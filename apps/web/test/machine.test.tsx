@@ -26,6 +26,7 @@ import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { wireHostLive } from "../src/machine/hostLive.js";
 import type { Api } from "../src/protocol/client.js";
+import { APP_LOCALE } from "../src/lib/timestampFormat.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { statusOf } from "./workspace-status.js";
@@ -364,8 +365,10 @@ describe("idle window", () => {
 });
 
 describe("usage", () => {
-  const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  // The app's own tag, as the chart spells it: under a shell whose locale reads 12:26 am these read the machine's
+  // and the chart read the app's, and the two disagreed only on the gate's Mac.
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit" });
+  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const T0 = Date.UTC(2026, 8, 5, 6, 0);
   const at = (minutes: number) => T0 + minutes * 60_000;
   const point = (minutes: number, rate: number, accruedUsd: number): EventUnion => ({
@@ -381,6 +384,13 @@ describe("usage", () => {
   const HISTORY = [point(0, 0.11, 0), point(120, 0.11, 0.22), point(121, 0, 0.22), point(180, 0, 0.22)];
   const axis = (which: "x" | "y") => [...document.querySelectorAll(`[data-usage-axis=${which}] span`)].map(el => el.textContent);
   const toggle = (name: string) => screen.getByRole("button", { name });
+
+  it("reads the total off the series, so the runtime's history stands there before the first live tick", async () => {
+    // The chart drew three hours of spend over a row that read $0.00 until a tick landed.
+    await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
+    expect(fact("accrued")).toBe("$0.22");
+  });
 
   it("shows the live rate, and the accrued total in the one shape every spend figure a person reads is in", async () => {
     const api = await mount([view("ws_a", "api")]);
@@ -411,29 +421,43 @@ describe("usage", () => {
     const t1 = Date.parse("2026-09-01T00:01:00Z");
     expect(axis("x")).toEqual([clockToSecond(t1 - 60_000), clockToSecond(t1 - 40_000), clockToSecond(t1 - 20_000), clockToSecond(t1)]);
     expect(new Set(axis("x")).size).toBe(4);
-    expect(fact("usage-readout")).toBe(`tracked since ${clockToSecond(t1)}`);
+    // One tick is a workspace tracked for no time at all, so the line says how long that is: every longer range is
+    // held behind it.
+    expect(fact("usage-readout")).toBe(`tracked since ${clockToSecond(t1)} · 0 min`);
   });
 
-  it("reads the workspace's history from the runtime and spans all of it by default, with hour and day toggles", async () => {
+  it("reads the workspace's history from the runtime and spans all of it by default, with the hour toggle", async () => {
     await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
     await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
     expect(toggle("all").getAttribute("aria-pressed")).toBe("true");
     expect(axis("x")).toEqual([clock(at(0)), clock(at(60)), clock(at(120)), clock(at(180))]);
     // A round ceiling just above the total, labelled to the step.
     expect(axis("y")).toEqual(["$0.30", "$0.20", "$0.10", "$0.00"]);
-    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
     expect(screen.queryByText(/peak/)).toBeNull();
 
     fireEvent.click(toggle("hour"));
     expect(toggle("hour").getAttribute("aria-pressed")).toBe("true");
     expect(toggle("all").getAttribute("aria-pressed")).toBe("false");
     expect(axis("x")).toEqual([clock(at(120)), clock(at(140)), clock(at(160)), clock(at(180))]);
+  });
+
+  it("holds a range longer than the workspace has been tracked, with how long that is as its reason, rather than drawing it empty", async () => {
+    // Three hours metered: a day and a month of axis around them is a day and a month of flat nothing.
+    await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
+    const tracked = `tracked since ${clock(at(0))} · 3 h`;
+    expect(fact("usage-readout")).toBe(tracked);
+    for (const word of ["day", "month"]) {
+      expect(toggle(word).hasAttribute("disabled")).toBe(true);
+      expect(toggle(word).getAttribute("title")).toBe(tracked);
+    }
+    expect(toggle("hour").hasAttribute("disabled")).toBe(false);
+    expect(toggle("all").hasAttribute("disabled")).toBe(false);
 
     fireEvent.click(toggle("day"));
-    expect(axis("x")).toEqual([clock(at(180 - 1440)), clock(at(180 - 960)), clock(at(180 - 480)), clock(at(180))]);
-    // The series began inside the day: the line starts where the data does, the axis stays the whole day.
-    const d = document.querySelector("[data-usage-line]")!.getAttribute("d")!;
-    expect(Number(d.slice(1).split(" ")[0])).toBeCloseTo(100 * (1 - 180 / 1440), 0);
+    // Nothing moved: the range stands where it was and the axis still reads the whole life.
+    expect(toggle("all").getAttribute("aria-pressed")).toBe("true");
+    expect(axis("x")).toEqual([clock(at(0)), clock(at(60)), clock(at(120)), clock(at(180))]);
   });
 
   it("a live tick extends the line and the axis to the newest moment", async () => {
@@ -441,7 +465,7 @@ describe("usage", () => {
     await waitFor(() => expect(axis("x").at(-1)).toBe(clock(at(180))));
     act(() => api.emit(point(190, 0.11, 0.23)));
     expect(axis("x").at(-1)).toBe(clock(at(190)));
-    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))} · 3 h`);
   });
 
   it("hovering reads the total, the rate and the moment under the pointer; leaving returns to the span", async () => {
@@ -455,7 +479,7 @@ describe("usage", () => {
     fireEvent.mouseMove(svg, { clientX: 250, clientY: 30 });
     expect(fact("usage-readout")).toBe(`$0.22 · $0.000/hr · ${clock(at(150))}`);
     fireEvent.mouseLeave(svg);
-    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))} · 3 h`);
     expect(svg.querySelector("[data-usage-hover]")).toBeNull();
   });
 
