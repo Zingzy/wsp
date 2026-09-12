@@ -55,12 +55,29 @@ Useful flags: `--yes` takes every default and asks nothing. `--recipe <path>` bu
 ## Every day
 
 ```sh
-wsp up
+wsp new api                  # a workspace from your image
+wsp import api ~/code/api    # put a folder in it
+wsp run api "fix the flaky terminal test"
 ```
 
-serves the app at `http://127.0.0.1:4400` and the runtime behind it. `wsp up --service` keeps it up across logins. The desktop app is the same host and app in one window; bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
+The first line that needs a host starts one and says so; `wsp down` stops it. `wsp up` is for a host you want to watch in a terminal, and `wsp up --service` keeps one up across logins. The desktop app is the same host and app in one window; bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
 
-The command line and the MCP tools are the same verbs: `new`, `fork`, `snapshot`, `pause`, `threads`, `run`, `send`, `exec`, `import`, `export`, `rename`. `wsp --help` lists them; the app's palette runs them too.
+`wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first. `wsp --help agent` has the verbs your agents use and `wsp host --help` the roads to a host on another computer. The command line and the MCP tools are the same verbs; the app's palette runs them too.
+
+<!-- renames:start -->
+### Renamed in 0.3.0
+
+The front page of `wsp --help` is sixteen words on five nouns: image, place, workspace, thread, project. Every command is `wsp <verb> <workspace> ...`, the workspace first.
+
+- `wsp run <workspace> "<task>"` replaces `wsp thread new`, and the MCP tool `run` replaces the old one.
+- `wsp import <workspace> <folder>` and `wsp threads <workspace>` take the workspace as their first word.
+- `wsp new <name> --on <place>` replaces the flags that named a machine of your own. This computer and every computer or provider you add are places, and `wsp places` lists them.
+- `wsp add` is the one way a place joins: `wsp add user@host` for a computer over ssh, `wsp add <provider>` for a provider, `wsp add` alone for the line another computer types.
+- The roads to a host on another computer live under `wsp host`: `host pair`, `host devices`, `host connect`, `host list`, `host default`, `host forget`, `host link`, `host unlink`, `host linked`, `host clients`.
+- The host starts itself on the first command that needs it and `wsp down` stops it, so `wsp up` is only for a host you want to watch or one that serves beyond this computer. Plain `wsp` prints the help.
+
+Nothing answers to the old words. Agents on this computer get the new skill the first time the new host starts; a project folder whose `AGENTS.md` carries the old section gets the new one at the next `wsp mcp install` there.
+<!-- renames:end -->
 
 <!-- bundles:start -->
 ### Opening a downloaded bundle

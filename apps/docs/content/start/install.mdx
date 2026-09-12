@@ -49,7 +49,7 @@ Useful flags on `wsp init`: `--yes` takes every default and asks nothing, which 
 wsp up
 ```
 
-serves the app at `http://127.0.0.1:4400` and the runtime behind it, until you stop it. `wsp up --service` hands the same line to your computer's service manager, a launchd agent on a Mac and a systemd user unit on Linux, so it serves now and again at every login; `wsp down` stops that and takes it away.
+serves the app at `http://127.0.0.1:4400` and the runtime behind it, until you stop it. You do not have to type it: the first command that needs a host starts one and says so. `wsp up --service` hands the same line to your computer's service manager, a launchd agent on a Mac and a systemd user unit on Linux, so it serves now and again at every login; `wsp down` stops that, and it stops a host a command started.
 
 The desktop app is the same host and app in one window. Bundles for macOS and Linux are on the [releases page](https://github.com/Zingzy/wsp/releases).
 

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { compareVersions } from "../../protocol/src/semver.mjs";
 import { bundleNames } from "../scripts/bundles.mjs";
-import { bundleNote, changeLines, cliArgs, previousTag, releaseNotes } from "../scripts/release-notes.mjs";
+import { bundleNote, changeLines, cliArgs, previousTag, releaseNotes, renameNote } from "../scripts/release-notes.mjs";
 
 const readme = readFileSync(fileURLToPath(new URL("../../../README.md", import.meta.url)), "utf8");
 const published = JSON.parse(readFileSync(fileURLToPath(new URL("../package.json", import.meta.url)), "utf8")).name as string;
@@ -107,6 +107,24 @@ describe("the lines about opening a downloaded bundle", () => {
 
   it("say so when the README no longer marks them", () => {
     expect(() => bundleNote("# wsp\n\nno markers here\n", false)).toThrow(/no bundles:start and bundles:end markers/);
+  });
+});
+
+describe("what a release that renamed things says", () => {
+  it("is the README's own block, lifted whole and printed above the change lines", () => {
+    const note = renameNote(readme);
+    expect(note).toBeDefined();
+    expect(note).toContain("Renamed in");
+    expect(note).toContain("wsp run <workspace>");
+    expect(note).not.toContain("<!--");
+    const printed = releaseNotes({ version: "0.1.4", previous: "v0.1.3", changes: changeLines(FAKE_LOG), bundles: bundleNote(readme, false), renames: note! });
+    expect(printed.indexOf(note!)).toBeGreaterThan(printed.indexOf("## What changed since v0.1.3"));
+    expect(printed.indexOf(note!)).toBeLessThan(printed.indexOf("- feat(app):"));
+  });
+
+  it("is nothing at a release that renamed nothing, and the notes are the change lines alone", () => {
+    expect(renameNote("# wsp\n\nno markers here\n")).toBeUndefined();
+    expect(notes()).not.toContain("Renamed in");
   });
 });
 

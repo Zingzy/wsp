@@ -134,7 +134,9 @@ describe("the pages wsp prints", () => {
       ["the skill", WSP_SKILL],
       ["the instructions", INSTRUCTIONS],
       ["AGENTS.md", readFileSync(join(REPO, "AGENTS.md"), "utf8")],
-      ["README.md", readFileSync(join(REPO, "README.md"), "utf8")],
+      // The release note is the one place an old word is written down, and it is written once, in a marked block
+      // the release after this one deletes. Everything else in the README is held to the new words.
+      ["README.md", readFileSync(join(REPO, "README.md"), "utf8").replace(/<!-- renames:start -->[\s\S]*?<!-- renames:end -->/, "")],
       ...VERBS.filter(hasTool).map(v => [`the ${v.name} tool`, v.tool.description] as [string, string]),
       ...CLI_VERBS.map(v => [`wsp ${v.name}`, `${v.usage}\n${v.about}`] as [string, string]),
       ...docs.map(p => [p.slice(REPO.length), readFileSync(p, "utf8")] as [string, string]),

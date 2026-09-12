@@ -194,6 +194,10 @@ exit codes; every failure is one line on stderr, the failure object with --json:
       the boxes on your relay account, from whichever computer you are at
   wsp host clients [revoke <id>]
       which computers hold a token for your relay account; revoke signs one out
+  wsp host devices revoke <id>
+      take one computer's token away
+  wsp host clients revoke <id>
+      sign one computer out of your relay account
 
 You need these only for a host serving on a computer that is not the one you are
 sitting at, or for one outside your own account: pair and devices hand out and
@@ -217,9 +221,11 @@ so it is reachable with no port open to the world.
 ```text
 usage: wsp init [--recipe <path>] [--project <path>] [--first-workspace <name>]
        [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]
-  seal this computer into your image, once: Agents, Tools, Also on this
-  computer, Sign-ins, wsp for your agents on this computer, then Build. With no
-  provider key it seals nothing and makes this computer your workspace instead
+  seal this computer into your image, one screen at a time: Agents, Tools, Also
+  on this computer, Sign-ins, wsp for your agents on this computer, each shown
+  when it has a row to pick, then Build. With no provider key it seals nothing
+  and makes this computer your workspace instead. Beside a host already serving
+  this state file the screens are the same and the build runs in that host
 
   --state              the state file: this word first, else WSP_HOME's
                        state.json, else ./.wsp/state.json when the current
@@ -230,10 +236,13 @@ usage: wsp init [--recipe <path>] [--project <path>] [--first-workspace <name>]
                        that provider
   --docker-host        the Docker daemon to dial, as DOCKER_HOST words it; this
                        computer's own socket without it
-  --yes                take every default and ask nothing, which a run off a
-                       terminal needs; on wsp doctor it also deletes the
-                       snapshots and templates this host left behind, which is
-                       not reversible
+  --yes                init: take every default and ask nothing, which a run off
+                       a terminal needs; a login with a browser or device
+                       sign-in, or one held in the Keychain, defaults to sign in
+                       on the machine unless a saved recipe answered copy, so
+                       macOS has nothing to ask either and the sign-ins wait for
+                       the app's terminal. doctor: also delete the snapshots and
+                       templates this host left behind, which is not reversible
   --recipe             tick the agents and tools from this recipe (wsp recipe
                        writes it) and go straight to the sign-ins
   --project            the project folder you are bringing first; its own files
@@ -678,9 +687,13 @@ usage: wsp doctor [--local] [--yes]
   --state    the state file: this word first, else WSP_HOME's state.json, else
              ./.wsp/state.json when the current directory has a .env, else
              state.json in the home the running host serves
-  --yes      take every default and ask nothing, which a run off a terminal
-             needs; on wsp doctor it also deletes the snapshots and templates
-             this host left behind, which is not reversible
+  --yes      init: take every default and ask nothing, which a run off a
+             terminal needs; a login with a browser or device sign-in, or one
+             held in the Keychain, defaults to sign in on the machine unless a
+             saved recipe answered copy, so macOS has nothing to ask either and
+             the sign-ins wait for the app's terminal. doctor: also delete the
+             snapshots and templates this host left behind, which is not
+             reversible
   --local    prove a thread on this computer and its reply instead of the reach
              loop, which needs no provider key, forks nothing and bills nothing
 ```
