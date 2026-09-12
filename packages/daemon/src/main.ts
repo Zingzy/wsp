@@ -254,9 +254,11 @@ export async function startDaemon(opts: DaemonOptions = {}): Promise<DaemonHandl
       else if (port === undefined) spotter.spot(p => broadcast({ type: "callback.port", port: p }));
     },
   };
-  // Every op the outbound link answers, the leave among them: one set, so one sentence refuses all of them on a
-  // socket that is not that link.
-  const linkOnly = new Set(opts.link === undefined ? [] : ["place.leave", ...Object.keys(opts.link.ops ?? {})]);
+  // Every op that belongs to the link a place opens outward, so one sentence refuses all of them on a socket that
+  // is not that link. The leave op is always one of them, whether or not this process is holding a link: which ops
+  // belong to that road is a fact of the wire, and a daemon with no link must still refuse it rather than call it
+  // an op it has never heard of. The rest are whatever the road that dialled out registered.
+  const linkOnly = new Set(["place.leave", ...Object.keys(opts.link?.ops ?? {})]);
   const ctx: Ctx = { ptys, manifest, modes, root, roots, getPortWatcher, getInboxWatcher, getSysSampler, getProcSampler, spotter, broadcast, linkOnly };
   let openSocket: OpenSocket | undefined;
   if (opts.openSocketPath !== undefined) {
