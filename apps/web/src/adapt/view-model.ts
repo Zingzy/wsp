@@ -269,6 +269,9 @@ export interface SidebarThreadSnapshot {
   /** The thread whose own agent opened this one; null on every thread a person or the command line opened. The row
    * is drawn one step in under it. */
   readonly parentThreadId: string | null;
+  /** The lead of the permission prompt the thread is stopped on, as the protocol's fold reads it; null while it is
+   * waiting on nobody. */
+  readonly asking: string | null;
   /** What the thread has spent, as the protocol's fold adds its rows up; null where no turn of it reported a
    * figure, which is not the same as nothing spent. */
   readonly costUsd: number | null;

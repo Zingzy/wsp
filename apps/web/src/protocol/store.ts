@@ -780,6 +780,12 @@ export const useStore = create<State>((set, get) => {
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
           void get().reloadSessions(e.workspaceId);
           return;
+        case "session.permission":
+        case "session.permission.closed":
+          // The row the sidebar reads carries what the thread is waiting on, so a prompt opening or closing is a row
+          // that changed: every workspace's rows are read here, not only the open thread's.
+          void get().reloadSessions(e.workspaceId);
+          return;
         case "session.notify":
           if (e.notify === NOTIFY_ME) set({ toast: e.text });
           return;

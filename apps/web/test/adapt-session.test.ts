@@ -507,7 +507,6 @@ describe("deriveSession: a permission prompt relayed into the chat", () => {
     input: '{"file_path":"/root/out.txt","content":"hi"}',
     detail: "out.txt",
     options,
-    waitMs: 300_000,
   };
   const closed = (over: Partial<Extract<SessionEvent, { type: "session.permission.closed" }>> = {}): SessionEvent => ({
     type: "session.permission.closed",

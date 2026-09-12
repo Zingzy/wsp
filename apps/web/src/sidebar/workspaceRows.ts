@@ -55,13 +55,15 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
   return lacks === undefined ? "no daemon on it" : machineLacksShort(lacks);
 }
 
-/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
- * runtime is doing to the machine's daemon, then a drop with memory near full, then a daemon that is not there at
- * all, then a nap whose vault was refused. Written once because two surfaces draw them and both have to tell them
- * from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper. The vault comes last
- * of them: the other three are what a person is waiting on now, and this one holds until the next nap. */
+/** The sentences a meta line can carry in place of its counts, in the order a surface draws them: a thread of this
+ * workspace stopped on a question first, then what the runtime is doing to the machine's daemon, then a drop with
+ * memory near full, then a daemon that is not there at all, then a nap whose vault was refused. Written once
+ * because two surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA,
+ * the counts beside it keep the whisper. The vault comes last of them: the others are what a person is waiting on
+ * now, and this one holds until the next nap. */
 export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "outOfMemory">): string[] {
   return [
+    askingNote(project),
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
@@ -70,7 +72,7 @@ export function metaSentences({ project, outOfMemory }: Pick<WorkspaceMetaInput,
 }
 
 export interface WorkspaceMetaInput {
-  readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach">;
+  readonly project: Pick<SidebarProjectSnapshot, "state" | "status" | "workspace" | "reach" | "threads">;
   /** The meter's last tick for this workspace; null before the first. */
   readonly cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
   /** The last memory sample from a machine whose link then dropped. */
@@ -118,6 +120,13 @@ export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "wo
   const kind = kindWords(workspaceKind(project.workspace));
   if (!kind.rowReadsMachine) return kind.machine;
   return project.status === null ? null : fmtSize(project.status.size, kind.cpu);
+}
+
+/** The lead of the prompt a thread of this workspace is stopped on, the one sentence a person is waiting on: the
+ * oldest waiting thread's, so a second prompt never takes the line from the one that has waited longest. The row
+ * cuts it at its own cap and the whole sentence rides the row's title, as every line three does. */
+export function askingNote(project: Pick<SidebarProjectSnapshot, "threads">): string | undefined {
+  return project.threads.find(thread => thread.asking !== null)?.asking ?? undefined;
 }
 
 /** What the runtime is doing to this machine's daemon, or why its last attempt failed; the status leads where one
@@ -223,9 +232,12 @@ export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, 
   return [agentName(thread.harness), ...words].join(" · ");
 }
 
-/** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */
-export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator">): ThreadStatusPill | null {
+/** The pill keys on the session's state and wears the adapter's word: a running thread, one waiting on the person
+ * and one that did not settle carry one, the resting states none. A thread stopped on a permission prompt carries it
+ * whatever its turn's own status says, since that is the one row on the screen a person can act on. */
+export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator" | "asking">): ThreadStatusPill | null {
   if (!thread.indicator) return null;
+  if (thread.asking !== null) return { label: thread.indicator.label, ...PLAIN, pulse: false };
   switch (thread.status) {
     case "running":
       return { label: thread.indicator.label, ...PLAIN, pulse: thread.indicator.pulse };
