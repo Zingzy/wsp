@@ -21,6 +21,7 @@ import {
   type PlaceAuthRequest,
   type PlaceJoinReply,
   type PlaceJoinRequest,
+  type PlaceEvent,
   type PlaceReport,
   type PlaceView,
   type WorkspaceSize,
@@ -65,12 +66,9 @@ const isPlaceRecord = (v: unknown): v is PlaceRecord => {
   return typeof r === "object" && r !== null && typeof r.id === "string" && typeof r.publicKey === "string" && typeof r.name === "string";
 };
 
-/** What a client watching the places hears. */
-export type PlaceEvent =
-  | { type: "place.joined"; placeId: string; name: string }
-  | { type: "place.present"; placeId: string }
-  | { type: "place.absent"; placeId: string }
-  | { type: "place.removed"; placeId: string };
+/** What a client watching the places hears. The four shapes are the protocol's own, so the host hands them straight
+ * to the runtime's event bus and the app folds them with no second spelling in between. */
+export type { PlaceEvent };
 
 /** What this computer is, as a row of the same list: the list is the whole of where work can run, so the computer
  * the host runs on is on it. The host answers, since its own name and shape are its own to read. */
@@ -90,6 +88,8 @@ export interface PlaceWiring {
   /** The one word for a provider the host is set up for, as a place; nothing when it forks nowhere. */
   provider(): { id: string; rateUsdPerHour: number } | undefined;
   here(): HerePlace;
+  /** What this computer calls itself, which is what a joining computer shows its person from then on. */
+  hostName(): string;
 }
 
 /** The two roads into the runtime a place needs, handed in because both are the runtime's own: a joined computer
@@ -123,7 +123,7 @@ export interface PlaceDoorOptions {
 export interface PlaceDoor {
   /** The first frame of a joining computer. Answers the reply and the bytes its prove must sign, or nothing when
    * the code is not one this host is holding. Throws with its own sentence for a key or a report it cannot take. */
-  join(req: PlaceJoinRequest, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; notice?: string } | undefined>;
+  join(req: PlaceJoinRequest, from: string, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; notice?: string } | undefined>;
   /** The first frame of a place that already joined; nothing when this host holds no place by that id. */
   auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array } | undefined>;
   /** Checks the place's signature over `expect` with the key on record and reads the report it sent by the one rule
@@ -131,7 +131,7 @@ export interface PlaceDoor {
    * the key's or the report's own. Attaches nothing yet. */
   prove(placeId: string, signature: string, expect: Uint8Array, report: PlaceReport): Promise<{ report: PlaceReport } | { refusal: string }>;
   /** Takes the proved socket as this place's link, with the report `prove` answered; the previous link is cut. */
-  attach(placeId: string, socket: WebSocket, report: PlaceReport, now: number): Promise<void>;
+  attach(placeId: string, socket: WebSocket, report: PlaceReport, from: string, now: number): Promise<void>;
   link(placeId: string): DaemonReach | undefined;
   /** One command on that place over its link; the refusal names the place when it is not connected. */
   exec(placeId: string, cmd: string, opts: { timeoutMs?: number; stdin?: Uint8Array }): Promise<ExecResult>;
@@ -306,11 +306,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     joinedAt: record.joinedAt,
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
+    agents: record.report.agents,
     ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
   });
 
   const door: PlaceDoor = {
-    async join(req, at) {
+    async join(req, from, at) {
       // The key and the report are read before the code is spent, so a join that was never going to stand does not
       // cost the person their code.
       if (!readsAsEd25519(req.publicKey)) throw new Error(PLACE_BAD_KEY_REFUSAL);
@@ -325,11 +326,22 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
       await markDefault(id);
       const recorded = await recording.record(record);
-      if (recorded.workspaceId !== undefined) await store.put(PLACES, id, { ...record, workspaceId: recorded.workspaceId } satisfies PlaceRecord);
+      const held: PlaceRecord = recorded.workspaceId === undefined ? record : { ...record, workspaceId: recorded.workspaceId };
+      if (recorded.workspaceId !== undefined) await store.put(PLACES, id, held);
+      // One code buys the place and, when the app asked, the token the joining computer's own window holds: the
+      // person's intent was one act. The socket stays the place link and is bound to no device.
+      const client = req.client === undefined ? undefined : await devices.admit(req.client.name, at);
       const { nonce, signature, expect } = challenge(id, req.nonce);
-      emit({ type: "place.joined", placeId: id, name: record.name });
+      emit({ type: "place.joined", place: viewOf(held, id), from });
       return {
-        reply: { placeId: id, hostPublicKey: wiring.hostKey.publicKey, nonce, signature },
+        reply: {
+          placeId: id,
+          hostPublicKey: wiring.hostKey.publicKey,
+          nonce,
+          signature,
+          hostName: wiring.hostName(),
+          ...(client === undefined ? {} : { device: { deviceId: client.deviceId, deviceToken: client.deviceToken } }),
+        },
         expect,
         ...(recorded.notice !== undefined ? { notice: recorded.notice } : {}),
       };
@@ -353,7 +365,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
     },
 
-    async attach(placeId, socket, report, at) {
+    async attach(placeId, socket, report, from, at) {
       // A second link replaces the first: a laptop that slept and came back dials before the host has noticed the
       // old socket is a connection to nothing.
       cut(placeId, REPLACED);
@@ -384,7 +396,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         void writeSeen(placeId, clockNow()).catch(() => undefined);
         emit({ type: "place.absent", placeId });
       });
-      emit({ type: "place.present", placeId });
+      emit({ type: "place.present", placeId, from });
     },
 
     link: placeId => live.get(placeId)?.reach,

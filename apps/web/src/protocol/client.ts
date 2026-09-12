@@ -24,6 +24,8 @@ import {
   InitJob,
   InitSetup,
   type InitRoad,
+  PlaceDoorView,
+  PlaceView,
   type InitScreenId,
   type ImageAttachment,
   TerminalConfig,
@@ -346,6 +348,14 @@ export interface Api {
   /** The person's Ghostty config on the computer running the host, as the terminal pane applies it, read now for the
    * scheme the app shows. Optional so fixtures without a terminal need not fake it; without it the pane keeps its defaults. */
   hostTerminalConfig?(scheme: TerminalScheme): Promise<TerminalConfig>;
+  /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on. Optional so a
+   * fixture with no Settings page need not fake it. */
+  placesList?(): Promise<PlaceView[]>;
+  /** Opens the door a computer you own dials and answers where it is. Refused in the host's own words when this
+   * host serves none. */
+  placesDoor?(): Promise<PlaceDoorView>;
+  /** A fresh code for a computer to join with, and when it stops being one. */
+  pairIssue?(): Promise<{ code: string; expiresAt: number }>;
   /** The person's view preferences as the host keeps them, one record every client on this host shares. Optional so
    * fixtures without a settings page need not fake it; without it the defaults stand and nothing is kept. */
   preferences?(): Promise<Preferences>;
@@ -522,6 +532,9 @@ export function makeApi(c: ProtocolClient): Api {
       HostFolderListing.parse((await c.request<{ listing?: unknown }>("host.folders", { ...(dir !== undefined ? { dir } : {}), ...(hidden !== undefined ? { hidden } : {}) })).listing),
     // Parsed, not trusted: the pane paints only values the wire type vouches for.
     hostTerminalConfig: async scheme => TerminalConfig.parse((await c.request<{ config?: unknown }>("host.terminalConfig", { scheme })).config),
+    placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
+    placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
+    pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),

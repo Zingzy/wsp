@@ -166,12 +166,38 @@ const MIGRATE = {
 
 /** One store as the JSON file holds it: one object per collection, keyed the way the runtime keys it. Every
  * fixture below builds one. */
-const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices }) => ({
+const store = ({ workspaces, sessions = {}, transcripts = {}, goldens, devices, places }) => ({
   workspaces: Object.fromEntries(workspaces.map(w => [w.id, w])),
   sessions,
   transcripts,
   ...(goldens !== undefined ? { goldens } : {}),
   ...(devices !== undefined ? { devices } : {}),
+  ...(places !== undefined ? { places } : {}),
+});
+
+/** A computer somebody joined, as the host's record of it: what it last reported about itself, and when it was
+ * last seen, so the table has a row that is not this computer. */
+const place = (id, name, minutes, over = {}) => ({
+  id,
+  name,
+  publicKey: `no-key-verifies-against-this-${id}`,
+  joinedAt: new Date(ago(60 * 26)).toISOString(),
+  lastSeenAt: new Date(ago(minutes)).toISOString(),
+  report: {
+    name,
+    platform: "darwin",
+    arch: "arm64",
+    os: "Darwin 24.6.0",
+    shape: { cpu: 4, memMb: 8192 },
+    diskFreeBytes: 91 * 1024 ** 3,
+    login: { HOME: "/Users/maya", USER: "maya", PATH: "/usr/bin" },
+    docker: false,
+    daemonVersion: 17,
+    wsp: ["/Users/maya/.wsp/bin/wsp"],
+    agents: ["claude", "codex"],
+    dialed: "http://192.168.1.20:4420",
+    ...over,
+  },
 });
 
 /** The threads one workspace holds, oldest first, with the transcript each replays. The order is the order the
@@ -202,6 +228,7 @@ const macOnly = () =>
       workspace("ws_notes", "notes"),
     ],
     ...API_THREADS(),
+    places: { p_oldmacbook: place("p_oldmacbook", "old-macbook", 120) },
   });
 
 /** This computer and an old laptop that redeemed a pairing code: a second workspace of the local kind, its own

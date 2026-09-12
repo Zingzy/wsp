@@ -106,7 +106,7 @@ describe("the folder a run leaves", () => {
 describe("the surfaces list this repo ships", () => {
   it("reads, and asks for four files per surface", () => {
     const read = readSurfaces(JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8")));
-    expect(read.surfaces.map(s => s.name)).toEqual(["sidebar", "workspace", "composer-thread", "machine", "cloud-setup"]);
+    expect(read.surfaces.map(s => s.name)).toEqual(["sidebar", "workspace", "composer-thread", "machine", "cloud-setup", "settings-where", "add-computer"]);
     expect(shotPlan(read)).toHaveLength(read.surfaces.length * 4);
   });
 });

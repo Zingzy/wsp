@@ -31,6 +31,19 @@
       "steps": ["390:key:Escape", "390:sidebar=trigger", "cloud-setup-row"],
       "wait": "k=choice",
       "settleMs": 700
+    },
+    {
+      "name": "settings-where",
+      "at": "/",
+      "steps": ["390:key:Escape", "390:sidebar=trigger", "k=settings-row"],
+      "wait": "k=places-table"
+    },
+    {
+      "name": "add-computer",
+      "at": "/",
+      "steps": ["390:key:Escape", "390:sidebar=trigger", "k=settings-row", "k=add-computer-button"],
+      "wait": "k=add-computer",
+      "settleMs": 700
     }
   ]
 }

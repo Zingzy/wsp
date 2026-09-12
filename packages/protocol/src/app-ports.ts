@@ -14,6 +14,11 @@ export const WS_PORT_OFFSET = 10;
 /** The WebSocket port of the default pair. */
 export const DEFAULT_WS_PORT = DEFAULT_PORT + WS_PORT_OFFSET;
 
+/** How far above the app port the door for computers you own sits, so `--port` alone moves all three. */
+export const PLACE_PORT_OFFSET = 20;
+/** The port that door answers on for the default pair. */
+export const DEFAULT_PLACE_PORT = DEFAULT_PORT + PLACE_PORT_OFFSET;
+
 /** The address every host socket binds when nobody names another: the page carries the host token, so nothing
  * listens beyond this computer. */
 export const LOOPBACK = "127.0.0.1";
@@ -33,12 +38,31 @@ export function wsUrlOf(url: string): string {
   return `${scheme}//${parsed.host}${path}${WS_PATH}`;
 }
 
+/** The address a person types on the join screen, as the join road dials it: a bare `host:port` becomes
+ * `http://host:port`, an address that already carries an http or https scheme stays as it is, and anything else,
+ * a word with no port or a scheme this road cannot dial, is nothing. The one reading, so the screen's refusal and
+ * the socket the join opens can never disagree about what was typed. */
+export function joinAddressOf(typed: string): string | undefined {
+  const word = typed.trim();
+  if (word === "") return undefined;
+  if (/^https?:\/\//i.test(word)) return servedHostname(word) === undefined ? undefined : word;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(word)) return undefined;
+  const at = `http://${word}`;
+  if (servedHostname(at) === undefined) return undefined;
+  // A port is what makes a bare word an address here: a host and nothing else is a name this road cannot dial.
+  return new URL(at).port === "" ? undefined : at;
+}
+
 /** Whether an address a host bound reaches no further than the computer it runs on. This decides whether the page
  * is served with the host token inlined and whether the JSON routes ask for a device token, so it is read once here
  * and nowhere else: two readings would let one road stay open while the other closed. */
 export function isLoopback(address: string): boolean {
   return address === "localhost" || address === "::1" || address === "[::1]" || /^127\./.test(address);
 }
+
+/** The address that binds every address this computer answers on: what the door a computer you own dials is bound
+ * to, and what reachAddresses is asked to spell out. */
+export const WILDCARD = "0.0.0.0";
 
 /** Whether an address is the wildcard, which binds every address this computer answers on, loopback included. A
  * tool on the computer itself dials such a host at loopback; a host on one named address answers only there. */

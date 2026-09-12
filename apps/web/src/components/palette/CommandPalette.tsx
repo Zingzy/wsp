@@ -42,6 +42,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const sessions = useStore(s => s.sessions);
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
+  const openAddComputer = useStore(s => s.openAddComputer);
   const createLocalWorkspace = useStore(s => s.createLocalWorkspace);
   // One local workspace per host: the row the section registry gives says whether a pick makes it or goes to it.
   const hasLocal = workspaces.some(w => isLocalWorkspace(w));
@@ -81,8 +82,9 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       // This computer forks nothing and boots nothing, so it needs no dialog: the host names it after itself.
       newLocalWorkspace: () => void createLocalWorkspace(),
       openSettings,
+      openAddComputer,
     }),
-    [createLocalWorkspace, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [createLocalWorkspace, openAddComputer, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
     () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, labs, sidebarMode, handlers, verbs }),

@@ -2256,6 +2256,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         },
       },
     });
+    // The door's four events ride the one stream every other event rides, so the app follows a computer joining
+    // over the socket it already holds and no road subscribes to the door itself.
+    placeDoor.on(e => bus.emit(e));
   }
   /** The machines a root thread's forks are landing but have no record for yet, by root: a slot is taken before
    * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
