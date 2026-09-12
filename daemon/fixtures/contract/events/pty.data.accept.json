@@ -2,6 +2,6 @@
   {
     "type": "pty.data",
     "ptyId": "pty_1",
-    "data": "hello\r\n"
+    "data": "$ "
   }
 ]

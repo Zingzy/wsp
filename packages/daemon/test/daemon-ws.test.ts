@@ -1,11 +1,12 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer, type Server } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { DAEMON_VERSION } from "@wsp/protocol";
+import { delimiter, join, resolve } from "node:path";
+import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_FIRST_FRAME_NOT_AUTH, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DAEMON_TOKEN_REFUSED, DAEMON_VERSION, portScopeRefusal, unknownOpLine } from "@wsp/protocol";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
-import { startDaemon, type DaemonHandle } from "../src/main.js";
+import { fakeProcTree, fakeStty, writeProc } from "./fake-proc.js";
+import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
 
 function lanIPv4(): string | null {
@@ -80,19 +81,27 @@ class Client {
   }
 }
 
-let daemon: DaemonHandle;
+let daemon: DaemonUnderTest;
 
 afterAll(async () => {
   await daemon?.close();
 });
 
+/** How many ptys the daemon holds, asked over the wire as any client would. */
+async function ptyCount(port: number): Promise<number> {
+  const c = await Client.connect(port, TOKEN);
+  const listed = await c.request("pty.list");
+  c.close();
+  return (listed["ptys"] as unknown[]).length;
+}
+
 describe("daemon WS server", () => {
   it("closes 4401 with one sentence when the auth frame carries the wrong token", async () => {
-    daemon = await startDaemon({ port: 0, token: TOKEN });
+    daemon = await daemonUnderTest({ port: 0, token: TOKEN });
     const c = await Client.connect(daemon.port, "wrong");
     const { code, reason } = await c.closed;
     expect(code).toBe(4401);
-    expect(reason).toBe("daemon token refused; the host holds the current one");
+    expect(reason).toBe(DAEMON_TOKEN_REFUSED);
     expect(c.frames).toEqual([]);
   });
 
@@ -104,7 +113,7 @@ describe("daemon WS server", () => {
   });
 
   it("closes a socket whose first frame is not auth 4401 before any handler runs", async () => {
-    const before = daemon.ptys.list().length;
+    const before = await ptyCount(daemon.port);
     const ws = new WebSocket(`ws://127.0.0.1:${daemon.port}/`);
     ws.on("open", () => {
       ws.send(JSON.stringify({ id: 1, op: "pty.create", shell: "bash" }));
@@ -115,9 +124,9 @@ describe("daemon WS server", () => {
     ws.on("message", raw => replies.push(JSON.parse(String(raw)) as WireMsg));
     const [code, reason] = await new Promise<[number, string]>(resolve => ws.once("close", (c, r) => resolve([c, String(r)])));
     expect(code).toBe(4401);
-    expect(reason).toBe("the first frame must be auth");
+    expect(reason).toBe(DAEMON_FIRST_FRAME_NOT_AUTH);
     await new Promise(r => setTimeout(r, 100));
-    expect(daemon.ptys.list().length).toBe(before);
+    expect(await ptyCount(daemon.port)).toBe(before);
     expect(replies).toEqual([]);
   });
 
@@ -146,7 +155,7 @@ describe("daemon WS server", () => {
     ws.on("message", raw => replies.push(JSON.parse(String(raw)) as WireMsg));
     const [code, reason] = await new Promise<[number, string]>(resolve => ws.once("close", (c, r) => resolve([c, String(r)])));
     expect(code).toBe(4401);
-    expect(reason).toBe("too many bytes before the auth frame");
+    expect(reason).toBe(DAEMON_PRE_AUTH_BYTES_EXCEEDED);
     expect(replies).toEqual([]);
 
     // The cap is for the pre-auth window only: an authed socket sends the same bytes and is answered.
@@ -188,7 +197,7 @@ describe("daemon WS server", () => {
     await new Promise<void>(resolve => guest.listen(0, "127.0.0.1", () => resolve()));
     const guestPort = (guest.address() as { port: number }).port;
     try {
-      const before = daemon.ptys.list().length;
+      const before = await ptyCount(daemon.port);
       const c = await Client.connect(daemon.port, TOKEN, "127.0.0.1", guestPort);
       expect((await c.request("ping")).ok).toBe(true);
 
@@ -196,7 +205,7 @@ describe("daemon WS server", () => {
         const r = await c.request(op, params);
         expect(r.ok).toBe(false);
         expect(r["code"]).toBe("forbidden");
-        expect(r["error"]).toBe(`this socket is scoped to port ${guestPort}: only tunnel ops on it and ping are allowed`);
+        expect(r["error"]).toBe(portScopeRefusal(guestPort));
       };
       await forbidden("pty.create", { shell: "bash" });
       await forbidden("pty.list");
@@ -209,7 +218,7 @@ describe("daemon WS server", () => {
       await forbidden("proc.kill", { pid: 1, signal: "TERM" });
       await forbidden("manifest.get");
       await forbidden("tunnel.open", { tunnelId: "other", port: guestPort + 1 });
-      expect(daemon.ptys.list().length).toBe(before);
+      expect(await ptyCount(daemon.port)).toBe(before);
 
       expect((await c.request("tunnel.open", { tunnelId: "t1", port: guestPort })).ok).toBe(true);
       expect((await c.request("tunnel.write", { tunnelId: "t1", data: Buffer.from("GET").toString("base64") })).ok).toBe(true);
@@ -233,7 +242,7 @@ describe("daemon WS server", () => {
     const c = await Client.connect(daemon.port, TOKEN, "127.0.0.1", 70000);
     const { code, reason } = await c.closed;
     expect(code).toBe(4401);
-    expect(reason).toBe("the first frame must be auth");
+    expect(reason).toBe(DAEMON_FIRST_FRAME_NOT_AUTH);
   });
 
   it("ignores an exported WSP_DAEMON_TOKEN: the file is the only source, so an export cannot pin a token past a rotation", async () => {
@@ -241,7 +250,7 @@ describe("daemon WS server", () => {
     const tokenPath = join(dir, "token");
     writeFileSync(tokenPath, "fromfile\n");
     vi.stubEnv("WSP_DAEMON_TOKEN", "fromenv");
-    const d = await startDaemon({ port: 0, tokenPath });
+    const d = await daemonUnderTest({ port: 0, tokenPath });
     try {
       const env = await Client.connect(d.port, "fromenv");
       expect((await env.closed).code).toBe(4401);
@@ -256,12 +265,12 @@ describe("daemon WS server", () => {
   });
 
   it("closes a socket that sends nothing before the auth deadline", async () => {
-    const d = await startDaemon({ port: 0, token: TOKEN, authDeadlineMs: 60 });
+    const d = await daemonUnderTest({ port: 0, token: TOKEN, authDeadlineMs: 60 });
     try {
       const ws = new WebSocket(`ws://127.0.0.1:${d.port}/`);
       const [code, reason] = await new Promise<[number, string]>(resolve => ws.once("close", (c, r) => resolve([c, String(r)])));
       expect(code).toBe(4401);
-      expect(reason).toBe("no auth frame arrived in time");
+      expect(reason).toBe(DAEMON_AUTH_DEADLINE_PASSED);
     } finally {
       await d.close();
     }
@@ -271,7 +280,7 @@ describe("daemon WS server", () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-token-"));
     const tokenPath = join(dir, "token");
     writeFileSync(tokenPath, "first\n");
-    const d = await startDaemon({ port: 0, tokenPath });
+    const d = await daemonUnderTest({ port: 0, tokenPath });
     try {
       const c1 = await Client.connect(d.port, "first");
       expect((await c1.request("ping")).ok).toBe(true);
@@ -291,6 +300,18 @@ describe("daemon WS server", () => {
     }
   });
 
+  it("writes the port it bound where the port file names, for a caller that asked for a free one", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-daemon-port-"));
+    const portFile = join(dir, "daemon.port");
+    const d = await daemonUnderTest({ port: 0, token: TOKEN, portFile });
+    try {
+      expect(readFileSync(portFile, "utf8")).toBe(`${d.port}\n`);
+    } finally {
+      await d.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("answers the auth frame, then greets with its root and version before anything else", async () => {
     const c = await Client.connect(daemon.port, TOKEN);
     const pong = await c.request("ping");
@@ -304,7 +325,7 @@ describe("daemon WS server", () => {
 
   it("answers an op it does not know with an error naming it, never with silence", async () => {
     const c = await Client.connect(daemon.port, TOKEN);
-    expect(await c.request("sys.explode")).toMatchObject({ ok: false, error: "unknown op: sys.explode" });
+    expect(await c.request("sys.explode")).toMatchObject({ ok: false, error: unknownOpLine("sys.explode") });
     c.close();
   });
 
@@ -345,36 +366,56 @@ describe("daemon WS server", () => {
     c2.close();
   });
 
-  it("pushes pty.mode on attach and again when the probed state changes", async () => {
-    let state = { icanon: true, echo: true, foreground: "bash" };
-    const d = await startDaemon({ port: 0, token: TOKEN, modeProbe: async () => state, modeIntervalMs: 50 });
+  /** A daemon whose pty modes come off a fake stty first on its PATH and a fake /proc tree: the probe reads the
+   * slave off fd 0 there, asks stty about it, and reads the foreground comm off the tpgid in stat. */
+  async function daemonWithModes(): Promise<{ d: DaemonUnderTest; procRoot: string; stty: ReturnType<typeof fakeStty>; shell: (pid: number, foreground: string) => void }> {
+    const stty = fakeStty();
+    const procRoot = fakeProcTree([]);
+    vi.stubEnv("PATH", `${stty.binDir}${delimiter}${process.env["PATH"] ?? ""}`);
+    const d = await daemonUnderTest({ port: 0, token: TOKEN, procRoot, modeIntervalMs: 50 });
+    // The shell's own entry: fd 0 on a slave, and a foreground group whose comm is what the pane shows.
+    const shell = (pid: number, foreground: string): void => {
+      writeProc(procRoot, { pid, comm: "bash", tpgid: 7001, stdin: "/dev/pts/9" });
+      writeProc(procRoot, { pid: 7001, comm: foreground });
+    };
+    return { d, procRoot, stty, shell };
+  }
+
+  it("pushes pty.mode on attach and again only when the probed state changes", async () => {
+    const { d, procRoot, stty, shell } = await daemonWithModes();
     try {
       const c = await Client.connect(d.port, TOKEN);
       const created = await c.request("pty.create", { shell: "bash" });
       const ptyId = created["ptyId"] as string;
+      shell(created["pid"] as number, "bash");
       await c.request("pty.attach", { ptyId });
-      await new Promise(r => setTimeout(r, 100));
       const modes = () => c.events.filter(e => e.type === "pty.mode");
-      expect(modes()[0]).toMatchObject({ ptyId, mode: "line", echo: true, foreground: "bash" });
+      await vi.waitFor(() => expect(modes()[0]).toMatchObject({ ptyId, mode: "line", echo: true, foreground: "bash" }), { timeout: 5_000, interval: 10 });
 
-      state = { icanon: false, echo: false, foreground: "vim" };
+      // One change at a time, each waited for: a poll that saw no change pushed nothing, so the count is the changes.
+      stty.setModes("-icanon -echo");
+      await vi.waitFor(() => expect(modes().at(-1)).toMatchObject({ ptyId, mode: "raw", echo: false, foreground: "bash" }), { timeout: 5_000, interval: 10 });
       await new Promise(r => setTimeout(r, 150));
-      const last = modes()[modes().length - 1];
-      expect(last).toMatchObject({ ptyId, mode: "raw", echo: false, foreground: "vim" });
       expect(modes().length).toBe(2);
+      shell(created["pid"] as number, "vim");
+      await vi.waitFor(() => expect(modes().at(-1)).toMatchObject({ ptyId, mode: "raw", echo: false, foreground: "vim" }), { timeout: 5_000, interval: 10 });
+      await new Promise(r => setTimeout(r, 150));
+      expect(modes().length).toBe(3);
       c.close();
     } finally {
+      vi.unstubAllEnvs();
       await d.close();
+      rmSync(procRoot, { recursive: true, force: true });
     }
   });
 
   it("stops probing once the pty exits, even with the client still attached", async () => {
-    const probe = vi.fn(async () => ({ icanon: true, echo: true, foreground: "bash" }));
-    const d = await startDaemon({ port: 0, token: TOKEN, modeProbe: probe, modeIntervalMs: 50 });
+    const { d, procRoot, stty, shell } = await daemonWithModes();
     try {
       const c = await Client.connect(d.port, TOKEN);
       const created = await c.request("pty.create", { shell: "bash" });
       const ptyId = created["ptyId"] as string;
+      shell(created["pid"] as number, "bash");
       await c.request("pty.attach", { ptyId });
       await c.request("pty.write", { ptyId, data: "exit\n" });
       const deadline = Date.now() + 3000;
@@ -382,20 +423,33 @@ describe("daemon WS server", () => {
         await new Promise(r => setTimeout(r, 20));
       }
       expect(c.events.some(e => e.type === "pty.exit")).toBe(true);
-      const atExit = probe.mock.calls.length;
+      // The attach ran the probe at least once; a probe in flight at the exit lands after it. The count settles
+      // over three of the probe's own intervals and then has to keep holding.
+      const atExit = await vi.waitFor(
+        async () => {
+          const before = stty.calls();
+          expect(before).toBeGreaterThan(0);
+          await new Promise(r => setTimeout(r, 150));
+          expect(stty.calls()).toBe(before);
+          return before;
+        },
+        { timeout: 5_000, interval: 10 },
+      );
       await new Promise(r => setTimeout(r, 300));
-      expect(probe.mock.calls.length).toBe(atExit);
+      expect(stty.calls()).toBe(atExit);
 
       // a late attach to the dead pty must not restart the loop either
       const c2 = await Client.connect(d.port, TOKEN);
       await c2.request("pty.attach", { ptyId });
       await new Promise(r => setTimeout(r, 300));
-      expect(probe.mock.calls.length).toBe(atExit);
+      expect(stty.calls()).toBe(atExit);
       expect(c2.events.some(e => e.type === "pty.exit")).toBe(true);
       c2.close();
       c.close();
     } finally {
+      vi.unstubAllEnvs();
       await d.close();
+      rmSync(procRoot, { recursive: true, force: true });
     }
   });
 });

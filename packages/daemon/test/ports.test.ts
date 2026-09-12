@@ -1,9 +1,10 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { DaemonEvent } from "@wsp/protocol";
 import { isLoopbackHost, lsofSource, parseLsofListeners, parseProcNetTcp, portSourceFor, PortWatcher, procNetTcpSource, type ListeningPort } from "../src/ports.js";
+import { fixture as readFixture } from "./fixtures.js";
 
 // Fixture provenance: hand-written from the documented /proc/net/tcp format
 // (proc(5); kernel net/ipv4/tcp_ipv4.c get_tcp4_sock printf layout), since no
@@ -11,7 +12,7 @@ import { isLoopbackHost, lsofSource, parseLsofListeners, parseProcNetTcp, portSo
 // (inode 45678), 127.0.0.1:3000 LISTEN (inode 45700), and one ESTABLISHED
 // connection that parsers must ignore. Swap in a real capture from the first
 // VM run when available.
-const fixture = readFileSync(join(import.meta.dirname, "fixtures", "proc-net-tcp.txt"), "utf8");
+const fixture = readFixture("proc-net-tcp.txt");
 
 describe("parseProcNetTcp", () => {
   it("returns LISTEN ports with pids resolved through the inode map", () => {
@@ -205,7 +206,7 @@ describe("PortWatcher port.close detail", () => {
 // Three processes: one on *:7000 and [::1]:5000, node on 127.0.0.1:3000 and
 // [::1]:3000, one on 0.0.0.0:49152. Swap in a real capture from the first Mac
 // run when available.
-const lsofFixture = readFileSync(join(import.meta.dirname, "fixtures", "lsof-listen.txt"), "utf8");
+const lsofFixture = readFixture("lsof-listen.txt");
 
 describe("loopback in a text address, as lsof prints it", () => {
   it.each([

@@ -12,8 +12,8 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, CURL_NET, GOLDEN_SETUP, GOLDEN_SMOKE, NODE_RELEASES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_TMP, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_NICE, DAEMON_OOM_SCORE_ADJ, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, GUEST_DAEMON_DIR, LOOPBACK, machineLacking, machineUnanswered, NO_BUILD_TOOLS_LINE, NO_LINGER_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
@@ -461,8 +461,8 @@ const systemctlIn = (place: DaemonPlace): string => (place.scope === "user" ? "s
 // --- daemon bundle --------------------------------------------------------
 
 /** Runs inside the place's own folder. A fork binds 0.0.0.0 because loopback binds are unreachable through the
- * preview edge (it dials eth0); a machine reached over ssh binds loopback and writes down the port it was given,
- * which is the one thing the host cannot know before the daemon is up. PATH is set before the daemon loads, never
+ * preview edge (it dials eth0); a machine reached over ssh binds loopback and the daemon writes down the port it
+ * was given, which is the one thing the host cannot know before it is up. PATH is set before the daemon loads, never
  * inherited: a relaunch from the machine's side arrives with a bare one (measured after an OOM kill, 2026-09-06).
  * The killer's score and the nice value are written here, on the daemon's own pid, so every road that starts the
  * daemon gives them; a start that may not write one (not root, or no Linux /proc) says so in the log and runs on. */
@@ -480,10 +480,15 @@ try {
 } catch (e) {
   console.error(\`priority not set: \${e.message}\`);
 }
-const { OPEN_SOCKET_PATH, startDaemon } = await import("./dist/index.js");
-const d = await startDaemon({ ${[...place.daemonArgs, ...daemonKindArg(place)].join(", ")} });
-${place.portFile === undefined ? "" : `writeFileSync(${JSON.stringify(place.portFile)}, String(d.port));\n`}console.log(\`wsp-daemon listening on ${place.bind}:\${d.port}\`);
+const { OPEN_SOCKET_PATH, daemonListeningLine, startDaemon } = await import("./dist/index.js");
+const d = await startDaemon({ ${[...place.daemonArgs, ...portFileArg(place), ...daemonKindArg(place)].join(", ")} });
+console.log(daemonListeningLine(${JSON.stringify(place.bind)}, d.port));
 `;
+}
+
+/** Where the daemon writes the port it bound, on a place that gave it none to bind; the daemon writes it itself. */
+function portFileArg(place: DaemonPlace): string[] {
+  return place.portFile === undefined ? [] : [`portFile: ${JSON.stringify(place.portFile)}`];
 }
 
 /** The kind the daemon is told it serves, which picks the two modules its Live rows and Processes tab read. A

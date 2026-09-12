@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import { workArgv } from "@wsp/protocol";
+import { GIT_DIFF_CAP_BYTES, workArgv } from "@wsp/protocol";
 import { OpError } from "./workspace-paths.js";
 
-export const GIT_DIFF_CAP_BYTES = 2 * 1024 * 1024;
 
 export interface GitResult {
   code: number | null;
