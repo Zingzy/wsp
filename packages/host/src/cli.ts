@@ -18,6 +18,7 @@ import {
   hostIdentity,
   jsonFileStore,
   localExecStream,
+  wiredPlace,
   type GoldenRecipe,
   type GoldenVersion,
   type LocalWiring,
@@ -28,7 +29,7 @@ import {
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, type ProviderEnv } from "./providers.js";
+import { providerBackendFor, providerEnvWith, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
@@ -728,6 +729,9 @@ export function providerBackend(keys: Keys, env: ProviderEnv = process.env): Mac
  * and the environment its provider was picked out of, so the swap picks out of the same one. */
 const PROVIDER_SLOTS = new WeakMap<Runtime, ProviderSlot>();
 const PROVIDER_ENVS = new WeakMap<Runtime, ProviderEnv>();
+/** The provider module each runtime made here forks on now, which names the place its copies are filed under; a
+ * swap moves it with the backend, so the two never say different things. */
+const PROVIDER_IDS = new WeakMap<Runtime, { id: string }>();
 export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDER_SLOTS.get(rt);
 
 /** Wires the provider module the keys name into a runtime made here; a runtime made elsewhere has no slot, and a
@@ -735,7 +739,10 @@ export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDE
 export function swapProvider(rt: Runtime, keys: Keys): void {
   const slot = providerSlotOf(rt);
   if (slot === undefined) throw new Error("this runtime has no provider slot; a key saved now would reach no machine road until the host restarts");
-  slot.swap(providerBackend(keys, PROVIDER_ENVS.get(rt) ?? process.env));
+  const env = PROVIDER_ENVS.get(rt) ?? process.env;
+  slot.swap(providerBackend(keys, env));
+  const wired = PROVIDER_IDS.get(rt);
+  if (wired !== undefined) wired.id = providerModule({ keys, env }).id;
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -753,7 +760,11 @@ export function makeRuntime(
   agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp },
 ): Runtime {
   const slot = providerSlot(providerBackend(keys, env));
+  // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
+  // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
+  const wired = { id: providerModule({ keys, env }).id };
   const rt = createRuntime({
+    places: wiredPlace(() => wired.id, slot.backend),
     backend: slot.backend,
     // What a turn's own agent needs to reach back in: what this host knows about where it answers, which each kind
     // reads for its own machines, and the same wsp command an agent's config on this computer is given, so a thread
@@ -772,6 +783,7 @@ export function makeRuntime(
   });
   PROVIDER_SLOTS.set(rt, slot);
   PROVIDER_ENVS.set(rt, env);
+  PROVIDER_IDS.set(rt, wired);
   return rt;
 }
 
@@ -1741,7 +1753,7 @@ export type CommandLine = { words: string; options: Options } & ({ tool: string 
 
 /** Every line `wsp` answers, with the flags it takes: what the skill's examples and the MCP tools are held to. */
 export const COMMAND_LINES: readonly CommandLine[] = [
-  ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, tool: toolName(v.name) })),
+  ...CLI_VERBS.map(v => ({ words: v.name, options: { ...COMMON, ...v.options }, ...("cliOnly" in v ? { cliOnly: v.cliOnly } : { tool: toolName(v.name) }) })),
   { words: MCP_COMMAND, options: MCP_OPTIONS, cliOnly: "is the tool server itself" },
   { words: `${MCP_COMMAND} install`, options: MCP_OPTIONS, cliOnly: "writes an agent's own config and skills folder, which is done once from a shell" },
   { words: "devices revoke", options: optionsFor("devices revoke"), cliOnly: "takes away a computer's token, which belongs with the terminal that handed it the code" },

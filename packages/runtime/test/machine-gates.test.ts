@@ -5,7 +5,7 @@
 import { NoProviderBackend } from "@wsp/engine";
 import { MACHINE_WSP_FORKS, NO_PROVIDER_LINE, providerCannotRefusal, THIS_COMPUTER } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
-import { createRuntime, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 
@@ -14,7 +14,7 @@ const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, b
 async function setup(): Promise<{ rt: Runtime; backend: StubBackend; store: Store }> {
   const backend = stubBackend();
   const store = memoryStore();
-  await store.put("goldens", "default", { head: 2, versions: [version(1), version(2)] });
+  await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
   return { backend, store, rt: createRuntime({ backend, store, adapters: {} }) };
 }
 

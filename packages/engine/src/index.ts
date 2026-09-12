@@ -20,6 +20,8 @@ export { TOOLS_DISK_FLOOR, missingCommands, plural, recordedPin, recordedPins, w
 export * from "./dotfiles.js";
 export * from "./dotfiles-presets.js";
 export * from "./vault.js";
+export * from "./image-vault.js";
+export * from "./vault-cipher.js";
 export * from "./recipe-owned.js";
 export * from "./labels.js";
 export * from "./orphans.js";

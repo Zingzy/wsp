@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { GoldenImport } from "@wsp/engine";
 import { describe, expect, it } from "vitest";
-import { createRuntime } from "../src/runtime.js";
+import { copyKey, createRuntime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -26,10 +26,10 @@ const version = (n: number) => ({
 async function fourVersions() {
   const store = memoryStore();
   const backend = stubBackend();
-  await store.put("goldens", "default", { head: 4, versions: [1, 2, 3, 4].map(version) });
+  await store.put("goldens", copyKey("default", "default"), { head: 4, versions: [1, 2, 3, 4].map(version) });
   for (const n of [1, 2, 3, 4]) {
     backend.snapshots.push({ id: `snap_golden-v${n}`, sizeBytes: (7 + n) * GB, createdAt: version(n).createdAt });
-    await store.put("golden-recipes", `default@v${n}`, { ticks: [], files: [] });
+    await store.put("golden-recipes", copyKey("default", `default@v${n}`), { ticks: [], files: [] });
   }
   const rt = createRuntime({ backend, store, adapters: {}, hostId: HOST });
   return { store, backend, rt };
@@ -80,9 +80,9 @@ describe("runtime golden retention", () => {
     expect(pruned.failed).toEqual([]);
     expect(backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v3", "snap_golden-v4"]);
     expect(await rt.golden.get()).toEqual({ head: 4, versions: [version(3), version(4)] });
-    expect(await store.get("golden-recipes", "default@v1")).toBeUndefined();
-    expect(await store.get("golden-recipes", "default@v2")).toBeUndefined();
-    expect(await store.get("golden-recipes", "default@v3")).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toBeUndefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toBeUndefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v3"))).toBeDefined();
     expect((await rt.golden.retention())!.drop).toEqual([]);
   });
 
@@ -160,8 +160,8 @@ describe("runtime golden retention", () => {
     expect(pruned.failed).toEqual([]);
     expect(backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v4", "snap_wsp-h1-default-v5"]);
     expect((await updating.golden.get())!.versions.map(v => v.version)).toEqual([2, 4, 5]);
-    expect(await store.get("golden-recipes", "default@v3")).toBeUndefined();
-    expect(await store.get("golden-recipes", "default@v4")).toBeDefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v3"))).toBeUndefined();
+    expect(await store.get("golden-recipes", copyKey("default", "default@v4"))).toBeDefined();
     await updating.close();
   });
 

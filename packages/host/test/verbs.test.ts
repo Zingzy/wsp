@@ -8,14 +8,18 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { agentsKindRefusal, effortsFor, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
-import { createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
+import { passphraseCipher } from "@wsp/engine";
+import { agentsKindRefusal, effortsFor, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, cli, localWiring, localWorkFolder, serve } from "../src/cli.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, threadRows, threadTree, threadsOf } from "../src/verbs.js";
+import { CLI_VERBS, PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, threadRows, threadTree, threadsOf } from "../src/verbs.js";
+import { HOST_SIDE_VAULT } from "../src/verbs.js";
+import { hostSideOnlyLine } from "../src/hosts.js";
+import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -61,7 +65,7 @@ describe("wsp verbs over the host", () => {
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     backend = stubBackend();
     store = memoryStore();
-    await store.put("goldens", "default", SEALED_GOLDEN);
+    await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user")) });
@@ -102,6 +106,8 @@ describe("wsp verbs over the host", () => {
     return { code: await cli([...argv, "--state", statePath], io, undefined, env), io };
   }
   const head = (m: typeof SEALED_GOLDEN) => m.versions.find(v => v.version === m.head)!;
+  /** An image record with a vault of `bytes`, for the export roads; the hashes are plainly fake. */
+  const RECORD = (bytes: number) => ({ name: "default", version: 1, hash: "a".repeat(64), recipeHash: "rh", logins: [{ name: "codex", state: "copied" as const }], sealedAt: "2026-09-12T00:00:00.000Z", sealedFrom: "h1", vault: { sha256: "b".repeat(64), bytes, paths: 2, takenAt: "2026-09-12T00:00:00.000Z" } });
 
   /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store): Promise<void> {
@@ -385,16 +391,134 @@ describe("wsp verbs over the host", () => {
     expect(extra.io.errors).toEqual(["wsp rebuild: wsp rebuild takes one workspace"]);
   });
 
+  it("wsp image reads the record off the seeded golden's head, says no sign-ins are held, and names the copy at this host's place", async () => {
+    const listed = await run("image");
+    expect(listed.code).toBe(0);
+    const lines = listed.io.lines.join("\n").split("\n");
+    expect(lines[0]).toContain("default v1");
+    expect(lines[0]).toContain(IMAGE_NO_VAULT);
+    expect(lines[0]).not.toContain("sign-in held");
+    expect(lines[1]).toMatch(/^default · v1/);
+    const [view] = json((await run("image", "--json")).io) as [{ image: { version: number; vault?: unknown }; copies: { place: string }[] }];
+    expect(view.image.version).toBe(1);
+    expect(view.image.vault).toBeUndefined();
+    expect(view.copies.map(c => c.place)).toEqual(["default"]);
+  });
+
+  it("wsp image export refuses a record with no sign-ins to export, and says so rather than writing an empty file", async () => {
+    env[IMAGE_PASSPHRASE_ENV] = "a-long-enough-passphrase";
+    const dest = join(dir, "image.wsp");
+    const refused = await run("image", "export", dest);
+    expect(refused.code).not.toBe(0);
+    expect(refused.io.errors.at(-1)).toContain("sealed before its sign-ins were held");
+    expect(existsSync(dest)).toBe(false);
+  });
+
+  it("wsp image export writes one file whose header parses and whose body the passphrase opens back to the vault", async () => {
+    const tar = Buffer.from("the person's sign-ins as the seal took them");
+    const record = RECORD(tar.length);
+    await store.put("images", "default", record);
+    await store.putBlob("image-vaults", "default@v1", tar);
+    env[IMAGE_PASSPHRASE_ENV] = "a-long-enough-passphrase";
+    const dest = join(dir, "out", "image.wsp");
+    const done = await run("image", "export", dest);
+    expect(done.code).toBe(0);
+    const bytes = readFileSync(dest);
+    expect(JSON.parse(bytes.subarray(0, bytes.indexOf(0x0a)).toString("utf8"))).toMatchObject({ format: "wsp-vault-1", to: "passphrase" });
+    // A login the copy road put on the machine counts as held, as one signed in there does.
+    expect((await run("image")).io.lines.join("\n")).toContain("1 sign-in held, 2 paths");
+    const opened = passphraseCipher.open(bytes, "a-long-enough-passphrase");
+    expect(opened.plain.equals(tar)).toBe(true);
+    expect(opened.image).toEqual(record);
+    expect(bytes.includes(tar)).toBe(false);
+    expect(done.io.lines.at(-1)).toContain(dest);
+  });
+
+  it("wsp image export asks the passphrase twice at a terminal, and refuses when the second does not match", async () => {
+    const tar = Buffer.from("the person's sign-ins as the seal took them");
+    await store.put("images", "default", RECORD(tar.length));
+    await store.putBlob("image-vaults", "default@v1", tar);
+    const asks: string[] = [];
+    const typed = async (...answers: string[]): Promise<{ code: number; io: Captured }> => {
+      const io = captured();
+      io.isTTY = true;
+      io.askSecret = async q => {
+        asks.push(q.split("\n")[0]!);
+        return answers[asks.length - 1] ?? "";
+      };
+      return { code: await cli(["image", "export", join(dir, `${asks.length}-out.wsp`), "--state", statePath], io, undefined, env), io };
+    };
+    const mismatched = await typed("a-long-enough-passphrase", "a-different-passphrase");
+    expect(mismatched.code).toBe(EXIT_CODES.usage);
+    expect(asks).toEqual(["A passphrase for this export", "The same passphrase again"]);
+    expect(mismatched.io.errors.at(-1)).toContain("the two passphrases are not the same");
+
+    asks.length = 0;
+    const short = await typed("short", "short");
+    expect(short.code).toBe(EXIT_CODES.usage);
+    expect(asks).toEqual(["A passphrase for this export"]);
+    expect(short.io.errors.at(-1)).toContain(`${IMAGE_PASSPHRASE_MIN} characters at least`);
+
+    asks.length = 0;
+    const done = await typed("a-long-enough-passphrase", "a-long-enough-passphrase");
+    expect(done.code).toBe(0);
+    expect(asks).toEqual(["A passphrase for this export", "The same passphrase again"]);
+  });
+
+  it("wsp image export aimed at a host on another computer is answered here, and nothing of this computer's crosses to it", async () => {
+    // A host this computer really holds, so the answer is the sentence and not the refusal for a name nobody knows.
+    // The aim reads the home off the run's own environment, which this file hands every verb.
+    env["WSP_HOME"] = join(dir, "home");
+    writeHost(join(dir, "home"), "box", { url: "http://box.local:4400", deviceId: "d_box", deviceToken: "tok-box", pairedAt: "2026-09-11T10:00:00.000Z" });
+    const dest = join(dir, "elsewhere.wsp");
+    const line = hostSideOnlyLine("image export", "box", HOST_SIDE_VAULT);
+    // Every way a line is aimed reads the same: the flag, the variable, and the alias wsp hosts marks.
+    const flagged = await run("image", "export", dest, "--host", "box");
+    expect(flagged.code).toBe(EXIT_CODES.usage);
+    expect(flagged.io.errors.at(-1)).toBe(line);
+
+    env["WSP_HOST"] = "box";
+    const named = await run("image", "export", dest);
+    expect(named.code).toBe(EXIT_CODES.usage);
+    expect(named.io.errors.at(-1)).toBe(line);
+    delete env["WSP_HOST"];
+
+    expect(existsSync(dest)).toBe(false);
+    delete env["WSP_HOME"];
+    // Only the export is held here: wsp image is a reading and answers against whichever host the line names.
+    expect(CLI_VERBS.filter(v => "hostSide" in v && v.hostSide !== undefined).map(v => v.name)).toEqual(["image export"]);
+  });
+
+  it("wsp image export with nobody at the terminal and no passphrase in the environment refuses before anything is read", async () => {
+    const refused = await run("image", "export", join(dir, "image.wsp"));
+    expect(refused.code).toBe(EXIT_CODES.usage);
+    expect(refused.io.errors.at(-1)).toContain(IMAGE_PASSPHRASE_ENV);
+  });
+
+  it("wsp image export refuses a passphrase under the minimum, and a destination that already holds something", async () => {
+    env[IMAGE_PASSPHRASE_ENV] = "short";
+    const tooShort = await run("image", "export", join(dir, "image.wsp"));
+    expect(tooShort.code).toBe(EXIT_CODES.usage);
+    expect(tooShort.io.errors.at(-1)).toContain(`${IMAGE_PASSPHRASE_MIN} characters at least`);
+
+    const taken = join(dir, "taken.wsp");
+    writeFileSync(taken, "mine");
+    env[IMAGE_PASSPHRASE_ENV] = "a-long-enough-passphrase";
+    const refused = await run("image", "export", taken);
+    expect(refused.code).not.toBe(0);
+    expect(readFileSync(taken, "utf8")).toBe("mine");
+  });
+
   it("image move puts the workspace on the newest version, says up front what moves, and names the files of the image's own it kept", async () => {
     const sha = (c: string): string => c.repeat(64);
     const v1 = { ...head(SEALED_GOLDEN), owned: [{ path: ".zshrc", sha256: sha("1") }, { path: ".gitconfig", sha256: sha("2") }] };
-    await store.put("goldens", "default", { head: 1, versions: [v1] });
+    await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [v1] });
     await run("new", "alpha");
     const [alpha] = await rt.workspaces.list();
     // The fork rewrote its own gitconfig and left the image's zshrc as it was.
     backend.execImpl = (m, cmd) =>
       cmd.includes("xargs -0 -r sha256sum") ? { exitCode: 0, stdout: `${sha("1")}  .zshrc\n${sha("f")}  .gitconfig\n`, stderr: "" } : guestAnswer(cmd);
-    await store.put("goldens", "default", {
+    await store.put("goldens", copyKey("default", "default"), {
       head: 2,
       versions: [v1, { ...v1, version: 2, snapshotId: "snap_gold2", owned: [{ path: ".zshrc", sha256: sha("9") }, { path: ".gitconfig", sha256: sha("2") }] }],
     });
