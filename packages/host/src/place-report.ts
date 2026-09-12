@@ -11,6 +11,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statfsSync, wri
 import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
 import type { PlaceSelfReport } from "@wsp/daemon";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile } from "@wsp/protocol";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
@@ -126,6 +127,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
   const env = opts.env ?? process.env;
   const work = workFolderIn(home);
   const free = diskFree(existsSync(work) ? work : home);
+  const login = placeLogin(env, home);
   return {
     name: opts.name,
     platform: platform() === "darwin" ? "darwin" : "linux",
@@ -133,11 +135,14 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     os: `${osType()} ${release()}`,
     shape: localShape(),
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
-    login: placeLogin(env, home),
+    login,
     // Whether this computer can fork at all, which is the one thing the host cannot read from over the link.
     docker: onPath("docker", env.PATH) !== undefined,
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
+    // Off the login PATH rather than this process's: a service starts with almost none, and what the person can
+    // run here is what a turn on this computer will find.
+    agents: CATALOG_AGENTS.filter(a => onPath(a.bin, login["PATH"]) !== undefined).map(a => a.id),
   };
 }
 

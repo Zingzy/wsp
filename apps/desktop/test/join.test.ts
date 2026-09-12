@@ -73,7 +73,16 @@ describe("the join behind the first launch's join screen", () => {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(
       file,
-      placeFileText({ placeId: "pl_1", name: "old-macbook", hostUrls: ["http://192.168.1.9:7788"], hostPublicKey: Buffer.alloc(32).toString("base64"), keyPath: `${home}/.wsp/place-key.pem`, joinedAt: new Date(0).toISOString() }),
+      placeFileText({
+        placeId: "pl_1",
+        name: "old-macbook",
+        hostName: "zingzy-mbp",
+        hostUrls: ["http://192.168.1.9:7788"],
+        hostPublicKey: Buffer.alloc(32).toString("base64"),
+        keyPath: `${home}/.wsp/place-key.pem`,
+        joinedAt: new Date(0).toISOString(),
+        awake: false,
+      }),
     );
     const fake = fakeJoin(0);
     expect(await joinWsp({ address: "192.168.1.20:7788", code: "QW4K7PZX" }, road(home, fake.join as Road["join"]))).toEqual({ ok: false, why: "already" });

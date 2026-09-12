@@ -174,6 +174,9 @@ function refreshMenu(): void {
       win?.webContents.send("hosts:connect-open");
       return;
     }
+    // The two rows a computer that joined another wsp adds are the joining shell's; this menu drives the switch and
+    // the disconnect, and a window on a Mac that joined nothing is never shown them.
+    if (action.kind !== "switch" && action.kind !== "disconnect") return;
     const moved = action.kind === "switch" ? hostsHeld.to(action.alias) : hostsHeld.disconnect(action.alias);
     void moved.then(answer => {
       if (!answer.ok) io.error(answer.error);

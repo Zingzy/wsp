@@ -3,7 +3,7 @@
 // app's own computer first, every saved host with the current one marked, the
 // connect row, and the disconnect row for the host the window is on.
 import { describe, expect, it } from "vitest";
-import { HOST_WORDS, hereWord, hostMenuAction, hostsMenuItems, shellVersionNotice, type HostsView } from "../src/index.js";
+import { HOST_WORDS, hereWord, hostMenuAction, hostsMenuItems, placeStateWord, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
@@ -49,6 +49,50 @@ describe("hostsMenuItems", () => {
     ]);
     expect(hostMenuAction("open-terminal")).toBeUndefined();
     expect(hostMenuAction("disconnect:")).toBeUndefined();
+  });
+});
+
+describe("the two rows a computer that joined another wsp adds", () => {
+  const joined: HostsView = { ...VIEW, place: { hostName: "zingzy-mbp", awake: true } };
+
+  it("appends the awake row checked from the standing and the leave row as a destructive one", () => {
+    const rows = hostsMenuItems(joined);
+    expect(rows.slice(-2).map(r => [r.label, r.checked ?? null, r.destructive ?? false])).toEqual([
+      [HOST_WORDS.place.awakeRow, true, false],
+      ["Leave zingzy-mbp's wsp", null, true],
+    ]);
+  });
+
+  it("reads both rows back, and the awake row asks for the state it is not in", () => {
+    const held = hostsMenuItems(joined).slice(-2);
+    expect(held.map(r => hostMenuAction(r.id))).toEqual([{ kind: "awake", on: false }, { kind: "leave" }]);
+    const loose = hostsMenuItems({ ...VIEW, place: { hostName: "zingzy-mbp", awake: false } }).slice(-2);
+    expect(hostMenuAction(loose[0]!.id)).toEqual({ kind: "awake", on: true });
+    expect(loose[0]!.checked).toBe(false);
+  });
+
+  it("leaves the list of a computer that joined nothing exactly as it was", () => {
+    expect(hostsMenuItems({ ...VIEW })).toEqual(hostsMenuItems(VIEW));
+    expect(hostsMenuItems(VIEW)).toHaveLength(5);
+  });
+});
+
+describe("what the Where agents run table says about a computer", () => {
+  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, workspaceId: "ws_1", ...over });
+  const now = Date.parse("2026-09-12T12:00:00.000Z");
+
+  it("says nothing while the computer holds its link, and how long it has been away when it does not", () => {
+    expect(placeStateWord(view(), now)).toBe("");
+    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T10:00:00.000Z" }), now)).toBe("offline · 2 h");
+    expect(placeStateWord(view({ present: false, lastSeenAt: "2026-09-12T11:48:00.000Z" }), now)).toBe("offline · 12 min");
+    expect(placeStateWord(view({ present: false }), now)).toBe("offline");
+  });
+
+  it("counts the workspaces on it and names the one thing that changes what may go there", () => {
+    expect(placeWorkspacesCell(view())).toBe("1");
+    expect(placeWorkspacesCell(view({ docker: false }))).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ present: false }))).toBe("1 · not answering");
+    expect(placeWorkspacesCell(view({ workspaceId: undefined }))).toBe("0");
   });
 });
 

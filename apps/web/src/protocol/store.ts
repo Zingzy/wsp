@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadFromHash, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
@@ -91,6 +91,10 @@ interface State {
   setupOpen: boolean;
   /** Whether the connect sheet stands open: the shell's menu, the sidebar's foot and a first launch all open one sheet. */
   connectOpen: boolean;
+  /** Every computer this wsp runs on, as the Settings table shows them; the four place events keep it current. */
+  places: PlaceView[];
+  /** Whether the Add a computer sheet stands open over the Settings page. */
+  addComputerOpen: boolean;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
   /** A thread of the selected workspace the person picked in the sidebar; null shows the workspace's latest thread. */
@@ -146,6 +150,9 @@ interface State {
   closeSetup(): void;
   openConnect(): void;
   closeConnect(): void;
+  /** Opens Settings with the Add a computer sheet over it: the palette row and the table's button take one road. */
+  openAddComputer(): void;
+  closeAddComputer(): void;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -316,6 +323,10 @@ export const useStore = create<State>((set, get) => {
       })
       .catch(() => {});
     void api
+      .placesList?.()
+      .then(places => set({ places }))
+      .catch(() => {});
+    void api
       .preferences?.()
       .then(preferences => {
         if (preferenceSetsInFlight === 0) set({ preferences });
@@ -343,6 +354,8 @@ export const useStore = create<State>((set, get) => {
     toastAction: null,
     setupOpen: false,
     connectOpen: false,
+    places: [],
+    addComputerOpen: false,
     selectedId: null,
     selectedThreadId: null,
     creations: [],
@@ -376,10 +389,9 @@ export const useStore = create<State>((set, get) => {
       if (conn === "live" && api) pull(api);
     },
     select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId, settingsOpen: false }); },
-    // The page is a labs surface, so every road to it (the chord, the palette row) is shut in one place.
-    openSettings() { if (get().preferences.labs) set({ settingsOpen: true }); },
-    closeSettings() { set({ settingsOpen: false }); },
-    toggleSettings() { set(s => ({ settingsOpen: s.preferences.labs && !s.settingsOpen })); },
+    openSettings() { set({ settingsOpen: true }); },
+    closeSettings() { set({ settingsOpen: false, addComputerOpen: false }); },
+    toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen })); },
     async setPreferences(patch) {
       const api = get().api;
       set(s => ({ preferences: applyPreferencesPatch(s.preferences, patch) }));
@@ -558,6 +570,8 @@ export const useStore = create<State>((set, get) => {
     closeSetup() { set({ setupOpen: false }); },
     openConnect() { set({ connectOpen: true }); },
     closeConnect() { set({ connectOpen: false }); },
+    openAddComputer() { set({ settingsOpen: true, addComputerOpen: true }); },
+    closeAddComputer() { set({ addComputerOpen: false }); },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
@@ -600,6 +614,18 @@ export const useStore = create<State>((set, get) => {
               forwards: s.forwards.filter(f => f.workspaceId !== e.workspaceId),
             };
           });
+          return;
+        case "place.joined":
+          set(s => ({ places: [...s.places.filter(p => p.id !== e.place.id), e.place] }));
+          return;
+        case "place.present":
+        case "place.absent":
+          set(s => ({
+            places: s.places.map(p => (p.id === e.placeId ? { ...p, present: e.type === "place.present", lastSeenAt: new Date().toISOString() } : p)),
+          }));
+          return;
+        case "place.removed":
+          set(s => ({ places: s.places.filter(p => p.id !== e.placeId) }));
           return;
         case "forward.open":
           set(s => ({ forwards: [...s.forwards.filter(f => !(f.workspaceId === e.forward.workspaceId && f.port === e.forward.port)), e.forward] }));
@@ -797,3 +823,5 @@ export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
   const api = useStore(s => s.api);
   useEffect(() => (api ? api.subscribe(fn) : undefined), [api, fn]);
 }
+export function usePlaces(): PlaceView[] { return useStore(s => s.places); }
+export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }

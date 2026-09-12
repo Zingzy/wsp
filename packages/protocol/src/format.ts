@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectGolden, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -2473,6 +2473,14 @@ export const HOST_WORDS = {
   disconnect: (label: string): string => `Disconnect ${label}`,
   /** Why the disconnect row is dimmed while the window is on the app's own computer. */
   hereStays: (here: string): string => `${here} is the app's own host`,
+  /** The two rows a computer that joined another wsp adds, and the line its sidebar foot reads. */
+  place: {
+    line: (hostName: string): string => `runs threads for ${hostName}`,
+    leave: "leave",
+    leaveRow: (hostName: string): string => `Leave ${hostName}'s wsp`,
+    awakeRow: "Stay awake while joined",
+    awakeWhy: "while the lid is open and it is plugged in",
+  },
   sheet: {
     headline: "Connect to a host",
     top: "A wsp host on another computer, by its address or over ssh.",
@@ -2496,12 +2504,74 @@ export const HOST_WORDS = {
   },
 } as const;
 
+/** How long a computer has been away, coarse on purpose: the figure is read once in a table, not watched. */
+function offlineFor(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
+}
+
+/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, and how
+ * long it has been away when it does not. The slot stands either way, so the word arriving moves no column. */
+export function placeStateWord(view: PlaceView, now: number): string {
+  if (view.present !== false) return "";
+  const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
+  return Number.isNaN(since) ? "offline" : `offline · ${offlineFor(now - since)}`;
+}
+
+/** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
+ * a person may put there. A computer that is not answering says so ahead of what it cannot run, since the second
+ * fact is about a computer this wsp is not talking to. */
+export function placeWorkspacesCell(view: PlaceView): string {
+  const count = view.workspaceId === undefined ? 0 : 1;
+  if (count === 0) return "0";
+  if (view.present === false) return `${count} · not answering`;
+  return view.docker === true ? `${count}` : `${count} · agents only`;
+}
+
+/** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
+export const PLACES_WORDS = {
+  section: "Where agents run",
+  columns: ["Computer", "Size", "Disk free", "Workspaces"],
+  addComputer: "Add a computer",
+  connectProvider: "Connect a provider",
+  /** Why Connect a provider is held: the sheet behind it belongs to the image and provider work. */
+  connectProviderHeld: "arrives with the provider sheet",
+  sheet: {
+    title: "Add a computer",
+    description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
+    appRoad: "On that computer, open wsp and press This Mac joins another wsp. Type these.",
+    address: "Address",
+    code: "Code",
+    waiting: "waiting for it to connect",
+    connected: (from: string): string => `connected from ${from} · keys exchanged`,
+    reading: "reading what it has",
+    joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
+    dockerOptional: "install Docker to run copies of your image · optional",
+    joinedTitle: (name: string): string => `${name} joined`,
+    joinedDescription: "It runs your agents as one workspace. Without Docker it cannot run copies of your image.",
+    open: (name: string): string => `Open ${name}`,
+    noApp: "No app on that computer",
+    noAppLine: "In its terminal, install wsp, then join:",
+    install: "npm i -g @zingzy/wsp",
+    joinLine: (url: string, code: string): string => `wsp join ${url} --code ${code}`,
+    escStays: "esc closes, the code stays good",
+    newCode: "New code",
+    close: "Close",
+    /** Said once, the first time the door binds: a Mac with its firewall on asks whether wsp may accept connections. */
+    firewall: "macOS may ask once whether wsp can accept connections; allow it",
+  },
+} as const;
+
 /** What the app calls the computer it runs on, first in every hosts list. */
 export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");
 
 const HOST_MENU_SWITCH = "switch:";
 const HOST_MENU_CONNECT = "connect";
 const HOST_MENU_DISCONNECT = "disconnect:";
+const HOST_MENU_AWAKE = "awake:";
+const HOST_MENU_LEAVE = "leave-place";
 
 /** The Hosts menu as one list of rows, read by the shell's own menu bar and by the sidebar's foot alike: this computer
  * first, every saved host, the current one marked, then the connect row, then the disconnect of the host the window is
@@ -2515,14 +2585,30 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
     current !== undefined
       ? { id: `${HOST_MENU_DISCONNECT}${current.alias}`, label: HOST_WORDS.disconnect(current.label), group: "remove", enabled: true, destructive: true }
       : { id: HOST_MENU_DISCONNECT, label: HOST_WORDS.disconnect(view.here), group: "remove", enabled: false, refusal: HOST_WORDS.hereStays(view.here), destructive: true },
+    ...(view.place === undefined
+      ? []
+      : [
+          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake },
+          { id: HOST_MENU_LEAVE, label: HOST_WORDS.place.leaveRow(view.place.hostName), group: "place", enabled: true, destructive: true },
+        ]),
   ];
 }
 
 /** What a row of the Hosts menu does, read back off its id; nothing for an id the list above never minted. */
-export type HostMenuAction = { kind: "switch"; alias: string | null } | { kind: "connect" } | { kind: "disconnect"; alias: string };
+export type HostMenuAction =
+  | { kind: "switch"; alias: string | null }
+  | { kind: "connect" }
+  | { kind: "disconnect"; alias: string }
+  | { kind: "awake"; on: boolean }
+  | { kind: "leave" };
 
 export function hostMenuAction(id: string): HostMenuAction | undefined {
   if (id === HOST_MENU_CONNECT) return { kind: "connect" };
+  if (id === HOST_MENU_LEAVE) return { kind: "leave" };
+  if (id.startsWith(HOST_MENU_AWAKE)) {
+    const word = id.slice(HOST_MENU_AWAKE.length);
+    return word === "on" || word === "off" ? { kind: "awake", on: word === "on" } : undefined;
+  }
   if (id.startsWith(HOST_MENU_SWITCH)) {
     const alias = id.slice(HOST_MENU_SWITCH.length);
     return { kind: "switch", alias: alias === "" ? null : alias };

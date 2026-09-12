@@ -2,11 +2,13 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, WS_PATH, isLoopback, recordRestoredLine, type BootPayload, type Caller, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { reachAddresses } from "./pairing.js";
+import { publicHostname } from "./relay-link.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
@@ -55,6 +57,11 @@ export interface HostOptions {
   beyondThisComputer?: boolean;
   /** The init job on this computer, served to the app as the init.* ops and the init.job events; absent, they are refused. */
   init?: InitDoor;
+  /** Whether the door a computer you own dials is bound as this host starts. Open when a joined computer is on
+   * record: it dials the port its place file names, and a laptop coming back must find that port there. */
+  door?: "closed" | "open";
+  /** The line said the first time the door binds, so a person reads about the firewall prompt where they asked. */
+  doorLine?: (line: string) => void;
 }
 
 /** The roads to a workspace and its project that the app's routes and wsp init share, so a workspace made without a
@@ -76,6 +83,9 @@ export interface HostHandle extends WorkspaceRoads {
   port: number;
   wsPort: number;
   authToken: string;
+  /** The door a computer you own dials: opened on the first ask and held open for this host's life, since a place
+   * file on another computer names its port for good. */
+  door: PlaceDoorControl & { close(): Promise<void>; port(): number | undefined };
   close(): Promise<void>;
 }
 
@@ -283,13 +293,15 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   let rtServer: RuntimeServer;
 
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
-  const page = (): string => {
+  // `here` is false on the door a computer you own dials: that page carries no token and pairs for one, whatever
+  // the address this host bound says about the loopback port beside it.
+  const page = (here = onThisComputer): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
     return loadPage(webDir, {
       wsPort: rtServer.port,
-      ...(onThisComputer ? { token: authToken } : {}),
+      ...(here ? { token: authToken } : {}),
       wsPath: WS_PATH,
-      paired: onThisComputer,
+      paired: here,
       version: VERSION,
       ...(terminalFont !== undefined ? { terminalFont } : {}),
       ...(opts.statePath !== undefined ? { statePath: opts.statePath } : {}),
@@ -300,22 +312,22 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
    * is the person, beyond it only a paired device's token in an Authorization header. The runtime server owns the one
    * reading of a token, and a token scoped to a thread names that thread here exactly as it does on a socket, so the
    * routes are no wider a road into this host than the protocol is. */
-  const callerOf = async (req: IncomingMessage): Promise<{ caller?: Caller } | undefined> => {
+  const callerOf = async (req: IncomingMessage, here: boolean): Promise<{ caller?: Caller } | undefined> => {
     const who = await rtServer.authorize(bearerOf(req.headers.authorization));
-    if (who === undefined) return onThisComputer ? {} : undefined;
+    if (who === undefined) return here ? {} : undefined;
     const scope = who.kind === "device" ? who.device.scope : undefined;
     return scope === undefined ? {} : { caller: { origin: "relayed", by: scope } };
   };
 
-  const server = createServer((req, res) => {
+  const handler = (here: boolean) => (req: IncomingMessage, res: ServerResponse) => {
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page());
+        res.end(page(here));
         return;
       }
-      const who = path.startsWith("/api/") ? await callerOf(req) : {};
+      const who = path.startsWith("/api/") ? await callerOf(req, here) : {};
       if (who === undefined) {
         sendJson(res, 401, { error: API_UNAUTHORIZED });
         return;
@@ -351,7 +363,50 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       if (!res.headersSent) sendJson(res, 500, { error: e instanceof Error ? e.message : String(e) });
       else res.end();
     });
-  });
+  };
+
+  const server = createServer(handler(onThisComputer));
+
+  // The door a computer you own dials: a second listener on the wildcard, built from the same request handler with
+  // the page's token withheld, whose upgrades reach the one runtime. Its port is fixed rather than stepped over,
+  // since the place file on the other computer names it for good and a fallback port could never be dialled.
+  // Zero asks the operating system for any free port, and the offset above it would be a privileged one, so that
+  // pair stays zero, which is the rule the app's own port pair already reads.
+  const asked = opts.port ?? DEFAULT_PORT;
+  const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
+  const doorServer = createServer(handler(false));
+  let doorAt: number | undefined;
+  let doorOpening: Promise<PlaceDoorView> | undefined;
+  /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host. */
+  const viewOf = (at: number, bound: string): PlaceDoorView => {
+    const relay = publicHostname(opts.statePath ?? "");
+    return {
+      port: at,
+      addresses: reachAddresses(bound).map(address => `http://${authority(address, at)}`),
+      ...(relay === undefined ? {} : { relay: relayUrlOf(relay) }),
+    };
+  };
+  const openDoor = async (): Promise<PlaceDoorView> => {
+    // A host that already answers beyond this computer needs no second listener: it names its own port instead.
+    if (!onThisComputer) return viewOf(port, address);
+    if (doorAt !== undefined) return viewOf(doorAt, WILDCARD);
+    doorOpening ??= new Promise<PlaceDoorView>((resolve, reject) => {
+      const failed = (e: NodeJS.ErrnoException): void => {
+        doorOpening = undefined;
+        reject(e.code === "EADDRINUSE" ? new Error(doorPortHeldLine(doorPort)) : e);
+      };
+      doorServer.once("error", failed);
+      doorServer.listen(doorPort, WILDCARD, () => {
+        doorServer.off("error", failed);
+        const bound = doorServer.address();
+        doorAt = typeof bound === "object" && bound !== null ? bound.port : doorPort;
+        // Said on a Mac alone: it is the application firewall's prompt, and no other computer here shows one.
+        if (platform() === "darwin") opts.doorLine?.(PLACES_WORDS.sheet.firewall);
+        resolve(viewOf(doorAt, WILDCARD));
+      });
+    });
+    return doorOpening;
+  };
 
   // The runtime answers upgrades of WS_PATH on the server above as well as on its own port, so a client that
   // reached the app through one forwarded port has the protocol on that same port.
@@ -359,7 +414,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     rtServer = await serveRuntime(rt, {
       port: opts.wsPort ?? DEFAULT_WS_PORT,
       host: address,
-      attach: server,
+      attach: [server, doorServer],
+      door: { open: openDoor },
       devices: rt.devices,
       authToken,
       forwards: relay,
@@ -416,10 +472,25 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   }
   const reapTimer = setInterval(() => void sweep(false), REAP_INTERVAL_MS);
 
+  // A door that cannot bind is a computer that cannot dial in, not a host that will not serve: the person reads
+  // who holds the port and everything else on this computer goes on working.
+  if (opts.door === "open") await openDoor().catch((e: unknown) => log(e instanceof Error ? e.message : String(e)));
+
   return {
     port,
     wsPort: rtServer.port,
     authToken,
+    door: {
+      open: openDoor,
+      port: () => doorAt,
+      close: async () => {
+        if (doorAt === undefined) return;
+        doorAt = undefined;
+        doorOpening = undefined;
+        doorServer.closeAllConnections();
+        await new Promise<void>((resolve, reject) => doorServer.close(err => (err ? reject(err) : resolve())));
+      },
+    },
     createWorkspace,
     createLocalWorkspace,
     planProject,
@@ -430,8 +501,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       // The runtime first: the sockets it holds on WS_PATH are this server's connections, and closing them here is
       // what sends a waiting client the stopping code instead of cutting the socket under it.
       await rtServer.close();
-      server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
+      for (const held of [doorServer, server]) {
+        held.closeAllConnections();
+        if (held.listening) await new Promise<void>((resolve, reject) => held.close(err => (err ? reject(err) : resolve())));
+      }
       // Last: with the servers gone nothing can record another event, so the
       // flush this waits on is the final word in the store.
       await rt.close();

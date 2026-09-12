@@ -14,11 +14,14 @@ import { WsClient } from "./ws-client.js";
 
 let srv: RuntimeServer | undefined;
 let http: Server | undefined;
+let second: Server | undefined;
 afterEach(async () => {
   await srv?.close();
   srv = undefined;
   if (http !== undefined) await new Promise<void>(done => http!.close(() => done()));
   http = undefined;
+  if (second !== undefined) await new Promise<void>(done => second!.close(() => done()));
+  second = undefined;
 });
 
 const rt = (store: Store = memoryStore()) => createRuntime({ backend: stubBackend(), store, adapters: {} });
@@ -246,6 +249,25 @@ describe("the runtime on an HTTP server's own port", () => {
     const onPort = await WsClient.connect(srv!.port, { token: "host-token" });
     expect((await onPort.request("workspaces.list")).ok).toBe(true);
     onPort.close();
+  });
+
+  it("answers on both attached servers, since the app's own port and the door computers you own dial carry one protocol", async () => {
+    const runtime = rt();
+    http = createServer((_req, res) => res.end("page"));
+    second = createServer((_req, res) => res.end("page"));
+    for (const server of [http, second]) await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", attach: [http, second], devices: runtime.devices });
+    const ports = [http, second].map(server => (server.address() as { port: number }).port);
+    for (const port of ports) {
+      const on = await WsClient.connectTo(`ws://127.0.0.1:${port}${WS_PATH}`, { token: "host-token" });
+      expect((await on.request("workspaces.list")).ok).toBe(true);
+      on.close();
+      await expect(WsClient.connectTo(`ws://127.0.0.1:${port}/socket`, {})).rejects.toThrow();
+    }
+    await srv.close();
+    srv = undefined;
+    // A close takes the runtime off both, so neither server is left upgrading into a runtime that has stopped.
+    for (const port of ports) await expect(WsClient.connectTo(`ws://127.0.0.1:${port}${WS_PATH}`, {})).rejects.toThrow();
   });
 
   it("refuses an upgrade of any other path rather than answering it", async () => {

@@ -14,6 +14,11 @@ export const WS_PORT_OFFSET = 10;
 /** The WebSocket port of the default pair. */
 export const DEFAULT_WS_PORT = DEFAULT_PORT + WS_PORT_OFFSET;
 
+/** How far above the app port the door for computers you own sits, so `--port` alone moves all three. */
+export const PLACE_PORT_OFFSET = 20;
+/** The port that door answers on for the default pair. */
+export const DEFAULT_PLACE_PORT = DEFAULT_PORT + PLACE_PORT_OFFSET;
+
 /** The address every host socket binds when nobody names another: the page carries the host token, so nothing
  * listens beyond this computer. */
 export const LOOPBACK = "127.0.0.1";
@@ -39,6 +44,10 @@ export function wsUrlOf(url: string): string {
 export function isLoopback(address: string): boolean {
   return address === "localhost" || address === "::1" || address === "[::1]" || /^127\./.test(address);
 }
+
+/** The address that binds every address this computer answers on: what the door a computer you own dials is bound
+ * to, and what reachAddresses is asked to spell out. */
+export const WILDCARD = "0.0.0.0";
 
 /** Whether an address is the wildcard, which binds every address this computer answers on, loopback included. A
  * tool on the computer itself dials such a host at loopback; a host on one named address answers only there. */
