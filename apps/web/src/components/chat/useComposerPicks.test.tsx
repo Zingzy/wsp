@@ -47,6 +47,11 @@ const view = (model: string | null, running = false): ChatThreadView => ({
 const handle = (model: string | null, threadKey = "t1", running = false): ChatThreadHandle =>
   ({ view: view(model, running), hydrated: true, busy: false, sending: false, fresh: false, resume: "sess", thread: threadKey, threadKey, named: null }) as unknown as ChatThreadHandle;
 
+/** The store as the composer meets it once this workspace's own machine has answered. Its catalog is what says which
+ * access modes the workspace takes: a workspace still waiting for one is lent the host-wide lists with none, so the
+ * access picker does not exist there and no pick against it can have been made. */
+const seed = (rows: SessionView[]) => useStore.setState({ harnesses: [CLAUDE], harnessesByWorkspace: { [WORKSPACE]: [CLAUDE] }, sessions: { [WORKSPACE]: rows } });
+
 function Picks({ thread }: { thread: ChatThreadHandle }) {
   const picks = useComposerPicks(WORKSPACE, thread);
   return <output data-testid="picks">{JSON.stringify({ model: picks.model, start: picks.startOptions, shows: picks.picks })}</output>;
@@ -87,7 +92,7 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("names the thread's recorded model and sends it, where nothing was picked", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [ROW] } }));
+    act(() => seed([ROW]));
     // What the composer shows, and what ChatComposer spreads into api.startSession for the send.
     expect(read("claude-fable-5-1")).toEqual({ model: { value: "claude-fable-5-1", label: "Fable 5.1", contextWindows: ["200k", "1m"] }, start: { model: "claude-fable-5-1" } });
     // A model this machine's list has no row for is named on the button by its id, and rides nothing: sessions.start
@@ -98,13 +103,13 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("a model picked on this thread still wins over the thread's own", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [ROW] } }));
+    act(() => seed([ROW]));
     act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "model", "claude-opus-5", "t1"));
     expect(read("claude-fable-5-1").start).toEqual({ model: "claude-opus-5" });
   });
 
   it("a model picked on another thread of this workspace paints neither this thread's button nor its send", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [ROW] } }));
+    act(() => seed([ROW]));
     act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "model", "claude-fable-5-1", "t9"));
     expect(read("claude-opus-5")).toEqual({ model: { value: "claude-opus-5", label: "Opus 5", isDefault: true, contextWindows: ["200k", "1m"] }, start: { model: "claude-opus-5" } });
     // A thread with no start behind it is the one that pick is for.
@@ -112,7 +117,7 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("a window picked here does not bring in a model picked on another thread, nor the other way round", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [ROW] } }));
+    act(() => seed([ROW]));
     const pick = useComposerOptionsStore.getState().pick;
     // Thread A ran on opus and had Fable picked on it; thread B ran on sonnet at 1M and has been touched by nobody.
     act(() => pick(WORKSPACE, "model", "claude-fable-5-1", "tA"));
@@ -129,7 +134,7 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("an effort picked on another thread of this workspace paints neither this thread's button nor its send", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [OPENED] } }));
+    act(() => seed([OPENED]));
     act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "effort", "low", "t9"));
     // This thread opened at high and nobody touched its picker: it reads high and its next send runs at high.
     const ran = readAll("claude-fable-5-1");
@@ -141,7 +146,7 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("an access picked on another thread of this workspace paints neither this thread's button nor its send", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [OPENED] } }));
+    act(() => seed([OPENED]));
     // The access goes onto the host's record for the whole workspace, so the thread it was picked on is the only
     // thing that keeps it off this one.
     pickAccess("bypassPermissions", "t9");
@@ -154,7 +159,7 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("an effort or an access picked on this thread still wins over what it ran at", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [OPENED] } }));
+    act(() => seed([OPENED]));
     act(() => useComposerOptionsStore.getState().pick(WORKSPACE, "effort", "low", "t1"));
     pickAccess("bypassPermissions", "t1");
     const ran = readAll("claude-fable-5-1");
@@ -163,7 +168,7 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
   });
 
   it("each pick is read against its own thread, so one picked here brings in none picked elsewhere", () => {
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [OPENED] } }));
+    act(() => seed([OPENED]));
     const pick = useComposerOptionsStore.getState().pick;
     // An effort picked on another thread, then a window picked here: the window stands and the effort stays away.
     act(() => pick(WORKSPACE, "effort", "low", "t9"));
@@ -178,11 +183,25 @@ describe("the composer's picks on a thread the catalog's list does not know", ()
     // pickers stand for is this thread's own, so the newer thread's values stay on the newer thread.
     const onA: SessionView = { id: "sA", workspaceId: WORKSPACE, harness: "claude", status: "running", threadId: "tA", model: "claude-opus-5", effort: "low", permissionMode: "plan" };
     const onB: SessionView = { id: "sB", workspaceId: WORKSPACE, harness: "claude", status: "running", threadId: "tB", model: "claude-sonnet-5", effort: "high", permissionMode: "bypassPermissions" };
-    act(() => useStore.setState({ harnesses: [CLAUDE], sessions: { [WORKSPACE]: [onA, onB] } }));
+    act(() => seed([onA, onB]));
     const a = readAll("claude-opus-5", "tA", true);
     expect(a.shows).toMatchObject({ model: "claude-opus-5", effort: "low", permissionMode: "plan" });
     expect(a.start).toEqual({ model: "claude-opus-5", effort: "low", permissionMode: "plan" });
     const b = readAll("claude-sonnet-5", "tB", true);
     expect(b.shows).toMatchObject({ model: "claude-sonnet-5", effort: "high", permissionMode: "bypassPermissions" });
+  });
+  it("a thread's own access stands while this workspace's catalog is still on the way, and no default paints", () => {
+    // The host-wide lists are lent to a workspace whose machine has not answered, with no access modes in them,
+    // since which mode a thread starts at is that machine's to decide. A thread that has run carries that machine's
+    // word on its own row, so it reads and sends what it runs at rather than nothing.
+    act(() => useStore.setState({ harnesses: [{ ...CLAUDE, permissionModes: [] }], harnessesByWorkspace: {}, sessions: { [WORKSPACE]: [OPENED] } }));
+    const ran = readAll("claude-fable-5-1");
+    expect(ran.shows["permissionMode"]).toBe("plan");
+    expect(ran.start).toMatchObject({ permissionMode: "plan" });
+    // A thread with no turn behind it has no word of its own, and the lists withhold their default, so it shows
+    // none and sends none: the runtime decides it on the machine when the thread opens.
+    const fresh = readAll(null);
+    expect(fresh.shows["permissionMode"]).toBeNull();
+    expect(fresh.start["permissionMode"]).toBeUndefined();
   });
 });

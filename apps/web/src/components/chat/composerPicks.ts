@@ -100,35 +100,53 @@ export function pickedFor(picked: ComposerOptions, thread: { model: string | nul
   return applies;
 }
 
-/** What a picker shows: the pick where this list carries it, else the thread's own value, else the list's own
- * default. Each is read against the list rather than the first of them being taken and then checked, so a pick made
- * on another harness leaves the picker showing what the next start will actually run instead of showing nothing. */
+/** What a picker shows: the pick where this list carries it, else what the thread already runs at as the reading
+ * beside each call below has read it, else the list's own default. The pick is read against the list rather than
+ * being taken and then checked, so a pick made on another harness leaves the picker showing what the next start will
+ * actually run instead of showing nothing. */
 function current(options: ReadonlyArray<HarnessOption>, picked: string | undefined, thread: string | undefined): string | null {
-  return listedPick(options, picked) ?? listedPick(options, thread) ?? markedDefault(options)?.value ?? null;
+  return listedPick(options, picked) ?? thread ?? markedDefault(options)?.value ?? null;
+}
+
+/** The access a thread already runs at, read against a list that may not have arrived. A workspace whose machine has
+ * not sent its own catalog is lent the host-wide lists with no access modes at all, since which mode a thread starts
+ * at is that machine's to decide and those lists were read against no machine. An empty list has not answered, so
+ * the thread's own word, written on its rows by the machine that ran it, stands, and only the list's default is
+ * withheld. A list with modes in it has answered: one it does not carry belongs to another harness and is dropped,
+ * the way every remembered pick is. The effort and the window are not read this way, since their lists are narrowed
+ * by the model in front of us and an empty one there is that model taking none. */
+function threadAccess(modes: ReadonlyArray<HarnessOption>, value: string | undefined): string | undefined {
+  return modes.length === 0 ? value : listedPick(modes, value);
 }
 
 export function effectivePicks(catalog: HarnessCatalog, input: { picked: ComposerOptions; thread: ComposerOptions }): ResolvedPicks {
   const model = resolveModel(catalog, { picked: input.picked.model, thread: input.thread.model });
+  const efforts = effortsFor(catalog, model);
+  const windows = contextWindowsFor(catalog, model);
+  const modes = catalog.permissionModes;
   return {
     model: model?.value ?? null,
-    effort: current(effortsFor(catalog, model), input.picked.effort, input.thread.effort),
-    contextWindow: current(contextWindowsFor(catalog, model), input.picked.contextWindow, input.thread.contextWindow),
-    permissionMode: current(catalog.permissionModes, input.picked.permissionMode, input.thread.permissionMode),
+    effort: current(efforts, input.picked.effort, listedPick(efforts, input.thread.effort)),
+    contextWindow: current(windows, input.picked.contextWindow, listedPick(windows, input.thread.contextWindow)),
+    permissionMode: current(modes, input.picked.permissionMode, threadAccess(modes, input.thread.permissionMode)),
   };
 }
 
 export function startOptionsFrom(catalog: HarnessCatalog, picked: ComposerOptions, thread: ComposerOptions = {}): ComposerStart {
   const model = resolveModel(catalog, { picked: picked.model, thread: thread.model });
-  const effort = listedPick(effortsFor(catalog, model), picked.effort ?? thread.effort);
-  const window = listedPick(contextWindowsFor(catalog, model), picked.contextWindow ?? thread.contextWindow);
-  const permissionMode = listedPick(catalog.permissionModes, picked.permissionMode ?? thread.permissionMode);
+  const efforts = effortsFor(catalog, model);
+  const windows = contextWindowsFor(catalog, model);
+  const effort = listedPick(efforts, picked.effort) ?? listedPick(efforts, thread.effort);
+  const window = listedPick(windows, picked.contextWindow) ?? listedPick(windows, thread.contextWindow);
+  // Read by the same two readings the buttons are, so what the person sees is what rides.
+  const permissionMode = listedPick(catalog.permissionModes, picked.permissionMode) ?? threadAccess(catalog.permissionModes, thread.permissionMode);
   // The thread's own model rides only where this list carries it. Nobody named it on this send, and sessions.start
   // refuses a model the list does not carry, so an inherited one the binary has since dropped would turn every send
   // into a refusal. Unsent, a claude resume keeps the harness session's own model, which is that same model
   // (measured on 2.1.257, 2026-09-12); on a harness whose resume does not, the turn runs on that CLI's own default,
-  // which is the price of a send that lands over one that is refused. An effort and an access the list carries ride
-  // rather than being left out: absent, every adapter here leaves its CLI's own default in place, which is neither
-  // what the thread ran at nor what the pickers show.
+  // which is the price of a send that lands over one that is refused. An effort and an access the thread already
+  // runs at ride rather than being left out: absent, every adapter here leaves its CLI's own default in place, which
+  // is neither what the thread ran at nor what the pickers show.
   const modelValue = picked.model ?? listedPick(catalog.models, thread.model) ?? (window !== undefined ? listedPick(catalog.models, model?.value) : undefined);
   // A window rides on the model, never alone: claude builds "<model>[1m]" and refuses a window with no model to
   // ride on, so a frame carrying one without the other fails at the adapter.
