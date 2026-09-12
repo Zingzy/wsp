@@ -1128,3 +1128,17 @@ async fn a_local_url_posted_to_the_shim_is_a_localhost_url_to_every_authed_socke
     assert_eq!(c.events("browser.open"), [json!({ "type": "browser.open", "url": local_authorize, "port": 8976 })]);
     c.every_event_parses();
 }
+
+#[tokio::test]
+async fn answers_a_plain_http_request_426_upgrade_required_which_is_what_the_status_probe_reads_as_a_daemon() {
+    let d = start(None).await;
+    let mut raw = TcpStream::connect(d.addr).await.unwrap();
+    raw.write_all(format!("GET / HTTP/1.1\r\nHost: {}\r\nAccept: */*\r\n\r\n", d.addr).as_bytes()).await.unwrap();
+    let mut answer = String::new();
+    raw.read_to_string(&mut answer).await.unwrap();
+    assert!(answer.starts_with("HTTP/1.1 426 Upgrade Required\r\n"), "{answer:?}");
+    assert!(answer.contains("\r\nContent-Length: 0\r\n"), "{answer:?}");
+    // The door still serves: the same daemon takes an upgrade and its auth frame after.
+    let mut c = authed(&d).await;
+    assert_eq!(c.request("ping", json!({})).await["ok"], true);
+}

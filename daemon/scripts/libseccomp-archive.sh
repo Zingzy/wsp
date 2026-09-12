@@ -29,7 +29,7 @@ case "${1:-}" in
     tar xzf "libseccomp-$version.tar.gz" && cd "libseccomp-$version"
     # musl's own headers first; the kernel's linux/ and asm/ headers, which musl-tools does not carry, after them.
     CC=musl-gcc CPPFLAGS="-idirafter /usr/include/$(gcc -print-multiarch) -idirafter /usr/include" \
-      ./configure --enable-static --disable-shared --host=x86_64-linux-musl > configure.log
+      ./configure --enable-static --disable-shared --host="$(uname -m)-linux-musl" > configure.log
     make -j2 > make.log
     install -D -m 644 src/.libs/libseccomp.a "$out"
     echo "$out"

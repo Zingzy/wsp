@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { SSH_FACTS_SCRIPT } from "@wsp/engine";
-import { DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, kindWords, NO_BUILD_TOOLS_LINE, noSshDaemonLine, rootsPathIn, sshDaemonPaths, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, kindWords, NO_NODE_LINE, noSshDaemonLine, rootsPathIn, sshDaemonPaths, type WorkspaceStatus } from "@wsp/protocol";
 import type { Clock } from "../src/clock.js";
 import { createRuntime, DAEMON_LACKS_AGAIN_MS, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { POLL_INTERVAL_MS } from "../src/status.js";
@@ -232,7 +232,7 @@ describe("putting a daemon on a machine already recorded", () => {
   it("leaves a machine that answered with what it lacks alone at the next host start, and offers again once its window is out", async () => {
     const store = memoryStore();
     const fc = fakeClock();
-    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const refusing = { store, clock: fc.clock, refuse: NO_NODE_LINE, lacks: true };
     const first = host(refusing);
     const ws = await first.rt.workspaces.createSsh("dev@box");
     expect(first.daemon.deploys).toHaveLength(1);
@@ -259,7 +259,7 @@ describe("putting a daemon on a machine already recorded", () => {
   it("stops saying a machine lacks something once a deploy gets past its checks, however that deploy ends", async () => {
     const store = memoryStore();
     const fc = fakeClock();
-    const first = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const first = host({ store, clock: fc.clock, refuse: NO_NODE_LINE, lacks: true });
     const ws = await first.rt.workspaces.createSsh("dev@box");
     expect(((await store.get("workspaces", ws.id)) as { daemonRefusedAt?: unknown }).daemonRefusedAt).toBeDefined();
     await first.rt.close();
@@ -281,7 +281,7 @@ describe("putting a daemon on a machine already recorded", () => {
   it("drops a refusal another machine gave, so a machine swapped under the record answers for itself", async () => {
     const store = memoryStore();
     const fc = fakeClock();
-    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const refusing = { store, clock: fc.clock, refuse: NO_NODE_LINE, lacks: true };
     const first = host(refusing);
     const ws = await first.rt.workspaces.createSsh("dev@box");
     await first.rt.close();
@@ -303,11 +303,11 @@ describe("putting a daemon on a machine already recorded", () => {
   it("keeps what a machine said it lacks through a dial that never reached it, and takes none of that dial's words", async () => {
     const store = memoryStore();
     const fc = fakeClock();
-    const first = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const first = host({ store, clock: fc.clock, refuse: NO_NODE_LINE, lacks: true });
     const ws = await first.rt.workspaces.createSsh("dev@box");
     await first.rt.close();
     const refusal = (): Promise<{ daemonRefusedAt?: { why: string } }> => store.get("workspaces", ws.id) as Promise<{ daemonRefusedAt?: { why: string } }>;
-    expect((await refusal()).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    expect((await refusal()).daemonRefusedAt?.why).toBe(NO_NODE_LINE);
 
     // The box is switched off by the time the window is out. ssh answers with its own words, which say nothing
     // about the compiler: the record keeps what the machine itself said and its hour goes on running.
@@ -321,18 +321,18 @@ describe("putting a daemon on a machine already recorded", () => {
       warn.mockRestore();
     }
     const kept = (await refusal()).daemonRefusedAt;
-    expect(kept?.why).toBe(NO_BUILD_TOOLS_LINE);
+    expect(kept?.why).toBe(NO_NODE_LINE);
     // The ssh client's words are in neither the record nor the row: a row saying a machine lacks "Connection
     // refused" would be saying something about that machine that nobody learned.
     expect(kept?.why).not.toContain("Connection refused");
-    expect((await off.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    expect((await off.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_NODE_LINE);
     await off.rt.close();
   });
 
   it("says what the machine lacks, rather than that a helper it never had is being updated", async () => {
     const store = memoryStore();
     const fc = fakeClock();
-    const refusing = { store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true };
+    const refusing = { store, clock: fc.clock, refuse: NO_NODE_LINE, lacks: true };
     const first = host(refusing);
     const ws = await first.rt.workspaces.createSsh("dev@box");
     await first.rt.close();
@@ -344,7 +344,7 @@ describe("putting a daemon on a machine already recorded", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       await second.rt.workspaces.list();
-      await vi.waitFor(() => expect(said).toContain(NO_BUILD_TOOLS_LINE));
+      await vi.waitFor(() => expect(said).toContain(NO_NODE_LINE));
     } finally {
       warn.mockRestore();
     }
@@ -411,7 +411,7 @@ describe("offering a refusing machine the daemon again with the host still up", 
    * across the hour, and a poll ticking the whole time, which is what a person with the app open on the row has. */
   const refusing = (dark?: { on: boolean }): ReturnType<typeof host> & { fc: ReturnType<typeof fakeClock>; polls: () => number } => {
     const fc = fakeClock();
-    const made = host({ clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true, ...(dark !== undefined ? { dark } : {}) });
+    const made = host({ clock: fc.clock, refuse: NO_NODE_LINE, lacks: true, ...(dark !== undefined ? { dark } : {}) });
     return { ...made, fc, polls: () => made.carried.filter(c => c.script === SSH_FACTS_SCRIPT).length };
   };
 
@@ -447,7 +447,7 @@ describe("offering a refusing machine the daemon again with the host still up", 
       expect(daemon.deploys).toHaveLength(1);
       // Inside the hour the tick costs that machine nothing at all beyond the poll's own read of what it is.
       expect(wrote()).toBe(settled);
-      expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+      expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_NODE_LINE);
     } finally {
       stop();
       fc.advance(0);
@@ -481,7 +481,7 @@ describe("offering a refusing machine the daemon again with the host still up", 
     const it_ = refusing();
     const { rt, daemon, fc } = it_;
     const ws = await rt.workspaces.createSsh("dev@box");
-    expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+    expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_NODE_LINE);
     // The person installs what their machine asked for. Nothing on it tells this host so; the hour running out is.
     daemon.refuse = undefined;
     const stop = rt.status.watch();
@@ -515,7 +515,7 @@ describe("offering a refusing machine the daemon again with the host still up", 
       // of this test takes to show up.
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(daemon.deploys).toHaveLength(1);
-      expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE);
+      expect((await rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_NODE_LINE);
 
       // It comes back on, and the tick that hears from it again is the one that offers.
       dark.on = false;
@@ -542,7 +542,7 @@ describe("offering a refusing machine the daemon again with the host still up", 
     await store.put("workspaces", ws.id, { ...stored, daemon: { ...stored.daemon, version: DAEMON_VERSION - 1 } });
 
     const fc = fakeClock();
-    const second = host({ store, clock: fc.clock, refuse: NO_BUILD_TOOLS_LINE, lacks: true });
+    const second = host({ store, clock: fc.clock, refuse: NO_NODE_LINE, lacks: true });
     // The daemon's own road answers, so the row stays reachable and the poll keeps reading what the machine is: a
     // row that fell to unreachable would stop those reads and leave this passing for the wrong reason.
     const server = createServer((_req, res) => {
@@ -558,7 +558,7 @@ describe("offering a refusing machine the daemon again with the host still up", 
     const stop = second.rt.status.watch();
     try {
       await vi.waitFor(() => expect(second.daemon.deploys).toHaveLength(1));
-      await vi.waitFor(async () => expect((await second.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_BUILD_TOOLS_LINE));
+      await vi.waitFor(async () => expect((await second.rt.workspaces.get(ws.id)).daemonRefusedAt?.why).toBe(NO_NODE_LINE));
       for (let i = 0; i < 3; i++) await tick(at);
       // Inside the hour, and a daemon on the record changes nothing about that: the thing the machine has not got
       // stops a replacement as flatly as it stops a first one.

@@ -9,8 +9,7 @@
     "@wsp/runtime": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
-    "@wsp/daemon": "workspace:*"
+    "@types/node": "^22.20.1"
   },
   "license": "AGPL-3.0-only"
 }
