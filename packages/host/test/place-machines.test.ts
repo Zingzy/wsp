@@ -9,12 +9,13 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { EXEC_BODY_MAX, NOT_ON_THIS_ROAD } from "@wsp/protocol";
-import { DockerBackend, LinkBackend, type ExecResult, type Machine, type MachineBackend, type MachineLink, type MachineSpec } from "@wsp/engine";
+import { DockerBackend, LinkBackend, type ExecResult, type Machine, type MachineBackend, type MachineSpec } from "@wsp/engine";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { machineOps } from "../src/place-machines.js";
 import { PLACE_OFFERS, offeredBackend } from "../src/place-offers.js";
 import { FakeEngine } from "../../engine/test/fake-docker-engine.js";
 import { closeFakePlaceHosts, fakePlaceHost, placePair, settled, testPlaceFile } from "../../daemon/test/fake-place-host.js";
+import { linkOver } from "./machine-link.js";
 
 const dirs: string[] = [];
 const daemons: DaemonHandle[] = [];
@@ -240,31 +241,6 @@ describe("what a joined computer offers", () => {
     expect(built.capabilities.pauseMode).toBe("disk");
   });
 });
-
-/** One request and its answer on the socket a place proved, which is the road the host's engine drives. */
-function linkOver(ws: WebSocket): MachineLink {
-  let next = 1;
-  const pending = new Map<number, { done: (v: Record<string, unknown>) => void; fail: (e: Error) => void }>();
-  ws.on("message", raw => {
-    const frame = JSON.parse(String(raw)) as Record<string, unknown>;
-    const id = frame["id"];
-    if (typeof id !== "number") return;
-    const held = pending.get(id);
-    if (held === undefined) return;
-    pending.delete(id);
-    if (frame["ok"] === true) held.done(frame);
-    else held.fail(Object.assign(new Error(String(frame["error"])), { kind: frame["kind"], status: frame["status"] }));
-  });
-  return {
-    request: (op, params) =>
-      new Promise((done, fail) => {
-        const id = next++;
-        pending.set(id, { done, fail });
-        ws.send(JSON.stringify({ id, op, ...params }));
-      }),
-    forward: async placePort => ({ localPort: placePort }),
-  };
-}
 
 describe("the whole road, over a daemon link a place proved", () => {
   const linked = async (ops: Record<string, unknown> | undefined, engineSocket?: string) => {

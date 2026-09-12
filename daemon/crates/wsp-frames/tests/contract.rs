@@ -11,8 +11,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonAuthRequest, DaemonEvent, DaemonRequest, MachineLinkRequest, PlaceAuthRequest, PlaceProveRequest, DAEMON_OPS,
-    MACHINE_OPS,
+    numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, MachineAnswersReply,
+    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
+    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -146,6 +147,67 @@ fn every_event_frame_reads_as_the_protocol_does() {
     ];
     expected.sort_unstable();
     assert_eq!(seen, expected);
+}
+
+/// The replies a daemon answers the machine ops with, one file per protocol reply schema, each sample read into
+/// the reply type here and written back to the same JSON. A file no type here reads is a reply this daemon does
+/// not answer yet, and the test says so rather than skipping it.
+#[test]
+fn every_reply_fixture_round_trips_through_the_reply_types() {
+    let dir = fixtures().join("replies");
+    let mut seen = Vec::new();
+    for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+        let path = entry.unwrap().path();
+        let name = path.file_stem().unwrap().to_str().unwrap().to_owned();
+        let at = path.display().to_string();
+        for sample in read_frames(&path) {
+            match name.as_str() {
+                "MachineBackendReply" => {
+                    round_trip::<BackendFacts>(&sample, &at);
+                }
+                "MachineCapacityReply" => {
+                    round_trip::<PlaceCapacity>(&sample, &at);
+                }
+                "MachineHandleReply" => {
+                    round_trip::<MachineHandleReply>(&sample, &at);
+                }
+                "MachineListReply" => {
+                    round_trip::<MachineListReply>(&sample, &at);
+                }
+                "MachineExecReply" => {
+                    round_trip::<MachineExecReply>(&sample, &at);
+                }
+                "MachineStateReply" => {
+                    round_trip::<MachineStateReply>(&sample, &at);
+                }
+                "MachineShapeReply" => {
+                    round_trip::<MachineShapeReply>(&sample, &at);
+                }
+                "MachineAnswersReply" => {
+                    round_trip::<MachineAnswersReply>(&sample, &at);
+                }
+                "DaemonErrorResponse" => {
+                    round_trip::<DaemonErrorResponse>(&sample, &at);
+                }
+                other => panic!("{at}: no reply type here reads {other}"),
+            }
+        }
+        seen.push(name);
+    }
+    seen.sort();
+    let mut expected = vec![
+        "DaemonErrorResponse",
+        "MachineAnswersReply",
+        "MachineBackendReply",
+        "MachineCapacityReply",
+        "MachineExecReply",
+        "MachineHandleReply",
+        "MachineListReply",
+        "MachineShapeReply",
+        "MachineStateReply",
+    ];
+    expected.sort_unstable();
+    assert_eq!(seen, expected, "every reply this daemon answers has its fixture");
 }
 
 /// The fixture set is generated from the protocol package's exports, so its keys are that package's names and a
