@@ -6,7 +6,7 @@
 // road can start a thread somewhere another road would not.
 import { THIS_COMPUTER } from "./format.js";
 import type { Preferences, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
-import { underProject } from "./project-path.js";
+import { folderName, underProject } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { kindWords, workspaceKind, type WorkspaceKindWords } from "./workspace-state.js";
 
@@ -51,10 +51,6 @@ export function projectAt(projects: readonly WorkspaceProject[], folder: string 
 export function projectCountCell(projects: readonly WorkspaceProject[]): string {
   return projects.length === 0 ? "" : String(projects.length);
 }
-
-/** A folder's own name, its last segment: what a project is called, and what the import dialog and the register line
- * call the folder. */
-export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
 
 /** A path as the machine's own shell would show it: `~` for its home and anything under it, the path as given
  * elsewhere or where the home is not known. */

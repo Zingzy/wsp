@@ -3903,7 +3903,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { placeDaemonPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
+export { folderName, parentFolderName, placeDaemonPaths, rootsPathIn, sshDaemonPaths, underProject, workFolderIn } from "./project-path.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { threadFromHash, threadHash, workspaceFromHash, workspaceHash } from "./app-address.js";
