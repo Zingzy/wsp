@@ -33,13 +33,14 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipPopup: () => null,
 }));
 
-const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
+const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", over: Partial<WorkspaceView> = {}): WorkspaceView => ({
   id,
   name,
   machineId: `m_${id}`,
   phase,
   golden: "snap_g",
   createdAt: `2026-09-01T00:0${id.length}:00Z`,
+  ...over,
 });
 
 const session = (id: string, workspaceId: string, prompt: string, over: Partial<SessionView> = {}): SessionView => ({
@@ -111,6 +112,14 @@ const chordOn = (title: string): string | null => {
   return row.querySelector("[data-slot=command-shortcut]")?.textContent ?? null;
 };
 
+/** The meta line under a palette row's title, by that title. */
+const metaOn = (title: string): string | null => {
+  const rows = [...(palette()?.querySelectorAll<HTMLElement>("[data-slot=command-item]") ?? [])];
+  const row = rows.find(candidate => candidate.querySelector("span.truncate")?.textContent === title);
+  if (row === undefined) throw new Error(`no palette row titled ${title}`);
+  return row.querySelector("span.text-muted-foreground\\/70")?.textContent ?? null;
+};
+
 /** The caret asks for one workspace from this call on; one left pending by an earlier test is dropped. */
 const watchComposerFocus = (workspaceId: string): { asks: string[]; off: () => void } => {
   const asks: string[] = [];
@@ -171,6 +180,23 @@ describe("command palette", () => {
     expect(inPalette().getByText("fix the flaky test")).toBeTruthy();
     mod("k");
     await waitFor(() => expect(palette()).toBeNull());
+  });
+
+  it("a workspace row reads its state and where it runs, never the id wsp holds its machine under", async () => {
+    useStore.getState().bind(fakeApi([view("ws_a", "api", "running", { provider: "solari" }), view("ws_b", "worker", "napping")], []));
+    render(
+      <AppShell>
+        <div>center content</div>
+      </AppShell>,
+    );
+    await waitFor(() => expect(useStore.getState().workspaces.length).toBe(2));
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    // The provider its own record names, and, on a record that names none, what the machine is: a person picks a
+    // workspace by its state and where it runs, and the id the provider minted for the machine names neither.
+    expect(metaOn("api")).toBe("Running · solari · Current workspace");
+    expect(metaOn("worker")).toBe("Paused · a provider");
+    for (const title of ["api", "worker"]) expect(metaOn(title)).not.toMatch(/m_ws_/);
   });
 
   it("carries Add a computer, which opens Settings with the sheet over it", async () => {
@@ -258,7 +284,7 @@ describe("command palette", () => {
     await mountShell();
     const seen: string[] = [];
     const off = onNewThreadRequest(d => seen.push(d.workspaceId));
-    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }], selectedId: "creating:1" }));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }], selectedId: "creating:1" }));
     mod("n");
     mod("j");
     mod("b", { altKey: true });
@@ -321,6 +347,26 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).toBeNull());
     expect(useStore.getState().selectedId).toBe("ws_b");
     expect(useStore.getState().selectedThreadId).toBe("t_old");
+  });
+
+  it("lists a thread an agent opened on another workspace once, naming the workspace it runs on and where that runs", async () => {
+    const lead = { ...session("s_lead", "ws_a", "run the migration across the fleet"), threadId: "t_lead", startedAt: Date.now() - 60_000 };
+    // Opened by the lead's agent, filed under the other workspace: the palette reads the same tree the sidebar draws.
+    const child = { ...session("s_child", "ws_b", "migration on worker"), threadId: "t_child", parentThreadId: "t_lead", startedBy: "agent" as const, startedAt: Date.now() - 30_000 };
+    await mountShell([lead, child]);
+    mod("k");
+    await waitFor(() => expect(palette()).not.toBeNull());
+    const input = screen.getByPlaceholderText(/Search commands/);
+    fireEvent.change(input, { target: { value: "migration" } });
+    await waitFor(() => expect(inPalette().getByText("migration on worker")).toBeTruthy());
+    // Once, not twice: the tree moves the row into its opener's group and never leaves a copy where it runs.
+    const titles = [...palette()!.querySelectorAll<HTMLElement>("[data-slot=command-item] span.truncate")].map(node => node.textContent);
+    expect(titles.filter(title => title === "migration on worker")).toHaveLength(1);
+    expect(titles).toContain("run the migration across the fleet");
+    // The workspace it runs on and where that runs, which is what tells it from a thread of the opener's own. This
+    // fixture's records name no provider, so where it runs is what the machine is.
+    const row = inPalette().getByText("migration on worker").closest<HTMLElement>("[data-slot=command-item]")!;
+    expect(within(row).getByText("worker · a provider")).toBeTruthy();
   });
 
   it("a thread the sidebar has folded into its archive is still found by title and still opens", async () => {

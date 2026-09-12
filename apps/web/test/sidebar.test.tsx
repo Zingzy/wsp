@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -65,6 +65,9 @@ type FakeApi = Api & {
 function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessions: SessionView[] = []): FakeApi {
   return {
     listWorkspaces: vi.fn(async () => workspaces),
+    // Two rows: this computer, which is never somewhere to put a workspace, and the provider this host forks on,
+    // which is the row the New workspace dialog checks.
+    placesList: vi.fn(async () => PLACES),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
     createWorkspace: vi.fn(async () => workspaces[0]!),
     createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
@@ -102,9 +105,14 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
   };
 }
 
+const PLACES: PlaceView[] = [
+  { id: "here", kind: "computer", name: "studio.local", default: false, docker: false, present: true },
+  { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018 },
+];
+
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -201,6 +209,19 @@ describe("rows from the fixture wire", () => {
     expect(screen.queryByText(/Settled/)).toBeNull();
   });
 
+  it("a thread stopped on a permission prompt says so on its row and on its workspace's third line, and goes back to working when it is answered", async () => {
+    const asking = "Permission for Bash: Check wsp version";
+    await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000), asking })]), "api");
+    await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
+    expect(within(rowOf("fix the port list")).getByLabelText("Needs you")).toBeDefined();
+    expect(within(rowOf("fix the port list")).queryByLabelText("Working")).toBeNull();
+    // The workspace's own row carries the sentence a person is waiting on, cut at the row's cap.
+    expect(rowOf("api").textContent).toContain("Permission for Bash: Check");
+    act(() => useStore.setState({ sessions: { ws_a: [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })] } }));
+    await waitFor(() => expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined());
+    expect(rowOf("api").textContent).not.toContain("Permission for Bash");
+  });
+
   it("three workspaces in mixed states: the running one leads, then the paused, then the gone, whatever order they were created in; a creating row sits above them all", async () => {
     const gone = { ...view("ws_gone", "scratch"), createdAt: new Date(NOW - 3 * 24 * 60 * 60_000).toISOString() };
     const paused = { ...view("ws_nap", "spike", "napping"), createdAt: new Date(NOW - 2 * 60 * 60_000).toISOString() };
@@ -221,7 +242,7 @@ describe("rows from the fixture wire", () => {
       expect(slot.className).toContain("shrink-0");
       expect(slot.className).not.toMatch(/success|emerald|green/);
     }
-    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(rowIds()).toEqual(["creating:1", "ws:ws_run", "ws:ws_nap", "ws:ws_gone"]);
   });
 
@@ -978,7 +999,7 @@ describe("the group before the first list has arrived", () => {
 
   it("a creation on its way holds the empty state off while the list is still coming", () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", workspaceId: null, lines: [], failed: null }] }));
+    act(() => useStore.setState({ creations: [{ key: "creating:1", name: "beta", askedAt: Date.now(), workspaceId: null, lines: [], failed: null }] }));
     expect(screen.getByText("beta")).toBeDefined();
     expect(screen.queryByText(/No workspaces yet/)).toBeNull();
   });
@@ -1039,12 +1060,12 @@ describe("new workspace dialog", () => {
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", { cpu: 2, memMb: 8192 }));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", { cpu: 2, memMb: 8192 }, "box"));
 
     const again = await openDialog();
     fireEvent.change(again.input, { target: { value: "gamma" } });
     fireEvent.keyDown(again.input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("gamma", undefined));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("gamma", undefined, "box"));
     vi.unstubAllGlobals();
   });
 
@@ -1058,7 +1079,7 @@ describe("new workspace dialog", () => {
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined);
+    expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box");
     const pending = await screen.findByText("beta");
     const row = pending.closest<HTMLElement>("[data-sidebar-row]")!;
     expect(row.getAttribute("aria-busy")).toBe("true");
@@ -1108,7 +1129,7 @@ describe("new workspace dialog", () => {
     act(() => useStore.getState().applyEvent({ type: "init.job", job: { id: "init_1", road: "manual", phase: "done", keys: { solari: true }, step: 0, stoppable: false, screens: [], rows: [], progress: { done: 2, total: 2 }, log: [] } }));
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false));
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined));
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box"));
   });
 
   it("a refusal keeps the row, names the refusal on it, and reopens no dialog", async () => {
@@ -1132,21 +1153,16 @@ describe("new workspace dialog", () => {
     expect(useStore.getState().creations.map(c => c.name)).toEqual(["gamma", "gamma"]);
   });
 
-  it("the second choice creates, then opens the import dialog for the workspace the runtime made", async () => {
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+  it("the Where control offers the rows this wsp holds, never this computer, and the create names the checked one", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] }));
-    api.importProject = vi.fn();
     api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_beta", name));
     await mount(api, "api");
     const { dialog, input } = await openDialog();
+    const group = await within(dialog).findByRole("radiogroup", { name: "Where" });
+    expect(within(group).getAllByRole("radio").map(r => [r.textContent, r.getAttribute("aria-checked")])).toEqual([["ASCII", "true"]]);
     fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.click(within(dialog).getByRole("radio", { name: /^Import a project/ }));
     fireEvent.keyDown(input, { key: "Enter" });
-    const importDialog = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(importDialog).getByText(importIntoLine("beta"))).toBeDefined();
-    expect(useStore.getState().selectedId).toBe("ws_beta");
-    vi.unstubAllGlobals();
+    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box"));
   });
 
   it("Escape cancels without creating; a blank name cannot be submitted", async () => {
@@ -1735,6 +1751,45 @@ describe("a thread another thread's agent opened", () => {
     expect(meta("ship the search rewrite").textContent).toBe("Working··you");
     expect(rowOf("write the migration").className).toContain("pl-5");
     expect(rowOf("write the migration").querySelector("[data-thread-provenance]")!.getAttribute("aria-label")).toBe("Claude Code · solari");
+  });
+});
+
+describe("a thread an agent opened on another workspace", () => {
+  // The orchestrator's own workspace is this computer and the builder it opened runs on a fork at a provider; the
+  // sidebar files each thread under the workspace its session belongs to, which is what used to part the two.
+  const MAC = { ...view("ws_mac", "zingzy's Mac"), kind: "local" as const };
+  const BENCH = view("ws_bench", "spoo-bench");
+
+  const opened = async () =>
+    mount(
+      fakeApi(
+        [MAC, BENCH],
+        [status(MAC), status(BENCH, { machineId: "sb_9f2c1d8a", provider: "ascii" })],
+        [
+          session("s1", "ws_mac", { prompt: "run the migration across the fleet", startedBy: "person", threadId: "th_lead", startedAt: iso(-60_000) }),
+          session("s2", "ws_bench", { prompt: "benchmark the new index", startedBy: "agent", threadId: "th_bench", parentThreadId: "th_lead", startedAt: iso(-600_000) }),
+        ],
+      ),
+      "zingzy's Mac",
+    );
+
+  it("is drawn one step in under the thread that opened it, not under the workspace its session is filed against", async () => {
+    await opened();
+    await waitFor(() => expect(screen.getByText("benchmark the new index")).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_mac", "thread:th_lead", "thread:th_bench", "ws:ws_bench"]);
+    expect(rowOf("benchmark the new index").className).toContain("pl-5");
+  });
+
+  it("names the workspace it runs in and then where that workspace runs, the two facts the row above it does not carry", async () => {
+    await opened();
+    await waitFor(() => expect(screen.getByText("benchmark the new index")).toBeDefined());
+    const meta = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-meta]")!;
+    expect(meta("benchmark the new index").textContent).toBe("··spoo-bench·ascii");
+    // The dot alone says it works on a spawned row, and the opener word is dropped: the indent already says it.
+    expect(meta("benchmark the new index").textContent).not.toContain("Working");
+    expect(meta("benchmark the new index").textContent).not.toContain("agent");
+    expect(meta("run the migration across the fleet").textContent).toBe("Working··you");
+    expect(rowOf("benchmark the new index").querySelector("[data-thread-provenance]")!.getAttribute("aria-label")).toBe("Claude Code · spoo-bench · ascii");
   });
 });
 

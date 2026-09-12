@@ -133,6 +133,7 @@ import type {
   Recipe,
   RecipeDigest,
   SealedImage,
+  SealedImageBuilt,
   SealedImageCopy,
   SealedImageView,
   SealedVault,
@@ -192,9 +193,9 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, PERMISSION_DENY, PERMISSION_WAIT_MS, permissionModeOptionLabel, permissionUnansweredLine, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, placeAbsentLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, noSuchPlaceRefusal, placeAbsentLine, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
-import { machineExecStream, type MachineExecOptions } from "./machine-exec.js";
+import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
@@ -628,17 +629,12 @@ export interface SessionHandle {
   view(): SessionView;
   interrupt(): Promise<void>;
   steer?(prompt: string): Promise<"accepted" | "not-running">;
-  /** Answers a permission prompt this turn raised, by the prompt's id, one of its options and who is answering: a
-   * person picking in the chat, or the runtime's own wait running out on a thread nobody came to. Absent on a
-   * harness that raises none. */
-  answer?(askId: string, opts: { optionId: string; by: PermissionAnswerer }): Promise<SessionAnswerResult["outcome"]>;
+  /** Answers a permission prompt this turn raised, by the prompt's id and one of its options. Only a person answers
+   * one: the prompt stands for as long as the turn does. Absent on a harness that raises none. */
+  answer?(askId: string, opts: { optionId: string }): Promise<SessionAnswerResult["outcome"]>;
   /** Moves this running turn to another access mode; absent on a harness that takes none mid-turn. */
   setAccess?(mode: string): Promise<"set" | "refused" | "gone">;
 }
-
-/** Who answered a permission prompt, the one fact the outcome and the line the agent reads both come from. */
-export type PermissionAnswerer = "person" | "wait";
-
 
 /** Which backend a place name resolves to. One row today, the provider this host is wired with; a row per joined
  * computer comes with the place link. The runtime reads only this interface, so nothing above it compares a place
@@ -715,8 +711,9 @@ export interface LocalWiring {
    * the machine directly cannot land in two different folders. */
   backend: MachineBackend & { readonly folder: string };
   /** The launch factory for a turn on this computer, under the limits the registry hands every turn (the turn's own
-   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. */
-  execStream: (opts?: MachineExecOptions) => ExecStreamFactory;
+   * by default, none for the exec verb), so a local turn is cut the way a cloud turn is. `waiting` rides beside them
+   * and is not one: it says the run is stopped on a question only a person can answer, which holds the idle clock. */
+  execStream: (opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
   home: (agentId: string) => string;
   /** The person's own home: where this computer's daemon browses from and keeps its roots file, and what a path
    * under it is shortened against. */
@@ -807,9 +804,6 @@ export interface RuntimeOptions {
   idle?: { defaultWindowMs?: number };
   /** Drives the idle window and the transcript debounce; tests inject one they advance by hand. */
   clock?: Clock;
-  /** How long a permission prompt relayed into the chat waits for an answer before the runtime denies it in the
-   * person's place; PERMISSION_WAIT_MS when unset (tests shrink it). */
-  permissionWaitMs?: number;
   /** How long a seal waits for a killed machine to read gone (tests shrink it). */
   killConfirm?: KillConfirm;
   /** How long a seal waits between snapshot attempts the provider refused (tests shrink it). */
@@ -1304,11 +1298,13 @@ export interface Runtime {
     get(name?: string): Promise<SealedImageView>;
     /** The vault bytes and the record, for the host to seal and write; refused when the record holds no vault. */
     vault(name?: string): Promise<{ image: SealedImage; tar: Buffer }>;
-    /** Prepares a builder at `place` from `recipe` (the host composed it with every login skipped), lands the
-     * record's vault on it and seals; the copy is recorded under that place at the record's hash. Refused when the
-     * place already holds a copy of this record, when the record has no small recipe to build from, and, without
-     * `force`, when it holds no vault. Progress rides golden.stage frames carrying `place`. */
-    build(o: { place: string; name?: string; recipe: GoldenRecipe; force?: boolean; signal?: AbortSignal }): Promise<SealedImageCopy>;
+    /** Prepares a builder at `place` from the recipe the host composes off the record (every login set to skip),
+     * lands the record's vault on it and seals; the copy is recorded under that place at the record's hash. The
+     * recipe is asked for only once every refusal has passed, so the host composes nothing for a build that cannot
+     * run. A place already holding a copy of this record is answered with that copy and builds nothing. Refused
+     * when the place is the wired one, when it builds no copy at all, when the record has no small recipe to build
+     * from, and, without `force`, when it holds no vault. Progress rides golden.stage frames carrying `place`. */
+    build(o: { place: string; name?: string; recipe: (image: SealedImage) => GoldenRecipe | Promise<GoldenRecipe>; force?: boolean; signal?: AbortSignal }): Promise<SealedImageBuilt>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
    * caller's origin may not drive, as workspaces.list does. */
@@ -1671,7 +1667,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * its kind: everything else a fork meets is the same either way, since the two are the same interface. */
     backend: (record: WorkspaceRecord) => MachineBackend;
     /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
-    execStream: (entry: LiveWorkspace, opts?: MachineExecOptions) => ExecStreamFactory;
+    execStream: (entry: LiveWorkspace, opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
     /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
      * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since on
      * a computer somebody owns the folder sits under the home that computer answered with. */
@@ -1889,7 +1885,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (at === undefined) throw new Error(placeForksNowhereLine(placeDoorOf().nameOf(record.place)));
         return at;
       },
-      execStream: (entry, o) => machineExecStream(entry.machine, o),
+      execStream: (entry, o, waiting) => machineExecStream(entry.machine, o, waiting),
       folder: () => undefined,
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
@@ -1920,7 +1916,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ? undefined
         : {
             backend: () => local.backend,
-            execStream: (_entry, o) => local.execStream(o),
+            execStream: (_entry, o, waiting) => local.execStream(o, waiting),
             folder: () => local.backend.folder,
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
@@ -1948,7 +1944,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The run's script, log and exit code live in wsp's own folder under the machine's home, not a folder
             // every login on it shares: on the person's own machine another account's /tmp folder is theirs, and a
             // turn that cannot write in it would launch nothing.
-            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: sshDaemonPaths(sshHomeDir(entry)).runDir }),
+            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { ...o, runDir: sshDaemonPaths(sshHomeDir(entry)).runDir }, waiting),
             // A turn lands where the person's own login lands. wsp makes no folder on a machine it only reaches, so
             // there is none of its own to start in, and a thread that wants another says so in its own cwd.
             folder: () => undefined,
@@ -2012,7 +2008,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             backend: () => placeBackend,
             // The run's script, log and exit code live in wsp's own folder under the place's home, not a folder
             // every login on it shares: on the person's own computer another account's temporary folder is theirs.
-            execStream: (entry, o) => machineExecStream(entry.machine, { ...o, runDir: placeDaemonPaths(placeHomeDir(entry)).runDir }),
+            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { ...o, runDir: placeDaemonPaths(placeHomeDir(entry)).runDir }, waiting),
             // A turn starts in wsp's own work folder under their home, the same rule this computer's own workspace
             // reads: a turn that started in the home itself committed inside the person's own repo once.
             folder: record => {
@@ -2059,7 +2055,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (lifecycle === undefined) throw new Error(`${entry.record.kind} machines declare no lifecycle`);
     return lifecycle;
   };
-  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o);
+  const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting): ExecStreamFactory => moduleOf(entry.record.kind).execStream(entry, o, waiting);
   /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else the
    * project named, else the project a thread last landed in on this workspace, else its only project, else the
    * kind's own folder, where a kind that names none leaves the shell in the machine's home. Both roads that launch a
@@ -2238,7 +2234,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const goneConfirmMs = opts.goneConfirmMs ?? GONE_CONFIRM_MS;
   const lateReadMs = opts.wake?.lateReadMs ?? WAKE_LATE_READ_MS;
   const clock = opts.clock ?? realClock;
-  const permissionWaitMs = opts.permissionWaitMs ?? PERMISSION_WAIT_MS;
   /** What the provider says the machine is, bounded by its own read; undefined where the read could not be had. */
   const readsState = (machine: Machine): Promise<MachineState | undefined> =>
     until(machine.state(), clock.now() + providerReadMs, `state of ${machine.id}`, clock).catch(() => undefined);
@@ -4725,8 +4720,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. `turnEnv` is
    * what only a turn's own launch carries, laid over the machine's login environment: every kind answers with that
    * environment through its one module, so a variable put on here reaches a launch on every kind of machine and is
-   * written nowhere else. */
-  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>): { harness: string; adapter: HarnessAdapter } => {
+   * written nowhere else. `waiting` is the turn's own reading of whether it is blocked on a person, which its
+   * stream's idle clock reads; absent on every road that is not a turn. It is handed beside the limits and never as
+   * one, so the turn road goes on handing the factory none and runs under the turn's own. */
+  const adapterFor = (entry: LiveWorkspace, named?: string, turnEnv?: Readonly<Record<string, string>>, waiting?: TurnWaiting): { harness: string; adapter: HarnessAdapter } => {
     const harness = named ?? DEFAULT_AGENT.id;
     const factory = adapters[harness];
     if (!factory) throw new Error(noAdapterLine(harness, Object.keys(adapters)));
@@ -4736,7 +4733,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       adapter: factory({
         machine: entry.machine,
         workspaceId: entry.record.id,
-        execStream: execFactoryFor(entry),
+        execStream: execFactoryFor(entry, undefined, waiting),
         home: id => kind.home(entry, id),
         env: { ...kind.env(entry, harness), ...turnEnv },
         signInRefusal: signInRefusalLine({ kind: entry.record.kind }),
@@ -4886,6 +4883,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const endedAt = Date.now();
     s.view.status = reply ?? "failed";
     s.view.endedAt = endedAt;
+    // A prompt the turn was stopped on goes with it, on this road as on the harness's own exit: nothing can answer
+    // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
+    delete s.view.asking;
     if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, { status: "failed", error: cutLine(endedAt) });
     record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
@@ -4930,6 +4930,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The folder this turn's images landed in on the machine, removed when the turn ends however it ends; absent on
      * a turn that landed none, whose harness read them inline or which carried none at all. */
     imagesDir?: string;
+    /** The box the turn's own exec stream reads to know it is blocked on a person: flipped while a permission prompt
+     * of this turn stands open, so the turn's idle clock does not run out under a question nobody has answered yet.
+     * Absent on a road that hands the adapter no stream of its own. */
+    waiting?: { on: boolean };
     open: (onEvent: (event: AdapterEvent) => void) => HarnessSession;
   }): SessionHandle => {
     const { entry, view, threadId, turnId, opening, outcome, notify, turnToken, scopeDeviceId } = t;
@@ -4961,12 +4965,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // and the persisted row read it whether the harness emits its result synchronously in start() (before the entry
     // exists) or later from its stream.
     const turnLive: TurnLive = t.turnLive ?? {};
-    /** The permission prompts of this turn nobody has answered, each with the end of the wait that denies it when
-     * nobody does. The harness is blocked on every one of them, so this map is what the thread is waiting on. */
-    const open = new Map<string, { ask: PermissionAsk; endWait: () => void }>();
+    /** The permission prompts of this turn nobody has answered. The harness is blocked on every one of them, so this
+     * map is what the thread is waiting on, and it holds for as long as the turn lives. */
+    const open = new Map<string, PermissionAsk>();
     /** The harness's own answer road, once the turn is open; a prompt raised inside start() is answered through it
-     * too, since its wait outlasts the synchronous run that raised it by minutes. */
+     * too, since it may stand for hours past the synchronous run that raised it. */
     let answerAsk: HarnessSession["answer"];
+
+    /** What the row says the thread is waiting on, and the turn's own reading of whether it is blocked on a person:
+     * the oldest prompt still open leads, since that is the one the harness stopped at. Written on every open and
+     * close, so the sidebar, the command line and the turn's idle clock read one fact. */
+    const readsOpen = (): void => {
+      const lead = [...open.values()][0];
+      if (lead === undefined) delete view.asking;
+      else view.asking = askingLine(lead);
+      if (t.waiting !== undefined) t.waiting.on = open.size > 0;
+      void persistSessions(workspaceId);
+    };
 
     /** The ask as clients read it: the harness's slug for a mode option carries no words of its own, and the words
      * for one live in the harness table beside the picker's, so they are lent here rather than in the adapter. */
@@ -4977,14 +4992,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       );
     };
 
-    /** The row that says a prompt is closed, and the end of its wait. Both the harness's own close and the runtime
-     * ending the turn under it come through here: a turn cut from this side never reaches the adapter's close, and a
-     * row left open would keep offering options that answer nothing. */
+    /** The row that says a prompt is closed. Both the harness's own close and the runtime ending the turn under it
+     * come through here: a turn cut from this side never reaches the adapter's close, and a row left open would keep
+     * offering options that answer nothing. */
     const closeAsk = (askId: string, outcome: PermissionOutcome, optionId?: string): void => {
-      const held = open.get(askId);
-      if (held === undefined) return;
-      held.endWait();
+      if (!open.has(askId)) return;
       open.delete(askId);
+      readsOpen();
       record({
         type: "session.permission.closed",
         workspaceId,
@@ -5002,18 +5016,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       for (const askId of [...open.keys()]) closeAsk(askId, "cancelled");
     };
 
-    /** The one place a pick becomes an outcome and the line the agent reads as the call's result: a person's deny
-     * says the person denied it, and the wait's says nobody answered, which is a different thing to an agent. */
-    const answer = async (askId: string, o: { optionId: string; by: PermissionAnswerer }): Promise<SessionAnswerResult["outcome"]> => {
+    /** The one place a pick becomes an outcome and the line the agent reads as the call's result. Only a person picks,
+     * so a deny is always the person's and says so. */
+    const answer = async (askId: string, o: { optionId: string }): Promise<SessionAnswerResult["outcome"]> => {
       const held = open.get(askId);
       if (held === undefined) return "gone";
-      const option = held.ask.options.find(candidate => candidate.id === o.optionId);
+      const option = held.options.find(candidate => candidate.id === o.optionId);
       if (option === undefined) return "no-option";
       // A turn that raised a prompt has the road that raised it; with none there is nothing left to answer it.
       if (answerAsk === undefined) return "gone";
-      const outcome: PermissionOutcome = o.by === "wait" ? "unanswered" : option.effect === "deny" ? "denied" : "allowed";
-      const denyMessage = o.by === "wait" ? permissionUnansweredLine(permissionWaitMs) : PERMISSION_DENIED_LINE;
-      return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage })) === "answered" ? "answered" : "gone";
+      const outcome: PermissionOutcome = option.effect === "deny" ? "denied" : "allowed";
+      return (await answerAsk(askId, { optionId: o.optionId, outcome, denyMessage: PERMISSION_DENIED_LINE })) === "answered" ? "answered" : "gone";
     };
 
     const forward = (event: AdapterEvent): void => {
@@ -5097,23 +5110,30 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
           // run is decided off the rows, and the result itself lives only in the transcript.
           if (event.result.refusal !== undefined) view.refusal = event.result.refusal;
+          // So does what the turn cost, added to what the row's earlier turns cost: a resumed turn takes over the
+          // row it resumes, and a listing has to answer what a thread spent without reading anyone's transcript.
+          if (event.result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + event.result.costUsd;
           void persistSessions(workspaceId);
           if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
           record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
           return;
         case "permission.ask": {
           const ask = { ...event.ask, options: named(event.ask) };
-          // The turn stops here until an option comes back, and nobody may be reading: the wait is the policy for
-          // an unattended thread, and it denies rather than let the wait reach the turn's idle cut.
-          const endWait = clock.schedule(() => void answer(ask.askId, { optionId: PERMISSION_DENY, by: "wait" }), permissionWaitMs, { unref: true });
-          open.set(ask.askId, { ask, endWait });
-          record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options], waitMs: permissionWaitMs });
+          // The turn stops here until an option comes back. Nothing else closes it: a person who was away for an
+          // hour comes back to the question they were asked, rather than to an agent that was denied and told to
+          // ask for a mode that does not ask.
+          open.set(ask.askId, ask);
+          readsOpen();
+          record({ type: "session.permission", workspaceId, sessionId, turnId, threadId, ...ask, options: [...ask.options] });
           return;
         }
         case "permission.close":
           closeAsk(event.askId, event.outcome, event.optionId);
           return;
         case "session.end":
+          // A prompt the harness left open goes with its process: nothing can answer it now, and a row left open
+          // would leave the thread reading as waiting on a person forever.
+          closeOpenAsks();
           // The process exited: the turn is over now, so the row takes the reply's status here (synchronously,
           // before the event is recorded, so a waiter woken by it reads the settled row, not the running one).
           if (turnLive.reply !== undefined) view.status = turnLive.reply;
@@ -5158,6 +5178,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (resumed !== undefined) {
       view.startedBy = resumed.startedBy ?? view.startedBy;
       if (resumed.prompt !== undefined) view.prompt = resumed.prompt;
+      // What the row cost is every turn that ran on it, so the earlier turns' figure carries into the row this one
+      // takes over; a listing reads the row, not the transcript.
+      if (resumed.costUsd !== undefined) view.costUsd = resumed.costUsd;
     }
 
     /** A pick made while this turn runs, taken by the harness: the row carries the mode the turn is now at, so the
@@ -5262,8 +5285,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return "cannot";
     };
     let adapter: HarnessAdapter;
+    // As on the start road: the re-opened stream reads this while the turn it attached to is stopped on a question.
+    const waiting = { on: false };
     try {
-      adapter = adapterFor(entry, view.harness).adapter;
+      adapter = adapterFor(entry, view.harness, undefined, () => waiting.on).adapter;
     } catch (e: unknown) {
       return cannot(e instanceof Error ? e.message : String(e));
     }
@@ -5304,6 +5329,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         ...(s.scopeDeviceId !== undefined ? { scopeDeviceId: s.scopeDeviceId } : {}),
         ...(s.turnLive !== undefined ? { turnLive: s.turnLive } : {}),
         outcome: "started",
+        waiting,
         opening: { prompt: view.prompt ?? "" },
         open: forward => {
           sink = forward;
@@ -5378,11 +5404,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The one refusal left that comes after the mint, since the launch environment is what it is given: a harness
       // this host has no adapter for hands the token back rather than leaving it standing until a restart.
       let built: { harness: string; adapter: HarnessAdapter };
+      // Flipped while a permission prompt of this turn stands open: the stream the adapter is about to launch reads
+      // it, and the row the turn opens writes it, so a turn stopped on a question is not read as a quiet one.
+      const waiting = { on: false };
       try {
-        built = adapterFor(entry, o.harness, {
-          [TURN_TOKEN_ENV]: turnToken,
-          ...(scoped !== undefined && reach !== undefined ? { [HOST_URL_ENV]: reach.url, [HOST_TOKEN_ENV]: scoped.deviceToken } : {}),
-        });
+        built = adapterFor(
+          entry,
+          o.harness,
+          {
+            [TURN_TOKEN_ENV]: turnToken,
+            ...(scoped !== undefined && reach !== undefined ? { [HOST_URL_ENV]: reach.url, [HOST_TOKEN_ENV]: scoped.deviceToken } : {}),
+          },
+          () => waiting.on,
+        );
       } catch (e) {
         dropScope();
         throw e;
@@ -5529,6 +5563,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           opening: { prompt: o.prompt, ...(o.requestId !== undefined ? { requestId: o.requestId } : {}), ...(afterCut ? { afterCut } : {}), ...(title !== undefined ? { title } : {}), ...(records.length > 0 ? { attachments: records } : {}) },
           ...(imagesDir !== undefined ? { imagesDir } : {}),
           ...(resume !== undefined ? { resume } : {}),
+          waiting,
           open: onEvent =>
             adapter.start({
               prompt: o.prompt,
@@ -5635,7 +5670,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       if (s.handle?.answer === undefined) return { outcome: s.handle === undefined ? "gone" : "unsupported" };
-      return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId, by: "person" }) };
+      return { outcome: await s.handle.answer(o.askId, { optionId: o.optionId }) };
     },
 
     async access(sessionId, permissionMode, origin) {
@@ -5820,7 +5855,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The backend a place name resolves to, or the refusal naming the places this host has. */
   const backendAt = (place: string): MachineBackend => {
     const at = places.backend(place);
-    if (at === undefined) throw Object.assign(new Error(`this host has no place named ${place}; it has ${places.list().join(", ")}`), { kind: "missing" });
+    if (at === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(place, places.list())), { kind: "missing" });
     return at;
   };
 
@@ -6530,6 +6565,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const name = o.name ?? "default";
       const at = backendAt(o.place);
       if (o.place === places.wired) throw conflict(`${o.place} is the place this host forks on, so its copy is what wsp init builds; name another place`);
+      if (!buildsImages(at.capabilities)) throw conflict(placeBuildsNoImageLine(o.place));
       const record = await recordOf(name);
       if (record === undefined) throw conflict(`this host owns no image named ${name} yet; wsp init seals one`);
       if (record.recipe === undefined) throw conflict(`${name} v${record.version} was sealed before the image record kept the recipe it was built from, so no other place can build it; cut the next version`);
@@ -6537,13 +6573,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         throw conflict(`${name} v${record.version} holds no sign-ins, so a copy at ${o.place} would ask for every one of them again; cut the next version to hold them, or build it anyway with force`);
       }
       const held = goldenHead(await copyOf(o.place, name));
-      // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in the other.
+      // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in
+      // the other. A place already standing on the record is answered with what it holds: the road that builds a
+      // copy on first use asks this of every place a fork lands on, and a second ask must cost nothing.
       if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) {
-        throw conflict(`${o.place} already holds ${name} v${held.version} built from this image; nothing to build`);
+        const standing = (await copiesOf(name)).find(c => c.place === o.place);
+        if (standing === undefined) throw new Error(`${o.place} holds ${name} v${held.version} and no copy of it was recorded there`);
+        return { copy: standing, built: false };
       }
       const tar = record.vault === undefined ? undefined : await store.getBlob(IMAGE_VAULTS, vaultKey(name, record.version));
       if (record.vault !== undefined && tar === undefined) throw conflict(`the vault of ${name} v${record.version} is not on this computer any more; cut the next version to take it again`);
-      const view = await golden.prepare({ name, place: o.place, recipe: o.recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
+      const recipe = await o.recipe(record);
+      const view = await golden.prepare({ name, place: o.place, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
       const entry = builders.get(view.id);
       if (entry === undefined) throw new Error(`the builder ${view.id} prepared at ${o.place} left no record here; nothing was sealed`);
       const stage = stageOf(name, o.place);
@@ -6563,7 +6604,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const sealed = await sealEntry(entry, false, record.logins);
       const copy = (await copiesOf(name)).find(c => c.place === o.place);
       if (copy === undefined) throw new Error(`${o.place} sealed ${name} v${sealed.version.version} and no copy of it was recorded there`);
-      return copy;
+      return { copy, built: true };
     },
   };
 

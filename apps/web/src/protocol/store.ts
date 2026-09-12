@@ -3,13 +3,17 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadFromHash, threadKeyOf, workspaceFromHash, workspaceStateOf, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
+import { readAddress, writeAddress } from "./address.js";
 import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
+import { placeName, placeNamed } from "../settings/places.js";
+import { imageBuildFrame } from "../shell/creationLog.js";
+import { requestNewThread } from "../shell/shellRequests.js";
 import { useSignInStore } from "../shell/signInStore.js";
 
 export interface CostTick {
@@ -18,9 +22,10 @@ export interface CostTick {
   at: string;
 }
 
-/** One line of a create's stage log, stamped with the wall clock when it arrived here. */
+/** One line of a create's stage log, stamped with the wall clock when it arrived here. A line the image build put
+ * there carries `image` rather than one of the create's own stages: the two streams share the log. */
 export interface CreationLine {
-  readonly stage: WorkspaceCreateStage;
+  readonly stage: WorkspaceCreateStage | "image";
   readonly message: string;
   readonly at: string;
   readonly elapsedMs: number;
@@ -32,10 +37,18 @@ export interface Creation {
   /** What select() takes for it; stable from the click through the runtime's first stage event. */
   readonly key: string;
   readonly name: string;
+  /** When this row was made here, in wall-clock ms. A line the create's own stages carry their elapsed on needs
+   * nothing from it; a line this app stamps itself (the image build's) measures from here, since the build runs
+   * before the runtime's own clock on this create starts. */
+  readonly askedAt: number;
   /** The snapshot the create forks, when it is not the golden's head: a project golden's. */
   readonly golden?: string;
   /** The size the person picked; absent, the golden's. */
   readonly size?: WorkspaceSize;
+  /** The computer or provider the person picked in Where, by the word the create was asked with; absent, wherever
+   * a fork last landed. The image build's own frames name their place, so this is what says which are this
+   * create's. */
+  readonly where?: string;
   /** The id the runtime minted, known from its first stage event. */
   readonly workspaceId: string | null;
   readonly lines: ReadonlyArray<CreationLine>;
@@ -97,8 +110,12 @@ interface State {
   addComputerOpen: boolean;
   /** A workspace id, or a creation's key while that create runs. */
   selectedId: string | null;
-  /** A thread of the selected workspace the person picked in the sidebar; null shows the workspace's latest thread. */
+  /** The thread of the selected workspace the centre is on, which the page's address names too; null until a pick
+   * or the centre's own view has settled on one, where the workspace's latest thread shows. */
   selectedThreadId: string | null;
+  /** Whether the centre is on the screen the selected workspace's next thread is written on: it has no thread of its
+   * own yet, and its address says so, so a reload opens it again rather than the thread it was opened from. */
+  freshThread: boolean;
   creations: Creation[];
   sessions: Record<string, SessionView[]>;
   ready: boolean;
@@ -113,8 +130,16 @@ interface State {
   noteGap(): void;
   /** Mirrors the client's status; live with an api bound pulls list and statuses again so a reconnect converges. */
   setConn(conn: ConnStatus): void;
-  /** Also leaves the settings page: every road to a workspace lands on its thread. */
+  /** Also leaves the settings page: every road to a workspace lands on its thread. The pick goes into the page's
+   * address, which is where the next load reads it back from. */
   select(id: string | null, threadId?: string | null): void;
+  /** Opens the screen the workspace's next thread is written on, with an address of its own, and asks the chat for
+   * that workspace to clear itself: the palette, the shortcut, the row's action and the files pane take this road. */
+  newThread(workspaceId: string): void;
+  /** What the centre settled on with nothing picked: the thread its own view holds, whether it found it in the
+   * transcript or this turn opened it. The address records it, so a reload comes back to it and a thread an agent
+   * opens next cannot take the centre. Ignored once anything else is selected. */
+  readingThread(workspaceId: string, threadId: string): void;
   openSettings(): void;
   closeSettings(): void;
   toggleSettings(): void;
@@ -123,7 +148,7 @@ interface State {
   /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
    * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
    * create was refused. */
-  createWorkspace(name: string, golden?: string, size?: WorkspaceSize): Promise<string | null>;
+  createWorkspace(name: string, golden?: string, size?: WorkspaceSize, on?: string): Promise<string | null>;
   /** Makes this computer the host's local workspace and selects it, or selects the one it already is: there is one
    * per host, so a second pick is a selection, not a create. Null when the road is not there or the host refused,
    * whose own sentence lands as the toast. */
@@ -189,18 +214,28 @@ const NO_LINES: CreationLine[] = [];
 
 /** The workspace the page's address opens on, when the list still has it: wsp init writes it after its first fork.
  * An id that is gone falls through to the first row, as an address with no workspace in it does. */
-function addressed(workspaces: readonly WorkspaceView[]): string | undefined {
-  const id = typeof window === "undefined" ? undefined : workspaceFromHash(window.location.hash);
-  return id !== undefined && workspaces.some(w => w.id === id) ? id : undefined;
+function addressed(address: AppAddress | undefined, workspaces: readonly WorkspaceView[]): string | undefined {
+  return address !== undefined && workspaces.some(w => w.id === address.workspaceId) ? address.workspaceId : undefined;
 }
 
-/** The thread the page's address names, when the workspace the page opens on has a session of that thread; a thread
- * the list does not carry opens the workspace alone, and says so. */
-function addressedThread(workspaceId: string | null, rows: readonly SessionView[]): { threadId: string | null; toast?: string } {
-  const found = typeof window === "undefined" ? undefined : threadFromHash(window.location.hash);
-  if (found === undefined || found.workspaceId !== workspaceId) return { threadId: null };
-  if (rows.some(r => r.workspaceId === workspaceId && r.threadId === found.threadId)) return { threadId: found.threadId };
-  return { threadId: null, toast: noSuchThreadLine(found.threadId) };
+/** What the centre opens on after a refresh, the address being the one record of it: the thread it names while the
+ * rows still carry it, else the pick standing, which every road wrote the address with. A thread the rows do not
+ * carry opens the workspace and says so. The screen a next thread is written on keeps its own address and no thread. */
+function openThreadOf(
+  address: AppAddress | undefined,
+  workspaceId: string | null,
+  pinned: string | null,
+  rows: readonly SessionView[],
+): { threadId: string | null; fresh: boolean; toast?: string } {
+  const own = address?.workspaceId === workspaceId ? address : undefined;
+  if (own?.fresh === true) return { threadId: null, fresh: true };
+  if (own?.threadId === undefined) return { threadId: pinned, fresh: false };
+  if (rows.some(r => r.workspaceId === workspaceId && r.threadId === own.threadId)) return { threadId: own.threadId, fresh: false };
+  // A session list is best-effort: the one a refused call leaves behind carries no rows at all, and reading that as
+  // the thread being gone would move the person off the pick they are holding and write the loss into the address.
+  // Only a list that answered can say a thread is not there, which is what a pick nobody is holding meets.
+  if (pinned === own.threadId) return { threadId: pinned, fresh: false };
+  return { threadId: null, fresh: false, toast: noSuchThreadLine() };
 }
 
 /** The workspace the person had open last, when the list still has it. */
@@ -231,10 +266,12 @@ export const useStore = create<State>((set, get) => {
   };
   /** The row leaves with its workspace in place of it; the selection follows. */
   const finishCreation = (key: string, workspaceId: string): void => {
+    const opened = get().selectedId === key;
     set(s => ({
       creations: s.creations.filter(c => c.key !== key),
-      selectedId: s.selectedId === key ? workspaceId : s.selectedId,
+      selectedId: opened ? workspaceId : s.selectedId,
     }));
+    if (opened) writeAddress({ workspaceId });
   };
   /** Whether a fork of the golden head is held back, having said so in the toast: the refusal is spoken before a
    * creation row exists, so a person who asks too early reads where the image is rather than a row that only failed.
@@ -246,11 +283,11 @@ export const useStore = create<State>((set, get) => {
     set({ toast: refusal.line, toastAction: { for: refusal.line, word: refusal.word, run: () => get().openSetup() } });
     return true;
   };
-  const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize): Promise<string | null> => {
+  const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize, on?: string): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
     try {
-      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name, size) : api.createWorkspace(golden, name, size));
+      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name, size, on) : api.createWorkspace(golden, name, size, on));
       if (notice !== undefined) set({ toast: notice });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
@@ -358,6 +395,7 @@ export const useStore = create<State>((set, get) => {
     addComputerOpen: false,
     selectedId: null,
     selectedThreadId: null,
+    freshThread: false,
     creations: [],
     sessions: {},
     ready: false,
@@ -388,7 +426,21 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (conn === "live" && api) pull(api);
     },
-    select(id, threadId = null) { set({ selectedId: id, selectedThreadId: threadId, settingsOpen: false }); },
+    select(id, threadId = null) {
+      set({ selectedId: id, selectedThreadId: threadId, freshThread: false, settingsOpen: false });
+      writeAddress(id === null || get().creations.some(c => c.key === id) ? null : { workspaceId: id, ...(threadId === null ? {} : { threadId }) });
+    },
+    newThread(workspaceId) {
+      set({ selectedId: workspaceId, selectedThreadId: null, freshThread: true, settingsOpen: false });
+      writeAddress({ workspaceId, fresh: true });
+      requestNewThread({ workspaceId });
+    },
+    readingThread(workspaceId, threadId) {
+      const s = get();
+      if (s.selectedId !== workspaceId || s.selectedThreadId !== null) return;
+      set({ selectedThreadId: threadId, freshThread: false });
+      writeAddress({ workspaceId, threadId });
+    },
     openSettings() { set({ settingsOpen: true }); },
     closeSettings() { set({ settingsOpen: false, addComputerOpen: false }); },
     toggleSettings() { set(s => ({ settingsOpen: !s.settingsOpen, addComputerOpen: s.settingsOpen ? false : s.addComputerOpen })); },
@@ -407,11 +459,15 @@ export const useStore = create<State>((set, get) => {
         if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
       }
     },
-    async createWorkspace(name, golden, size) {
+    async createWorkspace(name, golden, size, on) {
       if (!get().api || holdCreate(golden)) return null;
       const key = `creating:${++creationSeq}`;
-      set(s => ({ creations: [...s.creations, { key, name, ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), workspaceId: null, lines: NO_LINES, failed: null }], selectedId: key, selectedThreadId: null }));
-      return runCreation(key, name, golden, size);
+      set(s => ({
+        creations: [...s.creations, { key, name, askedAt: Date.now(), ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), ...(on !== undefined ? { where: on } : {}), workspaceId: null, lines: NO_LINES, failed: null }],
+        selectedId: key,
+        selectedThreadId: null,
+      }));
+      return runCreation(key, name, golden, size, on);
     },
     async createLocalWorkspace() {
       const api = get().api;
@@ -438,7 +494,7 @@ export const useStore = create<State>((set, get) => {
       const creation = get().creations.find(c => c.key === key);
       if (!creation || holdCreate(creation.golden)) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
-      await runCreation(key, creation.name, creation.golden, creation.size);
+      await runCreation(key, creation.name, creation.golden, creation.size, creation.where);
     },
     dismissCreation(key) {
       set(s => ({
@@ -450,12 +506,18 @@ export const useStore = create<State>((set, get) => {
       const api = get().api;
       if (!api) return;
       const [workspaces, rows] = await Promise.all([api.listWorkspaces(), api.listSessions().catch(() => NO_SESSIONS)]);
-      set(s => {
-        const sessions = groupSessions(rows);
-        const selectedId = s.selectedId ?? addressed(workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions });
-        const thread = s.selectedId === null ? addressedThread(selectedId, rows) : { threadId: s.selectedThreadId };
-        return { workspaces, sessions, ready: true, selectedId, selectedThreadId: thread.threadId, ...(thread.toast !== undefined ? { toast: thread.toast } : {}) };
-      });
+      const s = get();
+      const sessions = groupSessions(rows);
+      // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
+      // store from nothing, and what the person is reading is recorded there rather than here.
+      const address = readAddress();
+      const selectedId = s.selectedId ?? addressed(address, workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions });
+      const open = openThreadOf(address, selectedId, s.selectedThreadId, rows);
+      set({ workspaces, sessions, ready: true, selectedId, selectedThreadId: open.threadId, freshThread: open.fresh, ...(open.toast !== undefined ? { toast: open.toast } : {}) });
+      if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
+      // The chat for the workspace clears itself when it takes this, whether it is mounted yet or not.
+      if (open.fresh && !s.freshThread) requestNewThread({ workspaceId: selectedId });
+      writeAddress({ workspaceId: selectedId, ...(open.threadId === null ? {} : { threadId: open.threadId }), ...(open.fresh ? { fresh: true } : {}) });
     },
     async reloadSessions(workspaceId) {
       const api = get().api;
@@ -634,6 +696,24 @@ export const useStore = create<State>((set, get) => {
           set(s => ({ forwards: s.forwards.filter(f => !(f.workspaceId === e.workspaceId && f.port === e.port)) }));
           useSignInStore.getState().portClosed(e.workspaceId, e.port);
           return;
+        case "golden.stage": {
+          // The image being built where this create is going: one log, so the build's own stages read as the first
+          // lines of the create that is waiting on them. A frame naming no place is the image's own build, which
+          // the init screens own; one naming a place nobody here is waiting on is another road's.
+          const word = e.place;
+          if (word === undefined) return;
+          set(s => {
+            // Both words name the same row: the create was asked with the row's id and the build's frames carry
+            // the word the backend table keys it by, so the row itself is what matches the two.
+            const at = s.places.find(p => placeNamed(p, word));
+            const own = s.creations.find(c => c.failed === null && c.where !== undefined && (c.where === word || (at !== undefined && placeNamed(at, c.where))));
+            const line = own === undefined ? undefined : imageBuildFrame(e, at === undefined ? word : placeName(at));
+            if (own === undefined || line === undefined) return {};
+            const logged: CreationLine = { stage: "image", at: new Date().toISOString(), elapsedMs: Date.now() - own.askedAt, ...line };
+            return { creations: s.creations.map(c => (c === own ? { ...c, lines: [...c.lines, logged] } : c)) };
+          });
+          return;
+        }
         case "workspace.creating": {
           const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
           set(s => {
@@ -643,7 +723,7 @@ export const useStore = create<State>((set, get) => {
             const own = s.creations.find(c => c.workspaceId === e.workspaceId) ?? s.creations.find(c => c.workspaceId === null && c.name === e.name && c.failed === null);
             const failed = e.stage === "failed" ? { title: "Could not create the workspace", detail: e.message } : null;
             if (own === undefined) {
-              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, workspaceId: e.workspaceId, lines: [line], failed }] };
+              return { creations: [...s.creations, { key: `creating:${e.workspaceId}`, name: e.name, askedAt: Date.now() - e.elapsedMs, workspaceId: e.workspaceId, lines: [line], failed }] };
             }
             return { creations: s.creations.map(c => (c === own ? { ...c, workspaceId: e.workspaceId, lines: [...c.lines, line], failed: c.failed ?? failed } : c)) };
           });
@@ -698,6 +778,12 @@ export const useStore = create<State>((set, get) => {
           return;
         case "session.end":
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
+          void get().reloadSessions(e.workspaceId);
+          return;
+        case "session.permission":
+        case "session.permission.closed":
+          // The row the sidebar reads carries what the thread is waiting on, so a prompt opening or closing is a row
+          // that changed: every workspace's rows are read here, not only the open thread's.
           void get().reloadSessions(e.workspaceId);
           return;
         case "session.notify":
@@ -819,14 +905,13 @@ export const catalogsIn = (s: Catalogs, workspaceId: string | null): HarnessCata
   (workspaceId !== null ? s.harnessesByWorkspace[workspaceId] : undefined) ?? hostWide(s.harnesses);
 export const catalogIn = (s: Catalogs, workspaceId: string | null, harness: string): HarnessCatalog | null =>
   catalogsIn(s, workspaceId).find(c => c.harness === harness) ?? null;
-/** The thread the centre shows for a workspace: the one picked in the sidebar, else the workspace's latest; null with no threads yet. */
+/** The thread the centre shows for a workspace, which is the one the address names: none while the centre is on a
+ * next thread's screen or on a view that has not settled on a thread yet, so a header can never name one thread
+ * while the body shows another. */
 export function useOpenThread(workspaceId: string | null): ThreadView | null {
   const sessions = useStore(s => (workspaceId !== null ? s.sessions[workspaceId] : undefined) ?? NO_SESSIONS);
   const threadId = useSelectedThreadId();
-  return useMemo(() => {
-    const threads = foldThreads(sessions);
-    return (threadId !== null ? threads.find(t => t.threadId === threadId) : threads.at(-1)) ?? null;
-  }, [sessions, threadId]);
+  return useMemo(() => (threadId === null ? null : foldThreads(sessions).find(t => t.threadId === threadId) ?? null), [sessions, threadId]);
 }
 /** The workspace's most recent session row, running or not; null before its first session this runtime remembers. */
 export function useLatestSession(id: string | null): SessionView | null {

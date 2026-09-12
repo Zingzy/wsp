@@ -21,13 +21,15 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use tokio_tungstenite::WebSocketStream;
 use wsp_frames::{numbers, words, DaemonAuthRequest, DaemonEvent, Empty, Reply};
 
-use crate::ops::{self, Conn};
-use crate::{auth, Ctx, Outbound};
+use crate::ops::{self, Conn, Road};
+use crate::{auth, Ctx, Outbound, Outgoing};
 
 /// The most one message may be; node's ws holds the same ceiling, and the pre-auth cap sits far under it.
 const MESSAGE_MAX_BYTES: usize = 100 * 1024 * 1024;
 /// How long a refused peer gets to answer the close frame before the stream is dropped.
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
+/// A socket with no quiet cut: the sleep it never reaches.
+const FOREVER: Duration = Duration::from_secs(60 * 60 * 24 * 365);
 
 /// Bytes read since the handshake and whether they crossed the cap, shared by the stream that counts inside its
 /// read and the task that acts on the trip.
@@ -131,45 +133,98 @@ pub(crate) async fn serve(tcp: TcpStream, ctx: Arc<Ctx>) {
         return refuse(ws, words::AUTH_TOKEN_REFUSED, &pre).await;
     }
     pre.disarm();
-    let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: Some(numbers::DAEMON_VERSION) };
-    if ws.feed(text(&Reply::new(Some(auth.id), Empty {}))).await.is_err() || ws.send(text(&hello)).await.is_err() {
+    if ws.send(text(&Reply::new(Some(auth.id), Empty {}))).await.is_err() {
         return;
     }
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    let (tx, rx) = mpsc::unbounded_channel();
+    let conn = Arc::new(Conn::new(auth.port, Outbound(tx), Road::Inbound));
+    serve_authed(ws, &ctx, conn, rx, None).await;
+}
+
+/// How a served socket ended: the peer went, the link carried nothing for the quiet span, or a leave was answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Ended {
+    Peer,
+    Quiet,
+    Leave,
+}
+
+/// The one loop every authed socket runs, inbound or the link a place opened: the hello first, then each frame
+/// answered on its own task, as the node daemon answers them, so a heartbeat is not held behind an exec that runs
+/// for a minute. Replies and events share one channel, so what a handler sends stays in order. `quiet` is the
+/// link's cut: a socket that carries no frame for that long ends here and the caller redials.
+pub(crate) async fn serve_authed<S>(
+    mut ws: WebSocketStream<S>,
+    ctx: &Arc<Ctx>,
+    conn: Arc<Conn>,
+    mut rx: mpsc::UnboundedReceiver<Outgoing>,
+    quiet: Option<Duration>,
+) -> Ended
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
     let key = ctx.next_key();
-    let conn = Arc::new(Conn::new(auth.port, Outbound(tx)));
-    if auth.port.is_none() {
+    if conn.scope.is_none() {
         ctx.add_authed(key, conn.out.clone());
     }
-    // Each frame is answered on its own task, as the node daemon answers them: a heartbeat is not held behind an
-    // exec that runs for a minute. Replies and events share one channel, so what a handler sends stays in order.
-    loop {
-        tokio::select! {
-            incoming = ws.next() => {
-                let raw = match incoming {
-                    Some(Ok(Message::Text(t))) => t.to_string(),
-                    Some(Ok(Message::Binary(b))) => String::from_utf8_lossy(&b).into_owned(),
-                    Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break,
-                    Some(Ok(_)) => continue,
-                };
-                let (conn, ctx) = (Arc::clone(&conn), Arc::clone(&ctx));
-                tokio::spawn(async move {
-                    let reply = ops::handle(&conn, &ctx, &raw).await;
-                    conn.out.send_text(&reply);
-                });
-            }
-            outgoing = rx.recv() => {
-                let Some(text) = outgoing else { break };
-                if ws.send(Message::text(text)).await.is_err() {
-                    break;
+    let hello = DaemonEvent::DaemonHello { root: ctx.root.clone(), version: Some(numbers::DAEMON_VERSION) };
+    let mut ended = Ended::Peer;
+    if ws.send(text(&hello)).await.is_ok() {
+        let idle = tokio::time::sleep(quiet.unwrap_or(FOREVER));
+        tokio::pin!(idle);
+        ended = loop {
+            tokio::select! {
+                incoming = ws.next() => {
+                    let raw = match incoming {
+                        Some(Ok(Message::Text(t))) => t.to_string(),
+                        Some(Ok(Message::Binary(b))) => String::from_utf8_lossy(&b).into_owned(),
+                        Some(Ok(Message::Close(_))) | Some(Err(_)) | None => break Ended::Peer,
+                        Some(Ok(_)) => continue,
+                    };
+                    if let Some(span) = quiet {
+                        idle.as_mut().reset(Instant::now() + span);
+                    }
+                    let (conn, ctx) = (Arc::clone(&conn), Arc::clone(ctx));
+                    tokio::spawn(async move {
+                        let reply = ops::handle(&conn, &ctx, &raw).await;
+                        conn.out.send(reply);
+                    });
                 }
+                outgoing = rx.recv() => {
+                    match outgoing {
+                        None => break Ended::Peer,
+                        Some(Outgoing::Text(t)) => {
+                            if ws.send(Message::text(t)).await.is_err() {
+                                break Ended::Peer;
+                            }
+                        }
+                        // The leave's reply goes out whole before the daemon stops: the host reads what was swept.
+                        Some(Outgoing::Leave(t)) => {
+                            let _ = ws.send(Message::text(t)).await;
+                            let _ = ws.flush().await;
+                            break Ended::Leave;
+                        }
+                    }
+                }
+                _ = &mut idle, if quiet.is_some() => break Ended::Quiet,
             }
-        }
+        };
     }
-    // The client is gone; the watchers keep running. Only this socket's subscriptions and tunnels die with it.
+    // The client is gone; the ptys and the watchers keep running. Only this socket's subscriptions and tunnels die
+    // with it.
     ctx.remove_authed(key);
     conn.close();
-    let _ = ws.close(None).await;
+    let reason = match ended {
+        Ended::Peer => None,
+        Ended::Quiet => Some(words::LINK_CLOSE_QUIET),
+        Ended::Leave => Some(words::LINK_CLOSE_STOPPING),
+    };
+    let frame = reason.map(|reason| CloseFrame { code: CloseCode::Normal, reason: reason.into() });
+    let _ = timeout(CLOSE_WAIT, ws.close(frame)).await;
+    if ended == Ended::Leave {
+        ctx.stop.notify_one();
+    }
+    ended
 }
 
 /// Closes 4401 with one sentence, then waits for the peer's close as node's ws does. A peer cut for streaming past

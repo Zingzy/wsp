@@ -220,6 +220,44 @@ const permOptions = [
   { id: "deny", label: "Deny", effect: "deny" as const },
   { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode" as const, mode: "acceptEdits" },
 ];
+/** A page about two kilobytes long, the size the persona's prompt pasted into the chat before this row folded it. */
+const LANDING_PAGE = [
+  "<!DOCTYPE html>",
+  '<html lang="en">',
+  "  <head>",
+  '    <meta charset="utf-8" />',
+  '    <meta name="viewport" content="width=device-width, initial-scale=1" />',
+  "    <title>Health</title>",
+  "    <style>",
+  "      body { font: 16px/1.5 system-ui, sans-serif; margin: 0; padding: 3rem 1.5rem; color: #18181b; }",
+  "      main { max-width: 38rem; margin: 0 auto; }",
+  "      h1 { font-size: 2rem; margin: 0 0 1rem; }",
+  "      p { margin: 0 0 1rem; }",
+  "      code { font-family: ui-monospace, monospace; background: #f4f4f5; padding: 0.1rem 0.3rem; }",
+  "    </style>",
+  "  </head>",
+  "  <body>",
+  "    <main>",
+  "      <h1>The api is up</h1>",
+  "      <p>",
+  "        This page is served by the health route. If you can read it, the process started, the port was free",
+  "        and the router matched. Nothing on it is clever, and that is on purpose.",
+  "      </p>",
+  "      <p>",
+  '        The route answers <code>GET /health</code> with <code>{ "ok": true }</code> and this page with the same',
+  "        words a person can read. One of the two is for a machine and the other is for whoever is paged at",
+  "        three in the morning.",
+  "      </p>",
+  "      <p>",
+  "        There is no script tag here and no stylesheet to fetch, so a browser that draws nothing is telling you",
+  "        about the network rather than about the page.",
+  "      </p>",
+  "    </main>",
+  "  </body>",
+  "</html>",
+  "",
+].join("\n");
+
 const prompting: SessionEvent[] = [
   { type: "session.start", ...perm, prompt: "Add a health route and run the tests." },
   { type: "session.delta", ...perm, kind: "text", text: "I will add the route, then run the suite." },
@@ -232,7 +270,6 @@ const prompting: SessionEvent[] = [
     input: JSON.stringify({ file_path: "/Users/zingzy/api/src/health.ts", content: "export const health = () => ({ ok: true });\n" }),
     detail: "health.ts",
     options: permOptions,
-    waitMs: 300_000,
   },
   { type: "session.permission.closed", ...perm, askId: "ask_done", outcome: "allowed", optionId: "allow" },
   {
@@ -241,10 +278,31 @@ const prompting: SessionEvent[] = [
     askId: "ask_open",
     toolName: "Bash",
     toolUseId: "toolu_2",
-    input: JSON.stringify({ command: "pnpm exec vitest run packages/api/test/health.test.ts", description: "Run the health route's test" }),
+    input: JSON.stringify({ command: "pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/api/test/health.test.ts packages/api/test/routes.test.ts", description: "Run the health route's test" }),
     detail: "pnpm exec vitest run",
     options: permOptions,
-    waitMs: 300_000,
+  },
+  // A page of the size a person really meets, so the rule that an opened file leaves the buttons on the screen can
+  // be measured rather than asserted.
+  {
+    type: "session.permission",
+    ...perm,
+    askId: "ask_file",
+    toolName: "Write",
+    toolUseId: "toolu_4",
+    input: JSON.stringify({ file_path: "/Users/zingzy/api/public/index.html", content: LANDING_PAGE }),
+    detail: "index.html",
+    options: permOptions,
+  },
+  // One token longer than any row is wide, so the rule that a command is never broken inside a token can be measured.
+  {
+    type: "session.permission",
+    ...perm,
+    askId: "ask_long",
+    toolName: "Bash",
+    toolUseId: "toolu_3",
+    input: JSON.stringify({ command: `curl -fsSL https://registry.example.com/artifacts/${"a1b2c3d4e5".repeat(15)}/health.tar.gz` }),
+    options: permOptions,
   },
 ];
 

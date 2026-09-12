@@ -13,14 +13,15 @@ import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type Platform, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, checkProviderKey, describeAge, keyCheckLine, type BackendPricing } from "@wsp/engine";
 import type { GoldenStageEvent, GoldenStep, Recipe, RecipeCustomRow, RecipeHistory, ToolPin, WorkspaceView } from "@wsp/protocol";
-import { PrepareStoppedError, type GoldenBuilderView, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
+import { PrepareStoppedError, type GoldenBuilderView, type GoldenImport, type GoldenRecipe, type GoldenStage, type Runtime } from "@wsp/runtime";
 import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, log, outro } from "@clack/prompts";
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
-import { importFor, importResultPath, keychainLogins, readSecrets, statOf, type SecretReader } from "./init-import.js";
+import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
+import { planGoldenRecipe, planImport, type BuildContext } from "./image-recipe.js";
 import {
   RUNG_TITLE,
   answeredRows,
@@ -33,20 +34,18 @@ import {
   loadRecipe,
   lockRefused,
   loginShown,
+  manifestFor,
   recipeChanges,
   recipePath,
   recipeWithAnswers,
   pinsOf,
   withPins,
   withOutsideRows,
-  withSavedPins,
-  readSavedManifest,
   catalogIdOf,
   saveRecipe,
   saveSmallRecipe,
   smallRecipePath,
   tickLoginTools,
-  withCatalogAgents,
   withTicksOf,
   withoutAgentTools,
 } from "./init-recipe.js";
@@ -806,13 +805,6 @@ export interface Reading {
   source: string;
 }
 
-/** The manifest a run reads the recipe against: the catalog's bare rows joined to this computer's, the pins the last
- * build saved carried, the recipe applied. The screens as data and the run itself read it here, so a tick lands on
- * the same rows wherever it was made. */
-export function manifestFor(reading: Reading, recipe: Recipe, statePath: string): Manifest {
-  return applyRecipe(withCatalogAgents(withSavedPins(reading.manifest, readSavedManifest(recipePath(statePath)))), recipe);
-}
-
 export type ReadOptions = Pick<InitOptions, "importFolder" | "recipeFile" | "collect" | "brew" | "recipe" | "statePath" | "home" | "scan" | "platform">;
 
 /** Reads this computer for a run, saying each step on the output; `interactive` says a person will see the Also
@@ -891,10 +883,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
   // sees that rather than guessing. Nothing read, nothing to say.
   if (sessionsRead > 0) io.output.write(`${dim(S_BAR)}  ${dim(`Read ${plural(sessionsRead, "session")} in ${fmtDuration(Date.now() - startedHistories)}`)}\n`);
   // A row the pack would refuse whole is locked here with the pack's own sentence, judged on the same disk the pack reads.
-  manifest = lockRefused(manifest, rel => {
-    const st = statOf(join(opts.home, rel));
-    return st === undefined || st.kind === "dangling" ? undefined : st.kind === "dir";
-  });
+  manifest = lockRefused(manifest, refusedIsDir(opts.home));
   // What else this computer could put on the image; only its own screen uses it, so nothing runs when it is not shown.
   let scanned: readonly ScanRow[] = [];
   if (opts.scan !== undefined && interactive && opts.recipeFile === undefined) {
@@ -1009,8 +998,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const { ticks, choices } = answers;
   const offered: Manifest = { entries: manifest.entries.filter(e => loginShown(e, manifest, ticks)) };
 
-  const bringing = (): ManifestEntry[] => answeredRows(manifest, ticks, choices).filter(e => e.bring);
-  let bring = bringing();
   // Filled by the Keychain reads below, after the earlier-builder check; the pack reads it only at build time.
   const secrets = new Map<string, string>();
   const resultsPath = importResultPath(opts.statePath);
@@ -1023,33 +1010,37 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const pins = new Map<string, ToolPin>();
   const smallRecipeNow = (): Recipe => withPins(recipeWithAnswers(small.recipe, choices), pins);
   let landed: ImportResult | undefined;
-  const importOf = (rows: readonly ManifestEntry[]) =>
-    importFor(rows, {
-      home: opts.home,
-      secrets,
-      platform: opts.platform,
-      rows: answeredRows(manifest, ticks, choices),
-      brew,
-      custom: customRows(catalogRecipe),
-      onResult: r => {
-        writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
-        landed = r;
-        // The first install of a release tag pins its asset: the tag and the checksum the guest read go into both recipes for later installs of that tag.
-        const recorded = recordedPins(r.tools);
-        const stale = (e: ManifestEntry): boolean => recorded.has(e.id) && e.pin?.tag !== recorded.get(e.id)!.tag;
-        if (manifest.entries.some(stale)) {
-          for (const e of manifest.entries.filter(stale)) pins.set(catalogIdOf(e) ?? e.id, recorded.get(e.id)!);
-          manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: recorded.get(e.id)! } : e)) };
-          saveRecipe(path, manifest, ticks, choices);
-          saveSmallRecipe(small.path, smallRecipeNow());
-        }
-      },
-      // An attach reports no result, so the build's file stands; the retried write's outcome replaces the failure it recorded.
-      onContext: o => {
-        if (noteOutcomes(resultsPath, { context: o.context, contextFailure: o.contextFailure }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the machine context alone.`, out);
-      },
-    });
-  let imp = importOf(bring);
+  /** What every build road here is planned against: this computer, its Homebrew, the Keychain values read below and
+   * the keys the ticked agents run with. The rows change as the screens and the Keychain reads answer; the context
+   * around them does not. */
+  const context = (): BuildContext => ({ home: opts.home, platform: opts.platform, brew, secrets, agentKeys: opts.agentKeys });
+  const importHooks = () => ({
+    onResult: (r: ImportResult) => {
+      writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
+      landed = r;
+      // The first install of a release tag pins its asset: the tag and the checksum the guest read go into both recipes for later installs of that tag.
+      const recorded = recordedPins(r.tools);
+      const stale = (e: ManifestEntry): boolean => recorded.has(e.id) && e.pin?.tag !== recorded.get(e.id)!.tag;
+      if (manifest.entries.some(stale)) {
+        for (const e of manifest.entries.filter(stale)) pins.set(catalogIdOf(e) ?? e.id, recorded.get(e.id)!);
+        manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: recorded.get(e.id)! } : e)) };
+        saveRecipe(path, manifest, ticks, choices);
+        saveSmallRecipe(small.path, smallRecipeNow());
+      }
+    },
+    // An attach reports no result, so the build's file stands; the retried write's outcome replaces the failure it recorded.
+    onContext: (o: Pick<ImportResult, "context" | "contextFailure">) => {
+      if (noteOutcomes(resultsPath, { context: o.context, contextFailure: o.contextFailure }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the machine context alone.`, out);
+    },
+  });
+  /** The rows as the screens and the answers have left them, with what they install and the recipe they add up to.
+   * Read again whenever an answer moves the rows. */
+  const planNow = () => planGoldenRecipe({ ...context(), rows: answeredRows(manifest, ticks, choices), small: smallRecipeNow(), ...importHooks() });
+  /** One set of rows planned on its own: the delta road asks for a subset of the ticked rows. */
+  const importOf = (rows: readonly ManifestEntry[]): GoldenImport => planImport(rows, { ...context(), rows: answeredRows(manifest, ticks, choices), small: smallRecipeNow(), ...importHooks() });
+  let planned = planNow();
+  let bring = planned.bring;
+  let imp = planned.import;
   const uploadBytes = imp.files?.bytes ?? 0;
   card("Summary", summaryNote(offered, ticks, choices, widthOf(io.output), uploadBytes, brew, customRows(catalogRecipe), opts.pricing.builderDiskGb), io.output);
   saveRecipe(path, manifest, ticks, choices);
@@ -1084,7 +1075,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     cancel(`Nothing was booted. The rows and their sizes are listed in ${path}; shrink or remove the largest on this computer and run wsp init again. The recipe is kept.`, out);
     return { code: 1 };
   }
-  let recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp, source: smallRecipeNow() });
+  let recipe = planned.recipe;
   // Beside a host already serving this state file, everything from here is that host's: it owns the state, the
   // provider and the machines, so this run ends at the confirm and the build goes through its init job. The
   // question is asked here because the money is asked for here; the recipe the hand-off builds is the one saved
@@ -1202,9 +1193,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     saveSmallRecipe(small.path, smallRecipeNow());
     // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,
     // so the next wsp init on the same answers attaches to it.
-    bring = bringing();
-    imp = importOf(bring);
-    recipe = goldenRecipeFor(bring, opts.agentKeys, { import: imp, source: smallRecipeNow() });
+    planned = planNow();
+    bring = planned.bring;
+    imp = planned.import;
+    recipe = planned.recipe;
     await rt.close();
     rt = logged(opts.runtime({ ...recipe, onExec: runLog.exec }));
     earlier = await earlierBuilder();

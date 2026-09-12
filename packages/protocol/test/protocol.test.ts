@@ -75,6 +75,9 @@ import {
   ThreadView,
   ExecEvent,
   foldThreads,
+  threadState,
+  threadStateWord,
+  threadWordOf,
   threadRan,
   NOTIFY_ME,
   WorkspaceListing,
@@ -85,7 +88,7 @@ import {
 
 import * as wire from "../src/index.js";
 
-import { COPY_CURRENT, COPY_STALE, copyIsCurrent, copyStanding, sealedCopyLine, type SealedImage, type SealedImageCopy } from "../src/index.js";
+import { COPY_CURRENT, COPY_STALE, buildsImages, copyIsCurrent, copyStanding, sealedBuiltLine, sealedCopyLine, type SealedImage, type SealedImageCopy } from "../src/index.js";
 
 describe("a copy of the image beside the record", () => {
   const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
@@ -108,6 +111,22 @@ describe("a copy of the image beside the record", () => {
     // The line a person reads on the command line is the same rule spelled once: what it says is what the word says.
     expect(sealedCopyLine(sealed, copy({ hash: image.hash }))).toBe(`solari · v1 · ${COPY_CURRENT}`);
     expect(sealedCopyLine(image, copy({ hash: image.hash }))).toBe("solari · v1");
+  });
+
+  it("a build's own line is the copy's, and says when nothing was built", () => {
+    const sealed = { ...image, vault: { sha256: "c".repeat(64), bytes: 10, paths: 2, takenAt: "t" } };
+    const built = copy({ hash: image.hash });
+    expect(sealedBuiltLine(sealed, { copy: built, built: true })).toBe(sealedCopyLine(sealed, built));
+    expect(sealedBuiltLine(sealed, { copy: built, built: false })).toBe(`${sealedCopyLine(sealed, built)} · already built from this image; nothing was built`);
+  });
+
+  it("a place builds a copy only where it both forks a machine and copies its disk", () => {
+    const size = { cpu: 2, memMb: 4096, rateUsdPerHour: 0.1 };
+    expect(buildsImages({ sizes: [size], diskSnapshots: true })).toBe(true);
+    // A computer somebody joined: it runs their agents and forks nothing.
+    expect(buildsImages({ sizes: [], diskSnapshots: false })).toBe(false);
+    // A provider that forks but keeps no disk copy has nothing to seal a version out of.
+    expect(buildsImages({ sizes: [size], diskSnapshots: false })).toBe(false);
   });
 });
 
@@ -325,7 +344,6 @@ describe("a relayed permission prompt on the wire", () => {
       { id: "deny", label: "Deny", effect: "deny" },
       { id: "mode:acceptEdits", label: "Allow, then Accept edits", effect: "mode", mode: "acceptEdits" },
     ],
-    waitMs: 300_000,
   };
   const closed = { type: "session.permission.closed", workspaceId: "ws_1", sessionId: "s1", turnId: "turn_0001", threadId: "thread_0001", at: 1757320005000, askId: ask.askId, outcome: "allowed", optionId: "allow" };
 
@@ -345,7 +363,7 @@ describe("a relayed permission prompt on the wire", () => {
   });
 
   it("a prompt with nothing the harness did not name still parses, and one missing what it must name does not", () => {
-    const { detail: _d, toolUseId: _t, waitMs: _w, ...bare } = ask;
+    const { detail: _d, toolUseId: _t, ...bare } = ask;
     expect(SessionEvent.parse(bare)).toEqual(bare);
     for (const key of ["askId", "toolName", "input", "options"] as const) {
       expect(() => SessionEvent.parse({ ...ask, [key]: undefined })).toThrow();
@@ -1183,6 +1201,16 @@ describe("thread provenance", () => {
     for (const t of threads) expect(ThreadView.parse(t)).toEqual(t);
   });
 
+  it("foldThreads adds up what a thread's turns cost, and says nothing where no turn of it reported a figure", () => {
+    const [spent, said] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", claudeSessionId: "c1", costUsd: 0.75, startedAt: 1_000, endedAt: 2_000 },
+      { ...row, id: "s2", threadId: "thr_a", claudeSessionId: "c1", costUsd: 0.39, startedAt: 3_000, endedAt: 4_000 },
+      { ...row, id: "s3", threadId: "thr_b", claudeSessionId: "c2", startedAt: 5_000, endedAt: 6_000 },
+    ]);
+    expect(spent!.costUsd).toBeCloseTo(1.14, 10);
+    expect("costUsd" in said!).toBe(false);
+  });
+
   it("a thread reads as run once a turn of it did work: announcing a session is not enough, since both CLIs announce before they learn they have no sign-in", () => {
     const [worked, neverAnnounced, working, refused] = foldThreads([
       { ...row, id: "s1", threadId: "thr_a", status: "failed", claudeSessionId: "c1" },
@@ -1198,6 +1226,34 @@ describe("thread provenance", () => {
     ]);
     expect([worked!.ran, neverAnnounced!.ran, working!.ran, refused!.ran, signedInLater!.ran]).toEqual([true, false, true, false, true]);
     expect(threadRan([])).toBe(false);
+  });
+
+  it("foldThreads carries the latest turn's open prompt, so the word every row reads comes off the fold and nowhere else", () => {
+    const [asked, quiet] = foldThreads([
+      { ...row, id: "s1", threadId: "thr_a", status: "running", prompt: "write it", asking: "Permission for Write: out.txt" },
+      { ...row, id: "s2", threadId: "thr_b", status: "running", prompt: "nothing to ask" },
+    ]);
+    expect(asked!.asking).toBe("Permission for Write: out.txt");
+    expect(quiet).not.toHaveProperty("asking");
+    expect(ThreadView.parse(asked!).asking).toBe("Permission for Write: out.txt");
+    expect([threadState(asked!), threadState(quiet!)]).toEqual(["waiting", "running"]);
+    expect([threadWordOf(asked!), threadWordOf(quiet!)]).toEqual(["Needs you", "Working"]);
+    // A prompt raised on a turn that has since settled says nothing: the fold reads the latest turn alone.
+    const [settled] = foldThreads([
+      { ...row, id: "s3", threadId: "thr_c", status: "running", asking: "Permission for Bash: ls" },
+      { ...row, id: "s4", threadId: "thr_c", status: "completed" },
+    ]);
+    expect(settled).not.toHaveProperty("asking");
+    expect(threadWordOf(settled!)).toBe("Idle");
+  });
+
+  it("every thread state has one word, and a settled turn's is the word it always was", () => {
+    expect(threadStateWord("failed")).toBe("Ended");
+    expect(threadStateWord("interrupted")).toBe("Idle");
+    expect(threadStateWord("waiting")).toBe("Needs you");
+    // Only a running turn is ever waiting on a person: the runtime clears the prompt however the turn ends, on the
+    // harness's own exit and on the roads that cut it, so a settled row carrying one is a row nothing can answer.
+    expect(threadWordOf({ status: "running", asking: "Permission for Write: out.txt" })).toBe("Needs you");
   });
 
   it("foldThreads carries the latest turn's folder, so every director shows where the thread works; a row without one shows none", () => {

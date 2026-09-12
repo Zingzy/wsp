@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The door on a real socket: every auth and hello case the node daemon's suite pins, driven the way its clients
 //! drive it, with a WebSocket client for the frames and a raw TCP stream where the case is about wire bytes; then
-//! the ports, manifest, inbox, tunnel and open socket cases of the suite the same way.
+//! the exec, pty, ports, manifest, inbox, tunnel and open socket cases of the suite the same way.
 
 use std::io::Write;
 use std::net::SocketAddr;
@@ -166,7 +166,6 @@ fn unb64(text: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode(text).unwrap()
 }
 
-const WAIT: Duration = Duration::from_secs(5);
 // URLs as the tools build them (measurement 2026-09-03); state and challenge values are placeholders.
 const WRANGLER: &str = "https://dash.cloudflare.com/oauth2/auth?response_type=code&client_id=54d11594&redirect_uri=http%3A%2F%2Flocalhost%3A8976%2Foauth%2Fcallback&scope=account%3Aread&state=S&code_challenge=C&code_challenge_method=S256";
 const GH_DEVICE: &str = "https://github.com/login/device";
@@ -283,8 +282,26 @@ impl Client {
         false
     }
 
+    /// Reads until the pty text seen so far contains the marker, or the wait runs out.
+    async fn wait_text(&mut self, marker: &str, within: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + within;
+        while !self.pty_text().contains(marker) {
+            match tokio::time::timeout_at(deadline, self.ws.next()).await {
+                Ok(Some(Ok(Message::Text(t)))) => self.frames.push(serde_json::from_str(&t).unwrap()),
+                Ok(Some(Ok(_))) => continue,
+                _ => return false,
+            }
+        }
+        true
+    }
+
     fn events(&self, ty: &str) -> Vec<Value> {
         self.frames.iter().filter(|f| f["type"] == ty).cloned().collect()
+    }
+
+    /// The text every pty.data event carried, in order.
+    fn pty_text(&self) -> String {
+        self.events("pty.data").iter().map(|e| e["data"].as_str().unwrap_or("")).collect()
     }
 
     /// Every event this client saw is one the protocol parses: the zod half of the contract, on live traffic.
@@ -295,10 +312,23 @@ impl Client {
     }
 }
 
+const WAIT: Duration = Duration::from_secs(5);
+const MCP_REMOTE: &str = "https://mcp.linear.app/authorize?response_type=code&client_id=X&code_challenge=C&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A22227%2Foauth%2Fcallback&state=S&scope=read+write&resource=https%3A%2F%2Fmcp.linear.app%2Fmcp";
+
 async fn authed(d: &Running) -> Client {
     let (c, closed) = Client::connect(d.addr, TOKEN, None).await;
     assert_eq!(closed, None);
     c
+}
+
+/// A bash pty with no profile of its own, attached; the id it got.
+async fn bash_pty(c: &mut Client) -> String {
+    let created = c.request("pty.create", json!({ "cols": 80, "rows": 24, "shell": "bash" })).await;
+    assert_eq!(created["ok"], true, "{created}");
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    assert!(created["pid"].as_u64().unwrap() > 0);
+    assert_eq!(c.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    pty_id
 }
 
 /// A TCP stream past a hand-written upgrade, for the cases about bytes rather than frames.
@@ -565,12 +595,12 @@ async fn answers_a_json_value_that_is_not_an_object_as_an_unknown_op_as_the_node
 async fn refuses_an_op_the_protocol_names_but_this_daemon_lacks_by_name() {
     let d = start(None).await;
     let (mut c, _) = Client::connect(d.addr, TOKEN, None).await;
-    let r = c.request("pty.create", json!({ "shell": "bash" })).await;
-    assert_eq!(r, json!({ "id": 2, "ok": false, "code": "unsupported", "error": "pty.create is not served by this daemon yet" }));
+    let r = c.request("sys.watch", json!({})).await;
+    assert_eq!(r, json!({ "id": 2, "ok": false, "code": "unsupported", "error": "sys.watch is not served by this daemon yet" }));
     let r = c.request("machine.create", json!({})).await;
     assert_eq!(r, json!({ "id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
     let r = c.request("place.leave", json!({})).await;
-    assert_eq!(r, json!({ "id": 4, "ok": false, "code": "forbidden", "error": words::PLACE_LEAVE_ROAD_REFUSAL }));
+    assert_eq!(r, json!({ "id": 4, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD }));
 }
 
 #[tokio::test]
@@ -584,6 +614,232 @@ async fn refuses_to_start_without_a_token_to_check_against() {
     options.host = "127.0.0.1".to_owned();
     options.port = 0;
     assert_eq!(Daemon::bind(options).await.err().map(|e| e.to_string()), Some(words::NO_TOKEN_AT_START.to_owned()));
+}
+
+#[tokio::test]
+async fn exec_answers_a_command_on_an_authed_socket() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let res = c.request("exec", json!({ "cmd": "echo hello; pwd", "timeoutMs": 5000 })).await;
+    assert_eq!((res["ok"].as_bool(), res["exitCode"].as_i64(), res["truncated"].as_bool()), (Some(true), Some(0), Some(false)));
+    let stdout = res["stdout"].as_str().unwrap();
+    assert!(stdout.contains("hello"), "{stdout}");
+    // The daemon's root, not its working directory: a place's daemon is rooted at the person's home.
+    assert!(stdout.contains(d.root.path().to_str().unwrap()), "{stdout}");
+    assert_eq!(res["stderr"], "");
+}
+
+#[tokio::test]
+async fn exec_refuses_a_frame_whose_cmd_is_not_a_string_and_one_whose_timeout_is_not_a_positive_integer() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    assert_eq!(c.request("exec", json!({ "cmd": 3 })).await["ok"], false);
+    assert_eq!(c.request("exec", json!({ "cmd": "echo x", "timeoutMs": -1 })).await["ok"], false);
+    assert_eq!(c.request("exec", json!({ "cmd": "echo x", "stdin": 3 })).await["ok"], false);
+    // stdin is base64 bytes and the deadline is the request's own.
+    let res = c.request("exec", json!({ "cmd": "cat", "stdin": "aGVsbG8=", "timeoutMs": 5000 })).await;
+    assert_eq!(res["stdout"], "hello");
+    let late = c.request("exec", json!({ "cmd": "sleep 5; echo late", "timeoutMs": 200 })).await;
+    assert_eq!(late["exitCode"], numbers::EXEC_DEADLINE_EXIT);
+    assert_eq!(late["stdout"], "");
+}
+
+#[tokio::test]
+async fn serves_ptys_that_survive_a_client_disconnect_replaying_to_the_next_client() {
+    let d = start(None).await;
+    let mut c1 = authed(&d).await;
+    let pty_id = bash_pty(&mut c1).await;
+    assert_eq!(c1.request("pty.write", json!({ "ptyId": pty_id, "data": "echo WIRE-$((20+3))\n" })).await["ok"], true);
+    assert!(c1.wait_text("WIRE-23", WAIT).await, "{:?}", c1.pty_text());
+    c1.every_event_parses();
+    drop(c1);
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut c2 = authed(&d).await;
+    let listed = c2.request("pty.list", json!({})).await;
+    let entry = listed["ptys"].as_array().unwrap().iter().find(|p| p["id"] == pty_id).cloned().expect("the pty is still held");
+    assert_eq!((entry["exited"].as_bool(), entry["cols"].as_u64(), entry["rows"].as_u64()), (Some(false), Some(80), Some(24)));
+
+    assert_eq!(c2.request("pty.write", json!({ "ptyId": pty_id, "data": "echo SECOND-CLIENT\n" })).await["ok"], true);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(c2.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert!(c2.wait_text("SECOND-CLIENT", WAIT).await, "{:?}", c2.pty_text());
+    let seen = c2.pty_text();
+    assert!(seen.contains("WIRE-23"), "{seen:?}");
+    assert!(seen.contains("SECOND-CLIENT"), "{seen:?}");
+    assert_eq!(c2.request("nonsense.op", json!({})).await["ok"], false);
+    c2.every_event_parses();
+    assert_eq!(c2.request("pty.kill", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert!(c2.request("pty.list", json!({})).await["ptys"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn pty_exit_carries_the_shells_code_and_a_late_attach_hears_it_at_once() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let pty_id = bash_pty(&mut c).await;
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "exit 7\n" })).await["ok"], true);
+    assert!(c.wait_event("pty.exit", WAIT, |_| true).await, "the pty exits");
+    let exit = &c.events("pty.exit")[0];
+    assert_eq!((exit["ptyId"].as_str(), exit["exitCode"].as_i64()), (Some(pty_id.as_str()), Some(7)));
+    assert!(exit.get("signal").is_none(), "{exit}");
+    let listed = c.request("pty.list", json!({})).await;
+    assert_eq!(listed["ptys"].as_array().unwrap().iter().find(|p| p["id"] == pty_id).unwrap()["exited"], true);
+    // A late attach to the dead pty still replays what it printed and says it exited, before the reply.
+    let mut c2 = authed(&d).await;
+    assert_eq!(c2.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert_eq!(c2.events("pty.exit").len(), 1, "{:?}", c2.frames);
+    assert!(c2.pty_text().contains("exit 7"), "{:?}", c2.pty_text());
+    assert!(c2.events("pty.mode").is_empty());
+    c.every_event_parses();
+    c2.every_event_parses();
+}
+
+#[tokio::test]
+async fn a_printed_url_in_a_pty_names_the_callback_port_even_when_no_shim_ran() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let created = c.request("pty.create", json!({ "shell": "bash" })).await;
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    let line = format!("printf '%s\\n' 'Visit: {MCP_REMOTE}'\n");
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": line })).await["ok"], true);
+    assert!(c.wait_event("callback.port", WAIT, |_| true).await, "{:?}", c.frames);
+    c.listen(Duration::from_millis(300)).await;
+    assert_eq!(c.events("callback.port"), [json!({ "type": "callback.port", "port": 22227 })]);
+    assert!(c.events("browser.open").is_empty());
+    c.every_event_parses();
+}
+
+#[tokio::test]
+async fn a_local_url_printed_in_a_pty_becomes_one_localhost_url_with_its_port_on_every_authed_socket() {
+    let d = start(None).await;
+    let mut a = authed(&d).await;
+    let mut b = authed(&d).await;
+    let created = a.request("pty.create", json!({ "shell": "bash" })).await;
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    // The typed command echoes with the URL in it and the output prints it again: one event.
+    let line = "printf '%s\\n' 'Serving HTTP on 0.0.0.0 port 8123 (http://0.0.0.0:8123/) ...'\n";
+    assert_eq!(a.request("pty.write", json!({ "ptyId": pty_id, "data": line })).await["ok"], true);
+    assert!(a.wait_event("localhost.url", WAIT, |_| true).await, "{:?}", a.frames);
+    assert!(b.wait_event("localhost.url", WAIT, |_| true).await, "{:?}", b.frames);
+    a.listen(Duration::from_millis(300)).await;
+    b.listen(Duration::from_millis(300)).await;
+    assert_eq!(a.events("localhost.url"), [json!({ "type": "localhost.url", "port": 8123 })]);
+    assert_eq!(b.events("localhost.url"), [json!({ "type": "localhost.url", "port": 8123 })]);
+    assert!(a.events("callback.port").is_empty() && a.events("browser.open").is_empty());
+    a.every_event_parses();
+    b.every_event_parses();
+}
+
+#[tokio::test]
+async fn a_port_scoped_socket_hears_nothing_a_pty_prints() {
+    let d = start(None).await;
+    let mut a = authed(&d).await;
+    let (mut scoped, closed) = Client::connect(d.addr, TOKEN, Some(8123)).await;
+    assert_eq!(closed, None);
+    let created = a.request("pty.create", json!({ "shell": "bash" })).await;
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    let line = "printf '%s\\n' 'Local: http://localhost:5173/'\n";
+    assert_eq!(a.request("pty.write", json!({ "ptyId": pty_id, "data": line })).await["ok"], true);
+    assert!(a.wait_event("localhost.url", WAIT, |_| true).await);
+    scoped.listen(Duration::from_millis(300)).await;
+    assert!(scoped.events("localhost.url").is_empty(), "{:?}", scoped.frames);
+}
+
+#[tokio::test]
+async fn the_shell_it_spawns_is_a_login_shell_that_reads_the_profile_of_the_home_it_is_given() {
+    let d = start(None).await;
+    let home = tempfile::tempdir().unwrap();
+    for rc in [".profile", ".bash_profile", ".zprofile"] {
+        std::fs::write(home.path().join(rc), "echo WSP-LOGIN-PROFILE\n").unwrap();
+    }
+    let mut c = authed(&d).await;
+    let home_str = home.path().to_str().unwrap();
+    let env = json!({ "HOME": home_str, "ZDOTDIR": home_str });
+    let created = c.request("pty.create", json!({ "cols": 80, "rows": 24, "cwd": home_str, "env": env })).await;
+    assert_eq!(created["ok"], true, "{created}");
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    assert_eq!(c.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert!(c.wait_text("WSP-LOGIN-PROFILE", WAIT).await, "{:?}", c.pty_text());
+    // The pty starts where the request said, with the environment it named.
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "echo CWD=$PWD HOME=$HOME\n" })).await["ok"], true);
+    let want = format!("CWD={home_str} HOME={home_str}\r");
+    assert!(c.wait_text(&want, WAIT).await, "{:?}", c.pty_text());
+    c.every_event_parses();
+}
+
+#[tokio::test]
+async fn pty_mode_on_attach_reads_the_real_slave_and_a_resize_reaches_the_shell() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let pty_id = bash_pty(&mut c).await;
+    assert!(c.wait_event("pty.mode", WAIT, |e| e["foreground"] == "bash").await, "{:?}", c.frames);
+    assert_eq!(c.request("pty.resize", json!({ "ptyId": pty_id, "cols": 120, "rows": 40 })).await["ok"], true);
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "stty size\n" })).await["ok"], true);
+    assert!(c.wait_text("40 120", WAIT).await, "{:?}", c.pty_text());
+    let listed = c.request("pty.list", json!({})).await;
+    let entry = listed["ptys"].as_array().unwrap().iter().find(|p| p["id"] == pty_id).cloned().unwrap();
+    assert_eq!((entry["cols"].as_u64(), entry["rows"].as_u64()), (Some(120), Some(40)));
+    // At its prompt bash holds the slave in whichever mode readline left it; cat in the foreground is cooked, echo on.
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "cat\n" })).await["ok"], true);
+    assert!(c.wait_event("pty.mode", WAIT, |e| e["foreground"] == "cat").await, "{:?}", c.events("pty.mode"));
+    let mode = c.events("pty.mode").into_iter().find(|e| e["foreground"] == "cat").unwrap();
+    assert_eq!(mode, json!({ "type": "pty.mode", "ptyId": pty_id, "mode": "line", "echo": true, "foreground": "cat" }));
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "\x03" })).await["ok"], true);
+    assert!(c.wait_event("pty.mode", WAIT, |e| e["foreground"] == "bash").await, "{:?}", c.events("pty.mode"));
+    c.every_event_parses();
+}
+
+#[tokio::test]
+async fn a_heartbeat_is_not_held_behind_a_long_exec_on_the_same_socket() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    c.send_raw(json!({ "id": 100, "op": "exec", "cmd": "sleep 1", "timeoutMs": 5000 })).await;
+    c.send_raw(json!({ "id": 101, "op": "ping" })).await;
+    assert_eq!(c.read_until_reply(101).await, None);
+    assert!(c.frames.iter().all(|f| f["id"] != 100), "the ping was answered before the exec finished: {:?}", c.frames);
+    assert_eq!(c.read_until_reply(100).await, None);
+    assert_eq!(c.frames.last().unwrap()["exitCode"], 0);
+}
+
+#[tokio::test]
+async fn a_flood_through_a_pty_arrives_whole_and_the_exit_comes_after_its_last_byte() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let pty_id = bash_pty(&mut c).await;
+    // Two million bytes of yes: with ONLCR each y is three bytes on the wire, then a marker, then the exit.
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "yes | head -c 2000000; echo TAIL; exit 3\n" })).await["ok"], true);
+    assert!(c.wait_event("pty.exit", Duration::from_secs(30), |_| true).await, "the flood and the exit land within the wait");
+    let text = c.pty_text();
+    assert!(text.len() >= 3_000_000, "{} bytes reached the socket", text.len());
+    assert!(text.contains("TAIL"), "the marker after the flood reached the socket before the exit");
+    assert_eq!(c.events("pty.exit")[0]["exitCode"], 3);
+    let last = c.frames.last().unwrap();
+    assert_eq!(last["type"], "pty.exit", "the exit is the last frame, after every byte");
+    c.every_event_parses();
+}
+
+#[tokio::test]
+async fn a_cwd_that_is_not_a_directory_refuses_the_create_and_names_it() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let r = c.request("pty.create", json!({ "shell": "bash", "cwd": "/nonexistent/dir" })).await;
+    assert_eq!(r["ok"], false);
+    assert_eq!(r["error"], "cwd is not a directory: /nonexistent/dir");
+    assert!(c.request("pty.list", json!({})).await["ptys"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn starts_in_the_home_directory_not_wherever_the_daemon_runs() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let home = std::env::var("HOME").expect("the test process has a HOME");
+    let created = c.request("pty.create", json!({ "cols": 80, "rows": 24, "shell": "bash" })).await;
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    assert_eq!(c.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "echo CWD=$PWD\n" })).await["ok"], true);
+    let want = format!("CWD={home}\r");
+    assert!(c.wait_text(&want, WAIT).await, "{:?}", c.pty_text());
 }
 
 #[tokio::test]
@@ -787,7 +1043,7 @@ async fn a_shim_post_becomes_browser_open_on_every_authed_unscoped_socket_with_t
     assert!(a.wait_event("browser.open", WAIT, |_| true).await);
     assert!(b.wait_event("browser.open", WAIT, |_| true).await);
     let expected = json!({ "type": "browser.open", "url": WRANGLER, "port": 8976 });
-    assert_eq!(a.events("browser.open"), [expected.clone()]);
+    assert_eq!(a.events("browser.open"), std::slice::from_ref(&expected));
     assert_eq!(b.events("browser.open"), [expected]);
     // A port-scoped socket is there to tunnel one port and hears none of it.
     scoped.listen(Duration::from_millis(200)).await;

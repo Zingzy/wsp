@@ -200,6 +200,10 @@ const SCREEN_NAMES = SCREEN_COMMANDS.map(c => c.name);
 const ANNOUNCED = [...CHAT_HARNESS.slashCommands, ...SCREEN_NAMES, "my-skill"];
 const STREAM_WITH_SCREENS: SessionEvent[] = CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, harness: { ...CHAT_HARNESS, slashCommands: ANNOUNCED } } : e));
 const listed = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => el.getAttribute("data-composer-item-id")?.split(":").pop());
+/** The menu's headings and its rows in the order they are drawn; a command's own name may hold a colon, so the id is
+ * read past the two fields in front of it rather than split to the last one. */
+const groupLabels = () => [...document.querySelectorAll("[data-composer-command-drawer] [data-slot=command-group-label]")].map(el => el.textContent);
+const namesInMenu = () => [...document.querySelectorAll("[data-composer-item-id]")].map(el => (el.getAttribute("data-composer-item-id") ?? "").split(":").slice(2).join(":"));
 
 describe("composer slash menu", () => {
   it("promises no commands before a session announced any", async () => {
@@ -215,7 +219,6 @@ describe("composer slash menu", () => {
     await typeInto(editor, "/");
     await waitFor(() => expect(draft()).toBe("/"));
     expect(menuDrawer()).toBeNull();
-    expect(screen.queryByText("No matching command.")).toBeNull();
   });
 
   it("names the menu in the placeholder once a session announced commands, and a slash opens it on them", async () => {
@@ -226,7 +229,6 @@ describe("composer slash menu", () => {
     expect(editor.getAttribute("aria-placeholder")).toBe("Ask anything, or / for commands");
     await typeInto(editor, "/");
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
-    expect(screen.queryByText("No matching command.")).toBeNull();
   });
 
   it("takes the announcement as it lands, with no reload", async () => {
@@ -249,10 +251,12 @@ describe("composer slash menu", () => {
     await waitFor(() => expect(menuItem("compact")).not.toBeNull());
     expect(listed()).toEqual([...CHAT_HARNESS.slashCommands, "my-skill"]);
     for (const name of SCREEN_NAMES) expect(menuItem(name), name).toBeNull();
-    // Searching for one finds nothing rather than the screen command.
+    // Searching for one finds nothing rather than the screen command, and nothing is drawn: the slot says the name
+    // reached nothing, so a drawer under it would say the same in other words.
     await typeInto(editor, "log");
     await waitFor(() => expect(listed()).toEqual([]));
-    expect(screen.getByText("No matching command.")).toBeDefined();
+    expect(menuDrawer()).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("no command here is called /log");
   });
 
   it("lists the commands the session announced, filters as you type, arrows move the highlight, tab picks", async () => {
@@ -362,6 +366,87 @@ describe("composer slash menu", () => {
     await typeInto(editor, "/");
     await waitFor(() => expect(draft()).toBe("see /\n/"));
     expect(menuDrawer()).toBeNull();
+  });
+
+  it("groups what the session announced by the source the name itself gave, in the order announced, and filters inside the groups", async () => {
+    // A real init names a plugin's command <plugin>:<command> and announces everything else bare.
+    const announced = ["compact", "context", "code-review:code-review", "ralph-loop:help", "my-skill", "code-review:apply"];
+    const stream: SessionEvent[] = CHAT_STREAM.map(e => (e.type === "session.start" ? { ...e, harness: { ...CHAT_HARNESS, slashCommands: announced } } : e));
+    const { api } = fixtureApi([workspace], { [WS]: stream });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/");
+    await waitFor(() => expect(menuDrawer()).not.toBeNull());
+    expect(groupLabels()).toEqual(["Commands", "code-review", "ralph-loop"]);
+    // Each group in the order its source was first named, each command in the order the announcement gave it.
+    expect(namesInMenu()).toEqual(["compact", "context", "my-skill", "code-review:code-review", "code-review:apply", "ralph-loop:help"]);
+    // The keyboard walks the menu as it is drawn: the first row of the first group is the one that is highlighted.
+    expect(menuItem("compact")?.className).toContain("bg-accent!");
+
+    // Typing keeps the headings of whatever still matches and drops the rest. Inside a group the ranking decides,
+    // as it did before there were groups; the announcement's order is what an unfiltered menu is drawn in.
+    await typeInto(editor, "review");
+    await waitFor(() => expect(menuItem("compact")).toBeNull());
+    expect(groupLabels()).toEqual(["code-review"]);
+    expect(namesInMenu()).toEqual(["code-review:apply", "code-review:code-review"]);
+  });
+
+  it("holds a lone slash instead of sending it: the slot says why, the send button is held and wears the same words", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: CHAT_STREAM.slice() });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/");
+    await waitFor(() => expect(menuDrawer()).not.toBeNull());
+    const line = "a slash on its own is not a command";
+    expect(screen.getByRole("status").textContent).toBe(line);
+    const button = screen.getByRole("button", { name: line }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    // The menu dismissed, the slot holds the same line in the composer's own grammar and nothing else is drawn.
+    await press(editor, "Escape");
+    await waitFor(() => expect(menuDrawer()).toBeNull());
+    expectPlainLine(line);
+    await press(editor, "Enter");
+    await act(async () => { fireEvent.click(button); });
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("/");
+    expect(isEditable(editor)).toBe(true);
+  });
+
+  it("holds a slash and a name nothing announced, and lets the same name go once words follow it", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/heapdump");
+    const line = "no command here is called /heapdump";
+    await waitFor(() => expect(screen.queryByRole("status")?.textContent).toBe(line));
+    expectPlainLine(line);
+    expect((screen.getByRole("button", { name: line }) as HTMLButtonElement).disabled).toBe(true);
+    await press(editor, "Enter");
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("/heapdump");
+    // Words after the name are words that may be meant, so the hold lifts and Enter sends them.
+    await typeInto(editor, " of the daemon");
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("/heapdump of the daemon");
+  });
+
+  it("sends a slash and a name the session did announce", async () => {
+    const { api, started } = fixtureApi([workspace], { [WS]: STREAM_WITH_SCREENS });
+    await setup(api);
+    await screen.findByText(/Server is live at :3000\./);
+    const editor = composerEditor();
+    await typeInto(editor, "/compact");
+    await waitFor(() => expect(menuItem("compact")).not.toBeNull());
+    expect(screen.queryByRole("status")).toBeNull();
+    await press(editor, "Escape");
+    await press(editor, "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("/compact");
   });
 
   it("escape dismisses the menu, keeps the draft, and the menu returns when the query changes", async () => {
@@ -585,7 +670,8 @@ describe("a new thread while another thread of the workspace works", () => {
     await screen.findByText("On it.");
     expect(screen.queryByRole("status")).toBeNull();
     emit({ type: "session.done", ...a, result: { status: "completed", durationMs: 900, costUsd: 0.001 } });
-    expectPlainLine(stillWorkingLine("thr_a"));
+    // No title has landed for this thread yet, so the line names it as the person looking at it would.
+    expectPlainLine(stillWorkingLine());
     expect(screen.queryByRole("button", { name: "Send message" })).toBeNull();
     // A new thread asked for now owes that turn nothing.
     act(() => requestNewThread({ workspaceId: WS }));

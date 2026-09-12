@@ -12,10 +12,11 @@ import {
   THIS_COMPUTER,
   PERMISSION_DENIED_LINE,
   accessFromNextMessage,
+  askingLine,
   permissionAskLine,
+  permissionPromptWords,
   permissionModeOptionLabel,
   permissionOutcomeLine,
-  permissionUnansweredLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -132,6 +133,8 @@ import {
   TURN_WALL_MS,
   turnCutLine,
   turnEndLine,
+  openedSpendPart,
+  turnSpendPart,
   turnSettledLine,
   turnSettledParts,
   refusedTurn,
@@ -528,6 +531,18 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
     expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
+  });
+
+  it("says what the threads a thread opened spent beside its own figure, and says what each figure counts, so neither reads as the other", () => {
+    expect(openedSpendPart(2.3)).toBe("$2.30 in threads it opened");
+    expect(turnSpendPart(1.14)).toBe("$1.14 this turn");
+    // One turn against whole threads: with both on the line each says its own scope.
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 2.3)).toEqual(["Worked for 1m 12s", "$1.14 this turn", "$2.30 in threads it opened"]);
+    // Nothing opened anything, so there is no second figure to weigh the first against and the cost stands bare.
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 })).toEqual(["Worked for 1m 12s", "$1.14"]);
+    expect(turnSettledParts({ durationMs: 72_000, costUsd: 1.14 }, 0)).toEqual(["Worked for 1m 12s", "$1.14"]);
+    // The line a stream with no footer prints never carries a second figure, so it is untouched.
+    expect(turnSettledLine({ status: "completed", durationMs: 72_000, costUsd: 1.14 })).toBe("completed · Worked for 1m 12s · $1.14");
   });
 });
 
@@ -985,12 +1000,13 @@ describe("a record the sweep restored, and a name a fork cannot take", () => {
 });
 
 describe("stillWorkingLine", () => {
-  it("names the thread by its first eight characters, says the reply is in but the agent is still working, and says where a message sent now goes", () => {
-    expect(stillWorkingLine("5ffc2c96-1111-4222-8333-444455556666")).toBe(
-      "thread 5ffc2c96 replied, still working; the message runs as its next turn once that process exits",
-    );
+  it("names the thread by its title, says the reply is in but the agent is still working, and says where a message sent now goes", () => {
+    expect(stillWorkingLine("Fix the port list")).toBe("Fix the port list replied, still working; the message runs as its next turn once that process exits");
+    // A caller with no title for the thread names it as the person looking at it would: an id names no thread.
+    expect(stillWorkingLine()).toBe("This thread replied, still working; the message runs as its next turn once that process exits");
+    expect(stillWorkingLine("  ")).toBe(stillWorkingLine());
     // Nothing in it tells the caller to wait or says the send was refused: the send is never refused.
-    expect(stillWorkingLine("5ffc2c96")).not.toMatch(/wait|refus/);
+    expect(stillWorkingLine()).not.toMatch(/wait|refus/);
   });
 });
 
@@ -1070,8 +1086,8 @@ describe("the nap's words when its vault was not stored", () => {
   });
 
   it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
-    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("nap kept the previous vault; the export was 761 MB, over the 200 MB cap");
-    expect(vaultKeptLine("fetch failed")).toBe("nap kept the previous vault; fetch failed");
+    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("the nap kept what was saved before it; the export was 761 MB, over the 200 MB cap");
+    expect(vaultKeptLine("fetch failed")).toBe("the nap kept what was saved before it; fetch failed");
   });
 
   it("vaultStaleLine is the one word every surface shows for a machine whose files are not backed up, short enough for the row, and nothing while the last nap stored a vault", () => {
@@ -1203,10 +1219,10 @@ describe("LINEAGE_MARKS", () => {
   it("names every outcome a missing tool can carry and every state a lineage row shows, each as one short lowercase word or two", () => {
     const outcomes: GoldenMissingTool["outcome"][] = ["skipped", "failed"];
     for (const o of outcomes) expect(LINEAGE_MARKS[o]).toBe(o);
-    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" });
+    expect(LINEAGE_MARKS).toEqual({ now: "now", head: "newest", fork: "this one", failed: "failed", skipped: "skipped", volatile: "snapshot only" });
     for (const word of Object.values(LINEAGE_MARKS)) {
       expect(word).toMatch(/^[a-z]+( [a-z]+)?$/);
-      expect(word.length).toBeLessThanOrEqual(9);
+      expect(word.length).toBeLessThanOrEqual(13);
     }
   });
 });
@@ -1224,12 +1240,12 @@ describe("template words", () => {
   });
 
   it("the doctor's line per version names the template it promoted and, when other templates already carry the name, how many", () => {
-    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("golden default v2: template tpl_0f1e promoted and recorded");
-    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
-    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("golden default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
-    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("golden default v1: template tpl_0f1e promoted and recorded");
-    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("golden default v1: no template recorded, its snapshot is gone at the provider");
-    expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; goldens stay as snapshots");
+    expect(templateRecordedLine("default", 2, "tpl_0f1e", 0)).toBe("image default v2: template tpl_0f1e promoted and recorded");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 1)).toBe("image default v1: template tpl_0f1e promoted and recorded; 1 other template carries its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", 2)).toBe("image default v1: template tpl_0f1e promoted and recorded; 2 other templates carry its name");
+    expect(templateRecordedLine("default", 1, "tpl_0f1e", undefined)).toBe("image default v1: template tpl_0f1e promoted and recorded");
+    expect(templateSkippedLine("default", 1, "its snapshot is gone at the provider")).toBe("image default v1: no template recorded, its snapshot is gone at the provider");
+    expect(NO_TEMPLATES_LINE).toBe("this backend has no templates; image versions stay as snapshots");
   });
 });
 
@@ -1276,10 +1292,10 @@ describe("builderStaysLine and the seal's and the update's last lines", () => {
     expect(SEAL_FAILED_BUILDER_GONE_LINE).toBe("Seal failed and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again; the recipe is kept.");
   });
 
-  it("the update's last lines say the golden stands and whether the provider still has the machine the new version ran on", () => {
-    expect(upgradeSealFailedStaysLine(1, "m1", 0.11)).toBe("Golden v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
-    expect(upgradeSealFailedGoneLine(1)).toBe("Golden v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
-    expect(upgradeSealFailedUnreadLine(1, "m1")).toBe("Golden v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+  it("the update's last lines say the image stands and whether the provider still has the machine the new version ran on", () => {
+    expect(upgradeSealFailedStaysLine(1, "m1", 0.11)).toBe("Image v1 is unchanged. Builder m1 is as it was, up at about $0.11/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.");
+    expect(upgradeSealFailedGoneLine(1)).toBe("Image v1 is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.");
+    expect(upgradeSealFailedUnreadLine(1, "m1")).toBe("Image v1 is unchanged. The provider could not be read about builder m1, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.");
     expect(SEAL_FAILED_LINE).toBe("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.");
   });
 });
@@ -1493,12 +1509,68 @@ describe("terminalConfigLines", () => {
 });
 
 describe("the words a relayed permission prompt shows", () => {
-  it("leads with the tool and what it is about, and drops the detail where the harness named none", () => {
-    expect(permissionAskLine("Write", "out.txt")).toBe("Permission for Write: out.txt");
-    expect(permissionAskLine("Bash")).toBe("Permission for Bash");
-    expect(permissionAskLine("Bash", "")).toBe("Permission for Bash");
+  it("words a file write by the file, the folder holding it and how much is going in", () => {
+    // The path and the file's own text are what a person cannot read at a glance; the name, the folder and the size are.
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "/Users/dev/wsp-work/index.html", content: "x".repeat(2_100) }))).toBe(
+      "Write index.html in wsp-work (2 KB)",
+    );
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "out.txt", content: "hi" }))).toBe("Write out.txt (2 B)");
+    // The lead is the whole of it: a write's own words carry no code part, since a file's name is not read character by character.
+    expect(permissionPromptWords("Write", JSON.stringify({ file_path: "/root/out.txt", content: "hi" })).code).toBeUndefined();
     // The options under it are the question, so the line never asks one.
-    expect(permissionAskLine("Write", "out.txt")).not.toContain("?");
+    expect(permissionAskLine("Write", JSON.stringify({ file_path: "/root/out.txt", content: "hi" }))).not.toContain("?");
+  });
+
+  it("words a command as the whole command, kept apart from the words so a client can draw it as code", () => {
+    // A command goes in whole, its later lines and its length alike: one cut anywhere is one nobody can judge.
+    const long = `cat > out.py <<'PY'\nprint(${"1 + ".repeat(60)}1)\nPY`;
+    expect(permissionAskLine("Bash", JSON.stringify({ command: long, description: "Write and run a sum" }))).toBe(`Run: ${long}`);
+    // The two parts are apart, so a face that blurs two hyphens into one dash never draws the command.
+    const gate = "pnpm exec vitest run --minWorkers=1 --maxWorkers=1";
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: gate }))).toMatchObject({ says: "Run:", code: gate, lead: `Run: ${gate}` });
+  });
+
+  it("words a tool a server lends as the server and the tool, and never the server's own paragraph", () => {
+    expect(permissionAskLine("mcp__wsp__workspaces", "{}", "wsp runs cloud machines called workspaces, forked in seconds")).toBe("Use the wsp tools: workspaces");
+    expect(permissionAskLine("mcp__wsp__thread_new", "{}")).toBe("Use the wsp tools: thread new");
+    expect(permissionPromptWords("mcp__wsp__workspaces", "{}", "wsp runs cloud machines").code).toBeUndefined();
+  });
+
+  it("words a skill as its own name, and never the description paragraph the harness sends", () => {
+    expect(permissionAskLine("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI for AI agents. Use when the user needs")).toBe(
+      "Run the skill agent-browser",
+    );
+  });
+
+  it("falls back to the harness's own phrase under the tool's name for a kind with no rule and for input it cannot read", () => {
+    expect(permissionAskLine("Read", JSON.stringify({ file_path: "/root/out.txt" }), "out.txt")).toBe("Permission for Read: out.txt");
+    expect(permissionAskLine("Read", "{}")).toBe("Permission for Read");
+    expect(permissionAskLine("Read", "{}", "")).toBe("Permission for Read");
+    // Input that is not an object yet, and a call whose input carries none of what its rule needs, fall back the same way.
+    expect(permissionAskLine("Bash", "{\"comm", "rm -rf build")).toBe("Permission for Bash: rm -rf build");
+    expect(permissionAskLine("Write", "{}", "out.txt")).toBe("Permission for Write: out.txt");
+  });
+
+  it("folds a file's body away and shows the rest of the input under the lead", () => {
+    const body = "line\n".repeat(400);
+    const write = permissionPromptWords("Write", JSON.stringify({ file_path: "/Users/dev/wsp-work/index.html", content: body }));
+    expect(write.lead).toBe("Write index.html in wsp-work (2 KB)");
+    // The file is behind the fold, whole, and nowhere else: the buttons stay in reach.
+    expect(write.body).toEqual({ label: "show the file", text: body });
+    expect(write.rest).toBe("");
+    // The lead already carries the command, and the harness's phrase for it is never the row's words.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "rm -rf build", description: "Clean the build" })).rest).toBe("");
+    expect(permissionPromptWords("Skill", JSON.stringify({ skill: "agent-browser" }), "Browser automation CLI").rest).toBe("");
+    // What the lead does not carry still shows, each field apart from the next: this is the row consent is given on.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls", timeout: 5_000 })).rest).toBe("timeout: 5000");
+    expect(permissionPromptWords("mcp__wsp__send", JSON.stringify({ threadId: "thr_1", message: "go" })).rest).toBe("threadId: thr_1 · message: go");
+    // A field a tool really calls description is the call's own, not the harness's paragraph, so it shows like any other.
+    expect(permissionPromptWords("mcp__linear__create_issue", JSON.stringify({ title: "Fix login", description: "The button does\n\nnothing on Safari." })).rest).toBe(
+      "title: Fix login · description: The button does nothing on Safari.",
+    );
+    // A tool that carries no file body folds nothing away, and input that is not an object is shown as it stands.
+    expect(permissionPromptWords("Bash", JSON.stringify({ command: "ls" })).body).toBeUndefined();
+    expect(permissionPromptWords("Bash", "not json").rest).toBe("not json");
   });
 
   it("says how a closed prompt closed, naming the option only where it says something the outcome does not", () => {
@@ -1517,12 +1589,18 @@ describe("the words a relayed permission prompt shows", () => {
     expect(permissionOutcomeLine("cancelled", mode)).toBe("Cancelled with the turn");
   });
 
-  it("tells the agent nobody answered rather than that a person refused, since the two are different facts", () => {
-    const waited = permissionUnansweredLine(5 * 60_000);
-    expect(waited).toContain("5m");
-    expect(waited).toContain("wsp denied it");
-    expect(waited).not.toContain("the person");
+  it("has one deny line, the person's own, and it points the agent at no other access mode", () => {
     expect(PERMISSION_DENIED_LINE).toBe("the person denied this in the chat");
+    for (const word of ["access", "bypass", "mode", "start the thread"]) expect(PERMISSION_DENIED_LINE).not.toContain(word);
+  });
+
+  it("what a thread says it is waiting on is the prompt row's own lead, worded in one place off the whole prompt", () => {
+    const ask = { toolName: "Write", input: '{"file_path":"/root/out.txt","content":"hi"}', detail: "out.txt" };
+    expect(askingLine(ask)).toBe(permissionAskLine(ask.toolName, ask.input, ask.detail));
+    // The whole prompt is in hand, so the lead reads the call's own fields and not only the phrase the harness named.
+    expect(askingLine(ask)).toContain("out.txt");
+    const bare = { toolName: "mcp__wsp__workspaces", input: "{}", detail: undefined };
+    expect(askingLine(bare)).toBe(permissionAskLine(bare.toolName, bare.input, bare.detail));
   });
 
   it("a mode option reads as an allow that also stops the asking, in the picker's own words for the mode", () => {

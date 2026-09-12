@@ -30,9 +30,11 @@ export interface WorkspaceKindWords {
   rowReadsMachine: boolean;
   /** What this kind calls one of its cpus in that size line: a provider's are virtual, a machine that exists has cores. */
   cpu: CpuWord;
-  /** What a row calls where a workspace of this kind runs, in the lowercase a row's mono reads it. Null where the
-   * kind holds no such word: a fork names the provider its own record carries, since this host may be wired to any
-   * of them, and every other kind falls back to the name wsp has for the machine itself. */
+  /** What a row calls where a workspace of this kind runs, in the lowercase a row's mono reads it. A fork's own
+   * record names the provider it runs at, since this host may be wired to any of them, so the kind's word is only
+   * what a row says when that record carries none (one written before the provider rode the wire): the kind
+   * itself, never the id a provider minted. Null where the kind holds neither, and the name wsp has for the
+   * machine stands, which on those kinds is a login or a name somebody gave it. */
   where: string | null;
   /** Whether wsp forks this machine, pauses it, wakes it, resizes it and pays for it by the hour, or it is a machine
    * that already exists and simply runs while the host does. The state word beside the name, the state dot, the
@@ -67,6 +69,10 @@ export interface WorkspaceKindWords {
    * machine it forked, leaves this computer alone, and on a machine somebody owns takes off what it put there and
    * leaves the machine standing. */
   onDelete: MachineOnDelete;
+  /** The one line under the Workspace panel's name in the picker: what that panel holds for a workspace of this
+   * kind. Only a kind wsp drives pays by the hour or has a version behind it, so a kind that takes none of that
+   * names what it does hold rather than verbs its panel never offers. */
+  panel: string;
 }
 
 /** What a delete does to a machine, in the two moods the two sentences need: the clause the confirmation asks
@@ -89,6 +95,14 @@ const SSH_SWEPT = "daemon, its unit and its login line come off the machine, whi
  * and ready for another workspace, and the one road that takes wsp off it is the remove that drops it. */
 const PLACE_KEPT = "computer stays joined to this wsp; wsp remove takes the agent off it";
 
+/** What the Workspace panel holds for a computer that already existed: no spend and no version behind it, so the
+ * panel is what the computer is running and how it is doing. */
+const OWN_COMPUTER_PANEL = "What the computer is running, its projects and how it is doing.";
+
+/** What a row calls a fork whose record names no provider: what it is, since the id the provider minted for the
+ * machine names nothing to the person reading the row. */
+const A_PROVIDER = "a provider";
+
 /** The two readings a pane waits on. Each is one module per kind: the cloud kind and a machine over ssh read
  * that machine's own /proc through the daemon on it, and this computer reads its own host. */
 export type KindReading = "metrics" | "processes";
@@ -102,10 +116,10 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: null, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` } },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` } },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` } },
-  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", where: JOINED_COMPUTER, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` } },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs." },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing." },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL },
+  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", where: JOINED_COMPUTER, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` }, panel: OWN_COMPUTER_PANEL },
 };
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
@@ -317,8 +331,9 @@ export function needsRebuild(input: WorkspaceStateInput): boolean {
 }
 
 /** The one sentence for a rebuild asked of a machine that still answers, so the row's disabled tooltip and the
- * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule. */
-export const NO_REBUILD_NEEDED = "Rebuild replaces a machine wsp cannot get back; this one answers";
+ * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule.
+ * Two halves like every other refusal here: what is so, then when the rebuild is there to take. */
+export const NO_REBUILD_NEEDED = "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering";
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
  * caller holds them; rebuild and delete are the roads out. */
@@ -340,7 +355,7 @@ export interface ImageMoveInput {
  * disk the move leaves behind is the project's. */
 export function imageMoveRefusal(name: string, state: WorkspaceState, image: ImageMoveInput): string | null {
   if (image.projectImage) return `${name} was forked from a project image, which a version move would throw away; make a new workspace on the newer version instead`;
-  if (!image.knownVersion) return `${name}'s image is not a version of any golden this host knows`;
+  if (!image.knownVersion) return `${name}'s image is not one of the versions this host knows; make a new workspace on the newest version instead`;
   if (state === "gone") return `${name}'s machine is gone; rebuild it to move it to a newer image`;
   if (state !== "running") return `${name} is ${workspaceWord(state).toLowerCase()}; wake it to move it to a newer image`;
   return null;

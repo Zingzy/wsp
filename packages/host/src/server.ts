@@ -5,8 +5,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
-import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type SealedImage, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenRecipe, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { reachAddresses } from "./pairing.js";
 import { publicHostname } from "./relay-link.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
@@ -57,6 +57,9 @@ export interface HostOptions {
   beyondThisComputer?: boolean;
   /** The init job on this computer, served to the app as the init.* ops and the init.job events; absent, they are refused. */
   init?: InitDoor;
+  /** How the recipe a copy of the image builds from is composed off the record; absent, a build at a place is
+   * refused, since the runtime writes no recipe of its own. */
+  copyRecipe?: (image: SealedImage) => Promise<GoldenRecipe>;
   /** Whether the door a computer you own dials is bound as this host starts. Open when a joined computer is on
    * record: it dials the port its place file names, and a laptop coming back must find that port there. */
   door?: "closed" | "open";
@@ -320,11 +323,14 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   };
 
   const handler = (here: boolean) => (req: IncomingMessage, res: ServerResponse) => {
+    const sendPage = (): void => {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(page(here));
+    };
     void (async () => {
       const path = new URL(req.url ?? "/", "http://localhost").pathname;
       if (req.method === "GET" && path === "/") {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-        res.end(page(here));
+        sendPage();
         return;
       }
       const who = path.startsWith("/api/") ? await callerOf(req, here) : {};
@@ -358,6 +364,14 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         return;
       }
       if (req.method === "GET" && sendAsset(res, webDir, path)) return;
+      // The app records what a person is reading in the address, and a person types and pastes addresses: a GET
+      // naming no route of this host and no file of the bundle is the app itself, which reads the address it opened
+      // on. A path carrying an extension or ending in a slash asked for a file that is not there and stays a miss,
+      // so a script that moved never answers as a page.
+      if (req.method === "GET" && !path.startsWith("/api/") && extname(path) === "" && !path.endsWith("/")) {
+        sendPage();
+        return;
+      }
       sendJson(res, 404, { error: `no route: ${req.method} ${path}` });
     })().catch((e: unknown) => {
       if (!res.headersSent) sendJson(res, 500, { error: e instanceof Error ? e.message : String(e) });
@@ -422,6 +436,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       projects: bundlerFor,
       landing: projectLander(homes),
       imageExport: imageExporter,
+      ...(opts.copyRecipe !== undefined ? { copyRecipe: opts.copyRecipe } : {}),
       folders: hostFolders(() => rt.workspaces.list()),
       terminalConfig: { read: scheme => readGhosttyConfig(nodeHost(), scheme) },
       ...(opts.init !== undefined ? { init: opts.init } : {}),

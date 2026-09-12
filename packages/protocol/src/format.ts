@@ -3,10 +3,11 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
+import { folderName, parentFolderName } from "./project-path.js";
 import { shellLine } from "./shell-quote.js";
 import type { ThreadMessage } from "./thread-read.js";
 const KIB = 1024;
@@ -288,12 +289,27 @@ export function waitTimedOutLine(threadIds: readonly string[], ms: number): stri
   return `${who} still running after ${fmtDuration(ms)}`;
 }
 
-/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, then
- * what it cost. The app's chat footer and the command line's last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }): string[] {
+/** What the threads a thread opened have spent, said as its own fact: this is their whole life, and the turn's own
+ * figure counts none of their work. */
+export function openedSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} in threads it opened`;
+}
+
+/** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
+ * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
+export function turnSpendPart(costUsd: number): string {
+  return `${fmtCost(costUsd)} this turn`;
+}
+
+/** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
+ * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
+ * last line read from this one list. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+  const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }
 
@@ -384,6 +400,12 @@ interface ToolRow {
 function toolField(input: ToolInput, name: string): string | undefined {
   const value = input[name];
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/** A tool a server lends the agent, whose name carries both: `mcp__<server>__<tool>` as every harness spells it. */
+function serverTool(toolName: string): { server: string; tool: string } | undefined {
+  const parts = toolName.split("__");
+  return parts.length >= 3 && parts[0] === "mcp" && parts[1] !== "" ? { server: parts[1]!, tool: parts.slice(2).join("__") } : undefined;
 }
 
 function firstField(input: ToolInput, fields: readonly string[]): string | undefined {
@@ -502,7 +524,7 @@ export interface ToolCallFacts {
 
 export function toolCallFacts(toolName: string, input: string): ToolCallFacts {
   const row = TOOL_ROWS.get(toolName);
-  const itemType = row?.itemType ?? (toolName.startsWith("mcp__") ? "mcp_tool_call" : undefined);
+  const itemType = row?.itemType ?? (serverTool(toolName) === undefined ? undefined : "mcp_tool_call");
   const kinds = {
     ...(itemType !== undefined ? { itemType } : {}),
     ...(row?.requestKind !== undefined ? { requestKind: row.requestKind } : {}),
@@ -597,6 +619,13 @@ export function sealedCopyLine(image: SealedImage, copy: SealedImageCopy): strin
   const size = copy.sizeBytes === undefined ? [] : [fmtBytes(copy.sizeBytes)];
   const standing = copyStanding(image, copy);
   return [copy.place, `v${copy.version}`, ...size, ...(standing === undefined ? [] : [standing])].join(" · ");
+}
+
+/** What a build at a place came to, as the line a person reads after it: the copy that place now holds, and, when
+ * the place already stood on the record, that nothing was built. */
+export function sealedBuiltLine(image: SealedImage, built: { copy: SealedImageCopy; built: boolean }): string {
+  const line = sealedCopyLine(image, built.copy);
+  return built.built ? line : `${line} · already built from this image; nothing was built`;
 }
 
 /** One project image under the image, as a line: the workspace it was taken off, the projects on that disk and when. */
@@ -888,9 +917,11 @@ export const NO_SUCH_TURN = "no turn on this host carries that token; only wsp r
 /** What a send meets when its thread's last turn has replied but its agent process is still running (a child it did
  * not wait for, a lingering task): the row still reads running and is not free for a new turn, so the message waits
  * for that process rather than starting a second agent in the same worktree. Not a refusal: it says where the
- * message went, and every door shows it in these words. */
-export function stillWorkingLine(threadId: string): string {
-  return `thread ${threadId.slice(0, 8)} replied, still working; the message runs as its next turn once that process exits`;
+ * message went, and every door shows it in these words. The thread is named by its title where the caller holds
+ * one; a caller without one says nothing, since an id names no thread to the person reading the line. */
+export function stillWorkingLine(title?: string): string {
+  const named = title === undefined || title.trim() === "" ? "This thread" : title.trim();
+  return `${named} replied, still working; the message runs as its next turn once that process exits`;
 }
 
 /** The send key's label while the thread's turn runs: Enter queues, nothing sends. */
@@ -1082,7 +1113,7 @@ export function storeUnreadLine(store: string, why: string): string {
 /** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
  * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
 export function vaultKeptLine(why: string): string {
-  return `nap kept the previous vault; ${why}`;
+  return `the nap kept what was saved before it; ${why}`;
 }
 
 /** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the
@@ -1176,7 +1207,7 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
 /** The one sentence every machine road answers with on a computer set up with no machine provider key: wsp init took
  * the local road, so this computer is a workspace and there is nothing to fork, pause or seal until a key is here.
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
-export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to seal a golden";
+export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to build your image";
 
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
@@ -1984,17 +2015,142 @@ export function threadWorkingLine(e: SessionEvent): string | undefined {
     case "session.delta":
       return e.kind === "text" || e.kind === "thinking" ? lastLine(e.text) : e.kind === "tool_use" ? toolActivityLine(e.toolName, e.text) : undefined;
     case "session.permission":
-      return permissionAskLine(e.toolName, e.detail);
+      return permissionAskLine(e.toolName, e.input, e.detail);
     default:
       return undefined;
   }
 }
 
-/** The prompt row's lead, the same on every surface that shows a relayed permission prompt: the tool the harness
- * wants to run, and what it wants to run it on where the harness named one. No question mark: the options under it
- * are the question. */
-export function permissionAskLine(toolName: string, detail?: string): string {
-  return detail === undefined || detail === "" ? `Permission for ${toolName}` : `Permission for ${toolName}: ${detail}`;
+/** A prompt's lead in two parts: the words, and the call's own text where the call has some. They are apart because
+ * a command is judged by characters a sentence face blurs, two hyphens reading as one dash among them, so a client
+ * with more than one face draws the second part as code while a one-face surface joins them back into a sentence. */
+interface AskLead {
+  readonly says: string;
+  readonly code?: string;
+}
+
+/** How one kind of call is put to a person when the harness asks permission for it: the lead they judge it by,
+ * the input fields that lead already carries, and the field holding a file's body. */
+interface PermissionWords {
+  readonly lead: (input: ToolInput, toolName: string) => AskLead | undefined;
+  /** Fields the lead says itself, left out of the values shown under it so nothing is read twice. */
+  readonly named: readonly string[];
+  readonly body?: string;
+}
+
+const writeAsk: PermissionWords = {
+  lead: input => {
+    const path = toolField(input, "file_path");
+    if (path === undefined) return undefined;
+    const folder = parentFolderName(path);
+    const content = input["content"];
+    const size = typeof content === "string" ? ` (${fmtBytes(new TextEncoder().encode(content).length)})` : "";
+    return { says: `Write ${folderName(path)}${folder === "" ? "" : ` in ${folder}`}${size}` };
+  },
+  named: ["file_path", "content"],
+  body: "content",
+};
+
+const commandAsk: PermissionWords = {
+  lead: input => {
+    const command = toolField(input, "command");
+    return command === undefined ? undefined : { says: "Run:", code: command };
+  },
+  named: ["command", "description"],
+};
+
+const skillAsk: PermissionWords = {
+  lead: input => {
+    const skill = toolField(input, "skill");
+    return skill === undefined ? undefined : { says: `Run the skill ${skill}` };
+  },
+  named: ["skill"],
+};
+
+const serverAsk: PermissionWords = {
+  lead: (_input, toolName) => {
+    const lent = serverTool(toolName);
+    return lent === undefined ? undefined : { says: `Use the ${lent.server} tools: ${lent.tool.replace(/_/g, " ")}` };
+  },
+  named: [],
+};
+
+/** A kind with no words of its own yet: the lead falls back to the harness's own phrase under the tool's name. */
+const plainAsk: PermissionWords = { lead: () => undefined, named: [] };
+
+/** Every kind of call a permission prompt is worded for, one row per kind. The chat row and the command line both
+ * read this table, so the words live here and in neither of them, and a kind worded later is a row and nothing
+ * else. A name no row matches is a server's tool where its name carries one, else the plain row. */
+const PERMISSION_ASKS: ReadonlyMap<string, PermissionWords> = new Map<string, PermissionWords>([
+  ["Write", writeAsk],
+  ["Bash", commandAsk],
+  ["Skill", skillAsk],
+]);
+
+function permissionWords(toolName: string): PermissionWords {
+  return PERMISSION_ASKS.get(toolName) ?? (serverTool(toolName) === undefined ? plainAsk : serverAsk);
+}
+
+/** What the disclosure a file's body sits behind reads: the buttons stay in reach and the file is one click away. */
+const BODY_LABEL = "show the file";
+
+/** The lead its kind words the call by, or the harness's own phrase under the tool's name for a call whose input
+ * carries none of what its rule needs and for a kind with no rule. */
+function askLead(toolName: string, input: string, detail?: string): AskLead {
+  const fields = toolInput(input);
+  const lead = fields === undefined ? undefined : permissionWords(toolName).lead(fields, toolName);
+  if (lead !== undefined) return lead;
+  return { says: detail === undefined || detail === "" ? `Permission for ${toolName}` : `Permission for ${toolName}: ${detail}` };
+}
+
+/** The two parts joined back into one line, the one rule for it. */
+const leadLine = (lead: AskLead): string => (lead.code === undefined ? lead.says : `${lead.says} ${lead.code}`);
+
+/** The prompt row's lead as one line, for a surface with one face: the command line's. No question mark, since the
+ * options under it are the question. */
+export function permissionAskLine(toolName: string, input: string, detail?: string): string {
+  return leadLine(askLead(toolName, input, detail));
+}
+
+/** One value as the row reads it: its own whitespace collapsed, so a field holding a paragraph is one line rather
+ * than a wall, while the fields stay apart under their separator. */
+const restValue = (value: unknown): string => (typeof value === "string" ? value : JSON.stringify(value) ?? "").replace(/\s+/g, " ").trim();
+
+/** The whole of a relayed permission prompt as a client draws it: the lead in its two parts, the input values that
+ * lead does not already carry, and the file body folded away behind its own disclosure. Nothing here is cut, since
+ * this is the row consent is given on, which is also why a file's text is folded rather than shown: a wall of it
+ * between the question and the buttons is what nobody reads. */
+export interface PermissionPromptWords {
+  /** The lead as one line, the two parts joined, which is what a surface with one face shows. */
+  readonly lead: string;
+  readonly says: string;
+  /** The call's own text, where the call has some: a client with a code face draws this in it, breaks it at no
+   * character inside a token and scrolls it sideways rather than cutting it. */
+  readonly code?: string;
+  readonly rest: string;
+  readonly body?: { readonly label: string; readonly text: string };
+}
+
+export function permissionPromptWords(toolName: string, input: string, detail?: string): PermissionPromptWords {
+  const lead = askLead(toolName, input, detail);
+  const parts = { lead: leadLine(lead), says: lead.says, ...(lead.code === undefined ? {} : { code: lead.code }) };
+  const fields = toolInput(input);
+  if (fields === undefined) return { ...parts, rest: input };
+  const words = permissionWords(toolName);
+  const named = new Set(words.named);
+  const body = words.body === undefined ? undefined : toolField(fields, words.body);
+  const rest = Object.entries(fields)
+    .filter(([key]) => !named.has(key))
+    .map(([key, value]) => `${key}: ${restValue(value)}`)
+    .join(" · ");
+  return { ...parts, rest, ...(body === undefined ? {} : { body: { label: BODY_LABEL, text: body } }) };
+}
+
+/** That lead taken off the prompt itself, which is what a thread's row says it is waiting on and what the app says
+ * outside the thread's own pane. The one call both make, so the whole prompt is in hand here and reading another of
+ * its fields to word the lead is an edit to this body alone. */
+export function askingLine(ask: Pick<SessionPermissionEvent, "toolName" | "input" | "detail">): string {
+  return permissionAskLine(ask.toolName, ask.input, ask.detail);
 }
 
 /** What an answered prompt row reads once it is closed, one word per outcome. The option's own label rides beside it
@@ -2035,13 +2191,6 @@ export function permissionModeOptionLabel(modeLabel: string): string {
  * 1200 px viewport), and a line that says when the pick lands is no use cut before the "when". */
 export function accessFromNextMessage(modeLabel: string): string {
   return `${modeLabel} from your next message`;
-}
-
-/** What the harness is told when a prompt nobody answered ran its wait out: the runtime denies it in the person's
- * place rather than let the wait take the turn, and the sentence says so, since the agent reads it as the tool's
- * result and decides what to do next. */
-export function permissionUnansweredLine(waitMs: number): string {
-  return `nobody answered this permission prompt in ${fmtDuration(waitMs)}, so wsp denied it; ask again, or start the thread at an access that does not ask`;
 }
 
 /** The one sentence a second workspace on a machine that already carries one is refused with. wsp forks a machine
@@ -2203,9 +2352,12 @@ export function behindGoldenLine(on: number, head: number): string {
   return `on image v${on}, v${head} available`;
 }
 
-/** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
- * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
+/** The states a version row can be in, each as the muted mono word the row's marks column shows: state is text there,
+ * never a badge, and a missing tool's outcome indexes this table as it is. The keys are the wire's; the words are
+ * the person's, so a row says what the version is rather than the name the code holds it under. The volatile key's
+ * word says what such a version has behind it, a snapshot at the provider and no durable template, since that is
+ * the whole of what it is and what the provider can drop. */
+export const LINEAGE_MARKS = { now: "now", head: "newest", fork: "this one", failed: "failed", skipped: "skipped", volatile: "snapshot only" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -2275,25 +2427,25 @@ export function templateWaitedLine(templateId: string, status: string, waitedMs:
   return `the template ${templateId} still reads ${status} after ${fmtDuration(waitedMs)}`;
 }
 
-/** The doctor's line per version it made durable: the golden and version, the template it promoted, and when other
+/** The doctor's line per version it made durable: the image and version, the template it promoted, and when other
  * templates already carry the name (another host's, or a run that recorded nothing), how many; none when the count
  * is zero or the listing was not given. */
-export function templateRecordedLine(golden: string, version: number, templateId: string, sharing: number | undefined): string {
-  const head = `golden ${golden} v${version}: template ${templateId} promoted and recorded`;
+export function templateRecordedLine(image: string, version: number, templateId: string, sharing: number | undefined): string {
+  const head = `image ${image} v${version}: template ${templateId} promoted and recorded`;
   return sharing === undefined || sharing === 0 ? head : `${head}; ${sharing} other ${sharing === 1 ? "template carries" : "templates carry"} its name`;
 }
 
 /** The doctor's line per version it could not make durable and why: a lost snapshot in the provider's own words is
  * left to the doctor's rebuild road below it. */
-export function templateSkippedLine(golden: string, version: number, reason: string): string {
-  return `golden ${golden} v${version}: no template recorded, ${reason}`;
+export function templateSkippedLine(image: string, version: number, reason: string): string {
+  return `image ${image} v${version}: no template recorded, ${reason}`;
 }
 
 /** What a version's row says when the provider answers 404 for its snapshot: the vanish the templates exist to outlive. */
 export const SNAPSHOT_GONE_REASON = "its snapshot is gone at the provider";
 
 /** The doctor's line on a backend whose capabilities lack templates: nothing to promote, nothing wrong. */
-export const NO_TEMPLATES_LINE = "this backend has no templates; goldens stay as snapshots";
+export const NO_TEMPLATES_LINE = "this backend has no templates; image versions stay as snapshots";
 
 /** The doctor's line on a backend that cannot list snapshots: nothing to split, nothing to clean. */
 export const NO_SNAPSHOT_LISTING = "this backend lists no snapshots; nothing to split by owner";
@@ -2333,18 +2485,18 @@ export const SEAL_FAILED_BUILDER_GONE_LINE = "Seal failed and the builder is gon
 /** The update's last line when the snapshot of the new version failed and the provider still has the machine it
  * ran on: the golden stands, the machine is as it was, the retry runs on it or the sweep ends it. */
 export function upgradeSealFailedStaysLine(version: number, builderId: string, rateUsdPerHour: number): string {
-  return `Golden v${version} is unchanged. Builder ${builderId} is as it was, up at about $${rateUsdPerHour.toFixed(2)}/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
+  return `Image v${version} is unchanged. Builder ${builderId} is as it was, up at about $${rateUsdPerHour.toFixed(2)}/hr; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
 }
 
 /** The update's last line when the snapshot failed and the provider would not say what became of the machine it
  * ran on: nothing on it was touched, the retry runs on it or the sweep ends it. */
 export function upgradeSealFailedUnreadLine(version: number, builderId: string): string {
-  return `Golden v${version} is unchanged. The provider could not be read about builder ${builderId}, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
+  return `Image v${version} is unchanged. The provider could not be read about builder ${builderId}, so nothing on it was touched; run wsp init again to retry, and the sweep stops it once it is six hours old.`;
 }
 
 /** The update's last line when the snapshot failed and the provider answers 404 for the machine it ran on. */
 export function upgradeSealFailedGoneLine(version: number): string {
-  return `Golden v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
+  return `Image v${version} is unchanged and the builder is gone: the provider dropped it after refusing the snapshot. Run wsp init again to retry.`;
 }
 
 /** The line under the import dialog's title: which workspace, and that the folder lands at the path it has here. */

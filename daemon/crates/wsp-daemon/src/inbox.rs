@@ -225,17 +225,17 @@ mod tests {
     }
 
     /// A watcher over a fresh directory, with every event it emits landing on one channel.
-    async fn watch(dir: &Path, quiet_ms: u64, poll_ms: u64) -> (Arc<Running>, mpsc::UnboundedReceiver<String>) {
+    async fn watch(dir: &Path, quiet_ms: u64, poll_ms: u64) -> (Arc<Running>, mpsc::UnboundedReceiver<crate::Outgoing>) {
         let running = start(dir, Duration::from_millis(quiet_ms), Duration::from_millis(poll_ms)).unwrap();
         let (tx, rx) = mpsc::unbounded_channel();
         running.subscribe(Listener { key: 1, out: Outbound(tx) });
         (running, rx)
     }
 
-    fn drain(rx: &mut mpsc::UnboundedReceiver<String>) -> Vec<serde_json::Value> {
+    fn drain(rx: &mut mpsc::UnboundedReceiver<crate::Outgoing>) -> Vec<serde_json::Value> {
         let mut out = Vec::new();
-        while let Ok(text) = rx.try_recv() {
-            out.push(serde_json::from_str(&text).unwrap());
+        while let Ok(item) = rx.try_recv() {
+            out.push(serde_json::from_str(item.text()).unwrap());
         }
         out
     }

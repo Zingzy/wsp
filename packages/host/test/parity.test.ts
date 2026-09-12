@@ -480,7 +480,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### send"), WSP_SKILL.indexOf("### stop"));
     for (const text of [tool, section]) {
       for (const outcome of SessionStartOutcome.options) expect(text, outcome).toContain(`(outcome \`${outcome}\`)`);
-      expect(text).toContain(`\`${stillWorkingLine("1a2b3c4d-0000")}\``);
+      expect(text).toContain(`\`${stillWorkingLine()}\``);
     }
   });
 

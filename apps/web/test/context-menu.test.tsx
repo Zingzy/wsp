@@ -561,6 +561,25 @@ describe("a thread row's menu", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("a thread drawn under an opener on another workspace still carries its own machine's refusal", async () => {
+    // The opener runs here and the thread its agent opened runs on a machine that is gone, so the row sits among
+    // this workspace's rows while its rename has to travel to the other machine, which is not there to take it.
+    const api = fakeApi(
+      [API, OLD],
+      [statusOf(API), statusOf(OLD)],
+      [{ ...RUNNING }, { id: "s9", workspaceId: "ws_c", harness: "claude", status: "running", prompt: "rebuild the index", threadId: "thr_9", parentThreadId: "thr_1", startedBy: "agent", startedAt: Date.now() - 30_000 }],
+    );
+    await mountSidebar(api, "api");
+    await waitFor(() => expect(screen.getByText("rebuild the index")).toBeDefined());
+    expect(rowOf("rebuild the index").className).toContain("pl-5");
+    rightClick(rowOf("rebuild the index"));
+    await screen.findByRole("menu");
+    expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBe("true");
+    expect(refusalOf(THREAD_WORDS.rename)).toBe("Workspace machine is gone; rebuild it to rename (machine m_ws_c is gone at the provider: Not found)");
+    fireEvent.click(item(THREAD_WORDS.rename));
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
   it("the keys the sidebar traverses with are the field's while a name is typed", async () => {
     const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }]);
     await mountSidebar(api, "api");

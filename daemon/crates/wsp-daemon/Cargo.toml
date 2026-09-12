@@ -17,8 +17,12 @@ tokio-tungstenite.workspace = true
 futures-util.workspace = true
 subtle.workspace = true
 base64.workspace = true
-nix = { version = "0.31", default-features = false, features = ["signal"] }
+portable-pty = "0.9"
+nix = { version = "0.31", default-features = false, features = ["signal", "user", "feature", "fs"] }
+ed25519-dalek = { version = "3", features = ["pem"] }
+getrandom = "0.4"
 notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 
 [dev-dependencies]
 tempfile = "3"
+futures-util.workspace = true

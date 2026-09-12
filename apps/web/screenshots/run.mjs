@@ -133,6 +133,7 @@ async function shoot(context, shot, base, out, token) {
     // the redial, and the window keeps every row it was last told about.
     if (step.offline === true) fallAsleep();
     else if (step.key !== undefined) await page.keyboard.press(step.key);
+    else if (step.type !== undefined) await page.keyboard.type(step.type);
     else await page.locator(step.click).first().click({ timeout: 15_000 });
   }
   if (shot.wait !== undefined) await page.locator(shot.wait).first().waitFor({ state: "visible", timeout: 15_000 });

@@ -3,8 +3,9 @@
 //! through the socket's own channel.
 
 use std::num::NonZeroU16;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 use base64::Engine;
@@ -12,30 +13,42 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, InboxRescanReply, ManifestGetReply,
-    ManifestRecordReply, ManifestRestartScriptReply, PortsWatchReply, Reply, RequestId, DAEMON_OPS, MACHINE_OPS,
+    ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PortsWatchReply, PtyAttachReply, PtyCreateReply, PtyListReply, Reply,
+    RequestId, DAEMON_OPS, MACHINE_OPS,
 };
 
+use crate::exec::{run_exec, ExecOptions};
 use crate::manifest::RecordInput;
 use crate::paths::OpError;
+use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
-use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound};
+use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound, Outgoing};
 
 type Detach = Box<dyn FnOnce() + Send>;
+
+/// Which road a socket came in on: dialled by a client of this machine, or opened outward by this place to its
+/// host. The leave op and the machine ops are the link's alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Road {
+    Inbound,
+    Link,
+}
 
 /// What one authed socket holds between frames.
 pub(crate) struct Conn {
     /// Set when the auth frame named a port: only tunnel ops on it and ping are answered.
     pub(crate) scope: Option<NonZeroU16>,
     pub(crate) out: Outbound,
+    pub(crate) road: Road,
     pub(crate) tunnels: Tunnels,
-    /// What the socket's close undoes: every watcher listener an op on it made. None once closed, so an op still
-    /// being answered when the socket went undoes itself at once instead of outliving it.
+    /// What the socket's close undoes: every pty, mode and watcher listener an op on it made. None once closed, so an
+    /// op still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
 }
 
 impl Conn {
-    pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound) -> Conn {
-        Conn { scope, out, tunnels: Tunnels::default(), detaches: Mutex::new(Some(Vec::new())) }
+    pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound, road: Road) -> Conn {
+        Conn { scope, out, road, tunnels: Tunnels::default(), detaches: Mutex::new(Some(Vec::new())) }
     }
 
     fn on_close(&self, detach: Detach) {
@@ -117,24 +130,51 @@ fn answer<T: Serialize>(id: Option<RequestId>, result: Result<T, OpError>) -> St
     }
 }
 
-pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> String {
+/// One frame in, one reply out. The reply is the text to write, or the leave's, which the loop writes and then
+/// stops on.
+pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgoing {
     // Any JSON value is a frame, as the node daemon reads it; a non-object simply carries no op and no id.
     let Ok(frame) = serde_json::from_str::<Value>(raw) else {
-        return text(&DaemonErrorResponse::new(None, words::INVALID_JSON));
+        return Outgoing::Text(text(&DaemonErrorResponse::new(None, words::INVALID_JSON)));
     };
     let id = id_of(&frame);
     if let Some(port) = conn.scope {
         if !in_port_scope(port, &frame) {
-            return refuse(id, DaemonErrorCode::Forbidden, words::port_scope_refusal(port.get()));
+            return Outgoing::Text(refuse(id, DaemonErrorCode::Forbidden, words::port_scope_refusal(port.get())));
         }
     }
     let op = frame.get("op").and_then(Value::as_str);
+    if conn.road == Road::Link {
+        // The road that opened this socket answers its own ops before the daemon's switch sees them.
+        match op {
+            Some("place.leave") => {
+                let home = crate::place::place_home(ctx.options.home.as_deref());
+                let swept = fs::blocking(move || Ok(crate::place::sweep_place_home(&home))).await.unwrap_or_default();
+                return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
+            }
+            Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(text(&wsp_runtime::answer_machine_op(id, name))),
+            _ => {}
+        }
+    }
+    Outgoing::Text(handle_op(conn, ctx, &frame, id, op).await)
+}
+
+async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<RequestId>, op: Option<&str>) -> String {
     match op {
         Some("ping") => ok(id),
-        Some("place.leave") => refuse(id, DaemonErrorCode::Forbidden, words::PLACE_LEAVE_ROAD_REFUSAL),
-        Some(name) if MACHINE_OPS.contains(&name) => refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD),
+        // The leave op and the machine ops are the link's; one sentence for the one rule, as the node daemon says it.
+        Some(name) if name == "place.leave" || MACHINE_OPS.contains(&name) => {
+            refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
+        }
         Some(
-            name @ ("fs.list"
+            name @ ("pty.create"
+            | "pty.attach"
+            | "pty.write"
+            | "pty.resize"
+            | "pty.kill"
+            | "pty.list"
+            | "exec"
+            | "fs.list"
             | "fs.read"
             | "git.status"
             | "git.diff"
@@ -155,13 +195,17 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Strin
             }
         }
         Some(name) if DAEMON_OPS.contains(&name) => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
-        _ => fail(id, words::unknown_op(&op_word(&frame))),
+        _ => fail(id, words::unknown_op(&op_word(frame))),
     }
 }
 
 /// An op the protocol names that this daemon does not serve yet.
 pub(crate) fn not_built(op: &str) -> String {
     format!("{op} is not served by this daemon yet")
+}
+
+fn no_such_pty(pty_id: &str) -> String {
+    format!("no such pty: {pty_id}")
 }
 
 /// The real path a request names, inside the daemon's root or a folder the roots file names as of this op.
@@ -174,6 +218,74 @@ async fn locate(ctx: &Ctx, requested: &str) -> Result<PathBuf, OpError> {
 
 async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &str, op: DaemonOp) -> String {
     match op {
+        DaemonOp::PtyCreate { cols, rows, shell, cwd, env } => {
+            let opts = PtyCreateOpts { cols: cols.map(NonZeroU16::get), rows: rows.map(NonZeroU16::get), shell, cwd, env };
+            let spawned = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).create(&opts, &process_env(), passwd_row().as_ref());
+            match spawned {
+                Ok(spawned) => {
+                    let reply = PtyCreateReply { pty_id: spawned.id.clone(), pid: spawned.pid };
+                    tokio::spawn(pump(Arc::clone(ctx), spawned));
+                    text(&Reply::new(id, reply))
+                }
+                Err(e) => fail(id, e.to_string()),
+            }
+        }
+        DaemonOp::PtyAttach { pty_id } => {
+            let key = ctx.next_key();
+            let listener = || Listener { key, out: conn.out.clone() };
+            let live = {
+                let mut ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(session) = ptys.get_mut(&pty_id) else { return fail(id, no_such_pty(&pty_id)) };
+                session.attach(listener());
+                session.on_exit(listener());
+                session.exited.is_none().then_some(session.pid)
+            };
+            // An exited pty tells the newcomer so at once and is never probed again.
+            if let Some(pid) = live {
+                ctx.modes.attach(&pty_id, pid, listener());
+            }
+            let (ctx2, pty) = (Arc::clone(ctx), pty_id.clone());
+            conn.on_close(Box::new(move || {
+                if let Some(session) = ctx2.ptys.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&pty) {
+                    session.detach(key);
+                }
+                ctx2.modes.detach(&pty, key);
+            }));
+            text(&Reply::new(id, PtyAttachReply { pty_id }))
+        }
+        DaemonOp::PtyWrite { pty_id, data } => match ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&pty_id) {
+            Some(session) => {
+                session.write(&data);
+                ok(id)
+            }
+            None => fail(id, no_such_pty(&pty_id)),
+        },
+        DaemonOp::PtyResize { pty_id, cols, rows } => match ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&pty_id) {
+            Some(session) => match session.resize(cols.get(), rows.get()) {
+                Ok(()) => ok(id),
+                Err(e) => fail(id, e.to_string()),
+            },
+            None => fail(id, no_such_pty(&pty_id)),
+        },
+        DaemonOp::PtyKill { pty_id } => {
+            let mut ptys = ctx.ptys.lock().unwrap_or_else(|e| e.into_inner());
+            if ptys.get_mut(&pty_id).is_none() {
+                return fail(id, no_such_pty(&pty_id));
+            }
+            ctx.modes.remove(&pty_id);
+            ptys.destroy(&pty_id);
+            ok(id)
+        }
+        DaemonOp::PtyList => text(&Reply::new(id, PtyListReply { ptys: ctx.ptys.lock().unwrap_or_else(|e| e.into_inner()).list() })),
+        DaemonOp::Exec { cmd, timeout_ms, stdin } => {
+            let env: Vec<_> = std::env::vars_os().collect();
+            let opts = ExecOptions {
+                timeout: Duration::from_millis(u64::from(timeout_ms.unwrap_or(numbers::EXEC_TIMEOUT_DEFAULT_MS))),
+                stdin: stdin.as_deref().map(lenient_base64),
+                output_max: numbers::EXEC_OUTPUT_MAX,
+            };
+            text(&Reply::new(id, run_exec(Path::new(&ctx.root), &env, &cmd, opts).await))
+        }
         DaemonOp::FsList { path, gitignore } => {
             let listed = async { fs::list_dir(locate(ctx, &path).await?, gitignore == Some(true), numbers::FS_LIST_CAP_ENTRIES).await };
             answer(id, listed.await)
@@ -273,20 +385,24 @@ mod tests {
         options.root = Some(root.path().to_path_buf());
         options.roots_path = Some(root.path().join("roots"));
         options.manifest_path = Some(root.path().join("manifest.json"));
-        Bench { ctx: Arc::new(Ctx::new(options).unwrap()), _token: token, root }
+        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap()), _token: token, root }
     }
 
-    fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<String>) {
+    fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
+        conn_on(scope, Road::Inbound)
+    }
+
+    fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Arc::new(Conn::new(scope.and_then(NonZeroU16::new), Outbound(tx))), rx)
+        (Arc::new(Conn::new(scope.and_then(NonZeroU16::new), Outbound(tx), road)), rx)
     }
 
-    async fn reply(b: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {
-        serde_json::from_str(&handle(conn, &b.ctx, &frame.to_string()).await).unwrap()
+    async fn reply(bench: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {
+        serde_json::from_str(handle(conn, &bench.ctx, &frame.to_string()).await.text()).unwrap()
     }
 
-    async fn reply_raw(b: &Bench, conn: &Arc<Conn>, raw: &str) -> Value {
-        serde_json::from_str(&handle(conn, &b.ctx, raw).await).unwrap()
+    async fn reply_raw(bench: &Bench, conn: &Arc<Conn>, raw: &str) -> Value {
+        serde_json::from_str(handle(conn, &bench.ctx, raw).await.text()).unwrap()
     }
 
     #[tokio::test]
@@ -334,12 +450,19 @@ mod tests {
         let b = bench();
         let (c, _rx) = conn(None);
         assert_eq!(
-            reply(&b, &c, json!({"id": 1, "op": "pty.create", "shell": "bash"})).await,
-            json!({"id": 1, "ok": false, "code": "unsupported", "error": "pty.create is not served by this daemon yet"})
+            reply(&b, &c, json!({"id": 1, "op": "sys.watch"})).await,
+            json!({"id": 1, "ok": false, "code": "unsupported", "error": "sys.watch is not served by this daemon yet"})
         );
         let built = [
             "ping",
             "place.leave",
+            "pty.create",
+            "pty.attach",
+            "pty.write",
+            "pty.resize",
+            "pty.kill",
+            "pty.list",
+            "exec",
             "fs.list",
             "fs.read",
             "git.status",
@@ -367,7 +490,7 @@ mod tests {
         let (c, _rx) = conn(None);
         assert_eq!(
             reply(&b, &c, json!({"id": 1, "op": "place.leave"})).await,
-            json!({"id": 1, "ok": false, "code": "forbidden", "error": words::PLACE_LEAVE_ROAD_REFUSAL})
+            json!({"id": 1, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD})
         );
         for op in MACHINE_OPS {
             assert_eq!(
@@ -376,6 +499,35 @@ mod tests {
                 "{op}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn on_the_link_every_machine_op_is_answered_by_the_runtime_stub_and_the_leave_sweeps_then_stops() {
+        let b = bench();
+        let (link, _rx) = conn_on(None, Road::Link);
+        for op in MACHINE_OPS {
+            assert_eq!(
+                reply(&b, &link, json!({"id": 3, "op": op})).await,
+                json!({"id": 3, "ok": false, "error": format!("this computer's backend has no {op}")}),
+                "{op}"
+            );
+        }
+        // An inbound socket on the same daemon still gets the road refusal.
+        let (inbound, _rx2) = conn(None);
+        assert_eq!(reply(&b, &inbound, json!({"id": 4, "op": "machine.list"})).await["error"], words::NOT_ON_THIS_ROAD);
+        let home = tempfile::tempdir().unwrap();
+        let at = wsp_frames::place_daemon_paths(home.path());
+        std::fs::create_dir_all(&at.wsp).unwrap();
+        std::fs::write(&at.place_file, "{}").unwrap();
+        std::fs::write(&at.token_path, "t\n").unwrap();
+        let mut options = Options::new(b._token.path());
+        options.home = Some(home.path().to_path_buf());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
+        let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
+        let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy()]);
+        assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
+        assert!(!at.place_file.exists() && !at.token_path.exists());
     }
 
     #[tokio::test]
@@ -391,9 +543,7 @@ mod tests {
             "pty.create",
             "pty.list",
             "fs.list",
-            "fs.read",
             "git.status",
-            "git.diff",
             "ports.watch",
             "sys.watch",
             "proc.watch",
@@ -403,6 +553,7 @@ mod tests {
             "inbox.watch",
             "machine.create",
             "place.leave",
+            "exec",
             "nonsense",
         ] {
             assert_eq!(reply(&b, &scoped, json!({"id": 1, "op": op, "path": ".", "cwd": ".", "scope": "staged"})).await, refused, "{op}");
@@ -423,8 +574,32 @@ mod tests {
         assert_eq!(&got, b"GET");
         assert_eq!(reply(&b, &scoped, json!({"id": 3, "op": "tunnel.close", "tunnelId": "t"})).await, json!({"id": 3, "ok": true}));
         let end = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&end).unwrap(), json!({"type": "tunnel.end", "tunnelId": "t"}));
+        assert_eq!(serde_json::from_str::<Value>(end.text()).unwrap(), json!({"type": "tunnel.end", "tunnelId": "t"}));
         assert_eq!(reply(&b, &scoped, json!({"id": 4, "op": "tunnel.write", "tunnelId": "t", "data": ""})).await["code"], "not-found");
+    }
+
+    #[tokio::test]
+    async fn a_frame_the_protocol_refuses_is_a_bad_request_and_a_pty_nobody_opened_is_named() {
+        let b = bench();
+        let (c, _rx) = conn(None);
+        for frame in [
+            json!({"id": 1, "op": "exec", "cmd": 3}),
+            json!({"id": 1, "op": "exec", "cmd": "echo x", "timeoutMs": -1}),
+            json!({"id": 1, "op": "exec", "cmd": "echo x", "stdin": 3}),
+            json!({"id": 1, "op": "pty.resize", "ptyId": "pty_1", "cols": "wide"}),
+            json!({"id": 1, "op": "pty.resize", "ptyId": "pty_1", "cols": 0, "rows": 24}),
+            json!({"id": 1, "op": "pty.create", "cols": 80, "rows": 0}),
+        ] {
+            let out = reply(&b, &c, frame.clone()).await;
+            assert_eq!((out["ok"].as_bool(), out["code"].as_str()), (Some(false), Some("bad-request")), "{frame}");
+        }
+        assert_eq!(
+            reply(&b, &c, json!({"id": 2, "op": "pty.write", "ptyId": "pty_9", "data": "x"})).await,
+            json!({"id": 2, "ok": false, "error": "no such pty: pty_9"})
+        );
+        assert_eq!(reply(&b, &c, json!({"id": 3, "op": "pty.attach", "ptyId": "pty_9"})).await["error"], "no such pty: pty_9");
+        assert_eq!(reply(&b, &c, json!({"id": 4, "op": "pty.kill", "ptyId": "pty_9"})).await["error"], "no such pty: pty_9");
+        assert_eq!(reply(&b, &c, json!({"id": 5, "op": "pty.list"})).await, json!({"id": 5, "ok": true, "ptys": []}));
     }
 
     #[tokio::test]
@@ -485,7 +660,7 @@ mod tests {
         options.inbox_dir = Some(b.root.path().join("no-inbox"));
         options.manifest_path = Some(b.root.path().join("m2.json"));
         let without = Bench {
-            ctx: Arc::new(Ctx::new(options).unwrap()),
+            ctx: Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap()),
             _token: tempfile::NamedTempFile::new().unwrap(),
             root: tempfile::tempdir().unwrap(),
         };
@@ -513,6 +688,29 @@ mod tests {
 
     #[test]
     fn tunnel_bytes_are_read_as_nodes_buffer_reads_base64() {
+        assert_eq!(lenient_base64("aGVsbG8="), b"hello");
+        assert_eq!(lenient_base64("aGVsbG8"), b"hello");
+        assert_eq!(lenient_base64("aGVs\nbG8="), b"hello");
+        assert_eq!(lenient_base64(""), b"");
+    }
+
+    #[test]
+    fn what_an_attach_registers_after_its_socket_closed_is_undone_at_once() {
+        let (c, _rx) = conn(None);
+        let ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+        c.on_close(Box::new(move || flag.store(true, std::sync::atomic::Ordering::SeqCst)));
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst));
+        c.close();
+        assert!(ran.load(std::sync::atomic::Ordering::SeqCst));
+        let late = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&late);
+        c.on_close(Box::new(move || flag.store(true, std::sync::atomic::Ordering::SeqCst)));
+        assert!(late.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn stdin_is_read_as_nodes_buffer_reads_base64() {
         assert_eq!(lenient_base64("aGVsbG8="), b"hello");
         assert_eq!(lenient_base64("aGVsbG8"), b"hello");
         assert_eq!(lenient_base64("aGVs\nbG8="), b"hello");

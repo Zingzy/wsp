@@ -66,6 +66,9 @@ interface RightPanelTabsProps {
   diffAvailable: boolean;
   filesAvailable: boolean;
   machineAvailable: boolean;
+  /** What the Workspace panel holds for the selected workspace's kind, from the protocol's kind table: the card
+   * names what is on the panel rather than verbs a kind that wsp does not drive never offers. */
+  machinePanelWords: string;
   processesAvailable: boolean;
   screenAvailable: boolean;
   /** Why each unavailable surface is greyed out; shown on its card and menu item. */
@@ -189,6 +192,7 @@ function surfaceActions(
     | "filesAvailable"
     | "diffAvailable"
     | "machineAvailable"
+    | "machinePanelWords"
     | "processesAvailable"
     | "screenAvailable"
     | "unavailableReasons"
@@ -239,7 +243,7 @@ function surfaceActions(
     {
       key: "machine",
       label: "Workspace",
-      description: "Pause, wake, upgrade, lineage and usage.",
+      description: props.machinePanelWords,
       icon: Cpu,
       shortcut: "M",
       available: props.machineAvailable,

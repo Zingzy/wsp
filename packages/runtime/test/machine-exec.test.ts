@@ -453,6 +453,26 @@ describe("machineExecStream", () => {
     expect(guest.files()).toEqual([]);
   });
 
+  it("a turn stopped on a question only a person can answer is not cut at the idle limit", async () => {
+    const { backend, machine } = await makeMachine();
+    const guest = scriptGuest(backend, []);
+    let now = 0;
+    let waiting = true;
+    const stream = machineExecStream(machine, { pollMs: 1, idleMs: 1000, now: () => now }, () => waiting)("claude", { env: {}, input: ["first"] });
+    const first = stream.lines[Symbol.asyncIterator]().next();
+    now = 9000;
+    await new Promise(r => setTimeout(r, 20));
+    expect(guest.kills).toEqual([]);
+    // The answer lands and the clock runs again from there.
+    waiting = false;
+    now = 9500;
+    await new Promise(r => setTimeout(r, 20));
+    expect(guest.kills).toEqual([]);
+    now = 10_600;
+    await expect(first).rejects.toThrow(/with no output for 0m$/);
+    expect(await stream.exited).toBeNull();
+  });
+
   /** A guest whose clock moves one minute per poll and whose command prints one line a minute until `quietFromMs`,
    * its process group doing `ticksPerPoll` of work every minute however quiet the log is. */
   function minuteGuest(backend: StubBackend, quietFromMs: number, exitAtMs = Number.POSITIVE_INFINITY, ticksPerPoll = 0) {

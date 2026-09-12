@@ -282,7 +282,9 @@ describe("composer pickers", () => {
     await waitFor(() => expect(within(menu).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]));
     expect(within(menu).getByText("Best for everyday, complex tasks")).toBeTruthy();
     expect(within(menu).getAllByRole("option")[0]?.textContent).toMatch(/⌘1|Ctrl\+1/);
-    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on m1");
+    // Where the turn runs is the word the sidebar row reads; this fixture's record names no provider, so it is what
+    // the machine is rather than the id wsp holds it under.
+    expect(menu.querySelector("[data-composer-catalog-source]")?.textContent).toBe("Claude Code 2.1.257 on a provider");
     fireEvent.change(within(menu).getByLabelText("Search models"), { target: { value: "son" } });
     await waitFor(() => expect(within(menu).getAllByRole("option")).toHaveLength(1));
     fireEvent.click(option("claude-sonnet-5")!);

@@ -23,6 +23,9 @@ const AT_WIDTH = /^(\d+):(.+)$/;
 /** A step that presses a key rather than clicking. The narrow window opens with the right panel over the
  * whole shell and no control of its own on top, so Escape is the only way to the sidebar under it. */
 const KEY = /^key:(.+)$/;
+/** A step that types into whatever the step before it left focused, which is how a surface reaches a state a
+ * person only gets to by writing something: a path in a field, and the refusal the app answers it with. */
+const TYPE = /^type:(.+)$/;
 /** The one step that is neither: the network under the window goes, which is what a window on another computer
  * sees the moment the computer running wsp falls asleep. The rows stay as they were last known. */
 const OFFLINE = "offline";
@@ -52,19 +55,21 @@ export function stepFor(word, widths) {
   if (width !== undefined && !widths.includes(width)) fail(`a step is kept for width ${width}, which the list does not shoot`);
   const bare = kept === null ? word : kept[2];
   const key = KEY.exec(typeof bare === "string" ? bare : "");
-  const step = bare === OFFLINE ? { offline: true } : key === null ? { click: selectorFor(bare) } : { key: key[1] };
+  const typed = TYPE.exec(typeof bare === "string" ? bare : "");
+  const step = bare === OFFLINE ? { offline: true } : typed !== null ? { type: typed[1] } : key === null ? { click: selectorFor(bare) } : { key: key[1] };
   return width === undefined ? step : { width, ...step };
 }
 
 /** What the index says a step was. */
-const stepWords = step => (step.offline === true ? "the network going" : step.key === undefined ? `\`${step.click}\`` : `the ${step.key} key`);
+const stepWords = step =>
+  step.offline === true ? "the network going" : step.type !== undefined ? `typing \`${step.type}\`` : step.key !== undefined ? `the ${step.key} key` : `\`${step.click}\``;
 
 const surfaceFrom = (raw, index, widths) => {
   if (raw === null || typeof raw !== "object") fail(`surface ${index} is not an object`);
   const { name, at, steps, wait, settleMs, fixture, remote } = raw;
   if (typeof name !== "string" || !NAME.test(name)) fail(`surface ${index} needs a name of lowercase words and dashes, got ${JSON.stringify(name)}`);
   if (typeof at !== "string" || !at.startsWith("/")) fail(`${name}: "at" is the route or hash the page opens, starting with /`);
-  if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words and key presses`);
+  if (steps !== undefined && !Array.isArray(steps)) fail(`${name}: "steps" is an array of data attribute words, key presses and typed words`);
   if (settleMs !== undefined && (typeof settleMs !== "number" || settleMs < 0)) fail(`${name}: "settleMs" is a count of milliseconds`);
   if (remote !== undefined && typeof remote !== "boolean") fail(`${name}: "remote" says whether the page is served to another computer`);
   const own = raw.widths;

@@ -19,7 +19,8 @@ import { AGENTS_TITLE, AGENTS_TOP, SIGN_INS_TITLE, SIGN_INS_TOP, TOOLS_TITLE, TO
 import { agentName, isLoginChoice, isTickable } from "./init-recipe.js";
 import type { SelectItem } from "./init-select.js";
 import { agentRows, recipeTable, type TableRow } from "./init-table.js";
-import { manifestFor, type Reading } from "./init.js";
+import { manifestFor } from "./init-recipe.js";
+import { type Reading } from "./init.js";
 import { asksThePerson, signInFor } from "./signin-table.js";
 
 /** What the screens have settled so far: the recipe with its ticks, each sign-in row's answer, and the wsp tools rows
