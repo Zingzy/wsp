@@ -328,10 +328,15 @@ async function open(page, url) {
   await page.waitForFunction(() => (document.body?.innerText ?? "").trim() !== "", null, { timeout: WAIT_MS }).catch(() => {});
 }
 
-/** The thing a tester means by a word. A control whose name is exactly the word first, then a field by that label
- * or that placeholder, then any text on the page that reads it, so a word that names a row lands on the row and a
- * word that names half a sentence still lands on the sentence. */
-async function findByWords(page, word) {
+/** The thing a tester means by a word. A control whose name is exactly the word first, then a field by that label,
+ * then any text on the page that reads it, so a word that names a row lands on the row and a word that names half
+ * a sentence still lands on the sentence.
+ *
+ * A field's ghost is not here. It is not a thing on the page: it is the example a field shows while it is empty,
+ * and it goes the moment anything is typed. A tester read the example path in the folder picker's field as the
+ * folder itself, clicked it three times and wrote the picker off as broken. Typing still finds a field by it, in
+ * findField below, which is the one place the ghost means anything. */
+export async function findByWords(page, word) {
   const selector = attrWord(word);
   if (selector !== undefined) return page.locator(selector).first();
   return firstThere([
@@ -339,16 +344,20 @@ async function findByWords(page, word) {
     page.getByRole("tab", { name: word, exact: true }),
     page.getByRole("link", { name: word, exact: true }),
     page.getByLabel(word, { exact: true }),
-    page.getByPlaceholder(word, { exact: true }),
     page.getByText(word, { exact: true }),
     page.getByText(word),
   ]);
 }
 
+/** What a click is told when the only thing reading its words is a field's ghost: the words are an example, not
+ * something to press, and the field they belong to is typed into. */
+export const GHOST_IS_NOT_A_CONTROL = word =>
+  `${JSON.stringify(word)} is a field's own example of what to type, not something on the page to click; type into that field instead: type ${JSON.stringify(word)} '<what you want there>'`;
+
 /** What a tester means by a field's words. A real field with that name first; then whatever reads those words, and
  * the writable thing it belongs to, since the app's composer draws its own prompt as a sibling of the editable
  * element rather than as an input's placeholder, and the words a tester can see are that sibling's. */
-async function findField(page, word) {
+export async function findField(page, word) {
   const selector = attrWord(word);
   if (selector !== undefined) return page.locator(selector).first();
   const named = await firstThere([page.getByRole("textbox", { name: word, exact: true }), page.getByLabel(word, { exact: true }), page.getByPlaceholder(word, { exact: true })]);
@@ -360,8 +369,8 @@ async function findField(page, word) {
   return near ?? found;
 }
 
-const missed = word => {
-  console.error(`nothing on the page reads ${JSON.stringify(word)}; run text to see what does`);
+const missed = (word, instead) => {
+  console.error(instead ?? `nothing on the page reads ${JSON.stringify(word)}; run text to see what does`);
   process.exit(1);
 };
 
@@ -377,7 +386,7 @@ async function act({ verb, words, width, focus }, page) {
       const word = words[0];
       if (word === undefined) die("click takes the words on the thing to click, or attr=<name>");
       const found = await findByWords(page, word);
-      if (found === undefined) missed(word);
+      if (found === undefined) missed(word, (await page.getByPlaceholder(word, { exact: true }).count()) > 0 ? GHOST_IS_NOT_A_CONTROL(word) : undefined);
       await found.click({ timeout: WAIT_MS });
       return {};
     }

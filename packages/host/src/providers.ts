@@ -8,9 +8,10 @@
 // provider by name.
 
 import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
-import { FAKE_AS_ENV, PROVIDER_KEY_WORDS } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, standInRecordsPath } from "@wsp/protocol";
 import type { PlaceBackends } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
+import { fakeGuestAt } from "./fake-guest.js";
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
  * in front of it and every registered row's key variable filled from the layers a key is read through. */
@@ -81,9 +82,10 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
   },
   {
     id: "fake",
-    // No way of being added, so `wsp add` takes neither the word nor a key for it and `wsp places` shows no row:
-    // a provider that answers out of memory is a harness's fixture and never a place somebody owns.
-    envNames: [PROVIDER_ENV, FAKE_AS_ENV],
+    // No way of being added, so `wsp add` takes neither the word nor a key for it: a provider that answers out of
+    // memory is a harness's fixture and never a place somebody owns. It is still a place to show while it stands
+    // in for a cloud, since that is the cloud its machines read as being at.
+    envNames: [PROVIDER_ENV, FAKE_AS_ENV, FAKE_ROOT_ENV],
     // Named and never guessed: a provider that answers out of memory is what a harness serves a fixture state
     // through, so it is reached by asking for it by name and by nothing else. Two roads beyond a harness reach it,
     // both starting with the word typed: `wsp up --service` copies WSP_PROVIDER out of the installing shell into
@@ -96,7 +98,14 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
       const said = env[FAKE_AS_ENV];
       return said !== undefined && said !== "" ? said : undefined;
     },
-    build: () => new FakeBackend(),
+    // A folder for its machines where a harness named one: its records go there, so a second host on the same
+    // state file finds the fleet the first one holds, and each machine gets a folder with a daemon in it. Named
+    // nowhere else, and then this is the stand-in it has always been, holding its machines for one process.
+    build: env => {
+      const root = env[FAKE_ROOT_ENV];
+      if (root === undefined || root === "") return new FakeBackend();
+      return new FakeBackend({ records: standInRecordsPath(root), guest: fakeGuestAt(root) });
+    },
   },
   {
     id: "solari",
@@ -149,24 +158,38 @@ export function providerModule(env: ProviderEnv, modules: readonly ProviderModul
   return modules.find(m => m.selects(env))!;
 }
 
-/** The provider word this computer's own machines are stamped with: the picked row's id, or the word it stands in
- * for where it is a stand-in. Every reading of where a machine lives goes through here, so nothing compares a
- * provider id outside this table. */
+/** The word one row's machines and its place row are stamped with: the cloud it stands in for where it is a
+ * stand-in, else its own id. Every reading of where a machine lives goes through here, so nothing compares a
+ * provider id outside this table and the row a person reads cannot drift from the word its machines wear. */
+export function placeIdOf(m: ProviderModule, env: ProviderEnv): string {
+  return m.standsFor?.(env) ?? m.id;
+}
+
+/** The provider word this computer's own machines are stamped with. */
 export function wiredProviderId(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): string {
-  const picked = providerModule(env, modules);
-  return picked.standsFor?.(env) ?? picked.id;
+  return placeIdOf(providerModule(env, modules), env);
 }
 
 export function providerBackendFor(env: ProviderEnv): MachineBackend {
   return providerModule(env).build(env);
 }
 
-/** Every provider this computer is set up for, in the table's own order: a row a person can add as a place, whose
- * key, where it reads one, is here. These are the places a copy of the image can be built at beyond the one this
- * host forks on. A row that is no place at all says so on itself, and a row whose key nobody has typed is one the
- * provider would only refuse, so neither is offered; nothing here compares an id. */
+/** Whether this row is somewhere work can stand: a row a person can add whose key they hold where it reads one, or
+ * a stand-in wearing the cloud it is serving in place of, whose machines are at that cloud as far as every screen
+ * goes. A row that is no place at all says so on itself, and a row whose key nobody has typed is one the provider
+ * would only refuse, so neither is one; nothing here compares an id.
+ *
+ * A stand-in counts because the screens a person reads are built from this: a harness serving a fixture of forks
+ * at a cloud showed Settings with no provider row, New workspace with nowhere to create and the machines' own
+ * cloud nowhere on the list they stood on. */
+export function isPlace(m: ProviderModule, env: ProviderEnv): boolean {
+  return m.standsFor?.(env) !== undefined || (addedBy(m) !== undefined && (m.keyEnv === undefined || keyIn(env, m.keyEnv) !== undefined));
+}
+
+/** Every provider this computer is set up for, in the table's own order. These are the places a copy of the image
+ * can be built at beyond the one this host forks on. */
 export function placeProviders(env: ProviderEnv, modules: readonly ProviderModule[] = PROVIDER_MODULES): ProviderModule[] {
-  return modules.filter(m => addedBy(m) !== undefined && (m.keyEnv === undefined || keyIn(env, m.keyEnv) !== undefined));
+  return modules.filter(m => isPlace(m, env));
 }
 
 /** What a row reads out of the environment, as one string: every variable it declares and its key. A row whose
@@ -190,7 +213,7 @@ export function providerPlaces(wired: () => string, backend: MachineBackend, env
     },
     backend: place => {
       if (place === wired()) return backend;
-      const row = rows().find(m => m.id === place);
+      const row = rows().find(m => placeIdOf(m, env()) === place);
       if (row === undefined) return undefined;
       const reading = providerReading(row, env());
       const held = built.get(row.id);
@@ -200,7 +223,9 @@ export function providerPlaces(wired: () => string, backend: MachineBackend, env
       return made;
     },
     list: () => {
-      const ids = rows().map(m => m.id);
+      // Each word once: a stand-in wearing a cloud this computer also holds a key for is two rows under one word,
+      // and a list with the same place twice is a picker offering one machine two homes.
+      const ids = [...new Set(rows().map(m => placeIdOf(m, env())))];
       return ids.includes(wired()) ? [wired(), ...ids.filter(id => id !== wired())] : ids;
     },
   };

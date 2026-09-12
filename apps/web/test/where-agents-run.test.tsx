@@ -95,7 +95,7 @@ afterEach(() => {
 const cells = (row: HTMLElement): string[] => within(row).getAllByRole("cell").slice(0, 4).map(c => c.textContent ?? "");
 
 describe("Where agents run", () => {
-  it("lists this computer first with its size and disk, and says how long a computer that is not answering has been away", () => {
+  it("lists this computer first with its size and disk, and says how long a computer that is not answering has been away, once", () => {
     useStore.setState({ places: [here, laptop] });
     render(<WhereAgentsRun now={NOW} />);
     const rows = screen.getAllByRole("row").slice(1);
@@ -103,11 +103,15 @@ describe("Where agents run", () => {
     expect(cells(rows[0]!)[0]).not.toContain("zingzy-mbp");
     expect(cells(rows[0]!)[0]).toContain("default");
     expect(cells(rows[0]!).slice(1)).toEqual(["8 cores · 16 GB".replace(/ /g, " "), "210 GB", "1 · agents only"]);
-    // The table's slot holds the one word; how long it has been away is on the row's title and in its detail.
-    expect(cells(rows[1]!)[0]).toContain("offline");
+    // The table's slot holds the one word for the silence, in the words every other surface says it in; how long
+    // it has been away is on the row's title and in its detail. The Workspaces cell keeps to what the computer may
+    // hold, which is a different question and used to be a second wording of this one.
+    expect(cells(rows[1]!)[0]).toContain("no answer");
+    expect(cells(rows[1]!)[0]).not.toContain("offline");
     expect(cells(rows[1]!)[0]).not.toContain("2 h");
-    expect(rows[1]!.getAttribute("title")).toBe("old-macbook offline · 2 h");
-    expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · not answering"]);
+    expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · agents only"]);
+    // The whole sentence rides the row's title, so the table and the sidebar row say one thing.
+    expect(rows[1]!.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
   });
 
   it("keeps the default mark beside the name and the state word in the slot, so a default that is away says both", () => {
@@ -115,8 +119,8 @@ describe("Where agents run", () => {
     render(<WhereAgentsRun now={NOW} />);
     const row = screen.getAllByRole("row")[1]!;
     expect(row.querySelector("[data-k='place-default']")?.textContent).toBe("default");
-    expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("offline");
-    expect(row.getAttribute("title")).toBe("This Mac default offline · 2 h");
+    expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("no answer");
+    expect(row.getAttribute("title")).toBe("This Mac is not answering; it connects on its own when it is on default");
   });
 
   it("gives the name column what the fact columns leave and cuts the name there, so the table never scrolls sideways", () => {

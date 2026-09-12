@@ -6,12 +6,17 @@
 // manifest and files a cloud daemon does, rooted at the workspace's folder,
 // and told the local kind so it reads this computer's own load and processes
 // rather than a guest's /proc.
+//
+// A caller may name the file it reads its token off. A stand-in provider's
+// machine does: the runtime rotates a machine's token by writing it through
+// that machine's own exec, which is a shell in that machine's folder, so the
+// file has to be one this daemon reads and that shell can write.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { connectDaemon, type DaemonReach } from "@wsp/runtime";
 // LOOPBACK is the protocol's, which every road that binds or dials this computer reads. Here the reason is also
 // that a firewall prompt on macOS or Windows is a wall a local workspace must never hit.
@@ -41,6 +46,11 @@ export interface LocalDaemonOptions {
   workFolder: string;
   /** The binary to spawn; this computer's own out of the daemon asset when none is named. */
   binary?: string;
+  /** The file this daemon reads its token from, for a daemon whose token something else rotates: a stand-in
+   * provider's machine, whose token the runtime writes through that machine's own exec. The first token is minted
+   * here and written there, and every later frame is checked against the file as it is then. Without one the file
+   * is this daemon's own and its token lives as long as it does. */
+  tokenPath?: string;
 }
 
 /** One watch on this computer's readings, shared by every pane that asks: the link, its listeners, and the watch
@@ -61,10 +71,23 @@ export class LocalDaemon {
     private readonly exited: Promise<void>,
     /** The folder holding the token file and the manifest, this daemon's alone, gone with it. */
     private readonly ownDir: string,
-    private readonly token: string,
+    private readonly minted: string,
     readonly port: number,
     readonly root: string,
+    /** The file the token is read back off where a caller named one; this daemon's own otherwise. */
+    private readonly tokenPath?: string,
   ) {}
+
+  /** The token this daemon opens on now: the file's contents where a caller named the file, since whatever named it
+   * rotates it and this daemon reads it at every auth frame; the minted one otherwise, which nothing rewrites. */
+  private get token(): string {
+    if (this.tokenPath === undefined) return this.minted;
+    try {
+      return readFileSync(this.tokenPath, "utf8").trim();
+    } catch {
+      return this.minted;
+    }
+  }
 
   static async start(opts: LocalDaemonOptions): Promise<LocalDaemon> {
     const bin = opts.binary ?? daemonBinaryHere();
@@ -77,7 +100,8 @@ export class LocalDaemon {
     // of what a person started sits beside it: every file the daemon reads or writes is named, and nothing is left
     // to a default under /root this computer has not got.
     const ownDir = mkdtempSync(join(tmpdir(), "wsp-local-daemon-"));
-    const tokenPath = join(ownDir, "token");
+    const tokenPath = opts.tokenPath ?? join(ownDir, "token");
+    mkdirSync(dirname(tokenPath), { recursive: true });
     writeFileSync(tokenPath, `${token}\n`, { mode: 0o600 });
     // This daemon's root is the person's home, so rootsPathIn names its roots file; the binary's default names the
     // guest's, /root, which on a Linux computer is another user's folder and answers EACCES on every op. Loopback
@@ -123,7 +147,7 @@ export class LocalDaemon {
           fail(e);
         });
       });
-      return new LocalDaemon(child, exited, ownDir, token, port, opts.root);
+      return new LocalDaemon(child, exited, ownDir, token, port, opts.root, opts.tokenPath);
     } catch (e) {
       await stop();
       rmSync(ownDir, { recursive: true, force: true });

@@ -25,6 +25,7 @@ import type { SidebarProjectSnapshot } from "../adapt/index.js";
 import { SidebarMenuButton } from "../components/ui/sidebar.js";
 import { TINTED_INK, WorkspaceGlyphMark } from "../components/workspaceLook.js";
 import { cn } from "../lib/utils.js";
+import { useAbsentComputer } from "../protocol/store.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, workspaceRowId } from "./rowGrammar.js";
 import { dotClassForTone, metaSentences, spaceHeaderLines, stateSlotWord } from "./workspaceRows.js";
@@ -59,7 +60,8 @@ export function SpaceHeader({
   onRenameOpen?: (() => void) | undefined;
 }) {
   // Which of the header's lines are sentences rather than figures; they take the ink that reads at AA.
-  const prose = metaSentences({ project, outOfMemory });
+  const absent = useAbsentComputer(project.id, nowMs);
+  const prose = metaSentences({ project, absent, outOfMemory });
   return (
     <SidebarMenuButton
       size="lg"
@@ -95,10 +97,10 @@ export function SpaceHeader({
           )}
           <span data-space-state className={cn(ROW_META_CLASS, "flex shrink-0 items-center gap-1.5 text-right")}>
             {project.workspace.glyph === undefined ? null : <StateDot project={project} />}
-            {stateSlotWord(project)}
+            {stateSlotWord(project, absent)}
           </span>
         </span>
-        {spaceHeaderLines({ project, cost, outOfMemory, nowMs }).map(line => (
+        {spaceHeaderLines({ project, absent, cost, outOfMemory, nowMs }).map(line => (
           <span key={line} data-space-meta className={cn(prose.includes(line) ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={line}>
             {line}
           </span>

@@ -20,7 +20,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/
 import { DiffSurface } from "../diffs/DiffSurface.js";
 import { FilePreviewSurface } from "../files/FilePreviewSurface.js";
 import { FilesSurface } from "../files/FilesSurface.js";
-import { useStatus, useWorkspace } from "../protocol/store.js";
+import { useAbsentComputer, useStatus, useWorkspace } from "../protocol/store.js";
 import { useRightPanelStore, type WorkspaceRightPanelState } from "../rightPanelStore.js";
 import { ScreenSurface } from "../screen/ScreenSurface.js";
 import { openPanelTerminal } from "./shellCommands.js";
@@ -44,6 +44,7 @@ export function RightPanel({
   layoutControls?: ReactNode;
 }) {
   const workspace = useWorkspace(workspaceId);
+  const absent = useAbsentComputer(workspaceId);
   const status = useStatus(workspaceId);
   const open = useRightPanelStore(s => s.open);
   const activateSurface = useRightPanelStore(s => s.activateSurface);
@@ -82,12 +83,13 @@ export function RightPanel({
       onAddProcesses={() => open(workspaceId, "processes")}
       onAddScreen={() => open(workspaceId, "screen")}
       browserAvailable={workspace?.phase === "running"}
-      terminalAvailable={workspace?.phase === "running"}
+      terminalAvailable={workspace?.phase === "running" && absent === null}
       diffAvailable={workspace?.phase === "running"}
       filesAvailable={workspace?.phase === "running"}
       machineAvailable={workspace !== null}
       machinePanelWords={kindWords(workspaceKind(workspace ?? LOCAL_UNTIL_KNOWN)).panel}
-      processesAvailable={workspace?.phase === "running"}
+      processesAvailable={workspace?.phase === "running" && absent === null}
+      {...(absent === null ? {} : { unavailableReasons: { terminal: absent.sentence, processes: absent.sentence } })}
       screenAvailable={status?.screen !== undefined}
     >
       {active?.kind === "terminal" ? (

@@ -5,7 +5,7 @@
 // and the persona lab both take this road, so the environment a fixture is
 // served under is written once rather than once per harness.
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { FAKE_AS_ENV, PERSON_HOME_ENV, WEB_DIR_ENV } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_ROOT_ENV, PERSON_HOME_ENV, WEB_DIR_ENV } from "@wsp/protocol";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
@@ -71,8 +71,13 @@ export const providerFor = state => (Object.values(state.workspaces ?? {}).some(
  * its user instructions up under the home the login record names, whatever HOME says, and a tester's turn quoted
  * the person's own instruction file back at them (measured 2026-09-12). The variable each agent reads its store
  * from is the catalog's to name, so this moves them all by one rule rather than by a word written here.
+ *
+ * A folder for the stand-in's own machines rides with it where the caller names one. A lab does: its testers open
+ * panes on those machines, and a fork with a folder has a daemon, so its terminal, its processes and its live
+ * readings answer instead of reading unreachable six ways. The screenshot run names none, since it photographs
+ * screens rather than driving machines and a daemon per fork is a process per fork on this computer.
  */
-export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, binDir }) {
+export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, binDir, standIn }) {
   const path = process.env["PATH"] ?? "/usr/bin:/bin";
   return {
     // A lab's own wsp leads the path where it has one, so a turn that shells out to wsp reaches the lab's host
@@ -85,23 +90,28 @@ export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, bi
     ...(appDir === undefined ? {} : { [WEB_DIR_ENV]: appDir }),
     ...(personHome === home ? agentStores(home) : {}),
     ...(cloud === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_AS_ENV]: cloud }),
+    ...(standIn === undefined || providerFor(state) !== "fake" ? {} : { [FAKE_ROOT_ENV]: standIn }),
   };
 }
 
-/** Every agent's store under one home, by the variable that agent reads it from: what a harness sets so a turn
- * reads the instructions, the MCP servers and the skills in that home and none of the person's. An agent whose
+/** Every agent a lab writes a store for under one home, with the folder that agent reads it from. An agent whose
  * store follows HOME alone names no variable and is not here. */
-export const agentStores = home => Object.fromEntries(CATALOG_AGENTS.flatMap(a => (a.stateHomeEnv == null ? [] : [[a.stateHomeEnv, join(home, a.stateHome)]])));
+export const agentStoreRows = home => CATALOG_AGENTS.flatMap(a => (a.stateHomeEnv == null ? [] : [{ agent: a, store: join(home, a.stateHome) }]));
+
+/** Those same stores by the variable that agent reads its own from: what a harness sets so a turn reads the
+ * instructions, the MCP servers and the skills in that home and none of the person's. The folder is read off the
+ * rows above, so the variable a host is started with and the files a lab writes cannot name two folders. */
+export const agentStores = home => Object.fromEntries(agentStoreRows(home).map(({ agent, store }) => [agent.stateHomeEnv, store]));
 
 /** Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves. A
  * secret is handed to the child and never written into the environment this answers with: the lab records and
  * prints what it started the host with, and a key in that record would be a key in a log. */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, secrets = {} }) {
+export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
-  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir });
+  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn });
   const child = spawn(process.execPath, [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort)], {
     cwd: home,
     env: { ...env, ...secrets },

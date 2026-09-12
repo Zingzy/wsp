@@ -153,6 +153,7 @@ jobs:
       # importing it, so that one is unset, while the other four read empty as unset.
       - name: Build the bundles
         env:
+          WSP_REQUIRE_DAEMON: "1"
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -207,7 +208,10 @@ jobs:
           path: daemon-bins
       - name: The daemon binaries, where the app's build stages them
         run: node packages/wspx/scripts/daemon-binary.mjs --from-artifacts daemon-bins
-      - run: pnpm --filter @wsp/desktop run build:linux
+      - name: Build the bundle
+        env:
+          WSP_REQUIRE_DAEMON: "1"
+        run: pnpm --filter @wsp/desktop run build:linux
       - name: Name the AppImage after the release, and copy it to the name that never moves
         run: |
           shopt -s nullglob
@@ -253,7 +257,10 @@ jobs:
           path: daemon-bins
       - name: The daemon binaries, where the command's build stages them
         run: node packages/wspx/scripts/daemon-binary.mjs --from-artifacts daemon-bins
-      - run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
+      - name: Build, with every daemon binary required
+        env:
+          WSP_REQUIRE_DAEMON: "1"
+        run: pnpm -r --filter '!./apps/www' --filter '!./apps/docs' --filter '!@wsp/desktop' build
       - name: Every target the host names is in the package
         run: node packages/wspx/scripts/daemon-binary.mjs --check
       - name: Attach the binaries to the draft

@@ -10,7 +10,7 @@ import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { LocalBackend } from "@wsp/engine";
 import { relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
-import { DAEMON_TOKEN_NONE } from "../src/daemon-token.js";
+import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -88,6 +88,23 @@ describe("daemon.open", () => {
     expect(quiet.events).toEqual([]);
     mine.close();
     quiet.close();
+  }, 15_000);
+
+  it("writes a machine's daemon token where that machine keeps it, and at the guest's own path where it names none", async () => {
+    daemon = await startTestDaemon();
+    const ownPath = "/tmp/stand-in/fk_c0ffee/.wsp-daemon-token";
+    // A stand-in machine's guest is a folder on the computer asking, so a shell there cannot write the path a
+    // Linux fork keeps its token at, and the whole daemon road would come back without one.
+    const { backend, workspaceId } = await served(`ws://127.0.0.1:${daemon.port}`, {
+      execImpl: (_m, cmd) => (cmd.includes(ownPath) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }),
+    });
+    Object.assign(backend.machines[0]!, { daemonTokenPath: ownPath });
+    const c = await client();
+    expect((await c.request("daemon.open", { workspaceId })).ok).toBe(true);
+    const asked = backend.machines[0]!.execLog.filter(cmd => cmd.includes(".wsp-daemon-token"));
+    expect(asked.some(cmd => cmd.includes(ownPath))).toBe(true);
+    expect(asked.some(cmd => cmd.includes(DAEMON_TOKEN_PATH))).toBe(false);
+    c.close();
   }, 15_000);
 
   it("carries the daemon's own refusal under an ok reply, and keeps a channel's events off another channel", async () => {

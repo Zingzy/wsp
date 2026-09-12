@@ -678,6 +678,12 @@ export function openingTitle(text: string): string {
   return cutLine(/^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line, OPENING_TITLE_MAX);
 }
 
+/** The most characters the third line of a workspace row holds: the row leaves 201 px for text at the sidebar's
+ * default 256 px and 11 px mono fits 30 of them there, so a longer line is cut by the width with no say in where.
+ * Here rather than in the app because the lines written for that slot are written here too, and the cut is what
+ * takes the half that says what to do off a line nobody measured. */
+export const ROW_LINE_MAX = 30;
+
 /** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
  * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
  * title from its opening turn, a sidebar row's third line. */
@@ -2753,29 +2759,12 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, one word
- * when it does not. The slot stands either way, so the word arriving moves no column, and one word is all the
- * column can hold beside the three facts the table never shrinks. */
-export function placeStateWord(view: PlaceView): string {
-  return view.present === false ? "offline" : "";
-}
-
-/** The same state with how long the computer has been away, for the row's title and anywhere else with room for
- * the figure. The table's own slot takes the word alone. */
-export function placeAwayWord(view: PlaceView, now: number): string {
-  const word = placeStateWord(view);
-  if (word === "") return "";
-  const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
-  return Number.isNaN(since) ? word : `${word} · ${offlineFor(now - since)}`;
-}
-
 /** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
- * a person may put there. A computer that is not answering says so ahead of what it cannot run, since the second
- * fact is about a computer this wsp is not talking to. */
+ * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
+ * carries that, and a row that said it twice was a row that said it in two wordings. */
 export function placeWorkspacesCell(view: PlaceView): string {
   const count = view.workspaceId === undefined ? 0 : 1;
   if (count === 0) return "0";
-  if (view.present === false) return `${count} · not answering`;
   return view.docker === true ? `${count}` : `${count} · agents only`;
 }
 

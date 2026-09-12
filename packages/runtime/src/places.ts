@@ -21,7 +21,7 @@ import {
   PLACE_LINK_NONCE_BYTES,
   forkRoom,
   placeLinkTranscript,
-  placeAbsentLine,
+  absentComputer,
   noSuchPlaceRefusal,
   placeHoldsForksRefusal,
   placeForksNowhereLine,
@@ -465,7 +465,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const linkTo = (placeId: string): MachineLink => ({
     request: async (op, params, o) => {
       const reach = live.get(placeId)?.reach;
-      if (reach === undefined) throw new PlaceAbsentError(placeAbsentLine(kept.get(placeId)?.name ?? placeId));
+      if (reach === undefined) throw new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
       return bounded(reach.request(op, params), o?.timeoutMs ?? LINK_FRAME_MS, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
     },
     forward: placePort => door.forward(placeId, placePort),
@@ -843,7 +843,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async road(placeId) {
       const held = live.get(placeId);
       const name = (await recordOf(placeId))?.name ?? placeId;
-      if (held === undefined) throw new Error(placeAbsentLine(name));
+      if (held === undefined) throw new Error(absentComputer(name, null).sentence);
       const port = (await recordOf(placeId))?.report.daemonPort;
       if (port === undefined) throw new Error(placeNoDaemonPortLine(name));
       // One port per link, opened at the first pane that asks and closed with the link it rides.
@@ -858,7 +858,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async exec(placeId, cmd, execOpts) {
       const reach = live.get(placeId)?.reach;
-      if (reach === undefined) throw new Error(placeAbsentLine((await recordOf(placeId))?.name ?? placeId));
+      if (reach === undefined) throw new Error(absentComputer((await recordOf(placeId))?.name ?? placeId, null).sentence);
       const answer = await reach.request("exec", {
         cmd,
         ...(execOpts.timeoutMs !== undefined ? { timeoutMs: execOpts.timeoutMs } : {}),
