@@ -13,8 +13,10 @@
 // than that beside the inline panel. The one label a person writes, the
 // project's name, has no bound, so its button alone is capped at the row and
 // cuts the name; the menu row says it whole. A pick rides the next
-// sessions.start and is remembered per workspace; a turn
-// already running keeps its flags and shows them meanwhile. The access pick is
+// sessions.start and is remembered per workspace, except that the model, its
+// window, the effort and the access, which a thread that has run keeps for
+// itself, apply to the thread they were picked on and to one that has not run;
+// a turn already running keeps its flags and shows them meanwhile. The access pick is
 // the exception: it is remembered on the host's own record, so the next thread
 // here starts at it whichever client or CLI opens it, and where the harness
 // takes a mode change mid-turn it reaches the turn in front of the person too.
@@ -29,7 +31,8 @@ import { DEFAULT_AGENT } from "@wsp/catalog";
 import { accessFromNextMessage, contextWindowsFor, effortsFor, type HarnessCatalog, type HarnessModel, type HarnessOption, type WorkspaceProject } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { useChosenFolder, useDefaultProject, useProjects, useRootStore } from "../../files/root";
-import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useWorkspace } from "../../protocol/store";
+import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
+import { useWhereWord } from "../../sidebar/workspaceRows";
 import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { canPickFolder } from "./ComposerCheckoutRow";
@@ -76,9 +79,10 @@ export interface ComposerPicks {
 export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle): ComposerPicks {
   const latest = useLatestSession(workspaceId);
   const kept = useComposerOptions(workspaceId);
+  const rows = useThreadSessions(workspaceId, thread.threadKey);
   const pickedOn = useComposerOptionsStore(s => s.pickedOn[workspaceId] ?? NO_THREADS);
   const picked = useMemo(() => pickedFor(kept, thread.view, pickedOn, thread.threadKey), [kept, pickedOn, thread.threadKey, thread.view]);
-  const onThread = useMemo(() => threadPicks(latest, thread.view), [latest, thread.view]);
+  const onThread = useMemo(() => threadPicks(thread.view, rows), [rows, thread.view]);
   const pinned = latest !== null && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
   const harness = (pinned ? latest.harness : picked.harness ?? latest?.harness) ?? DEFAULT_HARNESS;
   const catalog = useHarnessCatalog(harness, workspaceId);
@@ -133,7 +137,8 @@ function EffortPicker({
   picks,
 }: {
   workspaceId: string;
-  /** The thread a window pick belongs to: the window rides inside the model, so it is scoped like one. */
+  /** The thread an effort or a window pick belongs to: each is something the thread already runs at, so a pick here
+   * is a change to this thread and not to every thread of the workspace. */
   threadKey: string;
   efforts: HarnessOption[];
   contextWindows: HarnessOption[];
@@ -195,14 +200,18 @@ export interface RunningTurn {
  * it whoever opens it, and into the turn in front of the person when one runs: Claude Code moves a running turn to
  * another mode over its control channel, and a harness that takes no such change answers unsupported. `line` is what
  * the composer says then, and it stands only while the turn the pick missed is still the running one. */
-export function useAccessPick(workspaceId: string, running: RunningTurn | null): { pick: (mode: string, label: string) => void; line: string | null } {
+export function useAccessPick(workspaceId: string, running: RunningTurn | null, threadKey: string): { pick: (mode: string, label: string) => void; line: string | null } {
   const api = useStore(s => s.api);
   const setPreferences = useStore(s => s.setPreferences);
+  const stamp = useComposerOptionsStore(s => s.pick);
   const [note, setNote] = useState<{ turnId: string; line: string } | null>(null);
   const pick = useCallback(
     (mode: string, label: string) => {
       setNote(null);
       void setPreferences({ access: { [workspaceId]: mode } });
+      // The mode itself lives on the host's record, which holds one per workspace; the thread it was picked on is
+      // kept in the browser beside the other picks, so it paints this thread rather than every thread here.
+      stamp(workspaceId, "permissionMode", mode, threadKey);
       if (running === null) return;
       const missed = (): void => setNote({ turnId: running.turnId, line: accessFromNextMessage(label) });
       if (api?.setSessionAccess === undefined) {
@@ -213,7 +222,7 @@ export function useAccessPick(workspaceId: string, running: RunningTurn | null):
         if (outcome !== "set") missed();
       }, missed);
     },
-    [api, running, setPreferences, workspaceId],
+    [api, running, setPreferences, stamp, threadKey, workspaceId],
   );
   return { pick, line: note !== null && note.turnId === running?.turnId ? note.line : null };
 }
@@ -325,6 +334,7 @@ export function ComposerOptionPickers({
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
   const projects = useProjects(workspaceId);
+  const where = useWhereWord(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;
   const efforts = effortsFor(catalog, model);
@@ -336,6 +346,7 @@ export function ComposerOptionPickers({
         catalog={catalog}
         model={model}
         pinned={pinned}
+        where={where}
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);

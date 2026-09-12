@@ -3,13 +3,15 @@
 // the button; behind it a rail of the harnesses that can run a turn, a search
 // box, the models with favourites first and a jump chip per row, and a footer
 // naming where the list came from in that agent's own words, on one line
-// whatever the words are and whole on hover. Cmd-1 to cmd-9 pick a listed
-// model while the menu is open. The harness is pinned once the thread has a
-// turn: a thread is one resumed session, so picking another harness changes
-// nothing and the footer says to start a new thread for it.
+// whatever the words are and whole on hover, then two sentences that hold
+// whatever that line says: whose sign-in the turn runs on and where, and what
+// the dollar figures beside the models are. Cmd-1 to cmd-9 pick a
+// listed model while the menu is open. The harness is pinned once the thread
+// has a turn: a thread is one resumed session, so picking another harness
+// changes nothing and the footer says to start a new thread for it.
 import { ChevronDownIcon, SearchIcon, StarIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { catalogSourceLine, noModelsLine } from "@wsp/protocol";
+import { catalogSourceLine, noModelsLine, whoPaysLines } from "@wsp/protocol";
 import type { HarnessCatalog, HarnessModel } from "@wsp/protocol";
 import { cn, isMacPlatform, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -26,6 +28,8 @@ export interface ModelPickerProps {
   model: HarnessModel | null;
   /** The thread already has a turn on this harness, so the rail offers no other. */
   pinned: boolean;
+  /** Where this workspace's turns run, as the rest of the app names it, for the footer's sentences. */
+  where: string;
   onPickHarness: (harness: string) => void;
   onPickModel: (harness: string, model: string) => void;
 }
@@ -61,7 +65,7 @@ export function newThreadNotice(entry: HarnessCatalog): string {
   return `Start a new thread to use ${entry.label} here`;
 }
 
-export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHarness, onPickModel }: ModelPickerProps) {
+export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, onPickHarness, onPickModel }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -224,13 +228,20 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, onPickHa
                 })
               )}
             </div>
-            <div
-              className="truncate border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-muted-foreground/70"
-              data-composer-catalog-source={catalog.source}
-              role={notice !== null ? "status" : undefined}
-              title={notice ?? catalogSourceLine(catalog)}
-            >
-              {notice ?? catalogSourceLine(catalog)}
+            <div className="border-t border-border px-2.5 py-1.5" data-composer-model-foot>
+              <div
+                className="truncate font-mono text-[10px] text-muted-foreground/70"
+                data-composer-catalog-source={catalog.source}
+                role={notice !== null ? "status" : undefined}
+                title={notice ?? catalogSourceLine(catalog, where)}
+              >
+                {notice ?? catalogSourceLine(catalog, where)}
+              </div>
+              {whoPaysLines(catalog, where).map(line => (
+                <p key={line} className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  {line}
+                </p>
+              ))}
             </div>
           </div>
         </div>

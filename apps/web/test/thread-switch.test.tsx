@@ -11,6 +11,7 @@ import type { Api, ProtocolEvent, StartSessionOptions } from "../src/protocol/cl
 import { useStore } from "../src/protocol/store.js";
 import { press, typeInto } from "./composer-harness.js";
 import { installFakeLayout } from "./fake-layout.js";
+import { TABLE_CATALOG, whenAgentsAnswered } from "./agents.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
@@ -67,6 +68,7 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     snapshotStorage: async () => null,
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" }),
     listSessions: async () => rows,
+    listHarnesses: async () => [TABLE_CATALOG],
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => manifest,
   };
@@ -100,6 +102,7 @@ function shellOf(container: HTMLElement) {
 
 async function mount(fixture = fixtureApi(), latest = "Checking the keychain.") {
   useStore.getState().bind(fixture.api);
+  await whenAgentsAnswered();
   const view = shellOf(render(<Shell />).container);
   // The first paint is polled for: a stale case's open act scope can hold this render's work until it closes.
   await waitFor(() => expect(view.center().getByText(latest)).toBeDefined());
