@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { screenCommandLine, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -12,6 +12,8 @@ import type { Api, ConnStatus, ProtocolEvent, StartSessionOptions } from "../src
 import { WorkspaceThread } from "../src/shell/WorkspaceThread.js";
 import { composerSendBlock } from "../src/components/chat/ChatComposer.js";
 import { SEND_LABEL, WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions.js";
+import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
+import { NOT_READY_NAMES } from "../screenshots/ready.mjs";
 import { useComposerDraftStore } from "../src/components/chat/composerDraftStore.js";
 import { requestComposerFocus, requestNewThread } from "../src/shell/shellRequests.js";
 import { CHAT_HARNESS, CHAT_STREAM, CHAT_TURN, CHAT_WS } from "./fixtures/chat-stream.js";
@@ -372,6 +374,20 @@ describe("composer while the workspace is not live", () => {
     expect(sendButton().disabled).toBe(true);
     await typeInto(composerEditor(), "hello");
     expect(sendButton().disabled).toBe(false);
+  });
+
+  it("says it is connecting in the same words the harness that drives this app waits on", async () => {
+    const { api } = fixtureApi([workspace]);
+    await setup(api, "connecting");
+    // One file holds the word. The button renders it, and the harness that drives the built app reads it to know
+    // the app is not ready for a key press yet; a second spelling in either place puts a driven step back on a
+    // page that is still loading, with nothing said about it.
+    expect(sendButton().getAttribute("aria-label")).toBe(SEND_BLOCK_WORDS.connecting);
+    expect(NOT_READY_NAMES).toContain(SEND_BLOCK_WORDS.connecting);
+    // The composer's own states are the other half of that list, and the two names it exports come from the same
+    // file, so every word the button can wear has exactly one home.
+    expect(NOT_READY_NAMES).toContain(COMPOSER_STATE_WORDS.connecting);
+    expect([SEND_LABEL, WAKE_AND_SEND_LABEL]).toEqual([COMPOSER_STATE_WORDS.send, COMPOSER_STATE_WORDS.wakeAndSend]);
   });
 
   it("a running workspace's button reads plain Send", async () => {

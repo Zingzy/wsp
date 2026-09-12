@@ -1,12 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The throwaway states a screenshot run and a persona lab serve, one per kind
 // of person: what their sidebar holds, whether an image is sealed, and what
-// their threads say. The default is a person with this computer alone, three
-// workspaces of the local kind, folders imported into two of them and two
-// threads with the transcript each replays, so no surface is photographed
-// empty; the rest vary the setup a tester meets. Nothing here is a real
-// machine, a real key or a real folder, and the forks are served by the
-// provider that answers out of memory, so no fixture dials anything.
+// their threads say. The default is what the screenshot run photographs, this
+// computer with work on it, three workspaces of the local kind, folders
+// imported into two of them and two threads with the transcript each replays,
+// so no surface is photographed empty; the rest vary the setup a tester meets.
+// Nothing here is a real machine, a real key or a real folder, and the forks
+// are served by the provider that answers out of memory, so no fixture dials
+// anything.
+//
+// Every folder a fixture names sits under this computer's own home, and a
+// workspace of the local kind is named the way wsp names one here. A tester
+// given somebody else's home and somebody else's threads spent their first
+// minute working out whose Mac they were on.
+import { homedir, hostname } from "node:os";
+import { join } from "node:path";
+
+/** This computer, as the app would show it to the person sitting at it: their own home, and the name wsp gives a
+ * workspace of the local kind, which is this computer's host name. */
+const HOME = homedir();
+const THIS_COMPUTER = hostname();
 
 /** Every stamp hangs off the hour this run started in rather than a date written here: the app words a
  * thread's time as a distance from now, and a fixed date would drift into the future and read "now" on
@@ -22,12 +35,12 @@ const workspace = (id, name, extra = {}) => ({
   kind: "local",
   golden: "",
   createdAt: new Date(ago(60 * 26)).toISOString(),
-  home: "/Users/dev",
-  folder: "/Users/dev",
+  home: HOME,
+  folder: HOME,
   ...extra,
 });
 
-const project = (name, size, minutes) => ({ name, dest: `/Users/dev/${name}`, importedAt: new Date(ago(minutes)).toISOString(), size });
+const project = (name, size, minutes) => ({ name, dest: join(HOME, name), importedAt: new Date(ago(minutes)).toISOString(), size });
 
 const turn = (thread, minutes, workspaceId = "ws_api") => ({
   id: `s_${thread.id}`,
@@ -42,7 +55,7 @@ const turn = (thread, minutes, workspaceId = "ws_api") => ({
   titleSource: "harness",
   startedAt: ago(minutes),
   endedAt: ago(minutes - 3),
-  cwd: thread.cwd ?? "/Users/dev/spoo",
+  cwd: thread.cwd ?? join(HOME, "spoo"),
   model: "opus",
   permissionMode: "default",
   ...(thread.parent === undefined ? {} : { parentThreadId: `th_${thread.parent}`, rootThreadId: `th_${thread.root}` }),
@@ -53,7 +66,7 @@ const event = (thread, rest, workspaceId = "ws_api") => ({ workspaceId, sessionI
 /** A whole turn as the transcript holds it: the person's words, a thought, one tool call and its result,
  * the reply, and the two events that close it. */
 const replay = (thread, minutes, workspaceId = "ws_api") => [
-  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? "/Users/dev/spoo" }, workspaceId),
+  event(thread, { type: "session.start", at: ago(minutes), prompt: thread.prompt, model: "opus", cwd: thread.cwd ?? join(HOME, "spoo") }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "thinking", text: thread.thought }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 1), kind: "tool_use", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.input }, workspaceId),
   event(thread, { type: "session.delta", at: ago(minutes - 2), kind: "tool_result", toolName: thread.tool.name, toolUseId: `tu_${thread.id}`, text: thread.tool.result }, workspaceId),
@@ -192,9 +205,10 @@ const merge = (...parts) => ({
 
 const API_THREADS = () => threadsOn("ws_api", [[CHART, 300], [REDIRECT, 45]]);
 
-/** This computer alone: three workspaces of the local kind, no image sealed, so the cloud setup button stands in
- * the sidebar's foot. */
-const macOnly = () =>
+/** This computer after a while of use: three workspaces of the local kind, folders imported into two of them,
+ * threads on one, and no image sealed, so the cloud setup button stands in the sidebar's foot. What the screenshot
+ * run photographs, since a surface with nothing on it shows a reviewer nothing. */
+const macInUse = () =>
   store({
     workspaces: [
       workspace("ws_api", "api", { projects: [project("spoo", 48_200_000, 60 * 20), project("wsp", 133_000_000, 60 * 5)] }),
@@ -203,6 +217,12 @@ const macOnly = () =>
     ],
     ...API_THREADS(),
   });
+
+/** This computer and nothing else, as the person sitting at it first meets it: one workspace, named after this
+ * computer, with no folder imported and no thread on it. Two personas are given this one, the person with a Mac
+ * and nothing else and the person who will sign in to nothing, because what those two meet is the same window;
+ * what differs is what they try to do in it. */
+const thisComputer = () => store({ workspaces: [workspace("ws_here", THIS_COMPUTER)] });
 
 /** This computer and an old laptop that redeemed a pairing code: a second workspace of the local kind, its own
  * home, and the paired computer in the devices collection. */
@@ -254,17 +274,13 @@ const solariOnly = () =>
 const bothProviders = () =>
   store({
     workspaces: [
-      workspace("ws_here", "this-mac", { projects: [project("wsp", 133_000_000, 60 * 5)] }),
+      workspace("ws_here", THIS_COMPUTER, { projects: [project("wsp", 133_000_000, 60 * 5)] }),
       fork("ws_api", "api", "fk_ascii_1", { projects: [project("spoo", 48_200_000, 60 * 20)] }),
       fork("ws_web", "web", "fk_slr_2.paused", { phase: "napping" }),
     ],
     ...API_THREADS(),
     goldens: sealed(),
   });
-
-/** A person who signed in to nothing: one workspace of the local kind, no threads, no image. The emptiest the app
- * ever is with a host running. */
-const noSignIn = () => store({ workspaces: [workspace("ws_here", "this-mac")] });
 
 /** A person who drives agents with agents: this computer with spawning on, three forks a root thread made, and a
  * thread on each hanging under that root. */
@@ -273,7 +289,7 @@ const orchestrator = () => {
   const tree = { parentThreadId: "th_migrate", rootThreadId: "th_migrate" };
   return store({
     workspaces: [
-      workspace("ws_here", "this-mac", { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
+      workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
       fork("ws_api", "api", "fk_run_1", tree),
       fork("ws_web", "web", "fk_run_2", tree),
       fork("ws_docs", "docs", "fk_run_3.paused", { ...tree, phase: "napping" }),
@@ -290,21 +306,22 @@ const orchestrator = () => {
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: adding one is a row
  * here and its builder above. */
 const FIXTURES = {
-  "mac-only": macOnly,
+  "mac-in-use": macInUse,
+  "mac-only": thisComputer,
   "mac-and-laptop": macAndLaptop,
   "mac-and-vps": macAndVps,
   "ascii-only": asciiOnly,
   "solari-only": solariOnly,
   "both-providers": bothProviders,
-  "no-sign-in": noSignIn,
+  "no-sign-in": thisComputer,
   orchestrator,
 };
 
 export const FIXTURE_NAMES = Object.keys(FIXTURES);
 
-/** The whole store one fixture serves. The default is the person with this computer alone, which is what the
- * screenshot run photographs. */
-export function fixtureState(name = "mac-only") {
+/** The whole store one fixture serves. The default is this computer with work on it, which is what the screenshot
+ * run photographs. */
+export function fixtureState(name = "mac-in-use") {
   const build = FIXTURES[name];
   if (build === undefined) throw new Error(`no fixture is called ${name}; there is ${FIXTURE_NAMES.join(", ")}`);
   return build();
