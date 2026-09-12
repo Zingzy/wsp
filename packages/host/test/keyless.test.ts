@@ -68,7 +68,7 @@ describe("a computer with no machine provider key", () => {
     expect(made.errors).toEqual([]);
     // The kind's own word for the machine, and under it the key the one dial read, to compare with the machine's own.
     const [created, notice] = made.lines[0]!.split("\n");
-    expect(created).toMatch(/^created box ws_[0-9a-f]+ \(a machine over ssh\)$/);
+    expect(created).toMatch(/^created box ws_[0-9a-f]+ \(a computer over ssh\)$/);
     expect(notice).toContain("ssh-ed25519 SHA256:box");
 
     const listed = captured();
@@ -76,7 +76,7 @@ describe("a computer with no machine provider key", () => {
     const rows = listed.lines[0]!.split("\n");
     expect(rows[0]).toMatch(/^WORKSPACE/);
     expect(rows.map(r => r.split(/ {2,}/)[0])).toEqual(["WORKSPACE", "mybox", "box"]);
-    expect(rows[2]).toContain("a machine over ssh");
+    expect(rows[2]).toContain("a computer over ssh");
   });
 
   it("makes this computer the workspace, serves it and lists it, with no key and nothing asked", async () => {

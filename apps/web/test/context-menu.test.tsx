@@ -10,7 +10,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type ContextMenuItem, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, threadForgetRefusal, type ContextMenuItem, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -43,6 +43,7 @@ import { provideTerminals, WorkspaceTerminals, type TerminalWire } from "../src/
 import { fakeWire, LEVELS, resetSurfaces, WS } from "./surface-harness.js";
 import { statusOf } from "./workspace-status.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
@@ -58,6 +59,7 @@ type FakeApi = Api & {
   nap: ReturnType<typeof vi.fn>;
   interruptSession: ReturnType<typeof vi.fn>;
   forget: ReturnType<typeof vi.fn>;
+  forgetThread: ReturnType<typeof vi.fn>;
   renameSession: ReturnType<typeof vi.fn>;
   renameWorkspace: ReturnType<typeof vi.fn>;
   setWorkspaceLook: ReturnType<typeof vi.fn>;
@@ -74,6 +76,10 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     forget: vi.fn(async () => {}),
+    // The runtime drops the thread's rows, so the next listing is short of them, as the real one is.
+    forgetThread: vi.fn(async (threadId: string) => {
+      for (let i = sessions.length - 1; i >= 0; i--) if (sessions[i]!.threadId === threadId) sessions.splice(i, 1);
+    }),
     rebuild: async id => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" }),
     interruptSession: vi.fn(async () => "accepted" as const),
     // The runtime keeps the name on the row, so the next listing carries it, as the real one does.
@@ -105,7 +111,7 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -119,6 +125,8 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 const API = view("ws_a", "api");
 const OLD: WorkspaceView = { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" };
 const RUNNING: SessionView = { id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", prompt: "fix the port list", threadId: "thr_1", startedAt: Date.now() - 60_000 };
+/** A launch that never started an agent: a failed row under a thread no harness ever announced a session for. */
+const NEVER_RAN: SessionView = { id: "s2", workspaceId: "ws_a", harness: "claude", status: "failed", prompt: "never got going", threadId: "thr_2", startedAt: Date.now() - 30_000, endedAt: Date.now() - 30_000 };
 
 const clipboard = () => {
   const writeText = vi.fn(async (_text: string) => {});
@@ -236,7 +244,7 @@ describe("a workspace row's menu", () => {
     expect(item(WORKSPACE_WORDS.pause).getAttribute("aria-disabled")).toBeNull();
     expect(item(WORKSPACE_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(WORKSPACE_WORDS.rename)).toBeNull();
-    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose machine is gone can be forgotten; this one is running");
+    expect(refusalOf(WORKSPACE_WORDS.forget)).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
@@ -286,7 +294,7 @@ describe("a workspace row's menu", () => {
     rightClick(rowOf("api"));
     await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.copyId));
-    await waitFor(() => expect(useStore.getState().toast).toBe("Copy machine id: The clipboard is not available here"));
+    await waitFor(() => expect(useStore.getState().toast).toBe("Copy computer id: The clipboard is not available here"));
     const writeText = clipboard();
     rightClick(rowOf("api"));
     await screen.findByRole("menu");
@@ -408,11 +416,12 @@ describe("a thread row's menu", () => {
     const row = rowOf("fix the port list");
     rightClick(row);
     await screen.findByRole("menu");
-    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.delete]);
+    expect(labels()).toEqual([THREAD_WORDS.stop, THREAD_WORDS.rename, THREAD_WORDS.copyLink, THREAD_WORDS.forget]);
     // The agent's own store keeps a name, and the row is the box: the rename runs.
     expect(item(THREAD_WORDS.rename).getAttribute("aria-disabled")).toBeNull();
     expect(refusalOf(THREAD_WORDS.rename)).toBeNull();
-    expect(item(THREAD_WORDS.delete).getAttribute("aria-disabled")).toBe("true");
+    expect(item(THREAD_WORDS.forget).getAttribute("aria-disabled")).toBe("true");
+    expect(refusalOf(THREAD_WORDS.forget)).toBe(threadForgetRefusal("thr_1"));
     fireEvent.click(item(THREAD_WORDS.stop));
     await waitFor(() => expect(api.interruptSession).toHaveBeenCalledWith("s1"));
     rightClick(row);
@@ -421,6 +430,20 @@ describe("a thread row's menu", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}${window.location.pathname}#w/ws_a/t/thr_1`));
     // The workspace row's menu did not open under the thread's.
     expect(screen.queryByText(WORKSPACE_WORDS.pause)).toBeNull();
+  });
+
+  it("Forget drops a thread no turn ever ran on through the runtime, and its row leaves the sidebar", async () => {
+    const api = fakeApi([API], [statusOf(API)], [{ ...RUNNING }, { ...NEVER_RAN }]);
+    await mountSidebar(api, "api");
+    rightClick(rowOf("never got going"));
+    await screen.findByRole("menu");
+    expect(item(THREAD_WORDS.forget).getAttribute("aria-disabled")).toBeNull();
+    expect(refusalOf(THREAD_WORDS.forget)).toBeNull();
+    fireEvent.click(item(THREAD_WORDS.forget));
+    await waitFor(() => expect(api.forgetThread).toHaveBeenCalledWith("thr_2"));
+    await waitFor(() => expect(screen.queryByText("never got going")).toBeNull());
+    // The thread beside it is untouched.
+    expect(screen.getByText("fix the port list")).toBeDefined();
   });
 
   it("Rename turns the row's title into an input in place, and Enter names the thread through the runtime", async () => {

@@ -56,7 +56,7 @@ export function MachineSurface({ workspaceId }: { workspaceId: string }) {
       <Empty className="flex-1">
         <EmptyHeader>
           <EmptyTitle>No workspace selected.</EmptyTitle>
-          <EmptyDescription>Pick a workspace in the sidebar to see its machine.</EmptyDescription>
+          <EmptyDescription>Pick a workspace in the sidebar to see it.</EmptyDescription>
         </EmptyHeader>
       </Empty>
     );
@@ -166,11 +166,11 @@ function Facts({ workspace, status, awakeMs, pendingSize, kind }: FactsProps) {
   // is the surface with room for the command a person types on their own machine.
   const daemonLacks = (status ?? workspace).daemonRefusedAt?.why;
   return (
-    <Section label="Machine">
+    <Section label="Workspace">
       <div className="mt-1 divide-y divide-border/40">
-        <Row label="State" k="state" title={diverged ? `${phaseLabel(workspace.phase)} · machine ${diverged}` : phaseLabel(workspace.phase)}>
+        <Row label="State" k="state" title={diverged ? `${phaseLabel(workspace.phase)} · computer ${diverged}` : phaseLabel(workspace.phase)}>
           {phaseLabel(workspace.phase)}
-          {diverged && <span className="text-muted-foreground"> · machine {diverged}</span>}
+          {diverged && <span className="text-muted-foreground"> · computer {diverged}</span>}
         </Row>
         <Row label="Reach" k="reach" title={status ? reachLabel(status.reach.state, workspaceKind(workspace)) : "pending"}>
           {status ? (
@@ -304,7 +304,7 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
     try {
       const taken = await api.snapshotWorkspace(workspace.id);
       onTaken(taken);
-      setNote(`Project golden of ${taken.projects.map(p => p.name).join(", ")} taken. New forks of it start with the projects in place.`);
+      setNote(`Project golden of ${taken.projects.map(p => p.name).join(", ")} taken. New workspaces from it start with the projects in place.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -386,7 +386,7 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
     setNote(null);
     try {
       await api.rebuild(workspace.id);
-      setNote("Machine rebuilt from the golden.");
+      setNote("Workspace rebuilt from the golden.");
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -409,8 +409,8 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
           <AlertDialogHeader>
             <AlertDialogTitle>Rebuild {workspace.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              A fresh fork of the golden replaces this machine and imports its nap-time vault. The old machine is killed whatever it
-              reports; anything running on it ends. Forking a new machine costs a wake.
+              A fresh copy of the golden replaces this workspace's computer and imports its nap-time vault. The old one is stopped
+              whatever it reports; anything running on it ends. Starting a new one costs a wake.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -607,7 +607,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
     try {
       const result = await api.rollbackSnapshot(version);
       setLineage(result.lineage);
-      setNote(`New forks use v${version}. Existing workspaces keep their image.`);
+      setNote(`New workspaces use v${version}. Existing workspaces keep their image.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -630,8 +630,10 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
     }
   };
 
+  // A copy of a project image, named after the project it carries: the name is the row's title in the sidebar, so
+  // it reads as what it is rather than as the verb underneath.
   const fork = (g: ProjectGolden): void => {
-    void createWorkspace(`${goldenForkName(g)}-fork`, g.snapshotId);
+    void createWorkspace(`${goldenForkName(g)}-copy`, g.snapshotId);
   };
 
   const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;
@@ -652,7 +654,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
           title={<span className="font-medium">Live disk</span>}
-          detail={`forked ${workspace.createdAt.slice(0, 10)}`}
+          detail={`created ${workspace.createdAt.slice(0, 10)}`}
           marks={["now"]}
         />
         {versions.length === 0 ? (
@@ -732,8 +734,8 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
           <AlertDialogHeader>
             <AlertDialogTitle>Roll back to v{armed?.version}?</AlertDialogTitle>
             <AlertDialogDescription>
-              New forks use v{armed?.version}; head moves from v{lineage?.head} to v{armed?.version}. Workspaces already forked keep
-              their image.
+              New workspaces use v{armed?.version}; head moves from v{lineage?.head} to v{armed?.version}. Workspaces already made
+              keep their image.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -799,8 +801,8 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
           detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.projects.at(-1)?.importedAt.slice(0, 10) ?? "never"} · from ${g.workspaceName}`}
           marks={g.snapshotId === forkOf ? ["fork"] : []}
           aside={
-            <Button size="xs" variant="outline" disabled={busy} aria-label={`fork ${goldenForkName(g)} from ${g.snapshotId}`} onClick={() => onFork(g)}>
-              Fork
+            <Button size="xs" variant="outline" disabled={busy} aria-label={`new workspace ${goldenForkName(g)} from ${g.snapshotId}`} onClick={() => onFork(g)}>
+              New workspace
             </Button>
           }
         />

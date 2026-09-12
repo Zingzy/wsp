@@ -17,6 +17,7 @@ import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
 import { appTerminalFontSize } from "../src/terminal/ghostty/surface.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const FILE: TerminalConfig = { files: ["/Users/dev/.config/ghostty/config"], fontFamily: [], fontSize: 16, palette: Array<null>(16).fill(null) };
 const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
@@ -38,7 +39,7 @@ function fakeApi(record: Preferences, file: TerminalConfig | null = FILE) {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -89,7 +90,7 @@ describe("the settings page", () => {
     useStore.getState().bind(api);
     await flush();
     render(<SettingsPage />);
-    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-about"]);
+    expect(screen.getAllByRole("region").map(s => s.getAttribute("aria-labelledby"))).toEqual(["settings-appearance", "settings-terminal", "settings-where", "settings-about"]);
     expect(screen.getByText("Appearance").tagName).toBe("H2");
     expect(screen.getByText("Terminal").tagName).toBe("H2");
     expect(screen.getByText("About").tagName).toBe("H2");

@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PLACE_PORT,
+  DEFAULT_PORT,
+  DEFAULT_WS_PORT,
+  EventUnion,
   GUEST_DAEMON_DIR,
   GUEST_WSP_BIN,
   PLACE_ADD_WORDS,
   PLACE_LINK_NONCE_BYTES,
+  PLACE_PORT_OFFSET,
   PlaceAddStep,
   PlaceAuthRequest,
   PlaceJoinReply,
   PlaceJoinRequest,
+  PlaceReport,
+  joinAddressOf,
+  sentPairCode,
+  shownPairCode,
   WORKSPACE_KIND_WORDS,
   deleteNotice,
   placeDaemonPaths,
@@ -30,6 +39,7 @@ const report = {
   login: { HOME: "/Users/maya", USER: "maya", PATH: "/usr/bin" },
   docker: false,
   daemonVersion: 17,
+  agents: [],
   wsp: ["/usr/local/bin/wsp"],
   dialed: "http://192.168.1.20:4400",
 };
@@ -102,7 +112,7 @@ describe("the words a place's workspace carries", () => {
   });
 
   it("says the computer stays joined when a workspace on it is deleted, since wsp remove is what takes the agent off", () => {
-    expect(deleteNotice(0, "place")).toContain("computer stays joined as a place");
+    expect(deleteNotice(0, "place")).toContain("computer stays joined to this wsp");
     expect(deleteNotice(0, "place")).toContain("wsp remove");
   });
 });
@@ -115,17 +125,6 @@ describe("where a daemon on somebody's own computer keeps things", () => {
   it("names the work folder by the one rule this computer's own workspace reads", () => {
     expect(workFolderIn("/Users/maya/")).toBe("/Users/maya/wsp-work");
     expect(placeDaemonPaths("/Users/maya").tokenPath).toBe("/Users/maya/.wsp/daemon-token");
-  });
-});
-
-describe("what a host tells a computer it has just taken in", () => {
-  const reply = { placeId: "p_1", hostPublicKey: publicKey, nonce, signature: Buffer.alloc(64, 9).toString("base64") };
-
-  it("may name every address it answers on, and refuses a word that is no address", () => {
-    expect(PlaceJoinReply.safeParse({ ...reply, hostUrls: ["http://10.0.0.2:4400", "https://p_x.example.com"] }).success).toBe(true);
-    // A host that answered before it said so leaves it out, and the computer keeps the address it typed.
-    expect(PlaceJoinReply.safeParse(reply).success).toBe(true);
-    expect(PlaceJoinReply.safeParse({ ...reply, hostUrls: ["10.0.0.2:4400"] }).success).toBe(false);
   });
 });
 
@@ -148,5 +147,78 @@ describe("where a computer joined as a place keeps its own two files", () => {
   it("names the wsp command in a bundle by one rule, which a fork and a joined computer both read", () => {
     expect(wspBinIn(GUEST_DAEMON_DIR)).toBe(GUEST_WSP_BIN);
     expect(wspBinIn("/home/maya/.wsp/daemon")).toBe("/home/maya/.wsp/daemon/wsp/dist/bin.js");
+  });
+});
+
+describe("the address a person types on the join screen", () => {
+  it("makes a bare host and port into the http address the join road dials", () => {
+    expect(joinAddressOf("192.168.1.20:4420")).toBe("http://192.168.1.20:4420");
+    expect(joinAddressOf("  old-macbook.local:4420 ")).toBe("http://old-macbook.local:4420");
+  });
+
+  it("leaves an address that already carries a scheme alone", () => {
+    expect(joinAddressOf("https://p_x.singhi.me")).toBe("https://p_x.singhi.me");
+    expect(joinAddressOf("http://192.168.1.20:4420")).toBe("http://192.168.1.20:4420");
+  });
+
+  it("is nothing for a word that names no port and for a scheme this road cannot dial", () => {
+    expect(joinAddressOf("box")).toBeUndefined();
+    expect(joinAddressOf("")).toBeUndefined();
+    expect(joinAddressOf("ws://x")).toBeUndefined();
+  });
+});
+
+describe("the port the door for computers you own answers on", () => {
+  it("sits the offset above the app port and is not the runtime's own", () => {
+    expect(DEFAULT_PLACE_PORT).toBe(DEFAULT_PORT + 20);
+    expect(PLACE_PORT_OFFSET).toBe(20);
+    expect(DEFAULT_PLACE_PORT).not.toBe(DEFAULT_WS_PORT);
+  });
+});
+
+describe("what a join carrying the app's own ask may send", () => {
+  it("takes a client the window's token is minted for, and refuses one with no name", () => {
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "7QK3M2VD", publicKey, nonce, report, client: { name: "old-macbook" } }).success).toBe(true);
+    expect(PlaceJoinRequest.safeParse({ id: 1, op: "place.join", code: "7QK3M2VD", publicKey, nonce, report, client: { name: "" } }).success).toBe(false);
+  });
+
+  it("answers the primary computer's name, and a device only with both halves of it", () => {
+    const signature = Buffer.alloc(64, 5).toString("base64");
+    const base = { placeId: "p_1", hostPublicKey: publicKey, nonce, signature, hostName: "zingzy-mbp" };
+    expect(PlaceJoinReply.safeParse(base).success).toBe(true);
+    expect(PlaceJoinReply.safeParse({ ...base, hostName: "" }).success).toBe(false);
+    expect(PlaceJoinReply.safeParse({ ...base, device: { deviceId: "d_1", deviceToken: "" } }).success).toBe(false);
+    expect(PlaceJoinReply.safeParse({ ...base, device: { deviceId: "d_1", deviceToken: "t" } }).success).toBe(true);
+  });
+
+  it("takes the agents a computer found on itself, up to the cap the sentence they land in can hold", () => {
+    expect(PlaceReport.safeParse({ ...report, agents: ["claude", "codex"] }).success).toBe(true);
+    expect(PlaceReport.safeParse({ ...report, agents: Array.from({ length: 33 }, () => "claude") }).success).toBe(false);
+  });
+});
+
+describe("the four events a computer you own rides the runtime's own stream on", () => {
+  const place = { id: "p_1", kind: "computer" as const, name: "old-macbook", default: true };
+
+  it("parses each with the sequence every other event carries", () => {
+    expect(EventUnion.safeParse({ type: "place.joined", place, from: "192.168.1.34", seq: 3 }).success).toBe(true);
+    expect(EventUnion.safeParse({ type: "place.present", placeId: "p_1", from: "192.168.1.34", seq: 4 }).success).toBe(true);
+    expect(EventUnion.safeParse({ type: "place.absent", placeId: "p_1", seq: 5 }).success).toBe(true);
+    expect(EventUnion.safeParse({ type: "place.removed", placeId: "p_1", seq: 6 }).success).toBe(true);
+  });
+
+  it("refuses a join with no address it came from, since the sheet says where it connected from", () => {
+    expect(EventUnion.safeParse({ type: "place.joined", place, seq: 3 }).success).toBe(false);
+  });
+});
+
+describe("a pairing code as a person reads it and as the host takes it", () => {
+  it("shows in two halves and comes back as the letters alone, whichever screen it was copied off", () => {
+    expect(shownPairCode("QW4K7PZX")).toBe("QW4K-7PZX");
+    expect(shownPairCode("qw4k7pzx")).toBe("QW4K-7PZX");
+    expect(shownPairCode("QW4K")).toBe("QW4K");
+    expect(sentPairCode("QW4K-7PZX")).toBe("QW4K7PZX");
+    expect(sentPairCode("qw4k-7pzx")).toBe("QW4K7PZX");
+    expect(sentPairCode(shownPairCode("QW4K7PZX"))).toBe("QW4K7PZX");
   });
 });

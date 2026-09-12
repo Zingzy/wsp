@@ -4,7 +4,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { SIDEBAR_DEFAULT_WIDTH } from "../src/shell/sidebarWidth.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, HOST_ASLEEP_LINE, type WorkspaceView } from "@wsp/protocol";
 import { App } from "../src/App.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
@@ -13,6 +13,7 @@ import { RIGHT_PANEL_WIDTH_STORAGE_KEY, useRightPanelStore } from "../src/rightP
 import { AppShell } from "../src/shell/AppShell.js";
 import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { caps } from "./caps.js";
+import { noDaemonApi } from "./fake-daemon-api.js";
 
 const view = (id: string, name: string): WorkspaceView => ({
   id,
@@ -38,7 +39,7 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
-    daemonReach: async () => ({ url: "ws://127.0.0.1:1", expiresAt: 0 }),
+    daemon: noDaemonApi,
     sessionHistory: async () => [],
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     snapshotStorage: async () => null,
@@ -62,6 +63,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   window.innerWidth = JSDOM_INNER_WIDTH;
+  delete (window as unknown as { __WSP__?: unknown }).__WSP__;
 });
 
 async function mountShell() {
@@ -76,6 +78,11 @@ async function mountShell() {
 }
 
 const tabbar = () => document.querySelector("[data-right-panel-tabbar]");
+/** The boot object the host inlined into this page: with a token it was served on this computer's loopback, without
+ * one it was served beyond it, which is the app's one reading of a window on another computer. */
+const served = (token: string | undefined): void => {
+  (window as unknown as { __WSP__?: unknown }).__WSP__ = { wsPort: 7788, wsPath: "/ws", paired: true, version: "0.0.0", ...(token === undefined ? {} : { token }) };
+};
 // Lets the kit's post-mount effects (scroll fades, the machine surface's lineage fetch) settle inside act.
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
 
@@ -87,7 +94,9 @@ describe("app shell", () => {
     expect(sidebar?.textContent).toContain("api");
     expect(screen.getByText("center content")).toBeTruthy();
     expect(tabbar()).not.toBeNull();
-    expect(screen.getByText("Open a surface")).toBeTruthy();
+    // The launcher's own words, in the person's word for one of these: a panel, never a surface.
+    expect(screen.getByText("Open a panel")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("surface");
   });
 
   it("toggles the right panel from the layout control", async () => {
@@ -211,13 +220,13 @@ describe("app shell", () => {
     expect(useStore.getState().preferences.sidebarWidth).toBe(220);
   });
 
-  it("opens the machine surface from the picker", async () => {
+  it("opens the workspace surface from the picker", async () => {
     await mountShell();
-    fireEvent.click(screen.getByText("Machine", { selector: "span" }).closest("button")!);
+    fireEvent.click(screen.getByText("Workspace", { selector: "span" }).closest("button")!);
     await settle();
     expect(screen.queryByText("Open a surface")).toBeNull();
     const tab = document.querySelector('[data-active-tab="true"]');
-    expect(tab?.textContent).toContain("Machine");
+    expect(tab?.textContent).toContain("Workspace");
     const content = document.querySelector("[data-right-panel-surface-content]");
     expect(content?.textContent).toContain("m_ws_a");
     expect(useRightPanelStore.getState().byWorkspaceId["ws_a"]?.activeSurfaceId).toBe("machine");
@@ -310,6 +319,22 @@ describe("disconnected banner", () => {
     act(() => useStore.setState({ conn: "closed" }));
     expect(screen.getByText("wsp is not running.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Reload" })).toBeTruthy();
+  });
+
+  it("is held back on a window the host did not serve on this computer: there the sidebar says the computer is asleep, and the banner is for a wsp that stopped where this window is", async () => {
+    served(undefined);
+    await mountShell();
+    act(() => useStore.setState({ conn: "reconnecting" }));
+    expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
+    expect(screen.queryByText("wsp is not running, reconnecting.")).toBeNull();
+    expect(screen.getByText(HOST_ASLEEP_LINE)).toBeTruthy();
+    act(() => useStore.setState({ conn: "closed" }));
+    expect(document.querySelector("[data-disconnected-banner]")).toBeNull();
+    // The same window with the host's own token is on the computer wsp runs on, where the banner is the right words.
+    served("t_local");
+    act(() => useStore.setState({ conn: "reconnecting" }));
+    expect(screen.getByText("wsp is not running, reconnecting.")).toBeTruthy();
+    expect(screen.queryByText(HOST_ASLEEP_LINE)).toBeNull();
   });
 });
 

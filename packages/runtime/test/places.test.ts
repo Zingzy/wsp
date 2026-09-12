@@ -10,6 +10,8 @@ import type WebSocket from "ws";
 import {
   NO_PLACE_INSTALLER,
   PLACE_CODE_REFUSAL,
+  PLACE_DOOR_REFUSAL,
+  PLACE_DOOR_UNSERVED,
   PLACES_TICKET_REFUSAL,
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
@@ -45,10 +47,14 @@ afterEach(async () => {
   runtime = undefined;
 });
 
+/** The addresses a joining computer is told to dial, as the host's own door answers them: the install is handed
+ * them rather than reading them a second time. */
+const DOOR = ["http://192.168.1.20:4400"];
+
 const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, docker: true };
 
 function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }): PlaceWiring {
-  return { hostKey, provider: () => provider, here: () => HERE, addresses: () => ["http://192.168.1.20:4400"] };
+  return { hostKey, provider: () => provider, here: () => HERE, hostName: () => "zingzys-mac" };
 }
 
 const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceReport => ({
@@ -61,6 +67,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
   docker: true,
   daemonVersion: 17,
+  agents: [],
   wsp: ["/home/maya/.npm-global/bin/wsp"],
   dialed: "http://host.docker.internal:14621",
   ...over,
@@ -89,13 +96,13 @@ const signWith = (pem: string, bytes: Uint8Array): string => sign(null, bytes, c
 /** One join, as a computer would make it: the frame, the check of the host's own signature, and the prove. */
 async function join(
   hostKey: PlaceKeyPair,
-  opts: { code: string; name?: string; report?: PlaceReport; proveReport?: PlaceReport; expectProved?: boolean } = { code: "" },
+  opts: { code: string; name?: string; client?: { name: string }; report?: PlaceReport; proveReport?: PlaceReport; expectProved?: boolean } = { code: "" },
 ): Promise<{ client: WsClient; placeId: string; reply: Record<string, unknown>; proved: Record<string, unknown>; pair: PlaceKeyPair }> {
   const client = await WsClient.connect(srv!.port);
   const pair = newPlaceKeyPair();
   const mine = nonce();
   const sent = opts.report ?? report(opts.name);
-  const reply = await client.request("place.join", { code: opts.code, publicKey: pair.publicKey, nonce: mine, report: sent });
+  const reply = await client.request("place.join", { code: opts.code, publicKey: pair.publicKey, nonce: mine, report: sent, ...(opts.client === undefined ? {} : { client: opts.client }) });
   if (reply.ok !== true) return { client, placeId: "", reply, proved: {}, pair };
   const placeId = String(reply["placeId"]);
   expect(reply["hostPublicKey"]).toBe(hostKey.publicKey);
@@ -518,7 +525,7 @@ describe("putting the agent on a computer over ssh", () => {
     const { hostKey } = await serving();
     // The wiring this host was served with names no installer, which is every host but the one with the ssh road.
     expect(hostKey).toBeDefined();
-    await expect(runtime!.places!.add({ address: "root@10.0.0.9" }, Date.now())).rejects.toThrow(NO_PLACE_INSTALLER);
+    await expect(runtime!.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(NO_PLACE_INSTALLER);
   });
 
   it("mints a code the computer spends, says what each step is doing, and answers once that computer's link is up", async () => {
@@ -544,13 +551,14 @@ describe("putting the agent on a computer over ssh", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
     // The caller mints the stream, since the steps come back before the reply that would have named it.
-    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", name: "box" }, Date.now());
+    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
     expect(added.place.name).toBe("box");
     expect(added.place.present).toBe(true);
     expect(added.hostKey).toBe("ssh-ed25519 SHA256:abc");
     // The code and every address this host answers on are the door's to hand the installer, not the installer's to find.
     expect(handed?.code).toMatch(/^[A-Z0-9]+$/);
-    expect(handed?.hostUrls).toEqual(["http://192.168.1.20:4400"]);
+    // The door's reading, handed down: the install reads no addresses of its own.
+    expect(handed?.hostUrls).toEqual(DOOR);
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect done", "join running", "join done"]);
     expect(added.addId).toBe("a_mine");
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
@@ -579,7 +587,7 @@ describe("putting the agent on a computer over ssh", () => {
       placeJoinWaitMs: 4_000,
     });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    const added = await runtime.places!.add({ address: "root@10.0.0.9" }, Date.now());
+    const added = await runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
     expect(added.place.present).toBe(true);
   });
 
@@ -602,7 +610,7 @@ describe("putting the agent on a computer over ssh", () => {
     });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
-    await expect(runtime.places!.add({ address: "root@10.0.0.9" }, Date.now())).rejects.toThrow("publickey");
+    await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow("publickey");
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["node running", "node failed"]);
     expect(stages.at(-1)?.note).toContain("publickey");
     // An install that never reached a join leaves its code unspent, and the person's next add mints another.
@@ -619,27 +627,11 @@ describe("putting the agent on a computer over ssh", () => {
       placeJoinWaitMs: 50,
     });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(runtime.places!.add({ address: "root@10.0.0.9" }, Date.now())).rejects.toThrow(placeNoLinkLine("box"));
+    await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("box"));
   });
 
 });
 
-describe("the code a person types on the computer they are sitting at", () => {
-  it("comes back with every address that computer could dial this host at", async () => {
-    await serving();
-    const c = await WsClient.connect(srv!.port, { token: "host-token" });
-    const issued = await c.request("pair.issue");
-    c.close();
-    expect(issued.ok, String(issued["error"])).toBe(true);
-    expect(issued["joinUrls"]).toEqual(["http://192.168.1.20:4400"]);
-  });
-
-  it("writes every one of them into the reply a join gets, so the computer keeps dialling when one stops answering", async () => {
-    const { hostKey } = await serving();
-    const { reply } = await join(hostKey, { code: await code() });
-    expect(reply["hostUrls"]).toEqual(["http://192.168.1.20:4400"]);
-  });
-});
 
 describe("the road a pane takes to a place", () => {
   it("is refused with the place's name while that computer is not connected", async () => {
@@ -671,5 +663,104 @@ describe("the port a place's panes ride", () => {
         socket.once("error", fail);
       }),
     ).rejects.toThrow();
+  });
+});
+
+describe("the device a join buys beside the place", () => {
+  it("mints one with no scope, whose token matches and which is listed and revoked as a redeemed one is", async () => {
+    const store = memoryStore();
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
+    const admitted = await runtime.devices.admit("old-macbook", 1);
+    expect(admitted.device.scope).toBeUndefined();
+    expect(await runtime.devices.match(admitted.deviceToken)).toMatchObject({ id: admitted.deviceId, name: "old-macbook" });
+    expect((await runtime.devices.list()).map(d => d.id)).toContain(admitted.deviceId);
+    expect(await runtime.devices.revoke(admitted.deviceId)).toBe(true);
+    expect(await runtime.devices.match(admitted.deviceToken)).toBeUndefined();
+  });
+
+  it("answers a join that asked for one, names it after the joining computer, and answers none to a join that did not", async () => {
+    const { hostKey } = await serving();
+    const first = await join(hostKey, { code: await code(), client: { name: "old-macbook" } });
+    sockets.push(first.client.ws);
+    const device = first.reply["device"] as { deviceId: string; deviceToken: string };
+    expect(device.deviceToken).toBeTruthy();
+    expect(await runtime!.devices.match(device.deviceToken)).toMatchObject({ id: device.deviceId, name: "old-macbook" });
+    const second = await join(hostKey, { code: await code(), name: "attic" });
+    sockets.push(second.client.ws);
+    expect(second.reply["device"]).toBeUndefined();
+  });
+
+  it("leaves the link bound to no device, so revoking that device closes nothing", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), client: { name: "old-macbook" } });
+    sockets.push(client.ws);
+    const device = (await runtime!.devices.list())[0]!;
+    expect(device.name).toBe("old-macbook");
+    expect(await runtime!.devices.revoke(device.id)).toBe(true);
+    await new Promise(r => setTimeout(r, 50));
+    expect(client.ws.readyState).toBe(client.ws.OPEN);
+    expect((await placesOf()).find(p => p.id === placeId)?.present).toBe(true);
+  });
+});
+
+describe("what a join is told about the wsp it joined", () => {
+  it("answers the primary computer's own name off the wiring, and the signature over the transcript still verifies", async () => {
+    const { hostKey } = await serving();
+    const { client, reply, proved } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    expect(reply["hostName"]).toBe("zingzys-mac");
+    expect(proved.ok).toBe(true);
+  });
+});
+
+describe("the four events a computer you own rides the runtime's stream on", () => {
+  it("carries the join with the address it came from, the link coming and going, and the remove", async () => {
+    const { hostKey } = await serving();
+    const watcher = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect((await watcher.request("events.subscribe")).ok).toBe(true);
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    await until(() => watcher.events.some(e => e.type === "place.present"));
+    const joined = watcher.events.find(e => e.type === "place.joined")!;
+    expect((joined["place"] as PlaceView).id).toBe(placeId);
+    expect(String(joined["from"])).toContain("127.0.0.1");
+    expect(typeof joined["seq"]).toBe("number");
+    expect(watcher.events.find(e => e.type === "place.present")).toMatchObject({ placeId });
+    client.ws.close();
+    await until(() => watcher.events.some(e => e.type === "place.absent"));
+    const remover = await WsClient.connect(srv!.port, { token: "host-token" });
+    expect((await remover.request("places.remove", { placeId })).ok).toBe(true);
+    await until(() => watcher.events.some(e => e.type === "place.removed"));
+    expect(watcher.events.filter(e => e.type === "place.removed")).toMatchObject([{ placeId }]);
+    remover.close();
+    watcher.close();
+  });
+});
+
+describe("the door a computer you own dials", () => {
+  it("is refused on a host that serves none, and answered on one that does", async () => {
+    await serving();
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const none = await c.request("places.door");
+    expect(none).toMatchObject({ ok: false, error: PLACE_DOOR_UNSERVED });
+    c.close();
+    await srv!.close();
+    const view = { port: 4420, addresses: ["http://192.168.1.20:4420"] };
+    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => view } });
+    const opened = await WsClient.connect(srv.port, { token: "host-token" });
+    const answer = await opened.request("places.door");
+    expect(answer).toMatchObject({ ok: true, door: view });
+    opened.close();
+  });
+
+  it("is refused on a socket let in by a ticket, as every other place op is", async () => {
+    await serving();
+    await srv!.close();
+    srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => ({ port: 4420, addresses: ["http://x:4420"] }) } });
+    const own = await WsClient.connect(srv.port, { token: "host-token" });
+    const { ticket } = (await own.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
+    own.close();
+    const relayed = await WsClient.connect(srv.port, { ticket });
+    expect(await relayed.request("places.door")).toMatchObject({ ok: false, error: PLACE_DOOR_REFUSAL });
+    relayed.close();
   });
 });

@@ -3,7 +3,7 @@
 // adapter names the state; this file turns it into the words and classes a
 // row shows.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type MemoryReading, type ReachState, type SessionOrigin, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
@@ -49,7 +49,7 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
   if (reach !== "unsupported" || kind.driven) return undefined;
   // Why, where the machine said why. It is the one thing on this row a person can act on, and the whole sentence
   // is on the Machine tab, since the instruction is at the end of it and this line cuts from the right.
-  return lacks === undefined ? "no daemon on this machine" : machineLacksShort(lacks);
+  return lacks === undefined ? "no daemon on it" : machineLacksShort(lacks);
 }
 
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: what the
@@ -75,9 +75,9 @@ export interface WorkspaceMetaInput {
   readonly nowMs: number;
 }
 
-/** The machine row's third line, one string in one order: what it cost today, the rate while it bills, the edge
- * note, the nap countdown last. The cost always leads, an honest zero before the meter's first tick, so no row draws
- * a blank line. The width cuts it from the right; nothing here decides what to leave out. What the runtime is doing
+/** The workspace row's third line, one string in one order: what it cost today, the edge note, the nap countdown
+ * last. The cost always leads, an honest zero before the meter's first tick, so no row draws
+ * a blank line. The row cuts it at its own cap; nothing here decides what to leave out. What the runtime is doing
  * to the machine's daemon, a drop with memory near full, or a daemon that is not there at all takes the whole line
  * while it lasts: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
  * machine wsp does not drive spends nothing and naps never, so its line says so in one word. */
@@ -87,11 +87,13 @@ export function workspaceMetaLine({ project, cost, outOfMemory, nowMs }: Workspa
   return costLine({ project, cost, nowMs });
 }
 
-/** The row's third line: free for a machine wsp does not pay for, else what it cost today, the ask a wake the
- * provider has not taken is on, the edge note and the nap countdown, in that order. */
+/** The row's third line: free for a computer wsp does not pay for, else what it cost today, the ask a wake the
+ * provider has not taken is on, the edge note and the nap countdown, in that order. The hourly rate is not on it:
+ * the line holds 30 characters and the spend with its countdown fills them, so the rate reads on the pane's own
+ * Rate row rather than crowding out what a person is waiting on. */
 function costLine({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [spendLine({ project, cost }), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
+  return [accruedTodayLabel(cost?.accruedUsd ?? 0), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
     .filter((part): part is string => part !== null)
     .join(" · ");
 }
@@ -153,6 +155,32 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
 // draws it from the root's copy of the token.
 const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
+/** The computer or the provider a workspace runs on, as a row names it: the provider the record itself carries,
+ * else the kind's own word where it has one, else the name wsp holds for the machine, the live one once a status
+ * has arrived. The provider leads because this host is wired to one of several and only the record knows which;
+ * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. The one place a
+ * surface asks where a workspace runs, so the day a computer carries the name its owner gave it is one edit here. */
+export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
+  const record = project.status ?? project.workspace;
+  return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
+}
+
+/** The words a thread row's meta line carries after the agent's mark, in the order it draws them. A thread a
+ * person or the command line opened names the project its folder sits in and who opened it. A thread another
+ * thread's agent opened names neither: the indent already says an agent opened it, and that slot holds the
+ * workspace it runs in, dropped where that is the workspace whose rows it is drawn under, then where that
+ * workspace runs. The workspace and the project never share a position, so one word never means two things. */
+export function threadMetaWords(
+  thread: Pick<SidebarThreadSnapshot, "parentThreadId" | "project" | "startedBy">,
+  runs: { readonly workspace: string; readonly where: string },
+  under: string,
+): string[] {
+  if (thread.parentThreadId === null) {
+    return [...(thread.project !== null ? [thread.project] : []), openerWord(thread.startedBy)];
+  }
+  return [...(runs.workspace === under ? [] : [runs.workspace]), runs.where];
+}
+
 const OPENER_WORD: Record<SessionOrigin, string> = { person: "you", cli: "cli", agent: "agent" };
 
 /** Who opened the thread: you, the command line on this computer, or a local agent. */
@@ -160,10 +188,10 @@ export function openerWord(startedBy: SessionOrigin): string {
   return OPENER_WORD[startedBy];
 }
 
-/** The agent inside the thread, the project it works in where it sits in one, and who opened it, as the row's hover
- * text reads it and in the order the row draws them. */
-export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness" | "startedBy" | "project">): string {
-  return [agentName(thread.harness), ...(thread.project !== null ? [thread.project] : []), openerWord(thread.startedBy)].join(" · ");
+/** The agent inside the thread and the words beside its mark, as the row's hover text reads them and in the order
+ * the row draws them, so what a screen reader is given is the line a person sees. */
+export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, words: ReadonlyArray<string>): string {
+  return [agentName(thread.harness), ...words].join(" · ");
 }
 
 /** The pill keys on the session's status and wears the adapter's word: a running thread and one that did not settle carry one, the resting states none. */
@@ -195,9 +223,19 @@ export function leadDimClass(project: Pick<SidebarProjectSnapshot, "state">): st
  * so the glyph takes the success ink while the machine runs, on a fork and on this computer; paused dims it by the
  * rule above; every other state leaves it whole and muted, and the state slot's word says which. The tier of the
  * green is the theme's foreground one, since emerald 500 reads 2.4:1 on the light sidebar and a mark has to clear
- * 3:1 there; the running dot wears the same token, so a sidebar holds one emerald. */
-export function glyphStateClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
+ * 3:1 there; the running dot wears the same token, so a sidebar holds one emerald. A workspace on a computer that
+ * has gone quiet takes no green whatever it last said: nothing is known about it while that computer sleeps, and
+ * the green would be a claim this window cannot make. */
+export function glyphStateClass(project: Pick<SidebarProjectSnapshot, "state">, quiet = false): string | undefined {
+  if (quiet) return undefined;
   return project.state === "running" ? "text-success-foreground" : leadDimClass(project);
+}
+
+/** Whether this workspace sits on the computer that has gone quiet: the wsp this window shows runs on that
+ * computer, so its own workspace sleeps with it, while a workspace at a provider or on another computer keeps
+ * running and keeps the state it was last known in. */
+export function onQuietComputer(project: Pick<SidebarProjectSnapshot, "workspace">, asleep: boolean): boolean {
+  return asleep && isLocalWorkspace(project.workspace);
 }
 
 export function dotClassForTone(tone: StatusIndicatorTone): string {

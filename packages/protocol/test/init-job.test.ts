@@ -253,7 +253,7 @@ describe("the words the clients print for the job", () => {
   });
 
   it("the cost line names the size and the rate once, from the backend's own number", () => {
-    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB machine costs about $0.11 an hour while it runs and naps when idle");
+    expect(initCostLine({ cpu: 2, memMb: 4096 }, 0.11)).toBe("A 2 vCPU · 4 GB workspace costs about $0.11 an hour while it runs and naps when idle");
   });
 
   it("the agent's first message names the two tools and where the recipe goes, asks the agent to ask nothing, and says plainly to run no commands", () => {
@@ -298,7 +298,7 @@ describe("the words the clients print for the job", () => {
     expect(initSetupLines(setup)).toEqual([
       "Solari key: saved",
       "Agents here: Claude Code (MCP added), Codex",
-      "A 2 vCPU · 4 GB machine costs about $0.11 an hour while it runs and naps when idle",
+      "A 2 vCPU · 4 GB workspace costs about $0.11 an hour while it runs and naps when idle",
       "No setup is running; the app's sidebar row starts one.",
     ]);
     const waiting = { ...JOB, phase: "signing-in" as const, rows: [row(), row({ id: "sign-in/gh", kind: "sign-in", label: "GitHub CLI login", state: INIT_ROW_STATES.open, page: "https://github.com/login/device", code: "8F4A-C21B" })] };
@@ -410,7 +410,7 @@ describe("the words the clients print for the job", () => {
     expect([initRowFailed({ state: INIT_ROW_STATES.failed }), initRowFailed({ state: INIT_SIGN_IN_WORDS["not-signed-in"]("linux"), login: "not-signed-in" }), initRowFailed({ state: INIT_ROW_STATES.done }), initRowFailed({ state: INIT_ROW_STATES.stopped })]).toEqual([true, true, false, false]);
     // The sentence alone says nothing: a row that carries no outcome is no failure, whatever its word reads.
     expect(initRowFailed({ state: "not signed in" })).toBe(false);
-    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("The image is sealed; every thread forks it");
+    expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("Your image is built; every workspace starts from it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
       { id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" },
@@ -421,7 +421,7 @@ describe("the words the clients print for the job", () => {
     ];
     const folded = initBuildRows(rows);
     expect(folded.rows.map(r => r.id)).toEqual(["stage/creating", SIGN_IN_STAGE_ID, "stage/snapshotting", "workspace/first"]);
-    expect(folded.rows[1]).toMatchObject({ kind: "stage", label: "Signing in on the machine", state: "waiting for you" });
+    expect(folded.rows[1]).toMatchObject({ kind: "stage", label: "Signing in on the computer", state: "waiting for you" });
     expect(folded.signIns.map(r => r.id)).toEqual(["sign-in/gh", "sign-in/claude"]);
     const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in", login: "not-signed-in" as const } : r)));
     expect(settled.rows[1], "a sign-in that ran out keeps the stage from reading done and hands it its own outcome").toMatchObject({ state: "not signed in", login: "not-signed-in" });

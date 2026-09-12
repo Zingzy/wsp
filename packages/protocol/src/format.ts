@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, ProjectExportEvent, ProjectImportEvent, ProjectGolden, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -120,6 +120,15 @@ export type CpuWord = "vCPU" | "cores";
 /** The size joins its words with no-break spaces, so a sentence carrying it never breaks between a number and its unit. */
 export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
   return `${size.cpu}\u00a0${cpu}\u00a0·\u00a0${fmtMemGb(size.memMb).replace(" ", "\u00a0")}`;
+}
+
+/** What a computer of the person's own is worth saying in one line: the cores and memory it has, and the room left
+ * where its threads work. The one reading, so the screen a computer joins on and the row it lands in later cannot
+ * describe the same computer differently. A computer that would not say how much room it has leaves that out. The
+ * whole line is joined with no-break spaces, fmtSize's own rule carried on: it is one phrase about one computer. */
+export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): string {
+  const parts = [fmtSize(shape, "cores"), ...(diskFreeBytes === undefined ? [] : [`${fmtBytes(diskFreeBytes)} free`])];
+  return parts.join(" · ").replace(/ /g, "\u00a0");
 }
 
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
@@ -285,6 +294,26 @@ export function turnSettledLine(result: TurnResult): string {
 export function turnEndLine(result: TurnResult): string {
   const failure = result.status === "completed" ? undefined : result.error;
   return failure === undefined ? turnSettledLine(result) : `${turnSettledLine(result)}: ${failure}`;
+}
+
+/** A turn the agent refused outright: it answered with an error line of its own and did none of the work. The word
+ * is failed whatever the harness's own subtype said, and the sentence is the agent's with wsp's half after it where
+ * the caller knows the road out. The reply is dropped, since a refusal is not a reply: every road reads a turn that
+ * did not complete by its error alone, so one shape here is what keeps the sentence from being printed twice.
+ * `cause` is what wsp classes the failure by; no door may read a cause out of the agent's words. */
+export function refusedTurn(result: TurnResult, refusal?: { road?: string; cause?: TurnRefusal }): TurnResult {
+  // The result's own text is the agent's sentence and the errors entry beside it is harness telemetry; a harness
+  // that sends both would say the same thing twice, so the sentence wins and the entry is dropped with the reply.
+  const said = (result.text ?? result.error ?? "").trim();
+  const sentence = [said, refusal?.road ?? ""].filter(part => part.length > 0).join("; ");
+  return {
+    status: "failed",
+    ...(result.durationMs !== undefined ? { durationMs: result.durationMs } : {}),
+    ...(result.costUsd !== undefined ? { costUsd: result.costUsd } : {}),
+    ...(result.usage !== undefined ? { usage: result.usage } : {}),
+    ...(sentence.length > 0 ? { error: sentence } : {}),
+    ...(refusal?.cause !== undefined ? { refusal: refusal.cause } : {}),
+  };
 }
 
 /** The clock a read prints beside a row, to the second, in the zone of the computer reading it, which is the
@@ -573,7 +602,7 @@ export function fmtThreads(n: number): string {
 
 /** What forgetting a workspace takes off this computer, the one sentence every client's confirmation shows. */
 export function forgetNotice(threads: number): string {
-  return `Its record and ${fmtThreads(threads)} leave this computer; the machine is already gone.`;
+  return `Its record and ${fmtThreads(threads)} leave this computer; the computer it ran on is already gone.`;
 }
 
 /** Text cut to one line: its first non-empty line with the whitespace collapsed, so a multi-paragraph brief is one
@@ -592,14 +621,21 @@ const ELLIPSIS = "\u2026";
  * the breadcrumb, the switcher card or the CLI's table with its whole opening words. */
 export function openingTitle(text: string): string {
   const line = titleLine(text);
-  const sentence = /^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line;
-  if (sentence.length <= OPENING_TITLE_MAX) return sentence;
-  const room = OPENING_TITLE_MAX - ELLIPSIS.length;
-  return `${wordsWithin(sentence, room) ?? sentence.slice(0, room).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
+  return cutLine(/^.*?[.!?](?=\s|$)/.exec(line)?.[0] ?? line, OPENING_TITLE_MAX);
 }
 
-/** What a cut leaves dangling at its edge: the space it broke on and the punctuation that hung off the word before. */
-const SEPARATOR_TAIL = /[\s,;:]+$/;
+/** Text cut to at most room characters, at a word boundary where one fits, with the ellipsis counted inside the
+ * room and drawn only where something was taken off. One rule for every line a surface cuts itself: a thread's
+ * title from its opening turn, a sidebar row's third line. */
+export function cutLine(text: string, room: number): string {
+  if (text.length <= room) return text;
+  const head = room - ELLIPSIS.length;
+  return `${wordsWithin(text, head) ?? text.slice(0, head).replace(SEPARATOR_TAIL, "")}${ELLIPSIS}`;
+}
+
+/** What a cut leaves dangling at its edge: the space it broke on, the punctuation that hung off the word before,
+ * and the middle dot a row's line parts its facts with. */
+const SEPARATOR_TAIL = /[\s,;:·]+$/;
 
 /** The whole words of a line that fit in the room, the separator they ended on taken off; nothing when the line's
  * first word alone overruns it. A word that ends exactly at the room's edge is kept whole. */
@@ -724,6 +760,12 @@ export const RUN_GONE_LINE = "the machine no longer holds this turn's run, so no
  * so it goes on and its reply lands in the thread whether or not this command is still there to see it. */
 export const HOST_STOPPING_LINE = "the host is restarting; the turn goes on and its reply lands in the thread";
 
+/** What a machine is called when the provider reports it running and the road every command takes is dead: whose
+ * machine it is, which one, and the guest's own words, so the failure reads as the provider's and not as wsp's. */
+export function guestUnusableLine(provider: string, machineId: string, detail: string): string {
+  return `${provider} left ${machineId} running but nothing on it can run: ${detail}`;
+}
+
 /** The turn's error when nothing on the machine answered a launch from this computer for the whole reach window:
  * how many times it was tried and over how long. The fetch's own words name a Node error and the machine id,
  * neither of which a person can act on. */
@@ -771,10 +813,26 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** The reason a status carries when the runtime's idle policy napped a workspace, with the one reading of it back
+ * beside it: the runtime stamps the nap through `of` and the app's paused line takes the window out through
+ * `windowIn`, so the words and their parse are one thing and a rewording moves both at once. */
+export const IDLE_REASON = {
+  of: (windowMs: number): string => `idle ${Math.round(windowMs / 60_000)} min`,
+  /** The window inside that reason, as its own words (`20 min`); nothing for a reason of any other shape, which is
+   * every reason a nap the person asked for or a wake wrote. */
+  windowIn: (reason: string | undefined): string | undefined => (reason === undefined ? undefined : (/^idle (\d+ min)$/.exec(reason)?.[1] ?? undefined)),
+} as const;
+
 /** The one line the sidebar puts above the rows while the probes fail before leaving this computer; the rows keep
  * their last word. It names what could not be reached, not the computer: the road out was up and every other name
  * resolved while this one did not (measured 2026-09-07). */
 export const PROVIDER_UNREACHED_LINE = "Solari cannot be reached from this computer";
+
+/** What a window on another computer says while the wsp it shows has gone quiet: the computer that host runs on is
+ * asleep or off, and the workspaces on every other computer keep working. It reads as a fact in the sidebar's own
+ * prose line and as the send's reason, never as an alert: nothing is broken and nothing is lost. */
+export const HOST_ASLEEP_LINE = "your Mac is asleep · threads on your other computers keep running";
+export const HOST_ASLEEP_SEND = "your Mac is asleep; new turns start when it wakes";
 
 /** One line per retry of a provider call that never left this computer: which call, the system error the road gave,
  * and which try of how many is about to go, so a run that still fails carries the whole flap in its log. */
@@ -900,7 +958,7 @@ export function memoryNearFull(mem: { used: number; total: number }): boolean {
 /** The line every pane and row shows when a machine stopped answering with its memory near full: the last figures
  * the daemon sent, and that the work took the memory, so nobody rebuilds a machine that is fine. */
 export function outOfMemoryLine(r: MemoryReading): string {
-  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the machine last answered; the work on it took the memory, not a fault of the machine`;
+  return `Out of memory (${fmtBytes(r.used)} of ${fmtBytes(r.total)} used, load ${r.load1.toFixed(1)}) when the workspace last answered; the work on it took the memory, not a fault of the computer it runs on`;
 }
 
 /** Two byte counts against each other with the unit said once when they share it: "3.6 of 3.9 GB", "900.0 MB of 3.9 GB". */
@@ -921,7 +979,7 @@ export function outOfMemoryRowLine(r: MemoryReading): string {
  * this machine, with its rate, for the next workspace. With none in the table, less at once is the only road. */
 export function biggerSizeLine(current: WorkspaceSize, offers: readonly MachineSizeOffer[]): string {
   const bigger = offers.filter(o => o.memMb > current.memMb).sort((a, b) => a.memMb - b.memMb)[0];
-  if (bigger === undefined) return "No size with more memory is offered; run less on the machine at once";
+  if (bigger === undefined) return "No size with more memory is offered; run less in the workspace at once";
   return `A workspace on ${fmtSize(bigger)} (${fmtRate(bigger.rateUsdPerHour)}) fits more; pick it when you make the next one`;
 }
 
@@ -982,7 +1040,7 @@ export function vaultStaleLine(w: Pick<WorkspaceView, "vaultedAt" | "vaultRefuse
  * image; an archive carries no deletion, so a file the person took out of a folder the image writes into comes back
  * with it; nothing installed outside the home travels at all, and the machine it all runs on is replaced. */
 export const IMAGE_MOVE_CONFIRM =
-  "Your home folder moves to the new machine, minus the files the image itself wrote and you never changed, which come from the new image; a file you deleted from a folder the image writes into comes back with it. Anything installed outside your home comes from the new image, and everything running on this machine stops with it.";
+  "Your home folder moves to the new copy, minus the files the image itself wrote and you never changed, which come from the new image; a file you deleted from a folder the image writes into comes back with it. Anything installed outside your home comes from the new image, and everything running in this workspace stops with it.";
 
 /** What a move found nothing to do: the workspace already stands on the newest version, so no machine was replaced
  * and no file was judged. Said in place of the kept line, which would otherwise claim files came across. */
@@ -1066,7 +1124,7 @@ export const CLOUD_SETUP_WORDS = {
   title: "Cloud machines",
   choice: {
     headline: "Set up cloud machines",
-    top: "Your setup goes on one machine image, built once and forked for every thread",
+    top: "Your setup goes on one image, built once and copied for every workspace",
     manual: "Choose what goes on the image",
     agent: "Let an agent choose from your usage",
     agentWith: "with",
@@ -1078,7 +1136,7 @@ export const CLOUD_SETUP_WORDS = {
   },
   keys: {
     headline: "Your Solari key",
-    top: "Solari runs the machines",
+    top: "Solari runs the computers your workspaces sit on",
     solari: "API key",
     /** The empty field's ghost: the start every Solari key has, and no more. */
     placeholder: "slr_live_...",
@@ -1117,7 +1175,7 @@ export const CLOUD_SETUP_WORDS = {
   },
   ask: {
     headline: "Your first cloud workspace",
-    top: "Forked from the image as soon as the build finishes",
+    top: "A copy of the image as soon as the build finishes",
     name: "Name",
     folder: "Project folder",
     optional: "optional",
@@ -1128,12 +1186,12 @@ export const CLOUD_SETUP_WORDS = {
   },
   build: {
     headline: "Building your image",
-    top: "The machine boots, installs what you ticked and is saved as the image every thread forks",
+    top: "The computer starts, installs what you ticked and is saved as the image every workspace starts from",
     /** The one stage row the sign-ins fold into, its sub-rows one per sign-in. */
-    signingIn: "Signing in on the machine",
+    signingIn: "Signing in on the computer",
     /** The slide the build becomes while that stage runs: room to act on each sign-in. */
-    slideHeadline: "Sign in on the machine",
-    slideTop: "Each one opens a page on this computer, and the machine keeps the sign-in",
+    slideHeadline: "Sign in on the computer",
+    slideTop: "Each one opens a page on this computer, and the image keeps the sign-in",
     open: "Open sign-in",
     retry: "Retry",
     codeAsk: "Paste the code from the page",
@@ -1143,11 +1201,11 @@ export const CLOUD_SETUP_WORDS = {
     /** Why the cancel link is disabled while the seal runs: the host's refusal and the app's tooltip, one sentence. */
     cannotStop: "The image is being saved. The snapshot and the save cannot be stopped.",
     cancelSure: "Stop the build",
-    cancelWhy: "The machine is thrown away and nothing is saved",
+    cancelWhy: "The computer it was building on is thrown away and nothing is saved",
     cancelKeep: "Keep building",
-    done: "Cloud machines are ready",
+    done: "Your image is ready",
     /** The sentence under that title: the running one would say the machine is still being saved. */
-    doneTop: "The image is sealed; every thread forks it",
+    doneTop: "Your image is built; every workspace starts from it",
     failed: "The build stopped",
     /** The headline of a build the person stopped, so the screen never reads as the machine's doing. */
     stopped: "You stopped the build",
@@ -1584,7 +1642,7 @@ export const SAVED_KEY_STOPPED_LINE = "Save a key Solari takes and run wsp init 
 
 /** What the machine the build boots costs, said once under the key screen's title from the backend's own rate. */
 export function initCostLine(size: WorkspaceSize, rateUsdPerHour: number): string {
-  return `A ${fmtSize(size)} machine costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
+  return `A ${fmtSize(size)} workspace costs about $${rateUsdPerHour.toFixed(2)} an hour while it runs and naps when idle`;
 }
 
 /** The cloud setup as wsp setup prints it: which keys are held, the agents here with their tools, the price, and the
@@ -1636,9 +1694,9 @@ export const THIS_COMPUTER = "this computer";
  * state with nothing in it both say it, so this computer is named the same way whichever road wrote the record. */
 export const thisComputerLine = (name: string, id: string): string => `Workspace ${name} (${id}) is ${THIS_COMPUTER}; its threads run here, under your own sign-ins.`;
 
-/** What an ssh workspace's machine is, in every sentence and every row that names it: a machine of the person's own
- * that wsp reaches and never runs. */
-export const OVER_SSH = "a machine over ssh";
+/** What an ssh workspace's computer is, in every sentence and every row that names it: a computer of the person's
+ * own that wsp reaches and never runs. The sidebar row prints it on line two, so it is a person's words. */
+export const OVER_SSH = "a computer over ssh";
 
 /** What a place's machine is, in every sentence and every row that names it: a computer of the person's own that
  * dialled this host and holds the link, so wsp drives it with the daemon protocol and never made it. */
@@ -1675,6 +1733,18 @@ export function relayedRecordRefusal(named: string): string {
 /** The short form of a thread id every sentence about a thread uses, so a refusal, a table and a tree all name a
  * thread the same way. */
 export const threadWord = (threadId: string): string => threadId.slice(0, 8);
+
+/** The one sentence a forget is refused with once a turn of the thread did work: the runtime raises it, the command
+ * line prints it and the app's row action shows it without asking, so all three say the same thing. */
+export function threadForgetRefusal(threadId: string): string {
+  return `thread ${threadWord(threadId)} has a turn that ran; only a thread no turn ever ran on can be forgotten`;
+}
+
+/** The one sentence a forget is refused with for a row from before threads: the fold keys such a row by its own
+ * turn id, so no thread here answers to it and nothing a forget could take is named. */
+export function threadWithoutIdRefusal(rowId: string): string {
+  return `${rowId} is a turn from before threads and carries no thread id of its own; no forget can name it`;
+}
 
 /** Every act a thread scoped token can be refused for, and the word each is refused by name with. The table is
  * the whole rule: an act absent from it is one no thread may ask for, and adding an act is one row here. */
@@ -1719,6 +1789,12 @@ export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
 }
 
+/** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
+ * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
+export function noWorkspaceRefusal(ref: string): string {
+  return `no workspace ${ref}`;
+}
+
 /** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the
  * column is quiet until a workspace has one. */
 export function agentsWord(agents: { spawn: boolean; maxMachines: number } | undefined): string {
@@ -1727,7 +1803,7 @@ export function agentsWord(agents: { spawn: boolean; maxMachines: number } | und
 
 /** What a listing and the workspace card say about a workspace's switch, one line either way. */
 export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
-  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "machine" : "machines"}`;
+  return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "workspace" : "workspaces"}`;
 }
 
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare
@@ -1906,7 +1982,7 @@ export function alreadyRecorded(machine: string, name: string): string {
  * fork have no meaning on either; `machine` is the kind's own word for what it is and `action` is the verb as the
  * person typed it. The capability behind each is false, so the road that reads the capability says this. */
 export function undrivenRefusal(name: string, machine: string, action: string): string {
-  return `${name} is ${machine}, not a machine wsp runs; it cannot ${action}`;
+  return `${name} is ${machine}, which wsp does not run; it cannot ${action}`;
 }
 
 /** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
@@ -2049,7 +2125,7 @@ export function behindGoldenLine(on: number, head: number): string {
 
 /** The states a lineage row can be in, each as the muted mono word the row's marks column shows: state is text there,
  * never a badge, and a missing tool's outcome indexes this table as it is. */
-export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this fork", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
+export const LINEAGE_MARKS = { now: "now", head: "head", fork: "this one", failed: "failed", skipped: "skipped", volatile: "volatile" } as const;
 export type LineageMark = keyof typeof LINEAGE_MARKS;
 
 /** What is said for each folder git named no branch for, by door: the word the composer's branch slot and the diff
@@ -2060,7 +2136,7 @@ export type LineageMark = keyof typeof LINEAGE_MARKS;
 export const REPO_STATE_WORDS = {
   unknown: { word: "", note: "", pane: "" },
   none: { word: "", note: "", pane: "This folder is not inside a git repository, so there is nothing to diff." },
-  refused: { word: "git unread", note: "The machine could not read this folder's git state, so no branch is shown.", pane: "" },
+  refused: { word: "git unread", note: "The workspace could not read this folder's git state, so no branch is shown.", pane: "" },
 } as const;
 export type RepoStateWord = keyof typeof REPO_STATE_WORDS;
 
@@ -2220,7 +2296,7 @@ export function exportFromLine(workspaceName: string): string {
 }
 
 /** What the ticks on the export dialog's agent rows do. */
-export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay on the machine.";
+export const EXPORT_SESSIONS_NOTE = "Ticked agents' sessions come home with the folder. The rest stay in the workspace.";
 
 /** The export dialog's agent section when the workspace has no threads to make rows of. */
 export const NO_THREADS_NOTE = "No threads here. Every agent's sessions for the folder come home with it.";
@@ -2397,6 +2473,14 @@ export const HOST_WORDS = {
   disconnect: (label: string): string => `Disconnect ${label}`,
   /** Why the disconnect row is dimmed while the window is on the app's own computer. */
   hereStays: (here: string): string => `${here} is the app's own host`,
+  /** The two rows a computer that joined another wsp adds, and the line its sidebar foot reads. */
+  place: {
+    line: (hostName: string): string => `runs threads for ${hostName}`,
+    leave: "leave",
+    leaveRow: (hostName: string): string => `Leave ${hostName}'s wsp`,
+    awakeRow: "Stay awake while joined",
+    awakeWhy: "while the lid is open and it is plugged in",
+  },
   sheet: {
     headline: "Connect to a host",
     top: "A wsp host on another computer, by its address or over ssh.",
@@ -2420,12 +2504,74 @@ export const HOST_WORDS = {
   },
 } as const;
 
+/** How long a computer has been away, coarse on purpose: the figure is read once in a table, not watched. */
+function offlineFor(ms: number): string {
+  const minutes = Math.max(0, Math.floor(ms / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
+}
+
+/** The mono word after a computer's name in the Where agents run table: nothing while it holds its link, and how
+ * long it has been away when it does not. The slot stands either way, so the word arriving moves no column. */
+export function placeStateWord(view: PlaceView, now: number): string {
+  if (view.present !== false) return "";
+  const since = view.lastSeenAt === undefined ? NaN : Date.parse(view.lastSeenAt);
+  return Number.isNaN(since) ? "offline" : `offline · ${offlineFor(now - since)}`;
+}
+
+/** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
+ * a person may put there. A computer that is not answering says so ahead of what it cannot run, since the second
+ * fact is about a computer this wsp is not talking to. */
+export function placeWorkspacesCell(view: PlaceView): string {
+  const count = view.workspaceId === undefined ? 0 : 1;
+  if (count === 0) return "0";
+  if (view.present === false) return `${count} · not answering`;
+  return view.docker === true ? `${count}` : `${count} · agents only`;
+}
+
+/** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
+export const PLACES_WORDS = {
+  section: "Where agents run",
+  columns: ["Computer", "Size", "Disk free", "Workspaces"],
+  addComputer: "Add a computer",
+  connectProvider: "Connect a provider",
+  /** Why Connect a provider is held: the sheet behind it belongs to the image and provider work. */
+  connectProviderHeld: "arrives with the provider sheet",
+  sheet: {
+    title: "Add a computer",
+    description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
+    appRoad: "On that computer, open wsp and press This Mac joins another wsp. Type these.",
+    address: "Address",
+    code: "Code",
+    waiting: "waiting for it to connect",
+    connected: (from: string): string => `connected from ${from} · keys exchanged`,
+    reading: "reading what it has",
+    joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
+    dockerOptional: "install Docker to run copies of your image · optional",
+    joinedTitle: (name: string): string => `${name} joined`,
+    joinedDescription: "It runs your agents as one workspace. Without Docker it cannot run copies of your image.",
+    open: (name: string): string => `Open ${name}`,
+    noApp: "No app on that computer",
+    noAppLine: "In its terminal, install wsp, then join:",
+    install: "npm i -g @zingzy/wsp",
+    joinLine: (url: string, code: string): string => `wsp join ${url} --code ${code}`,
+    escStays: "esc closes, the code stays good",
+    newCode: "New code",
+    close: "Close",
+    /** Said once, the first time the door binds: a Mac with its firewall on asks whether wsp may accept connections. */
+    firewall: "macOS may ask once whether wsp can accept connections; allow it",
+  },
+} as const;
+
 /** What the app calls the computer it runs on, first in every hosts list. */
 export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This computer");
 
 const HOST_MENU_SWITCH = "switch:";
 const HOST_MENU_CONNECT = "connect";
 const HOST_MENU_DISCONNECT = "disconnect:";
+const HOST_MENU_AWAKE = "awake:";
+const HOST_MENU_LEAVE = "leave-place";
 
 /** The Hosts menu as one list of rows, read by the shell's own menu bar and by the sidebar's foot alike: this computer
  * first, every saved host, the current one marked, then the connect row, then the disconnect of the host the window is
@@ -2439,14 +2585,30 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
     current !== undefined
       ? { id: `${HOST_MENU_DISCONNECT}${current.alias}`, label: HOST_WORDS.disconnect(current.label), group: "remove", enabled: true, destructive: true }
       : { id: HOST_MENU_DISCONNECT, label: HOST_WORDS.disconnect(view.here), group: "remove", enabled: false, refusal: HOST_WORDS.hereStays(view.here), destructive: true },
+    ...(view.place === undefined
+      ? []
+      : [
+          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake },
+          { id: HOST_MENU_LEAVE, label: HOST_WORDS.place.leaveRow(view.place.hostName), group: "place", enabled: true, destructive: true },
+        ]),
   ];
 }
 
 /** What a row of the Hosts menu does, read back off its id; nothing for an id the list above never minted. */
-export type HostMenuAction = { kind: "switch"; alias: string | null } | { kind: "connect" } | { kind: "disconnect"; alias: string };
+export type HostMenuAction =
+  | { kind: "switch"; alias: string | null }
+  | { kind: "connect" }
+  | { kind: "disconnect"; alias: string }
+  | { kind: "awake"; on: boolean }
+  | { kind: "leave" };
 
 export function hostMenuAction(id: string): HostMenuAction | undefined {
   if (id === HOST_MENU_CONNECT) return { kind: "connect" };
+  if (id === HOST_MENU_LEAVE) return { kind: "leave" };
+  if (id.startsWith(HOST_MENU_AWAKE)) {
+    const word = id.slice(HOST_MENU_AWAKE.length);
+    return word === "on" || word === "off" ? { kind: "awake", on: word === "on" } : undefined;
+  }
   if (id.startsWith(HOST_MENU_SWITCH)) {
     const alias = id.slice(HOST_MENU_SWITCH.length);
     return { kind: "switch", alias: alias === "" ? null : alias };

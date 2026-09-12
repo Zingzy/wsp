@@ -176,7 +176,8 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     const { events, onEvent } = collect();
     const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
     expect(NOT_SIGNED_IN).toBe("Codex is not signed in on this machine; run codex login --device-auth there");
-    expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN });
+    // The cause rides the result, as it does on the other CLI: a turn refused for want of a sign-in did no work.
+    expect(result).toMatchObject({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
     expect(events.at(-1)).toEqual({ type: "session.end", sessionId: FAILED_THREAD_ID, exitCode: 1, sawResult: true });
   });
 
@@ -190,7 +191,9 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     const exec = scriptedExec(fixtureLines("no-login-0153"), { exitCode: 101 });
     const { events, onEvent } = collect();
     const result = await adapterOver(exec).start({ prompt: "x", onEvent }).finished;
-    expect(result).toEqual({ status: "failed", error: NOT_SIGNED_IN });
+    expect(result).toEqual({ status: "failed", error: NOT_SIGNED_IN, refusal: "sign-in" });
+    // The CLI announced its session on thread.started, before it could know it had no sign-in, so the announce is
+    // no sign that the turn worked: the cause is what says it did none.
     expect(events.map(e => e.type)).toEqual(["session.start", "turn.done", "session.end"]);
     expect(events.at(-1)).toMatchObject({ type: "session.end", exitCode: 101, sawResult: false });
   });
@@ -205,6 +208,8 @@ describe("CodexAdapter over a codex exec --json turn", () => {
     const exec = scriptedExec([started, '{"type":"error","message":"Reconnecting... 1/5 (unexpected status 401 Unauthorized: token expired)"}', '{"type":"turn.started"}', '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"partway"}}', '{"type":"turn.failed","error":{"message":"Missing environment variable: `LATER_KEY`."}}'], { exitCode: 1 });
     const result = await adapterOver(exec).start({ prompt: "x", onEvent: () => {} }).finished;
     expect(result).toMatchObject({ status: "failed", error: codexMissingEnvLine("LATER_KEY") });
+    // A missing variable is not a refusal wsp classes: the later failure's words win and they claim no cause.
+    expect(result.refusal).toBeUndefined();
   });
 
   it("a process that dies after thread.started fails under the announced thread id with its last stderr lines", async () => {

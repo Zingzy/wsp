@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeSsh } from "../../../packages/runtime/test/fake-ssh.js";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
 import { checkSetup, recordThisComputer } from "../src/setup.js";
-import type { Keys } from "@wsp/host";
+import type { Keys, ProviderEnv } from "@wsp/host";
 
 const SOLARI = "slr_live_fake_desktop_key";
 const GOLDEN: GoldenManifest = {
@@ -52,11 +52,11 @@ describe("checkSetup", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  /** What makeRuntime does with the keys it is handed: the provider module behind the key, and behind no key the
-   * one that holds no machine. */
-  const runtimeFor = (keys: Keys, statePath: string): Runtime => {
+  /** What makeRuntime does with what it is handed: the provider module the environment the keys were read through
+   * names, and behind no provider key the one that holds no machine. */
+  const runtimeFor = (keys: Keys, statePath: string, env: ProviderEnv): Runtime => {
     made.push({ keys, statePath });
-    return keys.solari === undefined ? keyless : keyed;
+    return (env["SOLARI_API_KEY"] ?? "") === "" ? keyless : keyed;
   };
 
   it("is not ready, with nothing asked, when there is no key and nothing to show either", async () => {
@@ -85,7 +85,8 @@ describe("checkSetup", () => {
   it("is not ready when the key exists but the store has no golden and no workspace", async () => {
     sources.env = { SOLARI_API_KEY: SOLARI };
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
-    expect(made).toEqual([{ keys: { solari: SOLARI }, statePath: join(dir, "state.json") }]);
+    // The provider key is not among the keys the runtime is handed: it rides in the environment it picks from.
+    expect(made).toEqual([{ keys: {}, statePath: join(dir, "state.json") }]);
   });
 
   it("is not ready when the manifest has no head version", async () => {

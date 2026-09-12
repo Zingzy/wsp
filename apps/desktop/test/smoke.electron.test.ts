@@ -443,7 +443,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     await win.keyboard.up("Control");
   });
 
-  it("first launch with no key: the welcome, the agents found here with the MCP to add, Esc to the recap's one line, then the app on this computer with the cloud row, and the shim runs", async () => {
+  it("first launch with no key: the one screen with the agents found here ticked, Open wsp records this computer and the sidebar's first row is it, with the cloud row under it, and the shim runs", async () => {
     // Labs on, since the settings page that picks the light side for the photograph is a labs surface. The PATH is
     // launchd's own, what a Finder or Dock launch is handed, so this run is the one a tester's Mac makes.
     launched = await launch({ PATH: LAUNCHD_PATH.join(":"), WSP_LABS: "1" }, twoAgents);
@@ -466,71 +466,32 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(tokens.mono).toContain("ui-monospace");
     // The app's stylesheet clears html and body under the desktop class for the glass; this page paints its own ground.
     expect(await page.$eval(".ground", el => getComputedStyle(el).backgroundColor)).not.toBe("rgba(0, 0, 0, 0)");
-    expect(await page.textContent("#welcome h1")).toBe("Welcome to wsp");
-    expect(await page.textContent("#start")).toContain("Get started");
+    expect(await page.textContent("h1")).toBe("Welcome to wsp");
+    expect(await page.textContent(".sentence")).toBe("Your agents work on this Mac, in threads you can leave running.");
     expect(await page.$("#computer")).toBeNull();
-    expect(await page.isHidden("#agents")).toBe(true);
+    // The scan is the recipe scan's own: the two agents on this fixture's PATH, named in the row's slot and nowhere
+    // else, and the line under the card names them as the catalog does. No screen before this one, and none after.
+    const here = CATALOG_AGENTS.filter(a => a.id === "claude" || a.id === "codex");
+    await page.waitForFunction(() => (document.querySelector("#slot")?.textContent ?? "") !== "", undefined, { timeout: 30_000 });
+    expect(await page.textContent("#slot")).toBe(here.map(a => a.id).join(" · "));
+    expect(await page.textContent("#line")).toBe(`Lets ${here.map(a => a.name).join(" and ")} open threads and workspaces on this Mac.`);
+    expect(await page.isChecked("#tools")).toBe(true);
+    // The one screen that stands carries its keycap and its quiet link; the join screen behind that link and the
+    // joined screen behind it stand in the page with it, each hidden until it is reached.
+    expect(await page.$$eval("#welcome button", els => els.map(el => el.id))).toEqual(["open", "join"]);
+    expect(await page.$$eval(".setup", els => els.map(el => `${el.id}:${(el as HTMLElement).hidden}`))).toEqual(["welcome:false", "joining:true", "joined:true"]);
+    expect(await page.textContent("#open")).toContain("Open wsp");
+    expect(await page.textContent("#join")).toBe("This Mac joins another wsp");
+    // The column is the SetupScreen's, and nothing scrolls.
+    expect(await page.$eval("#welcome", el => el.getBoundingClientRect().width)).toBe(560);
     expect(await fits()).toBe(true);
     // The entrance plays once from CSS; the photograph is the screen at rest after it.
     await page.waitForFunction(() => document.getAnimations().length === 0);
-    console.info(`welcome: ${(await photograph(app, page, "onboarding-welcome")).join(" ")}`);
-
-    // Enter advances.
-    await page.keyboard.press("Enter");
-    await page.waitForSelector("#agents:not([hidden])");
-    expect(await page.isHidden("#welcome")).toBe(true);
-    expect(await page.textContent("#agents h1")).toBe("Let your agents drive wsp");
-    // The session counts land after the rows and are what the list is ordered by, so every reading of the list waits
-    // for them first: read before they land, the order is the one the counts are about to change.
-    await page.waitForFunction(() => /^\d+ sessions?$/.test(document.querySelector("#rows li[data-agent=claude] .meta")?.textContent ?? ""), undefined, { timeout: 30_000 });
-    expect(await page.textContent("#rows li[data-agent=claude] .meta")).toBe("0 sessions");
-    // No caps label over the title, and Enter put no ring on the keycap: a ring comes only where the keyboard puts the focus.
-    expect(await page.$$eval(".micro", els => els.length)).toBe(0);
-    expect(await page.$eval("#agents", el => el.firstElementChild?.tagName.toLowerCase())).toBe("h1");
     expect(await page.$$eval(":focus-visible", els => els.length)).toBe(0);
-    // Every catalog agent is a row: the two found first with the keycap, then, dimmed and with the state word in place
-    // of a button, those whose command is not on this computer; each group in catalog order, no version anywhere.
-    const here = (a: { id: string }): boolean => a.id === "claude" || a.id === "codex";
-    const rows = await page.$$eval("#rows li", rows => rows.map(r => [r.getAttribute("data-agent"), r.querySelector(".name")?.textContent, r.querySelector(".slot")?.textContent, r.classList.contains("absent")]));
-    expect(rows).toEqual([...CATALOG_AGENTS.filter(here), ...CATALOG_AGENTS.filter(a => !here(a))].map(a => [a.id, a.name, here(a) ? "Add MCP" : "not installed", !here(a)]));
-    expect(await page.$$eval("#rows li.absent button", els => els.length)).toBe(0);
-    for (const meta of await page.$$eval("#rows li .meta", els => els.map(e => e.textContent))) expect(meta).not.toMatch(/^v\d/);
-    // A found row's slot is never blank: it says the count is being read until the count lands.
-    for (const meta of await page.$$eval("#rows li:not(.absent) .meta", els => els.map(e => e.textContent))) expect(meta).toMatch(/^(reading sessions|\d+ sessions?)$/);
-    expect(await page.textContent("#all")).toContain("Add to all");
-    // The marks are the web app's vendored svgs, masked in the current colour; an agent without one gets its initial.
-    expect(await page.$eval("#rows li[data-agent=claude] .glyph", el => (el as HTMLElement).style.getPropertyValue("--mark"))).toContain("agents/claude.svg");
-    expect(await page.$eval("#rows li[data-agent=hermes] .initial", el => el.textContent)).toBe("H");
-    expect(await page.textContent("#skip")).toBe("Skip");
-    expect(await page.isEnabled("#all")).toBe(true);
-    // Every row one height, whatever its slot holds.
-    const heights = await page.$$eval("#rows li", rows => rows.map(r => r.getBoundingClientRect().height));
-    expect(new Set(heights).size).toBe(1);
-    expect(await fits()).toBe(true);
-    console.info(`agents: ${(await photograph(app, page, "onboarding-agents")).join(" ")}`);
+    console.info(`first run: ${(await photograph(app, page, "onboarding-first-run")).join(" ")}`);
 
-    await page.click("#rows li[data-agent=claude] button");
-    await page.waitForFunction(() => document.querySelector("#rows li[data-agent=claude] .state")?.textContent === "MCP added");
-    expect(await page.$$eval("#rows li", rows => rows.map(r => r.getBoundingClientRect().height))).toEqual(heights);
-    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", join(home, "state.json")] } } });
-    expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(home, ".codex", "skills"))).toBe(false);
-
-    // Esc is Skip: the recap says what happened in one line, and since one agent was left, the sentence about later.
-    await page.keyboard.press("Escape");
-    await page.waitForSelector("#recap:not([hidden])");
-    expect(await page.textContent("#recap h1")).toBe("This computer is your first workspace");
-    expect(await page.$eval("#recap", el => el.firstElementChild?.tagName.toLowerCase())).toBe("h1");
-    expect(await page.$$eval(":focus-visible", els => els.length)).toBe(0);
-    expect(await page.textContent("#happened")).toBe("Recorded as your workspace, with the wsp tools added to 1 agent.");
-    expect(await page.isVisible("#later")).toBe(true);
-    expect(await page.textContent("#open")).toContain("Open wsp");
-    expect(await page.$("#next")).toBeNull();
-    expect(await page.$("#computer")).toBeNull();
-    expect(await fits()).toBe(true);
-    console.info(`recap: ${(await photograph(app, page, "onboarding-recap")).join(" ")}`);
-
-    // Enter opens the app. An event asked for after it has fired never arrives, and the finish closes this window while the key is in flight.
+    // Enter is the keycap: the tools into both agents found here, then the app. An event asked for after it has
+    // fired never arrives, and the finish closes this window while the key is in flight.
     const closed = page.waitForEvent("close");
     await page.keyboard.press("Enter");
     const win = await windowAt(app, APP_URL);
@@ -541,9 +502,19 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     // The window opening and the record reaching the state file are two events, and the file is read once. The row is
     // the second of them said on screen: the app draws it from what the host read back, so the file holds it by then.
     await win.waitForSelector("[data-row-id^='ws:']");
-    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string }> };
-    expect(Object.values(state.workspaces ?? {}).filter(w => w.kind === "local")).toHaveLength(1);
+    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string; name?: string }> };
+    const recorded = Object.values(state.workspaces ?? {}).filter(w => w.kind === "local");
+    expect(recorded).toHaveLength(1);
     expect(existsSync(join(home, ".env"))).toBe(false);
+    // The sidebar's first row is this computer: the one workspace the first run recorded, under the name it was given.
+    const names = win.locator("[data-workspace-name]");
+    await names.first().waitFor();
+    expect(await names.count()).toBe(1);
+    expect(await names.first().textContent()).toBe(recorded[0]!.name);
+    // The tick was live, so both agents found here carry the wsp server and its skill, with the shim as the command.
+    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8"))).toEqual({ mcpServers: { wsp: { command: shim, args: ["mcp", "--state", join(home, "state.json")] } } });
+    expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
 
     // The app opens on this computer, and the cloud row waits at the sidebar's bottom.
     const row = win.locator("[data-cloud-setup-row]");
@@ -595,20 +566,23 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     expect(report.installed.map(p => p.id)).toEqual(["codex"]);
   });
 
-  it("Enter on the agents screen installs every agent found here and advances to the recap", async () => {
+  it("the tick taken off leaves every agent's config alone, and Open wsp still records this computer and opens the app on it", async () => {
     launched = await launch({ PATH: "/usr/bin:/bin" }, twoAgents);
     const { app, home } = launched;
     const page = await windowAt(app, ONBOARDING_URL);
     await page.waitForLoadState("domcontentloaded");
-    await page.keyboard.press("Enter");
-    await page.waitForSelector("#agents:not([hidden])");
-    await page.keyboard.press("Enter");
-    await page.waitForSelector("#recap:not([hidden])");
-    expect(await page.$$eval("#rows li .state", els => els.map(e => e.textContent))).toEqual(CATALOG_AGENTS.map(a => (a.id === "claude" || a.id === "codex" ? "MCP added" : "not installed")).sort((a, b) => Number(b === "MCP added") - Number(a === "MCP added")));
-    expect(await page.textContent("#happened")).toBe("Recorded as your workspace, with the wsp tools added to 2 agents.");
-    expect(await page.isHidden("#later")).toBe(true);
-    expect(JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")).mcpServers.wsp.command).toBe(shimPath(home));
-    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toContain("[mcp_servers.wsp]");
+    await page.waitForFunction(() => (document.querySelector("#slot")?.textContent ?? "") !== "", undefined, { timeout: 30_000 });
+    await page.click("#tools");
+    expect(await page.isChecked("#tools")).toBe(false);
+    await page.click("#open");
+    const win = await windowAt(app, APP_URL);
+    await win.waitForSelector("[data-row-id^='ws:']");
+    // The fixture's own files are what the scan found the two agents by; neither gained the wsp server.
+    expect(existsSync(join(home, ".claude.json"))).toBe(false);
+    expect(readFileSync(join(home, ".codex", "config.toml"), "utf8")).toBe("");
+    expect(existsSync(join(home, ".claude", "skills", "wsp"))).toBe(false);
+    const state = JSON.parse(readFileSync(join(home, "state.json"), "utf8")) as { workspaces?: Record<string, { kind?: string }> };
+    expect(Object.values(state.workspaces ?? {}).filter(w => w.kind === "local")).toHaveLength(1);
   });
 
   it("with no provider key the welcome opens while nothing is recorded, and a recorded local workspace opens the app on it instead", async () => {
@@ -616,7 +590,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     launched = await launch({});
     const welcome = await windowAt(launched.app, ONBOARDING_URL);
     await welcome.waitForLoadState("domcontentloaded");
-    expect(await welcome.textContent("#welcome h1")).toBe("Welcome to wsp");
+    expect(await welcome.textContent("h1")).toBe("Welcome to wsp");
     expect(appWindows(launched.app).filter(w => APP_URL.test(w.url()))).toHaveLength(0);
     await launched.app.close();
     rmSync(launched.home, { recursive: true, force: true });
@@ -795,7 +769,7 @@ describe.runIf(SMOKE)("desktop app (built)", { timeout: 60_000 }, () => {
     });
     const page = await windowAt(launched.app, ONBOARDING_URL);
     await page.waitForLoadState("domcontentloaded");
-    expect(await page.textContent("#welcome h1")).toBe("Welcome to wsp");
+    expect(await page.textContent("h1")).toBe("Welcome to wsp");
     expect(existsSync(shimPath(join(launched.home, ".wsp")))).toBe(true);
     expect(existsSync(join(launched.home, "old-home", "bin"))).toBe(false);
   });

@@ -109,6 +109,7 @@ import {
   noAdapterLine,
   noMessagesLine,
   noReplyLine,
+  noWorkspaceRefusal,
   NO_PROVIDER_LINE,
   notAFileLine,
   notAnImageLine,
@@ -149,6 +150,7 @@ import {
   type SessionEvent,
   type SessionOrigin,
   type SessionView,
+  type TurnRefusal,
   type TurnResult,
   type WorkspaceCreateResult,
   type WorkspaceCreatingEvent,
@@ -170,6 +172,7 @@ import {
   registerTakesNoConsentLine,
   shellQuote,
   threadOpenedLine,
+  threadWithoutIdRefusal,
   threadWord,
   workspaceForFolder,
   workspaceProjects,
@@ -567,15 +570,14 @@ async function threads(client: HostClient, workspaceId?: string): Promise<Thread
   return foldThreads(sessions);
 }
 
-/** A workspace as a person names it: by id, else by its name when exactly one carries it. */
+/** A workspace as a person names it: by id, else by its name when exactly one carries it. The host reads the name off
+ * the same list it prints, so a workspace the listing shows is never denied here as absent, and one this caller may
+ * not drive is refused in the words of the rule that hides it. */
 export async function workspaceOf(client: HostClient, ref: string): Promise<WorkspaceOut> {
-  const all = await workspaces(client);
-  const byId = all.find(w => w.id === ref);
-  if (byId !== undefined) return byId;
-  const byName = all.filter(w => w.name === ref);
-  if (byName.length === 1) return byName[0]!;
-  if (byName.length > 1) throw new Error(`${byName.length} workspaces are named ${ref}; use the id`);
-  throw new Error(`no workspace ${ref}`);
+  const { workspace } = await client.request<{ workspace?: unknown }>("workspaces.resolve", { ref });
+  const read = WorkspaceOut.safeParse(workspace);
+  if (!read.success) throw new Error(otherVersion("workspaces.resolve"));
+  return read.data;
 }
 
 /** The thread a reference names among these rows: by id, or by a prefix of it that names exactly one. */
@@ -742,6 +744,20 @@ export function stopLine(stopped: Stopped): string {
   const under = stopped.under ?? [];
   const tree = under.length === 0 ? "" : `, and with it ${under.length} ${under.length === 1 ? "thread" : "threads"} its agents spawned: ${under.map(threadWord).join(", ")}`;
   return `thread ${stopped.threadId} ${STOP_WORDS[stopped.outcome]}${tree}`;
+}
+
+/** Drops the thread from this computer through the runtime, the road the app's row action takes; the runtime
+ * refuses one whose turn ran and nothing on the machine is touched either way. A row from before threads carries
+ * no thread id, so it is refused here in its own words rather than dialled for and answered as a thread nobody has,
+ * which is the guard the app's row action makes before it offers the action at all. */
+export async function forgetThread(client: HostClient, thread: ThreadView): Promise<void> {
+  if (thread.threadId === undefined) throw new Error(threadWithoutIdRefusal(thread.id));
+  await client.request("sessions.forget", { threadId: thread.threadId });
+}
+
+/** The line every director prints for a forget, naming what nobody loses: no turn of the thread did any work. */
+export function threadForgotLine(thread: ThreadView): string {
+  return `forgot thread ${thread.id}: no turn ever ran on it, so nothing of its work is gone`;
 }
 
 /** What a rename came to, as every director prints it: the runtime's five answers, none an error. `error` is the
@@ -1200,11 +1216,16 @@ async function registerOnThisComputer(client: HostClient, workspace: WorkspaceVi
 }
 
 /** The workspace an import with none named goes to: the one the last thread anywhere started on, said in one line
- * through `tell`; refused before any thread has started. */
+ * through `tell`; refused before any thread has started. The id the preference holds goes through the host like a
+ * name a person typed, so a target this caller may not drive is refused in that rule's own words; only one the host
+ * no longer holds at all is no last target. */
 export async function lastTarget(client: HostClient, named: string, tell: (line: string) => void): Promise<WorkspaceOut> {
   const target = (await preferencesOf(client)).target;
-  const workspace = target === undefined ? undefined : (await workspaces(client)).find(w => w.id === target.workspace);
-  if (workspace === undefined) throw usageRefusal(noLastTargetLine(named));
+  if (target === undefined) throw usageRefusal(noLastTargetLine(named));
+  const workspace = await workspaceOf(client, target.workspace).catch((e: unknown) => {
+    if (e instanceof Error && e.message === noWorkspaceRefusal(target.workspace)) throw usageRefusal(noLastTargetLine(named));
+    throw e;
+  });
   tell(lastTargetLine(workspace.name));
   return workspace;
 }
@@ -1270,8 +1291,9 @@ export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {},
   return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
 }
 
-/** A start reply the protocol schema refuses: the host process predates or postdates this command's build. */
-const OTHER_VERSION = "the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up";
+/** A reply the protocol schema refuses: the host process predates or postdates this command's build. */
+const otherVersion = (op: string): string => `the host answered ${op} in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up`;
+const OTHER_VERSION = otherVersion("sessions.start");
 
 /** Starts a turn as `startedBy` and answers with it the moment the runtime names it: what a detached start returns
  * and what a follow goes on from. `onQueued` fires when the runtime says the start waits behind the thread's running
@@ -1424,6 +1446,21 @@ export function turnFailure(turn: Turn): string | undefined {
   return turn.result?.error ?? turn.reason ?? `turn ${turn.result?.status ?? "ended without a result"}`;
 }
 
+/** The refusal each cause an agent named is thrown as, so the exit code and the tool error say which class the
+ * failure was: a turn refused for want of a sign-in is the auth class, which already means no key and no sign-in.
+ * A cause with no row here takes the provider class every other turn failure takes. Adding a cause is a row. */
+const REFUSAL_THROWS: Readonly<Record<TurnRefusal, (message: string) => Error>> = { "sign-in": authRefusal };
+
+/** The turn's failure as the error every door throws for it, classed by what the agent refused it for; nothing when
+ * it completed. The class is read off the cause the adapter stamped, never out of the agent's own words. */
+export function turnRefusal(turn: Turn): Error | undefined {
+  const failure = turnFailure(turn);
+  if (failure === undefined) return undefined;
+  const cause = turn.result?.refusal;
+  const thrown = cause === undefined ? undefined : REFUSAL_THROWS[cause];
+  return thrown === undefined ? new Error(failure) : thrown(failure);
+}
+
 /** What a send that met a running turn on its thread says on stderr: WAITING when the runtime announces the wait,
  * the rest once it answered. A steered message cannot change the running turn's picks, so the line names the flags
  * it dropped. */
@@ -1484,8 +1521,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
       if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
     },
   });
-  const failure = turnFailure(turn);
-  if (failure !== undefined) throw new Error(failure);
+  const failure = turnRefusal(turn);
+  if (failure !== undefined) throw failure;
   return turn;
 }
 
@@ -1749,8 +1786,8 @@ function timeoutFlag(value: string | undefined): number | undefined {
 
 /** The turn's reply as the tool result; a turn that did not complete is a tool error with the harness's reason. */
 function turnOut(turn: Turn): z.infer<typeof TurnOut> {
-  const failure = turnFailure(turn);
-  if (failure !== undefined) throw new Error(failure);
+  const failure = turnRefusal(turn);
+  if (failure !== undefined) throw failure;
   return turnView(turn);
 }
 
@@ -2529,6 +2566,33 @@ export const VERBS: readonly Verb[] = [
         await awake(client, await workspaceOf(client, thread.workspaceId), "rename", QUIET_LINE);
         const renamed = await rename(client, thread, title);
         return asText(renameLine(renamed), { ...renamed });
+      },
+    }),
+  },
+  {
+    name: "thread forget",
+    usage: "wsp thread forget <thread>",
+    about: "drops a thread no turn ever ran on, the row a launch that never got going leaves behind; refused once a turn of it did work",
+    options: {},
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp thread forget takes one thread");
+      const client = await ctx.client();
+      const thread = await threadOf(client, ref);
+      await forgetThread(client, thread);
+      ctx.out.emit({ threadId: thread.id, workspaceId: thread.workspaceId }, threadForgotLine(thread));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Drops a thread (by id, or a prefix of it) no turn ever ran on: the row a launch that never got going leaves in threads and in the person's sidebar goes, and nothing is asked of the machine. A launch the agent refused outright, for want of a sign-in, counts as one that ran nothing and goes the same way. Refused in one line once a turn of the thread did work, since that work is written down on it and nowhere else; a whole workspace's threads go with forget or delete on the workspace.",
+      input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+      output: { threadId: z.string(), workspaceId: z.string() },
+      call: async ({ thread: ref }, deps) => {
+        const client = await deps.client();
+        const thread = await threadOf(client, ref);
+        await forgetThread(client, thread);
+        return asText(threadForgotLine(thread), { threadId: thread.id, workspaceId: thread.workspaceId });
       },
     }),
   },

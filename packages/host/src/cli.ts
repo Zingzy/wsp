@@ -27,14 +27,14 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, portsAsked, shellQuote, SOLARI_CONSOLE, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, usageRefusal, WS_PORT_OFFSET, type WorkspaceCreatingEvent } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
-import { providerBackendFor, providerEnvWith, providerModule, type ProviderEnv } from "./providers.js";
+import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerModule, type ProviderEnv } from "./providers.js";
 import { assetDir } from "./assets.js";
 import { claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
-import { agentKeyEnvs, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
+import { ANTHROPIC_KEY, agentKeyEnvs, keyIn, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
 // The writer of the wsp home's .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
@@ -214,6 +214,8 @@ options:
                      join: the code wsp add printed on the host
   --code-file PATH   join: read the code off this file and delete the file
                      before dialing, so a code never sits on a disk
+  --awake            join: hold this computer out of idle sleep while it is
+                     joined, for as long as the agent runs
   --serve            join: hold the link open in this terminal, which is what
                      the service installed by a join runs
   --name ALIAS       connect: the name to call that host here (default what its
@@ -264,10 +266,10 @@ options:
                      the only workspace there is
   --provider NAME    up, init: which machine provider this computer forks on.
                      docker forks containers on a Docker daemon, yours or one
-                     on a box; box forks Box by ASCII machines with BOX_API_KEY
-                     in the environment; without this a saved Solari key takes
-                     the cloud and no key leaves this computer as the only
-                     workspace
+                     on a box; box forks Box by ASCII machines. Without this,
+                     a key saved under a provider's own variable wires that
+                     provider, and no key at all leaves this computer as the
+                     only workspace
   --docker-host URL  up, init: the Docker daemon to dial, as DOCKER_HOST words
                      it (unix:///var/run/docker.sock, ssh://you@box); this
                      computer's own socket without it
@@ -300,12 +302,17 @@ options:
                      the sign-ins
 
 keys are read from the environment, then ./.env, then ~/.wsp/.env (WSP_HOME
-overrides ~/.wsp). The prompt runs only when no Solari key is found; it asks
-for the optional Anthropic key at the same time and can save both to that file.
-With a Solari key present, a missing Anthropic key is only noted at start.
+overrides ~/.wsp). The prompt runs only when the wired provider's key is not
+found, and asks for it by the variable that provider reads; it asks for the
+optional Anthropic key at the same time and can save both to that file. With
+the provider key present, a missing Anthropic key is only noted at start.
 Without one, init and up take the local road: this computer is the workspace,
 nothing is forked and nothing is sealed.
 `;
+
+/** Where a key is read from, as a line says it: one wording for the screen that asks for one and for every refusal
+ * that says there was nobody to ask. */
+const KEY_LAYER_WORDS = "the environment, ./.env, or ~/.wsp/.env";
 
 export interface CliIO {
   log(line: string): void;
@@ -318,8 +325,10 @@ export interface CliIO {
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
   isTTY?: boolean;
-  /** A key, typed without echo. Lines after the first are shown under the question. */
-  askSecret(question: string): Promise<string>;
+  /** A key, typed without echo. Lines after the first are shown under the question. `variable` is what a caller
+   * with no terminal is told to set instead, so a refusal in a service log names the key to put in a file rather
+   * than saying it. */
+  askSecret(question: string, variable?: string): Promise<string>;
 }
 
 export type { Keys } from "./env-keys.js";
@@ -343,10 +352,10 @@ type Stream<T> = T & { isTTY?: boolean };
 /** Questions are clack prompts on the terminal; off a terminal there is nobody to answer them. */
 export function terminalIO(input: Stream<Readable> = process.stdin, output: Stream<Writable> = process.stdout): CliIO {
   const screen = input.isTTY === true && output.isTTY === true;
-  const nobodyLine = (q: string): string => `${q.split("\n")[0]}: no terminal to ask on; set it in the environment, ./.env, or ~/.wsp/.env.`;
+  const nobodyLine = (q: string, variable?: string): string => `${q.split("\n")[0]}: no terminal to ask on; set ${variable ?? "it"} in ${KEY_LAYER_WORDS}.`;
   const nobody = (q: string): Promise<never> => Promise.reject(new Error(nobodyLine(q)));
   // A secret nobody can type is a missing key, the contract's auth class; a yes-or-no nobody can answer is not.
-  const noKey = (q: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q)));
+  const noKey = (q: string, variable?: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q, variable)));
   // The first line of a question is the question; the lines under it are its hint.
   const split = (q: string): PromptOptions => {
     const nl = q.indexOf("\n");
@@ -364,7 +373,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
-    askSecret: q => (screen ? answered(passwordPrompt(split(q))) : noKey(q)),
+    askSecret: (q, variable) => (screen ? answered(passwordPrompt(split(q))) : noKey(q, variable)),
   };
 }
 
@@ -373,9 +382,9 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
  * stream nobody is reading. */
 export function jsonCliIO(err: Writable = process.stderr): CliIO {
   const say = (line: string): void => void err.write(`${line}\n`);
-  const nobodyLine = (q: string): string => `${q.split("\n")[0]}: --json asks nothing; set it in the environment, ./.env, or ~/.wsp/.env.`;
+  const nobodyLine = (q: string, variable?: string): string => `${q.split("\n")[0]}: --json asks nothing; set ${variable ?? "it"} in ${KEY_LAYER_WORDS}.`;
   const nobody = (q: string): Promise<never> => Promise.reject(new Error(nobodyLine(q)));
-  const noKey = (q: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q)));
+  const noKey = (q: string, variable?: string): Promise<never> => Promise.reject(authRefusal(nobodyLine(q, variable)));
   return { log: say, error: say, stream: text => void err.write(text), ask: nobody, askSecret: noKey };
 }
 
@@ -384,34 +393,56 @@ function keyLayers(sources: KeySources): Array<Record<string, string | undefined
   return [sources.env, parseEnvFile(join(sources.cwd, ".env")), parseEnvFile(join(sources.home, ".env"))];
 }
 
-/** Where a key is read from on this computer: this process's environment, the folder it runs in, and the wsp home.
- * One answer, so a test can hand a different one through the same field rather than move the process. */
-export function keySources(): KeySources {
-  // The key is put to the provider whose key it is, not to whatever this computer is set up to fork on: a person
-  // typing a cloud key on a computer that forks containers is asking about the key.
-  return { env: process.env, cwd: process.cwd(), home: wspHome(), checkKey: key => checkProviderKey(providerBackend({ solari: key }, {})) };
+/** Where a key is read from on this computer: the environment the run picks its provider out of, the folder it runs
+ * in, and the wsp home. One answer, so a test can hand a different one through the same field rather than move the
+ * process. */
+export function keySources(env: ProviderEnv = process.env): KeySources {
+  // The key is put to the provider this run is wired to, under that row's own variable: a person who named a
+  // provider is typing that provider's key, whatever another row would have been taken by.
+  return { env, cwd: process.cwd(), home: wspHome(env), checkKey: key => checkProviderKey(providerBackendFor(providerEnvWithKey(env, key))) };
+}
+
+/** The environment a run picks its provider out of, as this computer stands now: the run's own with the command
+ * line's words already in it, and every registered row's key variable taken from the three layers. */
+function providerEnvNow(env: ProviderEnv = process.env, cwd: string = process.cwd(), home: string = wspHome(env)): ProviderEnv {
+  return providerEnvWith({}, env, keyLayers({ env, cwd, home }));
 }
 
 /** How many keys one run takes before it stops asking: a mistyped key is worth another go, an endless prompt is not. */
 const KEY_TRIES = 3;
 
-/** What no Solari key means for the command that asked. `refuse` is the road every command that needs a machine
+/** What no provider key means for the command that asked. `refuse` is the road every command that needs a machine
  * takes: nothing it does has any meaning without one. `offer` is wsp init's: at a terminal the key is asked for with
  * the way to skip it, and an empty answer takes the local road, since this computer is a workspace of its own. `local`
  * is the road of up, up --service, new --local and doctor --local: init already answered, so nothing is asked and
  * the run goes on with no provider. */
-export type NoSolari = "refuse" | "offer" | "local";
+export type NoProviderKey = "refuse" | "offer" | "local";
+
+/** What a run reads its keys as: the agents' keys, and the environment its provider is picked out of, carrying
+ * every registered row's key variable as the layers hold it and whatever this run was told to type. */
+export interface LoadedKeys {
+  keys: Keys;
+  env: ProviderEnv;
+}
 
 export async function loadKeys(
   io: CliIO,
   sources: KeySources = keySources(),
-  ask: { anthropic: boolean; noSolari?: NoSolari; checkSaved?: boolean } = { anthropic: true },
-): Promise<Keys> {
+  ask: { anthropic: boolean; noSolari?: NoProviderKey; checkSaved?: boolean } = { anthropic: true },
+): Promise<LoadedKeys> {
   const homeEnv = join(sources.home, ".env");
   const layers = keyLayers(sources);
-  const found = keysFound(sources, layers);
-  let solari = found.solari;
-  let anthropic = found.anthropic;
+  const env = providerEnvWith({}, sources.env, layers);
+  // The row this run is wired to, which is the only one it is asked about: the variable it reads its key from is
+  // the one named on the screen, written to the file and put to the provider.
+  const row = providerKeyRow(env);
+  const keyEnv = row?.keyEnv;
+  const held = keyEnv === undefined ? undefined : keyIn(env, keyEnv);
+  let anthropic = keysFound(sources, layers).anthropic;
+  const loaded = (key: string | undefined): LoadedKeys => ({
+    keys: anthropic !== undefined ? { anthropic } : {},
+    env: keyEnv === undefined ? env : { ...env, [keyEnv]: key },
+  });
   /** The provider's refusal of a key, in the words the app's keys step uses, or nothing. Only a refusal counts: a
    * check nothing answered says nothing about the key, so it is taken and the build says its own piece if it must. */
   const refusalOf = async (key: string, saved: boolean): Promise<string | undefined> => {
@@ -423,60 +454,61 @@ export async function loadKeys(
   // rather than stopping the build on the far side of the confirm. Every other verb takes a saved key as it stands:
   // one of them on a computer with no road out would otherwise refuse to do work that needs no provider at all.
   let refusedSaved: string | undefined;
-  if (solari !== undefined) {
-    refusedSaved = ask.checkSaved === true ? await refusalOf(solari, true) : undefined;
-    if (refusedSaved === undefined) return found;
-    solari = undefined;
+  if (held !== undefined) {
+    refusedSaved = ask.checkSaved === true ? await refusalOf(held, true) : undefined;
+    if (refusedSaved === undefined) return loaded(held);
   }
-  // No key on this computer and either a road init already answered or nobody at a keyboard to type one: the local
-  // road is taken without a question. Every other command still refuses through its IO's own words below. The Claude
-  // key rides on either way: it is the agents' key, not the provider's, and a local thread uses it as a fork would.
-  const withoutProvider = (): Keys => (anthropic !== undefined ? { anthropic } : {});
+  // No key on this computer and either a road init already answered, nobody at a keyboard to type one, or a
+  // provider that reads no key at all: the local road is taken without a question. Every other command still
+  // refuses through its IO's own words below. The Claude key rides on either way: it is the agents' key, not the
+  // provider's, and a local thread uses it as a fork would.
   // A refused key is never quietly dropped for the local road: nobody asked for this computer, the provider did.
   if (refusedSaved !== undefined && io.isTTY !== true) throw authRefusal(refusedSaved);
-  if (ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return withoutProvider();
+  if (keyEnv === undefined || ask.noSolari === "local" || (ask.noSolari === "offer" && io.isTTY !== true)) return loaded(undefined);
 
   // Not wrapped: the CLI's IOs already refuse a secret as the contract's auth class, so a caller with no terminal
   // to type one on exits on that code rather than on a generic failure.
-  let why = refusedSaved ?? "No Solari key found.";
+  const where = row?.keyConsole !== undefined ? `\n${row.keyConsole}` : "";
+  const skip = ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : "";
+  // The variable is said once, on the line that says where a key goes so this screen is not drawn again.
+  let why = refusedSaved ?? `No ${keyEnv} in ${KEY_LAYER_WORDS}.`;
+  let key: string;
   for (let attempt = 1; ; attempt++) {
-    const typed = (await io.askSecret(`Solari API key\n${why}\n${SOLARI_CONSOLE}${ask.noSolari === "offer" ? `\nEnter with nothing skips the cloud: ${THIS_COMPUTER} alone becomes your workspace, and nothing is sealed.` : ""}`)).trim();
+    const typed = (await io.askSecret(`${row?.keyName ?? keyEnv}\n${why}${where}${skip}`, keyEnv)).trim();
     if (!typed) {
-      if (ask.noSolari === "offer") return withoutProvider();
-      throw authRefusal("A Solari API key is needed to start.");
+      if (ask.noSolari === "offer") return loaded(undefined);
+      throw authRefusal(`${keyEnv} is needed to start.`);
     }
     // Checked before it is written, so a key the provider refuses never reaches the file the whole setup reads.
     const refused = await refusalOf(typed, false);
     if (refused === undefined) {
-      solari = typed;
+      key = typed;
       break;
     }
     if (attempt >= KEY_TRIES) throw authRefusal(refused);
     why = refused;
   }
-  const set: Record<string, string> = { SOLARI_API_KEY: solari };
+  const set: Record<string, string> = { [keyEnv]: key };
 
   if (anthropic === undefined && ask.anthropic) {
     const typed = (
-      await io.askSecret("Anthropic API key\noptional, enter skips\nOn a Claude subscription, skip this and sign in with /login on the machine instead.")
+      await io.askSecret("Anthropic API key\noptional, enter skips\nOn a Claude subscription, skip this and sign in with /login on the machine instead.", ANTHROPIC_KEY)
     ).trim();
     if (typed) {
       anthropic = typed;
-      set["ANTHROPIC_API_KEY"] = typed;
+      set[ANTHROPIC_KEY] = typed;
     }
   }
 
   if ((await io.ask(saveQuestion(sources.home, Object.keys(set).length))) === "yes") writeEnvFile(homeEnv, set);
-  return { solari, ...(anthropic !== undefined ? { anthropic } : {}) };
+  return loaded(key);
 }
 
-/** The keys as the environment and the files hold them now, asking nothing: what a serving host reads when the init
- * job asks, and where loadKeys starts before it asks. */
+/** The agents' keys as the environment and the files hold them now, asking nothing: what a serving host reads when
+ * the init job asks, and where loadKeys starts before it asks. */
 export function keysFound(sources: KeySources = keySources(), layers: Array<Record<string, string | undefined>> = keyLayers(sources)): Keys {
-  const find = (name: string): string | undefined => layers.map(l => l[name]).find(v => v !== undefined && v !== "");
-  const solari = find("SOLARI_API_KEY");
-  const anthropic = find("ANTHROPIC_API_KEY");
-  return { ...(solari !== undefined ? { solari } : {}), ...(anthropic !== undefined ? { anthropic } : {}) };
+  const anthropic = layers.map(l => keyIn(l, ANTHROPIC_KEY)).find(v => v !== undefined);
+  return anthropic !== undefined ? { anthropic } : {};
 }
 
 /** Names the file only when WSP_HOME moved it off the default. */
@@ -564,6 +596,9 @@ export const localWorkFolder = (home: string): string => join(home, "wsp-work");
  * made is the one a turn uses, and the work folder is the workspace's own. */
 export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env): LocalWiring {
   const root = localWorkFolder(home);
+  // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
+  // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
+  const person = homeNamed(env[PERSON_HOME_ENV]) ?? home;
   // Started on the first dial and kept: a host nobody opens a pane on never binds a port on this computer, and
   // never dlopens the native module @wsp/daemon's import of node-pty loads. The desktop package ships that module
   // beside its bundle, so the deferred edge is about the port and the load, not about a missing file.
@@ -573,9 +608,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   return {
     backend,
     execStream: o => localExecStream({ root: backend.workFolder(), ...o }),
-    home: id => agentHome(home, id, env),
+    home: id => agentHome(person, id, env),
     homeDir: home,
-    env: () => Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)),
+    env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
     daemonRoad: async () => {
       // The panes stay on the person's home: the files and terminal tabs are theirs to look around in, where a
       // turn's own folder is the workspace's.
@@ -712,7 +747,7 @@ export function optsFor(
     statePath: statePathFrom(values.state, env, note),
     home: wspHome(env),
     env,
-    providerEnv: providerEnvWith(provider, env),
+    providerEnv: providerEnvWith(provider, env, keyLayers({ env, cwd: process.cwd(), home: wspHome(env) })),
   };
 }
 
@@ -720,13 +755,6 @@ export function optsFor(
  * read so a port one of them holds is named as that host rather than as a bare node process. */
 export function statesHere(statePath: string): string[] {
   return [...new Set([statePath, resolve(defaultStatePath())])];
-}
-
-/** The machine provider this computer is set up for, out of the one table of them: the provider a person named,
- * else the one their keys name, else the module that holds no machine and refuses every road with the one sentence
- * saying how to get one. The one place that choice is made, so nothing above it asks which provider it holds. */
-export function providerBackend(keys: Keys, env: ProviderEnv = process.env): MachineBackend {
-  return providerBackendFor({ keys, env });
 }
 
 /** The provider slot each runtime made here was wired with, so a host can swap the module in when a key is saved,
@@ -738,15 +766,20 @@ const PROVIDER_ENVS = new WeakMap<Runtime, ProviderEnv>();
 const PROVIDER_IDS = new WeakMap<Runtime, { id: string }>();
 export const providerSlotOf = (rt: Runtime): ProviderSlot | undefined => PROVIDER_SLOTS.get(rt);
 
-/** Wires the provider module the keys name into a runtime made here; a runtime made elsewhere has no slot, and a
- * saved key it would do nothing with is refused rather than taken. */
-export function swapProvider(rt: Runtime, keys: Keys): void {
+/** Wires the provider module the keys now on this computer name into a runtime made here, picking out of the same
+ * environment that runtime was built from; a runtime made elsewhere has no slot, and a saved key it would do
+ * nothing with is refused rather than taken. The saved record stands in front of that environment on purpose: this
+ * is the road the app's keys step takes, where the key just written is the answer and the shell the host started in
+ * is the older one. Every other road reads the layers, where the environment wins. */
+export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string | undefined>>): void {
   const slot = providerSlotOf(rt);
   if (slot === undefined) throw new Error("this runtime has no provider slot; a key saved now would reach no machine road until the host restarts");
-  const env = PROVIDER_ENVS.get(rt) ?? process.env;
-  slot.swap(providerBackend(keys, env));
+  // One environment for both: the module this host forks on and the place its copies are filed under are the same
+  // pick, so they cannot drift apart when a key is saved.
+  const env = { ...(PROVIDER_ENVS.get(rt) ?? process.env), ...keys };
+  slot.swap(providerBackendFor(env));
   const wired = PROVIDER_IDS.get(rt);
-  if (wired !== undefined) wired.id = providerModule({ keys, env }).id;
+  if (wired !== undefined) wired.id = providerModule(env).id;
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -763,10 +796,10 @@ export function makeRuntime(
   env: ProviderEnv = process.env,
   agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp },
 ): Runtime {
-  const slot = providerSlot(providerBackend(keys, env));
+  const slot = providerSlot(providerBackendFor(env));
   // The place this host's copies are filed under is the provider module it forks on, read at each call: a host that
   // starts with no key swaps its module in when one is saved, and its copies belong to the module that made them.
-  const wired = { id: providerModule({ keys, env }).id };
+  const wired = { id: providerModule(env).id };
   const rt = createRuntime({
     places: wiredPlace(() => wired.id, slot.backend),
     backend: slot.backend,
@@ -779,7 +812,7 @@ export function makeRuntime(
     },
     local: localWiring(),
     ssh: sshWiring(),
-    placeLinks: placeWiring(statePath, keys, env),
+    placeLinks: placeWiring(statePath, env),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
@@ -806,11 +839,12 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
     platform: os,
     saved: () => savedEnv(wspHome()),
     saveKeys: set => writeEnvFile(join(wspHome(), ".env"), set),
-    provider: keys => swapProvider(rt, keys),
-    checkKey: keys => checkProviderKey(providerBackend(keys, {})),
+    provider: saved => swapProvider(rt, saved),
+    keyEnv: () => providerKeyRow(providerEnv)?.keyEnv,
+    checkKey: key => checkProviderKey(providerBackendFor(providerEnvWithKey(providerEnv, key))),
     // What this host's own provider charges and gives, not one provider's table: a host that forks containers has
     // no bill and no disk cap, and the screens read both off here.
-    pricing: () => providerBackend(keysFound(), providerEnv).pricing,
+    pricing: () => providerBackendFor(providerEnvNow(providerEnv)).pricing,
     agents: () => agentsHere(nodeHost(), { versions: false }),
     installTools: agents => installEach(agents, mcpServerSpec(statePath, run), home),
     mcpServer: () => mcpServerSpec(statePath, run),
@@ -927,7 +961,7 @@ function initRefusal(lock: HostLock, statePath: string, why: string): string {
 /** A serving host whose provider forks nothing: its init job would refuse at the first stage, so the run says so
  * before it reads this computer. The provider is the host's, not this terminal's: it is the process that builds. */
 function noGoldenThroughHost(lock: HostLock, statePath: string): string {
-  return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) forks no machines, so there is no golden to build through it. Give that host a provider (SOLARI_API_KEY in its environment, or wsp up --provider) and run wsp init again.`;
+  return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) forks no machines, so there is no golden to build through it. Give that host a provider (its provider's key in the environment it starts with, or wsp up --provider) and run wsp init again.`;
 }
 
 /** What the run reads off the host serving this state before it asks anything: the door to build through, what that
@@ -1021,6 +1055,13 @@ async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolea
   return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), appUrl: beside.appUrl });
 }
 
+/** How a line that says this computer forks nothing offers the way out of it: the variable the row a key typed here
+ * would be put to, and nothing at all where no row reads a key. */
+function orSetTheKey(env: ProviderEnv): string {
+  const name = providerKeyRow(env)?.keyEnv;
+  return name === undefined ? "" : `, or set ${name} first`;
+}
+
 async function init(
   io: CliIO,
   opts: SharedOpts,
@@ -1045,16 +1086,17 @@ async function init(
   // reads better without a banner over it. Nothing is asked for a key: the host has the one that builds.
   const beside = held === undefined ? undefined : await besideHost(held, opts.statePath);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
-  const keys = beside !== undefined ? keysFound() : await loadKeys(say, undefined, { anthropic: false, noSolari: "offer", checkSaved: true });
+  const { keys, env: providerEnv } =
+    beside !== undefined ? { keys: keysFound(), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv), { anthropic: false, noSolari: "offer", checkSaved: true });
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
-  if (beside === undefined && forksNoMachines(providerBackend(keys, opts.providerEnv).capabilities)) {
-    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it, or set SOLARI_API_KEY first.`);
+  if (beside === undefined && forksNoMachines(providerBackendFor(providerEnv).capabilities)) {
+    if (flags.noLocal) throw usageRefusal(`wsp init: with no provider key ${THIS_COMPUTER} is all this run makes, so --no-local would leave it with nothing. Drop it${orSetTheKey(providerEnv)}.`);
     // Every other flag is about a golden: what goes on the image, what forks from it and what lands on that fork.
     // This road builds no image, and the workspace it makes is this computer, whose files are already here.
     const aboutGolden = GOLDEN_FLAGS.filter(([, given]) => given(flags)).map(([name]) => name);
     if (aboutGolden.length > 0) {
-      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here. Drop them, or set SOLARI_API_KEY first.`);
+      throw usageRefusal(`wsp init: with no provider key there is no image to build and nothing to fork, and ${THIS_COMPUTER} already has your files, so ${aboutGolden.join(", ")} would do nothing here. Drop them${orSetTheKey(providerEnv)}.`);
     }
     const local = await runLocalInit(
       {
@@ -1064,9 +1106,9 @@ async function init(
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, agentsReachOf(opts)),
+        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, agentsReachOf(opts)),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
-        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv: opts.providerEnv }, say),
+        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv }, say),
       },
       screen,
     );
@@ -1094,14 +1136,14 @@ async function init(
           return exists ? scanProject(nodeHost(), path) : undefined;
         },
         agentKeys: agentKeyEnvs(keys),
-        pricing: beside?.pricing ?? providerBackend(keys, opts.providerEnv).pricing,
+        pricing: beside?.pricing ?? providerBackendFor(providerEnv).pricing,
         statePath: opts.statePath,
         home: homedir(),
         secrets: keychainReader(),
         platform: hostPlatform(),
         brew: () => readBrewTable(nodeHost()),
         scan: recipe => scanTools(nodeHost(), recipe),
-        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, opts.providerEnv, agentsReachOf(opts)),
+        runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => `daemon on node ${(await deployDaemon(machine)).node}` }, providerEnv, agentsReachOf(opts)),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
@@ -1118,7 +1160,7 @@ async function init(
             builder,
           }),
         roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
-        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort }, say),
+        host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv }, say),
         ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, screen, o.interactive, flags) } : {}),
       },
       screen,
@@ -1157,9 +1199,9 @@ export interface ServeOptions {
  * window that can ask nothing. */
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
-  const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
-  return hostFor(rt, keys, { ...opts, providerEnv: opts.providerEnv ?? process.env }, io, opts.running);
+  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  return hostFor(rt, keys, { ...opts, providerEnv }, io, opts.running);
 }
 
 /** Whether the state has anything for the app to show: a sealed golden to fork from, or any workspace record, this
@@ -1174,8 +1216,8 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
-  const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   // A state with nothing in it is recorded, not refused: this computer becomes its own workspace the way the app's
   // first launch records it, so a machine the host was just installed on serves and listens for pairing at once.
   // Found or made, the shape the app's own road takes, so the three roads that record this computer read alike and
@@ -1184,7 +1226,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
     const workspace = (await rt.workspaces.list()).find(isLocalWorkspace) ?? (await rt.workspaces.createLocal());
     io.log(thisComputerLine(workspace.name, workspace.id));
   }
-  return hostFor(rt, keys, { ...opts, providerEnv: opts.providerEnv ?? process.env }, io, opts.running);
+  return hostFor(rt, keys, { ...opts, providerEnv }, io, opts.running);
 }
 
 /** What a host with no Claude key says as it starts. A host that forks machines gives each fork the key as an env,
@@ -1222,6 +1264,9 @@ async function hostFor(
   // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
   // this run was asked for, and --no-relay stops that one rather than serving a token past it.
   const linked = readRelayRecord(opts.statePath) !== undefined;
+  // A computer that already joined dials the port its place file names, so the door binds as this host starts
+  // rather than waiting for somebody to open the Add a computer sheet again.
+  const joined = (await rt.places?.list(Date.now()).catch(() => []))?.some(p => p.kind === "computer" && p.joinedAt !== undefined) === true;
   try {
     const handle = await startHost({
       runtime: rt,
@@ -1229,6 +1274,8 @@ async function hostFor(
       wsPort: opts.wsPort,
       listen: address,
       beyondThisComputer: linked,
+      door: joined ? "open" : "closed",
+      doorLine: line => io.log(line),
       webDir: opts.webDir ?? assetDir("web"),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
       workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
@@ -1327,14 +1374,16 @@ function keyInAFile(name: string, sources: KeySources): boolean {
  * would be gone by then. A key no shell exported is not lost by a service; there is none, and on this computer that
  * is wsp init's local road, which serves with no provider at all. One reading for both keys. */
 function onlyInThisShell(name: string, sources: KeySources): boolean {
-  return (sources.env[name] ?? "") !== "" && !keyInAFile(name, sources);
+  return keyIn(sources.env, name) !== undefined && !keyInAFile(name, sources);
 }
 
-/** The line saying the Solari key would be gone by the time the service starts, or nothing when a file holds it or
- * no shell does. */
-export function keyOnlyInThisShell(sources: KeySources = keySources()): string | undefined {
-  if (!onlyInThisShell("SOLARI_API_KEY", sources)) return undefined;
-  return `wsp up --service: a service starts without your shell, so it reads the Solari key from a file. SOLARI_API_KEY is only in this shell's environment; put it in ${join(sources.home, ".env")} first.`;
+/** The line saying this provider's key would be gone by the time the service starts, or nothing when a file holds
+ * it, no shell does, or the provider this run is wired to reads no key. The variable is the row's own, so a service
+ * installed for a provider added tomorrow is refused in that provider's words. */
+export function keyOnlyInThisShell(sources: KeySources = keySources(), env: ProviderEnv = sources.env): string | undefined {
+  const name = providerKeyRow(env)?.keyEnv;
+  if (name === undefined || !onlyInThisShell(name, sources)) return undefined;
+  return `wsp up --service: a service starts without your shell, so it reads its provider key from a file. ${name} is only in this shell's environment; put it in ${join(sources.home, ".env")} first.`;
 }
 
 /** The Claude key is not needed to serve, so it is a word rather than a refusal; without it every workspace the
@@ -1356,7 +1405,7 @@ export async function upServiceCommand(io: CliIO, opts: ServeAsked, deps: Servic
     return 1;
   }
   await adoptLoginPath(line => io.log(line));
-  const shellOnly = keyOnlyInThisShell(deps.keys);
+  const shellOnly = keyOnlyInThisShell(deps.keys, providerEnvWith(opts, deps.keys.env));
   if (shellOnly !== undefined) {
     io.error(shellOnly);
     return 1;
@@ -1485,6 +1534,7 @@ interface SharedFlags {
   "ssh-port"?: string;
   "ssh-key"?: string;
   serve?: boolean;
+  awake?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1602,7 +1652,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), keys: keysFound(), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
   },
   remove: {
     json: false,
@@ -1620,6 +1670,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
         ...(values.name !== undefined ? { name: values.name } : {}),
         ...(values.serve === true ? { serve: true } : {}),
+        ...(values.awake === true ? { awake: true } : {}),
       }),
   },
   leave: {
@@ -1637,16 +1688,16 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // The local road touches no provider, so a missing key is not asked for: it is the whole of the doctor for a
       // person whose wsp init took the local road.
       if (values.local === true) {
-        const keys = await loadKeys(io, undefined, { anthropic: false, noSolari: "local" });
-        const rt = makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv);
+        const { keys, env } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
+        const rt = makeRuntime(keys, opts.statePath, goldenRecipe(keys), env);
         try {
           return await localDoctor(rt, io);
         } finally {
           await rt.close();
         }
       }
-      const keys = await loadKeys(io);
-      const rt = makeRuntime(keys, opts.statePath, goldenRecipe(keys), opts.providerEnv);
+      const { keys, env } = await loadKeys(io, keySources(opts.providerEnv));
+      const rt = makeRuntime(keys, opts.statePath, goldenRecipe(keys), env);
       return doctor(rt, io, {
         ...(keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {}),
         ...(values.yes === true ? { yes: true } : {}),
@@ -1774,6 +1825,7 @@ export const SHARED_OPTIONS: Options = {
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
   serve: { type: "boolean" },
+  awake: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },
@@ -1821,7 +1873,8 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   // The one verb that runs with no host serving, new --local, builds the runtime over the state file in this process.
   const verbRuntime = async (statePath: string): Promise<LocalRuntime> => {
     await adoptLoginPath(line => io.log(line));
-    const rt = makeRuntime(await loadKeys(io, undefined, { anthropic: false, noSolari: "local" }), statePath);
+    const { keys, env: providerEnv } = await loadKeys(io, keySources(env), { anthropic: false, noSolari: "local" });
+    const rt = makeRuntime(keys, statePath, goldenRecipe(keys), providerEnv);
     // Handed on as the two calls the verb makes and the stages it prints, so the verbs read nothing of the
     // runtime's own shape: they speak to a host over the wire, and this is the one road that has none.
     return {
