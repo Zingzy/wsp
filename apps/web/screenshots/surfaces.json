@@ -71,6 +71,28 @@
       "wait": "testid=composer-editor"
     },
     {
+      "name": "threads-across-workspaces",
+      "at": "/",
+      "fixture": "orchestrator",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger"
+      ],
+      "wait": "row-id=thread:th_api-move"
+    },
+    {
+      "name": "opener-transcript",
+      "at": "/",
+      "fixture": "orchestrator",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=thread:th_migrate",
+        "390:key:Escape"
+      ],
+      "wait": "opened-thread"
+    },
+    {
       "name": "host-asleep",
       "at": "/",
       "remote": true,
