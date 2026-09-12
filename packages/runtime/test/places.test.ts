@@ -63,7 +63,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
 async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
-  runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, places: wiring(hostKey, opts.provider) });
+  runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey, opts.provider) });
   srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
   return { hostKey, store };
 }
@@ -159,14 +159,14 @@ describe("a computer joining", () => {
     // reaches wait on that one reading rather than finding an empty host.
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, places: wiring(hostKey) });
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     const first = await join(hostKey, { code: await code() });
     sockets.push(first.client.ws);
     // A second host over the same store, asked nothing, still sees the name the first one recorded.
     await srv.close();
     await runtime.close();
-    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, places: wiring(hostKey) });
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey) });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     const second = await join(hostKey, { code: await code() });
     sockets.push(second.client.ws);

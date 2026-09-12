@@ -246,6 +246,17 @@ export function dialWindowMs(aim: HostAim): number {
   return where !== undefined && isLoopback(where) ? NEAR_WINDOW_MS : FAR_WINDOW_MS;
 }
 
+/** Why a line that runs at the host's own terminal cannot be aimed anywhere else. Its own sentence per line, since
+ * what a person may not do from here differs: hand out access, or carry a vault off. */
+export const HOST_SIDE_ACCESS = "Handing out access is the one thing a paired computer cannot do from here.";
+
+/** What the person reads when a line that runs at the host's own terminal is aimed at one on another computer: the
+ * thing it does happens over there and nowhere else, so there is no road from here to there. Every way a line is
+ * aimed reads the same, whether a --host flag, WSP_HOST or the default alias wsp hosts marks did the aiming. */
+export function hostSideOnlyLine(word: string, where: string, why: string = HOST_SIDE_ACCESS): string {
+  return `wsp ${word} runs on the computer the host runs on, and this line is aimed at ${where}; run it in a terminal over there. ${why}`;
+}
+
 /** The note a line naming both --state and a host somewhere else gets: the state file is this computer's, and a
  * host elsewhere serves its own. */
 export function stateIgnoredLine(where: string): string {

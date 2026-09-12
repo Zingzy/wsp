@@ -15,7 +15,7 @@ import { harnessCatalog } from "@wsp/runtime";
 import { cli, COMMAND_LINES, HELP, HOST_FLAG, JSON_COMMANDS, PROSE_COMMANDS, SERVE_FLAGS, type CliIO, type CommandLine } from "../src/cli.js";
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
-import { CLI_VERBS, COMMON, VERBS, flagList, openingOf, toolName, type Flags } from "../src/verbs.js";
+import { CLI_VERBS, COMMON, VERBS, flagList, hasTool, openingOf, toolName, type Flags } from "../src/verbs.js";
 
 interface Tool {
   name: string;
@@ -229,14 +229,15 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
 describe("the command line, the MCP tools and the skill are one contract", () => {
   it("the served tools are the verb table, one per entry under the naming rule, and the table's inputs are what is served", async () => {
     const tools = await listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(VERBS.map(v => toolName(v.name)).sort());
-    for (const verb of VERBS) expect(tools.find(t => t.name === toolName(verb.name))!.inputs, verb.name).toEqual(Object.keys(verb.tool.input).sort());
+    const served = VERBS.filter(hasTool);
+    expect(tools.map(t => t.name).sort()).toEqual(served.map(v => toolName(v.name)).sort());
+    for (const verb of served) expect(tools.find(t => t.name === toolName(verb.name))!.inputs, verb.name).toEqual(Object.keys(verb.tool.input).sort());
     expect(toolName("thread new")).toBe("thread_new");
   });
 
   it("every served tool carries an output schema with the entry's fields, so a verb cannot ship without saying what it answers with", async () => {
     for (const tool of await listTools()) {
-      const entry = VERBS.find(v => toolName(v.name) === tool.name)!;
+      const entry = VERBS.filter(hasTool).find(v => toolName(v.name) === tool.name)!;
       expect(tool.outputs.length, `${tool.name} serves no output schema`).toBeGreaterThan(0);
       expect(tool.outputs, tool.name).toEqual(Object.keys(entry.tool.output).sort());
     }
@@ -300,6 +301,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "down",
       "hosts",
       "hosts default",
+      "image export",
       "init",
       "join",
       "leave",
@@ -325,12 +327,12 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       if ("tool" in line) expect(CLI_VERBS.some(v => v.name === line.words), `${line.words} names a tool but is not in the verb table`).toBe(true);
       else expect(line.cliOnly, `${line.words} carries no reason for having no tool`).toMatch(/\S/);
     }
-    for (const verb of CLI_VERBS) expect(COMMAND_LINES.find(c => c.words === verb.name && "tool" in c), `${verb.name} is in the table and not in the command lines`).toBeDefined();
+    for (const verb of CLI_VERBS) expect(COMMAND_LINES.find(c => c.words === verb.name && ("cliOnly" in verb ? "cliOnly" in c : "tool" in c)), `${verb.name} is in the table and not in the command lines`).toBeDefined();
     for (const words of [...JSON_COMMANDS, ...PROSE_COMMANDS]) expect(COMMAND_LINES.find(c => c.words === words && "cliOnly" in c), `${words} is a command with no reason in the command lines`).toBeDefined();
   });
 
   it("every wsp line in the skill, the instructions and the tool descriptions parses against the flags its command reads", () => {
-    const commands = wspCommands([WSP_SKILL, INSTRUCTIONS, ...VERBS.map(v => v.tool.description)].join("\n\n"));
+    const commands = wspCommands([WSP_SKILL, INSTRUCTIONS, ...VERBS.filter(hasTool).map(v => v.tool.description)].join("\n\n"));
     expect(commands.length).toBeGreaterThan(30);
     const stale = commands.map(argv => usageError(argv, COMMAND_LINES)).filter(e => e !== undefined);
     expect(stale).toEqual([]);
@@ -362,7 +364,8 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     // only the ones that refuse it outright leave it out.
     for (const line of COMMAND_LINES) {
       const word = line.words.split(" ")[0]!;
-      if (!("cliOnly" in line) || word === "mcp") continue;
+      // A verb serves itself, flags and all; only the lines the shared parse serves are held to their word's table.
+      if (!("cliOnly" in line) || word === "mcp" || CLI_VERBS.some(v => v.name === line.words)) continue;
       expect(Object.hasOwn(line.options, "host"), `wsp ${line.words} advertises --host`).toBe((HOST_FLAG[word] ?? "refused") !== "refused");
       expect(Object.hasOwn(line.options, "json"), `wsp ${line.words} advertises --json`).toBe(JSON_COMMANDS.includes(word));
     }
@@ -465,7 +468,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     const options = effortsFor(claude, markedDefault(claude.models) ?? null);
     const words = options.map(o => o.value);
     const fallback = markedDefault(options)!.value;
-    const effort = VERBS.find(v => v.name === "thread new")!.tool.input.effort!.description!;
+    const effort = VERBS.filter(hasTool).find(v => v.name === "thread new")!.tool.input.effort!.description!;
     expect(/\(([^)]*)\)/.exec(effort)![1]!.split(", ")).toEqual(words);
     expect(effort).toContain(`absent means the agent's default, ${fallback} for ${claude.harness}`);
     expect(WSP_SKILL).toContain(words.map(w => `\`${w}\``).join(", "));

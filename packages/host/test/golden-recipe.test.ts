@@ -2,7 +2,11 @@
 import { createRuntime, memoryStore } from "@wsp/runtime";
 import { describe, expect, it } from "vitest";
 import { goldenRecipe } from "../src/cli.js";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, ROAD_STEPS } from "@wsp/catalog";
+import { goldenRecipeFor, vaultPathsFor } from "../src/init-recipe.js";
+import { FISH_FILE, SH_FILE } from "../src/init-secrets.js";
+import type { ManifestEntry } from "@wsp/collect";
+import type { Recipe } from "@wsp/protocol";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, ROAD_STEPS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 import { stubBackend } from "./stub-backend.js";
 
@@ -64,5 +68,29 @@ describe("host golden recipe", () => {
     expect(smokeFork.execLog).toEqual([GOLDEN_SMOKE, "test -x /usr/local/bin/wsp-open"]);
     expect(builder.killed).toBe(true);
     expect(await rt.golden.builders()).toEqual([]);
+  });
+});
+
+describe("what the seal archives as the image vault", () => {
+  const row = (id: string, rung: "agents" | "tools" | "logins"): ManifestEntry => ({ id, rung, label: id, group: "g", paths: [], bytes: 0, default: "bring" });
+
+  it("names each ticked row's login state on the machine and the two secrets files, each once", () => {
+    const paths = vaultPathsFor([row("agents/codex", "agents"), row("tools/gh", "tools"), row("logins/gh", "logins")]);
+    expect(paths).toContain(`${GUEST_HOME}/.codex/auth.json`);
+    expect(paths).toContain(`${GUEST_HOME}/.config/gh/hosts.yml`);
+    expect(paths).toContain(SH_FILE);
+    expect(paths).toContain(FISH_FILE);
+    expect(new Set(paths).size).toBe(paths.length);
+  });
+
+  it("a recipe with no row that signs in still archives the secrets files, since a key is set there without one", () => {
+    expect(vaultPathsFor([row("tools/jq", "tools")])).toEqual([SH_FILE, FISH_FILE]);
+  });
+
+  it("the recipe the wizard composes carries those paths and the small recipe it was planned from", () => {
+    const source: Recipe = { version: 1, at: "2026-09-12T00:00:00.000Z", histories: [], rows: [] };
+    const recipe = goldenRecipeFor([row("agents/codex", "agents")], {}, { source });
+    expect(recipe.vaultPaths).toContain(`${GUEST_HOME}/.codex/auth.json`);
+    expect(recipe.source).toEqual(source);
   });
 });

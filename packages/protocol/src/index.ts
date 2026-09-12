@@ -1692,6 +1692,11 @@ export const GoldenVersion = z.object({
    * sealed before the manifest existed and on one built from no recipe; a fork of such a version upgrades under the
    * old rule, its whole home landing over the new image. */
   owned: z.array(RecipeOwnedFile).optional(),
+  /** The builder's disk in use when the snapshot was taken, bytes; absent on versions sealed before it was recorded. */
+  usedBytes: z.number().int().nonnegative().optional(),
+  /** The image record's hash this copy of the version was built at; absent on a version sealed before records
+   * existed, which no record matches. A manifest is one place's copies, so this is the copy's hash. */
+  imageHash: z.string().length(64).optional(),
 });
 export type GoldenVersion = z.infer<typeof GoldenVersion>;
 
@@ -1910,8 +1915,84 @@ export const GoldenStageEvent = z.object({
   /** The machines this stage made and could not remove, because the provider could not be reached: they bill until
    * something takes them, so a client that can retry the kill retries it rather than reading the stage as over. */
   left: z.array(z.string()).optional(),
+  /** The place a copy is being built at, when the stage is a copy's and not the wired provider's. */
+  place: z.string().optional(),
 });
 export type GoldenStageEvent = z.infer<typeof GoldenStageEvent>;
+// --- the image: the record the host owns, its vault and the copies built from it ---
+
+/** What the sign-in stages left on the builder, archived at the seal: never the bytes on the wire, only their hash
+ * and size. */
+export const SealedVault = z.object({
+  sha256: z.string().length(64),
+  bytes: z.number().int().nonnegative(),
+  /** How many guest paths the archive names; zero means the seal had nothing to hold and the copy will ask for sign-ins again. */
+  paths: z.number().int().nonnegative(),
+  takenAt: z.string(),
+});
+export type SealedVault = z.infer<typeof SealedVault>;
+
+/** The image the host owns: what every copy is built from. One per golden name. */
+export const SealedImage = z.object({
+  name: z.string(),
+  version: z.number().int().positive(),
+  /** sha256 over the recipe hash and the vault's sha256; two copies with this hash were built from the same thing. */
+  hash: z.string().length(64),
+  recipeHash: z.string(),
+  /** The small recipe as it stood at the seal, so a later edit of recipe.json changes no copy until the next
+   * version. Absent on a record backfilled from a golden sealed before records existed, and on one sealed by a
+   * road that carried no small recipe: a copy of such a record is refused, since there is nothing to build from. */
+  recipe: Recipe.optional(),
+  logins: z.array(GoldenLogin),
+  sealedAt: z.string(),
+  /** This computer's name at the seal, for the screen's "sealed from". */
+  sealedFrom: z.string(),
+  /** Absent on a record backfilled from a golden sealed before vaults existed: its copies ask for sign-ins again. */
+  vault: SealedVault.optional(),
+  /** The builder's disk in use at the snapshot, in bytes; absent on a version sealed before it was read. */
+  usedBytes: z.number().int().nonnegative().optional(),
+});
+export type SealedImage = z.infer<typeof SealedImage>;
+
+/** One place's built copy of one version: the provider's artifact and when it was made. */
+export const SealedImageCopy = z.object({
+  place: z.string(),
+  /** The version this place's own manifest gave the copy. Each place numbers its own, so a second place's first
+   * copy is its v1 whatever version of the record it was built from; the hash is what says which record that was. */
+  version: z.number().int().positive(),
+  /** The record's hash when this copy was built; absent on a copy sealed before hashes, which no record matches. */
+  hash: z.string().length(64).optional(),
+  snapshotId: z.string(),
+  templateId: z.string().optional(),
+  builtAt: z.string(),
+  /** From the provider's snapshot listing where it has one; absent elsewhere, never guessed. */
+  sizeBytes: z.number().int().nonnegative().optional(),
+});
+export type SealedImageCopy = z.infer<typeof SealedImageCopy>;
+
+/** What an export wrote on this computer. */
+export const SealedImageExport = z.object({ path: z.string(), bytes: z.number().int().nonnegative(), hash: z.string().length(64) });
+export type SealedImageExport = z.infer<typeof SealedImageExport>;
+
+/** The shortest passphrase an export is sealed to; a shorter one is refused before anything is read. */
+export const IMAGE_PASSPHRASE_MIN = 12;
+
+/** A sealed vault's header, one line of JSON a reader parses before anything else: it says how the bytes behind it
+ * are keyed and carries the record in the plain, so an import can show what a file holds before asking for the
+ * passphrase. The header's own bytes are the cipher's additional data, so an edited header fails to open. */
+export const SealedVaultHeader = z.object({
+  format: z.literal("wsp-vault-1"),
+  cipher: z.literal("aes-256-gcm"),
+  to: z.enum(["passphrase", "key"]),
+  /** scrypt salt (passphrase) or HKDF salt (key), base64. */
+  salt: z.string(),
+  nonce: z.string(),
+  /** The sender's ephemeral X25519 public key, base64, on `to: "key"` only. */
+  ephemeral: z.string().optional(),
+  image: SealedImage,
+});
+export type SealedVaultHeader = z.infer<typeof SealedVaultHeader>;
+
 /** The detail a golden.stage frame carries for a step the builder already holds; a reader closes the step at once and charges it no time. */
 export const ALREADY_APPLIED = "already applied";
 /** Recipe rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. The collector writes them, the engine's import reads them. */
@@ -2953,6 +3034,16 @@ const RuntimeOp = z.discriminatedUnion("op", [
     replace: z.boolean().optional(),
     agents: z.array(z.string()).optional(),
   }),
+  /** Replies with { view: SealedImageView }. */
+  z.object({ id: reqId, op: z.literal("image.get"), name: z.string().optional() }),
+  /** Builds this host's image at `place` from the record: prepare there, import the vault, seal. Replies with
+   * { copy: SealedImageCopy }; progress rides golden.stage frames carrying `place`. Refused (kind "conflict") when
+   * the place already holds a copy with the record's hash, when no record exists, and when the record holds no
+   * vault and `force` is not set. */
+  z.object({ id: reqId, op: z.literal("image.build"), place: z.string().min(1), name: z.string().optional(), force: z.boolean().optional() }),
+  /** Writes the record and the vault, sealed to the passphrase, to `dest` on this computer. Replies with
+   * { exported: SealedImageExport }. The passphrase is never logged and never kept. */
+  z.object({ id: reqId, op: z.literal("image.export"), dest: z.string().min(1), passphrase: z.string().min(IMAGE_PASSPHRASE_MIN).max(256), name: z.string().optional() }),
 ]);
 
 /** Every request carries where it reached the host from: here, this computer's own app, CLI or MCP, or relayed from
@@ -3144,8 +3235,19 @@ export const ProjectGolden = z.object({
   workspaceId: z.string(),
   workspaceName: z.string(),
   createdAt: z.string(),
+  /** The place whose provider holds the snapshot; absent on one taken before places, which is the wired provider's. */
+  place: z.string().optional(),
 });
 export type ProjectGolden = z.infer<typeof ProjectGolden>;
+
+/** What Settings > Image and `wsp image` draw: the record, every copy at every place, the project goldens under it.
+ * Beside ProjectGolden because it carries them; the rest of the image shapes sit with the golden ones above. */
+export const SealedImageView = z.object({
+  image: SealedImage.nullable(),
+  copies: z.array(SealedImageCopy),
+  projects: z.array(ProjectGolden),
+});
+export type SealedImageView = z.infer<typeof SealedImageView>;
 
 /** One part of the listing: how many snapshots and what they hold. */
 export const SnapshotGroup = z.object({ count: z.number(), bytes: z.number() });
