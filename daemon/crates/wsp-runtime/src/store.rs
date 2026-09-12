@@ -61,12 +61,6 @@ impl Layout {
     fn image(&self, name: &str) -> PathBuf {
         self.images().join(format!("{}.json", file_word(name)))
     }
-    fn builds(&self) -> PathBuf {
-        self.root.join("builds")
-    }
-    fn build(&self, recipe: &str) -> PathBuf {
-        self.builds().join(recipe)
-    }
     fn snapshots(&self) -> PathBuf {
         self.root.join("snapshots")
     }
@@ -83,8 +77,8 @@ impl Layout {
     fn committing(&self, token: &str) -> PathBuf {
         self.blobs().join(format!("commit-{token}")).with_extension(Layout::PARTIAL)
     }
-    fn dirs(&self) -> [PathBuf; 6] {
-        [self.blobs(), self.unpacked_all(), self.images(), self.builds(), self.snapshots(), self.templates()]
+    fn dirs(&self) -> [PathBuf; 5] {
+        [self.blobs(), self.unpacked_all(), self.images(), self.snapshots(), self.templates()]
     }
 }
 
@@ -124,15 +118,6 @@ pub struct Image {
     pub chain: Chain,
     pub layer_bytes: Vec<u64>,
     pub pulled_at: u64,
-}
-
-/// `builds/<recipe sha256>`: the chain a recipe produced.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Build {
-    pub recipe: String,
-    #[serde(flatten)]
-    pub chain: Chain,
-    pub built_at: u64,
 }
 
 /// `snapshots/<id>.json`: a workspace's upper directory saved as one layer over the chain it booted from. The id is
@@ -282,21 +267,6 @@ impl Store {
         remove_if_there(&self.layout.image(name))
     }
 
-    /// The chain a recipe produced, under the recipe's sha256 hex.
-    pub fn record_build(&self, recipe: &str, chain: Chain) -> Result<Build, Error> {
-        let build = Build { recipe: recipe.to_owned(), chain, built_at: now() };
-        self.write_record(&self.layout.build(recipe), &build)?;
-        Ok(build)
-    }
-
-    pub fn build(&self, recipe: &str) -> Result<Option<Build>, Error> {
-        self.read_record(&self.layout.build(recipe))
-    }
-
-    pub fn remove_build(&self, recipe: &str) -> Result<bool, Error> {
-        remove_if_there(&self.layout.build(recipe))
-    }
-
     /// How many images, builds, snapshots and templates name the layer or config.
     pub fn references(&self, digest: &Digest) -> Result<usize, Error> {
         Ok(self.chains()?.iter().filter(|chain| chain.digests().any(|d| d == digest)).count())
@@ -305,7 +275,6 @@ impl Store {
     /// Every chain a record names.
     fn chains(&self) -> Result<Vec<Chain>, Error> {
         let mut chains: Vec<Chain> = self.images()?.into_iter().map(|i| i.chain).collect();
-        chains.extend(self.read_records::<Build>(&self.layout.builds())?.into_iter().map(|b| b.chain));
         chains.extend(self.snapshots()?.into_iter().map(|s| s.chain));
         chains.extend(self.templates()?.into_iter().map(|t| t.chain));
         Ok(chains)

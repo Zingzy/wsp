@@ -94,7 +94,8 @@ export interface HerePlace {
   name: string;
   os?: string;
   shape?: WorkspaceSize;
-  docker?: boolean;
+  runsWorkspaces?: boolean;
+  engine?: "none" | "docker" | "podman";
   diskFreeBytes?: number;
 }
 
@@ -517,7 +518,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and one
    * that does not answer in time shows nothing rather than a guess. */
   const forksOf = async (record: PlaceRecord): Promise<{ running: number; room: number } | undefined> => {
-    const linked = live.has(record.id) && record.report.docker;
+    const linked = live.has(record.id) && record.report.runsWorkspaces;
     const backend = linked ? door.backendOf(record.id) : undefined;
     if (backend === undefined) {
       if (linked) void door.forkingBackend(record.id).catch(() => undefined);
@@ -547,15 +548,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     os: record.report.os,
     shape: record.report.shape,
     ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
-    docker: record.report.docker,
+    runsWorkspaces: record.report.runsWorkspaces,
+    ...(record.report.workspacesBlocked !== undefined ? { workspacesBlocked: record.report.workspacesBlocked } : {}),
+    engine: record.report.engine,
     present: live.has(record.id),
     joinedAt: record.joinedAt,
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
-    // A joined computer forks only where it has a Docker of its own; without one it runs the person's agents as
-    // its own one workspace and that is the whole of it.
-    takesForks: record.report.docker === true,
+    // A joined computer forks where its own daemon runs workspaces, which is the daemon's self check, not an engine
+    // of its own; a box whose kernel that check turns down runs the person's agents as its own one workspace.
+    takesForks: record.report.runsWorkspaces === true,
     ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
   });
 
@@ -650,7 +653,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // about the computer that is here now. One that says it does is asked what it forks with behind the attach
       // and not in front of it, so the link is held whether or not that answer comes and the first listing after a
       // join carries the room it has left.
-      if (!moved.report.docker) backends.delete(placeId);
+      if (!moved.report.runsWorkspaces) backends.delete(placeId);
       else void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
       socket.once("close", () => {
         const mine = live.get(placeId);
@@ -704,9 +707,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (at !== undefined) return at;
       }
       const name = record?.name ?? placeId;
-      if (record === undefined || !record.report.docker) {
+      if (record === undefined || !record.report.runsWorkspaces) {
         backends.delete(placeId);
-        throw new Error(placeForksNowhereLine(name));
+        throw new Error(placeForksNowhereLine(name, record?.report.workspacesBlocked));
       }
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -828,7 +831,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", `docker ${held.report.docker ? "yes" : "no"}`);
+        stage("join", "done", `workspaces ${held.report.runsWorkspaces ? "yes" : "no"} · engine ${held.report.engine}`);
         return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
@@ -888,7 +891,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.os !== undefined ? { os: here.os } : {}),
           ...(here.shape !== undefined ? { shape: here.shape } : {}),
           ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
-          ...(here.docker !== undefined ? { docker: here.docker } : {}),
+          ...(here.runsWorkspaces !== undefined ? { runsWorkspaces: here.runsWorkspaces } : {}),
+          ...(here.engine !== undefined ? { engine: here.engine } : {}),
           present: true,
           // This computer is where the person's own agents run, never something the host forks into: a copy of the
           // image on a Docker here is the provider row's, which is the one that says it forks.

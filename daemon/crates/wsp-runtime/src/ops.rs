@@ -437,13 +437,11 @@ impl Ops {
     }
 
     fn self_check_on(layout: &Layout) -> Result<(), String> {
-        let controllers = fs::read_to_string(Path::new(freeze::CGROUP_ROOT).join("cgroup.controllers")).map_err(|_| {
-            "this computer mounts cgroup v1 at /sys/fs/cgroup, and wsp runs workspaces on cgroup v2 alone: boot it with systemd.unified_cgroup_hierarchy=1".to_owned()
-        })?;
-        for wanted in ["memory", "cpu"] {
-            if !controllers.split_whitespace().any(|c| c == wanted) {
-                return Err(format!("this computer's cgroup root offers no {wanted} controller, which wsp needs to run workspaces here"));
-            }
+        // The read-only facts the doctor reads for the report, in one place, then the live proof below: a mount and
+        // a cgroup this can make, which the read alone cannot promise. The two answer in the same words because
+        // they are the same words.
+        if let Some(reason) = crate::doctor::assess(&crate::doctor::read_facts()).blocked {
+            return Err(reason);
         }
         let check = layout.check();
         let (lower, upper, work, merged) = (check.join("lower"), check.join("upper"), check.join("work"), check.join("merged"));

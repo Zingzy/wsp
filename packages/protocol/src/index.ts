@@ -2230,7 +2230,11 @@ export const PlaceView = z.object({
   os: z.string().optional(),
   shape: WorkspaceSize.optional(),
   diskFreeBytes: z.number().int().optional(),
-  docker: z.boolean().optional(),
+  /** Whether the computer's daemon runs workspaces here, and if not the kernel reason; the engine for a project's
+   * own containers, a road of its own. Absent on a place that has never said what it is. */
+  runsWorkspaces: z.boolean().optional(),
+  workspacesBlocked: z.string().optional(),
+  engine: z.enum(["none", "docker", "podman"]).optional(),
   present: z.boolean().optional(),
   joinedAt: z.string().optional(),
   lastSeenAt: z.string().optional(),
@@ -2820,10 +2824,11 @@ export const placeHoldsNoImageLine = (place: string, image: string): string =>
 export const placeHoldsForksRefusal = (place: string, names: readonly string[]): string =>
   `${place} still holds ${names.length === 1 ? "a fork" : `${names.length} forks`} (${names.join(", ")}); delete them first, then wsp remove ${place}`;
 
-/** What a fork on a joined computer with no Docker is refused with: it runs the person's agents over its link and
- * has nothing to fork with. */
-export const placeForksNowhereLine = (place: string): string =>
-  `${place} runs your agents but has no Docker, so it takes no forks; install Docker on it to fork there`;
+/** What a fork on a joined computer whose kernel cannot run workspaces is refused with: the daemon there is the
+ * workspace manager now, so a box that forks nowhere is one whose kernel the daemon's self check turned down, and
+ * the reason is the one that check names. */
+export const placeForksNowhereLine = (place: string, reason?: string): string =>
+  reason === undefined ? `${place} cannot run wsp workspaces, so it takes no forks` : reason.replace("this computer", place);
 
 /** What a person asking for a workspace on a place that forks nothing is told when that place already runs one: the
  * place is its own one workspace, so the line names the one there is rather than making a second. The reason is not
@@ -3198,6 +3203,11 @@ export const PlacePublicKey = base64(44);
 /** An ed25519 signature, base64: 64 bytes. */
 export const PlaceSignature = base64(64);
 
+/** The engine a project's own containers would run on: Docker first, then podman, else none. The one rule both
+ * the host's own-machine report and the node agent's read off their own PATH check. */
+export type PlaceEngine = "none" | "docker" | "podman";
+export const engineWord = (hasDocker: boolean, hasPodman: boolean): PlaceEngine => (hasDocker ? "docker" : hasPodman ? "podman" : "none");
+
 /** What a place says about itself on every link, and once at join. Read by the host into the place record and the
  * workspace recorded on it; nothing here is trusted for paths until isPlainPath has read it. */
 export const PlaceReport = z.object({
@@ -3209,7 +3219,13 @@ export const PlaceReport = z.object({
   diskFreeBytes: z.number().int().nonnegative().optional(),
   /** HOME, USER, PATH and each harness's store variable, as the ssh read records them. */
   login: z.record(z.string()),
-  docker: z.boolean(),
+  /** Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an
+   * overlay, and root. What decides whether the place forks at all, where the docker field once did. */
+  runsWorkspaces: z.boolean(),
+  /** When it does not, the one kernel reason, in the daemon's own words. */
+  workspacesBlocked: z.string().optional(),
+  /** The engine a project's own containers would run on here; "none" until the person installs one. */
+  engine: z.enum(["none", "docker", "podman"]),
   daemonVersion: z.number().int().nonnegative(),
   /** The loopback port the place's own daemon bound, for the forward the panes ride. */
   daemonPort: z.number().int().min(1).max(65535).optional(),

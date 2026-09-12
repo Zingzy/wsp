@@ -290,7 +290,7 @@ const place = (id, name, minutes, over = {}, workspaceId) => ({
     shape: { cpu: 4, memMb: 8192 },
     diskFreeBytes: 91 * 1024 ** 3,
     login: { HOME: "/Users/maya", USER: "maya", PATH: "/usr/bin" },
-    docker: false,
+    runsWorkspaces: false, engine: "none",
     daemonVersion: 17,
     wsp: ["/Users/maya/.wsp/bin/wsp"],
     agents: ["claude", "codex"],
@@ -363,7 +363,7 @@ const macInUse = () =>
       threadsOn("ws_hetzner", [[CHART, 200], [REDIRECT, 30]]),
     ),
     places: {
-      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, "ws_hetzner"),
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }, "ws_hetzner"),
       p_oldmacbook: place("p_oldmacbook", "old-macbook", 120, {}, "ws_web"),
     },
   });
@@ -412,7 +412,7 @@ const macAndVps = () =>
         "p_vps",
         "vps",
         2,
-        { platform: "linux", os: "Debian GNU/Linux 12", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 44 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, wsp: ["/root/.wsp/bin/wsp"] },
+        { platform: "linux", os: "Debian GNU/Linux 12", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 44 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" }, wsp: ["/root/.wsp/bin/wsp"] },
         "ws_build",
       ),
     },
@@ -564,8 +564,8 @@ const macAndBoxes = () =>
     workspaces: [workspace("ws_here", THIS_COMPUTER, { projects: [project("spoo", 48_200_000, 60 * 20)] })],
     goldens: sealed(),
     places: {
-      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
-      p_studio: place("p_studio", "old-macbook", 4, { docker: true }),
+      p_hetzner: place("p_hetzner", "hetzner", 1, { platform: "linux", os: "Ubuntu 24.04", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "docker", login: { HOME: "/root", USER: "root", PATH: "/usr/bin" } }),
+      p_studio: place("p_studio", "old-macbook", 4, { runsWorkspaces: true, engine: "docker" }),
     },
   });
 

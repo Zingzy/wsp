@@ -9,7 +9,7 @@
 import { accessSync, constants, existsSync, lstatSync, rmSync, statfsSync } from "node:fs";
 import { arch, cpus, hostname, platform, release, totalmem, type as osType, userInfo } from "node:os";
 import { delimiter, join } from "node:path";
-import { DAEMON_VERSION, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
+import { DAEMON_VERSION, engineWord, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import type { AgentBin } from "./args.js";
 import { readPlaceFile, type PlaceSelfReport } from "./link.js";
 
@@ -24,7 +24,7 @@ export interface PlaceSelfReportInput {
   env?: NodeJS.ProcessEnv;
 }
 
-/** Whether a command by this name sits on the PATH given, which is what "can fork" means for docker here. */
+/** Whether a command by this name sits on the PATH given, which is how an agent or an engine on the box is found. */
 function onPath(name: string, path: string | undefined): boolean {
   for (const dir of (path ?? "").split(delimiter)) {
     if (dir === "") continue;
@@ -62,7 +62,10 @@ export function placeSelfReport(input: PlaceSelfReportInput): PlaceSelfReport {
     shape: { cpu: cpus().length, memMb: Math.round(totalmem() / (1024 * 1024)) },
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
     login: { HOME: input.home, USER: userInfo().username, PATH: env["PATH"] ?? "" },
-    docker: onPath("docker", env["PATH"]),
+    // This node agent runs the person's agents over its link and does not run workspaces; the daemon that does is
+    // the one binary, which builds its own report. The engine is what a project's own containers would run on here.
+    runsWorkspaces: false,
+    engine: engineWord(onPath("docker", env["PATH"]), onPath("podman", env["PATH"])),
     daemonVersion: DAEMON_VERSION,
     wsp: [...input.wspArgv],
     agents: input.agents.filter(a => onPath(a.bin, env["PATH"])).map(a => a.id),

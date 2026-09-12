@@ -550,7 +550,7 @@ if (params.get("places") === "1") {
   useStore.setState({
     places: [
       { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, workspaceId: "ws_a" },
-      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, docker: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, runsWorkspaces: true, engine: "docker", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
       { id: "p_laptop", kind: "computer", name: "old-macbook", default: false, present: false, lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 353_100_000_000, workspaceId: "ws_c" },
       { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, workspaceId: "ws_d", rateUsdPerHour: 0.018 },
     ],

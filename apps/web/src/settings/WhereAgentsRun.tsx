@@ -170,7 +170,7 @@ function PlaceActions({ place, onRemove, inMenu = true }: { place: PlaceView; on
  * computer holds are drawn nowhere here, since nothing on the wire says either yet. */
 function PlaceDetail({ place, holding, now, onRemove }: { place: PlaceView; holding: PlaceHolding; now: number; onRemove: () => void }) {
   const rows: { k: string; label: string; value: string }[] = [
-    ...(place.os === undefined ? [] : [{ k: "system", label: WHERE_WORDS.system, value: place.docker === true ? `${place.os} · docker` : place.os }]),
+    ...(place.os === undefined ? [] : [{ k: "system", label: WHERE_WORDS.system, value: place.engine !== undefined && place.engine !== "none" ? `${place.os} · ${place.engine}` : place.os }]),
     ...(place.agents === undefined || place.agents.length === 0 ? [] : [{ k: "agents", label: WHERE_WORDS.agents, value: place.agents.join(", ") }]),
     { k: "workspaces", label: PLACES_WORDS.columns[3]!, value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`).join(", ") },
     ...(place.joinedAt === undefined ? [] : [{ k: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.joinedAt))) }]),

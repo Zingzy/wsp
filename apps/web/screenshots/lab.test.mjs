@@ -187,7 +187,7 @@ describe("the fixtures a lab serves", () => {
       expect([name, w.folder.startsWith(homedir())]).toEqual([name, false]);
     }
     // The server running Docker says so, which is what makes it a place a fork could stand on.
-    expect(fixtureState("mac-and-vps").places.p_vps.report.docker).toBe(true);
+    expect(fixtureState("mac-and-vps").places.p_vps.report.runsWorkspaces).toBe(true);
   });
 
   it("opens every fork's meter with the hours it has been awake, so a rate has an amount beside it", () => {

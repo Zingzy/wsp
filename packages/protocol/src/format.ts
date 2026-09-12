@@ -2946,7 +2946,24 @@ export function offlineFor(ms: number): string {
  * reads off the workspace list, never off the row: a row carries at most the one workspace its join recorded, so
  * this computer's own workspace and a provider's forks are on neither. */
 export function placeWorkspacesCell(view: PlaceView, count: number): string {
-  return view.docker === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
+  return view.runsWorkspaces === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
+}
+
+/** The doctor's word on whether this computer runs workspaces: the positive line, or the one kernel reason the
+ * daemon's self check named. A place that has not yet said reads neither. */
+export function placeWorkspacesLine(view: Pick<PlaceView, "name" | "runsWorkspaces" | "workspacesBlocked">): string | undefined {
+  if (view.runsWorkspaces === undefined) return undefined;
+  if (view.runsWorkspaces) return `${view.name} runs your workspaces`;
+  // The daemon's reason names "this computer"; on a named row it is that computer, so the line says which.
+  return view.workspacesBlocked?.replace("this computer", view.name) ?? `${view.name}'s kernel cannot run wsp workspaces`;
+}
+
+/** The doctor's word on the engine a project's own containers run on here: the engine when
+ * the box has one, else the line that says installing one opens it. A place that has not yet said reads nothing. */
+export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): string | undefined {
+  if (view.engine === undefined) return undefined;
+  if (view.engine === "none") return `${view.name} has no container engine, so a project's own containers do not run here; install Docker or podman on it and they will`;
+  return `${view.name} runs a project's own containers on ${view.engine}`;
 }
 
 /** The one line that takes wsp off a computer it is typed on. */
@@ -2968,9 +2985,9 @@ export const PLACES_WORDS = {
     connected: (from: string): string => `connected from ${from} · keys exchanged`,
     reading: "reading what it has",
     joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
-    dockerOptional: "install Docker to run copies of your image · optional",
+    cannotRunWorkspaces: "runs your agents as one workspace",
     joinedTitle: (name: string): string => `${name} joined`,
-    joinedDescription: "It runs your agents as one workspace. Without Docker it cannot run copies of your image.",
+    joinedDescription: "It runs your agents as one workspace.",
     open: (name: string): string => `Open ${name}`,
     noApp: "No app on that computer",
     noAppLine: "In its terminal, install wsp, then join:",

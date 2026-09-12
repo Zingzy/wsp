@@ -249,8 +249,8 @@
           </div>
           <div class="row">
             <span class="mark" aria-hidden="true"></span>
-            <span class="name">Docker</span>
-            <span class="slot"><span class="state" id="here-docker"></span></span>
+            <span class="name">Workspaces</span>
+            <span class="slot"><span class="state" id="here-workspaces"></span></span>
           </div>
         </div>
       </div>
@@ -432,9 +432,9 @@
         already: { slot: "join-said", happened: "This Mac already runs threads for another wsp.", fix: "Leave it from the sidebar first." },
         shell: { slot: "join-said", happened: "This Mac could not join that wsp.", fix: "Press Join again." },
       };
-      /** What the second row of the joined card says about this computer: a computer without Docker runs the agents
-       * the person has here and holds one workspace; with it, it can run a copy of the image too. */
-      const DOCKER = { yes: "installed · runs copies of your image", no: "not installed · runs your agents, one workspace" };
+      /** What the second row of the joined card says about this computer: one whose daemon runs workspaces builds
+       * a copy of your image on first use; one whose kernel cannot runs the agents you have here as one workspace. */
+      const WORKSPACES = { yes: "runs your workspaces · your image builds here on first use", no: "runs your agents, one workspace" };
 
       const joinSlots = () => [$("address-said"), $("code-said"), $("join-said")];
       function clearJoinRefusals() {
@@ -480,7 +480,7 @@
           if (answer.ok) {
             $("here-name").textContent = answer.here.name;
             $("here-facts").textContent = answer.here.facts;
-            $("here-docker").textContent = answer.here.docker ? DOCKER.yes : DOCKER.no;
+            $("here-workspaces").textContent = answer.here.runsWorkspaces ? WORKSPACES.yes : WORKSPACES.no;
             show("joined");
             return;
           }

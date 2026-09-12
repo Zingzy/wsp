@@ -94,7 +94,15 @@ pub struct PlaceReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disk_free_bytes: Option<u64>,
     pub login: BTreeMap<String, String>,
-    pub docker: bool,
+    /// Whether this computer's own daemon runs workspaces here: cgroup v2 with the controllers a cap needs, an
+    /// overlay, and root. What decides whether the place forks at all, where the docker row once did.
+    pub runs_workspaces: bool,
+    /// When it does not, the one kernel reason, in the self check's own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspaces_blocked: Option<String>,
+    /// The engine a project's own containers would run on here, none until the person installs one.
+    #[serde(deserialize_with = "bounded::<_, 0, 16>")]
+    pub engine: String,
     pub daemon_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_port: Option<NonZeroU16>,

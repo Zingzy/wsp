@@ -52,7 +52,7 @@ function stagePage(): string {
 }
 
 /** This computer as the shell answers a join with it, in the app's own words for a shape and a disk. */
-const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"), docker: false };
+const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"), runsWorkspaces: false };
 
 /** The shell's bridge, answered in the page: the fixture's agents, an install that lands every id, and a join that
  * lands on this computer. */
@@ -708,7 +708,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect(await page!.$eval("#joined .row + .row", el => getComputedStyle(el).borderTopWidth)).toBe("1px");
     expect(await page!.textContent("#here-name")).toBe(HERE.name);
     expect(await page!.textContent("#here-facts")).toBe(HERE.facts);
-    expect(await page!.textContent("#here-docker")).toBe("not installed · runs your agents, one workspace");
+    expect(await page!.textContent("#here-workspaces")).toBe("runs your agents, one workspace");
     expect(await page!.$eval("#here-facts", el => ({ font: getComputedStyle(el).fontSize, mono: /mono/i.test(getComputedStyle(el).fontFamily), ink: getComputedStyle(el).color }))).toEqual({
       font: "12px",
       mono: true,

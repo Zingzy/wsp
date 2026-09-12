@@ -237,15 +237,17 @@ describe("a provider as a place", () => {
 
 describe("the table wsp places prints", () => {
   const rows: PlaceView[] = [
-    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, docker: true, present: true, takesForks: false },
-    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, docker: true, present: true, lastSeenAt: "2026-09-12T00:00:00.000Z", takesForks: true },
+    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: true, engine: "docker", present: true, takesForks: false },
+    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, runsWorkspaces: true, engine: "none", present: true, lastSeenAt: "2026-09-12T00:00:00.000Z", takesForks: true },
     { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.018, takesForks: true },
   ];
 
-  it("carries the cores, the memory, the free disk, the docker and the presence, with the default marked once", () => {
+  it("carries the cores, the memory, the free disk, whether it runs workspaces, its engine and the presence, with the default marked once", () => {
     const printed = placeLines(rows);
     expect(printed[0]).toContain("PLACE");
     expect(printed[0]).toContain("DISK FREE");
+    expect(printed[0]).toContain("WORKSPACES");
+    expect(printed[0]).toContain("ENGINE");
     expect(printed[1]).toContain("zingzys-mac");
     expect(printed[2]).toContain("box");
     expect(printed[2]).toContain("default");
@@ -260,7 +262,7 @@ describe("the table wsp places prints", () => {
   it("says how many forks a place holds of how many it takes, and nothing there for one that forks nowhere", () => {
     const printed = placeLines([
       { ...rows[1]!, forks: { running: 1, room: 2 } },
-      { ...rows[0]!, id: "p_2", name: "laptop", docker: false },
+      { ...rows[0]!, id: "p_2", name: "laptop", runsWorkspaces: false, engine: "none" },
     ]);
     expect(printed[0]).toContain("FORKS");
     expect(printed[1]).toContain("1 of 3");
@@ -520,7 +522,7 @@ describe("wsp add on a computer reached over ssh", () => {
   it("asks the host to do it, prints each step as it lands and says what joined", async () => {
     const io = captured();
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
-    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, docker: true, present: true, takesForks: true };
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "none", present: true, takesForks: true };
     const client = {
       request: async (op: string, params?: Record<string, unknown>) => {
         expect(op).toBe("places.add");
@@ -551,6 +553,9 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(said).toContain(`${PLACE_ADD_WORDS.connect}: Linux 6.8.0`);
     expect(said).toContain("box joined this wsp");
     expect(said).toContain("ssh-ed25519 SHA256:abc");
+    // The three doctor sentences, in the install's own lines: it runs workspaces, and it has no engine for a
+    expect(said).toContain("box runs your workspaces");
+    expect(said).toContain("box has no container engine");
     expect(said).toContain("wsp remove box");
     expect(said).not.toContain("somebody else");
   });

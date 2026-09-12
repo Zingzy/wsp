@@ -76,7 +76,7 @@ export const ADD_COMPUTER_WORDS = {
     running: "closing keeps it going",
     named: "Named after its hostname. Rename it from its row.",
   },
-  joinedWithDocker: "It can run copies of your image. Your image is built there the first time a workspace is created on it.",
+  runsWorkspaces: "It runs your workspaces. Your image is built there the first time a workspace is created on it.",
 } as const;
 
 /** Connect a provider: the pick, the key and what the provider said. */

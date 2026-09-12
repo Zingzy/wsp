@@ -3,7 +3,7 @@
 // app's own computer first, every saved host with the current one marked, the
 // connect row, and the disconnect row for the host the window is on.
 import { describe, expect, it } from "vitest";
-import { HOST_WORDS, absentComputer, awayMsOf, hereWord, hostMenuAction, hostsMenuItems, placeWorkspacesCell, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
+import { HOST_WORDS, absentComputer, awayMsOf, hereWord, hostMenuAction, hostsMenuItems, placeForksNowhereLine, placeWorkspacesCell, placeWorkspacesLine, shellVersionNotice, type HostsView, type PlaceView } from "../src/index.js";
 
 const VIEW: HostsView = {
   here: "This Mac",
@@ -87,7 +87,7 @@ describe("the two rows a computer that joined another wsp adds", () => {
 });
 
 describe("what the Where agents run table says about a computer", () => {
-  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, docker: true, takesForks: true, workspaceId: "ws_1", ...over });
+  const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, runsWorkspaces: true, engine: "none", takesForks: true, workspaceId: "ws_1", ...over });
   const now = Date.parse("2026-09-12T12:00:00.000Z");
 
   it("holds one word for the silence in the table's own slot, and dates it only where there is room", () => {
@@ -104,18 +104,26 @@ describe("what the Where agents run table says about a computer", () => {
 
   it("says the count it is given and names the one thing that changes what may go there, never a second word for the silence", () => {
     expect(placeWorkspacesCell(view(), 1)).toBe("1");
-    expect(placeWorkspacesCell(view({ docker: false }), 1)).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ runsWorkspaces: false }), 1)).toBe("1 · agents only");
     expect(placeWorkspacesCell(view({ present: false }), 1)).toBe("1");
-    expect(placeWorkspacesCell(view({ present: false, docker: false }), 1)).toBe("1 · agents only");
-    expect(placeWorkspacesCell(view({ docker: false }), 0)).toBe("0 · agents only");
+    expect(placeWorkspacesCell(view({ present: false, runsWorkspaces: false }), 1)).toBe("1 · agents only");
+    expect(placeWorkspacesCell(view({ runsWorkspaces: false }), 0)).toBe("0 · agents only");
   });
 
   it("reads the count off the list it is handed, never off the workspace a join recorded on the row", () => {
     // This computer's own workspace and a provider's forks are on no row, so a cell read off the row said 0 for
     // both: the count is the caller's and the row only says what kind of place it is about.
-    expect(placeWorkspacesCell({ id: "here", kind: "computer", name: "here", default: true, docker: true }, 1)).toBe("1");
+    expect(placeWorkspacesCell({ id: "here", kind: "computer", name: "here", default: true, runsWorkspaces: true }, 1)).toBe("1");
     expect(placeWorkspacesCell({ id: "box", kind: "provider", name: "box", default: false }, 2)).toBe("2");
     expect(placeWorkspacesCell(view({ workspaceId: undefined }), 1)).toBe("1");
+  });
+
+  it("names the place in the workspaces line and the forks-nowhere line, never the daemon's own 'this computer'", () => {
+    const v = view({ name: "laptop", runsWorkspaces: false, workspacesBlocked: "this computer mounts cgroup v1 at /sys/fs/cgroup: boot it with systemd.unified_cgroup_hierarchy=1" });
+    expect(placeWorkspacesLine(v)).toBe("laptop mounts cgroup v1 at /sys/fs/cgroup: boot it with systemd.unified_cgroup_hierarchy=1");
+    expect(placeWorkspacesLine(view({ name: "srv", runsWorkspaces: true }))).toBe("srv runs your workspaces");
+    expect(placeForksNowhereLine("laptop", v.workspacesBlocked)).toBe("laptop mounts cgroup v1 at /sys/fs/cgroup: boot it with systemd.unified_cgroup_hierarchy=1");
+    expect(placeForksNowhereLine("laptop")).toContain("laptop");
   });
 });
 

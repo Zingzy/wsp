@@ -7,7 +7,7 @@ import { NOTHING_HELD, placeIsFull, placeName, placeOf, placeWorkspaceCounts, re
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 
-const here: PlaceView = { id: "here", kind: "computer", name: "This Mac", default: false, shape: { cpu: 8, memMb: 16 * 1024 }, diskFreeBytes: 210 * 1024 ** 3, docker: false, present: true };
+const here: PlaceView = { id: "here", kind: "computer", name: "This Mac", default: false, shape: { cpu: 8, memMb: 16 * 1024 }, diskFreeBytes: 210 * 1024 ** 3, runsWorkspaces: false, engine: "none", present: true };
 const hetzner: PlaceView = {
   id: "p_1",
   kind: "computer",
@@ -15,12 +15,12 @@ const hetzner: PlaceView = {
   default: true,
   shape: { cpu: 2, memMb: 4 * 1024 },
   diskFreeBytes: 38 * 1024 ** 3,
-  docker: true,
+  runsWorkspaces: true, engine: "docker",
   present: true,
   joinedAt: ago(60 * 60 * 1000),
   lastSeenAt: ago(3_000),
 };
-const laptop: PlaceView = { ...hetzner, id: "p_2", name: "old-macbook", default: false, shape: { cpu: 4, memMb: 8 * 1024 }, diskFreeBytes: 91 * 1024 ** 3, docker: false, present: false, lastSeenAt: ago(2 * 60 * 60 * 1000) };
+const laptop: PlaceView = { ...hetzner, id: "p_2", name: "old-macbook", default: false, shape: { cpu: 4, memMb: 8 * 1024 }, diskFreeBytes: 91 * 1024 ** 3, runsWorkspaces: false, engine: "none", present: false, lastSeenAt: ago(2 * 60 * 60 * 1000) };
 const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4 * 1024 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018 };
 
 describe("what the section computes beyond the table's own cells", () => {
@@ -76,11 +76,11 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
   it("offers every computer and provider that takes a workspace, never the computer the host runs on", () => {
     // This computer runs Docker here: it can hold copies of the image, and it is still never somewhere to put
     // another workspace, since it is already the one it can be.
-    expect(whereSegments([{ ...here, docker: true }, hetzner, laptop, ascii]).map(p => p.id)).toEqual(["p_1", "box"]);
+    expect(whereSegments([{ ...here, runsWorkspaces: true, engine: "docker" }, hetzner, laptop, ascii]).map(p => p.id)).toEqual(["p_1", "box"]);
   });
 
   it("offers nothing at all where this computer is the only row that could hold one", () => {
-    expect(whereSegments([{ ...here, docker: true }, laptop])).toEqual([]);
+    expect(whereSegments([{ ...here, runsWorkspaces: true, engine: "docker" }, laptop])).toEqual([]);
   });
 
   it("says a box costs nothing, how much room it has, and that the image is built there first", () => {
