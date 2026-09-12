@@ -20,6 +20,7 @@ import { chromium } from "playwright";
 import { fixtureState } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
+import { APP_UP } from "./ready.mjs";
 
 function usage(why) {
   console.error(`${why}\n\nusage: pnpm --filter @wsp/web screenshots -- --out <folder> [--surfaces <file.json>]`);
@@ -52,12 +53,6 @@ function treeFacts() {
     return { sha: "an unknown commit", branch: "an unknown branch" };
   }
 }
-
-/** The app is up once its centre column is on the page: the socket has answered and the store has
- * rendered. A step taken before that is a click at a shell that is not there yet, and at 390 the right
- * panel opens over the whole window part way through, which swallowed the first click of every narrow
- * shot until this gate went in. */
-const APP_UP = "[data-shell-center]";
 
 /** Where a paired browser keeps the token the host handed it, copied from `apps/web/src/protocol/pairing.ts`
  * (DEVICE_TOKEN_KEY): this file is plain node beside the app rather than inside its build, so it cannot import the
