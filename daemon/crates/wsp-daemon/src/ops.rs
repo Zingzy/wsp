@@ -18,6 +18,7 @@ use wsp_frames::{
 
 use crate::exec::{run_exec, ExecOptions};
 use crate::paths::OpError;
+use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound};
 
@@ -31,17 +32,29 @@ pub(crate) struct Conn {
     /// What the socket's close undoes: every pty and mode listener an attach on it made. None once closed, so an
     /// attach still being answered when the socket went undoes itself at once instead of outliving it.
     detaches: Mutex<Option<Vec<Detach>>>,
+    /// This socket's proc.watch, so proc.unwatch can end it before the socket does and a second watch on the same
+    /// socket is not a second subscription.
+    proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
 }
 
 impl Conn {
     pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound) -> Conn {
-        Conn { scope, out, detaches: Mutex::new(Some(Vec::new())) }
+        Conn { scope, out, detaches: Mutex::new(Some(Vec::new())), proc_watch: Mutex::new(None) }
     }
 
     fn on_close(&self, detach: Detach) {
         match &mut *self.detaches.lock().unwrap_or_else(|e| e.into_inner()) {
             Some(pending) => pending.push(detach),
             None => detach(),
+        }
+    }
+
+    /// Takes a subscription on only while the socket is still open, and keeps what undoes it: an op that awaited
+    /// something takes nothing on for a client that has left, since the close drains what this socket holds once and
+    /// a subscription made after that drain is one nothing removes.
+    fn while_open(&self, take: impl FnOnce() -> Option<Detach>) {
+        if let Some(pending) = &mut *self.detaches.lock().unwrap_or_else(|e| e.into_inner()) {
+            pending.extend(take());
         }
     }
 
@@ -132,7 +145,7 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Strin
         }
         Some(
             name @ ("pty.create" | "pty.attach" | "pty.write" | "pty.resize" | "pty.kill" | "pty.list" | "exec" | "fs.list" | "fs.read"
-            | "git.status" | "git.diff"),
+            | "git.status" | "git.diff" | "sys.watch" | "proc.watch" | "proc.unwatch" | "proc.inspect" | "proc.kill"),
         ) => {
             // The typed frame: what the protocol's schema refuses, this refuses as a bad request.
             match serde_json::from_value::<DaemonOp>(frame.clone()) {
@@ -152,6 +165,14 @@ pub(crate) fn not_built(op: &str) -> String {
 
 fn no_such_pty(pty_id: &str) -> String {
     format!("no such pty: {pty_id}")
+}
+
+/// Both proc ops refuse a pid above the Linux pid_max ceiling as a bad request, as the node daemon does.
+fn pid_in_range(pid: std::num::NonZeroU32) -> Result<u32, OpError> {
+    if pid.get() > numbers::PID_MAX {
+        return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("pid must be an integer between 1 and {}", numbers::PID_MAX)));
+    }
+    Ok(pid.get())
 }
 
 /// The real path a request names, inside the daemon's root or a folder the roots file names as of this op.
@@ -247,6 +268,54 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
             let diff = async { git::git_diff(&locate(ctx, &cwd).await?, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await };
             answer(id, diff.await)
         }
+        DaemonOp::SysWatch => {
+            // One read before the watch is taken: a machine whose module cannot read it refuses here, where the pane
+            // can say so, rather than accepting a stream it will never send and leaving the rows at pending.
+            let watched = async {
+                let sampler = ctx.sys_sampler()?;
+                sampler.probe().await?;
+                let key = ctx.next_key();
+                conn.while_open(|| {
+                    sampler.subscribe(key, conn.out.clone());
+                    Some(Box::new(move || sampler.unsubscribe(key)) as Detach)
+                });
+                Ok(Empty {})
+            };
+            answer(id, watched.await)
+        }
+        DaemonOp::ProcWatch => {
+            let watched = async {
+                let sampler = ctx.proc_sampler()?;
+                sampler.probe().await?;
+                let key = ctx.next_key();
+                conn.while_open(|| {
+                    let mut watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner());
+                    if watch.is_some() {
+                        return None;
+                    }
+                    sampler.subscribe(key, conn.out.clone());
+                    *watch = Some((key, Arc::clone(&sampler)));
+                    Some(Box::new(move || sampler.unsubscribe(key)) as Detach)
+                });
+                Ok(Empty {})
+            };
+            answer(id, watched.await)
+        }
+        DaemonOp::ProcUnwatch => {
+            let watch = conn.proc_watch.lock().unwrap_or_else(|e| e.into_inner()).take();
+            if let Some((key, sampler)) = watch {
+                sampler.unsubscribe(key);
+            }
+            ok(id)
+        }
+        DaemonOp::ProcInspect { pid } => {
+            let inspected = async { ctx.proc_sampler()?.inspect(pid_in_range(pid)?).await };
+            answer(id, inspected.await)
+        }
+        DaemonOp::ProcKill { pid, signal } => {
+            let protected = ProtectedPids { this: std::process::id(), parent: std::os::unix::process::parent_id() };
+            answer(id, pid_in_range(pid).and_then(|pid| kill_process(pid, signal, protected)).map(|()| Empty {}))
+        }
         _ => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
     }
 }
@@ -272,7 +341,7 @@ mod tests {
         let mut options = Options::new(token.path());
         options.root = Some(root.path().to_path_buf());
         options.roots_path = Some(root.path().join("roots"));
-        Bench { ctx: Arc::new(Ctx::new(options)), _token: token, root }
+        Bench { ctx: Arc::new(Ctx::new(options, Box::new(|_| {}))), _token: token, root }
     }
 
     fn conn(scope: Option<u16>) -> (Arc<Conn>, mpsc::UnboundedReceiver<String>) {
@@ -350,6 +419,11 @@ mod tests {
             "fs.read",
             "git.status",
             "git.diff",
+            "sys.watch",
+            "proc.watch",
+            "proc.unwatch",
+            "proc.inspect",
+            "proc.kill",
         ];
         for op in DAEMON_OPS.iter().filter(|op| !built.contains(op)) {
             let out = reply(&b, &c, json!({"id": 1, "op": op})).await;
