@@ -138,6 +138,37 @@
       "settleMs": 700
     },
     {
+      "name": "composer-folder",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "composer-folder"
+      ],
+      "wait": "k=folder-path",
+      "settleMs": 700
+    },
+    {
+      "name": "composer-folder-refused",
+      "at": "/",
+      "steps": [
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "row-id=ws:ws_web",
+        "390:key:Escape",
+        "390:sidebar=trigger",
+        "composer-folder",
+        "k=folder-path",
+        "type:/does/not/exist",
+        "key:Enter"
+      ],
+      "wait": "refused",
+      "settleMs": 700
+    },
+    {
       "name": "settings-where",
       "at": "/",
       "steps": [
