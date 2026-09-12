@@ -1,8 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { connect, createServer, type Server } from "node:net";
+import { connect, createServer, type Server, type Socket } from "node:net";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_FIRST_FRAME_NOT_AUTH, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DAEMON_TOKEN_REFUSED, DAEMON_VERSION, portScopeRefusal, unknownOpLine } from "@wsp/protocol";
+import { DAEMON_AUTH_DEADLINE_PASSED, DAEMON_FIRST_FRAME_NOT_AUTH, DAEMON_PRE_AUTH_BYTES_EXCEEDED, DAEMON_TOKEN_REFUSED, DAEMON_VERSION, TUNNEL_CAP, portScopeRefusal, unknownOpLine } from "@wsp/protocol";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { fakeProcTree, fakeStty, writeProc } from "./fake-proc.js";
@@ -235,6 +235,41 @@ describe("daemon WS server", () => {
       full.close();
     } finally {
       await new Promise<void>(resolve => guest.close(() => resolve()));
+    }
+  });
+
+  it("an unscoped socket tunnels to any guest port, holds at most the cap at once, and loses them all with the socket", async () => {
+    const guestSide = new Set<Socket>();
+    const echo: Server = createServer(sock => {
+      guestSide.add(sock);
+      sock.on("close", () => guestSide.delete(sock));
+      sock.on("data", d => sock.write(Buffer.from(`echo:${d.toString()}`)));
+    });
+    await new Promise<void>(resolve => echo.listen(0, "127.0.0.1", () => resolve()));
+    const port = (echo.address() as { port: number }).port;
+    const tunnelled = (c: Client, type: string, tunnelId: string) => c.events.find(e => e.type === type && e["tunnelId"] === tunnelId);
+    try {
+      const c = await Client.connect(daemon.port, TOKEN);
+      for (let i = 0; i < TUNNEL_CAP; i++) expect((await c.request("tunnel.open", { tunnelId: `t${i}`, port })).ok).toBe(true);
+      expect(await c.request("tunnel.open", { tunnelId: "one-more", port })).toMatchObject({ ok: false, code: "bad-request", error: `too many tunnels open (${TUNNEL_CAP})` });
+      expect(await c.request("tunnel.open", { tunnelId: "t0", port })).toMatchObject({ ok: false, code: "bad-request", error: "tunnel t0 is already open" });
+      // Every one of them carries bytes both ways, and closing one frees its place.
+      expect((await c.request("tunnel.write", { tunnelId: "t63", data: Buffer.from("x").toString("base64") })).ok).toBe(true);
+      await vi.waitFor(() => expect(tunnelled(c, "tunnel.data", "t63")).toBeDefined(), { timeout: 5000, interval: 10 });
+      expect(Buffer.from(String(tunnelled(c, "tunnel.data", "t63")!["data"]), "base64").toString()).toBe("echo:x");
+      expect((await c.request("tunnel.close", { tunnelId: "t63" })).ok).toBe(true);
+      await vi.waitFor(() => expect(tunnelled(c, "tunnel.end", "t63")).toBeDefined(), { timeout: 5000, interval: 10 });
+      expect(await c.request("tunnel.write", { tunnelId: "t63", data: "" })).toMatchObject({ ok: false, code: "not-found" });
+      expect((await c.request("tunnel.open", { tunnelId: "one-more", port })).ok).toBe(true);
+      c.close();
+      // The tunnels die with the socket: the guest sees every connection end, and the next client starts from nothing.
+      await vi.waitFor(() => expect(guestSide.size).toBe(0), { timeout: 5000, interval: 10 });
+      const again = await Client.connect(daemon.port, TOKEN);
+      for (let i = 0; i < TUNNEL_CAP; i++) expect((await again.request("tunnel.open", { tunnelId: `t${i}`, port })).ok).toBe(true);
+      again.close();
+    } finally {
+      for (const sock of guestSide) sock.destroy();
+      await new Promise<void>(resolve => echo.close(() => resolve()));
     }
   });
 
