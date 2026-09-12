@@ -34,12 +34,15 @@ import { Button } from "../ui/button";
 import { Menu, MenuGroup, MenuGroupLabel, MenuItem, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { canPickFolder } from "./ComposerCheckoutRow";
 import { ComposerModelPicker } from "./ComposerModelPicker";
-import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey } from "./composerOptionsStore";
-import { effectivePicks, resolveModel, runningPicks, startOptionsFrom, type ComposerStart, type ResolvedPicks } from "./composerPicks";
+import { useComposerOptions, useComposerOptionsStore, type ComposerOptionKey, type PickThreads } from "./composerOptionsStore";
+import { effectivePicks, pickedFor, resolveModel, startOptionsFrom, threadPicks, type ComposerStart, type ResolvedPicks } from "./composerPicks";
 import { effortPickerLabel } from "./format";
 import type { ChatThreadHandle } from "./useChatThread";
 
 export const DEFAULT_HARNESS = DEFAULT_AGENT.id;
+
+/** One object for a workspace nobody has picked on, so the selector hands the hook the same reference every render. */
+const NO_THREADS: PickThreads = {};
 
 /** One icon per permission mode the table knows; a mode it does not gets the shield. */
 const ACCESS_ICONS: Readonly<Record<string, LucideIcon>> = {
@@ -72,14 +75,16 @@ export interface ComposerPicks {
 /** The composer's picks for a workspace, and the catalog they read from: the machine's once it answered, else the table's. */
 export function useComposerPicks(workspaceId: string, thread: ChatThreadHandle): ComposerPicks {
   const latest = useLatestSession(workspaceId);
-  const picked = useComposerOptions(workspaceId);
-  const running = useMemo(() => runningPicks(latest, thread.view.running), [latest, thread.view.running]);
+  const kept = useComposerOptions(workspaceId);
+  const pickedOn = useComposerOptionsStore(s => s.pickedOn[workspaceId] ?? NO_THREADS);
+  const picked = useMemo(() => pickedFor(kept, thread.view, pickedOn, thread.threadKey), [kept, pickedOn, thread.threadKey, thread.view]);
+  const onThread = useMemo(() => threadPicks(latest, thread.view), [latest, thread.view]);
   const pinned = latest !== null && !thread.fresh && (thread.view.entries.length > 0 || thread.view.running);
   const harness = (pinned ? latest.harness : picked.harness ?? latest?.harness) ?? DEFAULT_HARNESS;
   const catalog = useHarnessCatalog(harness, workspaceId);
-  const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, running: running.model })), [catalog, picked.model, running.model]);
-  const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, running })), [catalog, picked, running]);
-  const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked)), [catalog, picked]);
+  const model = useMemo(() => (catalog === null ? null : resolveModel(catalog, { picked: picked.model, thread: onThread.model })), [catalog, picked.model, onThread.model]);
+  const picks = useMemo(() => (catalog === null ? null : effectivePicks(catalog, { picked, thread: onThread })), [catalog, picked, onThread]);
+  const startOptions = useMemo(() => (catalog === null ? {} : startOptionsFrom(catalog, picked, onThread)), [catalog, picked, onThread]);
   return { harness, catalog, model, picks, startOptions, pinned };
 }
 
@@ -120,14 +125,27 @@ function OptionRows({ options }: { options: ReadonlyArray<HarnessOption> }) {
   });
 }
 
-function EffortPicker({ workspaceId, efforts, contextWindows, picks }: { workspaceId: string; efforts: HarnessOption[]; contextWindows: HarnessOption[]; picks: ResolvedPicks }) {
+function EffortPicker({
+  workspaceId,
+  threadKey,
+  efforts,
+  contextWindows,
+  picks,
+}: {
+  workspaceId: string;
+  /** The thread a window pick belongs to: the window rides inside the model, so it is scoped like one. */
+  threadKey: string;
+  efforts: HarnessOption[];
+  contextWindows: HarnessOption[];
+  picks: ResolvedPicks;
+}) {
   const pick = useComposerOptionsStore(s => s.pick);
   const label = effortPickerLabel(
     efforts.find(o => o.value === picks.effort),
     contextWindows.find(o => o.value === picks.contextWindow),
   );
   const onPick = (key: ComposerOptionKey) => (next: unknown) => {
-    if (typeof next === "string") pick(workspaceId, key, next);
+    if (typeof next === "string") pick(workspaceId, key, next, threadKey);
   };
   return (
     <Menu>
@@ -321,10 +339,10 @@ export function ComposerOptionPickers({
         onPickHarness={harness => pick(workspaceId, "harness", harness)}
         onPickModel={(harness, value) => {
           if (harness !== catalog.harness) pick(workspaceId, "harness", harness);
-          pick(workspaceId, "model", value);
+          pick(workspaceId, "model", value, thread.threadKey);
         }}
       />
-      {efforts.length > 0 || contextWindows.length > 0 ? <EffortPicker workspaceId={workspaceId} efforts={efforts} contextWindows={contextWindows} picks={picks} /> : null}
+      {efforts.length > 0 || contextWindows.length > 0 ? <EffortPicker workspaceId={workspaceId} threadKey={thread.threadKey} efforts={efforts} contextWindows={contextWindows} picks={picks} /> : null}
       {catalog.permissionModes.length > 0 ? <AccessPicker modes={catalog.permissionModes} value={picks.permissionMode} onPick={onPickAccess} /> : null}
       {projects.length > 0 && canPickFolder(thread) ? <ProjectPicker workspaceId={workspaceId} projects={projects} onOtherFolder={onOtherFolder} /> : null}
     </>
