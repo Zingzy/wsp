@@ -2818,12 +2818,12 @@ describe("wsp verbs over the host", () => {
     expect(half.io.errors).toEqual(['wsp thread opens a line rather than being one. usage: wsp thread new [--in <workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"\nusage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>']);
   });
 
-  it("without a host serving the state file every verb refuses in one line before dialling anything", async () => {
+  it("without a host serving the state file, and with nothing to start one, every verb refuses in one line before dialling anything", async () => {
     await handle!.close();
     handle = undefined;
-    const { code, io } = await run("threads");
-    expect(code).toBe(1);
-    expect(io.errors).toEqual([`wsp threads: no wsp host is serving ${statePath}; run wsp up first`]);
+    const io = captured();
+    expect(await cli(["threads", "--state", statePath], io, undefined, env, false)).toBe(1);
+    expect(io.errors).toEqual([`wsp threads: no wsp host is serving ${statePath}`]);
   });
 
   it("a wrong token is refused by the host, under the auth class", async () => {

@@ -187,6 +187,7 @@ import {
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
 import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lock.js";
+import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
@@ -230,7 +231,17 @@ export interface DialOpts extends HostPick {
   aim?: HostAim;
   /** Spends a pairing code as the first frame and holds the device token the host answers with. */
   redeem?: { code: string; name: string };
+  /** What brings a host up when none serves this state file here. A line that hands none in starts nothing and
+   * reads the refusal, which is what a line about to serve a host itself wants. */
+  start?: HostStarter;
+  /** Where the starter's one line goes; stderr when nobody names a reader, since the line rides beside whatever
+   * the verb prints on stdout. */
+  say?: (line: string) => void;
 }
+
+/** No host holds this state file's lock, said once: a line that asked for none to be started reads it, and so does
+ * a wait that ran out somewhere a starter could not run. */
+export const noHostServingLine = (statePath: string): string => `no wsp host is serving ${statePath}`;
 
 /** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
  * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
@@ -241,7 +252,7 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
   if (aim.kind === "url") return { url: wsUrlOf(aim.url), token: aim.token ?? "" };
   if (aim.kind === "alias") return { url: wsUrlOf(aim.record.url), token: aim.record.deviceToken };
   const lock = servingHost(statePath);
-  if (lock === undefined) throw new Error(`no wsp host is serving ${statePath}; run wsp up first`);
+  if (lock === undefined) throw new Error(noHostServingLine(statePath));
   const token = hostTokenFor(statePath);
   if (token === undefined) throw authRefusal(`the host's token file is missing: ${hostTokenPath(statePath)}`);
   return { url: `ws://${authority(dialAddress(lock), lock.wsPort)}`, token };
@@ -252,6 +263,11 @@ export function hostAddress(statePath: string, pick: HostPick & { aim?: HostAim 
  * is the window the road gets rather than one number for every road. */
 export async function dialHost(statePath: string, opts: DialOpts = {}): Promise<HostClient> {
   const aim = opts.aim ?? aimedHost(statePath, opts);
+  // Nothing serves this state file here and the line needs one: start it rather than telling the person to. Every
+  // other aim is a host somewhere else, which this computer cannot start and must not try to.
+  if (aim.kind === "here" && opts.start !== undefined && servingHost(statePath) === undefined) {
+    await opts.start(statePath, opts.say ?? (line => void process.stderr.write(`${line}\n`)));
+  }
   // An address is the road wsp connect takes and no other: every other line needs the token a redeem bought, and
   // this computer holds one only under a name.
   if (aim.kind === "url" && aim.token === undefined && opts.redeem === undefined) throw usageRefusal(addressNotPairedLine(aim.url), "Run wsp hosts to read the names this computer knows.");
@@ -447,6 +463,9 @@ export interface VerbDeps {
   /** The runtime over the state file in this process, for the one verb that runs with no host serving (new --local
    * on an empty state, the way in); the caller closes it. Absent on the tool door, which always has a host. */
   runtime?(statePath: string): Promise<LocalRuntime>;
+  /** What brings the host up when nothing serves the state file here; both doors hand in the one built from how
+   * this process was started. Absent starts nothing, which is what a caller with no wsp to spawn has. */
+  start?: HostStarter;
 }
 
 /** What a person names when they record a machine of their own: where it is, and the port, key and name they give
@@ -3107,7 +3126,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime" | "env">): Promise<number> {
+export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "runtime" | "env" | "start">): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -3156,12 +3175,13 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
     ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
     ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
     ...(deps.runtime !== undefined ? { runtime: deps.runtime } : {}),
+    ...(deps.start !== undefined ? { start: deps.start } : {}),
     client: async () => {
       if (stateNote !== undefined && !noted) {
         noted = true;
         io.error(stateNote);
       }
-      return (client ??= await dialHost(statePath, { aim }));
+      return (client ??= await dialHost(statePath, { aim, say: line => io.error(line), ...(deps.start !== undefined ? { start: deps.start } : {}) }));
     },
   };
   try {

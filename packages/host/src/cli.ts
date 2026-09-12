@@ -65,6 +65,7 @@ import {
   runFailureLine,
   serviceEnv,
   serviceManagerFor,
+  SERVICE_WAIT_MS,
   serviceReading,
   statusLines,
   stopService,
@@ -76,6 +77,7 @@ import {
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
+import { startedByVerb, starterFor, type HostStarter } from "./host-start.js";
 import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
@@ -1021,6 +1023,8 @@ async function besideHost(lock: HostLock, statePath: string): Promise<BesideHost
   try {
     // The host holding this state file's lock and no other: WSP_HOST and the default alias aim a verb at another
     // computer, and the build belongs to the process that writes this file.
+    // No starter is handed in: the lock was read before this call, and an init that started a host under itself
+    // would be building through a host it is about to replace.
     client = await dialHost(statePath, { aim: { kind: "here" } });
   } catch (e) {
     throw refuse(e instanceof Error ? e.message : String(e));
@@ -1298,7 +1302,7 @@ async function hostFor(
 ): Promise<HostHandle> {
   const address = opts.address ?? LOOPBACK;
   const lockPath = lockPathFor(opts.statePath);
-  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address });
+  const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address, ...(startedByVerb(process.env) ? { startedBy: "verb" as const } : {}) });
   // Read before the host serves a byte: a linked box is reachable from anywhere the moment its connector is up,
   // so the page it serves must carry no token even though it binds this computer alone. This follows the record
   // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
@@ -1374,14 +1378,16 @@ export interface ServiceDeps {
   answers: HostProbe;
   /** The one dial, for the status of a host on another computer: nothing on this computer says whether it is up. */
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
+  /** Asks the pid the lock recorded to end, for a host a verb started and no terminal holds. */
+  stop(pid: number): void;
 }
 
-/** A load or a stop is a process starting or ending on this computer, not a network call. */
-const SERVICE_WAIT_MS = 20_000;
+/** What wsp down says for a host a verb brought up: the same shape the service's own stop line takes. */
+export const verbHostStoppedLine = (pid: number, statePath: string): string => `stopped the host a verb started (pid ${pid}); nothing serves ${statePath} now`;
 
 export function systemService(): ServiceDeps {
   const os = platform();
-  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe, dial: dialHost };
+  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe, dial: dialHost, stop: pid => process.kill(pid, "SIGTERM") };
 }
 
 /** Which service this is: one per state file, under this person's home and this user. */
@@ -1501,11 +1507,23 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
     return 1;
   }
   if (!held && !installed) {
-    const byHand = servingHost(opts.statePath);
+    const serving = servingHost(opts.statePath);
+    // A host a verb started for itself is nobody's terminal to stop, so this is the one line that stops it: the pid
+    // comes off the lock that host wrote, never off a search for a process that looks like it.
+    if (serving?.startedBy === "verb") {
+      deps.stop(serving.pid);
+      const left = await untilLock(opts.statePath, false, deps.waitMs);
+      if (left !== undefined) {
+        io.error(`wsp down: the host a verb started (pid ${left.pid}) is still serving ${opts.statePath}.`);
+        return 1;
+      }
+      io.log(verbHostStoppedLine(serving.pid, opts.statePath));
+      return 0;
+    }
     io.error(
-      byHand === undefined
+      serving === undefined
         ? `wsp down: no ${manager.words} for ${opts.statePath}, and no host is serving it.`
-        : `wsp down: no ${manager.words} for ${opts.statePath}; the host serving it (pid ${byHand.pid}) was started by hand. Stop it with Ctrl-C in its terminal, or kill ${byHand.pid}.`,
+        : `wsp down: no ${manager.words} for ${opts.statePath}; the host serving it (pid ${serving.pid}) was started by hand. Stop it with Ctrl-C in its terminal, or kill ${serving.pid}.`,
     );
     return 1;
   }
@@ -1794,7 +1812,7 @@ function commandUsage(word: string): string | undefined {
  * once per `--agent` given, and answers with the lines or, with `--json`, the report as one line. Its flags are
  * parsed here rather than in the table every command shares, so a command that has no JSON to print refuses
  * `--json` instead of taking it and printing prose. */
-async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>): Promise<number> {
+async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => string, run: RunningWsp, env: Readonly<Record<string, string | undefined>>, starts: { start?: HostStarter }): Promise<number> {
   const usage = mcpUsage();
   let values: { agent?: string[]; host?: string; json?: boolean; remove?: boolean; state?: string; help?: boolean };
   let words: string[];
@@ -1810,7 +1828,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
   const statePath = statePathOf(values.state);
   if (words.length === 0) {
     // The agent starts the server in its own folder, which is the folder a thread opened with no workspace is placed by.
-    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...(values.host !== undefined ? { host: values.host } : {}) });
+    await serveMcp(statePath, { alsoHere, cwd: process.cwd(), env, ...starts, ...(values.host !== undefined ? { host: values.host } : {}) });
     return 0;
   }
   const json = values.json === true;
@@ -1908,8 +1926,17 @@ export const COMMAND_LINES: readonly CommandLine[] = [
 
 /** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it
  * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
- * environment the verbs run with, this process's for a real command line and its own for a test. */
-export async function cli(argv: string[], io: CliIO = terminalIO(), run: RunningWsp = runningWsp(), env: Readonly<Record<string, string | undefined>> = process.env): Promise<number> {
+ * environment the verbs run with, this process's for a real command line and its own for a test. `start` is what
+ * brings a host up when none serves the state file: the one built from `run` unless a caller says otherwise, and
+ * `false` for a caller that wants a line with no host to refuse rather than start one. */
+export async function cli(
+  argv: string[],
+  io: CliIO = terminalIO(),
+  run: RunningWsp = runningWsp(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  start: HostStarter | false = starterFor(run, env),
+): Promise<number> {
+  const starts = start === false ? {} : { start };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
   // tool server all pick their state here, so none of them can run against a state another of them named.
   const chooseState = (flag?: string): string => statePathFrom(flag, env, line => io.error(line));
@@ -1932,9 +1959,9 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
   };
   if (verb !== undefined) {
     const words = verb.name.split(" ");
-    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime });
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, runtime: verbRuntime, ...starts });
   }
-  if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env);
+  if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
   let values: SharedFlags;
   let positionals: string[];
   try {
@@ -1946,10 +1973,11 @@ export async function cli(argv: string[], io: CliIO = terminalIO(), run: Running
     io.log(`wsp ${VERSION}`);
     return 0;
   }
-  const word = positionals[0] ?? "up";
+  const word = positionals[0];
   // `help` is the word for the flag: a person reaching for it types one as readily as the other, and answering the
-  // word with a typo's refusal is the tool arguing about punctuation.
-  if (values.help === true || word === "help") {
+  // word with a typo's refusal is the tool arguing about punctuation. A line with no word at all is the same
+  // question: typing the program's name asks what it is, and answering by serving made a second host of it.
+  if (values.help === true || word === undefined || word === "help") {
     io.log(HELP);
     return 0;
   }

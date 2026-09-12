@@ -261,9 +261,10 @@ describe("installing the MCP server for a local agent", () => {
     const stray = io();
     expect(await cli(["--state", statePath, "mcp", "install", "--nope"], stray)).toBe(3);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
-    // The verb runs rather than printing its usage: nothing serves this state file, which is the line's own answer.
+    // The verb runs rather than printing its usage: nothing serves this state file, which is the line's own answer
+    // when it is handed nothing to start one with.
     const verbLine = io();
-    expect(await cli(["--state", statePath, "threads"], verbLine)).toBe(1);
+    expect(await cli(["--state", statePath, "threads"], verbLine, undefined, process.env, false)).toBe(1);
     expect(verbLine.errors[0]).toContain(`no wsp host is serving ${statePath}`);
     const nonsense = io();
     expect(await cli(["--state", statePath, "nope"], nonsense)).toBe(3);

@@ -140,8 +140,8 @@ describe("the wsp skill", () => {
     const setup = WSP_SKILL.slice(WSP_SKILL.indexOf(SETUP_HEADING), WSP_SKILL.indexOf("## Verbs and tools"));
     expect(setup).toContain("wsp --version");
     expect(setup).toContain("wsp threads --json");
-    expect(setup).toContain("wsp threads: no wsp host is serving <path>; run wsp up first");
-    expect(setup).toContain("app         http://127.0.0.1:4400");
+    expect(setup).toContain("starting the host for <path>; its log is <path>, and wsp down stops it");
+    expect(setup).toContain("no host answered for <path> within 20.0s");
     expect(setup).toContain(thisComputerLine("<name>", "ws_..."));
     expect(setup).toContain("Solari API key: no terminal to ask on; set SOLARI_API_KEY in the environment, ./.env, or ~/.wsp/.env.");
     expect(setup).toContain("wsp init --recipe ~/.wsp/recipe.json");
@@ -152,7 +152,8 @@ describe("the wsp skill", () => {
     expect(setup).toContain("SOLARI_API_KEY=");
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
     for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", "--signin <id>=copy|machine|key|skip", "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp thread new --in first"]) expect(setup, step).toContain(step);
-    expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(10);
+    // Eight steps, since nothing in the walkthrough starts or restarts a host by hand any more.
+    expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(8);
   });
 
   it("mints the recipe from what their agents used, puts the heavy rows to the person, and keeps the host the agent's own job", () => {
@@ -167,10 +168,10 @@ describe("the wsp skill", () => {
     expect(setup.indexOf("--tick used")).toBeLessThan(setup.indexOf("nohup wsp init --recipe ~/.wsp/recipe.json --non-interactive --json"));
     // The wizard the init line opens, named as the plan names it, so the person knows what is coming.
     for (const screen of ["Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, and Build"]) expect(setup).toContain(screen);
-    // The first wsp up of the run is the one that meets a busy port, so its branch lives with the command.
-    expect(setup.slice(setup.indexOf("\n2. "), setup.indexOf("\n3. "))).toContain("wsp up --port 4401 >");
-    expect(setup).toContain("The host is yours to start");
-    expect(setup).toContain("Never say the host is theirs because it holds their keys");
+    // A key written after the host started is read by the next host, so the one step that writes one says how.
+    expect(setup.slice(setup.indexOf("\n2. "), setup.indexOf("\n3. "))).toContain("wsp down");
+    expect(setup).toContain("Starting the host is neither: any command that needs one starts it");
+    expect(setup).toContain("it reads those keys off the file itself, so nothing about them passes through you");
     expect(setup).toContain("The tools show up only after that agent restarts");
     expect(setup).toContain("prefer that over `npx @zingzy/wsp`");
     // Every install line names the published package; a bare npx or a stale name would send them to another one.
@@ -189,10 +190,10 @@ describe("the wsp skill", () => {
       const body = lines.slice(at, next === -1 ? undefined : at + 1 + next);
       expect(body.filter(l => /^ *Expect: /.test(l)), line.slice(0, 40)).toHaveLength(1);
     }
-    // A serving host is not a sealed golden: init serves for the whole wizard, so only step 5 tells them apart.
-    const six = setup.slice(setup.indexOf("\n6. "), setup.indexOf("\n7. "));
-    expect(six).toContain("which is the seal");
-    expect(six).toContain("step 8 is what tells a sealed golden from an init still running");
+    // A serving host is not a sealed golden: init serves for the whole wizard, so only one step tells them apart.
+    const five = setup.slice(setup.indexOf("\n5. "), setup.indexOf("\n6. "));
+    expect(five).toContain("which is the seal");
+    expect(five).toContain("step 6 is what tells a sealed golden from an init still running");
     expect(setup).toContain("Every step below ends in an `Expect:` line");
     expect(setup).toContain("say what to run next inside their own agent");
     expect(setup).toContain("In Claude Code the skill is then `/wsp`");
@@ -219,7 +220,7 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).toContain("two questions to them, the heavy rows with their sizes and the sign-ins with their default choice");
     expect(INSTRUCTIONS).toContain("then `wsp init --recipe ~/.wsp/recipe.json --non-interactive --json`, which you run detached from a shell");
     expect(INSTRUCTIONS).toContain("prints one JSON line per sign-in");
-    expect(INSTRUCTIONS).toContain("then `wsp up`, which you run yourself when nothing serves");
+    expect(INSTRUCTIONS).toContain("Starting the host is neither: any command that needs one starts it");
     expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
     // An agent holding only the tools reads here that a workspace need not be a machine, and which listing shows both.

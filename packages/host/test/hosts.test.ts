@@ -230,7 +230,7 @@ describe("where a verb dials", () => {
 
   it("refuses a state file no host serves in one sentence", () => {
     const gone = join(tempDir("hosts-empty"), "state.json");
-    expect(() => hostAddress(gone, { env: {}, home: tempDir("hosts-none") })).toThrow(`no wsp host is serving ${gone}; run wsp up first`);
+    expect(() => hostAddress(gone, { env: {}, home: tempDir("hosts-none") })).toThrow(`no wsp host is serving ${gone}`);
   });
 });
 

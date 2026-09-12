@@ -28,7 +28,9 @@ describe("what wsp says when it will not run a line", () => {
 
   const run = async (...argv: string[]): Promise<{ code: number; io: Captured }> => {
     const io = captured();
-    const code = await cli([...argv, "--state", statePath], io, undefined, env);
+    // Nothing starts a host here: what a refused line says is the whole of this file, and a line that got as far as
+    // the dial is held to the one sentence it leaves when there is nothing to reach.
+    const code = await cli([...argv, "--state", statePath], io, undefined, env, false);
     return { code, io };
   };
 

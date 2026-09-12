@@ -108,6 +108,7 @@ describe("the MCP server over the host", () => {
 
   async function connect(over: Partial<Parameters<typeof mcpServer>[1]> = {}): Promise<Client> {
     const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    // No starter: this server is held to what it answers with when nothing serves, not to one it would bring up.
     const dial = dialer(statePath);
     server = mcpServer(statePath, { dial: Object.assign(async () => (socket = await dial()), { close: dial.close }), env, ...over });
     await server.connect(toServer);
@@ -1020,7 +1021,7 @@ describe("the MCP server over the host", () => {
     handle = undefined;
     await socket!.closed;
     const gone = await call("workspaces");
-    expect(gone).toEqual(failedWith(`no wsp host is serving ${statePath}; run wsp up first`));
+    expect(gone).toEqual(failedWith(`no wsp host is serving ${statePath}`));
 
     await restartHost({ claude: stuckAgent() });
     const turn = call("thread_new", { workspace: "alpha", task: "hang" });

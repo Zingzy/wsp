@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
 import { EXIT_CODES, LOOPBACK } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
+import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, verbHostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
   SERVICE_MANAGERS,
   installService,
@@ -165,8 +165,19 @@ describe("one module per service manager", () => {
 
 /** A manager that writes a file and answers commands, standing in for launchd here: load starts a host by writing
  * the lock the real one's host would take, unload takes it away again. */
-function fakeService(over: Partial<ServiceDeps> = {}): { deps: ServiceDeps; manager: ServiceManager; run: ServiceRunner; ran: string[][]; plans: ServicePlan[]; fail: (verb: string) => void; starts: (yes: boolean) => void; mute: () => void } {
+function fakeService(over: Partial<ServiceDeps> = {}): {
+  deps: ServiceDeps;
+  manager: ServiceManager;
+  run: ServiceRunner;
+  ran: string[][];
+  plans: ServicePlan[];
+  stopped: number[];
+  fail: (verb: string) => void;
+  starts: (yes: boolean) => void;
+  mute: () => void;
+} {
   const ran: string[][] = [];
+  const stopped: number[] = [];
   const plans: ServicePlan[] = [];
   const failing = new Set<string>();
   let held = false;
@@ -217,11 +228,13 @@ function fakeService(over: Partial<ServiceDeps> = {}): { deps: ServiceDeps; mana
       keys: { env: process.env, cwd: tmpdir(), home: tmpdir() },
       answers: () => Promise.resolve(true),
       dial: () => Promise.reject(new Error("this fake service dials nothing")),
+      stop: pid => stopped.push(pid),
       ...over,
     },
     manager,
     ran,
     plans,
+    stopped,
     fail: verb => void failing.add(verb),
     starts: yes => {
       starts = yes;
@@ -568,6 +581,25 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // Both runs still ask the manager: only its answer rules out a service holding on with no file left to name it.
     const asks = ["fake", "holds", `fake.${serviceTag(statePath)}`];
     expect(fake.ran).toEqual([asks, asks]);
+  });
+
+  it("wsp down stops a host a verb started, by the pid its lock recorded, and says nothing serves the file now", async () => {
+    // A pid the lock could really name: a lock whose process is gone is a crash leftover and no host at all.
+    const verbLock = JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString(), startedBy: "verb" });
+    const fake = svc();
+    writeFileSync(join(home, ".wsp", "host.lock"), verbLock);
+    const lines: string[] = [];
+    // The stop takes the lock away, which is what the host it asked to end does as it closes.
+    const fake2 = svc({ stop: pid => void (pid === process.pid && rmSync(join(home, ".wsp", "host.lock"), { force: true })) });
+    expect(await downCommand(quietIO(lines), opts, fake2.deps)).toBe(0);
+    expect(lines).toEqual([verbHostStoppedLine(process.pid, statePath)]);
+
+    // One that will not go is said so rather than reported as stopped.
+    writeFileSync(join(home, ".wsp", "host.lock"), verbLock);
+    const held: string[] = [];
+    expect(await downCommand(quietIO([], held), opts, fake.deps)).toBe(1);
+    expect(fake.stopped).toEqual([process.pid]);
+    expect(held[0]).toBe(`wsp down: the host a verb started (pid ${process.pid}) is still serving ${statePath}.`);
   });
 
   it("wsp status exits 1 while nothing serves the state file and 0 once the service does, saying which ports either way", async () => {
