@@ -321,6 +321,10 @@ export interface CliIO {
   ask(question: string): Promise<string>;
   /** A person is at the keyboard (stdin and stdout are terminals); absent means an agent or a pipe, and nothing is asked. */
   isTTY?: boolean;
+  /** What the stream writes and what log prints land in front of the same eyes (stdout and stderr are both
+   * terminals), so text the stream has already shown is not printed a second time under it. Absent, the two part:
+   * stdout carries the answer whole and the stream is somebody else's view of the work. */
+  sameScreen?: boolean;
   /** A key, typed without echo. Lines after the first are shown under the question. `variable` is what a caller
    * with no terminal is told to set instead, so a refusal in a service log names the key to put in a file rather
    * than saying it. */
@@ -368,6 +372,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     stream: text => process.stderr.write(text),
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
+    sameScreen: isTTY(output) && isTTY(process.stderr),
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: (q, variable) => (screen ? answered(passwordPrompt(split(q))) : noKey(q, variable)),
   };
