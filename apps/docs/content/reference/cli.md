@@ -137,10 +137,9 @@ the verbs your agents use, and the two lines that serve a host by hand:
       stop the host: the service and its unit where one holds it up, and the
       host a verb started otherwise
   wsp join <url>... --code <code> [--code-file <path>] [--name <name>] [--awake]
-    [--serve]
       on the computer you are sitting at: join it to the wsp at that address,
-      then hold the link open under this computer's own service manager. wsp
-      join --serve is what that service runs
+      then install the daemon under this computer's own service manager, which
+      dials again at every login
   wsp leave
       on that computer: take wsp off it, for a computer whose host is gone and
       cannot run wsp remove
@@ -644,10 +643,9 @@ usage: wsp image
 
 ```text
 usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>] [--awake]
-       [--serve]
   on the computer you are sitting at: join it to the wsp at that address, then
-  hold the link open under this computer's own service manager. wsp join --serve
-  is what that service runs
+  install the daemon under this computer's own service manager, which dials
+  again at every login
 
   --state        the state file: this word first, else WSP_HOME's state.json,
                  else ./.wsp/state.json when the current directory has a .env,
@@ -658,8 +656,6 @@ usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>] [--a
                  so a code never sits on a disk
   --awake        hold this computer out of idle sleep while it is joined, for as
                  long as the agent runs
-  --serve        hold the link open in this terminal, which is what the service
-                 installed by a join runs
   --name         the name to call the computer by here; what its address calls
                  it without one
 ```

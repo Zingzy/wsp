@@ -733,10 +733,10 @@ export interface LocalWiring {
    * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
    * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
   daemonRoad?: () => Promise<DaemonReachView>;
-  /** This computer's own cpu, memory and disk, pushed to the listener every poll tick until the returned detach
-   * runs. Read in the host process, so the Live rows of the workspace that is this computer stand whether or not
-   * its daemon is up: a port, a token and a pty have nothing to do with what `os`, `df` and the memory road read.
-   * One sampler however many listeners there are; it starts with the first and stops with the last. */
+  /** This computer's own cpu, memory and disk, pushed to the listener every sample until the returned detach runs.
+   * Read off this computer's daemon, the one reader of a machine's load wsp has, so the Live rows of the workspace
+   * that is this computer start it if nothing else has. One watch however many listeners there are; it opens with
+   * the first and closes with the last. */
   sysSamples?: (fn: (s: SysSample) => void) => Promise<() => void>;
   /** Frees whatever the wiring holds open on this computer when the runtime closes. */
   close?: () => Promise<void>;

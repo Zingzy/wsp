@@ -9,7 +9,7 @@ import { connectDaemon, createRuntime, memoryStore, type Runtime } from "@wsp/ru
 import type { GoldenBuilderView } from "@wsp/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import { LIVE, liveEnv } from "../../engine/test/live.js";
-import { GUEST_ENVS, deployDaemon } from "../src/doctor.js";
+import { DAEMON_DEPLOYED_LINE, GUEST_ENVS, deployDaemon } from "../src/doctor.js";
 import { startCallbackRelay, systemOpener, type CallbackRelay } from "../src/relay.js";
 
 const LABEL = { wsp: "1", "wsp-test": "callback-relay-live" };
@@ -66,8 +66,8 @@ describe.runIf(LIVE)("callback relay (live)", () => {
     // (measured 2026-09-04, "host pool ... does not support: disk.size"), and the relay only needs a daemon.
     const machine = await backend.create({ kind: "sandbox", template: "base", cpu: 2, memMb: 4096, envs: GUEST_ENVS, labels: { ...LABEL, createdAt: new Date().toISOString() } });
     machineId = machine.id;
-    const { token, node } = await deployDaemon(machine);
-    const notes: string[] = [`machine ${machine.id} created and daemon deployed (node ${node}) at ${Date.now() - t0}ms`];
+    const { token } = await deployDaemon(machine);
+    const notes: string[] = [`machine ${machine.id} created and ${DAEMON_DEPLOYED_LINE} deployed at ${Date.now() - t0}ms`];
     // The relay dials builders through the runtime; this one stands in for a prepared builder with the same reach shape.
     const builder: GoldenBuilderView = { id: machine.id, name: "relay-live", kind: "sandbox", createdAt: new Date().toISOString(), size: { cpu: 2, memMb: 4096 } };
     let minted: PreviewReach | undefined;

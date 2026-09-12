@@ -3,9 +3,8 @@
 // daemon is behind, so content that changes under an unchanged version reaches
 // no machine already running. This hashes what a deploy installs and holds it
 // against the last sha in the protocol's DAEMON_CONTENTS. Sources, not the
-// built bundle: dist carries the version constant itself, so a sha of it would
-// move again the moment it was recorded, and it would need a build to say
-// anything at all.
+// built binary: a build differs by toolchain and machine, and the sources are
+// what a version stands for.
 import { createHash } from "node:crypto";
 import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,35 +12,49 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION, workScoreLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { CLOUD_PLACE, deployScript, openShimScript, startMjs } from "../src/doctor.js";
+import { CLOUD_PLACE, daemonUnit, deployScript, openShimScript } from "../src/doctor.js";
 
-const DAEMON_PKG = fileURLToPath(new URL("../../daemon/", import.meta.url));
+const DAEMON_TREE = fileURLToPath(new URL("../../../daemon/", import.meta.url));
 // A fixed hex token: the deploy writes the token it is given, and which one cannot be what moves the sha.
 const TOKEN = "aabbcc";
 // The suffixed script carries every line the bare one has and two of its own.
 const SUFFIX = ".preview.example.com";
 
-function srcRelPaths(dir: string, prefix = ""): string[] {
+/** Every file under a folder, relative and sorted, so the walk reads the same whatever the folder's own path is. */
+function relPaths(dir: string, keep: (name: string) => boolean, prefix = ""): string[] {
   return readdirSync(dir, { withFileTypes: true })
-    .flatMap(e => (e.isDirectory() ? srcRelPaths(join(dir, e.name), `${prefix}${e.name}/`) : [`${prefix}${e.name}`]))
+    .flatMap(e => (e.isDirectory() ? relPaths(join(dir, e.name), keep, `${prefix}${e.name}/`) : keep(e.name) ? [`${prefix}${e.name}`] : []))
     .sort();
 }
 
-/** What a deploy leaves on a guest and this can hash: the daemon's sources, which its dist is built from; the
- * dependency pins the bundle's package.json copies out of the daemon's, which the guest's npm install reads; the
- * scripts the host writes beside them, whose content outlives the deploy that wrote it; and DAEMON_ROOTS_PATH and
- * the work-score line, which the daemon reads from the protocol and its dist bundles in. Left out, and on the guest anyway inside that
- * same bundle: the rest of the protocol, the DaemonAuthRequest schema the daemon reads, and zod. Hashing the
- * protocol whole would make every edit to it a redeploy of every machine, so those change under an unchanged
- * version and only the op set the version stands for holds them. */
-function daemonContentSha(daemonPkgDir: string, scripts: string[]): string {
+const isSource = (name: string): boolean => name.endsWith(".rs") || name === "Cargo.toml";
+const isFixture = (name: string): boolean => name.endsWith(".json");
+
+/** A file's text as the sha reads it. Two files carry the version itself, in Rust and in the fixture the Rust is
+ * held to, and a sha over the version would move the moment it was recorded: the line and the key that hold it
+ * are taken out, and every cap and default beside them stays in, so a changed cap moves the version and the
+ * version never chases its own hash. */
+function hashed(rel: string, text: string): string {
+  if (rel.endsWith("/numbers.rs")) return text.split("\n").filter(line => !line.includes("DAEMON_VERSION")).join("\n");
+  if (rel.endsWith("/numbers.json")) {
+    const { daemonVersion: _version, ...numbers } = JSON.parse(text) as Record<string, unknown>;
+    return JSON.stringify(numbers);
+  }
+  return text;
+}
+
+/** What a deploy leaves on a guest and this can hash: the Rust sources the binary is built from and each crate's
+ * manifest, the lock that pins every dependency, the C library the Linux builds link and the release it is pinned
+ * to, the contract fixtures the binary's words, numbers and frames are held to, DAEMON_ROOTS_PATH and the
+ * work-score line the daemon reads through that contract, and the scripts the host writes beside the binary,
+ * whose content outlives the deploy that wrote it. */
+function daemonContentSha(daemonTree: string, scripts: string[]): string {
   const h = createHash("sha256");
-  const src = join(daemonPkgDir, "src");
-  for (const rel of srcRelPaths(src)) h.update(`${rel}\n${readFileSync(join(src, rel), "utf8")}\n`);
-  const pkg = JSON.parse(readFileSync(join(daemonPkgDir, "package.json"), "utf8")) as {
-    dependencies: Record<string, string>;
-  };
-  h.update(`${JSON.stringify(pkg.dependencies)}\n`);
+  const crates = join(daemonTree, "crates");
+  for (const rel of relPaths(crates, isSource)) h.update(`crates/${rel}\n${hashed(`crates/${rel}`, readFileSync(join(crates, rel), "utf8"))}\n`);
+  for (const file of ["Cargo.toml", "Cargo.lock", "scripts/libseccomp-archive.sh"]) h.update(`${file}\n${readFileSync(join(daemonTree, file), "utf8")}\n`);
+  const contract = join(daemonTree, "fixtures", "contract");
+  for (const rel of relPaths(contract, isFixture)) h.update(`fixtures/contract/${rel}\n${hashed(`fixtures/contract/${rel}`, readFileSync(join(contract, rel), "utf8"))}\n`);
   h.update(`${DAEMON_ROOTS_PATH}\n`);
   h.update(`${workScoreLine()}\n`);
   for (const s of scripts) h.update(`${s}\n`);
@@ -50,11 +63,11 @@ function daemonContentSha(daemonPkgDir: string, scripts: string[]): string {
 
 // A fork's place, which is what a golden is built under: the sha pins what lands on a guest, and a
 // machine somebody owns carries its own place and no golden.
-const deployedScripts = (): string[] => [startMjs(CLOUD_PLACE), openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, TOKEN, SUFFIX)];
+const deployedScripts = (): string[] => [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, TOKEN, SUFFIX), daemonUnit(CLOUD_PLACE)];
 
 describe("the daemon version names the content the host deploys", () => {
   it("holds the recorded sha, so a changed daemon cannot ship under a version no machine reads as behind", () => {
-    const sha = daemonContentSha(DAEMON_PKG, deployedScripts());
+    const sha = daemonContentSha(DAEMON_TREE, deployedScripts());
     expect(
       sha,
       `what a deploy installs on a guest changed. Append ${sha} to DAEMON_CONTENTS in packages/protocol/src/index.ts, which cuts the next DAEMON_VERSION; leave it at v${DAEMON_VERSION} and every machine already running keeps the daemon it has`,
@@ -71,44 +84,85 @@ describe("what the recorded sha covers", () => {
     dir = undefined;
   });
 
-  function copyOfDaemonPkg(): string {
+  /** The daemon tree as the sha reads it, copied: its crates, its two manifests, the libseccomp script and the
+   * contract fixtures, and nothing of a build. */
+  function copyOfDaemonTree(): string {
     dir = mkdtempSync(join(tmpdir(), "wsp-daemon-content-"));
-    cpSync(join(DAEMON_PKG, "src"), join(dir, "src"), { recursive: true });
-    cpSync(join(DAEMON_PKG, "package.json"), join(dir, "package.json"));
+    cpSync(join(DAEMON_TREE, "crates"), join(dir, "crates"), { recursive: true, filter: from => !from.includes("/target/") });
+    for (const file of ["Cargo.toml", "Cargo.lock", "scripts/libseccomp-archive.sh"]) cpSync(join(DAEMON_TREE, file), join(dir, file));
+    cpSync(join(DAEMON_TREE, "fixtures", "contract"), join(dir, "fixtures", "contract"), { recursive: true });
     return dir;
   }
 
-  it("moves when a daemon source moves, when one is added, and when a dependency pin moves", () => {
-    const pkgDir = copyOfDaemonPkg();
-    // A copy hashes as the original does: the walk reads relative paths, so where the package sits cannot move it.
-    const base = daemonContentSha(pkgDir, deployedScripts());
-    expect(base).toBe(daemonContentSha(DAEMON_PKG, deployedScripts()));
+  it("moves when a Rust source moves, when one is added, when a crate manifest moves and when the lock moves", () => {
+    const tree = copyOfDaemonTree();
+    // A copy hashes as the original does: the walk reads relative paths, so where the tree sits cannot move it.
+    const base = daemonContentSha(tree, deployedScripts());
+    expect(base).toBe(daemonContentSha(DAEMON_TREE, deployedScripts()));
 
-    const main = join(pkgDir, "src", "main.ts");
-    const body = readFileSync(main, "utf8");
-    writeFileSync(main, `${body}\nexport const added = 1;\n`);
-    expect(daemonContentSha(pkgDir, deployedScripts())).not.toBe(base);
-    writeFileSync(main, body);
+    const main = join(tree, "crates", "wsp-daemon-bin", "src", "main.rs");
+    writeFileSync(main, `${readFileSync(main, "utf8")}\nfn added() {}\n`);
+    const edited = daemonContentSha(tree, deployedScripts());
+    expect(edited).not.toBe(base);
 
-    writeFileSync(join(pkgDir, "src", "new-op.ts"), "export const op = 1;\n");
-    expect(daemonContentSha(pkgDir, deployedScripts())).not.toBe(base);
-    rmSync(join(pkgDir, "src", "new-op.ts"));
+    writeFileSync(join(tree, "crates", "wsp-daemon", "src", "added.rs"), "pub fn added() {}\n");
+    const added = daemonContentSha(tree, deployedScripts());
+    expect(added).not.toBe(edited);
 
-    const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as {
-      dependencies: Record<string, string>;
-    };
-    pkg.dependencies["ws"] = "^9.0.0";
-    writeFileSync(join(pkgDir, "package.json"), JSON.stringify(pkg));
-    expect(daemonContentSha(pkgDir, deployedScripts())).not.toBe(base);
+    const manifest = join(tree, "crates", "wsp-daemon", "Cargo.toml");
+    writeFileSync(manifest, `${readFileSync(manifest, "utf8")}\n[features]\nadded = []\n`);
+    const featured = daemonContentSha(tree, deployedScripts());
+    expect(featured).not.toBe(added);
+
+    const lock = join(tree, "Cargo.lock");
+    writeFileSync(lock, readFileSync(lock, "utf8").replace(/version = "(\d+)\.(\d+)\.(\d+)"/, (_m, a: string, b: string, c: string) => `version = "${a}.${b}.${Number(c) + 1}"`));
+    expect(daemonContentSha(tree, deployedScripts())).not.toBe(featured);
   });
 
-  it("moves when any script the deploy writes moves, one at a time", () => {
-    const scripts = deployedScripts();
-    const base = daemonContentSha(DAEMON_PKG, scripts);
-    expect(scripts).toHaveLength(3);
-    for (let i = 0; i < scripts.length; i++) {
-      const changed = scripts.map((s, j) => (i === j ? `${s}\necho changed\n` : s));
-      expect(daemonContentSha(DAEMON_PKG, changed)).not.toBe(base);
-    }
+  it("moves when a contract fixture moves, since the words and numbers the daemon answers with are pinned there", () => {
+    const tree = copyOfDaemonTree();
+    const base = daemonContentSha(tree, deployedScripts());
+    const words = join(tree, "fixtures", "contract", "words.json");
+    writeFileSync(words, JSON.stringify({ ...(JSON.parse(readFileSync(words, "utf8")) as Record<string, unknown>), added: "a sentence" }, null, 2));
+    const worded = daemonContentSha(tree, deployedScripts());
+    expect(worded).not.toBe(base);
+    // A cap in the numbers moves it, in the fixture and in the Rust that mirrors it: both land on a guest.
+    const numbers = join(tree, "fixtures", "contract", "numbers.json");
+    writeFileSync(numbers, JSON.stringify({ ...(JSON.parse(readFileSync(numbers, "utf8")) as Record<string, unknown>), preAuthMaxBytes: 8192 }));
+    const capped = daemonContentSha(tree, deployedScripts());
+    expect(capped).not.toBe(worded);
+    const rust = join(tree, "crates", "wsp-frames", "src", "numbers.rs");
+    writeFileSync(rust, readFileSync(rust, "utf8").replace("pub const DEFAULT_PORT: u16 = 7070;", "pub const DEFAULT_PORT: u16 = 7071;"));
+    expect(daemonContentSha(tree, deployedScripts())).not.toBe(capped);
+  });
+
+  it("moves when the libseccomp release the Linux builds link is pinned to moves", () => {
+    const tree = copyOfDaemonTree();
+    const base = daemonContentSha(tree, deployedScripts());
+    const script = join(tree, "scripts", "libseccomp-archive.sh");
+    writeFileSync(script, readFileSync(script, "utf8").replace("version=2.5.5", "version=2.5.6"));
+    expect(daemonContentSha(tree, deployedScripts())).not.toBe(base);
+  });
+
+  it("moves when a script the deploy writes moves: the shim, the deploy, the unit", () => {
+    const base = daemonContentSha(DAEMON_TREE, deployedScripts());
+    const [shim, deploy, unit] = deployedScripts();
+    expect(daemonContentSha(DAEMON_TREE, [`${shim}\n# changed`, deploy!, unit!])).not.toBe(base);
+    expect(daemonContentSha(DAEMON_TREE, [shim!, `${deploy}\necho changed`, unit!])).not.toBe(base);
+    expect(daemonContentSha(DAEMON_TREE, [shim!, deploy!, `${unit}\nNice=1\n`])).not.toBe(base);
+  });
+
+  it("ignores what is not on the guest or is the version itself: a note beside the sources, the version in its two files, and the token", () => {
+    const tree = copyOfDaemonTree();
+    const base = daemonContentSha(tree, deployedScripts());
+    writeFileSync(join(tree, "crates", "wsp-daemon", "notes.md"), "not a source");
+    expect(daemonContentSha(tree, deployedScripts())).toBe(base);
+    // The version moves when a sha is appended here, and lands in both of these; a hash over it would chase itself.
+    const numbers = join(tree, "fixtures", "contract", "numbers.json");
+    writeFileSync(numbers, JSON.stringify({ ...(JSON.parse(readFileSync(numbers, "utf8")) as Record<string, unknown>), daemonVersion: 999 }));
+    const rust = join(tree, "crates", "wsp-frames", "src", "numbers.rs");
+    writeFileSync(rust, readFileSync(rust, "utf8").replace(/pub const DAEMON_VERSION: u32 = \d+;/, "pub const DAEMON_VERSION: u32 = 999;"));
+    expect(daemonContentSha(tree, deployedScripts())).toBe(base);
+    expect(daemonContentSha(DAEMON_TREE, [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, "ddeeff", SUFFIX), daemonUnit(CLOUD_PLACE)])).not.toBe(daemonContentSha(DAEMON_TREE, deployedScripts()));
   });
 });
