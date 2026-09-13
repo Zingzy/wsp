@@ -177,6 +177,22 @@ describe("wsp verbs over the host", () => {
     expect(backend.machines.at(-1)!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
   });
 
+  it("new --engine reaches the create's spec, and a recipe that asks for the engine gives every fork one without the flag", async () => {
+    await run("new", "plain");
+    expect(backend.machines.at(-1)!.spec.engine).toBeUndefined();
+    const asked = await run("new", "eng", "--engine");
+    expect(asked.code).toBe(0);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ engine: true });
+    // The sealed image's small recipe asks for the engine: a fork made without the flag gets one too.
+    await store.put("images", "default", { ...RECORD(3), recipe: { version: 1, at: "2026-09-12T00:00:00.000Z", histories: [], rows: [], engine: true } });
+    const viaRecipe = await run("new", "viarecipe");
+    expect(viaRecipe.code).toBe(0);
+    expect(backend.machines.at(-1)!.spec).toMatchObject({ engine: true });
+    await store.delete("images", "default");
+    await run("new", "afterwards");
+    expect(backend.machines.at(-1)!.spec.engine).toBeUndefined();
+  });
+
   it("a fork the provider refuses at the machine cap is one line naming the workspaces holding the slots, never the provider's sentence", async () => {
     await run("new", "first");
     await run("new", "t-cap");
@@ -227,7 +243,10 @@ describe("wsp verbs over the host", () => {
     // Nothing is forked there, so the words that pick an image or a size are refused rather than swallowed.
     const sized = await run("new", "x", "--on", HERE, "--size", "2x4");
     expect(sized.code).toBe(EXIT_CODES.usage);
-    expect(sized.io.errors[0]).toBe(`wsp new: ${HERE} forks nothing, so it takes no --from or --size. Drop them.`);
+    expect(sized.io.errors[0]).toBe(`wsp new: ${HERE} forks nothing, so it takes no --from, --size or --engine. Drop them.`);
+    const engined = await run("new", "x", "--on", HERE, "--engine");
+    expect(engined.code).toBe(EXIT_CODES.usage);
+    expect(engined.io.errors[0]).toBe(`wsp new: ${HERE} forks nothing, so it takes no --from, --size or --engine. Drop them.`);
   });
 
   it("this computer's row carries Running while its daemon answers and the reach word when it does not, as every other row does", () => {

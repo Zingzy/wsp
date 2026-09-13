@@ -3129,8 +3129,8 @@ export function placeWorkspacesLine(view: Pick<PlaceView, "name" | "runsWorkspac
  * the line that says installing one opens it. A place that has not yet said reads nothing. */
 export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): string | undefined {
   if (view.engine === undefined) return undefined;
-  if (view.engine === "none") return `${view.name} has no container engine, so a project's own containers do not run here; install Docker or podman on it and they will`;
-  return `${view.name} runs a project's own containers on ${view.engine}`;
+  if (view.engine === "none") return `${view.name} has no container engine; a project's docker compose runs there once you install Docker or podman on it`;
+  return `${view.name} runs a project's own containers on ${view.engine}; a workspace made with --engine gets a socket to it and sees its own containers alone`;
 }
 
 /** The one line that takes wsp off a computer it is typed on. */

@@ -1058,14 +1058,14 @@ async function forkable(client: HostClient): Promise<Capabilities> {
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
-export async function createFromHead(client: HostClient, out: Out, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string): Promise<WorkspaceCreateResult> {
+export async function createFromHead(client: HostClient, out: Out, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string, engine?: boolean): Promise<WorkspaceCreateResult> {
   // A fork that names a place is held to what that computer offers, which only the host can read; the check here
   // is what this host's own provider can do, so it stands only where the fork lands there.
   if (on === undefined) await forkable(client);
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
-  return create(client, out, head.snapshotId, name, size, agents, on);
+  return create(client, out, head.snapshotId, name, size, agents, on, engine);
 }
 
 /** What a --spawn line asks for, the one reading of it: nothing when nobody named a switch, so a workspace made
@@ -1138,8 +1138,9 @@ export function projectGoldenLine(g: ProjectGolden): string {
   return `project golden ${g.snapshotId}: ${version} plus ${carried}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${goldenForkName(g)}`;
 }
 
-/** `size` is the --size word; absent, the workspace takes the golden's size. */
-export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string): Promise<WorkspaceCreateResult> {
+/** `size` is the --size word; absent, the workspace takes the golden's size. `engine` asks the place for its
+ * container engine through the fenced socket; absent, the image's recipe decides. */
+export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string, engine?: boolean): Promise<WorkspaceCreateResult> {
   // Read before a frame is followed, so a host that mints nothing says so once and streams no stage for a machine
   // that will never exist. A fork on a joined computer is that computer's to size and to refuse, so the host is
   // left to answer for it.
@@ -1161,6 +1162,7 @@ export async function create(client: HostClient, out: Out, golden: string, name:
       ...chosen,
       ...(agents !== undefined ? { agents } : {}),
       ...(on !== undefined ? { on } : {}),
+      ...(engine === true ? { engine: true } : {}),
     });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     out.emit(created, `created ${workspace.name} ${workspace.id}${projectsInPlace(workspaceProjects(workspace))}${notice !== undefined ? `\n${notice}` : ""}`);
@@ -1201,9 +1203,9 @@ export async function onPlaceItself(
   out: Out,
   place: PlaceView,
   name: string,
-  asked: { from?: string; size?: string; agents?: Partial<WorkspaceAgents> & { spawn: boolean } },
+  asked: { from?: string; size?: string; engine?: boolean; agents?: Partial<WorkspaceAgents> & { spawn: boolean } },
 ): Promise<WorkspaceCreateResult> {
-  if (asked.from !== undefined || asked.size !== undefined) throw usageRefusal(`${place.name} forks nothing, so it takes no --from or --size.`, "Drop them.");
+  if (asked.from !== undefined || asked.size !== undefined || asked.engine === true) throw usageRefusal(`${place.name} forks nothing, so it takes no --from, --size or --engine.`, "Drop them.");
   // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads.
   if (asked.agents?.spawn === true && !agentsMayDrive("local")) throw usageRefusal(agentsKindRefusal("local"), "Drop --spawn on, or name a place that forks.");
   const already = await workspaceOnPlace(client, place);
@@ -2392,9 +2394,9 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "recipe",
-    usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--project <folder>] [--out <path>]`,
+    usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>]`,
     about:
-      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
+      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
     page: "agent",
     options: {
       out: { type: "string" },
@@ -2403,6 +2405,7 @@ export const VERBS: readonly Verb[] = [
       signin: { type: "string", multiple: true },
       add: { type: "string", multiple: true },
       "add-check": { type: "string", multiple: true },
+      engine: { type: "boolean" },
       project: { type: "string", multiple: true },
     },
     run: async ctx => {
@@ -2416,6 +2419,7 @@ export const VERBS: readonly Verb[] = [
           out,
           cache: historyCache(ctx.statePath),
           ...(tick !== undefined ? { tick } : {}),
+          ...(ctx.flags["engine"] === true ? { engine: true } : {}),
           set: flagList(ctx.flags, "set"),
           signin: flagList(ctx.flags, "signin"),
           add: flagList(ctx.flags, "add"),
@@ -2437,11 +2441,12 @@ export const VERBS: readonly Verb[] = [
         add: z.array(z.string()).optional().describe('tools neither the catalog carries nor this computer has, "<id>=<install command>"; the line runs on the machine as given after every catalog install, and such a row is never offered a sign-in. A package recipe_scan already lists under alsoHere is refused here and ticked with set instead, since it is a row of its own. Rows an earlier call added stand, whatever tick or project do to the ticks'),
         add_check: z.array(z.string()).optional().describe('what proves an added tool landed, "<id>=<command that exits 0>"; without one the id on PATH is the check'),
         why: z.string().optional().describe("what the rows this call adds are for, in your own words; absent, they say an agent added them"),
+        engine: z.boolean().optional().describe("mark the recipe so every workspace from its image gets the place's container engine (Docker or podman) through a socket of its own, for a project whose compose file needs one; it stays in the file until edited out"),
         project: WEIGH_BY_FOLDERS,
         out: z.string().optional().describe("where the recipe file goes, absolute; absent means the host's own recipe.json beside its state"),
       },
       output: RecipeAnswer.shape,
-      call: async ({ tick, set, signin, add, add_check: addCheck, why, project, out }, deps) => {
+      call: async ({ tick, set, signin, add, add_check: addCheck, why, engine, project, out }, deps) => {
         const table = await runRecipe(nodeHost(), {
           out: out === undefined ? smallRecipePath(deps.statePath) : absolutePath("out is a path on this computer", out),
           cache: historyCache(deps.statePath),
@@ -2451,6 +2456,7 @@ export const VERBS: readonly Verb[] = [
           ...(add !== undefined ? { add } : {}),
           ...(addCheck !== undefined ? { addCheck } : {}),
           ...(why !== undefined ? { why } : {}),
+          ...(engine === true ? { engine: true } : {}),
           ...(project !== undefined ? { projects: projectFolders(project) } : {}),
           ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
         });
@@ -2460,27 +2466,28 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
-    usage: "wsp new <name> [--on <place>] [--from <project golden>] [--size <cpu>x<memGb>] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
-    about: "a workspace from your image; --on <place> says where, and you meet it only once you have more than one place",
+    usage: "wsp new <name> [--on <place>] [--from <project golden>] [--size <cpu>x<memGb>] [--engine] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
+    about: "a workspace from your image; --on <place> says where, and you meet it only once you have more than one place; --engine gives it the place's Docker or podman through a socket that sees its own containers alone",
     page: "front",
-    options: { from: { type: "string" }, size: { type: "string" }, on: { type: "string" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
+    options: { from: { type: "string" }, size: { type: "string" }, on: { type: "string" }, engine: { type: "boolean" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
       const [name] = ctx.args;
       if (name === undefined || ctx.args.length !== 1) throw usageRefusal("wsp new takes one name.", usageIs(ctx));
       const from = flag(ctx.flags, "from");
       const size = flag(ctx.flags, "size");
       const on = flag(ctx.flags, "on");
+      const engine = ctx.flags["engine"] === true;
       const agents = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
       const client = await ctx.client();
       if (on !== undefined) {
         const place = await placeNamed(client, on);
         if (place.takesForks !== true) {
-          await onPlaceItself(client, ctx.out, place, name, { from, size, agents });
+          await onPlaceItself(client, ctx.out, place, name, { from, size, engine, agents });
           return 0;
         }
       }
-      if (from === undefined) await createFromHead(client, ctx.out, name, size, agents, on);
-      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents, on);
+      if (from === undefined) await createFromHead(client, ctx.out, name, size, agents, on, engine);
+      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents, on, engine);
       return 0;
     },
     tool: tool({
@@ -2491,20 +2498,21 @@ export const VERBS: readonly Verb[] = [
         from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
         size: SizeIn,
         on: z.string().optional().describe("the place the workspace lands on, by the name or the id places lists; absent takes the place a fork last landed on, which on a host with no joined computer is its own provider"),
+        engine: z.boolean().optional().describe("give the workspace the place's container engine (Docker or podman) through a socket at the path a Docker client expects, which sees that workspace's containers alone; a place with no engine refuses it, and absent takes what the image's recipe says"),
         spawn: SpawnIn,
         max_machines: MaxMachinesIn,
         max_depth: MaxDepthIn,
       },
       output: Created.shape,
-      call: async ({ name, from, size: word, on, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
+      call: async ({ name, from, size: word, on, engine, spawn, max_machines: maxMachines, max_depth: maxDepth }, deps) => {
         const client = await deps.client();
         const agents = agentsAsked(spawn, maxMachines, maxDepth);
         if (on !== undefined) {
           const place = await placeNamed(client, on);
-          if (place.takesForks !== true) return asJson(await onPlaceItself(client, QUIET, place, name, { from, size: word, agents }));
+          if (place.takesForks !== true) return asJson(await onPlaceItself(client, QUIET, place, name, { from, size: word, engine, agents }));
         }
-        if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on));
-        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents, on));
+        if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on, engine));
+        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents, on, engine));
       },
     }),
   },
