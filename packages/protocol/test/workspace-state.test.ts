@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, workspaceStateLine, whereWord, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -307,5 +307,38 @@ describe("a slash command that works only in the CLI's own terminal", () => {
       expect(signInRefusalLine(view)).toBe(`${signInRoad(view)}, then send again`);
       expect(screenCommandLine(SCREEN[0]!, catalog, view)).toContain(signInRoad(view));
     }
+  });
+});
+
+describe("where a workspace runs, in the person's words", () => {
+  it("names the provider its own record carries, never the id that provider minted for the machine", () => {
+    expect(whereWord({ kind: "cloud", provider: "solari", machineId: "fk_slr_1" })).toBe("solari");
+    expect(whereWord({ kind: "cloud", provider: "docker", machineId: "fk_dkr_9" })).toBe("docker");
+  });
+
+  it("names the computer this host holds a row for by the name it was given, above the provider that computer forks with, and a fork whose record names no provider by what it is", () => {
+    expect(whereWord({ kind: "place", machineId: "pl_7" }, "vps")).toBe("vps");
+    expect(whereWord({ kind: "cloud", provider: "docker", machineId: "fk_dkr_1" }, "vps")).toBe("vps");
+    expect(whereWord({ kind: "cloud", machineId: "fk_slr_1" })).toBe("a provider");
+    expect(whereWord({ kind: "ssh", machineId: "ssh://dev@box:22" })).toBe("ssh://dev@box:22");
+  });
+
+  it("names the computer the host runs on the way every other screen names it, off what that machine said it is", () => {
+    expect(whereWord({ kind: "local", machineId: "local", facts: { os: "macOS 26.4" } })).toBe("this Mac");
+    expect(whereWord({ kind: "local", machineId: "local", facts: { os: "Ubuntu 24.04.1 LTS" } })).toBe(THIS_COMPUTER);
+    expect(whereWord({ kind: "local", machineId: "local" })).toBe(THIS_COMPUTER);
+  });
+});
+
+describe("the line a verb that moved a workspace prints", () => {
+  it("prints the word the next listing will print, in the lowercase a line of work reads", () => {
+    expect(workspaceStateLine("web", "running")).toBe("web running");
+    expect(workspaceStateLine("web", "paused")).toBe("web paused");
+    expect(workspaceStateLine("web", "waking")).toBe("web waking");
+    expect(workspaceStateLine("web", "gone")).toBe("web gone");
+  });
+
+  it("says a machine that is up and answering nothing is up and answering nothing, rather than one word for two states", () => {
+    expect(workspaceStateLine("web", "unreachable")).toBe("web is up and not answering yet");
   });
 });

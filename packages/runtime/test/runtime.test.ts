@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { hostname } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { catalogProbeCommand, createClaudeAdapter, parseCatalogProbe } from "@wsp/adapter-claude";
-import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type EventUnion, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, NO_SUCH_TURN, NOTIFY_ME, PERMISSION_ALLOW, RUN_GONE_LINE, SessionEvent, TURN_TOKEN_ENV, foldThreads, notifyLine, stillWorkingLine, threadMessages, threadReplyRows, threadResult, threadWordOf, type AdapterEvent, type EventUnion, type PermissionAsk, type RecipeDigest, type SessionView, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import { BUILDER_IDLE_MS, GuestUnusableError, TOOLS_PATH, type GoldenDelta, type GoldenImport } from "@wsp/engine";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET, rotateDaemonTokenScript } from "../src/daemon-token.js";
@@ -5844,6 +5844,7 @@ describe("runtime session steer", () => {
       adapter,
       steered,
       init: () => onEvent!({ type: "session.start", sessionId: SID, model: "claude-sonnet-4-5" }),
+      ask: (raised: PermissionAsk) => onEvent!({ type: "permission.ask", sessionId: SID, ask: raised }),
       end: () => {
         onEvent!({ type: "turn.done", sessionId: SID, result: { status: "completed", text: "ok" } });
         onEvent!({ type: "session.end", sessionId: SID, exitCode: 0, sawResult: true });
@@ -5876,6 +5877,28 @@ describe("runtime session steer", () => {
     const history = await rt.sessions.history(ws.id);
     expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.done", "session.end"]);
     expect(history[1]).toMatchObject({ type: "session.steer", prompt: "and say pineapple" });
+    await rt.close();
+  });
+
+  it("marks the steer waiting when the turn it joined is stopped on a prompt nobody has answered, and leaves it off one that is working", async () => {
+    const h = steerable();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const handle = await rt.sessions.start(ws.id, { prompt: "write it" });
+    h.init();
+    await rt.sessions.steer(handle.id, { prompt: "hurry" });
+    h.ask({ askId: "a1", toolName: "Write", input: JSON.stringify({ file_path: "kai.txt" }), options: [{ id: "allow", label: "Yes", effect: "allow" }] });
+    await vi.waitFor(async () => expect((await rt.sessions.list(ws.id))[0]!.asking).toBeDefined());
+    await rt.sessions.steer(handle.id, { prompt: "yes" });
+    const steers = events.filter(e => e.type === "session.steer") as Extract<SessionEvent, { type: "session.steer" }>[];
+    expect(steers.map(e => [e.prompt, e.waiting])).toEqual([
+      ["hurry", undefined],
+      ["yes", true],
+    ]);
+    h.end();
+    await handle.finished;
     await rt.close();
   });
 

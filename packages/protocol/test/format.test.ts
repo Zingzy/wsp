@@ -138,6 +138,8 @@ import {
   titlePrompt,
   titleLine,
   toolActivityLine,
+  toolDoneLine,
+  validatorRefusal,
   toolCallFacts,
   toolResultLine,
   TURN_IDLE_MS,
@@ -512,20 +514,40 @@ describe("a turn's activity in one line each", () => {
   });
 
   it("reads a file behind the verb that touched it, and a search behind what it looked for", () => {
-    expect(toolActivityLine("Read", JSON.stringify({ file_path: "packages/engine/src/golden-mcp.ts" }))).toBe("read packages/engine/src/golden-mcp.ts");
-    expect(toolActivityLine("Write", JSON.stringify({ file_path: "src/a.ts" }))).toBe("wrote src/a.ts");
-    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("edited src/a.ts");
-    expect(toolActivityLine("NotebookEdit", JSON.stringify({ notebook_path: "run.ipynb" }))).toBe("edited run.ipynb");
-    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searched code for shellQuote");
-    expect(toolActivityLine("WebSearch", JSON.stringify({ query: "solari snapshot" }))).toBe("searched the web for solari snapshot");
-    expect(toolActivityLine("WebFetch", JSON.stringify({ url: "https://example.com" }))).toBe("fetched https://example.com");
+    expect(toolActivityLine("Read", JSON.stringify({ file_path: "packages/engine/src/golden-mcp.ts" }))).toBe("reading packages/engine/src/golden-mcp.ts");
+    expect(toolActivityLine("Write", JSON.stringify({ file_path: "src/a.ts" }))).toBe("writing src/a.ts");
+    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("editing src/a.ts");
+    expect(toolActivityLine("NotebookEdit", JSON.stringify({ notebook_path: "run.ipynb" }))).toBe("editing run.ipynb");
+    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searching code for shellQuote");
+    expect(toolActivityLine("WebSearch", JSON.stringify({ query: "solari snapshot" }))).toBe("searching the web for solari snapshot");
+    expect(toolActivityLine("WebFetch", JSON.stringify({ url: "https://example.com" }))).toBe("fetching https://example.com");
     expect(toolActivityLine("Task", JSON.stringify({ description: "review the diff" }))).toBe("agent: review the diff");
   });
 
   it("counts the paths of a change call that carries several, and names the one it carries alone", () => {
     const one = [{ kind: "edit", path: "src/a.ts" }];
-    expect(toolActivityLine("file_change", JSON.stringify({ changes: one }))).toBe("edited src/a.ts");
-    expect(toolActivityLine("file_change", JSON.stringify({ changes: [...one, { kind: "add", path: "src/b.ts" }] }))).toBe(`edited ${plural(2, "file")}`);
+    expect(toolActivityLine("file_change", JSON.stringify({ changes: one }))).toBe("editing src/a.ts");
+    expect(toolDoneLine("file_change", JSON.stringify({ changes: one }))).toBe("edited src/a.ts");
+    expect(toolActivityLine("file_change", JSON.stringify({ changes: [...one, { kind: "add", path: "src/b.ts" }] }))).toBe(`editing ${plural(2, "file")}`);
+  });
+
+  it("says what a call is doing while it runs and what it did once its result landed, never the past before the fact", () => {
+    const write = JSON.stringify({ file_path: "kai.txt" });
+    expect(toolActivityLine("Write", write)).toBe("writing kai.txt");
+    expect(toolDoneLine("Write", write)).toBe("wrote kai.txt");
+    expect(toolActivityLine("Read", JSON.stringify({ file_path: "src/a.ts" }))).toBe("reading src/a.ts");
+    expect(toolDoneLine("Read", JSON.stringify({ file_path: "src/a.ts" }))).toBe("read src/a.ts");
+    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("editing src/a.ts");
+    expect(toolDoneLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("edited src/a.ts");
+    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searching code for shellQuote");
+    expect(toolDoneLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searched code for shellQuote");
+  });
+
+  it("a call whose row reads the same either way has no line of its own for its result, and its answer stands", () => {
+    expect(toolDoneLine("Bash", JSON.stringify({ command: "git status" }))).toBeUndefined();
+    expect(toolDoneLine("Task", JSON.stringify({ description: "review the diff" }))).toBeUndefined();
+    expect(toolDoneLine("TodoWrite", JSON.stringify({ todos: [] }))).toBeUndefined();
+    expect(toolDoneLine("Write", "{\"file_pa")).toBeUndefined();
   });
 
   it("falls back to the tool's own name when there is no row for it, when its input carries nothing the row needs, and when the input is not an object", () => {
@@ -831,6 +853,34 @@ describe("refusedTurn", () => {
   });
 });
 
+describe("a refusal the host's own validator wrote", () => {
+  const issues = (rows: unknown[]): string => JSON.stringify(rows, null, 2);
+
+  it("reads an op the host does not know as the two builds differing, and never prints the ops it listed", () => {
+    const refusal = issues([{ code: "invalid_union_discriminator", options: ["auth", "status.list", "workspaces.exec"], path: ["op"], message: "Invalid discriminator value. Expected 'auth' | 'status.list' | 'workspaces.exec'" }]);
+    const line = validatorRefusal(refusal);
+    expect(line).toBe("the host does not serve this line; it runs another version of wsp, restart it with wsp up");
+    expect(line).not.toContain("workspaces.exec");
+    expect(line).not.toContain("discriminator");
+  });
+
+  it("names the argument the host refused, in the words the line was typed in", () => {
+    expect(validatorRefusal(issues([{ code: "invalid_type", expected: "string", received: "number", path: ["cwd"], message: "Expected string, received number" }]))).toBe("the host would not read --cwd on this line");
+    expect(validatorRefusal(issues([{ code: "invalid_type", path: ["workspaceId"], message: "Required" }, { code: "invalid_type", path: ["argv", 0], message: "Required" }]))).toBe("the host would not read the workspace and the command on this line");
+  });
+
+  it("says the line alone where the field it named is one no line carries", () => {
+    expect(validatorRefusal(issues([{ code: "invalid_type", path: ["turnToken"], message: "Required" }]))).toBe("the host would not read this line");
+  });
+
+  it("leaves every refusal wsp writes itself alone", () => {
+    expect(validatorRefusal("no workspace nope")).toBeUndefined();
+    expect(validatorRefusal("[]")).toBeUndefined();
+    expect(validatorRefusal(JSON.stringify([{ message: "Required" }]))).toBeUndefined();
+    expect(validatorRefusal(JSON.stringify({ code: "invalid_type", path: ["cwd"] }))).toBeUndefined();
+  });
+});
+
 describe("harnessExitLine", () => {
   it("exit 127 names the binary the shell could not find and the PATH it searched, never the bare code alone", () => {
     const path = "/root/.local/bin:/usr/bin:/bin";
@@ -842,9 +892,19 @@ describe("harnessExitLine", () => {
     expect(harnessExitLine("claude", 127, undefined)).toBe("claude was not found on PATH (exit 127); the launch exported no PATH, the machine's own was searched");
   });
 
-  it("any other exit reads as the code, a null one as null", () => {
+  it("any other exit reads as the code", () => {
     expect(harnessExitLine("claude", 1, "/usr/bin")).toBe("claude exited with code 1 before emitting a result");
-    expect(harnessExitLine("claude", null, "/usr/bin")).toBe("claude exited with code null before emitting a result");
+  });
+
+  it("a run that ended on a signal says the agent was killed, and names the signal where the host saw one", () => {
+    expect(harnessExitLine("claude", null, "/usr/bin", { reached: true, signal: "SIGKILL" })).toBe("claude was killed (SIGKILL) before it answered");
+    expect(harnessExitLine("claude", -1, "/usr/bin", { reached: true, signal: "SIGTERM" })).toBe("claude was killed (SIGTERM) before it answered");
+    expect(harnessExitLine("claude", null, "/usr/bin", { reached: true })).toBe("claude was killed before it answered");
+  });
+
+  it("a launch that never reached the agent says that instead of naming a code", () => {
+    expect(harnessExitLine("claude", null, "/usr/bin", { reached: false })).toBe("the launch never reached claude: its run ended before the agent said a word");
+    expect(harnessExitLine("claude", 127, "/usr/bin", { reached: false })).toBe("claude was not found on PATH (exit 127); PATH searched: /usr/bin");
   });
 });
 

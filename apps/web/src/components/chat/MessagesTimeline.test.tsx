@@ -1241,6 +1241,31 @@ describe("a notice row: the cut-turn row and the notify row", () => {
   const glyphs = (el: Element): string[] =>
     [...new Set([...el.querySelectorAll("svg")].flatMap(svg => [...svg.classList].filter(c => c.startsWith("lucide-") && !c.startsWith("lucide-chevron"))))];
 
+  it("a subagent's tool line reads as what the call is doing until its result lands, and as what it did after", () => {
+    const inside = { workspaceId: "ws_1", sessionId: "s_1", turnId: "u1", threadId: "thread_a" } as const;
+    const opened: SessionEvent[] = [
+      { type: "session.start", ...inside, at: 0, prompt: "have a look" },
+      { type: "session.delta", ...inside, at: 1, kind: "tool_use", toolName: "Task", toolUseId: "agent_1", text: JSON.stringify({ description: "write it" }) },
+      { type: "session.delta", ...inside, at: 2, kind: "tool_use", toolName: "Write", toolUseId: "toolu_1", parentToolUseId: "agent_1", text: JSON.stringify({ file_path: "kai.txt" }) },
+    ];
+    const lineOf = (events: SessionEvent[]): string | undefined => {
+      const entry = deriveSession(events).timeline.find(row => row.kind === "subagent");
+      return entry?.kind === "subagent" ? entry.subagent.lines.at(-1)?.label : undefined;
+    };
+    expect(lineOf(opened)).toBe("writing kai.txt");
+    expect(lineOf([...opened, { type: "session.delta", ...inside, at: 3, kind: "tool_result", toolUseId: "toolu_1", parentToolUseId: "agent_1", text: "File created successfully at: kai.txt" }])).toBe("wrote kai.txt");
+
+    // A call whose input the harness streams in pieces reads as the whole of it in both tenses, as the parent's own
+    // calls do: neither line is written off one piece.
+    const streamed: SessionEvent[] = [
+      ...opened.slice(0, 2),
+      { type: "session.delta", ...inside, at: 2, kind: "tool_use", toolName: "Write", toolUseId: "toolu_2", parentToolUseId: "agent_1", text: '{"file_path":"src/' },
+      { type: "session.delta", ...inside, at: 3, kind: "tool_use", toolUseId: "toolu_2", parentToolUseId: "agent_1", text: 'kai.txt"}' },
+    ];
+    expect(lineOf(streamed)).toBe("writing src/kai.txt");
+    expect(lineOf([...streamed, { type: "session.delta", ...inside, at: 4, kind: "tool_result", toolUseId: "toolu_2", parentToolUseId: "agent_1", text: "ok" }])).toBe("wrote src/kai.txt");
+  });
+
   it("on a settled turn both rows open from the fold as muted mono text under the info glyph, with no check mark, no cross and no failure", async () => {
     const model = deriveSession(settled);
     const { container, getByRole } = await act(async () =>

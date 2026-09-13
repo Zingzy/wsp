@@ -7,7 +7,7 @@
 // session id repeats across turns. Wire order is the timeline order. createdAt
 // is the wire's `at` (ms epoch) as ISO, else the caller's receipt clock, else
 // "" for unstamped history.
-import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolResultLine, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
+import { AFTER_CUT_LINE, NOTIFY_ME, internalToolResult, subagentTaskLine, toolActivityLine, toolCallFacts, toolDoneLine, toolResultLine, type SessionEvent, type SessionHarness, type TurnResult } from "@wsp/protocol";
 import type {
   ChatMessage,
   PermissionPrompt,
@@ -55,6 +55,9 @@ interface TurnBuild {
   openMessage: number | null;
   sawText: boolean;
   tools: Map<string, ToolCall>;
+  /** Each of a subagent's open calls as the harness has reported it so far, by that line's own key: a call whose
+   * input arrives in pieces reads as the whole of it, in both tenses, as the parent's own calls do. */
+  childCalls: Map<string, { name: string; input: string }>;
   /** Tool calls without an id resolve to the newest open one, as the CLI streams them in order. */
   openAnonymousTool: number | null;
   /** Where each subagent's fold sits in the timeline, by the call that launched it. */
@@ -230,7 +233,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       completedAt: null,
     };
     turns.push(summary);
-    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
+    return { summary, startCount: count, ordinal: 0, openMessage: null, sawText: false, tools: new Map(), childCalls: new Map(), openAnonymousTool: null, subagents: new Map(), reply: null };
   };
   /** A delta, done or end whose turn never started here (history capped mid-turn) still needs a turn to hang on. */
   const turnFor = (event: SessionEvent, at: string): TurnBuild => {
@@ -372,11 +375,19 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
         addFoldLine(t, parent, at, { createdAt: at, kind: e.kind, label: e.text });
         return;
       case "tool_use": {
-        const name = e.toolName ?? "tool";
-        addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(name, e.text), status: "inProgress" }, foldLineKey(parent, e.toolUseId));
+        const key = foldLineKey(parent, e.toolUseId);
+        // The call as it stands, kept beside the line it opens: its result carries none of its own input, and both
+        // the line and the past it turns into are written off that input alone.
+        const open = key === undefined ? undefined : t.childCalls.get(key);
+        const call = { name: e.toolName ?? open?.name ?? "tool", input: (open?.input ?? "") + e.text };
+        if (key !== undefined) t.childCalls.set(key, call);
+        addFoldLine(t, parent, at, { createdAt: at, kind: "tool", label: toolActivityLine(call.name, call.input), status: "inProgress" }, key);
         return;
       }
-      case "tool_result":
+      case "tool_result": {
+        const key = foldLineKey(parent, e.toolUseId);
+        const call = key === undefined ? undefined : t.childCalls.get(key);
+        const did = call === undefined || e.isError === true ? undefined : toolDoneLine(call.name, call.input);
         addFoldLine(
           t,
           parent,
@@ -385,11 +396,14 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
             createdAt: at,
             kind: "tool",
             status: e.isError === true ? "failed" : "completed",
+            ...(did !== undefined ? { label: did } : {}),
             ...(toolResultLine(e.text, e.isError === true) !== undefined ? { detail: toolResultLine(e.text, e.isError === true)! } : {}),
           },
-          foldLineKey(parent, e.toolUseId),
+          key,
         );
+        if (key !== undefined) t.childCalls.delete(key);
         return;
+      }
       default: {
         const _exhaustive: never = e.kind;
         return;

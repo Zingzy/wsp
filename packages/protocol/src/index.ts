@@ -459,14 +459,6 @@ export type WorkspaceView = z.infer<typeof WorkspaceView>;
 export const MachineFacts = z.object({ os: z.string(), uptimeMs: z.number(), folder: z.string() });
 export type MachineFacts = z.infer<typeof MachineFacts>;
 
-/** Whether the machine that reported this system name is a Mac: the name its maker gives it, and the kernel's own
- * word where the machine answered nothing better, which is what a machine on this computer falls back to. The
- * folder browsers read it beside the home to know whether that home keeps a Library. Absent is not a Mac: what
- * reads this hides a folder, and a machine that said nothing has said nothing to hide. */
-export function isMacMachine(osName: string | null | undefined): boolean {
-  return /^(?:macOS|Darwin)\b/.test(osName ?? "");
-}
-
 /** WorkspaceView enriched with what the rail and meta panel render live. */
 export const WorkspaceStatus = WorkspaceView.extend({
   machineState: MachineState,
@@ -1074,7 +1066,12 @@ export const SessionSteerEvent = z.object({
   prompt: z.string(),
   /** The id the client minted for the sessions.steer, as on session.start. */
   requestId: z.string().optional(),
+  /** Set where the turn this message joined was stopped on a permission prompt nobody had answered when it landed:
+   * the message is in and the turn takes it up once the person answers, which is what the caller says rather than
+   * waiting in silence. */
+  waiting: z.boolean().optional(),
 });
+export type SessionSteerEvent = z.infer<typeof SessionSteerEvent>;
 
 /** Pushed once when a start finds the thread's turn running and a harness that takes no message mid-turn, so the
  * caller can say it is waiting before the start's reply comes; not a session event, never in history. */
@@ -4062,7 +4059,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
-export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

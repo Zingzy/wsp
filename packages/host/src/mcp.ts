@@ -55,7 +55,7 @@ export function mcpServer(statePath: string, opts: { dial?: Dialer; alsoHere?: V
   const deps: VerbDeps = { statePath, env: opts.env, client: opts.dial ?? dialer(statePath, pickOf(opts)), ...(opts.alsoHere !== undefined ? { alsoHere: opts.alsoHere } : {}), ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}) };
   for (const verb of VERBS) {
     if (!hasTool(verb)) continue;
-    server.registerTool(toolName(verb.name), { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, args => verb.tool.call(args, deps).catch(toolFailure));
+    server.registerTool(toolName(verb.name), { description: verb.tool.description, inputSchema: verb.tool.input, outputSchema: verb.tool.output }, args => verb.tool.call(args, deps).catch((e: unknown) => toolFailure(e, "usage" in verb ? verb.usage : undefined)));
   }
   return server;
 }

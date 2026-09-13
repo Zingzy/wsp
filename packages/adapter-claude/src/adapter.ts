@@ -515,7 +515,7 @@ export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
               ? { status: "interrupted" }
               : {
                   status: "failed",
-                  error: streamError ?? harnessExitLine("claude", exitCode, env["PATH"]),
+                  error: streamError ?? harnessExitLine("claude", exitCode, env["PATH"], { reached: sawInit, ...(stream.signalled !== undefined ? { signal: stream.signalled } : {}) }),
                 };
         onEvent({ type: "turn.done", sessionId: claudeSessionId, result: turnResult });
       }
