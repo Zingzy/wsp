@@ -12,7 +12,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostPlatform, localWiring, serve } from "../src/cli.js";
@@ -479,7 +479,7 @@ describe("the MCP server over the host", () => {
   it("rebuild puts a new machine under a gone workspace and answers with it; one that still answers is a tool error in the row's own words", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    expect(await call("rebuild", { workspace: "alpha" })).toEqual(failedWith("This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering"));
+    expect(await call("rebuild", { workspace: "alpha" })).toEqual(failedWith(goneRoadRefusal("running", "rebuild")));
     expect(backend.machines).toHaveLength(1);
 
     await handle!.close();

@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { LIST_PRICE_WORD, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -17,9 +17,10 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { awake, CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, napAfterDeadLaunch, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
+import { awake, CLI_VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, napAfterDeadLaunch, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
+import type { WatchSignals } from "../src/watch.js";
 import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -296,6 +297,65 @@ describe("wsp verbs over the host", () => {
     expect(opened.io.lines).toEqual([expect.stringMatching(/^thread /), "re: say pong"]);
   });
 
+  it("workspaces --watch and threads --watch redraw the same table where it stands until Ctrl-C, on one socket", async () => {
+    await run("new", "alpha");
+    for (const word of ["workspaces", "threads"] as const) {
+      const frames: string[] = [];
+      const io: Captured = { ...captured(), redraw: { write: text => void frames.push(text), columns: () => 100 } };
+      // Ctrl-C, without a real signal: one would take the test runner with it.
+      const held = new Set<() => void>();
+      const signals: WatchSignals = {
+        on: (_s, l) => {
+          held.add(l);
+          return undefined;
+        },
+        off: (_s, l) => held.delete(l),
+      };
+      // Every socket this line opens to the host, counted: a watch that dialled per frame would be a number here.
+      let dials = 0;
+      const dial: typeof dialHost = (path, opts) => {
+        dials++;
+        return dialHost(path, opts);
+      };
+      const verb = CLI_VERBS.find(v => v.name === word)!;
+      const watching = runVerb(verb, [word, "--watch", "--state", statePath], io, () => statePath, { cwd: dir, env, signals, dial });
+      // Past the one second tick, so what is waited for is a second frame and not the first one twice over.
+      await vi.waitFor(() => expect(frames.filter(f => f.includes("\n")).length).toBeGreaterThan(1), { timeout: 5_000 });
+      for (const stop of [...held]) stop();
+      expect(await watching, word).toBe(0);
+      // The cursor comes off the screen for the frames and is back on the last write.
+      expect(frames[0], word).toBe("\x1b[?25l");
+      expect(frames.at(-1), word).toBe("\x1b[?25h");
+      const drawn = frames.slice(1, -1);
+      expect(drawn.length, word).toBeGreaterThan(1);
+      expect(drawn[0], word).toContain(word === "workspaces" ? "WORKSPACE" : "THREAD");
+      // The first frame has nothing above it; every frame after it rewinds the rows it drew, so the table never
+      // walks down the screen.
+      expect(drawn[0]!.startsWith("\x1b["), word).toBe(false);
+      for (const frame of drawn.slice(1)) {
+        expect(frame, word).toMatch(/^\x1b\[\d+A\x1b\[G\x1b\[J/);
+        expect(frame, word).toContain(word === "workspaces" ? "WORKSPACE" : "THREAD");
+      }
+      // One socket for every frame of it, which is the whole of why the flag is worth having.
+      expect(dials, word).toBe(1);
+      // Nothing went to stdout as lines: a watched list is frames, and only frames.
+      expect(io.lines, word).toEqual([]);
+    }
+  });
+
+  it("--watch is refused off a terminal and beside --json, each in two halves, and nothing is drawn", async () => {
+    await run("new", "alpha");
+    const noTerminal = await run("workspaces", "--watch");
+    expect(noTerminal.code).toBe(EXIT_CODES.usage);
+    expect(noTerminal.io.errors).toEqual(["wsp workspaces --watch redraws where it stands, and this run has no terminal to redraw on. Run wsp workspaces without --watch to print the list once."]);
+    expect(noTerminal.io.lines).toEqual([]);
+
+    const io: Captured = { ...captured(), redraw: { write: () => {}, columns: () => 100 } };
+    const asJson = await cli(["threads", "--watch", "--json", "--state", statePath], io, undefined, env);
+    expect(asJson).toBe(EXIT_CODES.usage);
+    expect(io.errors.map(l => (JSON.parse(l) as { error: string }).error)).toEqual(["wsp threads --watch redraws a table and --json answers with objects. Take one of the two: wsp threads --watch at a terminal, or wsp threads --json for the objects."]);
+  });
+
   it("the STATE cell reads the machine and the daemon beside the phase: a machine the provider paused says Paused and one whose daemon has gone dark says Unreachable, both while the record still reads running", async () => {
     await run("new", "napped");
     await run("new", "dark");
@@ -446,7 +506,7 @@ describe("wsp verbs over the host", () => {
     const [alpha] = await rt.workspaces.list();
     const refused = await run("rebuild", "alpha");
     expect(refused.code).toBe(1);
-    expect(refused.io.errors).toEqual(["wsp rebuild: This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering"]);
+    expect(refused.io.errors).toEqual([`wsp rebuild: ${goneRoadRefusal("running", "rebuild")}`]);
     expect(backend.machines).toHaveLength(1);
 
     await handle!.close();
@@ -470,13 +530,37 @@ describe("wsp verbs over the host", () => {
     const asJson = await run("rebuild", "alpha", "--json");
     expect(asJson.code).toBe(1);
     expect(asJson.io.lines).toEqual([]);
-    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering", class: "provider", exit: EXIT_CODES.provider }]);
+    expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: goneRoadRefusal("running", "rebuild"), class: "provider", exit: EXIT_CODES.provider }]);
     const missing = await run("rebuild", "nope");
     expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp rebuild: no workspace nope"]);
     const extra = await run("rebuild", "alpha", "beta");
     expect(extra.code).toBe(EXIT_CODES.usage);
     expect(extra.io.errors).toEqual(["wsp rebuild takes one workspace. usage: wsp rebuild <workspace>"]);
+  });
+
+  it("rebuild refuses a workspace whose machine stopped answering in the words the row shows, not in the words for one that answers", async () => {
+    await run("new", "dark");
+    // Every cloud machine has an edge route, and a prompt 502 on it is the edge dialling the guest and finding
+    // nothing on the daemon's port: the machine runs, the record reads running, and nothing answers on it.
+    const edge = createHttpServer((_req, res) => {
+      res.writeHead(502).end();
+    });
+    await new Promise<void>(r => edge.listen(0, "127.0.0.1", r));
+    try {
+      const port = (edge.address() as AddressInfo).port;
+      backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${port}/`, token: "stub", expiresAt: Date.now() + 3_600_000 });
+      const listed = await run("workspaces");
+      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[4]).toBe("Unreachable");
+
+      const refused = await run("rebuild", "dark");
+      expect(refused.code).toBe(1);
+      expect(refused.io.errors).toEqual([`wsp rebuild: ${notAnsweringYet("rebuild")}`]);
+      // The machine the provider still holds is not replaced by a refusal.
+      expect(backend.machines).toHaveLength(1);
+    } finally {
+      await new Promise<void>(r => edge.close(() => r()));
+    }
   });
 
   it("wsp image reads the record off the seeded golden's head, says no sign-ins are held, and names the copy at this host's place", async () => {
