@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The machine ops a host sends down a place link, as the engine's MachineBackend and Machine interfaces carry
-//! them. The daemon refuses them on every socket that is not the link; the runtime crate answers them there.
+//! them. The runtime crate answers them there; the daemon refuses them on every socket that is not the link, but
+//! for the two read-only ones a person at the computer itself asks of it.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU16;
@@ -195,6 +196,11 @@ pub const MACHINE_OPS: [&str; 27] = [
     "machine.putBytes",
 ];
 
+/// The two of them a client on the computer itself may ask, holding the daemon's own token: what this computer is
+/// running and one workspace's reading. Both only read, so neither is the link's to keep; every other op in
+/// MACHINE_OPS makes, moves or ends something and stays the link's alone.
+pub const MACHINE_OPS_ON_ANY_ROAD: [&str; 2] = ["machine.list", "machine.metrics"];
+
 /// The provider word for a machine's state: a napping workspace's machine reads `paused` here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -386,6 +392,40 @@ pub struct MachineShape {
     pub used_bytes: Option<u64>,
 }
 
+/// One workspace as the computer running it reads it, in one frame: the sizes its cgroup was written with, what it
+/// holds of them now, and where its processes, its files and its address are. Every figure is read at the moment of
+/// the ask rather than sampled, so a row drawn from it is true of that moment and of no moment since; a workspace
+/// that is not running carries the sizes and the paths and none of the live figures.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineReading {
+    pub state: MachineState,
+    /// The cores and the memory the workspace was given, as they were applied rather than as they were asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_mb: Option<u64>,
+    /// What its cgroup holds this moment, against the cap memMb names.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_bytes: Option<u64>,
+    /// The processor time its cgroup has spent since the workspace booted; a rate is the difference between two
+    /// readings, which is the caller's to take.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_usage_usec: Option<u64>,
+    /// How long its first process has been running, which a wake starts again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_ms: Option<u64>,
+    /// Every process in its cgroup and in the cgroups under it, which is what a container engine inside it makes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procs: Option<u64>,
+    /// The address it answers on inside the computer's own network.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    pub cgroup: String,
+    /// The overlay directory holding everything it has written since it was made, which is what a snapshot saves.
+    pub upper: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaceImage {
@@ -443,6 +483,11 @@ pub struct MachineStateReply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MachineShapeReply {
     pub shape: MachineShape,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MachineReadingReply {
+    pub reading: MachineReading,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
