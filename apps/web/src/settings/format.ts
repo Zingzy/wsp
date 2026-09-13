@@ -35,6 +35,7 @@ export const WHERE_WORDS = {
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",
   system: "System",
+  spend: "Spend",
   agents: "Agents",
   joined: "Joined",
   answered: "Answered",

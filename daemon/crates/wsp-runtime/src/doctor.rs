@@ -9,7 +9,8 @@
 use std::path::Path;
 
 /// Where cgroup v2 is mounted when the box runs it; the read-only twin of the self check reads the same root the
-/// freezer writes.
+/// freezer writes. Read only on Linux, where a workspace runs.
+#[cfg(target_os = "linux")]
 const CGROUP_ROOT: &str = "/sys/fs/cgroup";
 
 /// The container engine a project's own `docker compose` would run on, when the box has one.
@@ -34,6 +35,9 @@ impl Engine {
 /// The kernel facts the doctor reads, split out so a test can hand it a box it is not running on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Facts {
+    /// This computer runs Linux, which the kernel work a workspace is built from needs; the rest of the facts are
+    /// read only where it does.
+    pub linux: bool,
     /// cgroup v2 unified is mounted at the cgroup root.
     pub cgroup2: bool,
     /// The controllers the cgroup root delegates, when it is v2.
@@ -72,6 +76,9 @@ pub fn assess(facts: &Facts) -> Doctor {
 }
 
 fn blocking_reason(facts: &Facts) -> Option<String> {
+    if !facts.linux {
+        return Some("wsp runs workspaces on a Linux computer, and this computer is not one".to_owned());
+    }
     if !facts.cgroup2 {
         return Some(
             "this computer mounts cgroup v1 at /sys/fs/cgroup, and wsp runs workspaces on cgroup v2 alone: boot it with systemd.unified_cgroup_hierarchy=1".to_owned(),
@@ -92,23 +99,41 @@ fn blocking_reason(facts: &Facts) -> Option<String> {
 }
 
 /// The facts read off this box: nothing is mounted or created, so it costs a few file reads and can run at every
-/// dial.
+/// dial. Off Linux only the engine is read; the rest stand false, and the doctor names Linux as the reason a
+/// workspace does not run here, since youki's kernel work has no answer on another kernel.
 pub fn read_facts() -> Facts {
-    let controllers = std::fs::read_to_string(Path::new(CGROUP_ROOT).join("cgroup.controllers"));
-    let cgroup2 = controllers.is_ok();
-    Facts {
-        cgroup2,
-        controllers: controllers.map(|text| text.split_whitespace().map(str::to_owned).collect()).unwrap_or_default(),
-        overlay: kernel_knows_overlay(),
-        root: nix::unistd::geteuid().is_root(),
-        kvm: Path::new("/dev/kvm").exists(),
-        engine: engine_on_path(&std::env::var("PATH").unwrap_or_default()),
+    let engine = engine_on_path(&std::env::var("PATH").unwrap_or_default());
+    #[cfg(target_os = "linux")]
+    {
+        let controllers = std::fs::read_to_string(Path::new(CGROUP_ROOT).join("cgroup.controllers"));
+        let cgroup2 = controllers.is_ok();
+        Facts {
+            linux: true,
+            cgroup2,
+            controllers: controllers.map(|text| text.split_whitespace().map(str::to_owned).collect()).unwrap_or_default(),
+            overlay: kernel_knows_overlay(),
+            root: euid_is_root(),
+            kvm: Path::new("/dev/kvm").exists(),
+            engine,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Facts { linux: false, cgroup2: false, controllers: Vec::new(), overlay: false, root: false, kvm: false, engine }
     }
 }
 
 /// Whether the kernel lists overlay in /proc/filesystems, built in or as a module already loaded.
+#[cfg(target_os = "linux")]
 fn kernel_knows_overlay() -> bool {
     std::fs::read_to_string("/proc/filesystems").is_ok_and(|text| text.split_whitespace().any(|word| word == "overlay"))
+}
+
+/// The effective uid is root, the mode the daemon runs workspaces in on a box. nix is here on Linux, which is the
+/// only target this reads on.
+#[cfg(target_os = "linux")]
+fn euid_is_root() -> bool {
+    nix::unistd::geteuid().is_root()
 }
 
 /// The engine a project's containers would run on: Docker where its cli is on the PATH, else podman, else none.
@@ -123,9 +148,10 @@ pub fn engine_on_path(path: &str) -> Engine {
 }
 
 pub fn on_path(name: &str, path: &str) -> bool {
-    path.split(':')
-        .filter(|dir| !dir.is_empty())
-        .any(|dir| nix::unistd::access(&Path::new(dir).join(name), nix::unistd::AccessFlags::X_OK).is_ok())
+    use std::os::unix::fs::PermissionsExt;
+    path.split(':').filter(|dir| !dir.is_empty()).any(|dir| {
+        std::fs::metadata(Path::new(dir).join(name)).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    })
 }
 
 #[cfg(test)]
@@ -134,6 +160,7 @@ mod tests {
 
     fn box_that_runs() -> Facts {
         Facts {
+            linux: true,
             cgroup2: true,
             controllers: ["cpuset", "cpu", "io", "memory", "pids"].iter().map(|s| (*s).to_owned()).collect(),
             overlay: true,
@@ -207,7 +234,30 @@ mod tests {
         assert_eq!(assess(&facts), assess(&facts.clone()));
         assert_eq!(
             assess(&facts).runs_workspaces,
-            facts.cgroup2 && facts.overlay && facts.root && ["memory", "cpu"].iter().all(|w| facts.controllers.iter().any(|c| c == w))
+            facts.linux
+                && facts.cgroup2
+                && facts.overlay
+                && facts.root
+                && ["memory", "cpu"].iter().all(|w| facts.controllers.iter().any(|c| c == w))
         );
+    }
+
+    #[test]
+    fn a_computer_that_is_not_linux_cannot_run_workspaces_and_the_reason_says_so() {
+        // The doctor is built for every target the daemon builds for, so it answers a Mac honestly rather than
+        // failing to compile: no cgroup and no overlay to read, and Linux named as the reason a workspace does not
+        // run there. The engine still travels, since a project's own containers are the box's own affair.
+        let d = assess(&Facts {
+            linux: false,
+            cgroup2: false,
+            controllers: vec![],
+            overlay: false,
+            root: false,
+            kvm: false,
+            engine: Engine::Docker,
+        });
+        assert!(!d.runs_workspaces);
+        assert!(d.blocked.as_deref().unwrap().contains("Linux computer"), "{:?}", d.blocked);
+        assert_eq!(d.engine, Engine::Docker);
     }
 }

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Capabilities, EventUnion, SnapshotStorage, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
+import type { Capabilities, EventUnion, ProjectGolden, SnapshotStorage, WorkspaceStatus, WorkspaceView } from "@wsp/protocol";
 import { MachineSurface } from "../src/components/machine/MachineSurface.js";
 import { SnapshotStorageLine, storageLine } from "../src/components/machine/SnapshotStorageLine.js";
 import type { Api } from "../src/protocol/client.js";
@@ -14,7 +14,8 @@ const CAPS: Capabilities = caps();
 const PRICING = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
 /** Who made each snapshot rides on the wire beside the sum; this line reads the sum, and wsp up and the doctor read the split. */
 const owners = (count: number, bytes: number) => ({ kept: { count, bytes }, orphans: { count: 0, bytes: 0 }, others: { count: 0, bytes: 0 } });
-const WS: WorkspaceView = { id: "ws1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_golden-v1", createdAt: "2026-08-30T09:00:00Z" };
+const PROJECT = { name: "alpha", dest: "/root/work/alpha", importedAt: "2026-08-31T09:00:00Z" };
+const WS: WorkspaceView = { id: "ws1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_golden-v1", createdAt: "2026-08-30T09:00:00Z", projects: [PROJECT] };
 const STATUS: WorkspaceStatus = { ...WS, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
 
 function fakeApi(storage: SnapshotStorage | null) {
@@ -42,6 +43,8 @@ function fakeApi(storage: SnapshotStorage | null) {
     listSnapshots: async () => ({ name: "default", head: null, versions: [] }),
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const }),
     snapshotStorage: vi.fn(async () => storage),
+    listProjectGoldens: async () => [],
+    snapshotWorkspace: async (id: string): Promise<ProjectGolden> => ({ snapshotId: "snap_taken", projects: [PROJECT], golden: "snap_golden-v1", workspaceId: id, workspaceName: "alpha", createdAt: new Date().toISOString() }),
     emit: e => {
       for (const fn of listeners) fn(e);
     },
@@ -88,6 +91,18 @@ describe("the storage line", () => {
     expect(usage.querySelector("[data-usage-chart]")).not.toBeNull();
     expect(usage.querySelector('[data-usage-chart] [data-k="storage"]')).toBeNull();
     expect(storage.querySelector("svg, path")).toBeNull();
+  });
+
+  it("reads the account again when the pane takes a snapshot, so the take's own GB land on the pane that took it", async () => {
+    const api = fakeApi({ count: 2, totalBytes: 16.3 * GB, ...PRICING, monthlyUsd: 6.3 * 0.05, ...owners(2, 16.3 * GB) });
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws1" />);
+    await waitFor(() => expect(line()).toBe("2 snapshots · 16.3 GB · about $0.32/month above the free 10 GB from 2026-10-01"));
+
+    api.snapshotStorage.mockResolvedValue({ count: 3, totalBytes: 24.9 * GB, ...PRICING, monthlyUsd: 14.9 * 0.05, ...owners(3, 24.9 * GB) });
+    fireEvent.click(screen.getByRole("button", { name: "snapshot alpha as an image" }));
+    await waitFor(() => expect(line()).toBe("3 snapshots · 24.9 GB · about $0.75/month above the free 10 GB from 2026-10-01"));
+    expect(api.snapshotStorage).toHaveBeenCalledTimes(2);
   });
 
   it("renders nothing when the provider cannot list snapshots", async () => {

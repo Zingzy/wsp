@@ -652,8 +652,9 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     keepDaemonForThisChip(place),
     // The profile a box needs before its workspaces can isolate, where AppArmor is enforcing; written once the
-    // binary it names is in place, and nowhere it has nothing to load it into.
-    ...apparmorStep(place),
+    // binary it names is in place, and only on a root install, since a login-scoped daemon owns no /etc and runs
+    // its workspaces under the person's own login instead.
+    ...(place.scope === "system" ? apparmorStep(place) : []),
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs
     // only when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.

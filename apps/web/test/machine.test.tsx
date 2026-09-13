@@ -26,6 +26,7 @@ import { provideDaemonHello } from "../src/files/wire.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { wireHostLive } from "../src/machine/hostLive.js";
 import type { Api } from "../src/protocol/client.js";
+import { APP_LOCALE } from "../src/lib/timestampFormat.js";
 import { useStore } from "../src/protocol/store.js";
 import { caps } from "./caps.js";
 import { statusOf } from "./workspace-status.js";
@@ -44,7 +45,7 @@ const view = (id: string, name: string, phase: WorkspacePhase = "running"): Work
   machineId: `m_${id}_0123456789abcdef`,
   phase,
   golden: "snap_golden01",
-  createdAt: "2026-08-30T09:00:00Z",
+  createdAt: new Date(2026, 7, 30, 9, 0).toISOString(),
 });
 
 const status = statusOf;
@@ -95,7 +96,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [] })),
     listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
     snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
-      const taken = pg("snap_taken", "snap_golden-v12", { workspaceId: id, createdAt: "2026-09-07T08:00:00.000Z" });
+      const taken = pg(`snap_taken-${projects.length + 1}`, "snap_golden-v12", { workspaceId: id, createdAt: new Date(Date.now() + projects.length).toISOString() });
       projects = [...projects, taken];
       return taken;
     }),
@@ -176,7 +177,7 @@ const gv = (n: number) => ({
   snapshotId: `snap_golden-v${n}`,
   baseTemplate: "base",
   setupSha: `sha${n}`,
-  createdAt: `2026-08-${10 + n}T00:00:00.000Z`,
+  createdAt: new Date(2026, 7, 10 + n, 0, 0).toISOString(),
   smoke: { cmd: "true", exitCode: 0 },
 });
 const twoVersions: SnapshotLineage = { name: "default", head: 12, versions: [gv(11), gv(12)] };
@@ -190,7 +191,7 @@ const pg = (snapshotId: string, golden: string, over: Partial<ProjectGolden> = {
   version: Number(golden.slice(-2)),
   workspaceId: "ws_a",
   workspaceName: "api",
-  createdAt: "2026-09-06T10:06:00.000Z",
+  createdAt: new Date(2026, 8, 6, 11, 6).toISOString(),
   ...over,
 });
 
@@ -361,8 +362,10 @@ describe("idle window", () => {
 });
 
 describe("usage", () => {
-  const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  // The app's own tag, as the chart spells it: under a shell whose locale reads 12:26 am these read the machine's
+  // and the chart read the app's, and the two disagreed only on the gate's Mac.
+  const clock = (ms: number) => new Date(ms).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit" });
+  const clockToSecond = (ms: number) => new Date(ms).toLocaleTimeString(APP_LOCALE, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const T0 = Date.UTC(2026, 8, 5, 6, 0);
   const at = (minutes: number) => T0 + minutes * 60_000;
   const point = (minutes: number, rate: number, accruedUsd: number): EventUnion => ({
@@ -378,6 +381,13 @@ describe("usage", () => {
   const HISTORY = [point(0, 0.11, 0), point(120, 0.11, 0.22), point(121, 0, 0.22), point(180, 0, 0.22)];
   const axis = (which: "x" | "y") => [...document.querySelectorAll(`[data-usage-axis=${which}] span`)].map(el => el.textContent);
   const toggle = (name: string) => screen.getByRole("button", { name });
+
+  it("reads the total off the series, so the runtime's history stands there before the first live tick", async () => {
+    // The chart drew three hours of spend over a row that read $0.00 until a tick landed.
+    await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
+    expect(fact("accrued")).toBe("$0.22");
+  });
 
   it("shows the live rate, and the accrued total in the one shape every spend figure a person reads is in", async () => {
     const api = await mount([view("ws_a", "api")]);
@@ -408,29 +418,43 @@ describe("usage", () => {
     const t1 = Date.parse("2026-09-01T00:01:00Z");
     expect(axis("x")).toEqual([clockToSecond(t1 - 60_000), clockToSecond(t1 - 40_000), clockToSecond(t1 - 20_000), clockToSecond(t1)]);
     expect(new Set(axis("x")).size).toBe(4);
-    expect(fact("usage-readout")).toBe(`tracked since ${clockToSecond(t1)}`);
+    // One tick is a workspace tracked for no time at all, so the line says how long that is: every longer range is
+    // held behind it.
+    expect(fact("usage-readout")).toBe(`tracked since ${clockToSecond(t1)} · 0 min`);
   });
 
-  it("reads the workspace's history from the runtime and spans all of it by default, with hour and day toggles", async () => {
+  it("reads the workspace's history from the runtime and spans all of it by default, with the hour toggle", async () => {
     await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
     await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
     expect(toggle("all").getAttribute("aria-pressed")).toBe("true");
     expect(axis("x")).toEqual([clock(at(0)), clock(at(60)), clock(at(120)), clock(at(180))]);
     // A round ceiling just above the total, labelled to the step.
     expect(axis("y")).toEqual(["$0.30", "$0.20", "$0.10", "$0.00"]);
-    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
     expect(screen.queryByText(/peak/)).toBeNull();
 
     fireEvent.click(toggle("hour"));
     expect(toggle("hour").getAttribute("aria-pressed")).toBe("true");
     expect(toggle("all").getAttribute("aria-pressed")).toBe("false");
     expect(axis("x")).toEqual([clock(at(120)), clock(at(140)), clock(at(160)), clock(at(180))]);
+  });
+
+  it("holds a range longer than the workspace has been tracked, with how long that is as its reason, rather than drawing it empty", async () => {
+    // Three hours metered: a day and a month of axis around them is a day and a month of flat nothing.
+    await mount([view("ws_a", "api")], CAPS, EMPTY_LINEAGE, HISTORY);
+    await waitFor(() => expect(document.querySelector("[data-usage-line]")).not.toBeNull());
+    const tracked = `tracked since ${clock(at(0))} · 3 h`;
+    expect(fact("usage-readout")).toBe(tracked);
+    for (const word of ["day", "month"]) {
+      expect(toggle(word).hasAttribute("disabled")).toBe(true);
+      expect(toggle(word).getAttribute("title")).toBe(tracked);
+    }
+    expect(toggle("hour").hasAttribute("disabled")).toBe(false);
+    expect(toggle("all").hasAttribute("disabled")).toBe(false);
 
     fireEvent.click(toggle("day"));
-    expect(axis("x")).toEqual([clock(at(180 - 1440)), clock(at(180 - 960)), clock(at(180 - 480)), clock(at(180))]);
-    // The series began inside the day: the line starts where the data does, the axis stays the whole day.
-    const d = document.querySelector("[data-usage-line]")!.getAttribute("d")!;
-    expect(Number(d.slice(1).split(" ")[0])).toBeCloseTo(100 * (1 - 180 / 1440), 0);
+    // Nothing moved: the range stands where it was and the axis still reads the whole life.
+    expect(toggle("all").getAttribute("aria-pressed")).toBe("true");
+    expect(axis("x")).toEqual([clock(at(0)), clock(at(60)), clock(at(120)), clock(at(180))]);
   });
 
   it("a live tick extends the line and the axis to the newest moment", async () => {
@@ -438,7 +462,7 @@ describe("usage", () => {
     await waitFor(() => expect(axis("x").at(-1)).toBe(clock(at(180))));
     act(() => api.emit(point(190, 0.11, 0.23)));
     expect(axis("x").at(-1)).toBe(clock(at(190)));
-    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))} · 3 h`);
   });
 
   it("hovering reads the total, the rate and the moment under the pointer; leaving returns to the span", async () => {
@@ -452,7 +476,7 @@ describe("usage", () => {
     fireEvent.mouseMove(svg, { clientX: 250, clientY: 30 });
     expect(fact("usage-readout")).toBe(`$0.22 · $0.000/hr · ${clock(at(150))}`);
     fireEvent.mouseLeave(svg);
-    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))}`);
+    expect(fact("usage-readout")).toBe(`tracked since ${clock(at(0))} · 3 h`);
     expect(svg.querySelector("[data-usage-hover]")).toBeNull();
   });
 
@@ -471,7 +495,7 @@ describe("lineage", () => {
   it("renders live disk and the image it started from while no image was ever sealed", async () => {
     await mount([view("ws_a", "api")]);
     expect(screen.getByText("Live disk")).toBeDefined();
-    expect(screen.getByText("created 2026-08-30")).toBeDefined();
+    expect(screen.getByText("created Aug 30 09:00")).toBeDefined();
     await waitFor(() => expect(fact("golden")).toBe("Image"));
   });
 
@@ -484,7 +508,7 @@ describe("lineage", () => {
     const word = document.querySelector("[data-mark='head']")!;
     expect(word.className).toContain("font-mono");
     expect(word.className).toContain("text-muted-foreground");
-    expect(screen.getByText("built 2026-08-22")).toBeDefined();
+    expect(screen.getByText("built Aug 22 00:00")).toBeDefined();
     const rows = [...document.querySelectorAll("[data-k^='v1']")].map(el => el.getAttribute("data-k"));
     expect(rows).toEqual(["v12", "v11"]);
     expect(screen.getByRole("button", { name: "roll back to v11" })).toBeDefined();
@@ -807,7 +831,7 @@ describe("a workspace behind the golden's head", () => {
 });
 
 describe("project goldens in the lineage", () => {
-  const goldens = [pg("snap_p1", "snap_golden-v12"), pg("snap_p2", "snap_golden-v12", { createdAt: "2026-09-06T11:00:00.000Z", workspaceName: "task-a", workspaceId: "ws_b" }), pg("snap_p3", "snap_golden-v11")];
+  const goldens = [pg("snap_p1", "snap_golden-v12"), pg("snap_p2", "snap_golden-v12", { createdAt: new Date(2026, 8, 6, 12, 0).toISOString(), workspaceName: "task-a", workspaceId: "ws_b" }), pg("snap_p3", "snap_golden-v11")];
   const rowsUnder = (version: string): string[] => [...document.querySelectorAll(`[data-k='${version}']`)[0]!.closest("li")!.querySelectorAll("[data-k^='pg-']")].map(el => el.getAttribute("data-k")!);
 
   it("lists each project golden under the version it stands on, newest first, marks the one this workspace forks from, and a fork creates a workspace from its snapshot", async () => {
@@ -817,9 +841,14 @@ describe("project goldens in the lineage", () => {
     expect(marks("v12")).toEqual([HEAD, VOLATILE]);
     expect(marks("pg-snap_p2")).toEqual([THIS_ONE]);
     expect(marks("pg-snap_p1")).toEqual([]);
-    expect(screen.getByText("snapshot 2026-09-06 · imported 2026-09-06 · from task-a")).toBeDefined();
+    // The row is stamped by the take alone: the project's import date sat here and read as the row's own, so two
+    // takes minutes apart read as one old row twice.
+    expect(screen.getByText("snapshot Sep 6 12:00 · from task-a")).toBeDefined();
     // What is on the disk is the projects section's to list; the lineage row says when the fork was made and no more.
-    expect(screen.getByText("created 2026-08-30")).toBeDefined();
+    // Every row of this list spells a stamp the one way, the disk it stands on and the versions above it included.
+    expect(screen.getByText("created Aug 30 09:00")).toBeDefined();
+    expect(screen.getByText("built Aug 22 00:00")).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /^new workspace from the image of/ })[0]!.textContent).toBe("New workspace from this");
     fireEvent.click(screen.getByRole("button", { name: "new workspace from the image of proj taken on api, v12" }));
     // The name a person reads on the row it makes: a copy of the project, never the verb under it.
     await waitFor(() => // A fork of a project golden names no computer: it goes where the image it carries already stands.
@@ -844,15 +873,22 @@ describe("project goldens in the lineage", () => {
     expect(button.closest("section")!.textContent).toContain("Projects");
     fireEvent.click(button);
     await waitFor(() => expect(api.snapshotWorkspace).toHaveBeenCalledWith("ws_a"));
-    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]));
-    // The golden taken here is known here, so the list is not read again for it.
-    expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
-    expect(fact("projects-note")).toBe("Image of proj taken. New workspaces from it start with the projects in place.");
+    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken-1"]));
+    // What the host holds, read again on its answer: a list this tab appended to by itself showed the row while the
+    // count and the money beside it stood still.
+    await waitFor(() => expect(api.listProjectGoldens).toHaveBeenCalledTimes(2));
+    // The row the take added is stamped at the take, so it reads as the new thing it is.
+    expect(screen.getByText(/^snapshot today \d\d:\d\d · from api$/)).toBeDefined();
+    expect(fact("projects-note")).toBe("Image of proj taken. New workspace from this starts with the projects in place.");
+
+    fireEvent.click(button);
+    await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken-2", "pg-snap_taken-1"]));
+    expect(api.listProjectGoldens).toHaveBeenCalledTimes(3);
 
     api.snapshotWorkspace.mockRejectedValueOnce(new Error("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
     fireEvent.click(button);
     await waitFor(() => expect(fact("projects-note")).toBe("snapshot of api refused: machine m1 is not first-life (it was resumed); snapshots only come from fresh machines"));
-    expect(rowsUnder("v12")).toEqual(["pg-snap_taken"]);
+    expect(rowsUnder("v12")).toEqual(["pg-snap_taken-2", "pg-snap_taken-1"]);
   });
 });
 
