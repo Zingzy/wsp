@@ -202,6 +202,7 @@ import {
   HERE_PLACE_ID,
   isLocalWorkspace,
   turnSpendWord,
+  placeDaemonBehind,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
@@ -460,9 +461,12 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
+    // The one word about a computer running an older daemon than this wsp deploys, built in the protocol so this
+    // row and the app's table say it the same way; empty on a row that is level, ahead, or has never reported.
+    placeDaemonBehind(p) ?? "",
     p.build ?? "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "IMAGE"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "BEHIND", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */

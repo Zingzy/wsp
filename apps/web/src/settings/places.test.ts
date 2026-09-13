@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, absentComputer, placeDaemonBehind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
+import { NOTHING_HELD, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -154,5 +154,25 @@ describe("which row a workspace stands on", () => {
   it("leaves a row nothing stands on out, and counts nothing for a workspace no row holds", () => {
     expect(placeWorkspaceCounts([here, hetzner], [on("ws_a", "local", "local")])).toEqual({ here: 1 });
     expect(placeWorkspaceCounts([here], [on("ws_b", "cloud", "ctr_1", "p_gone")])).toEqual({});
+  });
+});
+
+describe("the one word the slot beside a row's name carries", () => {
+  it("says a computer runs an older daemon than this wsp deploys, in the protocol's own word", () => {
+    const behind = { ...hetzner, daemonVersion: DAEMON_VERSION - 5 };
+    expect(placeStateWord(behind, null)).toBe(`daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}`);
+    // The same word wsp places prints in its BEHIND column, read off the protocol by both.
+    expect(placeStateWord(behind, null)).toBe(placeDaemonBehind(behind));
+  });
+
+  it("says a computer that is not answering first, since nothing can be put on a computer that is off", () => {
+    const away = absentComputer("hetzner", 32 * 60 * 1000);
+    expect(placeStateWord({ ...hetzner, daemonVersion: DAEMON_VERSION - 5, present: false }, away)).toBe(away.away);
+  });
+
+  it("says nothing of a computer that is answering on this wsp's own daemon, or one that has never reported", () => {
+    expect(placeStateWord({ ...hetzner, daemonVersion: DAEMON_VERSION }, null)).toBe("");
+    expect(placeStateWord(hetzner, null)).toBe("");
+    expect(placeStateWord(ascii, null)).toBe("");
   });
 });

@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -138,6 +138,14 @@ function ownDaemonAbsence(status: Pick<WorkspaceStatus, "reach"> | null): Absent
  * which is every caller that shows the sentence alone. */
 export function absentOf(place: PlaceView, now: number | null, here = false): AbsentComputer | null {
   return placeIsOffline(place) ? absentComputer(placeName(place, here), now === null ? null : awayMsOf(place, now)) : null;
+}
+
+/** The one word the slot beside a row's name carries. A computer that is not answering says that first: it is the
+ * more urgent of the two and nothing can be put on a computer that is off. A computer that is answering and runs an
+ * older daemon than this wsp deploys says so in the protocol's own word, the same one `wsp places` prints in its
+ * BEHIND column, so the app and the command line cannot word it twice. */
+export function placeStateWord(place: PlaceView, absent: AbsentComputer | null): string {
+  return absent?.away ?? placeDaemonBehind(place) ?? "";
 }
 
 /** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one

@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use sha2::{Digest as _, Sha256};
 use wsp_frames::{
-    numbers, place_owned_paths, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
+    numbers, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform,
+    WorkspaceSize,
 };
 use wsp_runtime::doctor::on_path;
 
@@ -158,6 +160,112 @@ pub(crate) fn sweep_place_home(home: &Path) -> Vec<String> {
     removed
 }
 
+/// Where the parts of an update are appended while they arrive: under the place's own put folder, named after the
+/// upload, so nothing half landed ever sits where the binary the unit starts does.
+pub(crate) fn update_part(home: &Path, upload_id: &str) -> PathBuf {
+    place_daemon_paths(home).put_dir.join(upload_id)
+}
+
+/// Where the seq this upload expects next is written, beside its bytes. Two files rather than one: the bytes are
+/// appended to and their length says nothing about how many parts made them, since a part is whatever the host cut.
+fn update_next(part: &Path) -> PathBuf {
+    part.with_extension("next")
+}
+
+/// Everything under the put folder except the upload named, removed. A link that drops mid-upload leaves its parts
+/// there and the host picks a fresh id for its next try, so without this the box keeps every abandoned attempt.
+/// Run when the agent starts and again when an upload begins, which are the two moments nothing else is arriving.
+pub(crate) fn sweep_updates(home: &Path, keep: Option<&str>) -> usize {
+    let dir = place_daemon_paths(home).put_dir;
+    let Ok(entries) = std::fs::read_dir(&dir) else { return 0 };
+    let mut swept = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned());
+        if keep.is_some() && stem.as_deref() == keep {
+            continue;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            swept += 1;
+        }
+    }
+    swept
+}
+
+/// One part appended under the seq this upload is waiting for: 0 for an upload nothing has been landed for, and the
+/// one after the last part taken from then on. A part that is not it, a repeat or a skip alike, drops the upload
+/// rather than letting it become a file with a hole in it or the same bytes twice.
+pub(crate) fn take_update_part(part: &Path, seq: u64, bytes: &[u8], upload_id: &str) -> Result<(), String> {
+    let dropped = |part: &Path| {
+        let _ = std::fs::remove_file(part);
+        let _ = std::fs::remove_file(update_next(part));
+    };
+    let next = std::fs::read_to_string(update_next(part)).ok().and_then(|text| text.trim().parse::<u64>().ok());
+    let wanted = match (next, std::fs::metadata(part).is_ok()) {
+        // Nothing landed and nothing recorded: this upload starts here.
+        (None, false) => 0,
+        (Some(wanted), true) => wanted,
+        // Bytes with no record beside them, or a record with no bytes: neither is an upload this can go on with.
+        _ => {
+            dropped(part);
+            return Err(words::update_out_of_order(seq, 0, upload_id));
+        }
+    };
+    if seq != wanted {
+        dropped(part);
+        return Err(words::update_out_of_order(seq, wanted, upload_id));
+    }
+    if let Some(parent) = part.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let mut file = std::fs::OpenOptions::new().append(true).create(true).open(part).map_err(|e| format!("{}: {e}", part.display()))?;
+    std::io::Write::write_all(&mut file, bytes).map_err(|e| format!("{}: {e}", part.display()))?;
+    std::fs::write(update_next(part), format!("{}", seq + 1)).map_err(|e| format!("{}: {e}", update_next(part).display()))
+}
+
+/// Lowercase hex sha256 of some bytes, as the host spells the one it names on the frame.
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The file this daemon was execed from, which is the file its unit starts. Linux answers /proc/self/exe with the
+/// path and " (deleted)" after it once the inode the process runs has been unlinked, which is what a rename over
+/// that path leaves behind: an update that landed and whose daemon has not restarted yet reads its own path that
+/// way, and writing to it would make a second file nothing starts.
+pub(crate) fn running_daemon(said: std::io::Result<PathBuf>) -> Result<PathBuf, String> {
+    let exe = said.map_err(|e| format!("this daemon cannot say which file it runs from: {e}"))?;
+    let text = exe.to_string_lossy();
+    Ok(match text.strip_suffix(" (deleted)") {
+        Some(path) => PathBuf::from(path),
+        None => exe,
+    })
+}
+
+/// The landed binary moved over the one this process runs from, and where the one it replaced was kept. The bytes
+/// are checked against the host's sha256 first and the whole of the move is a rename beside the binary, which is
+/// the one write a running executable takes: writing into it is refused while it is mapped, and a copy that failed
+/// halfway would leave the unit starting a truncated file forever under Restart=always.
+pub(crate) fn install_daemon(exe: &Path, part: &Path, sha256: &str, upload_id: &str) -> Result<(String, String), String> {
+    let landed = std::fs::read(part).map_err(|e| format!("{}: {e}", part.display()))?;
+    let held = sha256_hex(&landed);
+    if held != sha256 {
+        let _ = std::fs::remove_file(part);
+        let _ = std::fs::remove_file(update_next(part));
+        return Err(words::update_bytes_differ(upload_id, sha256, &held));
+    }
+    let fresh = exe.with_extension("new");
+    let kept = exe.with_extension("old");
+    std::fs::write(&fresh, &landed).map_err(|e| format!("{}: {e}", fresh.display()))?;
+    std::fs::set_permissions(&fresh, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .map_err(|e| format!("{}: {e}", fresh.display()))?;
+    // The old binary kept beside the new one, so a box whose daemon will not come up still holds the one it ran.
+    std::fs::copy(exe, &kept).map_err(|e| format!("{}: {e}", kept.display()))?;
+    std::fs::rename(&fresh, exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+    let _ = std::fs::remove_file(part);
+    let _ = std::fs::remove_file(update_next(part));
+    Ok((exe.to_string_lossy().into_owned(), kept.to_string_lossy().into_owned()))
+}
+
 /// The home the place keeps its files under: --home, else HOME, else the root.
 pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
     given.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("/"))
@@ -167,7 +275,7 @@ pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
-    use wsp_frames::{place_daemon_paths, place_link_transcript, LinkRole};
+    use wsp_frames::{place_link_transcript, LinkRole};
 
     fn pair() -> (String, PlacePublicKey) {
         let mut seed = [0u8; 32];
@@ -250,6 +358,80 @@ mod tests {
         assert_eq!(bare.wsp, vec!["wsp"]);
         // The shape the host parses is the shape this serialises to.
         serde_json::from_value::<PlaceReport>(serde_json::to_value(&report).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_update_takes_only_the_part_it_waits_for_and_moves_the_whole_over_the_running_binary() {
+        let home = tempfile::tempdir().unwrap();
+        let part = update_part(home.path(), "u1");
+        assert_eq!(part, place_daemon_paths(home.path()).put_dir.join("u1"));
+
+        // An upload waits for part 0 first, so a skip to any other part is refused and lands nothing.
+        assert_eq!(take_update_part(&part, 1, b"x", "u1").unwrap_err(), words::update_out_of_order(1, 0, "u1"));
+        assert!(!part.exists());
+        take_update_part(&part, 0, b"new ", "u1").unwrap();
+
+        // From then on it waits for the one after the last it took: a repeat of the part already landed is refused
+        // rather than appended twice, and a skip over the one it wants is refused rather than leaving a hole.
+        assert_eq!(take_update_part(&part, 0, b"x", "u1").unwrap_err(), words::update_out_of_order(0, 1, "u1"));
+        assert!(!part.exists(), "a refused part left the upload on disk");
+        take_update_part(&part, 0, b"new ", "u1").unwrap();
+        assert_eq!(take_update_part(&part, 2, b"x", "u1").unwrap_err(), words::update_out_of_order(2, 1, "u1"));
+        take_update_part(&part, 0, b"new ", "u1").unwrap();
+        take_update_part(&part, 1, b"daemon", "u1").unwrap();
+        assert_eq!(std::fs::read(&part).unwrap(), b"new daemon");
+
+        let exe = home.path().join("wsp-daemon");
+        std::fs::write(&exe, b"old daemon").unwrap();
+        let wrong = "0".repeat(64);
+        let refused = install_daemon(&exe, &part, &wrong, "u1").unwrap_err();
+        assert_eq!(refused, words::update_bytes_differ("u1", &wrong, &sha256_hex(b"new daemon")));
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old daemon", "a binary whose bytes differ was moved anyway");
+        assert!(!part.exists(), "the dropped upload stays on disk");
+
+        take_update_part(&part, 0, b"new daemon", "u1").unwrap();
+        let (at, kept) = install_daemon(&exe, &part, &sha256_hex(b"new daemon"), "u1").unwrap();
+        assert_eq!(at, exe.to_string_lossy());
+        assert_eq!(kept, exe.with_extension("old").to_string_lossy());
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new daemon");
+        assert_eq!(std::fs::read(exe.with_extension("old")).unwrap(), b"old daemon");
+        assert!(!exe.with_extension("new").exists(), "the staged copy stays beside the binary");
+        // Both the bytes and the seq beside them go with the landing, so the next upload starts from nothing.
+        assert!(!part.exists() && !update_next(&part).exists());
+        let mode: u32 = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&exe).unwrap().permissions());
+        assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[test]
+    fn the_parts_a_dropped_link_left_go_when_the_agent_starts_and_when_the_next_upload_begins() {
+        let home = tempfile::tempdir().unwrap();
+        let abandoned = update_part(home.path(), "aa11");
+        take_update_part(&abandoned, 0, b"half a daemon", "aa11").unwrap();
+        assert!(abandoned.exists() && update_next(&abandoned).exists());
+
+        // The host picks a fresh id for its next try, so nothing will ever name that one again.
+        let fresh = update_part(home.path(), "bb22");
+        take_update_part(&fresh, 0, b"a whole one", "bb22").unwrap();
+        assert_eq!(sweep_updates(home.path(), Some("bb22")), 2, "the abandoned upload and the seq beside it");
+        assert!(!abandoned.exists() && !update_next(&abandoned).exists());
+        assert!(fresh.exists(), "the upload arriving now went with them");
+
+        // At the agent's start nothing is arriving, so the lot goes.
+        assert_eq!(sweep_updates(home.path(), None), 2);
+        assert!(!fresh.exists());
+        // A place whose folder is not there at all is not an error.
+        assert_eq!(sweep_updates(&home.path().join("nowhere"), None), 0);
+    }
+
+    #[test]
+    fn the_binary_this_daemon_runs_is_its_own_path_with_the_kernels_deleted_mark_taken_off() {
+        assert_eq!(running_daemon(Ok(PathBuf::from("/h/.wsp/daemon/wsp-daemon"))).unwrap(), PathBuf::from("/h/.wsp/daemon/wsp-daemon"));
+        // What /proc/self/exe reads once an update has renamed a new binary over the running one's path.
+        assert_eq!(
+            running_daemon(Ok(PathBuf::from("/h/.wsp/daemon/wsp-daemon (deleted)"))).unwrap(),
+            PathBuf::from("/h/.wsp/daemon/wsp-daemon")
+        );
+        assert!(running_daemon(Err(std::io::Error::other("no /proc"))).unwrap_err().contains("which file it runs from"));
     }
 
     #[test]

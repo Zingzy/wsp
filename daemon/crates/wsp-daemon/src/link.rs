@@ -136,6 +136,12 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
         daemon_port,
         ctx: Arc::clone(&ctx),
     };
+    // Parts of an upload a dropped link left behind: the host picks a fresh id for every try, so nothing else will
+    // ever name them again.
+    let swept = place::sweep_updates(&link.home, None);
+    if swept > 0 {
+        link.log(&words::update_swept(swept));
+    }
     let mut attempt: u32 = 0;
     loop {
         attempt += 1;
@@ -155,7 +161,7 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
                 Outcome::Linked(ws) => {
                     let linked_at = Instant::now();
                     match link.hold(*ws, url).await {
-                        Ended::Leave => return,
+                        Ended::Leave | Ended::Restart => return,
                         Ended::Quiet => link.log(&words::link_quiet(url, seconds(link.quiet.as_millis() as u64))),
                         Ended::Peer => {}
                     }

@@ -3,7 +3,7 @@
 // records and links the door holds, the workspace a join records, and the two
 // ops a person's own socket reaches. The signatures here are real ed25519
 // ones, so what the door verifies is what a place would send.
-import { createPrivateKey, randomBytes, sign } from "node:crypto";
+import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
 import { connect as netConnect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
@@ -16,6 +16,8 @@ import {
   PLACE_KEY_REFUSAL,
   PLACE_UNKNOWN_REFUSAL,
   PLACE_LINK_NONCE_BYTES,
+  DAEMON_VERSION,
+  placeCurrentLine,
   THREAD_OPS,
   placeDaemonPaths,
   absentComputer,
@@ -41,7 +43,7 @@ import {
 import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
-import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -66,8 +68,8 @@ const DOOR = ["http://192.168.1.20:4400"];
 
 const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, engine: "docker" as const };
 
-function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }): PlaceWiring {
-  return { hostKey, provider: () => provider, here: () => HERE, hostName: () => "zingzys-mac" };
+function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }, update?: PlaceUpdater): PlaceWiring {
+  return { hostKey, provider: () => provider, here: () => HERE, hostName: () => "zingzys-mac", ...(update === undefined ? {} : { update }) };
 }
 
 const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceReport => ({
@@ -87,15 +89,16 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
     backend: stubBackend(),
     store,
     adapters: {},
-    placeLinks: wiring(hostKey, opts.provider),
+    placeLinks: wiring(hostKey, opts.provider, opts.update),
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
+    ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });
   srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
   return { hostKey, store };
@@ -523,6 +526,120 @@ async function remove(placeId: string): Promise<Record<string, unknown>> {
   c.close();
   return answer;
 }
+
+describe("moving a place onto the daemon this host deploys", () => {
+  /** What the host's own updater does, in miniature: the binary in parts over the link the place is holding, each
+   * under one upload id with the sha256 of the whole, and the path the place answered with. */
+  const overTheLink = (bytes: Uint8Array, asked: { req: PlaceUpdateRequest }[]): PlaceUpdater => async req => {
+    asked.push({ req });
+    const half = Math.ceil(bytes.length / 2);
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    let at = "";
+    for (const [seq, part] of [bytes.subarray(0, half), bytes.subarray(half)].entries()) {
+      const answer = await req.link!.request("place.update", { uploadId: "u1", seq, last: seq === 1, data: Buffer.from(part).toString("base64"), sha256 });
+      at = typeof answer["at"] === "string" ? answer["at"] : at;
+    }
+    return { road: "link", at };
+  };
+
+  /** A place that takes the parts as the daemon does: appended in order, and the last one answered with where the
+   * binary landed. What it was sent is kept so the test can read the whole of it back. */
+  const takesParts = (landed: Buffer[], sent: { sha256: string[]; uploads: string[] }) => (c: WsClient): void => {
+    c.ws.on("message", raw => {
+      const frame = JSON.parse(String(raw)) as { id?: number; op?: string; data?: string; sha256?: string; uploadId?: string; last?: boolean };
+      if (frame.op !== "place.update") return;
+      landed.push(Buffer.from(String(frame.data), "base64"));
+      sent.sha256.push(String(frame.sha256));
+      sent.uploads.push(String(frame.uploadId));
+      c.ws.send(JSON.stringify({ id: frame.id, ok: true, ...(frame.last === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } : {}) }));
+    });
+  };
+
+  const update = async (placeId: string): Promise<Record<string, unknown>> => {
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const answer = await c.request("places.update", { placeId });
+    c.close();
+    return answer;
+  };
+
+  it("puts the binary over the link as bytes, and the row reads the new version once that computer dials back on it", async () => {
+    const binary = Buffer.from("a daemon built for this box's chip, twice as long as one part");
+    const asked: { req: PlaceUpdateRequest }[] = [];
+    const { hostKey } = await serving({ update: overTheLink(binary, asked), updateWaitMs: 5_000 });
+    const landed: Buffer[] = [];
+    const sent = { sha256: [] as string[], uploads: [] as string[] };
+    const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
+    const { client, placeId, pair } = await join(hostKey, { code: await code(), report: behind, answers: takesParts(landed, sent) });
+    sockets.push(client.ws);
+
+    // The computer restarts its agent on the new binary and dials back saying so, which is what the wait is for.
+    const back = setTimeout(() => {
+      client.close();
+      void relink(hostKey, placeId, pair, report("old-macbook", { daemonVersion: DAEMON_VERSION })).then(({ client: fresh }) => sockets.push(fresh.ws));
+    }, 200);
+    back.unref?.();
+    const answer = await update(placeId);
+
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    expect(answer["name"]).toBe("old-macbook");
+    expect(answer["from"]).toBe(DAEMON_VERSION - 1);
+    expect(answer["to"]).toBe(DAEMON_VERSION);
+    expect(answer["road"]).toBe("link");
+    expect(answer["at"]).toBe("/home/maya/.wsp/daemon/wsp-daemon");
+    // The row a person reads says it too, and says nothing about being behind any more.
+    const row = (await placesOf()).find(p => p.id === placeId)!;
+    expect(row.daemonVersion).toBe(DAEMON_VERSION);
+
+    // The binary arrived whole, in order, as bytes on the link and never as a command: two parts under one upload
+    // id, each carrying the sha256 of the whole, and what landed is byte for byte what was sent.
+    expect(landed).toHaveLength(2);
+    expect(Buffer.concat(landed)).toEqual(binary);
+    expect(new Set(sent.uploads)).toEqual(new Set(["u1"]));
+    expect(new Set(sent.sha256)).toEqual(new Set([createHash("sha256").update(binary).digest("hex")]));
+    // The updater is told what the place said about itself, which is how the chip is picked, and handed the link.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.req.report.arch).toBe("x64");
+    expect(asked[0]!.req.name).toBe("old-macbook");
+  });
+
+  it("answers what the row still reads, with the reason, when the computer has not come back on it inside the wait", async () => {
+    const asked: { req: PlaceUpdateRequest }[] = [];
+    const { hostKey } = await serving({ update: overTheLink(Buffer.from("a daemon"), asked), updateWaitMs: 300 });
+    const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
+    const { client, placeId } = await join(hostKey, { code: await code(), report: behind, answers: takesParts([], { sha256: [], uploads: [] }) });
+    sockets.push(client.ws);
+    const answer = await update(placeId);
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    // Nothing failed: the binary landed and the row moves on the computer's next link, which the note says.
+    expect(answer["to"]).toBe(DAEMON_VERSION - 1);
+    expect(String(answer["note"])).toContain("had not dialled back on it within");
+  });
+
+  it("refuses a place already running this daemon before it picks up a byte, and one this host does not hold", async () => {
+    const asked: { req: PlaceUpdateRequest }[] = [];
+    const { hostKey } = await serving({ update: overTheLink(Buffer.from("a daemon"), asked) });
+    const level = report("old-macbook", { daemonVersion: DAEMON_VERSION });
+    const { client, placeId } = await join(hostKey, { code: await code(), report: level });
+    sockets.push(client.ws);
+    const answer = await update(placeId);
+    expect(answer.ok).toBe(false);
+    expect(answer["error"]).toBe(placeCurrentLine("old-macbook", DAEMON_VERSION));
+    expect(asked).toEqual([]);
+    const nowhere = await update("p_nothing");
+    expect(nowhere.ok).toBe(false);
+    expect(String(nowhere["error"])).toContain("p_nothing");
+  });
+
+  it("says so plainly on a host wired with no road to put a daemon on a computer", async () => {
+    const { hostKey } = await serving();
+    const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
+    const { client, placeId } = await join(hostKey, { code: await code(), report: behind });
+    sockets.push(client.ws);
+    const answer = await update(placeId);
+    expect(answer.ok).toBe(false);
+    expect(answer["error"]).toBe(NO_PLACE_UPDATER);
+  });
+});
 
 describe("taking a place back out", () => {
   it("asks the linked place to sweep itself, drops the workspace standing on it, and answers what came off", async () => {

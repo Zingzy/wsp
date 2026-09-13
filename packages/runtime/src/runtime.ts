@@ -801,6 +801,9 @@ export interface RuntimeOptions {
   /** How long a computer has to dial back after its own join before an install gives up on it; the door's own wait
    * unless a test shortens it. */
   placeJoinWaitMs?: number;
+  /** How long a computer that took an update has to dial back running it before the answer says what it still
+   * reads; the door's own wait unless a test shortens it. */
+  placeUpdateWaitMs?: number;
   /** The same for one dial of a computer, which the door bounds itself rather than leaving to whatever road the
    * dial takes. */
   placeDialWaitMs?: number;
@@ -2295,6 +2298,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       onStage: event => bus.emit(event),
       copyBuild: placeId => copyRows.get(placeId),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
+      ...(opts.placeUpdateWaitMs !== undefined ? { updateWaitMs: opts.placeUpdateWaitMs } : {}),
       ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
       ...(opts.placeFrameWaitMs !== undefined ? { frameWaitMs: opts.placeFrameWaitMs } : {}),
       ...(opts.placeRelinkWaitMs !== undefined ? { relinkWaitMs: opts.placeRelinkWaitMs } : {}),

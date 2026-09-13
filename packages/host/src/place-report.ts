@@ -191,8 +191,9 @@ export interface PlaceSweepOptions {
   uid?: number;
 }
 
-/** Which service the agent on this computer is, for the manager that holds it. */
-const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
+/** Which service the agent on this computer is, for the manager that holds it. Exported because the update road
+ * names that unit from the host, and a second spelling of it there would be a second copy of the rule. */
+export const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
 
 /** Takes wsp off this computer: the file that holds the agent up, the place file and the key, and every path the
  * daemon and the installer put under wsp's own folder here, read off the one list the ssh road's removal reads so

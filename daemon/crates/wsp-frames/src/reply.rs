@@ -256,3 +256,12 @@ pub struct DaemonExecReply {
 pub struct PlaceLeaveReply {
     pub swept: Vec<String>,
 }
+
+/// What the last part of an update is answered with before the agent ends: where the binary landed, so the host's
+/// line names the path a person would look at, and what stood there before it, which is kept beside it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaceUpdateReply {
+    pub at: String,
+    pub kept: String,
+}
