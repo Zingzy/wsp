@@ -66,6 +66,7 @@ export { isCacheDir, isRepoFolder, packProject, packState, planProject, projectB
 export {
   doctor,
   deployDaemon,
+  missingBundleFile,
   stageDaemonBundle,
   connectDaemonSocket,
   type DaemonSocket,

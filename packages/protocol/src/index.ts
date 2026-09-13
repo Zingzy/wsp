@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
+import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2261,13 +2261,14 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "wsp", "service", "join"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "wsp", "service", "join"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
  * node it got), which is the step's own to say and never a second sentence about it. */
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
+  "host-key": `remembering the box's host key in ${KNOWN_HOSTS}`,
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
@@ -2278,6 +2279,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
  * not be one, so the words above stay as they are. `done` is read once a step is finished, where a line under a
  * check would otherwise say the wait it was in rather than the state it reached. */
 export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
+  "host-key": { word: `keeps the box's host key in ${KNOWN_HOSTS} here` },
   wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
   service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
   join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
