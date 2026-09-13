@@ -41,6 +41,9 @@ mod tests {
             assert!(kinds.contains(&kind), "{kind}");
         }
         assert!(p["mounts"].as_array().unwrap().iter().all(|m| m["type"] != "bind"));
+        // An exec loads this filter itself and serves no notify listener, so no rule's action is SCMP_ACT_NOTIFY, the
+        // action libcontainer hands a notify fd back for; an exec refuses such a filter.
+        assert!(p["linux"]["seccomp"]["syscalls"].as_array().unwrap().iter().all(|rule| rule["action"] != "SCMP_ACT_NOTIFY"));
         assert!(p.get("hostname").is_none() && p["process"].get("args").is_none() && p["process"].get("apparmorProfile").is_none());
     }
 }

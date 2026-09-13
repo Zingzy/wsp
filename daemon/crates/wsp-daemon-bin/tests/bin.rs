@@ -86,6 +86,45 @@ async fn runtime_ask_names_its_root_on_purpose_or_not_at_all() {
     assert!(stderr.contains("--root"), "{stderr}");
 }
 
+/// The exec verb on a bundle whose filter has a rule with the notify action: the refusal is the helper's own, before
+/// youki is asked, so no state directory is needed and no root.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn runtime_exec_refuses_a_filter_with_a_notify_action_and_exits_125() {
+    let dir = tempfile::tempdir().unwrap();
+    let layout = wsp_runtime::bundle::Layout::new(dir.path());
+    std::fs::create_dir_all(layout.workspace("wsp-n")).unwrap();
+    let args = vec!["/sbin/wsp-init".to_owned()];
+    let mut spec = wsp_runtime::bundle::config_json(&wsp_runtime::bundle::Config {
+        hostname: "wsp-n",
+        args: &args,
+        envs: &std::collections::BTreeMap::new(),
+        cpu: None,
+        mem_mb: None,
+        cgroup: &layout.cgroup_name("wsp-n"),
+        init: std::path::Path::new(BIN),
+        etc: &layout.etc("wsp-n"),
+        engine: None,
+    });
+    spec["linux"]["seccomp"]["syscalls"].as_array_mut().unwrap().push(json!({ "names": ["getcwd"], "action": "SCMP_ACT_NOTIFY" }));
+    wsp_runtime::bundle::write_json(&layout.config("wsp-n"), &spec).unwrap();
+    let out = Command::new(BIN)
+        .args(["runtime", "exec", "--root"])
+        .arg(dir.path())
+        .args(["--id", "wsp-n", "--timeout-ms", "1000", "--", "true"])
+        .output()
+        .await
+        .unwrap();
+    assert_eq!(out.status.code(), Some(125));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        stderr.lines().last().unwrap(),
+        "wsp-runtime: the workspace's seccomp filter has a rule whose action is notify, and an exec serves no listener for it, so the command did not run",
+        "{stderr}"
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "");
+}
+
 #[tokio::test]
 async fn refuses_to_start_without_a_token_file_and_says_so() {
     let dir = tempfile::tempdir().unwrap();
