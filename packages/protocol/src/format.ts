@@ -2952,6 +2952,35 @@ export function placeWorkspacesCell(view: PlaceView, count: number): string {
 /** The one line that takes wsp off a computer it is typed on. */
 export const PLACE_LEAVE_LINE = "wsp leave";
 
+/** Everything wsp puts on a computer it is installed on, named once. The Add sheet writes its lines and the note
+ * under them from this list and the Remove dialog writes its sentence from the same, so what a person is told
+ * before they press Add is what they are told on the way out. Nothing here is called a shim: a person reads what
+ * the thing does, since nobody outside this repo knows what a shim is.
+ *
+ * The paths behind the words are placeOwnedPaths', which is the list a sweep actually walks. */
+export const PLACE_INSTALL = {
+  /** Where wsp's own files land under that login's home, and what they weigh there. */
+  folder: "~/.wsp",
+  weight: "about 40 MB",
+  /** Whose service manager holds the agent up: that login's own, never the system's, so nothing here needs root. */
+  service: "a user service",
+  /** The three things a sweep takes off again, in the order placeOwnedPaths walks them and in the grammar Remove
+   * says them: the unit that holds the agent up, the files under wsp's own folder, and the command beside them.
+   * The Add lines name the same three in their own grammar, so a fourth thing landing on a box cannot show on one
+   * screen and not the other. */
+  taken: {
+    service: "the agent's service",
+    files: "wsp's own files under that login's home",
+    opener: "the command beside them that opens sign-in pages in your browser",
+  },
+  /** What that command does, as its own sentence for a screen that lists what lands rather than what comes off. */
+  openerLine: "Sign-in pages started on that computer open in your browser here.",
+  /** What Docker on that computer ends up holding, and when. The size is the image's own, where this host has
+   * built one; a host with none yet says the sentence without a figure rather than a figure it is guessing. */
+  imageCopy: (size: string | undefined): string =>
+    `Your image${size === undefined ? "" : ` (${size})`} is copied into Docker there the first time a workspace is created. Remove takes all of it off again.`,
+} as const;
+
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
 export const PLACES_WORDS = {
   section: "Where agents run",
@@ -2989,7 +3018,7 @@ export const PLACES_WORDS = {
     leaveLine: PLACE_LEAVE_LINE,
     /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
      * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. */
-    leaveTakes: "It takes off the agent's service, wsp's own files under that login's home, and the browser shim beside it. Your work folder stays, and so do any copies of your image in Docker there.",
+    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and so do any copies of your image in Docker there.`,
   },
 } as const;
 

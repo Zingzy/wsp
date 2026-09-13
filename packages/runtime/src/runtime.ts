@@ -792,6 +792,9 @@ export interface RuntimeOptions {
   /** How long a computer has to dial back after its own join before an install gives up on it; the door's own wait
    * unless a test shortens it. */
   placeJoinWaitMs?: number;
+  /** The same for one dial of a computer, which the door bounds itself rather than leaving to whatever road the
+   * dial takes. */
+  placeDialWaitMs?: number;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
@@ -2309,6 +2312,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       now: () => clock.now(),
       onStage: event => bus.emit(event),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
+      ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
       recording: {
         // Every one of these three reads the live records, so each waits on the one hydration every other road
         // waits on: a place that dials a host nothing has asked a verb of yet would otherwise find no records at all.

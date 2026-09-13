@@ -15,12 +15,13 @@
 // has-aria-expanded for exactly this.
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import { Fragment, useCallback, useEffect, useState } from "react";
-import { PLACES_WORDS, offlineFor, workspaceStateOf, workspaceWord, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { PLACES_WORDS, absentRoad, awayMsOf, lastKnown, offlineFor, workspaceStateOf, workspaceWord, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { TableCell, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
+import { TryNowButton, useDialPlace } from "./AbsentRoad.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
@@ -165,16 +166,35 @@ function PlaceActions({ place, onRemove, inMenu = true }: { place: PlaceView; on
   );
 }
 
-/** What the host knows about one computer, under its row: what it is, the workspaces standing on it, when it
- * joined and when it last answered. Only facts the host carries are rows; the ssh login and the image copy this
- * computer holds are drawn nowhere here, since nothing on the wire says either yet. */
+/** What the host knows about one computer, under its row: where it expects that computer, what it is, the
+ * workspaces standing on it, when it joined and when it last answered, with how long the last dial of it took.
+ * Only facts the host carries are rows; the image copy this computer holds is drawn nowhere here, since nothing
+ * on the wire says it yet. */
 function PlaceDetail({ place, holding, now, onRemove }: { place: PlaceView; holding: PlaceHolding; now: number; onRemove: () => void }) {
+  const { dial, busy, line, held, heldWhy } = useDialPlace(place.id);
+  // How long this host has not heard from it, and null while it is holding its link: a computer that is answering
+  // reads its facts plain, since nothing about them is stale.
+  const away = place.present === true ? null : awayMsOf(place, now);
+  // A provider is no computer this host reaches: its machines are at the other end of a key, so there is no
+  // address to name, nothing that last answered and nothing to dial. The whole road reading is a computer's, and
+  // the rows, the slot and the button that read it stand or go together.
+  const road = place.kind === "computer" ? absentRoad({ name: place.name, road: place.road, awayMs: awayMsOf(place, now), dialled: place.dialled }) : null;
+  // How long the last frame that answered took, beside when it answered: the one figure that tells a road that is
+  // slow from one that is down, and the reason the row keeps what the button got.
+  const took = place.dialled?.answered === true && place.dialled.roundTripMs !== undefined ? ` · ${place.dialled.roundTripMs} ms` : "";
   const rows: { k: string; label: string; value: string }[] = [
-    ...(place.os === undefined ? [] : [{ k: "system", label: WHERE_WORDS.system, value: place.docker === true ? `${place.os} · docker` : place.os }]),
+    ...(road === null || road.address === null ? [] : [{ k: "address", label: WHERE_WORDS.address, value: road.address }]),
+    // Marked while the computer is not answering, the way the pane's OS row is: a person who cannot tell which of
+    // two screens is stale is the whole of what this row was reported for.
+    ...(place.os === undefined
+      ? []
+      : [{ k: "system", label: WHERE_WORDS.system, value: lastKnown(place.docker === true ? `${place.os} · docker` : place.os, away) }]),
     ...(place.agents === undefined || place.agents.length === 0 ? [] : [{ k: "agents", label: WHERE_WORDS.agents, value: place.agents.join(", ") }]),
     { k: "workspaces", label: PLACES_WORDS.columns[3]!, value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`).join(", ") },
     ...(place.joinedAt === undefined ? [] : [{ k: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.joinedAt))) }]),
-    ...(place.lastSeenAt === undefined ? [] : [{ k: "answered", label: WHERE_WORDS.answered, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.lastSeenAt))) }]),
+    // When it last answered is the road reading's, not a second span worked out here: the pane says the same thing
+    // in its sentence and the two may not date one silence differently.
+    ...(road === null ? [] : [{ k: "answered", label: WHERE_WORDS.answered, value: `${road.answered}${took}` }]),
   ];
   return (
     <TableRow data-k="place-detail" data-place={place.id} className="hover:bg-transparent">
@@ -188,7 +208,15 @@ function PlaceDetail({ place, holding, now, onRemove }: { place: PlaceView; hold
               </span>
             </div>
           ))}
+          {/* Wrapped, not cut: the cell it sits in is nowrap for its fact columns, and a refusal inheriting that
+              pushed the table past the card (640 against 622) and clipped the half that says what happened. */}
+          {road === null || (line ?? road.refused ?? heldWhy) === null ? null : (
+            <p className="whitespace-normal break-words text-[11px] leading-relaxed text-muted-foreground" data-k="dialled">
+              {line ?? road.refused ?? heldWhy}
+            </p>
+          )}
           <div className="flex gap-2 pt-1">
+            {road === null ? null : <TryNowButton busy={busy} held={held} onDial={dial} />}
             <PlaceActions place={place} onRemove={onRemove} inMenu={false} />
           </div>
         </div>

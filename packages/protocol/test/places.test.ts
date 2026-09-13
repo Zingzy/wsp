@@ -138,7 +138,8 @@ describe("the steps of an install on a computer over ssh", () => {
   it("says a step in the app's sheet as that sheet says it, a done one as the state it reached, and takes the terminal's word for the rest", () => {
     expect(placeAddSheetWord("connect", "running")).toBe(PLACE_ADD_WORDS.connect);
     expect(placeAddSheetWord("connect", "done")).toBe(PLACE_ADD_WORDS.connect);
-    expect(placeAddSheetWord("service", "running")).toBe("starting the agent under systemd");
+    expect(placeAddSheetWord("wsp", "running")).toBe("installing wsp under ~/.wsp");
+    expect(placeAddSheetWord("service", "running")).toBe("starting the agent as a user service");
     expect(placeAddSheetWord("join", "running")).toBe("waiting for it to connect to this Mac");
     // A line under a check reading as the wait it was in is the wrong word for a step that is over.
     expect(placeAddSheetWord("join", "done")).toBe("connected to this Mac");

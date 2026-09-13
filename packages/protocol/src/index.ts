@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
+import { openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2196,7 +2196,8 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
  * not be one, so the words above stay as they are. `done` is read once a step is finished, where a line under a
  * check would otherwise say the wait it was in rather than the state it reached. */
 export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
-  service: { word: "starting the agent under systemd" },
+  wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
+  service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
   join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
 };
 
@@ -2219,6 +2220,26 @@ export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
 export const PlaceKind = z.enum(["computer", "provider"]);
 export type PlaceKind = z.infer<typeof PlaceKind>;
+
+/** How a computer this host holds is reached, off the road it was added on. `ssh` is the login the host logs in
+ * as, which is also what a person types in their own terminal; `from` is where its last link dialled in from. A
+ * row with neither is a computer that joined with a code and has never linked. */
+export const PlaceRoad = z.object({
+  ssh: z.string().max(300).optional(),
+  from: z.string().max(300).optional(),
+});
+export type PlaceRoad = z.infer<typeof PlaceRoad>;
+
+/** What one dial of a computer came to: when it was dialled, whether anything answered, how long the frame that
+ * answered took, and what the road said when nothing did (ssh's own line on the ssh road). The one shape the
+ * answer is written in, so the button that asks and the row that keeps it read one thing. */
+export const PlaceDialled = z.object({
+  at: z.string(),
+  answered: z.boolean(),
+  roundTripMs: z.number().int().nonnegative().optional(),
+  said: z.string().max(2000).optional(),
+});
+export type PlaceDialled = z.infer<typeof PlaceDialled>;
 
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
@@ -2249,8 +2270,31 @@ export const PlaceView = z.object({
    * on a Docker here is the provider row's. The one fact wsp new reads to decide which road a place takes, so no
    * line outside this list switches on a place's kind. */
   takesForks: z.boolean().optional(),
+  /** Where the host expects that computer: the ssh login it was installed over, and the address its last link
+   * dialled in from. A computer joined by typing a code has no login here, so the address is all there is. */
+  road: PlaceRoad.optional(),
+  /** The folder a turn there starts in and how long that computer had been up, as it last reported them, and when
+   * that report was taken. Kept on the row so a computer that stopped answering reads what it last was rather than
+   * nothing at all. The stamp is the uptime's: it grows while the computer is up, so it is dated by the report it
+   * was read in and not by the last frame this host saw, which can be hours later. */
+  home: z.string().optional(),
+  uptimeMs: z.number().int().nonnegative().optional(),
+  reportedAt: z.string().optional(),
+  /** What the last dial of this computer got. Kept on the row, so the answer stands after the window is closed
+   * and opened again rather than living only in the button that asked. */
+  dialled: PlaceDialled.optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
+
+/** What one dial of a computer answers: what came back, the sentence the slot that asked says it in, and the row as
+ * it now stands, since the host writes the answer on the record. The one home for the shape, so the door that
+ * answers it and the client that parses it cannot spell it two ways. */
+export const PlaceDial = z.object({
+  dialled: PlaceDialled,
+  line: z.string(),
+  place: PlaceView,
+});
+export type PlaceDial = z.infer<typeof PlaceDial>;
 
 /** The id the computer the host runs on carries in that list. It is a place like every other, and the one nothing
  * was installed on, so both sides of the wire read the same word for it. */
@@ -3210,6 +3254,9 @@ export const PlaceReport = z.object({
   /** HOME, USER, PATH and each harness's store variable, as the ssh read records them. */
   login: z.record(z.string()),
   docker: z.boolean(),
+  /** How long that computer had been up when it wrote this report. Kept on the record so a row can say what the
+   * computer last was rather than nothing while it is not answering. */
+  uptimeMs: z.number().int().nonnegative().optional(),
   daemonVersion: z.number().int().nonnegative(),
   /** The loopback port the place's own daemon bound, for the forward the panes ride. */
   daemonPort: z.number().int().min(1).max(65535).optional(),
@@ -3441,6 +3488,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
+  /** Dials one computer once, now: a frame over the link it holds, or a login over the road it was added on when
+   * it holds none. Answers a PlaceDial: what came back, the sentence to say it in, and the row with the answer
+   * written on it, so a window opened later reads the same thing. Nothing is installed and nothing is left
+   * running either way. */
+  z.object({ id: reqId, op: z.literal("places.dial"), placeId: z.string() }),
   /** Opens the door computers you own dial, when this host binds loopback alone, and answers where it is; a host
    * already bound beyond loopback answers its own port and opens nothing. Answers a PlaceDoorView. The person's
    * own road only, as every other place op is. */
@@ -4034,7 +4086,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
-export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { type AbsentComputer, type AbsentRoad, type AbsentRoadInput, absentComputer, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

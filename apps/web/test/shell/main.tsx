@@ -551,7 +551,21 @@ if (params.get("places") === "1") {
     places: [
       { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, workspaceId: "ws_a" },
       { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, docker: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
-      { id: "p_laptop", kind: "computer", name: "old-macbook", default: false, present: false, lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 353_100_000_000, workspaceId: "ws_c" },
+      // The worst row the detail draws: a computer away with a login on its record and the longest refusal ssh
+      // hands back, which is the line that used to push the table past the card it sits in.
+      {
+        id: "p_laptop",
+        kind: "computer",
+        name: "old-macbook",
+        default: false,
+        present: false,
+        lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+        shape: { cpu: 10, memMb: 16384 },
+        diskFreeBytes: 353_100_000_000,
+        workspaceId: "ws_c",
+        road: { ssh: "root@65.21.4.12" },
+        dialled: { at: new Date(Date.now() - 20 * 60_000).toISOString(), answered: false, said: "ssh: connect to host 65.21.4.12 port 22: Connection refused" },
+      },
       { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, workspaceId: "ws_d", rateUsdPerHour: 0.018 },
     ],
   });

@@ -478,6 +478,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
               return;
             }
+            case "places.dial": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
+              return;
+            }
             case "places.door": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACE_DOOR_REFUSAL });
