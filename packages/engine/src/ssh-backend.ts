@@ -79,6 +79,13 @@ export function parseSshAddress(address: string, opts: { port?: number; keyPath?
   return { user, host, port, ...(opts.keyPath !== undefined ? { keyPath: opts.keyPath } : {}) };
 }
 
+/** One written form of an ssh dial for a person to read on a row and type back into a terminal: the login, and the
+ * port only where it is not ssh's own. parseSshAddress reads it back, so the word a row shows is the word a later
+ * dial of that machine is built from. */
+export function sshLoginWord(reach: SshReach): string {
+  return reach.port === SSH_DEFAULT_PORT ? `${reach.user}@${reach.host}` : `${reach.user}@${reach.host}:${reach.port}`;
+}
+
 /** What a machine reached over ssh is called when the person named no name: the host's own first label, and the
  * whole address where cutting at a dot would leave a number (an IPv4 address) or there is nothing to cut. */
 export function sshMachineName(reach: SshReach): string {
@@ -277,6 +284,28 @@ function clientWords(text: string): string {
     .join("\n")
     .trim();
 }
+
+/** What ssh itself said when a login would not stand: the client's own lines with its debug chatter dropped and
+ * nothing of wsp's over them. A person reading why a computer refused them needs ssh's sentence, the one they
+ * would have seen in their own terminal; a wrapper naming the reader that asked is the reader talking about
+ * itself. Capped because it lands in a slot two lines high. */
+export function sshRefusalLine(said: { stderr: string; exitCode: number }, reach: SshReach): string {
+  const lines = clientWords(said.stderr);
+  return lines === "" ? `${reach.user}@${reach.host} refused the login over ssh (exit ${said.exitCode})` : lines.slice(-300);
+}
+
+/** One dial of a machine over ssh and nothing else: a command every unix runs, so what comes back is the
+ * connection's own verdict and not a reading of the machine. Answers when the login stands; throws ssh's own line
+ * when it does not. Nothing is installed and nothing is left running. */
+export async function sshDial(reach: SshReach, transport: SshTransport = sshClient): Promise<void> {
+  const said = await transport(reach, "exit 0", { timeoutMs: SSH_DIAL_MS });
+  if (said.exitCode === 0) return;
+  throw new Error(sshRefusalLine(said, reach));
+}
+
+/** How long one dial waits: the client's own connect timeout and a moment for the login, since a person is
+ * watching the button they pressed. */
+export const SSH_DIAL_MS = 15_000;
 
 /** The store variable each harness reads, by name, as the catalog gives them. The shape rule is what keeps a
  * catalog entry out of the read as shell: the name is interpolated into a printf inside the login shell, so a name

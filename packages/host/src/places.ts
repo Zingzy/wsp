@@ -47,8 +47,8 @@ import {
   usageRefusal,
   wsUrlOf,
 } from "@wsp/protocol";
-import { SshBackend, checkProviderKey, keyCheckLine, parseSshAddress, sshDialsThisComputer, sshMachineName, type KeyCheck, type MachineBackend } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
+import { SshBackend, checkProviderKey, keyCheckLine, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { daemonBinaryHere } from "./assets.js";
@@ -118,6 +118,7 @@ export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
     install: placeInstaller(),
+    dial: placeDialler(),
     provider: () => {
       const module = providerModule(env);
       // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
@@ -285,7 +286,22 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
       ...(deps.daemonDir !== undefined ? { daemonDir: deps.daemonDir } : {}),
       ...(deps.cliDir !== undefined ? { cliDir: deps.cliDir } : {}),
     });
-    return { name, ...(hostKey !== undefined ? { hostKey } : {}) };
+    return { name, ssh: sshLoginWord(reach), ...(reach.keyPath !== undefined ? { sshKeyPath: reach.keyPath } : {}), ...(hostKey !== undefined ? { hostKey } : {}) };
+  };
+}
+
+/** One login over ssh and nothing else: the road the app's Try now takes on a computer whose agent has stopped
+ * dialling in. It reads what that computer says about itself, which is one connection's worth of printf, and it
+ * installs nothing and leaves nothing running. ssh's own refusal is what a person reads when it will not take.
+ *
+ * The key file the add was given is carried here: every ssh child this host starts runs with BatchMode on, so a
+ * dial without it would be refused for the publickey on a computer that is switched on and answering. What a
+ * refusal reads as is ssh's own line and not a reading of the machine wrapped around it: a person needs the
+ * sentence their own terminal would have shown them. */
+export function placeDialler(deps: { transport?: SshTransport } = {}): PlaceDialler {
+  return async login => {
+    const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
+    await sshDial(reach, ...(deps.transport === undefined ? [] : [deps.transport]));
   };
 }
 

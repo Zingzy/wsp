@@ -7,7 +7,7 @@
 
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
-import { homedir, arch as osArch, platform, release, type as osType, userInfo } from "node:os";
+import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, parsePlaceFile, placeFileText, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
@@ -139,6 +139,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     login,
     // Whether this computer can fork at all, which is the one thing the host cannot read from over the link.
     docker: opts.docker ?? onPath("docker", env.PATH) !== undefined,
+    uptimeMs: Math.max(0, Math.round(upSeconds() * 1000)),
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
     // Off the login PATH rather than this process's: a service starts with almost none, and what the person can
