@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 [workspace]
 resolver = "2"
-members = ["crates/wsp-frames", "crates/wsp-runtime", "crates/wsp-daemon", "crates/wsp-daemon-bin"]
+members = ["crates/wsp-frames", "crates/wsp-runtime", "crates/wsp-daemon", "crates/wsp-guest", "crates/wsp-daemon-bin"]
 
 [workspace.package]
 version = "0.1.0"

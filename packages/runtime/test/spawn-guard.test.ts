@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend, type MachineBackend } from "@wsp/engine";
 import {
   AGENTS_ON,
-  GUEST_WSP_BIN,
+  GUEST_DAEMON_BIN,
   HOST_TOKEN_ENV,
   HOST_URL_ENV,
   MCP_SERVER_NAME,
@@ -241,8 +241,9 @@ describe("agents spawning agents", () => {
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("http://host.docker.internal:4700");
     expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
-    // The tools dial the same address the launch carries, since both come off the one answer.
-    expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]?.args).toEqual([GUEST_WSP_BIN, "mcp", "--host", "http://host.docker.internal:4700"]);
+    // The tools take no address at all: the binary opens a session on the machine's own daemon, which the host is
+    // already holding the socket to, so nothing on this line says where this host answers.
+    expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: GUEST_DAEMON_BIN, args: ["wsp", "mcp"] });
     held.end(0);
     await handle.finished;
     await rt.close();
@@ -335,7 +336,10 @@ describe("agents spawning agents", () => {
     const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "node", args: [GUEST_WSP_BIN, "mcp", "--host", "http://10.0.0.2:4700"] });
+    expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: GUEST_DAEMON_BIN, args: ["wsp", "mcp"] });
+    // The line carries no host word, and the launch still carries the pair a turn reads its host and token off.
+    expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]?.args).not.toContain("--host");
+    expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("http://10.0.0.2:4700");
     held.end(0);
     await handle.finished;
     await rt.close();

@@ -303,6 +303,7 @@ export function renderMachineContext(input: ContextInput): string {
   if (!probe.overlay) machine.push(`- Containers do not run here: the kernel has no overlayfs${containers.length === 0 ? ", and Docker and Podman are not installed" : ""}. Install services natively.`);
   else if (containers.length === 0) machine.push("- Docker and Podman are not installed.");
   machine.push(`- wsp-daemon listens on 0.0.0.0:${DAEMON_PORT} with its own token. Do not stop it and do not bind port ${DAEMON_PORT}.`);
+  machine.push("- wsp on this machine's PATH drives the person's host as this thread; wsp --help agent lists its verbs.");
   machine.push("- A background process started with a plain & inside a tool call dies when that tool call ends.");
   machine.push(TURN_FACT);
   machine.push(cdFact(input.agent));

@@ -2125,13 +2125,17 @@ function mcpPage(install: boolean): string {
  * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
  * environment the verbs run with, this process's for a real command line and its own for a test. `start` is what
  * brings a host up when none serves the state file: the one built from `run` unless a caller says otherwise, and
- * `false` for a caller that wants a line with no host to refuse rather than start one. */
+ * `false` for a caller that wants a line with no host to refuse rather than start one. `caller` is where the line was
+ * typed: the folder, which a thread with no workspace is placed by, and whether that place is somewhere other than
+ * this computer, which is what every rule that would read a path here reads. This process's own folder and here by
+ * default; a line typed inside a machine says both. */
 export async function cli(
   argv: string[],
   io: CliIO = terminalIO(),
   run: RunningWsp = runningWsp(),
   env: Readonly<Record<string, string | undefined>> = process.env,
   start: HostStarter | false = starterFor(run, env),
+  caller: { cwd?: string; elsewhere?: boolean } = {},
 ): Promise<number> {
   const starts = start === false ? {} : { start };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
@@ -2143,7 +2147,7 @@ export async function cli(
   const verb = findVerb(rest);
   if (verb !== undefined) {
     const words = verb.name.split(" ");
-    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, ...starts });
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
   }
   if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
   let values: SharedFlags;

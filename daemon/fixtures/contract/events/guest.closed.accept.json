@@ -1,0 +1,11 @@
+[
+  {
+    "type": "guest.closed",
+    "session": "g1"
+  },
+  {
+    "type": "guest.closed",
+    "session": "g1",
+    "error": "the host holds no such session"
+  }
+]

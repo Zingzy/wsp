@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 32;
+pub const DAEMON_VERSION: u32 = 33;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -12,6 +12,10 @@ pub const DEFAULT_MANIFEST_PATH: &str = "/root/.wsp/manifest.json";
 pub const DEFAULT_RUN_DIR: &str = "/root/.wsp/run";
 pub const DEFAULT_LOG_DIR: &str = "/root/.wsp/logs";
 pub const GUEST_DAEMON_DIR: &str = "/root/wsp-daemon";
+/// The binary in that folder, which is the wsp a process inside a machine runs, and the shim on its PATH that
+/// runs it. Written by the host's deploy; here so the two halves of the contract cannot spell them apart.
+pub const GUEST_DAEMON_BIN: &str = "/root/wsp-daemon/wsp-daemon";
+pub const GUEST_WSP_PATH: &str = "/usr/local/bin/wsp";
 pub const DAEMON_ROOTS_PATH: &str = "/root/.wsp/roots";
 pub const OPEN_SHIM_PATH: &str = "/usr/local/bin/wsp-open";
 pub const XDG_OPEN_PATH: &str = "/usr/local/bin/xdg-open";
@@ -44,6 +48,16 @@ pub const PID_MAX: u32 = 4_194_304;
 /// The most one POST /open body may carry.
 pub const OPEN_BODY_CAP: usize = 8 * 1024;
 pub const OPEN_URL_MAX: usize = 8192;
+
+/// One guest message's JSON: a thread's whole transcript is the largest thing that rides this road.
+pub const GUEST_MESSAGE_CAP_BYTES: usize = 4 * 1024 * 1024;
+/// Frames one guest session may hold while no watcher is attached; past it the session is closed to the guest.
+pub const GUEST_QUEUE_CAP_FRAMES: usize = 256;
+/// The thread token and the turn token a guest session opens with; the daemon never reads either.
+pub const GUEST_TOKEN_MAX: usize = 512;
+/// Words in one guest command line, and the length of the folder it runs in.
+pub const GUEST_ARGV_MAX: usize = 256;
+pub const GUEST_CWD_MAX: usize = 4096;
 
 pub const PLACE_LINK_NONCE_BYTES: usize = 32;
 

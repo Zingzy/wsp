@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { boxRoomLines, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_BIN, GUEST_DAEMON_DIR, GUEST_WSP_PATH, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -65,6 +65,11 @@ export interface DaemonPlace {
   preflight: readonly string[];
   /** Where a run's script, streams and exit code live on this machine. */
   runDir: string;
+  /** Which wsp a process on this machine runs: the shim to the daemon binary, which carries a line to the host over
+   * this machine's own daemon, or the node command bundled beside it, which dials a host of its own. A fork takes
+   * the shim and needs no node; a computer somebody owns keeps the bundle until the command line story there says
+   * what runs on it. */
+  wsp: "shim" | "bundle";
   /** Where the browser shim and its xdg-open name go; a folder already on the machine's own PATH. */
   binDir: string;
   openShim: string;
@@ -296,6 +301,7 @@ export const CLOUD_PLACE: DaemonPlace = {
   root: "/root",
   make: [GUEST_DIR, "/root/inbox"],
   exportEnv: [EXEC_ENV],
+  wsp: "shim",
   quotePaths: false,
   tokenRoad: "script",
   preflight: [],
@@ -344,6 +350,7 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     rootsPath: at.rootsPath,
     root: login.home,
     make: [at.dir, at.inbox, at.binDir, at.unitDir],
+    wsp: "bundle",
     // A login that arrives without its own session manager's address cannot talk to its systemd at all, and every
     // line below would fail at the bus rather than at the thing it was doing.
     exportEnv: ['export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"'],
@@ -504,16 +511,20 @@ export async function stageDaemonBundle(
     cpSync(from, to);
     chmodSync(to, 0o755);
   }
-  // The wsp command rides with the daemon so every machine that has one has wsp under the place's own folder, with
-  // no install of its own and nothing on the image: it is what a turn's own agent runs to reach back into this host.
-  // Copied by the asset's own rule, so what a fork gets is what the packed command carries and nothing more.
-  copyAsset("cli", cliDir, join(stageDir, "wsp"));
+  // The wsp of this place: a fork's is two lines onto the binary beside it, and a machine somebody owns carries the
+  // packed node command, copied by the asset's own rule so what lands is what that package holds and nothing more.
+  if (place.wsp === "shim") writeFileSync(join(stageDir, "wsp"), guestWspShim(), { mode: 0o755 });
+  else copyAsset("cli", cliDir, join(stageDir, "wsp"));
   writeFileSync(join(stageDir, "wsp-open"), openShimScript(place), { mode: 0o755 });
 }
 
 /** The least node the wsp command in the bundle runs on, which is the one thing a machine somebody owns still has
- * to carry: the daemon beside it is a static binary and asks for nothing. A machine wsp built carries the floor's. */
+ * to carry: the daemon beside it is a static binary and asks for nothing. */
 export const WSP_COMMAND_NODE_MAJOR = 22;
+
+/** The whole of the wsp a fork carries: two lines handing the line to the binary beside them, which opens a session
+ * on this machine's own daemon. Written into the bundle and installed on the machine's PATH by the deploy. */
+export const guestWspShim = (): string => `#!/bin/sh\nexec ${GUEST_DAEMON_BIN} wsp "$@"\n`;
 
 /** How a node is asked which major it is. Not read into a variable, since `set -e` ends a script on an assignment
  * whose substitution failed and exempts one inside a test. */
@@ -676,6 +687,9 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs
     // only when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
     `install -m 0755 ${sh(place, `${place.dir}/wsp-open`)} ${sh(place, place.openShim)}`,
+    // The wsp on this machine's PATH, where the place carries the shim: beside wsp-open, in the same folder and
+    // under the same rule, so a fork needs nothing on its image to answer the word.
+    ...(place.wsp === "shim" ? [`install -m 0755 ${sh(place, `${place.dir}/wsp`)} ${sh(place, GUEST_WSP_PATH)}`] : []),
     `ln -sfn ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
     `mkdir -p ${sh(place, profileDir)} && printf 'export BROWSER=%s\\nunset DISPLAY\\n' ${sh(place, place.openShim)} > ${sh(place, place.profileFile)}`,
     // A place whose profile file is the person's own folder is read only if their login file says so, and their
@@ -711,7 +725,7 @@ export function removeDaemonScript(place: DaemonPlace): string {
     `rm -f ${sh(place, place.unitPath)}`,
     `${systemctl} daemon-reload 2>/dev/null || true`,
     `rm -rf ${daemonOwnedPaths(place).map(path => sh(place, path)).join(" ")}`,
-    `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
+    `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}${place.wsp === "shim" ? ` ${sh(place, GUEST_WSP_PATH)}` : ""}`,
     ...(place.profileSource === undefined
       ? []
       : [

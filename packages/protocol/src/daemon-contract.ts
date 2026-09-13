@@ -46,6 +46,10 @@ export const PROC_CAP = 1000;
 /** Linux pid_max ceiling: above it proc.inspect and proc.kill refuse alike as bad-request. */
 export const PID_MAX = 4_194_304;
 
+/** One guest message's JSON: a thread's whole transcript is the largest thing that rides the guest road. */
+export const GUEST_MESSAGE_CAP_BYTES = 4 * 1024 * 1024;
+/** Frames one guest session may hold while no watcher is attached; past it the session is closed to the guest. */
+export const GUEST_QUEUE_CAP_FRAMES = 256;
 /** The four sentences a socket is closed 4401 with before its auth frame passes. */
 export const DAEMON_TOKEN_REFUSED = "daemon token refused; the host holds the current one";
 export const DAEMON_FIRST_FRAME_NOT_AUTH = "the first frame must be auth";
@@ -86,3 +90,10 @@ export const dialFailedLine = (url: string, error: string): string => `${url} co
 export const notAFrameLine = (url: string): string => `${url} sent something that is not a frame`;
 export const authUnreadableLine = (url: string, error: string): string => `${url} answered place.auth with something this computer cannot read: ${error}`;
 export const hostRefusedLine = (url: string, refusal: string): string => `${url}: ${refusal}`;
+
+/** What a socket that never asked to watch guest sessions is told when it answers or ends one. */
+export const GUEST_NOT_WATCHER = "only the socket that sent guest.watch may answer or close a guest session";
+/** Why a session with nobody reading it is ended: the host has been away past the queue's cap. */
+export const GUEST_QUEUE_FULL = "the host has not read this session for too long";
+/** What a guest process prints when nothing answers on its own machine's daemon port. */
+export const guestNoDaemonLine = (port: number | string): string => `this machine's wsp daemon is not answering on 127.0.0.1:${port}`;

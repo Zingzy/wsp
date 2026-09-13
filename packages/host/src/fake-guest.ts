@@ -27,11 +27,10 @@
 
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
-import { GUEST_WSP_BIN, shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
+import { GUEST_DAEMON_BIN, shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
 import { LocalDaemon } from "./local-daemon.js";
 import { onPath, runningWsp, thisComputersPath, wspCommand } from "./mcp-install.js";
 
@@ -91,17 +90,16 @@ const guestCommands = (at: string): Record<string, string> => ({
   ...guestAgents(),
 });
 
-/** The wsp command where a machine's own bundle keeps it. A turn on a workspace whose agents may spawn is launched
- * with the wsp tools run from that path, and a stand-in machine carries no bundle, so its agent met a file that was
- * not there and had no tools at all. One line loading this computer's own command, which serves the host those
- * tools would dial anyway. Nothing where this wsp is no script on this computer (an npx cache, a packaged binary),
- * since then there is no file to load. */
+/** The daemon binary where a machine's own deploy keeps it, which is the wsp a turn on a fork runs: the launch
+ * gives it the word wsp and the rest of the line, and the real binary carries that line to the host over the
+ * machine's own daemon. A stand-in machine has no daemon of that kind, so this drops the word and runs this
+ * computer's own wsp against the host the launch named, which is the host those tools would have reached anyway. */
 function stageWsp(at: string): void {
-  const script = wspCommand(runningWsp()).args.at(-1);
-  if (script === undefined || !script.endsWith(".js")) return;
-  const path = guestPath(at, GUEST_WSP_BIN);
+  const wsp = wspCommand(runningWsp());
+  const path = guestPath(at, GUEST_DAEMON_BIN);
+  const line = [wsp.command, ...wsp.args].map(word => shellQuote(word)).join(" ");
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `import ${JSON.stringify(pathToFileURL(script).href)};\n`);
+  writeFileSync(path, `#!/bin/sh\n[ "$1" = wsp ] && shift\nexec ${line} "$@" --host "$WSP_HOST_URL"\n`, { mode: 0o755 });
 }
 
 /** The agents on this machine: the ones this computer has, each run where it stands here. A stand-in machine forks

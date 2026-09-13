@@ -192,7 +192,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { GUEST_WSP_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { GUEST_DAEMON_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1753,10 +1753,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
     relayed: (machineId: string | undefined) => boolean;
     /** How wsp itself is run on this kind's machine, for the tools a turn's own agent is given: a fork runs the
-     * bundle that rides in the daemon deploy, this computer runs the command the host itself was started as, and a
-     * kind wsp puts nothing on answers none, which leaves that kind's turns without the tools. The address the
-     * host is reached at goes on the end by the one caller, so no kind carries a copy of that rule. */
-    wspMcp: (entry: LiveWorkspace) => McpServerSpec | undefined;
+     * binary the daemon deploy lands, this computer runs the command the host itself was started as, and a kind wsp
+     * puts nothing on answers none, which leaves that kind's turns without the tools. The address a turn reaches
+     * this host at is handed in, since a command that dials needs it on its line and one that rides the machine's
+     * own daemon does not. */
+    wspMcp: (entry: LiveWorkspace, hostUrl: string) => McpServerSpec | undefined;
     /** Where a turn on this workspace's machine dials this host, which the kind answers because the address is a
      * fact about its machines and not about this computer's network cards: a container reaches the computer its
      * daemon runs on through the gateway it was given a name for, a machine somewhere else reaches this host at
@@ -1955,7 +1956,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       homeDir: () => GUEST_HOME,
       env: (_entry, id) => cloudEnv(id),
       relayed: () => true,
-      wspMcp: () => ({ command: "node", args: [GUEST_WSP_BIN, "mcp"] }),
+      // The binary the deploy lands is the wsp on a fork: it dials no host of its own, it opens a session on this
+      // machine's daemon and the daemon carries it up the socket this host already holds. So no address goes on the
+      // end of this line, where every other kind's still does.
+      wspMcp: () => ({ command: GUEST_DAEMON_BIN, args: ["wsp", "mcp"] }),
       // A machine whose backend knows a road back to this computer takes it, whatever this host advertises: a
       // container on this computer's own daemon dials the gateway, where a LAN address of this computer may reach
       // nothing from inside it. Only where the host bound the wildcard, which is what a port here says: a host on
@@ -1986,7 +1990,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             homeDir: () => local.homeDir,
             env: () => local.env(),
             relayed: () => false,
-            wspMcp: () => opts.agents?.wspMcp,
+            // This computer's own command, told which host to drive: a thread here runs the node wsp, which dials
+            // rather than riding a machine's daemon. No thread gets this today, since the kind table lets no agent
+            // on this computer drive this host; it is the kind's own answer for the day that changes.
+            wspMcp: (_entry, hostUrl) => {
+              const wsp = opts.agents?.wspMcp;
+              return wsp === undefined ? undefined : { ...wsp, args: [...wsp.args, "--host", hostUrl] };
+            },
             // A turn here runs on the computer the host runs on, not on a machine dialling in, and the kind table
             // lets no agent on it drive anything, so it is told no address and handed no token.
             hostUrl: () => undefined,
@@ -2254,7 +2264,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const agentsReach = (entry: LiveWorkspace): { url: string; wsp?: McpServerSpec } | undefined => {
     const url = opts.agents?.reach?.advertise ?? moduleOf(entry.record.kind).hostUrl(entry);
     if (url === undefined || url === "") return undefined;
-    const wsp = moduleOf(entry.record.kind).wspMcp(entry);
+    const wsp = moduleOf(entry.record.kind).wspMcp(entry, url);
     return { url, ...(wsp !== undefined ? { wsp } : {}) };
   };
   /** The one door every act a thread's own token asks for goes through: the switch on the workspace that thread
@@ -5700,7 +5710,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // refused where a caller named servers and left alone here, since the person asked for a thread, not for tools.
       const mcpServers =
         scoped !== undefined && reach?.wsp !== undefined && adapter.mcpServers === true
-          ? { [MCP_SERVER_NAME]: { command: reach.wsp.command, args: [...reach.wsp.args, "--host", reach.url] }, ...o.mcpServers }
+          ? { [MCP_SERVER_NAME]: reach.wsp, ...o.mcpServers }
           : o.mcpServers;
       const records = (o.attachments ?? []).map(imageRecord);
       const blocked = imagesBlocked(records, adapter.attachments, harness) ?? mcpServersBlocked(o.mcpServers, adapter.mcpServers, harness);

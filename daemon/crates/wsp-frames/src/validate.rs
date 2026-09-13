@@ -39,6 +39,30 @@ where
     Ok(list)
 }
 
+/// A string that may be absent, under the same cap when it is there.
+pub(crate) fn bounded_opt<'de, D, const MAX: usize>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<String>::deserialize(d)? {
+        None => Ok(None),
+        Some(s) if js_len(&s) <= MAX => Ok(Some(s)),
+        Some(s) => Err(de::Error::custom(format!("string must be at most {MAX} characters, got {}", js_len(&s)))),
+    }
+}
+
+/// A list of any strings under a cap on how many, which is what a zod array with only .max() takes.
+pub(crate) fn capped_list<'de, D, const MAX: usize>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let list = Vec::<String>::deserialize(d)?;
+    if list.len() > MAX {
+        return Err(de::Error::custom(format!("at most {MAX} entries, got {}", list.len())));
+    }
+    Ok(list)
+}
+
 pub(crate) fn non_empty_list<'de, D>(d: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
