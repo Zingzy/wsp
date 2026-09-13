@@ -54,6 +54,43 @@ describe("the daemon this computer's panes dial", () => {
     await wiring.close!();
   });
 
+  it("starts another daemon on a restart, after closing the one it was holding", async () => {
+    const closed: number[] = [];
+    let started = 0;
+    const start: LocalDaemonStart = async () => {
+      const n = ++started;
+      return {
+        road: { url: `http://127.0.0.1:${n}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" },
+        close: async () => void closed.push(n),
+      } as unknown as Awaited<ReturnType<LocalDaemonStart>>;
+    };
+    const wiring = localWiring(dir, { HOME: dir }, start);
+    expect((await wiring.daemonRoad!()).url).toBe("http://127.0.0.1:1");
+    await wiring.restartDaemon!();
+    expect(closed).toEqual([1]);
+    expect(started).toBe(2);
+    expect((await wiring.daemonRoad!()).url).toBe("http://127.0.0.1:2");
+    await wiring.close!();
+  });
+
+  it("starts one on a restart asked before any pane has dialled, which is the host whose first start failed", async () => {
+    let started = 0;
+    const start: LocalDaemonStart = async () => {
+      started++;
+      return { road: { url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }, close: async () => {} } as unknown as Awaited<ReturnType<LocalDaemonStart>>;
+    };
+    const wiring = localWiring(dir, { HOME: dir }, start);
+    await wiring.restartDaemon!();
+    expect(started).toBe(1);
+    await wiring.close!();
+  });
+
+  it("raises the reason a restart could not start one, so the button that asked says what refused it", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const wiring = localWiring(dir, { HOME: dir }, failing({ n: 0 }, "address in use"));
+    await expect(wiring.restartDaemon!()).rejects.toThrow("address in use");
+  });
+
   it("reads this computer's Live rows off the same daemon the panes dial, started for them if nothing else has", async () => {
     const detached: string[] = [];
     let started = 0;

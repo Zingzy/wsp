@@ -2,7 +2,7 @@
 // The terminal pane's state from (phase, reach, socket): what it says over the frame, in the empty state, and to a key.
 import { describe, expect, it } from "vitest";
 import type { DaemonLinkStatus, MachineState, ReachState, WorkspacePhase } from "@wsp/protocol";
-import { absentComputer, awayMsOf, workspaceState } from "@wsp/protocol";
+import { absentComputer, awayMsOf, ownDaemonDown, workspaceState } from "@wsp/protocol";
 import { terminalEmptyLine, terminalInputRefusal, terminalPaneHints, terminalPaneState, terminalPaneTitle, type TerminalPaneState } from "../src/adapt/index.js";
 
 const pane = (phase: WorkspacePhase, machineState: MachineState | null, reach: ReachState | null, socket: DaemonLinkStatus): TerminalPaneState =>
@@ -46,6 +46,20 @@ describe("terminalPaneState", () => {
     for (const line of [terminalPaneTitle(pane), ...terminalPaneHints(pane, null, null), terminalEmptyLine(pane), terminalInputRefusal(pane)]) {
       expect(line).not.toContain("daemon");
       expect(line).not.toContain("place:");
+    }
+  });
+
+  it("this computer's own daemon refuses in the one sentence the pane already shows, with no second line to fill the button's place", () => {
+    const absent = ownDaemonDown("this Mac");
+    const pane = { kind: "absent", absent } as const;
+    expect(terminalPaneTitle(pane)).toBe("this Mac's daemon is not running");
+    // The button is what happens next, so nothing under the title says it in words the button already says.
+    expect(terminalPaneHints(pane, null, null)).toEqual([]);
+    expect(terminalEmptyLine(pane)).toBe("this Mac's daemon is not running");
+    expect(terminalInputRefusal(pane)).toBe("Typing is refused: this Mac's daemon is not running");
+    for (const line of [terminalPaneTitle(pane), terminalEmptyLine(pane), terminalInputRefusal(pane)]) {
+      expect(line).not.toContain("Unreachable");
+      expect(line).not.toContain("terminal:");
     }
   });
 

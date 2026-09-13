@@ -998,7 +998,15 @@ describe("where a workspace runs", () => {
     // The status the host pushes for a machine on a computer it cannot ask anything of: running at the provider,
     // answering nothing, with the one sentence as its reason.
     api.watchStatuses = vi.fn(async () => [
-      { ...status(on), kind: "place" as const, size: { cpu: 4, memMb: 8192 }, rateUsdPerHour: 0, reach: { state: "unreachable" as const }, reason: absentComputer("old-laptop", null).sentence },
+      {
+        ...status(on),
+        kind: "place" as const,
+        size: { cpu: 4, memMb: 8192 },
+        rateUsdPerHour: 0,
+        reach: { state: "unreachable" as const },
+        reason: absentComputer("old-laptop", null).sentence,
+        facts: { os: "Ubuntu 24.04.3 LTS", uptimeMs: 26 * 3_600_000, folder: "/home/dev" },
+      },
     ]);
     useStore.getState().bind(api);
     render(<MachineSurface workspaceId="ws_p" />);
@@ -1011,6 +1019,10 @@ describe("where a workspace runs", () => {
     expect(fact("reason")).toBe(sentence);
     expect(document.body.textContent).not.toContain(placeMachineId("p_1"));
     expect(document.body.textContent).not.toContain("no daemon on it");
+    // What it last reported is the only thing known about it: a computer this host waits for keeps its rows, and
+    // only the one whose daemon this host started drops them, since there the button is what fills them again.
+    expect(fact("os")).toBe("Ubuntu 24.04.3 LTS");
+    expect(fact("folder")).toBe("/home/dev");
   });
 
   /** A workspace that is a computer somebody joined, and the row this host holds for that computer, as they stand
@@ -1689,6 +1701,39 @@ describe("this computer as a workspace", () => {
     cleanup();
     await mount([view("ws_a", "api")]);
     expect(fact("cpu")).toBe("unreachable");
+  });
+
+  it("says its own daemon is not running, never Unreachable, and drops the rows that daemon would have filled", async () => {
+    const api = fakeApi([MAC]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "unreachable" as const } }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId={MAC.id} />);
+    await waitFor(() => expect(fact("state")).toBe("No daemon"));
+    expect(document.body.textContent).not.toContain("Unreachable");
+    // The system, the uptime and the folder are read over that daemon: three rows reading pending wait on nothing.
+    for (const k of ["os", "uptime", "folder"]) expect(document.querySelector(`[data-k="${k}"]`)).toBeNull();
+    // The Live rows say which part is down and offer the start, in place of unreachable in all three slots.
+    expect(document.querySelector('[data-k="daemon-down"]')!.textContent).toContain("this Mac's daemon is not running");
+    expect(document.querySelector('[data-live-row="cpu"]')).toBeNull();
+  });
+
+  it("presses the host for another daemon from the Live rows, and says what refused it under the button", async () => {
+    const api = fakeApi([MAC]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(MAC), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "no-daemon" as const } }]);
+    const asked: string[] = [];
+    api.restartDaemon = vi.fn(async (id: string) => {
+      asked.push(id);
+      throw new Error("address in use");
+    });
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId={MAC.id} />);
+    await waitFor(() => expect(document.querySelector('[data-k="start-daemon"]')).not.toBeNull());
+    expect(document.querySelector('[data-k="start-daemon"]')!.textContent).toBe("Start it");
+    await act(async () => void fireEvent.click(document.querySelector('[data-k="start-daemon"]')!));
+    expect(asked).toEqual([MAC.id]);
+    // The host's own words end in whatever threw; what stands under the button is one written sentence.
+    await waitFor(() => expect(fact("start-daemon-refused")).toBe("No daemon started; try again."));
+    expect(document.body.textContent).not.toContain("address in use");
   });
 
   it("nothing wsp does not drive: no awake meter, no auto-nap row, no idle-window line and no usage section", async () => {

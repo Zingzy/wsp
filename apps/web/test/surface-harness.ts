@@ -58,7 +58,9 @@ export function resetSurfaces(): void {
   resetListings();
   provideDaemonWire(WS, null);
   provideDaemonHello(WS, DAEMON_HELLO);
-  useStore.setState({ workspaces: [view], selectedId: WS });
+  // Every field a surface test sets goes back, not only the list: a status or a client left behind by one test was
+  // read by the next one, which is a pane answering for a workspace the test before it set up.
+  useStore.setState({ workspaces: [view], statuses: {}, api: null, selectedId: WS });
   useRightPanelStore.setState({ byWorkspaceId: {} });
   useRootStore.setState({ byWorkspaceId: {} });
 }

@@ -12,7 +12,7 @@
 // off. The head is the shipped TableHead's own style, which is a tier above the
 // zone label over the section.
 import type { ReactNode } from "react";
-import { PLACES_WORDS, fmtBytes, fmtSize, placeWorkspacesParts, type PlaceView } from "@wsp/protocol";
+import { PLACES_WORDS, fmtBytes, fmtSize, placeWorkspacesParts, type AbsentComputer, type PlaceView } from "@wsp/protocol";
 import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
@@ -71,11 +71,11 @@ function Workspaces({ place, count, monthUsd }: { place: PlaceView; count: numbe
 /** One computer or provider. The default mark rides beside the name and the state slot is the state's, so a
  * computer that is the default and is also away says both and no column moves when either word arrives.
  * The chevron, where the row opens, comes after them. */
-export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** How many workspaces stand on this row, counted off the app's own list by placeWorkspaceCounts. */ workspaces?: number; /** What this row has taken since the first of the month, where the host has metered anything on it. */ monthUsd?: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
+export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, absent: given, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** How many workspaces stand on this row, counted off the app's own list by placeWorkspaceCounts. */ workspaces?: number; /** What this row has taken since the first of the month, where the host has metered anything on it. */ monthUsd?: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The reading for a row whose silence is not its link's: the computer the host runs on holds no link and is read off its own workspace's daemon. */ absent?: AbsentComputer | null; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
   const name = placeName(place, here);
   // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
   // too: the slot beside the name holds the one word.
-  const absent = absentOf(place, now, here);
+  const absent = given ?? absentOf(place, now, here);
   // The whole of what the cut cell says, and the sentence the state slot has no room for beside the fact columns.
   // A computer that is not answering is named by its own sentence, so the row does not say the name twice.
   const title = [absent?.sentence ?? name, place.default ? WHERE_WORDS.default : ""].filter(word => word !== "").join(" ");

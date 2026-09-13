@@ -240,6 +240,10 @@ export function workspaceStateLine(name: string, state: WorkspaceState): string 
   return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state).toLowerCase()}`;
 }
 
+/** Every word a slot beside facts can hold for a computer that is not answering, which is what lets a reader of
+ * that slot keep a closed set of words: a reading added here is a word added there, in one place. */
+export type AwayWord = "no answer" | "no daemon";
+
 /** What every surface says about a workspace whose computer is not answering, one reading per slot that has to
  * hold it: the mono word of a state slot, a row's third line, the length of the silence beside the computer's own
  * name, the two halves a pane refuses in, and the whole sentence. Six surfaces used to word this silence six ways
@@ -250,7 +254,7 @@ export interface AbsentComputer {
   readonly word: string;
   /** The one word a table slot standing beside three fact columns holds: the silence itself, with no figure on it.
    * How long it has been rides the row's title and the detail that already carries it. */
-  readonly away: string;
+  readonly away: AwayWord;
   /** A workspace row's third line, which has room for the figure. Written to thirty characters because that is
    * what the row leaves for text: a longer line is cut from the right, and the half that says what to do is the
    * half that goes. The second half states the silence and asks; it never says the computer is off, which this
@@ -258,10 +262,15 @@ export interface AbsentComputer {
   readonly line: string;
   /** What happened, the first half a pane refuses in. */
   readonly said: string;
-  /** What happens next, the second half: nobody has to reconnect it, so the one thing left to do is switch it on. */
-  readonly will: string;
+  /** What happens next, the second half: nobody has to reconnect it, so the one thing left to do is switch it on.
+   * Absent on a reading that carries a button instead, where the button is what happens next. */
+  readonly will?: string;
   /** Both halves, for every slot with room for a sentence: the row's title, the pane's State row, the held send. */
   readonly sentence: string;
+  /** The word on the button that puts back what the reading names, where this host owns the process that is
+   * missing rather than waiting on a computer of its own accord. A reading that carries one is also one a turn
+   * runs under, since what is missing never carried the turn: the composer stays open on it. */
+  readonly start?: string;
 }
 
 /** The one state of a computer that is not answering. awayMs is how long this host has not heard from it, null
@@ -272,6 +281,21 @@ export function absentComputer(name: string, awayMs: number | null): AbsentCompu
   const will = "it connects on its own when it is on";
   const dated = awayMs === null ? away : `${away} ${offlineFor(awayMs)}`;
   return { word: workspaceWord("unreachable"), away, line: `${dated} · is it on?`, said, will, sentence: `${said}; ${will}` };
+}
+
+/** The word on the button under every pane that needs the daemon this host started. */
+export const START_DAEMON_WORD = "Start it";
+
+/** The one state of the daemon this host started for its own computer's workspace while it is not running. The
+ * daemon is a child of the host, so this computer's reach is that child's reach and the app reads it as the
+ * computer being absent, in this computer's own words; the host can start another, so the reading carries the
+ * button rather than a second sentence, and a turn here runs without it. Unreachable is never one of these words:
+ * the computer the app is drawn on is the one computer a person can see is on. */
+export function ownDaemonDown(name: string): AbsentComputer {
+  const said = `${name}'s daemon is not running`;
+  // The row leaves thirty characters, which the sentence itself does not fit in, so the line says the same fact
+  // without the computer's name: the row already names the workspace, and the whole sentence rides its title.
+  return { word: "No daemon", away: "no daemon", line: "daemon not running · start it", said, sentence: said, start: START_DAEMON_WORD };
 }
 
 /** What the slot above the composer says while the workspace's computer is not answering. The box stays open and
@@ -442,6 +466,11 @@ export function screenCommandLine(command: ScreenCommand, catalog: Pick<HarnessC
 const ANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["reachable", "slow"]);
 /** A probe nothing answered: silence, or the edge dialling the guest and finding the daemon port dead. */
 const UNANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["unreachable", "no-daemon"]);
+
+/** Whether a workspace's reach says nothing is answering on its daemon's road: the probe found silence, or found
+ * the road open with the daemon port dead. On the computer the host runs on both mean one thing, the child this
+ * host started is not running, which is why the one reading of it asks this and not a list of states. */
+export const daemonSilent = (reach: ReachState | null | undefined): boolean => reach != null && UNANSWERED.has(reach);
 
 /** The reach word a row shows after one probe. A single silence after an answer keeps the answer's word: one slow
  * edge answer, one DNS blip, one busy second on the box or one probe that landed while the daemon was restarting

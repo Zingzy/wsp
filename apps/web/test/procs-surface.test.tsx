@@ -328,6 +328,27 @@ describe("processes surface", () => {
     expect(said.textContent).not.toContain("place:");
   });
 
+  it("says this computer's own daemon is not running in the pane, with the start beside it", async () => {
+    const asked: string[] = [];
+    act(() =>
+      useStore.setState({
+        api: { subscribe: () => () => {}, restartDaemon: async (id: string) => void asked.push(id) } as never,
+        workspaces: [{ ...view, kind: "local", machineId: "local" }],
+        statuses: { [WS]: { ...view, kind: "local", machineId: "local", machineState: "running", reach: { state: "no-daemon" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never },
+      }),
+    );
+    render(<ProcessesSurface workspaceId={WS} />);
+    await flush();
+    const said = document.querySelector("[data-procs-unavailable]")!;
+    expect(said.textContent).toContain("this Mac's daemon is not running");
+    expect(said.textContent).not.toContain("Unreachable");
+    // The slot beside the filter reads the same reading, so the header and the sentence under it agree.
+    expect(document.querySelector("[data-procs-count]")!.textContent).toBe("no daemon");
+    expect(document.body.textContent).not.toContain("unreachable");
+    await act(async () => void fireEvent.click(document.querySelector('[data-k="start-daemon"]')!));
+    expect(asked).toEqual([WS]);
+  });
+
   it("a machine over ssh lists its own, since the daemon on it reads that machine's own /proc", async () => {
     act(() => useStore.setState({ workspaces: [{ ...view, kind: "ssh" }] }));
     render(<ProcessesSurface workspaceId={WS} />);

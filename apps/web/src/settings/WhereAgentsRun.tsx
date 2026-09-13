@@ -15,7 +15,7 @@
 // has-aria-expanded for exactly this.
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { PLACES_TICKET_REFUSAL, PLACES_WORDS, offlineFor, placeSpendLine, placesSpendFoot, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
+import { PLACES_TICKET_REFUSAL, PLACES_WORDS, isLocalWorkspace, offlineFor, placeSpendLine, placesSpendFoot, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { TableCell, TableRow } from "../components/ui/table.js";
@@ -25,7 +25,7 @@ import { TryNowButton, useDialPlace } from "./AbsentRoad.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, isProviderPlace, placeOf, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, absenceOf, isProviderPlace, placeOf, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
@@ -108,6 +108,11 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
   /** What that computer's own copy of the image weighs, where the provider's listing gave a size for it. */
   const imageBytesOn = (place: PlaceView): number | undefined => copyOn(copies, place)?.sizeBytes;
   const holdingOf = (place: PlaceView): PlaceHolding => holdings[place.id] ?? NOTHING_HELD;
+  // The computer the host runs on reports no link of its own, so its state is its workspace's daemon: this row said
+  // the Mac was fine while every pane on it said unreachable, which is the two rooms saying two things. Read
+  // through the one door every surface reads an absent computer through, never by the kind here.
+  const here = workspaces.find(w => isLocalWorkspace(w)) ?? null;
+  const ownAbsence = absenceOf(places, here, here === null ? null : statuses[here.id] ?? null, now);
   const spendOn = (place: PlaceView): PlaceSpend | undefined => spend.find(row => row.place === place.id);
   /** The providers that have taken something this month and what they took together: a person who runs their own
    * computers alone is charged by nobody, and the foot says nothing at all. A provider whose workspaces have all
@@ -130,6 +135,7 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
                 now={now}
                 workspaces={counts[place.id] ?? 0}
                 here={own}
+                {...(own ? { absent: ownAbsence } : {})}
                 {...(took === undefined ? {} : { monthUsd: took.monthUsd })}
                 {...(own
                   ? // The column is there and empty: a row short of a cell is a row shorter than the rest.

@@ -371,6 +371,9 @@ export interface Api {
   stopWake?(id: string): Promise<WorkspaceView>;
   /** A person typed into the workspace; the runtime's idle window starts over. Optional so fixtures that never open a terminal need not fake it. */
   touch?(id: string): Promise<void>;
+  /** Starts another daemon for a workspace whose daemon the host holds the process of, in place of one that is not
+   * running. Optional so a fixture with no such workspace need not fake it. */
+  restartDaemon?(id: string): Promise<void>;
   /** Replaces the machine with a fresh golden fork at the new size; gate on capabilities().resize. */
   upgrade(id: string, size: WorkspaceSizeSpec): Promise<WorkspaceView>;
   /** Moves the workspace onto the golden's head version, carrying its files across and naming the ones of the
@@ -637,6 +640,7 @@ export function makeApi(c: ProtocolClient): Api {
     wake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: id })).workspace,
     stopWake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.stopWake", { workspaceId: id })).workspace,
     touch: async id => void (await c.request("workspaces.touch", { workspaceId: id })),
+    restartDaemon: async id => void (await c.request("workspaces.restartDaemon", { workspaceId: id })),
     upgrade: async (id, size) =>
       (await c.request<{ workspace: WorkspaceView }>("workspaces.upgrade", { workspaceId: id, ...size })).workspace,
     updateImage: async id => await c.request<UpgradeResult>("workspaces.updateImage", { workspaceId: id }),

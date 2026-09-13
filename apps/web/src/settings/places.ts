@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, fmtBytes, fmtRate, hereWord, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, daemonSilent, fmtBytes, fmtRate, hereWord, isLocalWorkspace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -102,13 +102,30 @@ export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceV
 }
 
 /** The one state of the computer a workspace stands on, while that computer is not answering; null while it is,
- * and on every workspace at a provider or on this computer, neither of which reports a link at all. The sidebar
- * row, the Workspace panel, the composer and the terminal and processes panes all read this one reading, so the
- * silence of one computer is not worded six ways again. */
-export function absenceOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place"> | null, now: number | null): AbsentComputer | null {
+ * and on every workspace at a provider, which reports no link at all. The sidebar row, the Workspace panel, the
+ * composer and the terminal and processes panes all read this one reading, so the silence of one computer is not
+ * worded six ways again.
+ *
+ * The computer the host runs on is read off its own workspace's reach rather than off the places list, which
+ * holds no link for it: its daemon is a child of the host, so a daemon that is not running is the whole of what
+ * this computer's silence can be, and it reads as this computer's own absence in this computer's own words. */
+export function absenceOf(
+  places: readonly PlaceView[],
+  workspace: Pick<WorkspaceView, "kind" | "machineId" | "place"> | null,
+  status: Pick<WorkspaceStatus, "reach"> | null,
+  now: number | null,
+): AbsentComputer | null {
   if (workspace === null) return null;
+  if (isLocalWorkspace(workspace)) return ownDaemonAbsence(status);
   const at = placeOf(places, workspace);
   return at === undefined ? null : absentOf(at, now);
+}
+
+/** The reading for the workspace that is this computer, off the reach its status carries: null before a status has
+ * arrived and while the daemon answers. Behind absenceOf, which is the one door: a caller that picked this by the
+ * kind itself was the third copy of one dispatch. */
+function ownDaemonAbsence(status: Pick<WorkspaceStatus, "reach"> | null): AbsentComputer | null {
+  return daemonSilent(status?.reach.state) ? ownDaemonDown(THIS_COMPUTER_WORD) : null;
 }
 
 /** The same reading off one row of the places list, for the table that draws that row: null while the computer

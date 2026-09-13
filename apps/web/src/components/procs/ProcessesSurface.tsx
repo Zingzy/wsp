@@ -20,6 +20,7 @@ import { daemonBehindLine } from "../../machine/daemon.js";
 import { staleWord, type StaleWord } from "../../machine/live.js";
 import { getProcs, useWorkspaceProcs } from "../../machine/procs.js";
 import { useAbsentComputer, useStore, useWorkspace } from "../../protocol/store.js";
+import { StartDaemonButton } from "../DaemonDown.js";
 import { getTerminals, onTerminals } from "../../terminal/link.js";
 import { clockLabel, compactBytes } from "../machine/format.js";
 import { ScrollArea } from "../ui/scroll-area.js";
@@ -82,7 +83,9 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
   // Whether a thread of this workspace is on the machine's list at all, which the filter says nothing about: the
   // empty section has two true sentences and this is which one it is.
   const threadsHere = useMemo(() => threads.some(t => (snapshot?.procs ?? []).some(p => p.pid === t.pid)), [threads, snapshot]);
-  const stale = staleWord(workspace?.phase ?? "running", procs.reach === "live");
+  // The slot beside the filter reads the one reading's own word where a computer is not answering, so the header
+  // and the sentence under it cannot say two things about one silence.
+  const stale = absent?.away ?? staleWord(workspace?.phase ?? "running", procs.reach === "live");
   const served = workspace === null || servesReading(workspaceKind(workspace), "processes");
 
   // A process that went away takes its selection with it.
@@ -135,13 +138,14 @@ export function ProcessesSurface({ workspaceId }: { workspaceId: string }) {
       <ScrollArea className="min-h-0 flex-1">
         <div role="table" aria-label="Processes" className={cn(stale !== null && "text-muted-foreground/60")} {...(stale !== null ? { "data-stale": stale } : {})}>
           {absent !== null ? (
-            // The refusal stands in the pane, in the two halves the one reading of an absent computer carries,
-            // rather than as a line at the foot of the sidebar in the opposite corner from the click.
-            <p className="px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} data-procs-unavailable>
-              {absent.said}
-              <br />
-              {absent.will}
-            </p>
+            // The refusal stands in the pane, in the words the one reading of an absent computer carries, rather
+            // than as a line at the foot of the sidebar in the opposite corner from the click. A daemon this host
+            // started carries the button that starts another in place of the second half.
+            <div className="flex flex-col items-start gap-2 px-2 py-2 text-muted-foreground" data-procs-unavailable>
+              <p>{absent.said}</p>
+              {absent.will !== undefined ? <p>{absent.will}</p> : null}
+              <StartDaemonButton absent={absent} workspaceId={workspaceId} />
+            </div>
           ) : (
             unavailableLine !== null && (
               <p className="truncate px-2 text-muted-foreground" style={{ lineHeight: `${ROW_PX}px` }} title={unavailable ?? undefined} data-procs-unavailable>

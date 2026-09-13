@@ -11,6 +11,7 @@
 // over the last five threads opened in the workspace on screen: the hold
 // shows them, letting go lands on the highlighted one, and a tap is the
 // thread before this one.
+import { terminalRefusedLine } from "../actions/format.js";
 import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
 import { toggleCommandPalette } from "../commandPaletteBus.js";
 import { isWorkspaceSelectCommand, workspaceSelectSlot, type KeybindingCommand, type WorkspaceSelectSlot } from "../keybindingTypes.js";
@@ -35,23 +36,27 @@ export interface ShellCommandTarget {
 
 export type SplitDirection = "horizontal" | "vertical";
 
-export function reportTerminalFailure(error: unknown): void {
-  useStore.setState({ toast: `terminal: ${error instanceof Error ? error.message : String(error)}` });
+/** A workspace the link refused a pty for, in the app's own sentence at the foot of the sidebar, where it carries a
+ * close and leaves on its own. Only for a refusal with no pane to stand in for it: a computer that is not answering
+ * is the pane's own sentence, said where the click was, so nothing is said here about one. What used to land here
+ * was the link's words behind a workspace name and a colon, and it stayed until another toast replaced it. */
+export function reportTerminalRefused(workspaceId: string): void {
+  const { workspaces, statuses, places } = useStore.getState();
+  const workspace = workspaces.find(w => w.id === workspaceId) ?? null;
+  if (absenceOf(places, workspace, statuses[workspaceId] ?? null, null) !== null) return;
+  useStore.setState({ toast: terminalRefusedLine(workspace?.name) });
 }
 
-/** Runs fn against the workspace's link; no link or a refused create ends in a toast, never in silence. Nothing is
- * asked of a workspace whose computer is not answering: its pane already says so in that computer's own words and
- * stands there, where a rejection from the link would land as a line in the sidebar's foot that nothing clears.
- * The tab that opens a pane is held on the same reading, so every road to a pty reads one state. */
+/** Runs fn against the workspace's link. Nothing is asked of a workspace whose computer is not answering: its pane
+ * already says so in that computer's own words and stands there. The tab that opens a pane is held on the same
+ * reading, so every road to a pty reads one state. */
 function withTerminals(workspaceId: string, fn: (terminals: WorkspaceTerminals) => Promise<unknown>): Promise<void> {
-  const { workspaces, places } = useStore.getState();
-  if (absenceOf(places, workspaces.find(w => w.id === workspaceId) ?? null, null) !== null) return Promise.resolve();
+  const { workspaces, statuses, places } = useStore.getState();
+  const workspace = workspaces.find(w => w.id === workspaceId) ?? null;
+  if (absenceOf(places, workspace, statuses[workspaceId] ?? null, null) !== null) return Promise.resolve();
   const terminals = getTerminals(workspaceId);
-  if (!terminals) {
-    reportTerminalFailure(new Error("no terminal link for this workspace"));
-    return Promise.resolve();
-  }
-  return fn(terminals).then(() => undefined, reportTerminalFailure);
+  if (!terminals) return Promise.resolve();
+  return fn(terminals).then(() => undefined, () => reportTerminalRefused(workspaceId));
 }
 
 /** The drawer, shown; a workspace that never had a pty spawns one on mount. */

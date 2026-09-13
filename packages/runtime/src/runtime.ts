@@ -732,6 +732,10 @@ export interface LocalWiring {
    * arrives in, so the panes and the status probe read one view. The host starts that daemon on the first call and
    * closes it in close(); a host that wires none leaves the local workspace's panes with nothing to dial. */
   daemonRoad?: () => Promise<DaemonReachView>;
+  /** Starts another daemon for this computer's workspace, in place of the one this host is holding: the daemon is
+   * a child of this process, so nothing else can put it back. The old one is let go of and closed, and the call
+   * answers once the new one has listened. */
+  restartDaemon?: () => Promise<void>;
   /** This computer's own cpu, memory and disk, pushed to the listener every sample until the returned detach runs.
    * Read off this computer's daemon, the one reader of a machine's load wsp has, so the Live rows of the workspace
    * that is this computer start it if nothing else has. One watch however many listeners there are; it opens with
@@ -1096,6 +1100,9 @@ export interface Runtime {
     updateImage(id: string, origin?: Caller): Promise<UpgradeResult>;
     /** Fresh golden fork with the nap-time vault, old machine killed, id and name kept: the way out of a zombie. */
     rebuild(id: string, origin?: Caller): Promise<WorkspaceView>;
+    /** Starts another daemon for a workspace whose daemon this host holds the process of, in place of one that is
+     * not running. Refused in one sentence for every kind whose daemon lives on a machine instead. */
+    restartDaemon(id: string, origin?: Caller): Promise<void>;
     /** Names the workspace, under the rules a fork's name takes: the space around the name is dropped, and a name
      * another workspace holds, one a fork is landing under and a blank one are refused (kind conflict) naming the
      * holder. A name the workspace already carries answers with the record untouched. The record alone changes, so
@@ -1735,6 +1742,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * machine the person owns carries what this host put there on its record, and this computer runs its daemon
      * in this process. What the sync compares against the version this wsp would deploy. */
     daemonVersion: (entry: LiveWorkspace) => Promise<number | null>;
+    /** Starts another daemon in place of one that is not running, where this host holds the process itself. Only
+     * the workspace that is this computer has such a daemon; every other kind's runs on a machine this host can
+     * reach but does not hold, and the sentence a caller gets there says so. */
+    restartDaemon?: (entry: LiveWorkspace) => Promise<void>;
     /** Puts this runtime's daemon on the machine, replacing one already there. Absent where nothing can: this
      * computer runs its daemon in this process, a host that wired no bundle has none, and a backend that neither
      * mints a signed URL nor carries bytes itself has no road for one. Every road that offers to deploy reads
@@ -1939,6 +1950,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             hostUrl: () => undefined,
             hasDaemon: () => local.daemonRoad !== undefined,
             daemonRoad: localRoad,
+            ...(local.restartDaemon !== undefined ? { restartDaemon: local.restartDaemon } : {}),
             scratch: () => local.backend.folder,
             // This computer's daemon is this process: it is never behind what this process would deploy.
             daemonVersion: async () => null,
@@ -4440,6 +4452,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async touch(id, origin) {
       await entryOf(id, origin);
       idle.touch(id);
+    },
+
+    async restartDaemon(id, origin) {
+      const entry = await entryOf(id, origin);
+      const start = moduleOf(entry.record.kind).restartDaemon;
+      if (start === undefined) throw new Error(`${entry.record.name}'s daemon runs on ${machineWord(entry.record.kind)}, which this host does not hold the process of`);
+      await start(entry);
+      // The poll's last measurement is of the daemon that is gone, and the next one is a poll away: the row would
+      // go on saying no daemon for that long over a daemon this host has just watched start. Dropped rather than
+      // replaced with a claim, so the row falls back to what this kind's road says and the next poll measures.
+      polledReach.delete(entry.record.id);
+      await pushStatus(entry);
     },
 
     async exec(id, cmd, o, origin) {

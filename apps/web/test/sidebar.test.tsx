@@ -5,13 +5,14 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, dropRefusedLine, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { getLive, resetLive } from "../src/machine/live.js";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
+import { CLOSE_TOAST_LABEL, TOAST_MS } from "../src/sidebar/toastLife.js";
 import { SETTINGS_WORDS } from "../src/settings/format.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
@@ -553,6 +554,26 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · active"));
   });
 
+  it("this computer's own daemon down: the row says No daemon, and the glyph beside it is the start its line names", async () => {
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const asked: string[] = [];
+    const api = fakeApi([MAC], [{ ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "unreachable" } }]);
+    api.restartDaemon = vi.fn(async (id: string) => void asked.push(id));
+    await mount(api, "zingzy-mac");
+    const row = () => rowOf("zingzy-mac");
+    await waitFor(() => expect(stateSlot(row()).textContent).toBe("No daemon"));
+    expect(metaOf(row()).textContent).toBe("daemon not running · start it");
+    // The line says start it, so the row's own glyph is that start: it used to say it with nothing to press.
+    const start = screen.getByRole("button", { name: "Start the daemon of zingzy-mac" });
+    expect(screen.queryByRole("button", { name: "New thread in zingzy-mac" })).toBeNull();
+    await act(async () => void fireEvent.click(start));
+    expect(asked).toEqual(["ws_m"]);
+    // And the daemon answering gives the row back its own glyph, with nothing left to start.
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 } }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "New thread in zingzy-mac" })).toBeDefined());
+    expect(screen.queryByRole("button", { name: "Start the daemon of zingzy-mac" })).toBeNull();
+  });
+
   it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork, green while the machine runs and muted otherwise; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
     const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
     const OLD = view("ws_c", "old", "gone");
@@ -711,6 +732,22 @@ describe("rows from the fixture wire", () => {
     expect(toast.querySelector("[data-toast-action]")).toBeNull();
   });
 
+  it("carries a close of its own and leaves after a few seconds, so nothing a person did not ask for follows them across pages", async () => {
+    const api = fakeApi([], []);
+    useStore.getState().bind(api);
+    render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
+    act(() => useStore.setState({ toast: "runtime unreachable" }));
+    const toast = await screen.findByRole("status", { name: /runtime unreachable/ });
+    // The whole box was the target before, which is nothing a person can see; the glyph says what it does.
+    fireEvent.click(within(toast).getByRole("button", { name: CLOSE_TOAST_LABEL }));
+    expect(useStore.getState().toast).toBeNull();
+
+    // And one nobody closes goes on its own: one sat in a corner for four minutes, another for a whole session.
+    act(() => useStore.setState({ toast: "runtime unreachable" }));
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeNull());
+    await waitFor(() => expect(useStore.getState().toast).toBeNull(), { timeout: TOAST_MS + 2_000 });
+  });
+
   it("a build that needs the person says so in the toast once, with an Open that opens the setup sheet; a later toast takes the slot and its action goes with it", async () => {
     const api = fakeApi([], []);
     useStore.getState().bind(api);
@@ -784,7 +821,7 @@ describe("new thread", () => {
     expect(endPadding(rowOf("api"))).toEqual(endPadding(rowOf("web")));
     expect(endPadding(rowOf("api"))).toEqual(["group-has-data-[sidebar=menu-action]/menu-item:pe-2"]);
     for (const name of ["api", "web"]) {
-      expect(stateSlot(rowOf(name)).className).toContain("min-w-11");
+      expect(stateSlot(rowOf(name)).className).toContain("min-w-[74px]");
       expect(stateSlot(rowOf(name)).className).toContain("group-hover/menu-item:opacity-0");
     }
   });
@@ -892,6 +929,15 @@ describe("a folder dragged from the desktop", () => {
     await waitFor(() => expect(useStore.getState().toast).toBe(DROP_A_FOLDER_LINE));
     expect(api.importProject).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).toBeNull();
+
+    // A register the host refused says what did not happen and what to try, by the folder's own name: the line
+    // used to begin with the workspace's name and a colon and end in whatever the host threw.
+    api.importProject = vi.fn(async () => { throw new Error("EACCES: permission denied, scandir '/Users/dev/spoo'"); });
+    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
+    fireEvent(tileOf("ws_m"), drag("drop", folder("spoo")));
+    await waitFor(() => expect(useStore.getState().toast).toBe(dropRefusedLine("/Users/dev/spoo")));
+    expect(useStore.getState().toast).toBe("spoo was not imported; check the folder is still there and drop it again.");
+    expect(useStore.getState().toast).not.toContain("EACCES");
   });
 
   it("a browser tab cannot read a dropped folder's path, so its rows stay rows", async () => {

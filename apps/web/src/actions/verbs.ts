@@ -18,6 +18,7 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
   const togglePhase = useStore(s => s.toggle);
   const openSurface = useRightPanelStore(s => s.open);
   const rebuild = api?.rebuild;
+  const restartDaemon = api?.restartDaemon;
   const forget = api?.forget;
   const canRename = api?.renameWorkspace !== undefined;
   const canLook = api?.setWorkspaceLook !== undefined;
@@ -27,6 +28,7 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
     () => ({
       togglePhase,
       openTerminal: showTerminal,
+      restartDaemon: restartDaemon === undefined ? undefined : async workspaceId => await restartDaemon(workspaceId),
       openBrowser: workspaceId => openSurface(workspaceId, "preview"),
       openMachine: workspaceId => openSurface(workspaceId, "machine"),
       newThread,
@@ -43,7 +45,7 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
       importProject: canImport ? workspaceId => requestProjectTrip({ workspaceId, trip: "import" }) : undefined,
       exportProject: canExport ? workspaceId => requestProjectTrip({ workspaceId, trip: "export" }) : undefined,
     }),
-    [canExport, canImport, canLook, canRename, forget, newThread, openSurface, rebuild, togglePhase],
+    [canExport, canImport, canLook, canRename, forget, newThread, openSurface, rebuild, restartDaemon, togglePhase],
   );
 }
 
