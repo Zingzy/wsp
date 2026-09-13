@@ -8,9 +8,10 @@
 // among them, while one whose turn worked is refused in one sentence.
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { codexNotSignedInLine, foldThreads, signInRefusalLine, threadForgetRefusal, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { codexNotSignedInLine, foldThreads, forgetUndrivenRefusal, OVER_SSH, signInRefusalLine, threadForgetRefusal, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
+import { fakeSsh } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
 
 describe("workspaces.forget", () => {
@@ -33,6 +34,17 @@ describe("workspaces.forget", () => {
     expect(await store.get("transcripts", ws.id)).toBeUndefined();
     expect(await store.get("sessions", ws.id)).toBeUndefined();
     expect(events.filter(e => e.type === "workspace.deleted")).toMatchObject([{ type: "workspace.deleted", workspaceId: ws.id }]);
+  });
+
+  it("sends a workspace on a computer wsp does not run to delete: its machine is never gone and there is no provider to pause it at", async () => {
+    const { wiring } = fakeSsh();
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, ssh: wiring });
+    const ws = await rt.workspaces.createSsh("dev@box");
+
+    await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({ message: forgetUndrivenRefusal("box", OVER_SSH), kind: "conflict" });
+
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
+    await rt.close();
   });
 
   it("refuses a workspace whose machine still exists, running or paused, with the reason, and keeps everything", async () => {
@@ -163,7 +175,8 @@ describe("sessions.forget", () => {
 
     expect(foldThreads(await rt.sessions.list(ws.id)).map(t => t.id)).toEqual([thread]);
     expect((await rt.sessions.history(ws.id)).map(e => e.type)).toEqual(["session.start", "session.done", "session.end"]);
-    await expect(rt.sessions.forget("thr_nobody")).rejects.toThrow("no thread thr_nobo");
+    // A name this runtime holds nothing by, the same shape a workspace name nothing holds has: a value nothing takes.
+    await expect(rt.sessions.forget("thr_nobody")).rejects.toMatchObject({ message: "no thread thr_nobo", kind: "not-found" });
     await rt.close();
   });
 });
