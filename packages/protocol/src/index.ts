@@ -535,6 +535,67 @@ export type TitleSource = z.infer<typeof TitleSource>;
 export const TurnRefusal = z.enum(["sign-in"]);
 export type TurnRefusal = z.infer<typeof TurnRefusal>;
 
+/** What picking one option on a permission prompt does to the tool call in front of it: run it, refuse it, or run it
+ * and leave the rest of the turn in another access mode, which is how a harness offers "and stop asking about
+ * edits". answer is none of the three: the call in front of it only asks the person something, and the pick is what
+ * it answers with. The runtime hands the option's id back to the adapter, which turns it into whatever its CLI
+ * takes. */
+export const PermissionEffect = z.enum(["allow", "deny", "mode", "answer"]);
+export type PermissionEffect = z.infer<typeof PermissionEffect>;
+
+export const PermissionOption = z.object({
+  id: z.string(),
+  label: z.string(),
+  effect: PermissionEffect,
+  /** The access mode the rest of the turn runs in when this option is picked; set on the mode effect only. */
+  mode: z.string().optional(),
+});
+export type PermissionOption = z.infer<typeof PermissionOption>;
+
+/** How a permission prompt ended. allowed and denied are a person's pick. cancelled is the prompt going with its
+ * turn: a stop, or a harness that withdrew the question. unanswered is only ever read back off a transcript written
+ * while wsp still denied a prompt on a clock of its own; nothing closes one that way now. */
+export const PermissionOutcome = z.enum(["allowed", "denied", "unanswered", "cancelled"]);
+export type PermissionOutcome = z.infer<typeof PermissionOutcome>;
+
+/** One permission prompt as the wire carries it, with no say in whose turn raised it: the tool it wants to run,
+ * what it wants to run it on, and the options a person may pick. The prompt's own fields and nothing else, so the
+ * row a transcript records and the question a thread waiting behind another thread draws are one shape. */
+const permissionPrompt = {
+  /** What sessions.answer names this prompt by; unique inside its turn. */
+  askId: z.string(),
+  toolName: z.string(),
+  /** The tool_use this prompt is about, so the row sits with the call it belongs to; absent where the harness
+   * named none. */
+  toolUseId: z.string().optional(),
+  /** The tool call that launched the agent this prompt came from; absent on every prompt the thread's own agent
+   * raised. The row sits inside that agent's own fold and says which of them is asking. */
+  parentToolUseId: z.string().optional(),
+  /** The tool's input as the harness sent it, JSON, the same text a tool_use delta carries. */
+  input: z.string(),
+  /** The harness's own one phrase for the call (a file name, a command); absent where it named none. */
+  detail: z.string().optional(),
+  options: z.array(PermissionOption),
+};
+
+export const ThreadPrompt = z.object(permissionPrompt);
+export type ThreadPrompt = z.infer<typeof ThreadPrompt>;
+
+/** What one thread is stopped behind when the thread itself was asked nothing: the thread whose open prompt its own
+ * running call is waiting on, that thread's turn as sessions.answer names it, and the question whole, so the caller
+ * draws it and answers it where the person is already reading. A thread carrying this is waiting on a person as
+ * surely as one carrying a prompt of its own, and the answer ends both waits at once. */
+export const ThreadWaitingOn = z.object({
+  threadId: z.string(),
+  workspaceId: z.string(),
+  sessionId: z.string(),
+  /** What that thread is called, by the one title rule foldThreads reads, so the caller names it the way every
+   * other surface does rather than by an id nobody recognises. */
+  title: z.string(),
+  prompt: ThreadPrompt,
+});
+export type ThreadWaitingOn = z.infer<typeof ThreadWaitingOn>;
+
 export const SessionView = z.object({
   id: z.string(),
   workspaceId: z.string(),
@@ -586,6 +647,12 @@ export const SessionView = z.object({
    * absent on a turn waiting on nobody. The harness is stopped on the question while it stands, so this is the one
    * fact that says a thread is waiting on the person rather than working. */
   asking: z.string().optional(),
+  /** The thread this turn's own running call is stopped behind, when that thread has a prompt open and nobody has
+   * answered it. The harness here is working, but nothing it is doing can finish until a person answers somewhere
+   * else, so a row carrying this is waiting on the person too. Absent on every turn blocked on nobody. Beside the
+   * pid and for the same reason, it is never written down: it is read off two live turns, and a wait written down
+   * outlives the question it was on. */
+  waitingOn: ThreadWaitingOn.optional(),
   /** The process this turn leads on the computer the host runs on, where the turn runs there: the pid the Processes
    * pane heads this thread's tree with. Absent on a turn running on another machine, whose pids are not this
    * computer's, and on a turn that is over. It is never written down: a pid outlives nothing, and the computer is
@@ -622,6 +689,9 @@ export const ThreadView = z.object({
   rootThreadId: z.string().optional(),
   /** The latest turn's open permission prompt, as SessionView.asking carries it; what threadState reads. */
   asking: z.string().optional(),
+  /** The thread the latest turn is stopped behind, as SessionView.waitingOn carries it; threadState reads this too,
+   * since a thread that cannot move until a question elsewhere is answered is not working. */
+  waitingOn: ThreadWaitingOn.optional(),
   /** What this thread has cost: its rows' figures added up. Absent where no row of it carries one. */
   costUsd: z.number().optional(),
   /** The latest turn's process on the computer the host runs on, as SessionView.pid carries it. */
@@ -672,6 +742,7 @@ export function foldThreads(sessions: ReadonlyArray<SessionView>): ThreadView[] 
       ...(latest.endedAt !== undefined ? { endedAt: latest.endedAt } : {}),
       ...(latest.cwd !== undefined ? { cwd: latest.cwd } : {}),
       ...(latest.asking !== undefined ? { asking: latest.asking } : {}),
+      ...(latest.waitingOn !== undefined ? { waitingOn: latest.waitingOn } : {}),
       ...(latest.pid !== undefined ? { pid: latest.pid } : {}),
       turns: turns.length,
       ran: threadRan(turns),
@@ -972,6 +1043,10 @@ export type TurnStatus = z.infer<typeof TurnStatus>;
 export const TurnResult = z.object({
   status: TurnStatus,
   durationMs: z.number().optional(),
+  /** How much of durationMs the turn spent stopped on a permission prompt nobody had answered. The harness's own
+   * figure is wall time from launch to result, so a turn that asked and waited counts the person's minutes as its
+   * own; this is what every reader takes off it. Absent on a turn nothing of it waited on. */
+  waitedMs: z.number().optional(),
   costUsd: z.number().optional(),
   usage: z.record(z.unknown()).optional(),
   text: z.string().optional(),
@@ -1110,9 +1185,6 @@ export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): 
  * because the host stages the file and the runtime builds the launch that runs it, and neither may import the
  * other's rule. */
 export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
-/** The name the wsp MCP server has in every agent's config and in every launch that carries it, so an agent's
- * config on this computer and the launch a turn on a machine gets name one server and not two. */
-export const MCP_SERVER_NAME = "wsp";
 /** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder,
  * because the bin reads its own version through that file (`../package.json` from the bin) and announces it in
  * every MCP handshake; a client refuses a server that names none. */
@@ -1138,49 +1210,14 @@ export const SessionNotifyEvent = z.object({
 });
 export type SessionNotifyEvent = z.infer<typeof SessionNotifyEvent>;
 
-/** What picking one option on a permission prompt does to the tool call in front of it: run it, refuse it, or run it
- * and leave the rest of the turn in another access mode, which is how a harness offers "and stop asking about
- * edits". answer is none of the three: the call in front of it only asks the person something, and the pick is what
- * it answers with. The runtime hands the option's id back to the adapter, which turns it into whatever its CLI
- * takes. */
-export const PermissionEffect = z.enum(["allow", "deny", "mode", "answer"]);
-export type PermissionEffect = z.infer<typeof PermissionEffect>;
 
-export const PermissionOption = z.object({
-  id: z.string(),
-  label: z.string(),
-  effect: PermissionEffect,
-  /** The access mode the rest of the turn runs in when this option is picked; set on the mode effect only. */
-  mode: z.string().optional(),
-});
-export type PermissionOption = z.infer<typeof PermissionOption>;
-
-/** How a permission prompt ended. allowed and denied are a person's pick. cancelled is the prompt going with its
- * turn: a stop, or a harness that withdrew the question. unanswered is only ever read back off a transcript written
- * while wsp still denied a prompt on a clock of its own; nothing closes one that way now. */
-export const PermissionOutcome = z.enum(["allowed", "denied", "unanswered", "cancelled"]);
-export type PermissionOutcome = z.infer<typeof PermissionOutcome>;
-
-/** One permission prompt the harness raised, relayed into the chat as its own row: the tool it wants to run, what it
- * wants to run it on, and the options the person may pick. The prompt blocks the turn until sessions.answer names an
- * option or the turn itself ends, so the row is what the thread is waiting on for as long as the turn lives. */
+/** One permission prompt the harness raised, relayed into the chat as its own row. The prompt blocks the turn until
+ * sessions.answer names an option or the turn itself ends, so the row is what the thread is waiting on for as long
+ * as the turn lives. */
 export const SessionPermissionEvent = z.object({
   type: z.literal("session.permission"),
   ...sessionScope,
-  /** What sessions.answer names this prompt by; unique inside its turn. */
-  askId: z.string(),
-  toolName: z.string(),
-  /** The tool_use this prompt is about, so the row sits with the call it belongs to; absent where the harness
-   * named none. */
-  toolUseId: z.string().optional(),
-  /** The tool call that launched the agent this prompt came from; absent on every prompt the thread's own agent
-   * raised. The row sits inside that agent's own fold and says which of them is asking. */
-  parentToolUseId: z.string().optional(),
-  /** The tool's input as the harness sent it, JSON, the same text a tool_use delta carries. */
-  input: z.string(),
-  /** The harness's own one phrase for the call (a file name, a command); absent where it named none. */
-  detail: z.string().optional(),
-  options: z.array(PermissionOption),
+  ...permissionPrompt,
 });
 export type SessionPermissionEvent = z.infer<typeof SessionPermissionEvent>;
 
@@ -4185,7 +4222,8 @@ export type SnapshotRollbackResult = z.infer<typeof SnapshotRollbackResult>;
 export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice: z.string().optional() });
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
-export { needsYouLine, threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
+export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
+export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
 export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
