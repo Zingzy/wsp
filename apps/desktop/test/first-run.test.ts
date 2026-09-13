@@ -6,7 +6,7 @@
 // whole of what this file reads; what the shell does with each ask is its own
 // road, proved where recordThisComputer and the join are.
 import { readFileSync } from "node:fs";
-import { DEFAULT_PLACE_PORT, JOIN_ADDRESS_LINE, JOIN_ALREADY, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, joinToken, readJoinToken } from "@wsp/protocol";
+import { DEFAULT_PLACE_PORT, JOIN_ADDRESS_LINE, JOIN_ALREADY, JOIN_TOKEN_MARK, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, joinToken, readJoinToken } from "@wsp/protocol";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { shownCode } from "../../web/src/hosts/pairingCode.js";
@@ -289,6 +289,7 @@ describe("the first launch's screen", () => {
     // page's field does with a typed code against what the app's own field does with it.
     expect(/const CODE_ALPHABET = "([^"]+)"/.exec(PAGE)?.[1]).toBe(PAIR_CODE_ALPHABET);
     expect(Number(/const CODE_LENGTH = (\d+)/.exec(PAGE)?.[1])).toBe(PAIR_CODE_LENGTH);
+    expect(/const TOKEN_MARK = "([^"]+)"/.exec(PAGE)?.[1]).toBe(JOIN_TOKEN_MARK);
     const screen = await open();
     await screen.press("#join");
     for (const typed of ["qw4k-7pzx", "qw4k7pzxzz", "  qw4k-7pzx  ", "oil1qw4k7pzx", "7pzx", "----", "q-w4k7pzx"]) {
