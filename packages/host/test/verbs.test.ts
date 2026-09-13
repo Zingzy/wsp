@@ -2622,14 +2622,16 @@ describe("wsp verbs over the host", () => {
     it("every verb takes the workspaces the caller's own listing prints, by name and by id", async () => {
       const alpha = await leadWorkspace();
       await run("run", "alpha", "hello");
-      const [row] = await rt.sessions.list();
       await asThread(alpha, "t_lead");
       expect(names(await line("workspaces"))).toEqual(["alpha"]);
       execGuest(backend, "Linux\n", 0);
       expect((await line("exec", "alpha", "--", "uname")).io.lines).toEqual(["Linux"]);
       expect((await line("exec", alpha.id, "--", "uname")).io.lines).toEqual(["Linux"]);
       expect((await line("threads", "alpha")).code).toBe(0);
-      expect((await line("send", row!.threadId!, "and the rest")).code).toBe(0);
+      // The send names a thread this one opened, since the thread the person opened is theirs to drive.
+      expect((await line("run", "alpha", "of my own")).code).toBe(0);
+      const ours = (await rt.sessions.list()).find(v => v.parentThreadId === "t_lead");
+      expect((await line("send", ours!.threadId!, "and the rest")).code).toBe(0);
     });
 
     it("a workspace the caller's reach hides is refused by the rule that hides it, never as one that does not exist", async () => {

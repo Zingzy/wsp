@@ -192,7 +192,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { GUEST_WSP_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { GUEST_WSP_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, threadReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -4930,6 +4930,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return found;
   };
+  /** The rule every session verb that drives a thread reads: a caller that is no thread passes straight through,
+   * and a thread drives its own thread and the tree under it, off the one reading the cascading stop and the tree
+   * listing already take. A thread a person opened carries no parent, so it sits in no agent's tree and no agent's
+   * token reaches it. A row from before threads holds no thread of its own, which no tree holds either, so it is
+   * named by its row id and refused with the rest. */
+  const refuseOutsideTree = (row: { id: string; threadId?: string }, caller: Caller | undefined): void => {
+    const scope = scopeOf(caller);
+    if (scope === undefined) return;
+    const drives = row.threadId !== undefined && (row.threadId === scope.threadId || treeUnder(scope.threadId).includes(row.threadId));
+    if (!drives) throw new Error(threadReachRefusal(scope.threadId, row.threadId ?? row.id));
+  };
   /** What a thread is called, by the one rule every listing reads it by: its own rows folded, so a thread named in
    * another thread's row reads there exactly as it reads in the sidebar. */
   const threadTitle = (threadId: string): string => {
@@ -5575,6 +5586,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // two is what a thread's own token is capped on. Read before the machine is asked for anything.
       const opens = rowsOn(threadId).length === 0;
       spawnGuard(opens ? "thread_new" : "send", origin);
+      // A thread this send opens hangs under the caller by the rows written below, so only a thread that already
+      // has rows is one the caller has to be above.
+      if (!opens) refuseOutsideTree(rowsOn(threadId)[0]!, origin);
       // The tree this thread sits in, written on its first row and read off it by every later turn: a thread a
       // person opened is its own root, and one a thread opened hangs under that thread's root.
       const spawnedBy = opens ? scopeOf(origin) : undefined;
@@ -5859,6 +5873,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       await entryOf(s.view.workspaceId, origin);
+      refuseOutsideTree(s.view, origin);
       // A thread's agents spawned a tree under it, and a stop on the thread is a stop on the tree: the children go
       // first, so nothing under a stopped lead is left working for a thread that is no longer reading. The lead
       // itself may already be over, which is an answer and not a reason to leave its builders running.
@@ -5876,6 +5891,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const s = sessions.get(sessionId);
       if (!s) return { outcome: "not-found" };
       const entry = await entryOf(s.view.workspaceId, origin);
+      refuseOutsideTree(s.view, origin);
       const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       if (s.view.status !== "running" || s.handle === undefined) return { outcome: "not-running" };
@@ -5927,6 +5943,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (!s) return { outcome: "not-found" };
       const harnessSessionId = s.view.claudeSessionId;
       const entry = await entryOf(s.view.workspaceId, origin);
+      refuseOutsideTree(s.view, origin);
       const refusal = actionRefusal(workspaceState({ phase: entry.record.phase }), "rename", entry.record.gone);
       if (refusal !== null) throw new Error(refusal);
       const write = adapterFor(entry, s.view.harness).adapter.renameSession;

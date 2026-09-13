@@ -38,6 +38,11 @@ describe("the wsp skill", () => {
     expect(WSP_SKILL).toContain("off a terminal a run that names none takes every agent whose own command is on the PATH");
   });
 
+  it("says which threads an agent drives, so the skill cannot promise a reach the host refuses", () => {
+    expect(WSP_SKILL).toContain("You drive the threads you opened and the ones they opened, and nothing else");
+    expect(WSP_SKILL).toContain("refused in one line on a thread the person opened and on any other lead's thread");
+  });
+
   it("quotes the notify line as the protocol prints it and names every send outcome the protocol knows", () => {
     expect(WSP_SKILL).toContain(`\`${notifyLine("1a2b3c4d-0000", { status: "completed", durationMs: 724_000, costUsd: 0.41, text: "first line\n<last line of the reply>" })}\``);
     for (const outcome of SessionStartOutcome.options) expect(WSP_SKILL, outcome).toContain(`(outcome \`${outcome}\`)`);
@@ -100,7 +105,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("comes back as its own next message");
     expect(section).toContain("`--notify me`");
     // The instructions carry it too, since an agent holding only the tools reads nothing else.
-    expect(INSTRUCTIONS).toContain("how one thread talks to another");
+    expect(INSTRUCTIONS).toContain("how one thread talks to the threads it opened");
   });
 
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {

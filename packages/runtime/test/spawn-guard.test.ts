@@ -23,6 +23,7 @@ import {
   spawnDepthRefusal,
   noWorkspaceRefusal,
   spawnReachRefusal,
+  threadReachRefusal,
   threadWord,
   type Caller,
   type McpServerSpec,
@@ -38,7 +39,7 @@ import { WsClient } from "./ws-client.js";
 
 /** What each turn's launch was handed, so a test reads the environment and the servers the runtime built rather
  * than trusting the record. The turn holds until it is ended by hand, which is the window a scoped token stands in. */
-function heldAdapter(opts: { takesMcpServers?: true } = {}): {
+function heldAdapter(opts: { takesMcpServers?: true; steers?: true; renames?: true } = {}): {
   factory: HarnessAdapterFactory;
   launches: { env: Readonly<Record<string, string>>; mcpServers?: Readonly<Record<string, McpServerSpec>> }[];
   end: (nth: number) => void;
@@ -46,8 +47,9 @@ function heldAdapter(opts: { takesMcpServers?: true } = {}): {
   const ends: (() => void)[] = [];
   const launches: { env: Readonly<Record<string, string>>; mcpServers?: Readonly<Record<string, McpServerSpec>> }[] = [];
   const factory: HarnessAdapterFactory = ctx => ({
-    steers: false,
+    steers: opts.steers === true,
     ...(opts.takesMcpServers === true ? { mcpServers: true as const } : {}),
+    ...(opts.renames === true ? { renameSession: async () => ({ kind: "written" as const }) } : {}),
     start: ({ resume, mcpServers, onEvent }) => {
       const sessionId = resume ?? randomUUID();
       launches.push({ env: { ...ctx.env }, ...(mcpServers !== undefined ? { mcpServers } : {}) });
@@ -66,7 +68,7 @@ function heldAdapter(opts: { takesMcpServers?: true } = {}): {
       ends.push(mine);
       onEvent({ type: "session.start", sessionId });
       // Its own turn, never the newest: a stop that cascades reaches each turn through its own handle.
-      return { localId: sessionId, finished, interrupt: async () => mine() };
+      return { localId: sessionId, finished, interrupt: async () => mine(), ...(opts.steers === true ? { steer: async () => "accepted" as const } : {}) };
     },
   });
   return { factory, launches, end: nth => ends[nth]!() };
@@ -760,6 +762,73 @@ describe("agents spawning agents", () => {
     expect(stopped.outcome).toBe("accepted");
     expect([...(stopped.under ?? [])].sort()).toEqual([childThread, grandchild.view().threadId!].sort());
     expect((await rt.sessions.list(ws.id)).every(v => v.status !== "running")).toBe(true);
+    await rt.close();
+  });
+
+  it("a lead drives its own thread, the thread it opened and the one that opened under that", async () => {
+    const held = heldAdapter({ steers: true, renames: true });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const lead = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const leadThread = lead.view().threadId!;
+    const leadScope: ThreadScope = { kind: "thread", threadId: leadThread, workspaceId: ws.id, rootThreadId: leadThread };
+    const child = await rt.sessions.start(ws.id, { prompt: "builder" }, asThread(leadScope));
+    const childThread = child.view().threadId!;
+    const childScope: ThreadScope = { kind: "thread", threadId: childThread, workspaceId: ws.id, rootThreadId: leadThread };
+    const grandchild = await rt.sessions.start(ws.id, { prompt: "deeper" }, asThread(childScope));
+    const grandThread = grandchild.view().threadId!;
+    // Steer, rename and send read a running turn, so they go before the stop that would end it.
+    expect((await rt.sessions.steer(child.id, { prompt: "narrower" }, asThread(leadScope))).outcome).toBe("accepted");
+    expect((await rt.sessions.steer(grandchild.id, { prompt: "narrower still" }, asThread(leadScope))).outcome).toBe("accepted");
+    expect((await rt.sessions.rename(grandchild.id, "the deep one", asThread(leadScope))).outcome).toBe("renamed");
+    expect((await rt.sessions.start(ws.id, { prompt: "more", thread: grandThread }, asThread(leadScope))).outcome).toBe("steered");
+    // Its own thread is inside its own tree: the lead drives the turn it is itself running on.
+    expect((await rt.sessions.steer(lead.id, { prompt: "to myself" }, asThread(leadScope))).outcome).toBe("accepted");
+    expect((await rt.sessions.rename(lead.id, "my own turn", asThread(leadScope))).outcome).toBe("renamed");
+    // And one level down reaches the level below it, so the rule is the ancestry and not the root.
+    expect((await rt.sessions.steer(grandchild.id, { prompt: "from the child" }, asThread(childScope))).outcome).toBe("accepted");
+    const stopped = await rt.sessions.interrupt(child.id, asThread(leadScope));
+    expect(stopped.outcome).toBe("accepted");
+    expect(stopped.under).toEqual([grandThread]);
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
+    await rt.close();
+  });
+
+  it("a thread is refused on the person's own thread on the same workspace and on the tree beside its own", async () => {
+    const held = heldAdapter({ steers: true, renames: true });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const theirs = await rt.sessions.start(ws.id, { prompt: "the person's own" });
+    const theirThread = theirs.view().threadId!;
+    const lead = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const leadThread = lead.view().threadId!;
+    const leadScope: ThreadScope = { kind: "thread", threadId: leadThread, workspaceId: ws.id, rootThreadId: leadThread };
+    const child = await rt.sessions.start(ws.id, { prompt: "builder" }, asThread(leadScope));
+    const childScope: ThreadScope = { kind: "thread", threadId: child.view().threadId!, workspaceId: ws.id, rootThreadId: leadThread };
+    const beside = await rt.sessions.start(ws.id, { prompt: "another lead" });
+    const besideThread = beside.view().threadId!;
+    const besideScope: ThreadScope = { kind: "thread", threadId: besideThread, workspaceId: ws.id, rootThreadId: besideThread };
+    const besideChild = await rt.sessions.start(ws.id, { prompt: "their builder" }, asThread(besideScope));
+    /** Every session verb the lead's token carries, against one turn it may not reach, in the one sentence. */
+    const refusedOn = async (turnId: string, threadId: string): Promise<void> => {
+      const line = threadReachRefusal(leadThread, threadId);
+      await expect(rt.sessions.steer(turnId, { prompt: "nudge" }, asThread(leadScope))).rejects.toThrow(line);
+      await expect(rt.sessions.interrupt(turnId, asThread(leadScope))).rejects.toThrow(line);
+      await expect(rt.sessions.rename(turnId, "mine now", asThread(leadScope))).rejects.toThrow(line);
+      await expect(rt.sessions.start(ws.id, { prompt: "do this", thread: threadId }, asThread(leadScope))).rejects.toThrow(line);
+    };
+    // The thread the person opened, on the very workspace the lead runs on: the reach the ruling took away.
+    await refusedOn(theirs.id, theirThread);
+    // A tree beside its own, and a thread under that tree, sharing the workspace with both.
+    await refusedOn(beside.id, besideThread);
+    await refusedOn(besideChild.id, besideChild.view().threadId!);
+    // Upwards is outside the tree too: a child does not drive the lead that opened it.
+    await expect(rt.sessions.steer(lead.id, { prompt: "nudge" }, asThread(childScope))).rejects.toThrow(threadReachRefusal(childScope.threadId, leadThread));
+    // The person keeps all four on their own thread, which is what the rule never touches.
+    expect((await rt.sessions.steer(theirs.id, { prompt: "carry on" })).outcome).toBe("accepted");
+    expect((await rt.sessions.rename(theirs.id, "my own")).outcome).toBe("renamed");
+    expect((await rt.sessions.interrupt(theirs.id)).outcome).toBe("accepted");
+    for (let nth = held.launches.length - 1; nth >= 0; nth--) held.end(nth);
     await rt.close();
   });
 });
