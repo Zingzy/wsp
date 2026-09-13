@@ -5,11 +5,12 @@
 // back. The relay here is a real http server in this process, so the requests,
 // the headers and the refusals are real ones.
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CliIO } from "../src/cli.js";
+import { addressLines } from "../src/host-lock.js";
 import { connectCommand } from "../src/connect.js";
 import { dialWindowMs, readHost } from "../src/hosts.js";
 import { startConnector, type Connector } from "../src/connector.js";
@@ -19,12 +20,23 @@ import type { DialOpts, HostClient } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const io = (log: string[] = [], err: string[] = []): CliIO => ({ log: l => log.push(l), error: l => err.push(l), ask: noPrompt, askSecret: noPrompt });
+/** Everything a line said, in the order it said it, for a case about which sentence comes first. */
+const transcript = (said: string[]): CliIO => ({ log: l => said.push(l), error: l => said.push(l), ask: noPrompt, askSecret: noPrompt });
 
 let dirs: string[] = [];
 let servers: Server[] = [];
 const closers: (() => Promise<void>)[] = [];
 
+// A home of this run's own: what a host on this computer serves is read off the home directory, and the real one
+// would make these cases say different things on different machines.
+beforeEach(() => {
+  const user = mkdtempSync(join(tmpdir(), "wsp-relay-user-"));
+  dirs.push(user);
+  vi.stubEnv("HOME", user);
+});
+
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const close of closers.splice(0)) await close();
   for (const server of servers) await new Promise<void>(done => server.close(() => done()));
   servers = [];
@@ -173,6 +185,16 @@ function deps(dir: string, extra: Partial<RelayDeps> = {}): RelayDeps {
   };
 }
 
+/** A host serving this computer's default home, as the launchd service is: the pointer every other reading follows
+ * and a lock naming a live pid. Returns the state file that host serves. */
+function servingStateHere(): string {
+  const home = join(homedir(), ".wsp");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "current-home"), `${home}\n`);
+  writeFileSync(join(home, "host.lock"), JSON.stringify({ pid: process.pid, port: 4400, wsPort: 4410, startedAt: new Date().toISOString() }));
+  return join(home, "state.json");
+}
+
 /** A state folder with nothing in it, as a box that has never linked has. */
 function box(): { statePath: string; dir: string; home: string } {
   const dir = tempDir("relay-state");
@@ -203,6 +225,40 @@ describe("wsp host link", () => {
     await relayCommand(io(), { statePath, home }, ["link", relay.url], { name: "attic" }, deps(dir));
     expect(relay.calls[0]!.body["name"]).toBe("attic");
     expect(readRelayRecord(statePath)!.name).toBe("attic");
+  });
+
+  it("names the state it wrote to, in the spelling wsp status uses", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    const log: string[] = [];
+    await relayCommand(io(log), { statePath, home }, ["link", relay.url], {}, deps(dir));
+
+    expect(log).toContain(`relay       ${relay.url}`);
+    expect(log).toContain("host        the box");
+    // The one spelling of the state line, so the link and wsp status never name it two ways.
+    expect(log).toContain(addressLines(statePath, { port: 4400, wsPort: 4410 }).find(l => l.startsWith("state"))!);
+  });
+
+  it("says which state the host on this computer serves, and the --state that reaches it, before anything is written", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    const served = servingStateHere();
+    const said: string[] = [];
+    await relayCommand(transcript(said), { statePath, home }, ["link", relay.url], {}, deps(dir));
+
+    const warned = said.findIndex(l => l.includes(served));
+    expect(warned, said.join("\n")).toBeGreaterThanOrEqual(0);
+    expect(said[warned]).toContain(`--state ${served}`);
+    // Before the code goes up, so nothing is approved by somebody who has not read it.
+    expect(warned).toBeLessThan(said.findIndex(l => l.includes("ABCD2345")));
+  });
+
+  it("says nothing about another state when the host on this computer is the one being linked", async () => {
+    const relay = await fakeRelay();
+    const home = tempDir("relay-home");
+    const said: string[] = [];
+    await relayCommand(transcript(said), { statePath: servingStateHere(), home }, ["link", relay.url], {}, deps(tempDir("relay-bin")));
+    expect(said.join("\n")).not.toContain("--state");
   });
 
   it("refuses a second link over the first, and a line with no relay to link to", async () => {
@@ -472,6 +528,27 @@ describe("the person's own client", () => {
     expect(readRelayRecord(statePath)!.token).toBe("host-token");
     expect(readRelayClient(dir)!.token).toBe("client-token");
     expect(await relayHostUrl(dir, "box", deps(dir))).toBe("https://hbox1.boxes.example");
+  });
+
+  it("tells a computer already on the relay as a host that listing the account's hosts from here is its own sign-in", async () => {
+    const relay = await fakeRelay();
+    const { statePath, home, dir } = box();
+    await relayCommand(io(), { statePath, home }, ["link", relay.url], {}, deps(dir));
+
+    const refused = await relayCommand(io(), { statePath, home }, ["linked"], {}, deps(dir)).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused).toBeInstanceOf(Error);
+    // The link did happen: a sentence that reads as if it had not is what sent the owner looking for a fault.
+    expect(refused!.message).not.toContain("signed in to no relay");
+    expect(refused!.message).toContain(relay.url);
+    expect(refused!.message).toContain("the box");
+    expect(refused!.message).toContain(`wsp host linked ${relay.url}`);
+  });
+
+  it("still asks for the relay's address on a computer that is no host either", async () => {
+    const { statePath, home, dir } = box();
+    const refused = await relayCommand(io(), { statePath, home }, ["linked"], {}, deps(dir)).then(() => undefined, (e: unknown) => e as Error);
+    expect(refused!.message).toContain("signed in to no relay");
+    expect(refused!.message).toContain("wsp host linked <url>");
   });
 
   it("refuses a second relay rather than overwriting the sign-in this computer holds", async () => {
