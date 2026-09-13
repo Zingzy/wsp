@@ -24,7 +24,6 @@ import {
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
-  placeWorkspacesLine,
   placeEngineLine,
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinReply,
@@ -49,6 +48,7 @@ import {
   sentPairCode,
   usageRefusal,
   wsUrlOf,
+  PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
 import { SshBackend, checkProviderKey, keyCheckLine, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
 import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
@@ -145,7 +145,7 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
  * shown right after it joined somebody else's wsp cannot describe the same computer differently. */
 export function placeHere(name: string = placeNameHere()): HerePlace {
   const report = placeReport({ name });
-  return { name: report.name, os: report.os, shape: report.shape, runsWorkspaces: report.runsWorkspaces, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
+  return { name: report.name, os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
 
 /** How long a join gets to open the socket and finish the handshake. A person is watching, and a host that is not
@@ -216,12 +216,11 @@ export const deviceLeftLine = (name: string, deviceIds: readonly string[]): stri
   return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
 };
 
-/** What a remove prints: what came off that computer, what the workspaces on it said as they went, the note for a
- * place that was not connected to sweep, and the device a join bought for it where one is still on record. */
-export function removeLines(name: string, answer: { swept: readonly string[]; dropped: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
+/** What a remove prints: what came off that computer, the note for a place that was not connected to sweep, and
+ * the device a join bought for it where one is still on record. */
+export function removeLines(name: string, answer: { swept: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
   return [
     ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...answer.swept.map(line => `  ${line}`)]),
-    ...answer.dropped,
     ...(answer.note === undefined ? [] : [answer.note]),
     ...(deviceIds.length === 0 ? [] : [deviceLeftLine(name, deviceIds)]),
     `${name} is no longer a place in this wsp.`,
@@ -491,7 +490,7 @@ export function addedLines(place: PlaceView, hostKey: string | undefined): strin
   return [
     `${place.name} joined this wsp${place.shape === undefined ? "" : ` · ${fmtSize(place.shape, "cores")}`}${place.diskFreeBytes === undefined ? "" : ` · ${fmtBytes(place.diskFreeBytes)} free`}`,
     ...(hostKey === undefined ? [] : [`its ssh key      ${hostKey}`]),
-    ...[placeWorkspacesLine(place), placeEngineLine(place)].filter((line): line is string => line !== undefined),
+    ...[placeEngineLine(place)].filter((line): line is string => line !== undefined),
     `wsp remove ${place.name} takes it back out and sweeps wsp off it.`,
   ];
 }
@@ -539,7 +538,7 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
       return 1;
     }
     const place = found[0]!;
-    const answer = await client.request<{ removed: boolean; swept: string[]; dropped: string[]; note?: string }>("places.remove", { placeId: place.id });
+    const answer = await client.request<{ removed: boolean; swept: string[]; note?: string }>("places.remove", { placeId: place.id });
     if (!answer.removed) {
       io.error(noPlaceLine(ref, joined.map(p => p.name)));
       return 1;
@@ -563,7 +562,7 @@ const JOIN_USAGE = "usage: wsp join <address>... --code <code> [--name <name>]";
 /** Which of the two things a person typed a join refusal is about, where it is about one of them: an address
  * nothing answered at, or a code the host would not take. A refusal about neither (a host that would not prove its
  * key, a computer already in a wsp) carries none. */
-export type JoinRefusalAbout = "address" | "code";
+export type JoinRefusalAbout = "address" | "code" | "host";
 
 /** A join that did not happen, carrying what it was about where that is known. It is thrown where the reason is
  * known, so a screen with one slot per field puts a refusal under the right field rather than reading it back out
@@ -593,6 +592,10 @@ export interface JoinDeps {
   platform: string;
   home: string;
   now(): number;
+  /** Which manager holds the unit and which login is running this, for a caller that is not this process; this
+   * computer's own by default, which is what every terminal means. */
+  manager?: ServiceManager;
+  uid?: number;
 }
 
 const joinDeps = (): JoinDeps => ({
@@ -711,8 +714,9 @@ async function handshake(
         if (frame["ok"] !== true) {
           const said = String(frame["error"] ?? `${url} refused this join`);
           // The one refusal a host has for a code it is not holding, spent or expired or never minted, is the
-          // protocol's own constant; every other refusal from over there is about neither field.
-          end(said === PLACE_CODE_REFUSAL ? new JoinRefused("code", said) : new Error(said));
+          // protocol's own constant; every other refusal from over there is about this computer rather than about
+          // a field, and travels as the host's own sentence so a screen can print it instead of guessing.
+          end(new JoinRefused(said === PLACE_CODE_REFUSAL ? "code" : "host", said));
           return;
         }
         if (frame["id"] === 1) {
@@ -775,6 +779,9 @@ export interface JoinPlaceOptions {
   /** Which computer this is, for the manager that holds the unit and the line said where there is none; this
    * process's own unless a caller names another. */
   platform?: string;
+  /** The login running the join, for the manager that says whether its unit needs root; this process's own unless
+   * a caller names another. */
+  uid?: number;
   /** Which manager holds the unit: the one that platform has unless the caller names another, and a caller that
    * means none names the key with nothing in it, as the sweep's own option already reads. */
   manager?: ServiceManager | undefined;
@@ -794,7 +801,7 @@ export interface JoinedPlace {
 }
 
 /** The whole of a join, as a function: the key, the handshake, the two files at the person's own mode, and the unit
- * that dials again at every login. It refuses a computer that already belongs to a wsp, since a place file is the
+ * that dials again at every start. It refuses a computer that already belongs to a wsp, since a place file is the
  * one wsp this computer is in. Throws the host's own sentence on a refusal; the caller decides what a person reads. */
 export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<JoinedPlace> {
   const { home, addresses, code } = opts;
@@ -805,6 +812,10 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   const on = opts.platform ?? platform();
   const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
   if (manager === undefined) throw new Error(noPlaceManagerLine(on));
+  // The agent here is the machine's own service, so a login that cannot write one reads the sentence and stops:
+  // before the handshake, before the key, before the place file, before anything of wsp's is on this computer.
+  const uid = opts.uid ?? process.getuid?.() ?? 0;
+  if (manager.needsRoot?.({ role: "place", statePath: file, home, uid }) === true && uid !== 0) throw new Error(PLACE_NEEDS_ROOT_LINE);
   const bin = daemonBinaryHere();
   const name = opts.name?.trim() !== undefined && opts.name.trim() !== "" ? opts.name.trim() : placeNameHere();
   const now = opts.now ?? Date.now;
@@ -835,7 +846,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     report: joined.report,
     ...(joined.device === undefined ? {} : { device: joined.device }),
   };
-  const at: ServiceAddress = { role: "place", statePath: file, home, uid: process.getuid?.() ?? 0 };
+  const at: ServiceAddress = { role: "place", statePath: file, home, uid };
   const logPath = placeLogPath(home);
   // HOME is stated rather than inherited: the daemon keeps every file it has under the home its place file sits in,
   // and a manager that hands it the login's own default would put them somewhere else entirely. PATH is the one a
@@ -848,7 +859,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp leave takes it away.`);
     throw new Error(runFailureLine(failure));
   }
-  io.log(`${manager.words} ${unit.name} is loaded; it dials again at every login`);
+  io.log(`${manager.words} ${unit.name} is loaded; it dials again at every start`);
   io.log(`log         ${logPath}`);
   const after = manager.afterLoad?.(at);
   if (after !== undefined) io.log(after);
@@ -908,6 +919,8 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     ...(flags.name !== undefined ? { name: flags.name } : {}),
     ...(flags.awake === true ? { awake: true } : {}),
     platform: deps.platform,
+    ...(deps.manager !== undefined ? { manager: deps.manager } : {}),
+    ...(deps.uid !== undefined ? { uid: deps.uid } : {}),
     run: deps.run,
     dial: deps.dial,
     now: deps.now,

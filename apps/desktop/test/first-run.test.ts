@@ -39,10 +39,10 @@ interface Asks {
 }
 
 /** What the shell answers a join with, as the screen reads it: this computer's own facts, or which refusal. */
-type JoinAnswer = { ok: true; here: { name: string; facts: string; runsWorkspaces: boolean } } | { ok: false; why: string; said?: string };
+type JoinAnswer = { ok: true; here: { name: string; facts: string } } | { ok: false; why: string; said?: string };
 
 /** The computer the live shell would answer with, in the app's own words for a shape and a disk. */
-const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free", runsWorkspaces: false };
+const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free" };
 
 interface Screen {
   window: JSDOM["window"];
@@ -203,6 +203,24 @@ describe("the first launch's screen", () => {
     expect(already.text("#join-said")).toBe(`This Mac already runs threads for another wsp. ${JOIN_ALREADY.fix}`);
   });
 
+  it("prints the other wsp's own sentence when it turns this computer down, with nothing of the screen's added and nothing to press again", async () => {
+    // What a Mac meets: it is not a place, and the doctor over there says why in one sentence. The screen has
+    // nothing to add to it and no second try to offer, so the slot is that sentence and no fix.
+    const said = "old-macbook cannot run wsp workspaces: wsp runs workspaces on a Linux computer";
+    const turned = await open(AGENTS, { join: { ok: false, why: "refused", said } });
+    await turned.press("#join");
+    await turned.type("#address", "192.168.1.20:4420");
+    await turned.type("#code", "QW4K7PZX");
+    await turned.press("#go");
+    expect(turned.text("#join-said")).toBe(said);
+    expect(halves(turned.at("#join-said"))).toEqual({ happened: said, fix: "" });
+    // Never the screen's own catch-all, which told a person to press Join again at a wsp that will refuse forever.
+    expect(turned.text("#join-said")).not.toContain("Press Join again");
+    expect(turned.text("#join-said")).not.toContain("could not join");
+    // The joined card is not reached at all, so its one sentence stays the Linux box's.
+    expect(turned.at("#joined").hasAttribute("hidden") || turned.text("#here-workspaces") === "").toBe(true);
+  });
+
   it("holds the Join keycap as the outline until both fields are filled, with the reason in the Address slot", async () => {
     const screen = await open();
     await screen.press("#join");
@@ -311,19 +329,14 @@ describe("the first launch's screen", () => {
     expect(screen.text("#joined .sentence")).toBe("It now runs threads for your wsp. Leave it plugged in and awake.");
     expect(screen.text("#here-name")).toBe(HERE.name);
     expect(screen.text("#here-facts")).toBe(HERE.facts);
-    expect(screen.text("#here-workspaces")).toBe("runs your agents, one workspace");
+    // A computer that joined boots your image: the join turns down every one whose kernel cannot, so the row has
+    // one thing to say and no second sentence behind it.
+    expect(screen.text("#here-workspaces")).toBe("runs your workspaces · your image builds here on first use");
     expect(screen.text("#open-joined").replace(/\s+/g, " ").trim()).toBe("Open wsp →");
-    // A computer that can fork says so instead, on the same row.
-    const withDocker = await open(AGENTS, { join: { ok: true, here: { ...HERE, runsWorkspaces: true } } });
-    await withDocker.press("#join");
-    await withDocker.type("#address", "192.168.1.20:7788");
-    await withDocker.type("#code", "QW4K-7PZX");
-    await withDocker.press("#go");
-    expect(withDocker.text("#here-workspaces")).toBe("runs your workspaces · your image builds here on first use");
-    // The one press out of the page is the same one: the tools into the agents found here, then this Mac recorded.
-    await withDocker.press("#open-joined");
-    expect(withDocker.asks.install).toEqual([["claude", "codex"]]);
-    expect(withDocker.asks.finish).toBe(1);
+    // The one press out of the page: the tools into the agents found here, then this Mac recorded.
+    await screen.press("#open-joined");
+    expect(screen.asks.install).toEqual([["claude", "codex"]]);
+    expect(screen.asks.finish).toBe(1);
   });
 
   it("draws a refusal as two halves, what happened then what to do, and keeps the keycap live after one", async () => {

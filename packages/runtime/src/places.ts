@@ -26,6 +26,7 @@ import {
   noSuchPlaceRefusal,
   placeHoldsForksRefusal,
   placeForksNowhereLine,
+  placeCannotBootLine,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeStillInstalledLine,
@@ -80,8 +81,6 @@ export interface PlaceRecord {
   joinedAt: string;
   lastSeenAt: string;
   report: PlaceReport;
-  /** The workspace recorded on this computer at join, where the join could record one. */
-  workspaceId?: string;
   /** What the backend this computer offers said about itself the last time it was linked. Kept on the record so a
    * fork standing on this place can be held at host start, before the computer has dialled in: the capabilities,
    * the sizes and the budgets a road reads are facts about that computer, not about this moment's socket. */
@@ -119,7 +118,6 @@ export interface HerePlace {
   name: string;
   os?: string;
   shape?: WorkspaceSize;
-  runsWorkspaces?: boolean;
   engine?: "none" | "docker" | "podman";
   diskFreeBytes?: number;
 }
@@ -178,20 +176,11 @@ export interface PlaceInstalled {
 export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
-/** The two roads into the runtime a place needs, handed in because both are the runtime's own: a joined computer
- * becomes a workspace at its join, and those workspaces go when the place does. */
+/** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks,
+ * and a remove refuses to take the place out from under them. */
 export interface PlaceRecording {
-  /** Records one workspace on the place; answers its id, and the notice where a name was already held. */
-  record(place: PlaceRecord): Promise<{ workspaceId?: string; notice?: string }>;
-  /** Drops every workspace standing on this place by the ordinary delete road; answers the lines it printed, in
-   * that kind's own words for what a delete does to a machine. */
-  drop(placeId: string): Promise<string[]>;
-  /** Moves the login and the shape of the workspace standing on this place onto what it just reported. A computer
-   * somebody owns is upgraded, re-installed and given new tools under wsp rather than by it, so what a turn there
-   * runs under is read again at every link and not once at the join. */
-  refresh(place: PlaceRecord): Promise<void>;
-  /** The names of the forks standing on this place: machines wsp made there, which a remove refuses to take the
-   * place out from under. The workspace the place itself is is not one of them. */
+  /** The names of the forks standing on this place: the machines wsp made there, which are the only workspaces a
+   * place carries. */
   forksOn(placeId: string): Promise<string[]>;
 }
 
@@ -318,7 +307,6 @@ export interface PlaceAdded {
 export interface PlaceRemoved {
   removed: boolean;
   swept: string[];
-  dropped: string[];
   note?: string;
 }
 
@@ -664,7 +652,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and one
    * that does not answer in time shows nothing rather than a guess. */
   const forksOf = async (record: PlaceRecord): Promise<{ running: number; room: number } | undefined> => {
-    const linked = live.has(record.id) && record.report.runsWorkspaces;
+    const linked = live.has(record.id);
     const backend = linked ? door.backendOf(record.id) : undefined;
     if (backend === undefined) {
       if (linked) void door.forkingBackend(record.id).catch(() => undefined);
@@ -694,18 +682,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     os: record.report.os,
     shape: record.report.shape,
     ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
-    runsWorkspaces: record.report.runsWorkspaces,
-    ...(record.report.workspacesBlocked !== undefined ? { workspacesBlocked: record.report.workspacesBlocked } : {}),
     engine: record.report.engine,
     present: live.has(record.id),
     joinedAt: record.joinedAt,
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
-    // A joined computer forks where its own daemon runs workspaces, which is the daemon's self check, not an engine
-    // of its own; a box whose kernel that check turns down runs the person's agents as its own one workspace.
-    takesForks: record.report.runsWorkspaces === true,
-    ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+    // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
+    // every computer on this list forks.
+    takesForks: true,
     // Field by field rather than spread: the key file on the record is a path on this computer and no client's
     // business, and a road copied whole would hand it over.
     ...(record.road === undefined ? {} : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}) } }),
@@ -717,12 +702,22 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
   });
 
+  /** Whether this computer can be a place at all, by the daemon's own self check, and the one sentence when it
+   * cannot. Read on the join and on every link after it: a box is turned down the moment it says its kernel no
+   * longer boots the image, rather than staying a forking place nothing can fork on. */
+  const cannotBoot = (report: PlaceReport): string | undefined =>
+    report.runsWorkspaces ? undefined : placeCannotBootLine(report.name, report.workspacesBlocked);
+
   const door: PlaceDoor = {
     async join(req, from, at) {
       // The key and the report are read before the code is spent, so a join that was never going to stand does not
       // cost the person their code.
       if (!readsAsEd25519(req.publicKey)) throw new Error(PLACE_BAD_KEY_REFUSAL);
       const taken = takenReport(req.report);
+      // A computer that cannot boot the image is not a place: the daemon's own doctor says why in one sentence and
+      // the join stops on it, before the code is spent and before a record exists.
+      const blocked = cannotBoot(taken);
+      if (blocked !== undefined) throw new Error(blocked);
       if (!(await devices.spend(req.code, at))) return undefined;
       // Eight bytes: the id keys the store, so two places that drew the same one would be one record and the older
       // computer's link would replace the newer's on every dial.
@@ -732,9 +727,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await keep(record);
       // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
       await markDefault(id);
-      const recorded = await recording.record(record);
-      const held: PlaceRecord = recorded.workspaceId === undefined ? record : { ...record, workspaceId: recorded.workspaceId };
-      if (recorded.workspaceId !== undefined) await keep(held);
       // One code buys the place and, when the app asked, the token the joining computer's own window holds: the
       // person's intent was one act. The socket stays the place link and is bound to no device.
       const client = req.client === undefined ? undefined : await devices.admit(req.client.name, at);
@@ -742,7 +734,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // An install that handed this computer the code is waiting on the link it will open next.
       const waiting = awaiting.get(req.code);
       if (waiting !== undefined) waiting.placeId = id;
-      emit({ type: "place.joined", place: viewOf(held, id), from });
+      emit({ type: "place.joined", place: viewOf(record, id), from });
       return {
         reply: {
           placeId: id,
@@ -753,7 +745,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(client === undefined ? {} : { device: { deviceId: client.deviceId, deviceToken: client.deviceToken } }),
         },
         expect,
-        ...(recorded.notice !== undefined ? { notice: recorded.notice } : {}),
       };
     },
 
@@ -766,13 +757,22 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async prove(placeId, signature, expect, report) {
       const held = await recordOf(placeId);
       if (held === undefined || !verifyPlaceBytes(held.publicKey, expect, signature)) return { refusal: PLACE_KEY_REFUSAL };
-      // The report on this frame is the one the record and the workspace take, on a join's second frame and on every
-      // relink alike, so it is read by the same rule the join's own frame was.
+      // The report on this frame is the one the record takes, on a join's second frame and on every relink alike,
+      // so it is read by the same rule the join's own frame was.
+      let taken: PlaceReport;
       try {
-        return { report: takenReport(report) };
+        taken = takenReport(report);
       } catch (e) {
         return { refusal: e instanceof Error ? e.message : String(e) };
       }
+      const blocked = cannotBoot(taken);
+      if (blocked === undefined) return { report: taken };
+      // A box that can no longer boot the image stops being reachable here and says why: the link is cut, the row
+      // keeps the sentence where every other refusal of a dial is kept, and nothing attaches.
+      await keep({ ...held, dialled: { at: new Date(clockNow()).toISOString(), answered: false, said: blocked } });
+      cut(placeId, blocked);
+      emit({ type: "place.absent", placeId });
+      return { refusal: blocked };
     },
 
     async attach(placeId, socket, report, from, at) {
@@ -789,9 +789,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // the link that arrived: the computer is here now, and a refusal from before it came back is not news.
       const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
       await keep(moved);
-      // What a turn there runs under is this link's report and not the join's: a person installs a tool on their own
-      // computer and the next link is where wsp learns it.
-      await recording.refresh(moved);
       const reach = connectDaemon({
         socket,
         onEvent: e => {
@@ -810,12 +807,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // Before anything else this attach does: a request held over the gap is sent again on this socket, and the
       // stage waiting on it was told to wait rather than told the computer was gone.
       woken(placeId, true);
-      // A computer that says it no longer forks is taken at its word at once: what it said before is not a fact
-      // about the computer that is here now. One that says it does is asked what it forks with behind the attach
-      // and not in front of it, so the link is held whether or not that answer comes and the first listing after a
-      // join carries the room it has left.
-      if (!moved.report.runsWorkspaces) backends.delete(placeId);
-      else void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
+      // What the computer forks with is asked behind the attach and not in front of it, so the link is held whether
+      // or not that answer comes and the first listing after a join carries the room it has left.
+      void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
       socket.once("close", () => {
         const mine = live.get(placeId);
         if (mine?.socket !== socket) return;
@@ -869,9 +863,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (at !== undefined) return at;
       }
       const name = record?.name ?? placeId;
-      if (record === undefined || !record.report.runsWorkspaces) {
+      if (record === undefined) {
         backends.delete(placeId);
-        throw new PlaceForksNowhereError(placeForksNowhereLine(name, record?.report.workspacesBlocked));
+        throw new PlaceForksNowhereError(placeForksNowhereLine(name));
       }
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -998,7 +992,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (installed.ssh !== undefined) await keep(held);
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", `workspaces ${held.report.runsWorkspaces ? "yes" : "no"} · engine ${held.report.engine}`);
+        stage("join", "done", `engine ${held.report.engine}`);
         return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
@@ -1099,7 +1093,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.os !== undefined ? { os: here.os } : {}),
           ...(here.shape !== undefined ? { shape: here.shape } : {}),
           ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
-          ...(here.runsWorkspaces !== undefined ? { runsWorkspaces: here.runsWorkspaces } : {}),
           ...(here.engine !== undefined ? { engine: here.engine } : {}),
           present: true,
           // This computer is where the person's own agents run, never something the host forks into: a copy of the
@@ -1131,7 +1124,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async remove(placeId) {
       const held = await recordOf(placeId);
-      if (held === undefined) return { removed: false, swept: [], dropped: [] };
+      if (held === undefined) return { removed: false, swept: [] };
       // The forks on it are wsp's own machines and the person's to delete: a place taken out from under them would
       // leave containers on that computer nothing here can name again.
       const forks = await recording.forksOn(placeId);
@@ -1151,8 +1144,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         }
         cut(placeId, "removed from this host");
       }
-      // The workspaces standing on it go by the ordinary delete road, so their threads and transcripts go with them.
-      const dropped = await recording.drop(placeId);
       kept.delete(placeId);
       backends.delete(placeId);
       await store.delete(PLACES, placeId);
@@ -1160,7 +1151,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       woken(placeId, false);
       closedAt.delete(placeId);
       emit({ type: "place.removed", placeId });
-      return { removed: true, swept, dropped, ...(note !== undefined ? { note } : {}) };
+      return { removed: true, swept, ...(note !== undefined ? { note } : {}) };
     },
 
     find: async ref => (await records()).filter(r => r.id === ref || r.name === ref),

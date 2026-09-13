@@ -284,21 +284,18 @@ describe("the kind table", () => {
     expect(readingsFor("ssh")).toBe(readingsFor("cloud"));
   });
 
-  it("picks a place's two modules by the system it is on, which is the one platform switch there is", async () => {
+  it("reads a place's own /proc, as a fork does, since a place is Linux or it never joined", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-place-readings-"));
     made.push(dir);
     const opts = { root: dir, workFolder: dir, ports: async () => [], platform: "linux" };
-    const place = readingsFor("place");
-    // On Linux a place reads its own /proc, as a fork does; a fork's own modules are the same objects.
     const procRoot = mkdtempSync(join(tmpdir(), "wsp-place-proc-"));
     made.push(procRoot);
-    const onLinux = place.metrics({ ...opts, procRoot });
+    const place = readingsFor("place");
+    // The join turns down a box whose kernel cannot boot the image, and that check names Linux first, so there is
+    // no second system a place's daemon can be on and no platform switch left inside this kind.
     const forked = readingsFor("cloud").metrics({ ...opts, procRoot });
-    expect(onLinux.constructor).toBe(forked.constructor);
-    // Elsewhere it reads its own host with os, df and ps, which is what answers on a Mac: the /proc road reads
-    // nothing there and left both panes at pending.
-    const mine = place.processes({ ...opts, platform: "darwin" });
-    expect(mine).toBeInstanceOf(LocalProcSource);
-    expect(readingsFor("place").processes({ ...opts, platform: "linux", procRoot })).not.toBeInstanceOf(LocalProcSource);
+    expect(place.metrics({ ...opts, procRoot }).constructor).toBe(forked.constructor);
+    expect(place.processes({ ...opts, procRoot })).not.toBeInstanceOf(LocalProcSource);
+    expect(place.processes({ ...opts, platform: "darwin", procRoot })).not.toBeInstanceOf(LocalProcSource);
   });
 });

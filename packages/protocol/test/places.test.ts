@@ -21,7 +21,10 @@ import {
   sentPairCode,
   shownPairCode,
   WORKSPACE_KIND_WORDS,
-  deleteNotice,
+  WorkspaceKind,
+  workspacesBlockedBy,
+  CGROUP_CONTROLLERS_PATH,
+  PROC_FILESYSTEMS_PATH,
   placeDaemonPaths,
   placeLinkTranscript,
   sshDaemonPaths,
@@ -40,7 +43,7 @@ const report = {
   os: "Darwin 24.5.0",
   shape: { cpu: 4, memMb: 8192 },
   login: { HOME: "/Users/maya", USER: "maya", PATH: "/usr/bin" },
-  runsWorkspaces: false,
+  runsWorkspaces: true,
   engine: "none",
   daemonVersion: 17,
   agents: [],
@@ -104,20 +107,10 @@ describe("the bytes both sides of a link sign", () => {
   });
 });
 
-describe("the words a place's workspace carries", () => {
-  const words = WORKSPACE_KIND_WORDS.place;
-
-  it("is a machine wsp neither forks nor pays for, whose agents drive nothing, and whose folders land under its own home", () => {
-    expect(words.driven).toBe(false);
-    expect(words.agents).toBe(false);
-    expect(words.importsAt).toBe("under home");
-    expect(words.imports).toBe("copies");
-    expect(words.daemon).toBe(true);
-  });
-
-  it("says the computer stays joined when a workspace on it is deleted, since wsp remove is what takes the agent off", () => {
-    expect(deleteNotice(0, "place")).toContain("computer stays joined to this wsp");
-    expect(deleteNotice(0, "place")).toContain("wsp remove");
+describe("the kinds a workspace can be", () => {
+  it("holds no kind for the computer a place is: a place is not a workspace, and its forks are the workspaces", () => {
+    expect(Object.keys(WORKSPACE_KIND_WORDS)).not.toContain("place");
+    expect(WorkspaceKind.safeParse("place").success).toBe(false);
   });
 });
 
@@ -257,9 +250,8 @@ describe("which row of the places list a workspace stands on", () => {
   const solari = { id: "solari", kind: "provider" as const };
   const places = [here, laptop, ascii, solari];
 
-  it("takes the computer a record names, wherever the name is written", () => {
-    expect(workspacePlaceId({ kind: "place", machineId: "place:p_1" }, places)).toBe("p_1");
-    expect(workspacePlaceId({ kind: "place", machineId: "m1", place: "p_1" }, places)).toBe("p_1");
+  it("takes the computer a fork's record names", () => {
+    expect(workspacePlaceId({ kind: "cloud", machineId: "m1", place: "p_1" }, places)).toBe("p_1");
   });
 
   it("puts this computer's own workspace on the first row, which is the computer the host runs on", () => {
@@ -284,7 +276,58 @@ describe("which row of the places list a workspace stands on", () => {
   });
 
   it("places nothing it cannot: a computer that has been removed, and a fork on a list with no provider at all", () => {
-    expect(workspacePlaceId({ kind: "place", machineId: "place:p_gone" }, places)).toBeUndefined();
+    expect(workspacePlaceId({ kind: "cloud", machineId: "m1", place: "p_gone" }, places)).toBeUndefined();
     expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1" }, [here])).toBeUndefined();
+  });
+});
+
+describe("the one rule that decides whether a computer can be a place", () => {
+  /** A kernel, as the rule reads one: the two files it asks for, and nothing else on this machine. */
+  const box = (files: Record<string, string>) => (path: string): string | undefined => files[path];
+  const CGROUP: Record<string, string> = { [CGROUP_CONTROLLERS_PATH]: "cpuset cpu io memory pids\n", [PROC_FILESYSTEMS_PATH]: "nodev sysfs\next4\nnodev overlay\n" };
+
+  it("takes a Linux box with cgroup v2, the two controllers a cap needs, an overlay and root", () => {
+    expect(workspacesBlockedBy({ platform: "linux", read: box(CGROUP), euid: 0 })).toBeUndefined();
+  });
+
+  it("turns down anything that is not Linux before it reads a file at all", () => {
+    let asked = 0;
+    const counting = (path: string): string | undefined => {
+      asked++;
+      return CGROUP[path];
+    };
+    expect(workspacesBlockedBy({ platform: "darwin", read: counting, euid: 0 })).toBe("wsp runs workspaces on a Linux computer");
+    expect(asked).toBe(0);
+  });
+
+  it("names cgroup v1 when the controllers file is not there, since that is what mounting v1 looks like", () => {
+    const said = workspacesBlockedBy({ platform: "linux", read: box({ [PROC_FILESYSTEMS_PATH]: CGROUP[PROC_FILESYSTEMS_PATH]! }), euid: 0 });
+    expect(said).toContain("cgroup v1");
+    expect(said).toContain("systemd.unified_cgroup_hierarchy=1");
+  });
+
+  it("names the controller a cap needs and does not have, one at a time", () => {
+    const without = (drop: string) => box({ ...CGROUP, [CGROUP_CONTROLLERS_PATH]: "cpuset cpu io memory pids\n".replace(`${drop} `, "") });
+    expect(workspacesBlockedBy({ platform: "linux", read: without("memory"), euid: 0 })).toBe("this computer's cgroup root offers no memory controller, which wsp needs to run workspaces here");
+    expect(workspacesBlockedBy({ platform: "linux", read: without("cpu"), euid: 0 })).toBe("this computer's cgroup root offers no cpu controller, which wsp needs to run workspaces here");
+  });
+
+  it("names the overlay a workspace's layers stack on, whether the file is missing or does not list it", () => {
+    const overlay = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    expect(workspacesBlockedBy({ platform: "linux", read: box({ [CGROUP_CONTROLLERS_PATH]: CGROUP[CGROUP_CONTROLLERS_PATH]! }), euid: 0 })).toBe(overlay);
+    expect(workspacesBlockedBy({ platform: "linux", read: box({ ...CGROUP, [PROC_FILESYSTEMS_PATH]: "nodev sysfs\next4\n" }), euid: 0 })).toBe(overlay);
+  });
+
+  it("names root last, so a box that has everything else reads the one thing a person can change from here", () => {
+    expect(workspacesBlockedBy({ platform: "linux", read: box(CGROUP), euid: 1000 })).toBe("wsp runs workspaces on this computer as root, and this daemon is not root");
+    expect(workspacesBlockedBy({ platform: "linux", read: box(CGROUP) })).toContain("as root");
+  });
+
+  it("asks in one order, so the reason a person reads is the first thing missing rather than the last", () => {
+    // A Mac with none of it reads the platform, not the cgroup; a Linux box missing both cgroup and overlay reads
+    // the cgroup. Every sentence above is reachable, and only the first one that applies is ever said.
+    expect(workspacesBlockedBy({ platform: "darwin", read: box({}), euid: 1000 })).toContain("Linux computer");
+    expect(workspacesBlockedBy({ platform: "linux", read: box({}), euid: 1000 })).toContain("cgroup v1");
+    expect(workspacesBlockedBy({ platform: "linux", read: box({ [CGROUP_CONTROLLERS_PATH]: "cpu memory\n" }), euid: 1000 })).toContain("overlay");
   });
 });
