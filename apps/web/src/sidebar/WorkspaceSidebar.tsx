@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -22,7 +22,7 @@ import { sidebarActions } from "../actions/sidebarActions.js";
 import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
 import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
-import { deriveSidebarProjects, type SidebarProjectSnapshot, type SidebarThreadSnapshot } from "../adapt/index.js";
+import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
 import { ForgetWorkspaceDialog } from "../components/ForgetWorkspaceDialog.js";
 import { WorkspaceLookPopover } from "../components/look/WorkspaceLookPopover.js";
@@ -35,7 +35,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
-import { catalogIn, useCapabilities, useLabs, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useCapabilities, useLabs, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
@@ -129,7 +129,6 @@ export function WorkspaceSidebar() {
   const conn = useStore(s => s.conn);
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
-  const sessions = useStore(s => s.sessions);
   const costs = useStore(s => s.costs);
   const toast = useStore(s => s.toast);
   const clearToast = useStore(s => s.clearToast);
@@ -195,7 +194,7 @@ export function WorkspaceSidebar() {
   // known, the line under the search row says why nothing moves, and the rows on that computer take no green, since
   // nothing here knows what they are doing while it sleeps.
   const asleep = hostAsleep(conn);
-  const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+  const projects = useSidebarProjects();
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(
@@ -602,10 +601,12 @@ export function WorkspaceSidebar() {
             {allCollapsed && mode !== "spaces" ? null : (
               <SidebarGroupContent>
                 <SidebarMenu>
+                  {mode === "spaces" ? null : visible.map(listItem)}
+                  {/* Under the rows and not over them: a workspace being made is the newest of them, so its row waits
+                      where it will stand once it is one and nothing already drawn moves when it lands. */}
                   {creations.map(creation => (
                     <CreationRow key={creation.key} creation={creation} active={selectedId === creation.key} onSelect={() => select(creation.key)} />
                   ))}
-                  {mode === "spaces" ? null : visible.map(listItem)}
                 </SidebarMenu>
                 {currentSpace === null ? null : (
                   <SpaceSlide currentId={currentSpace.project.id} order={visible.map(v => v.project.id)}>
@@ -730,10 +731,11 @@ function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string
   );
 }
 
-/** A workspace still being created: the spinner and the runtime's latest stage, wrapped rather than cut at the sidebar's width. */
+/** A workspace still being created: the spinner and the step the create is waiting on, wrapped rather than cut at
+ * the sidebar's width. A note on a step already taken stays in the log: this line is the create's state. */
 function CreationRow({ creation, active, onSelect }: { creation: Creation; active: boolean; onSelect: () => void }) {
   const failed = creation.failed !== null;
-  const line = failed ? creation.failed.title : creation.lines.at(-1)?.message ?? CREATION_ASKED;
+  const line = failed ? creation.failed.title : creation.lines.findLast(l => creationAwaits(l.stage))?.message ?? CREATION_ASKED;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton

@@ -22,7 +22,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "playwright";
-import { fixtureFleet, fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFleet, fixtureState } from "./fixture-state.mjs";
 import { BROWSER_ARGS, freePort, REPO, startHost, stopHost, WEB_DIR, whatIsNotBuilt } from "./host.mjs";
 import { writeStandIn } from "./lab-home.mjs";
 import { indexMarkdown, readSurfaces, shotPlan } from "./plan.mjs";
@@ -169,16 +169,26 @@ async function main() {
     const held = others.get(fixture);
     if (held !== undefined) return held;
     const own = mkdtempSync(join(tmpdir(), "wsp-shots-"));
+    // The cloud the fixture's machines are meant to be at rides with it: without that word the stand-in stands in
+    // for nothing, and the provider a fixture is about is on no row of the places table.
     const state = fixtureState(fixture);
-    const started = await startHost({ home: own, state, port: await freePort(), wsPort: await freePort(), records: writeStandIn(own, fixtureFleet(state)) });
+    const started = await startHost({
+      home: own,
+      state,
+      port: await freePort(),
+      wsPort: await freePort(),
+      cloud: fixtureCloud(fixture),
+      records: writeStandIn(own, fixtureFleet(state)),
+    });
     others.set(fixture, { ...started, home: own, token: await bootToken(started.base) });
     return others.get(fixture);
   };
   try {
     const state = fixtureState();
     // The stand-in's records, seeded and named: a fixture's sleeping fork is asleep because its provider says so,
-    // and this run names no folder for the machines, so nothing runs on any of them.
-    host = await startHost({ home, state, port: await freePort(), wsPort: await freePort(), records: writeStandIn(home, fixtureFleet(state)) });
+    // and this run names no folder for the machines, so nothing runs on any of them. The cloud those machines are
+    // meant to be at rides with them, or the stand-in stands in for nothing and no provider is on the places table.
+    host = await startHost({ home, state, port: await freePort(), wsPort: await freePort(), cloud: fixtureCloud(), records: writeStandIn(home, fixtureFleet(state)) });
     host.token = await bootToken(host.base);
     browser = await chromium.launch({ args: BROWSER_ARGS });
     for (const shot of shotPlan(list)) {

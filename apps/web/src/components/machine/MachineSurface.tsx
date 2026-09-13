@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, staleWord, useOutOfMemoryReading, useWorkspaceLive, type StaleWord } from "../../machine/live.js";
@@ -35,6 +35,7 @@ import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { idleLabel, money, percentLabel } from "./format.js";
 import { TONE_TEXT } from "../../lib/tone.js";
+import { builtWhen } from "../../settings/image.js";
 import { THIS_COMPUTER_WORD } from "../../settings/places.js";
 import { whereRuns } from "../../sidebar/workspaceRows.js";
 import { workspaceKindGlyph } from "../../workspaceKindGlyph.js";
@@ -65,21 +66,29 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
   // A machine wsp neither forks nor pays for has no spend to chart, nothing to nap and no image behind it; its rows
   // say what it is instead.
   const kind = kindWords(workspaceKind(workspace));
-  const goldens = useProjectGoldens(kind.driven);
+  // The host answers no event for a project snapshot, so the count of the takes this pane made is the only thing the
+  // project images and the account's storage can be read again on.
+  const [takes, setTakes] = useState(0);
+  const goldens = useProjectGoldens(kind.driven, takes);
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} pendingSize={pendingSize} kind={kind} />
-        <Projects workspace={workspace} status={status} kind={kind} onTaken={goldens.add} />
+        <Projects workspace={workspace} status={status} kind={kind} onTaken={() => setTakes(n => n + 1)} />
         <Live workspace={workspace} />
-        {kind.driven && <Usage workspace={workspace} status={status} series={series} />}
-        {kind.driven && <GoldenLineage workspace={workspace} projects={goldens.list} />}
+        {kind.driven && <Usage workspace={workspace} status={status} series={series} takes={takes} />}
+        {kind.driven && <GoldenLineage workspace={workspace} projects={goldens} />}
       </ScrollArea>
       <Actions workspace={workspace} status={status} upgrade={upgrade} />
     </div>
   );
 }
+
+/** The road from one project image to a workspace holding it, written once: the button beside the row and the note
+ * the take leaves say the same words, so the promise and the thing that keeps it cannot drift apart. Longer than the
+ * sidebar's New workspace on purpose, since that one starts from the image's newest version and carries no project. */
+const NEW_WORKSPACE_FROM_THIS = "New workspace from this";
 
 /** Every row of the pane, header and foot included: 12 px at the left and 20 px at the right, so the 6 px scroll
  * bar rides in the outer 8 px and never covers a value. The hairlines run edge to edge, being the row's own. */
@@ -237,8 +246,8 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
         </p>
       )}
       {vaultStale !== null && (
-        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="vault-refused">
-          {vault.vaultRefused}
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="vault-refused" title={vault.vaultRefused}>
+          {vaultKeptLine(vault)}
         </p>
       )}
       {daemonLacks !== undefined && (
@@ -261,10 +270,10 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   );
 }
 
-/** Every project image this host took, read once for the tab: the Versions section lists them under their versions and the
- * projects section adds the one it takes, so the two never read two lists. Read only where the versions draw, since a
- * machine with no image behind it neither lists images nor takes one. */
-function useProjectGoldens(wanted: boolean): { list: ProjectGolden[]; add: (taken: ProjectGolden) => void } {
+/** Every project image this host took, read for the tab and read again on every take it answers: the Versions section
+ * lists them under their versions, so the row a take adds is the host's own listing rather than this tab's guess at
+ * it. Read only where the versions draw, since a machine with no image behind it neither lists images nor takes one. */
+function useProjectGoldens(wanted: boolean, takes: number): ProjectGolden[] {
   const api = useStore(s => s.api);
   const [list, setList] = useState<ProjectGolden[]>([]);
   useEffect(() => {
@@ -279,15 +288,15 @@ function useProjectGoldens(wanted: boolean): { list: ProjectGolden[]; add: (take
     return () => {
       current = false;
     };
-  }, [api, wanted]);
-  return { list, add: taken => setList(p => [...p, taken]) };
+  }, [api, wanted, takes]);
+  return list;
 }
 
 /** The projects on the machine, oldest import first, one mono row each: the name, the folder it landed at, its size
  * where the import measured one and the day it landed. Under them the two roads that change the list: the import
  * the row's menu offers, through the registry so it is refused where that is, and the snapshot that images the disk
  * with every project on it, offered only where the Versions section draws: a machine with an image behind it. */
-function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: (taken: ProjectGolden) => void }) {
+function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: () => void }) {
   const api = useStore(s => s.api);
   const verbs = useWorkspaceVerbs();
   const projects = workspaceProjects(workspace);
@@ -300,8 +309,8 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
     setBusy(true);
     try {
       const taken = await api.snapshotWorkspace(workspace.id);
-      onTaken(taken);
-      setNote(`Image of ${taken.projects.map(p => p.name).join(", ")} taken. New workspaces from it start with the projects in place.`);
+      onTaken();
+      setNote(`Image of ${taken.projects.map(p => p.name).join(", ")} taken. ${NEW_WORKSPACE_FROM_THIS} starts with the projects in place.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -539,23 +548,27 @@ function LiveRow({ label, k, samples, y, text, tone, stale, unavailable, kindWor
   );
 }
 
-function Usage({ workspace, status, series }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: WorkspaceCostEvent[] }) {
+function Usage({ workspace, status, series, takes }: { workspace: WorkspaceView; status: WorkspaceStatus | null; series: WorkspaceCostEvent[]; takes: number }) {
   const cost = useCost(workspace.id);
   const [range, setRange] = useState<UsageRange>("all");
   const billing = isBilling(workspaceStateOf(workspace, status));
   const rate = billing ? cost?.rateUsdPerHour ?? status?.rateUsdPerHour ?? 0 : 0;
+  // The total is the series' own newest point, which is the runtime's history until a tick lands and the tick
+  // after that: the live reading alone stood at zero under a chart drawing dollars until the first tick of the
+  // session, and a loaded zero reads as a measurement.
+  const accrued = series[series.length - 1]?.accruedUsd ?? cost?.accruedUsd ?? 0;
   return (
-    <Section label="Usage" aside={<UsageRangeToggle range={range} onChange={setRange} />}>
+    <Section label="Usage" aside={<UsageRangeToggle series={series} range={range} onChange={setRange} />}>
       <UsageChart series={series} range={range} />
       <div className="divide-y divide-border/40">
         <Row label="Rate now" k="rate">
           {`${money(rate, 3)}/hr`}
         </Row>
         <Row label="Accrued" k="accrued">
-          {fmtCost(cost?.accruedUsd ?? 0)}
+          {fmtCost(accrued)}
         </Row>
       </div>
-      <SnapshotStorageLine />
+      <SnapshotStorageLine takes={takes} />
     </Section>
   );
 }
@@ -658,7 +671,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
         <LineageRow
           dot={workspace.phase === "running" ? "bg-success" : "border border-muted-foreground/60"}
           title={<span className="font-medium">Live disk</span>}
-          detail={`created ${workspace.createdAt.slice(0, 10)}`}
+          detail={`created ${builtWhen(workspace.createdAt)}`}
           marks={["now"]}
         />
         {versions.length === 0 ? (
@@ -685,7 +698,7 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
                     v{v.version}
                   </span>
                 }
-                detail={`built ${v.createdAt.slice(0, 10)}${fork && behind !== null ? ` · ${behindGoldenLine(v.version, behind)}` : ""}`}
+                detail={`built ${builtWhen(v.createdAt)}${fork && behind !== null ? ` · ${behindGoldenLine(v.version, behind)}` : ""}`}
                 marks={[...(head ? ["head" as const] : []), ...(fork ? ["fork" as const] : []), ...goldenImage(v).marks]}
                 below={
                   <>
@@ -802,11 +815,11 @@ function ProjectGoldens({ goldens, forkOf, busy, onFork }: { goldens: ProjectGol
               {g.projects.map(p => p.name).join(", ")}
             </span>
           }
-          detail={`snapshot ${g.createdAt.slice(0, 10)} · imported ${g.projects.at(-1)?.importedAt.slice(0, 10) ?? "never"} · from ${g.workspaceName}`}
+          detail={`snapshot ${builtWhen(g.createdAt)} · from ${g.workspaceName}`}
           marks={g.snapshotId === forkOf ? ["fork"] : []}
           aside={
             <Button size="xs" variant="outline" disabled={busy} aria-label={`new workspace from the image of ${goldenForkName(g)} taken on ${g.workspaceName}, v${g.version}`} onClick={() => onFork(g)}>
-              New workspace
+              {NEW_WORKSPACE_FROM_THIS}
             </Button>
           }
         />

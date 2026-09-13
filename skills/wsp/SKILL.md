@@ -83,6 +83,8 @@ The command line and the MCP server call the same functions. Every verb takes `-
 | `wsp run [<workspace>] [--agent <id>] [--model <slug>] [--effort <word>] [--access <word>] [--project <name>] [--cwd <path>] [--notify <thread\|me>] [--title <name>] [--image <path>] [--detach] "<task>"` | `run` (workspace, task, agent, model, effort, access, project, cwd, notify, title, images, detach) | an agent works in the workspace and the reply comes back: a thread in the project named, else where the last thread on that workspace ran, following its first turn to the reply; with no workspace, run from inside a registered repo, it goes to the workspace that project last ran on and the first line says so; with `--detach`, prints the thread id the moment the turn is started and returns |
 | `wsp thread read <thread> [--last]` | `thread_read` (thread, last) | the thread's messages as the app lists them, oldest first: who each one is (`person`, `agent`, `tool` for one call folded to a line, `turn` for the outcome the turn ended with), when the runtime recorded it, and the text; `--last` gives the final reply alone, the whole message its finished line carries. The transcript is the host's, so nothing on a machine is touched and a paused workspace reads the same as a running one |
 | `wsp thread forget <thread>` | `thread_forget` (thread) | drops a thread no turn ever ran on, the row a launch that never got going leaves in `wsp threads` and in the person's sidebar, a launch the agent refused for want of a sign-in among them; nothing is asked of the machine, and it is refused in one line once a turn of the thread did work |
+| `wsp thread allow <thread>` | `thread_allow` (thread) | answers the prompt the thread is stopped on and lets the call run, the same pick the app's own button sends; a thread stopped on a prompt reads Needs you in `wsp threads` and runs nothing until somebody picks. Refused in one line when the thread is waiting on no prompt and when the prompt carries no such answer |
+| `wsp thread deny <thread>` | `thread_deny` (thread) | answers the same prompt the other way: the call is refused and the turn goes on with that answer |
 | `wsp send <thread> [--model <slug>] [--effort <word>] [--access <word>] [--image <path>] [--detach] "<message>"` | `send` (thread, message, model, effort, access, images, detach) | a message into an existing thread; follows the turn to the reply, or with `--detach` returns the moment the turn is started |
 | `wsp stop <thread>` | `stop` (thread) | ends the thread's running turn, as the app's stop button does; the machine stays up. A thread whose agents spawned threads of their own stops as one, and the line names each of those it ended |
 | `wsp exec <workspace> [--cwd <dir>] -- <command...>` | `exec` (workspace, argv, cwd) | runs the command on the machine, each word as given, in the folder named or the one a thread would start in, waking it first when it is paused; output lines, the exit code and the folder it ran in |
@@ -179,6 +181,15 @@ wsp thread read 1a2b3c4d --last
 ```
 
 The thread's messages as the app lists them, oldest first, one block each: who it is and the clock on the first line, the text under it. `person` is the message that opened or steered a turn, `agent` is the agent's own words, `tool` is one call of its folded to the line the app's row reads, and `turn` is the outcome, the duration and the cost the turn ended with, and the reason where it did not complete. `--last` prints the final reply alone, the whole message the thread's finished line carries, which is what to read when the line that reached you is shorter than the report behind it. When the thread has started another turn since, a second row says so, so the report you are reading is never taken for the one being written. Under `--json` and on the tool the answer is `threadId` and `messages`, each one `{who, at, text}` with `at` the ms epoch the runtime recorded. The transcript is the host's own, so a read touches no machine and a paused workspace reads the same as a running one. A call's output and the agent's reasoning are no rows of it, and a thread whose rows the transcript's cap has dropped answers with none, which is an answer and not an error.
+
+### thread allow, thread deny
+
+```
+wsp thread allow 1a2b3c4d
+wsp thread deny 1a2b3c4d
+```
+
+A thread whose agent asked to run a command or write a file is stopped on that question: it reads `Needs you` in `wsp threads`, runs nothing and ends nothing until somebody answers. A terminal watching the turn prints the question and the keys that answer it; from anywhere else these two lines answer it by thread id, the same pick the app's buttons send. `wsp thread read <thread>` shows what is being asked. Both print what they closed, and both are refused in one line when the thread is waiting on no prompt, so answering twice is never mistaken for answering once.
 
 ### threads wait
 

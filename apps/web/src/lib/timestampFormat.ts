@@ -77,6 +77,19 @@ function getTimestampFormatter(
   return formatter;
 }
 
+const zoneFormatter = new Intl.DateTimeFormat(timestampLocale, { timeZoneName: "short" });
+
+/**
+ * The zone every wall clock in this window is in, as a person names it
+ * (`GMT+5:30`, `PDT`, `UTC`): a log of a machine's steps is read against the
+ * clock on the wall, so the surface printing one says which clock it is.
+ */
+export function localZoneLabel(nowMs: number = Date.now()): string {
+  // The instant decides the word, since a zone reads PDT one half of the year and PST the other.
+  const parts = zoneFormatter.formatToParts(new Date(nowMs));
+  return parts.find(part => part.type === "timeZoneName")?.value ?? "";
+}
+
 export function parseTimestampDate(isoDate: string): Date | null {
   const date = new Date(isoDate);
   return Number.isNaN(date.getTime()) ? null : date;

@@ -6,7 +6,8 @@ import { create } from "zustand";
 import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
-import { sidebarWorkspaceOrder } from "../adapt/workspaces.js";
+import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
+import type { SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
@@ -30,6 +31,8 @@ export interface CreationLine {
   readonly at: string;
   readonly elapsedMs: number;
   readonly notice?: string;
+  /** What the machine answered this step with, for the line's title; never drawn as a sentence. */
+  readonly detail?: string;
 }
 
 /** A workspace being created: the sidebar row and the center view read it until workspace.created replaces it. */
@@ -739,7 +742,14 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "workspace.creating": {
-          const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
+          const line: CreationLine = {
+            stage: e.stage,
+            message: e.message,
+            at: new Date().toISOString(),
+            elapsedMs: e.elapsedMs,
+            ...(e.notice !== undefined ? { notice: e.notice } : {}),
+            ...(e.detail !== undefined ? { detail: e.detail } : {}),
+          };
           set(s => {
             // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up
             // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created
@@ -855,6 +865,16 @@ useStore.subscribe((s, prev) => {
 useStore.subscribe((s, prev) => {
   if (s.preferences !== prev.preferences) rememberFirstPaint(s.preferences);
 });
+
+/** Every workspace with its threads, as the sidebar's rows read them, for the surfaces that need the whole fleet
+ * rather than one workspace: the sidebar, the palette, the rows a transcript draws for the threads it opened, and
+ * the header's name for the thread that opened this one. */
+export function useSidebarProjects(): SidebarProjectSnapshot[] {
+  const workspaces = useStore(s => s.workspaces);
+  const statuses = useStore(s => s.statuses);
+  const sessions = useStore(s => s.sessions);
+  return useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+}
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }
 export function useSelectedThreadId(): string | null { return useStore(s => s.selectedThreadId); }

@@ -1,10 +1,10 @@
 // Adapted from pingdotgg/t3code apps/web/src/components/chat/ComposerPrimaryActions.tsx at 57a66608 (MIT).
-// Differs from upstream: the settings hook and the sidebar stage artwork inside the send button are removed (no settings, no artwork), so the send button keeps the plain branch; the unavailable label says workspace, not environment; the stop button takes isInterruptPending and, while it holds, is disabled, labelled Stopping and shows the send button's spinner in place of the square; the send button takes wakesFirst and reads Wake and send while the machine is paused, since the send wakes it; and a send held by a reason wears the app's own held weight and says that reason on hover, where upstream faded it to a third of itself and said nothing.
+// Differs from upstream: the settings hook and the sidebar stage artwork inside the send button are removed (no settings, no artwork), so the send button keeps the plain branch; the unavailable label says workspace, not environment; the stop button takes isInterruptPending and, while it holds, is disabled, labelled Stopping and shows the send button's spinner in place of the square; the send button takes wakesFirst and reads Wake and send while the machine is paused, since the send wakes it; and a send held by a reason is drawn as a held primary is, the accent off it until it can be pressed, and says that reason on hover, where upstream faded it to a third of itself and said nothing.
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { COMPOSER_STATE_WORDS } from "../../composer-state-words.js";
 import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
+import { Button, HELD_SURFACE } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 
@@ -235,11 +235,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type="submit"
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8",
-        "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover",
-        // Held for a reason it can name, it wears the one weight every held primary in this app wears; an empty box
-        // is not held, it is simply empty, and stays the fainter thing it has always been.
-        isSendDisabled ? "disabled:opacity-64" : "disabled:opacity-30",
+        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-transparent shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8",
+        // Held for a reason it can name, the window's one loud thing stops being loud: it takes the held tier in the
+        // same slot and the accent back the moment the block lifts. An empty box is not held, it is simply empty,
+        // and stays the fainter accent it has always been.
+        isSendDisabled
+          ? `${HELD_SURFACE} text-muted-foreground`
+          : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover disabled:opacity-30",
       )}
       {...pointerFocusProps}
       disabled={

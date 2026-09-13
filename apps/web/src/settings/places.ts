@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, fmtBytes, fmtRate, hereWord, isLocalWorkspace, plural, thisComputer, workspacePlace, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, fmtBytes, fmtRate, hereWord, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -93,15 +93,12 @@ export const placeNamed = (place: PlaceView, word: string): boolean => word === 
  * so it is never offered as somewhere to put another. */
 export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPlace(place) || place.docker === true;
 
-/** Which row a workspace stands on, or nothing for one this list cannot place. The id a joined computer's machine
- * carries names its row; what runs on this computer is the first row, which is the computer the host runs on; and
- * anything else was forked at the provider. The one reading, so the pane's Where row and the table's own holdings
- * cannot disagree about which computer a workspace is on. */
-export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place">): PlaceView | undefined {
-  const named = workspacePlace(workspace);
-  if (named !== undefined) return places.find(p => p.id === named);
-  if (isLocalWorkspace(workspace)) return places[0];
-  return places.find(isProviderPlace);
+/** Which row a workspace stands on, or nothing for one this list cannot place, read the protocol's one way so the
+ * pane's Where row, the table's own holdings and the host's month total cannot disagree about which computer a
+ * workspace is on. */
+export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place" | "provider">): PlaceView | undefined {
+  const at = workspacePlaceId(workspace, places);
+  return at === undefined ? undefined : places.find(p => p.id === at);
 }
 
 /** The one state of the computer a workspace stands on, while that computer is not answering; null while it is,

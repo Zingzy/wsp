@@ -274,7 +274,8 @@ function lastUserMessageIndex(entries: ReadonlyArray<TimelineEntry>): number {
   return -1;
 }
 
-function entryTurnId(entry: TimelineEntry): string | null {
+/** The turn a rendered entry belongs to, or null where it belongs to none. */
+export function entryTurnId(entry: TimelineEntry): string | null {
   switch (entry.kind) {
     case "message":
       return entry.message.role === "assistant" ? entry.message.turnId : null;

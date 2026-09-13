@@ -253,6 +253,12 @@ export function absentComputer(name: string, awayMs: number | null): AbsentCompu
   return { word: workspaceWord("unreachable"), away, line: `${dated} · is it on?`, said, will, sentence: `${said}; ${will}` };
 }
 
+/** What the slot above the composer says while the workspace's computer is not answering. The box stays open and
+ * keeps what is typed, so the line says what became of those words rather than that a send was refused: nothing
+ * leaves until the computer answers, and then only on the person's own send. The computer is named because it is
+ * the one thing the person can act on; the state word belongs to the row. */
+export const composerHeldLine = (computer: string): string => `held until ${computer} answers`;
+
 /** How long this host has not heard from a computer, off the row it holds for it; null on a row that never
  * reported. One spelling of the silence's length, so the table and the sidebar date it alike. */
 export function awayMsOf(place: { readonly lastSeenAt?: string | undefined }, now: number): number | null {
@@ -375,6 +381,13 @@ export function needsRebuild(input: WorkspaceStateInput): boolean {
  * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule.
  * Two halves like every other refusal here: what is so, then when the rebuild is there to take. */
 export const NO_REBUILD_NEEDED = "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering";
+
+/** Why a road out that opens only once the machine is gone is refused on one that is merely not answering. The
+ * rebuild and the forget are both such roads and stand four rows apart in one list, so they read the workspace's
+ * state off the same field and say it in the same words: a machine nothing has heard from does not answer, and a
+ * person told both at once stops believing either. Two halves as every refusal here has them: what is so, then when
+ * the road is there to take. */
+export const notAnsweringYet = (road: "rebuild" | "forget"): string => `This one is not answering yet; the ${road} is offered once it is gone`;
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
  * caller holds them; rebuild and delete are the roads out. */

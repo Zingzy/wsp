@@ -321,27 +321,35 @@ const merge = (...parts) => ({
   transcripts: Object.assign({}, ...parts.map(p => p.transcripts)),
 });
 
+/** How long a fixture's meter has been running when the run photographs it: long enough for the chart to draw a
+ * line rather than a dot, and short enough that the day and month ranges are held, which is the state a workspace
+ * made this morning is in. */
+const METERED_MIN = 40;
+
 /** The meter one workspace opens with, as the host's own cost history holds it: the stretch it has been awake and
  * what that came to at its rate. Without one every fork in a fixture reads $0.0000 accrued beside a rate per hour,
- * since the meter starts at the tick after the host came up, and five testers asked what the number was for. The
- * last point is minutes old and running, so the host carries the line on from there rather than starting again. */
-const meter = (workspaceId, { rateUsdPerHour, hours, phase = "running" }) => [
-  workspaceId,
-  {
+ * since the meter starts at the tick after the host came up, and five testers asked what the number was for. Two
+ * points where there is a stretch, as a host that has been metering holds them: the run's first tick and its
+ * newest, which is minutes old, so the host carries the line on from there rather than starting again. */
+const meter = (workspaceId, { rateUsdPerHour, hours, phase = "running" }) => {
+  const rate = phase === "running" ? rateUsdPerHour : 0;
+  const total = rateUsdPerHour * hours;
+  const point = (minutesAgo, awakeMs, accruedUsd) => ({
+    type: "workspace.cost",
     workspaceId,
-    points: [
-      {
-        type: "workspace.cost",
-        workspaceId,
-        phase,
-        rateUsdPerHour: phase === "running" ? rateUsdPerHour : 0,
-        awakeMs: hours * 3_600_000,
-        accruedUsd: Number((rateUsdPerHour * hours).toFixed(4)),
-        at: new Date(ago(2)).toISOString(),
-      },
-    ],
-  },
-];
+    phase,
+    rateUsdPerHour: rate,
+    awakeMs,
+    accruedUsd: Number(accruedUsd.toFixed(4)),
+    at: new Date(ago(minutesAgo)).toISOString(),
+  });
+  const run = (rate * (METERED_MIN - 2)) / 60;
+  // Nothing on the clock is one tick and no stretch: a persona who has run nothing has nothing for the chart to
+  // draw, and a second point at the same total would be a line of no length under a meter that reads zero.
+  const points =
+    hours === 0 ? [point(2, 0, 0)] : [point(METERED_MIN, hours * 3_600_000 - (rate > 0 ? (METERED_MIN - 2) * 60_000 : 0), total - run), point(2, hours * 3_600_000, total)];
+  return [workspaceId, { workspaceId, points }];
+};
 
 /** What the stand-in charges for the shape every fork in a fixture takes, as its own table prices it
  * (`packages/engine/src/fake-backend.ts`): four cores and 8 GB. */
@@ -543,11 +551,13 @@ const orchestrator = () => {
   const root = { ...MIGRATE };
   const tree = { parentThreadId: threadId("migrate"), rootThreadId: threadId("migrate") };
   return store({
+    // Three forks made one after another, minutes apart, because the sidebar draws its rows in the order the
+    // workspaces were made and a fixture where all three claim one minute says nothing about that order.
     workspaces: [
       workspace("ws_here", THIS_COMPUTER, { agents: { spawn: true, maxMachines: 3, maxDepth: 1 }, projects: [project("wsp", 133_000_000, 60 * 5)] }),
-      fork("ws_api", "api", "fk_run_1", tree),
-      fork("ws_web", "web", "fk_run_2", tree),
-      fork("ws_docs", "docs", "fk_run_3", { ...tree, phase: "napping" }),
+      fork("ws_api", "api", "fk_run_1", { ...tree, createdAt: new Date(ago(60 * 8)).toISOString() }),
+      fork("ws_web", "web", "fk_run_2", { ...tree, createdAt: new Date(ago(60 * 8 - 2)).toISOString() }),
+      fork("ws_docs", "docs", "fk_run_3", { ...tree, phase: "napping", createdAt: new Date(ago(60 * 8 - 4)).toISOString() }),
     ],
     ...merge(
       threadsOn("ws_here", [[root, 120]]),

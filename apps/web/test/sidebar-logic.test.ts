@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
-import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
+import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
   foldArchivedThreads,
@@ -223,20 +223,19 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("active");
   });
 
-  it("a nap that could not store a vault says the machine's files are not backed up, on the row and in the Spaces header", () => {
+  it("a nap that could not store a backup leaves the row and the Spaces header on what the workspace spent", () => {
     const refused = { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" };
     const napped = { phase: "napping" as const, machineState: "paused" as const, reach: { state: "napping" as const } };
     const line = (over: Partial<WorkspaceStatus>) => workspaceMetaLine({ project: project(over), cost: tick(0.18, 0), outOfMemory: undefined, nowMs: now });
-    expect(line({ ...napped, ...refused })).toBe("no backup since 2026-09-08");
-    // A vault the last nap stored leaves the row's figures alone.
+    // A note on a step already taken is not this slot's: the row says the state and the spend, and the verdict
+    // reads on the pane's own backup line, where the machine's own words ride the title.
+    expect(line({ ...napped, ...refused })).toBe("$0.18 today");
     expect(line({ ...napped, vaultedAt: refused.vaultedAt })).toBe("$0.18 today");
-    // Before a status arrives the record's own fact is the line, as the daemon note is.
-    expect(workspaceMetaLine({ project: { ...project(napped, refused), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("no backup since 2026-09-08");
-    // What the runtime is doing to the daemon leads: that is what a person is waiting on, this holds until the next nap.
+    expect(workspaceMetaLine({ project: { ...project(napped, refused), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("");
+    expect(metaSentences({ project: project({ ...napped, ...refused }), outOfMemory: undefined })).toEqual([]);
+    // What the runtime is doing to the daemon still leads: that is what a person is waiting on.
     expect(line({ ...napped, ...refused, daemonNote: "updating the helper" })).toBe("updating the helper");
-    // The header says it under what the machine is, since the header draws every sentence.
     expect(spaceHeaderLines({ project: project({ ...napped, ...refused }), cost: tick(0.18, 0), outOfMemory: undefined, nowMs: now })).toEqual([
-      "no backup since 2026-09-08",
       "2 vCPU · 4 GB",
       "$0.18 today",
     ]);
@@ -545,6 +544,16 @@ describe("the tree a thread's own threads make", () => {
     expect(threadsOpenedBy([mac, bench], "other")).toEqual([]);
     expect(workspaceOf([mac, bench], { workspaceId: "bench" })?.id).toBe("bench");
     expect(workspaceOf([mac, bench], { workspaceId: "nowhere" })).toBeUndefined();
+  });
+
+  it("answers the thread that opened one, with the workspace that one runs on, and nothing where there is none to reach", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("far", "bench", "lead")]);
+    const opener = openedBy([mac, bench], { parentThreadId: "lead" });
+    expect([opener?.thread.id, opener?.runs.id]).toEqual(["lead", "mac"]);
+    expect(openedBy([mac, bench], { parentThreadId: null })).toBeUndefined();
+    // An opener on a workspace this window was never given is one no click could reach, so it is not named either.
+    expect(openedBy([bench], { parentThreadId: "lead" })).toBeUndefined();
   });
 });
 
