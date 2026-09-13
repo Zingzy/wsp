@@ -110,17 +110,23 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[]):
 }
 
 /** The one way bytes go onto a guest through exec: sends the upload's execs in order, each piece confirmed before the
- * next goes, and answers with the last exec's result, which the caller reads for its own marker. */
+ * next goes, and answers with the last exec's result, which the caller reads for its own marker.
+ *
+ * Every exec here is written to land the same whether it runs once or twice, which is this function's own law
+ * above: a piece is a whole file written under its own name, an append is held behind its marker, and the lines
+ * around them are the caller's to write that way. So each carries a key of this upload's, and a road that broke
+ * under one sends it again rather than losing the file half written. */
 export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<ExecResult> {
   const timeoutMs = opts.timeoutMs ?? INLINE_EXEC_MS;
   const execs = uploadSequence(files, opts.before ?? [], opts.after ?? []);
-  for (const cmd of execs.slice(0, -1)) {
-    const res = await machine.exec(cmd, { timeoutMs });
+  const upload = randomBytes(6).toString("hex");
+  for (const [at, cmd] of execs.slice(0, -1).entries()) {
+    const res = await machine.exec(cmd, { timeoutMs, idempotencyKey: `${upload}/${at}` });
     if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.piece)) {
       throw new Error(`a piece did not land on ${machine.id}: nothing came back saying ${HANDSHAKE.piece}, the word the guest prints once a piece is written; ${machineAnswer(res)}`);
     }
   }
-  return machine.exec(execs.at(-1)!, { timeoutMs });
+  return machine.exec(execs.at(-1)!, { timeoutMs, idempotencyKey: `${upload}/last` });
 }
 
 /** The wrapper is the session leader: its pid is the group the deadline kills, and it writes the exit file

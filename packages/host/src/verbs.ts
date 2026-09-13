@@ -153,10 +153,12 @@ import {
   verbFailure,
   waitTimedOutLine,
   whereWord,
+  workspaceAsleepAgainLine,
   workspaceKind,
   workspaceState,
   workspaceStateLine,
   workspaceStateOf,
+  workspaceStaysAwakeLine,
   workspaceWord,
   type Capabilities,
   type ExecEvent,
@@ -176,6 +178,7 @@ import {
   Preferences,
   WorkspaceProject,
   type WorkspaceSize,
+  type WorkspaceState,
   homeShortened,
   importDest,
   lastTargetLine,
@@ -852,14 +855,64 @@ export function renamedWorkspaceLine(r: RenamedWorkspace): string {
   return `${r.was} is now ${r.workspace.name} ${r.workspace.id}`;
 }
 
+/** A workspace a verb woke to do its work on, and whether this call is what woke it: a machine the person already
+ * had running is theirs, and only the caller that took it off its nap owes it one back. */
+export interface Woken {
+  workspace: WorkspaceOut;
+  woke: boolean;
+}
+
+/** The states a machine is down in, which are the only ones a wake can lift it out of. A machine another client is
+ * already waking, or one running but out of reach, was not taken off its nap by the caller that met it there, so
+ * neither counts: the fact is the transition this call made, never the word the state happened to read. `pausing`
+ * is here because the nap behind it is one somebody asked for, and a run that cuts that short owes it back. */
+const MACHINE_DOWN: ReadonlySet<WorkspaceState> = new Set<WorkspaceState>(["paused", "pausing"]);
+
 /** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
  * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
  * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
-export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<WorkspaceOut> {
-  const state = workspaceState({ phase: workspace.phase });
-  if (state === "gone") throw new Error(goneRefusal(action, workspace.gone));
-  if (state !== "running") tell(`waking ${workspace.name}`);
-  return (await client.request<{ workspace: WorkspaceOut }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
+export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<Woken> {
+  const before = workspaceState({ phase: workspace.phase });
+  if (before === "gone") throw new Error(goneRefusal(action, workspace.gone));
+  if (before !== "running") tell(`waking ${workspace.name}`);
+  const woken = (await client.request<{ workspace: WorkspaceOut }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
+  return { workspace: woken, woke: MACHINE_DOWN.has(before) && workspaceState({ phase: woken.phase }) === "running" };
+}
+
+/** What a launch owes the machine it woke when its thread never got going. Sleeping is automatic by window, and a
+ * window is twenty minutes of the provider's rate for a turn that never reached the agent; the launch that took
+ * the machine off its nap is the one that knows nothing else ran there. A machine the person already had running
+ * is theirs and is neither touched nor spoken about here. Answers the line, which is the run's last, or nothing
+ * where this launch changed nothing about the machine. */
+export async function napAfterDeadLaunch(client: HostClient, woken: Woken, turn: Turn | undefined): Promise<string | undefined> {
+  if (!woken.woke) return undefined;
+  // An agent that named a refusal of its own is an agent that ran: the launch reached it, and the window the rule
+  // gives a turn that ran is the right one.
+  if (turn?.result?.refusal !== undefined) return undefined;
+  try {
+    const rows = await threads(client, woken.workspace.id);
+    const mine = turn === undefined ? undefined : rows.find(t => threadIdOf(t) === turn.threadId);
+    // A thread whose turn did work is not a launch that died: the machine holds what it did.
+    if (mine?.ran === true) return undefined;
+    if (rows.some(t => t !== mine && t.status === "running")) {
+      const listed = (await workspaceStatuses(client)).find(w => w.id === woken.workspace.id);
+      return workspaceStaysAwakeLine(woken.workspace.name, listed?.idleAt === undefined ? undefined : Math.max(0, listed.idleAt - Date.now()));
+    }
+    await client.request("workspaces.nap", { workspaceId: woken.workspace.id });
+    return workspaceAsleepAgainLine(woken.workspace.name);
+  } catch {
+    // Whatever this road came to, the machine is awake as far as this run knows and the person is told that much.
+    // The failure the run is answering with is what stands; none of it is worth losing to a second one.
+    return workspaceStaysAwakeLine(woken.workspace.name);
+  }
+}
+
+/** The same refusal with one more line under it. The class an exit code is read off is stamped on the error, so a
+ * line added to what a person reads carries that stamp over rather than making a plain failure of a refusal. */
+function withLine(e: unknown, line: string | undefined): unknown {
+  if (line === undefined || !(e instanceof Error)) return e;
+  const kind = (e as { kind?: unknown }).kind;
+  return Object.assign(new Error(`${e.message}\n${line}`), typeof kind === "string" ? { kind } : {});
 }
 
 /** What a stop came to, as every director prints it: the runtime's three answers, none an error. */
@@ -1828,7 +1881,7 @@ interface SaidAbout {
  * and stdout adds only the lines around it; where stdout parts from the stream it carries the finished text whole,
  * with --json every event of the turn up to its done instead; a turn that did not complete is the verb's failure,
  * in the harness's words. */
-async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, said: SaidAbout = {}): Promise<Turn> {
+async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, said: SaidAbout = {}, onTurn?: (turn: Turn) => void): Promise<Turn> {
   const { opened, spend } = said;
   const stream = turnStream(ctx);
   const asks = answering(ctx, client, line => stream.says(line));
@@ -1846,6 +1899,8 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         joinedWaiting = event.waiting === true;
       },
       started: (t: Turn) => {
+        // The live turn, which follow fills in as its events land: whoever waited on it reads its end off this.
+        onTurn?.(t);
         if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadSaid(t.threadId, opened));
         if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
         if (joinedWaiting) ctx.io.error(WAITING_ON_A_PERSON);
@@ -2687,7 +2742,7 @@ export const VERBS: readonly Verb[] = [
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp wake takes one workspace.", usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, ref), "wake", line => ctx.io.error(line));
+      const { workspace } = await awake(client, await workspaceOf(client, ref), "wake", line => ctx.io.error(line));
       ctx.out.emit({ workspace }, await wokeLine(client, workspace));
       return 0;
     },
@@ -2697,7 +2752,7 @@ export const VERBS: readonly Verb[] = [
       output: { workspace: WorkspaceOut },
       call: async ({ workspace: ref }, deps) => {
         const client = await deps.client();
-        return asJson({ workspace: await awake(client, await workspaceOf(client, ref), "wake", QUIET_LINE) });
+        return asJson({ workspace: (await awake(client, await workspaceOf(client, ref), "wake", QUIET_LINE)).workspace });
       },
     }),
   },
@@ -2901,10 +2956,15 @@ export const VERBS: readonly Verb[] = [
       const project = projectNamed(found, flag(ctx.flags, "project") ?? target.project);
       const cwd = flag(ctx.flags, "cwd");
       const opened = openedLine(target, found, project, cwd);
-      const workspace = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(ctx.env, workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
-      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true, {}, { opened, spend: turnSpendWord(workspace) })));
+      const woken = await awake(client, found, "send", line => ctx.io.error(line));
+      const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
+      let started: Turn | undefined;
+      try {
+        if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
+        else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true, {}, { opened, spend: turnSpendWord(woken.workspace) }, t => (started = t))));
+      } catch (e) {
+        throw withLine(e, await napAfterDeadLaunch(client, woken, started));
+      }
       return 0;
     },
     tool: tool({
@@ -2918,11 +2978,16 @@ export const VERBS: readonly Verb[] = [
         await checkedStart(client, task, harness, input, found.id);
         const project = projectNamed(found, named ?? target.project);
         const opened = openedLine(target, found, project, folder);
-        const awoken = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(deps.env, awoken, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
-        if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
-        const out = turnOut(await follow(client, opening, "agent", QUIET_TURN));
-        return asText(opened === undefined ? turnText(out) : `${opened(out.threadId)}\n${turnText(out)}`, out);
+        const woken = await awake(client, found, "send", QUIET_LINE);
+        const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
+        let started: Turn | undefined;
+        try {
+          if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
+          const out = turnOut(await follow(client, opening, "agent", { ...QUIET_TURN, started: t => (started = t) }));
+          return asText(opened === undefined ? turnText(out) : `${opened(out.threadId)}\n${turnText(out)}`, out);
+        } catch (e) {
+          throw withLine(e, await napAfterDeadLaunch(client, woken, started));
+        }
       },
     }),
   },
@@ -3029,7 +3094,7 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
       await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
-      const workspace = await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
+      const { workspace } = await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       const images = flagList(ctx.flags, "image");
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, images), picks);
       else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images), false, picks, { spend: turnSpendWord(workspace) })));
@@ -3083,7 +3148,7 @@ export const VERBS: readonly Verb[] = [
       const [ref, ...words] = ctx.args;
       if (ref === undefined || words.length === 0) throw usageRefusal("wsp exec takes a workspace, then -- and the command.", usageIs(ctx));
       const client = await ctx.client();
-      const workspace = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
+      const { workspace } = await awake(client, await workspaceOf(client, ref), "exec", line => ctx.io.error(line));
       const folder = absoluteFolder(flag(ctx.flags, "cwd"));
       const { exit, ranIn } = await execOn(client, workspace.id, words, folder, e => {
         if (e.type === "exec.output") ctx.out.emit(e, e.text);
@@ -3101,7 +3166,7 @@ export const VERBS: readonly Verb[] = [
       call: async ({ workspace: ref, argv, cwd: folder }, deps) => {
         const asked = absoluteFolder(folder);
         const client = await deps.client();
-        const target = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
+        const { workspace: target } = await awake(client, await workspaceOf(client, ref), "exec", QUIET_LINE);
         const output: string[] = [];
         const { exit, ranIn } = await execOn(client, target.id, argv, asked, e => {
           if (e.type === "exec.output") output.push(e.text);

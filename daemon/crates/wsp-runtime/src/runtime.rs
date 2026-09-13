@@ -4,7 +4,9 @@
 //! (`runtime create`, `runtime exec`) that the daemon spawns and waits for; that process also carries the exec's
 //! stdio, which a tenant inherits. Start, kill, delete and the status are reads and writes on the state directory
 //! and the cgroup and run in this process. The tenant notify sockets youki leaves behind are removed after each
-//! exec.
+//! exec. A tenant runs behind the workspace's seccomp filter as the init does: youki hands a tenant the init's
+//! namespaces and cgroup and none of the linux section the filter lives in, so the exec loads it itself, through
+//! the executor that runs the command.
 
 use std::fmt;
 use std::fs;
@@ -16,7 +18,11 @@ use std::time::{Duration, SystemTime};
 
 use libcontainer::container::builder::ContainerBuilder;
 use libcontainer::container::{Container, ContainerStatus, State};
+use libcontainer::oci_spec::runtime::{LinuxSeccomp, Spec};
+use libcontainer::seccomp;
 use libcontainer::syscall::syscall::SyscallType;
+use libcontainer::workload::default::DefaultExecutor;
+use libcontainer::workload::{Executor, ExecutorError, ExecutorValidationError};
 use nix::sys::signal::{kill, killpg, Signal};
 use nix::sys::wait::{waitpid, WaitStatus};
 use nix::unistd::Pid;
@@ -38,6 +44,10 @@ const STALE_NOTIFY: Duration = Duration::from_secs(30);
 const TENANT_NOTIFY: &str = "tenant-notify-";
 /// How long killed processes get to leave their cgroup before the kill is called failed.
 const KILL_PATIENCE: Duration = Duration::from_secs(10);
+/// The one sentence an exec is refused with when the workspace's filter has a rule whose action is notify: loading
+/// such a filter hands back a notify fd, and nothing on the exec road serves it.
+const NOTIFY_REFUSAL: &str =
+    "the workspace's seccomp filter has a rule whose action is notify, and an exec serves no listener for it, so the command did not run";
 
 #[derive(Debug)]
 pub enum Error {
@@ -388,13 +398,16 @@ pub fn helper_create(root: &Path, id: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// In the helper process: the command as a tenant of the workspace, its stdio inherited from this process, waited
-/// for; past the deadline its group is killed and the answer is 124. Answers the exit code to exit with.
+/// In the helper process: the command as a tenant of the workspace behind its seccomp filter, its stdio inherited
+/// from this process, waited for; past the deadline its group is killed and the answer is 124. Answers the exit
+/// code to exit with.
 pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Duration) -> Result<i32, Error> {
     let layout = Layout::new(root);
+    let fence = Fenced::read(&layout.config(id))?;
     let tenant = ContainerBuilder::new(id.to_owned(), SyscallType::default())
         .with_root_path(layout.state())
         .map_err(container)?
+        .with_executor(fence)
         .as_tenant()
         .with_container_args(args)
         .with_detach(false)
@@ -419,6 +432,46 @@ pub fn helper_exec(root: &Path, id: &str, args: Vec<String>, timeout: Duration) 
     };
     remove_stale_notify_sockets(&layout.state_of(id));
     Ok(code)
+}
+
+/// The workspace's seccomp filter, read off its config.json and carried into the tenant process, where it is loaded
+/// right before the command runs, once the tenant holds the workspace's capabilities and the no-new-privileges bit
+/// youki sets on every tenant, which is what lets the load go through without a privilege. A kernel that refuses
+/// the filter refuses the exec: the command never runs unfenced. A filter with a rule whose action is notify is
+/// refused before any tenant is cloned: its load hands back a notify fd that only a listener could answer, no exec
+/// serves one, and the first notified call would hold the command for good.
+#[derive(Clone, Debug)]
+struct Fenced {
+    seccomp: LinuxSeccomp,
+}
+
+impl Fenced {
+    fn read(config: &Path) -> Result<Fenced, Error> {
+        let spec = Spec::load(config).map_err(container)?;
+        let Some(seccomp) = spec.linux().as_ref().and_then(|l| l.seccomp().clone()) else {
+            return Err(Error::Container(format!("{} names no seccomp filter", config.display())));
+        };
+        if seccomp::is_notify(&seccomp) {
+            return Err(Error::Container(NOTIFY_REFUSAL.to_owned()));
+        }
+        Ok(Fenced { seccomp })
+    }
+}
+
+impl Executor for Fenced {
+    fn validate(&self, spec: &Spec) -> Result<(), ExecutorValidationError> {
+        DefaultExecutor {}.validate(spec)
+    }
+
+    fn exec(&self, spec: &Spec) -> Result<(), ExecutorError> {
+        seccomp::initialize_seccomp(&self.seccomp).map_err(|e| ExecutorError::Other(filter_refusal(&described(&e))))?;
+        DefaultExecutor {}.exec(spec)
+    }
+}
+
+/// The one sentence an exec is refused with when the kernel will not take the workspace's filter.
+fn filter_refusal(detail: &str) -> String {
+    format!("this computer's kernel refused the workspace's seccomp filter for the exec, so the command did not run: {detail}")
 }
 
 /// youki leaves each tenant's notify socket in the state directory; the ones older than any exec still starting go.
@@ -487,6 +540,62 @@ mod tests {
         fs::File::open(&other).unwrap().set_modified(long_ago).unwrap();
         remove_stale_notify_sockets(dir.path());
         assert!(!old.exists() && fresh.exists() && other.exists());
+    }
+
+    /// A workspace's config.json under a runtime root, as the ops write it, with the profile's filter.
+    fn write_config(root: &Path, id: &str) -> serde_json::Value {
+        let layout = Layout::new(root);
+        fs::create_dir_all(layout.workspace(id)).unwrap();
+        let args = vec!["/sbin/wsp-init".to_owned()];
+        let spec = crate::bundle::config_json(&crate::bundle::Config {
+            hostname: id,
+            args: &args,
+            envs: &std::collections::BTreeMap::new(),
+            cpu: None,
+            mem_mb: None,
+            cgroup: &layout.cgroup_name(id),
+            init: Path::new("/usr/local/bin/wsp-daemon"),
+            etc: &layout.etc(id),
+            engine: None,
+        });
+        crate::bundle::write_json(&layout.config(id), &spec).unwrap();
+        spec
+    }
+
+    #[test]
+    fn the_fence_is_read_off_the_workspaces_config_and_a_config_without_one_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Layout::new(dir.path()).config("wsp-a");
+        let spec = write_config(dir.path(), "wsp-a");
+        let fence = Fenced::read(&config).unwrap();
+        assert_eq!(fence.seccomp.syscalls().as_ref().unwrap().len(), 15);
+        assert_eq!(fence.seccomp.architectures().as_ref().unwrap().len(), 3);
+        let mut bare = spec.clone();
+        bare["linux"].as_object_mut().unwrap().remove("seccomp");
+        crate::bundle::write_json(&config, &bare).unwrap();
+        let refused = Fenced::read(&config).unwrap_err().to_string();
+        assert!(refused.ends_with("config.json names no seccomp filter"), "{refused}");
+        assert_eq!(
+            filter_refusal("failed to load seccomp context"),
+            "this computer's kernel refused the workspace's seccomp filter for the exec, so the command did not run: failed to load seccomp context"
+        );
+    }
+
+    #[test]
+    fn a_filter_with_a_notify_action_refuses_the_exec_before_any_tenant_is_cloned() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut spec = write_config(dir.path(), "wsp-n");
+        let rules = spec["linux"]["seccomp"]["syscalls"].as_array_mut().unwrap();
+        rules.push(serde_json::json!({ "names": ["getcwd"], "action": "SCMP_ACT_NOTIFY" }));
+        let config = Layout::new(dir.path()).config("wsp-n");
+        crate::bundle::write_json(&config, &spec).unwrap();
+        // The predicate the read refuses on is the one the load hands a notify fd back for.
+        assert!(seccomp::is_notify(Spec::load(&config).unwrap().linux().as_ref().unwrap().seccomp().as_ref().unwrap()));
+        assert_eq!(Fenced::read(&config).unwrap_err().to_string(), NOTIFY_REFUSAL);
+        // The helper road: no youki state exists under this root, so a refusal that reads as anything but the
+        // notify sentence would be youki's, asked after the read.
+        let refused = helper_exec(dir.path(), "wsp-n", vec!["true".to_owned()], Duration::from_secs(1)).unwrap_err();
+        assert_eq!(helper_failure_line(&refused), format!("wsp-runtime: {NOTIFY_REFUSAL}"));
     }
 
     #[test]

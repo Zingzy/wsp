@@ -16,7 +16,7 @@ import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { agentKeysIn } from "./env-keys.js";
@@ -27,7 +27,7 @@ import { answerScreen, diskOf, keyNameFor, screensOf, type ScreenAnswers } from 
 import { SignInCodes } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
 import { historyWord } from "./recipe-command.js";
-import { GOLDEN_NAME, PREPARE_STEPS, SEAL_STEPS, readThisComputer, reduceStages, runInit, type InitIO, type InitOptions, type Reading, type SignInContext, type StageFrame, type StageWords } from "./init.js";
+import { GOLDEN_NAME, PREPARE_STEPS, SEAL_STAGES, SEAL_STEPS, readThisComputer, reduceStages, runInit, type InitIO, type InitOptions, type Reading, type SignInContext, type StageFrame, type StageWords } from "./init.js";
 import { MCP_SERVER_NAME, type InstallReport } from "./mcp-install.js";
 import { loadRecipe, recipeStamp, saveSmallRecipe, smallRecipePath } from "./recipe-file.js";
 import type { WorkspaceRoads } from "./server.js";
@@ -71,7 +71,7 @@ export interface InitJobDeps {
   /** This computer's readers, the ones a terminal run takes. */
   read: Pick<InitOptions, "collect" | "recipe" | "scanProject" | "brew" | "scan">;
   /** The build's pieces a terminal run also takes, and the roads to a workspace on the serving host. */
-  build: Pick<InitOptions, "secrets" | "relay" | "daemon"> & {
+  build: Pick<InitOptions, "secrets" | "relay" | "daemon" | "bundleFile"> & {
     roads(): WorkspaceRoads;
     /** The golden recipe with what the host adds to every build (the daemon deploy). */
     recipe(recipe: GoldenRecipe): GoldenRecipe;
@@ -96,7 +96,6 @@ const takesTools = (harness: string): boolean => takesMcpServers(harnessCatalog(
 const SWEEP_RETRY = { attempts: 40, waitMs: 30_000 };
 /** The stage rows in the order the build runs them: the prepare's, then the seal's. */
 const STAGE_WORDS: readonly StageWords[] = [...PREPARE_STEPS, ...SEAL_STEPS];
-const SEAL_STAGES = new Set<string>(SEAL_STEPS.map(w => w.stage));
 
 /** The build rows' state words are the protocol's; the stage rows read the terminal's own start, end and fail words. */
 const STATE = INIT_ROW_STATES;
@@ -500,6 +499,7 @@ export class InitJobs implements InitDoor {
       home: this.deps.home,
       secrets: this.deps.build.secrets,
       platform: this.deps.platform,
+      ...(this.deps.build.bundleFile !== undefined ? { bundleFile: this.deps.build.bundleFile } : {}),
       runtime: r => buildingOn(this.deps.rt, this.deps.build.recipe(r), offs),
       ports: { port: 0, wsPort: 0, named: true },
       upCommand: "wsp up",
@@ -599,8 +599,8 @@ export class InitJobs implements InitDoor {
   /** Why the job is not running, in the words a person reads: every reason goes through here, so the raw error a
    * client shows is this computer's own sentence when there is one and is never said twice. The first reason in
    * stands: a run that failed and then stopped reports what failed it. */
-  private fail(s: State, message: string): void {
-    s.error ??= initStoppedLine(message);
+  private fail(s: State, message: string, machine?: "gone" | "left"): void {
+    s.error ??= initFailedLine(message, machine);
   }
 
   /** Background work on the job: a failure lands on the view as the job failing, never as an unhandled rejection. */
@@ -827,8 +827,10 @@ export class InitJobs implements InitDoor {
         const step = record["step"] as GoldenStep | undefined;
         s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), at });
         // The failure's sentence stands from the frame that failed, so the view drawn on it already closes the stage's
-        // block with what the head says; the raw detail stays in the frame and reaches no screen.
-        if (stage === "failed") this.fail(s, text("detail") ?? "no detail given");
+        // block with what the head says; the raw detail stays in the frame and reaches no screen. What became of the
+        // machine is read off the frames rather than guessed here, and is said in the words a stop the person asked
+        // for uses: a build that booted a machine never ends without saying whether it is still billing.
+        if (stage === "failed") this.fail(s, text("detail") ?? "no detail given", reduceStages(s.frames, STAGE_WORDS).machine);
         // The provider having no room is not the stage working: the next frame off it, cap or not, says so again.
         s.slotWait = record["waiting"] === true ? stage : undefined;
         // A machine the stage made and could not remove bills on, whether the person stopped the build or it failed

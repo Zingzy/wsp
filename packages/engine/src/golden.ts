@@ -881,8 +881,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
         });
   // A snapshot that failed changed nothing on the builder, so every failure here is typed as one that leaves it:
   // the provider's 502 is asked again while it still reads the builder running, and any other failure (a job the
-  // far side failed, a link that dropped) is said once with the builder's state beside it. Only a resumed machine's
-  // refusal is another kind of failure, and it passes as itself.
+  // far side failed, a link that went under the frame naming the job, a link the wait for the job did not bring
+  // back) is said once with the builder's state beside it. Only a resumed machine's refusal is another kind of
+  // failure, and it passes as itself.
   const takeSnapshot = async (): Promise<string> => {
     for (let attempt = 1; ; attempt++) {
       try {

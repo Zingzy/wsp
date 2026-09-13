@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { LIST_PRICE_WORD, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { LIST_PRICE_WORD, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -17,7 +17,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
+import { awake, CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, napAfterDeadLaunch, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { writeHost } from "../src/hosts.js";
@@ -1481,6 +1481,120 @@ describe("wsp verbs over the host", () => {
     const more = await run("send", row!.threadId!, "once more");
     expect(more.io.lines).toEqual(["re: once more"]);
     expect(agent.starts[2]!.resume).toBe(rows[1]!.claudeSessionId);
+  });
+
+  it("a launch that never reached the agent on a workspace it woke puts that workspace back to sleep and says so on its last line", async () => {
+    const agent = bornDeadAgent(prompt => `re: ${prompt}`);
+    await restartHost({ claude: agent.adapter });
+    await run("new", "alpha");
+    const alpha = (await rt.workspaces.list())[0]!;
+    await rt.workspaces.nap(alpha.id);
+    expect((await rt.workspaces.get(alpha.id)).phase).toBe("napping");
+
+    const dead = await run("run", "alpha", "hello");
+    expect(dead.code).toBe(1);
+    // The machine the launch woke is back where it found it, so no idle window bills for a turn that never ran.
+    expect((await rt.workspaces.get(alpha.id)).phase).toBe("napping");
+    // The failure still stands whole; the nap is the line under it, which is the last thing the run prints.
+    expect(dead.io.errors).toEqual(["waking alpha", `wsp run: ${UNREACHED_LINE}\n${workspaceAsleepAgainLine("alpha")}`]);
+  });
+
+  it("a launch that never reached the agent leaves a workspace it did not wake alone and says nothing about it", async () => {
+    const agent = bornDeadAgent(prompt => `re: ${prompt}`);
+    await restartHost({ claude: agent.adapter });
+    await run("new", "alpha");
+    const alpha = (await rt.workspaces.list())[0]!;
+
+    const dead = await run("run", "alpha", "hello");
+    expect(dead.code).toBe(1);
+    expect(dead.io.errors).toEqual([`wsp run: ${UNREACHED_LINE}`]);
+    expect((await rt.workspaces.get(alpha.id)).phase).toBe("running");
+  });
+
+  it("a launch that dies on a running machine whose daemon is dark leaves that machine up: an unreachable machine is not one this launch woke", async () => {
+    const agent = bornDeadAgent(prompt => `re: ${prompt}`);
+    await restartHost({ claude: agent.adapter });
+    await run("new", "alpha");
+    const alpha = (await rt.workspaces.list())[0]!;
+    // The machine is up and nothing on it answers, which is the state word Unreachable and never a machine asleep.
+    const edge = createHttpServer((_req, res) => {
+      res.writeHead(502).end();
+    });
+    await new Promise<void>(r => edge.listen(0, "127.0.0.1", r));
+    try {
+      backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${(edge.address() as AddressInfo).port}/`, token: "stub", expiresAt: Date.now() + 3_600_000 });
+      const dead = await run("run", "alpha", "hello");
+      expect(dead.code).toBe(1);
+      expect(dead.io.errors).toEqual([`wsp run: ${UNREACHED_LINE}`]);
+      expect((await rt.workspaces.get(alpha.id)).phase).toBe("running");
+    } finally {
+      await new Promise<void>(r => edge.close(() => r()));
+    }
+  });
+
+  describe("which caller a wake belongs to", () => {
+    /** A host that answers the wake with the phase given, so the transition is what each case turns on. */
+    const host = (after: string): HostClient => ({ request: async () => ({ workspace: { id: "ws_1", name: "alpha", phase: after } }) }) as unknown as HostClient;
+    const view = (phase: string): WorkspaceView => ({ id: "ws_1", name: "alpha", phase, kind: "cloud", golden: "", createdAt: "2026-09-13T00:00:00.000Z", machineId: "m1" }) as unknown as WorkspaceView;
+
+    it("is the caller's only where the machine was down before it and running after: a machine already up, or one another caller is waking, was woken by neither", async () => {
+      // The one this road owes a nap back to, and the one the nap the person asked for was cut short on.
+      expect((await awake(host("running"), view("napping"), "send", () => {})).woke).toBe(true);
+      expect((await awake(host("running"), view("pausing"), "send", () => {})).woke).toBe(true);
+      // Already up is the person's own machine; waking is another caller's wake in flight, not this one's doing.
+      expect((await awake(host("running"), view("running"), "send", () => {})).woke).toBe(false);
+      expect((await awake(host("running"), view("waking"), "send", () => {})).woke).toBe(false);
+      // A wake the provider did not finish started nothing, so there is nothing for this caller to put back.
+      expect((await awake(host("napping"), view("napping"), "send", () => {})).woke).toBe(false);
+    });
+
+    it("says it is waking on every state that is not running, whoever the wake belongs to", async () => {
+      const said: string[] = [];
+      for (const phase of ["napping", "pausing", "waking", "running"]) await awake(host("running"), view(phase), "send", line => said.push(line));
+      expect(said).toEqual(["waking alpha", "waking alpha", "waking alpha"]);
+    });
+  });
+
+  describe("what a dead launch does about the machine it woke", () => {
+    const woken = { workspace: { id: "ws_1", name: "alpha" } as unknown as WorkspaceOut, woke: true };
+    /** A host answering only the two ops this road asks, so the road itself is what the case turns on. */
+    const host = (answers: Record<string, unknown>): HostClient => ({ request: async (op: string) => (answers[op] ?? Promise.reject(new Error(`no ${op}`))) as never }) as unknown as HostClient;
+    const turnOf = (status: string, extra: Record<string, unknown> = {}): Record<string, unknown> => ({ id: "s_1", workspaceId: "ws_1", harness: "claude", status, ...extra });
+
+    it("naps it where nothing else is running there", async () => {
+      const asked: { op: string; workspaceId?: unknown }[] = [];
+      const client = {
+        request: async (op: string, params?: Record<string, unknown>) => {
+          asked.push({ op, workspaceId: params?.["workspaceId"] });
+          return (op === "sessions.list" ? { sessions: [turnOf("failed", { threadId: "t_1" })] } : {}) as never;
+        },
+      } as unknown as HostClient;
+      expect(await napAfterDeadLaunch(client, woken, undefined)).toBe(workspaceAsleepAgainLine("alpha"));
+      expect(asked).toContainEqual({ op: "workspaces.nap", workspaceId: "ws_1" });
+    });
+
+    it("leaves it up where another thread is working there, and says when the idle window takes it", async () => {
+      const client = host({
+        "sessions.list": { sessions: [turnOf("failed", { threadId: "t_mine" }), turnOf("running", { id: "s_2", threadId: "t_other" })] },
+        // Half a minute past the window, so the whole minutes the line reads in do not turn on this test's clock.
+        "status.list": { statuses: [{ id: "ws_1", idleAt: Date.now() + 20 * 60_000 + 30_000 }] },
+      });
+      // Nothing is napped under a turn that is still going, so the line says what the machine costs until then.
+      expect(await napAfterDeadLaunch(client, woken, undefined)).toBe("alpha stays awake · naps in 20m");
+    });
+
+    it("says the machine is up with no countdown where the host answers no nap time for it", async () => {
+      const client = host({
+        "sessions.list": { sessions: [turnOf("running", { threadId: "t_other" })] },
+        "status.list": { statuses: [{ id: "ws_1" }] },
+      });
+      expect(await napAfterDeadLaunch(client, woken, undefined)).toBe("alpha stays awake");
+    });
+
+    it("answers the same where the host cannot be reached at all, so the failure the run is reporting is never lost to a second one", async () => {
+      const client = host({});
+      expect(await napAfterDeadLaunch(client, woken, undefined)).toBe("alpha stays awake");
+    });
   });
 
   it("thread forget drops the row a launch that never got going left, and refuses a thread whose turn did work and a row from before threads", async () => {

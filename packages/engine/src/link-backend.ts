@@ -53,12 +53,28 @@ import type {
   TemplateRow,
 } from "./machine.js";
 
+/** What one ask on a link may say about itself: how long it waits, and whether asking it again is the same ask. */
+export interface LinkAsk {
+  timeoutMs?: number;
+  idempotencyKey?: string;
+}
+
 /** The road to one place, as whoever holds the socket hands it over. */
 export interface MachineLink {
   /** One frame and its answer. Rejects with an Error carrying the reply's kind and status when the place refused,
    * with PlaceAbsentError when the place is not connected, and with a timeout error when nothing answered inside
-   * timeoutMs. */
-  request(op: string, params?: Record<string, unknown>, opts?: { timeoutMs?: number }): Promise<Record<string, unknown>>;
+   * timeoutMs.
+   *
+   * `idempotencyKey` names an ask that may be made a second time: the road holding the link waits for a bounded
+   * while and asks again when the link goes out from under the frame, and fails with what the frame failed with
+   * when the computer never comes back. A frame without one is never asked twice, since the far side runs what it
+   * is sent and has no memory of what it already ran. */
+  request(op: string, params?: Record<string, unknown>, opts?: LinkAsk): Promise<Record<string, unknown>>;
+  /** Whether the road to the computer went and came back: for a caller whose ask is a run of frames rather than
+   * one, which waits here and sends the run again. False at once on a link that is up, where what just failed is
+   * the far side's own answer and nothing is retried, and false on a computer that did not open a socket again
+   * inside the same bounded wait. Absent on a link nothing redials, where a closed socket is the end of it. */
+  dialsBack?(): Promise<boolean>;
   /** A port on this computer's loopback carried to one port on the place's own loopback, kept for as long as the
    * place stands; the same pair answers the same local port every time. */
   forward(placePort: number): Promise<{ localPort: number }>;
@@ -129,13 +145,20 @@ export class LinkMachine implements Machine {
     if (handle.roads.metrics) this.metrics = () => this.ask(null, "machine.metrics").then(() => undefined);
   }
 
-  private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: { timeoutMs?: number }): Promise<T> {
+  private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: LinkAsk): Promise<T> {
     return askLink(this.link, reply, op, { machineId: this.id, ...params }, opts);
   }
 
-  exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
+  /** A command the caller says may be run twice carries its key down to the link, so a gap in the link is waited
+   * out rather than failing it. Every other command is the caller's alone and is sent once. */
+  exec(cmd: string, opts?: LinkAsk): Promise<ExecResult> {
     const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
-    return this.ask(MachineExecReply, "machine.exec", { cmd, timeoutMs }, { timeoutMs: timeoutMs + LINK_MARGIN_MS }).then(r => r.result);
+    return this.ask(
+      MachineExecReply,
+      "machine.exec",
+      { cmd, timeoutMs },
+      { timeoutMs: timeoutMs + LINK_MARGIN_MS, ...(opts?.idempotencyKey !== undefined ? { idempotencyKey: opts.idempotencyKey } : {}) },
+    ).then(r => r.result);
   }
 
   /** A command that may run for minutes: the same detached launch and polls every machine without a long-lived
@@ -145,13 +168,18 @@ export class LinkMachine implements Machine {
   }
 
   /** The far side names the job at once and is asked after it until it reads done; a job that failed is refused
-   * with its reason on the ask that finds it so, a link that dropped fails the ask in flight, and a job whose bytes
-   * stand still past the stall bound is given up with the count it stopped at. */
+   * with its reason on the ask that finds it so, and a job whose bytes stand still past the stall bound is given up
+   * with the count it stopped at.
+   *
+   * The ask after the job is a read of the job's own state and changes nothing on that computer, so it is named by
+   * the job and waits out a link that drops under it. The frame that names the job is not: asked twice it would
+   * start a second snapshot. That leaves the first frame of a snapshot as the one a gap ends, and the minutes after
+   * it, which is where a layer is written, as time a link may go and come back in. */
   async snapshot(name: string, life: MachineLife, opts?: SnapshotOptions): Promise<string> {
     const { job } = await this.ask(MachineSnapshotReply, "machine.snapshot", { name, life });
     let advanced = { bytes: -1, at: Date.now() };
     for (;;) {
-      const read = await askLink(this.link, MachineSnapshotJobReply, "machine.snapshotJob", { job });
+      const read = await askLink(this.link, MachineSnapshotJobReply, "machine.snapshotJob", { job }, { idempotencyKey: `snapshotJob/${job}` });
       opts?.onProgress?.({ bytes: read.bytes, ...(read.total !== undefined ? { total: read.total } : {}) });
       if (read.state === "done") {
         if (read.snapshotId === undefined) throw new Error(`the snapshot job ${job} on ${this.id} read done without a snapshot id`);
@@ -216,19 +244,33 @@ export class LinkMachine implements Machine {
   }
 
   /** The file in parts under one upload id, in order, the last one marked: the place appends them and lands the
-   * whole of it through its own machine's byte road. */
+   * whole of it through its own machine's byte road.
+   *
+   * A part carries no key of its own: the far side appends what it is sent, so the same part asked twice would land
+   * twice. The whole upload is the ask that may be made again, since it ends in one write of the file: a link that
+   * drops under a part is waited out and every part goes again under a fresh id, which is a name the far side has
+   * nothing under. The part it half wrote stays in its own scratch folder, outside the machine. */
   private async landBytes(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void> {
-    const uploadId = randomBytes(8).toString("hex");
     const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
     const parts = Math.max(1, Math.ceil(bytes.length / MACHINE_PUT_PART_BYTES));
-    for (let seq = 0; seq < parts; seq++) {
-      const part = bytes.subarray(seq * MACHINE_PUT_PART_BYTES, (seq + 1) * MACHINE_PUT_PART_BYTES);
-      await this.ask(
-        null,
-        "machine.putBytes",
-        { path, uploadId, seq, last: seq === parts - 1, data: Buffer.from(part).toString("base64"), timeoutMs },
-        { timeoutMs: timeoutMs + LINK_MARGIN_MS },
-      );
+    for (let attempt = 1; ; attempt++) {
+      const uploadId = randomBytes(8).toString("hex");
+      try {
+        for (let seq = 0; seq < parts; seq++) {
+          const part = bytes.subarray(seq * MACHINE_PUT_PART_BYTES, (seq + 1) * MACHINE_PUT_PART_BYTES);
+          await this.ask(
+            null,
+            "machine.putBytes",
+            { path, uploadId, seq, last: seq === parts - 1, data: Buffer.from(part).toString("base64"), timeoutMs },
+            { timeoutMs: timeoutMs + LINK_MARGIN_MS },
+          );
+        }
+        return;
+      } catch (e) {
+        // A part that failed on anything but the link, and a computer that never came back inside the wait, leave
+        // the upload failing with what its own part failed with.
+        if (attempt >= UPLOAD_ATTEMPTS || this.link.dialsBack === undefined || !(await this.link.dialsBack())) throw e;
+      }
     }
   }
 }
@@ -239,7 +281,7 @@ async function askLink<T>(
   reply: { parse(v: unknown): T } | null,
   op: string,
   params: Record<string, unknown>,
-  opts?: { timeoutMs?: number },
+  opts?: LinkAsk,
 ): Promise<T> {
   const answer = await link.request(op, params, opts ?? {});
   return reply === null ? (undefined as T) : reply.parse(answer);
@@ -295,12 +337,15 @@ export class LinkBackend implements MachineBackend {
     }
   }
 
-  private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: { timeoutMs?: number }): Promise<T> {
+  private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: LinkAsk): Promise<T> {
     return askLink(this.link, reply, op, params, opts);
   }
 
+  /** The spec's own key is the ask's: the far side answers the machine it already made under that key instead of
+   * booting a second one, so a create the link dropped under is asked again by it and no computer is billed twice. */
   async create(spec: MachineSpec): Promise<Machine> {
-    return new LinkMachine(this.link, (await this.ask(MachineHandleReply, "machine.create", { spec }, { timeoutMs: CREATE_MS })).machine);
+    const opts: LinkAsk = { timeoutMs: CREATE_MS, ...(spec.idempotencyKey !== undefined ? { idempotencyKey: spec.idempotencyKey } : {}) };
+    return new LinkMachine(this.link, (await this.ask(MachineHandleReply, "machine.create", { spec }, opts)).machine);
   }
 
   async get(id: string): Promise<Machine> {
@@ -327,3 +372,7 @@ export class LinkBackend implements MachineBackend {
 /** How long a create over a link gets: the machine may have to be fetched onto that computer first, which is the
  * same wait the backend doing the fetching gives it. */
 const CREATE_MS = 600_000 + LINK_MARGIN_MS;
+
+/** How many times one file's upload is sent over a link that keeps dropping under it. Each attempt waits for the
+ * computer to dial back, so this bounds a link that flaps rather than one that is down. */
+const UPLOAD_ATTEMPTS = 3;

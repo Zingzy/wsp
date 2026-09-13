@@ -72,8 +72,11 @@ export interface Machine {
   readonly seen?: { state: MachineState; createdAt?: string };
   /** On a handle from create(): the provider answered from an earlier create under the same key instead of booting. */
   readonly replayed?: boolean;
-  /** One short command; a backend's exec has a hard ceiling, so anything that can run longer goes through run(). */
-  exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>; // always REST path
+  /** One short command; a backend's exec has a hard ceiling, so anything that can run longer goes through run().
+   * `idempotencyKey` is the caller saying this command lands the same whether it runs once or twice, which is what
+   * lets the road under it send the command again after the road itself broke; a backend that runs commands in
+   * process has no such gap and ignores it. */
+  exec(cmd: string, opts?: { timeoutMs?: number; idempotencyKey?: string }): Promise<ExecResult>; // always REST path
   /** A command that may run for minutes: started detached on the guest and read until it exits or the deadline
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;
