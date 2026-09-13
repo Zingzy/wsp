@@ -8,8 +8,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { defaultStatePath, optsFor, statePick } from "../src/cli.js";
+import { defaultStatePath, devCheckoutState, optsFor, statePick } from "../src/cli.js";
 import { servingHost } from "../src/host-lock.js";
 import { SERVING_HOME_SH, currentHome, currentHomePointer, servingHome } from "../src/serving-home.js";
 
@@ -31,6 +32,10 @@ function computer(): { user: string; own: string; moved: string } {
   for (const d of [own, moved]) mkdirSync(d, { recursive: true });
   return { user, own, moved };
 }
+
+/** What makes a folder a checkout of wsp: its own root package.json naming the workspace. A folder holding keys and
+ * nothing else is not one, which is the whole point of the marker. */
+const checkoutAt = (dir: string): void => writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "wsp", private: true })}\n`);
 
 const pointAt = (user: string, home: string): void => writeFileSync(currentHomePointer(user), `${home}\n`);
 const lockOn = (home: string, pid: number): void =>
@@ -104,8 +109,13 @@ describe("the home this computer's host serves", () => {
     expect(defaultStatePath(cwd, {})).toBe(join(moved, "state.json"));
     expect(defaultStatePath(cwd, { WSP_HOME: own })).toBe(join(own, "state.json"));
 
-    // A .env in the folder a line runs in marks a dev checkout, which is the reading where nothing names a state.
+    // Keys alone say nothing about a folder: the wsp home itself holds a .env, and a line typed in it must still
+    // reach the host that is serving rather than an empty state under ~/.wsp/.wsp.
     writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+    expect(defaultStatePath(cwd, {})).toBe(join(moved, "state.json"));
+
+    // A checkout of wsp is the reading where nothing names a state.
+    checkoutAt(cwd);
     expect(defaultStatePath(cwd, {})).toBe(join(cwd, ".wsp", "state.json"));
 
     // The two readings above are the only lines that pick a state, so wsp host pair, wsp host devices and every other verb
@@ -118,12 +128,12 @@ describe("the home this computer's host serves", () => {
     expect(calls).toEqual(["return statePick(undefined, cwd, env).path;", "const pick = statePick(flag, process.cwd(), env);"]);
   });
 
-  it("keeps a state the person named: WSP_HOME over a checkout's .env, --state over both, and says which one ran", () => {
+  it("keeps a state the person named: WSP_HOME over a checkout, --state over both, and says which one ran", () => {
     const { user, own, moved } = computer();
     const cwd = mkdtempSync(join(tmpdir(), "wsp-state-pick-"));
     dirs.push(cwd);
     vi.stubEnv("HOME", user);
-    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+    checkoutAt(cwd);
 
     const named = statePick(undefined, cwd, { WSP_HOME: moved });
     expect(named.path).toBe(join(moved, "state.json"));
@@ -139,7 +149,7 @@ describe("the home this computer's host serves", () => {
     // Nothing names a state, so the checkout keeps its own, and there is nothing to say about it.
     expect(statePick(undefined, cwd, {})).toEqual({ path: join(cwd, ".wsp", "state.json") });
 
-    // A .env beside a checkout that names the state which won is not a disagreement.
+    // A checkout that names the state which won is not a disagreement.
     expect(statePick(undefined, cwd, { WSP_HOME: join(cwd, ".wsp") }).note).toBeUndefined();
 
     // Nor is one folder reached by two names, which is what /tmp and /private/tmp are on a Mac.
@@ -151,12 +161,39 @@ describe("the home this computer's host serves", () => {
     expect(statePick(undefined, link, { WSP_HOME: join(cwd, ".wsp") }).note).toBeUndefined();
   });
 
+  it("a folder that only holds keys is not a checkout, and this repository's own root is", () => {
+    const { user, moved } = computer();
+    vi.stubEnv("HOME", user);
+    pointAt(user, moved);
+    lockOn(moved, process.pid);
+
+    // The person's own state home: wsp writes their provider keys into ~/.wsp/.env and the state file is right
+    // there too, so a folder holding both must not answer off ~/.wsp/.wsp/state.json, which nothing ever wrote.
+    const home = mkdtempSync(join(tmpdir(), "wsp-keys-only-"));
+    dirs.push(home);
+    writeFileSync(join(home, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+    mkdirSync(join(home, ".wsp"), { recursive: true });
+    writeFileSync(join(home, ".wsp", "state.json"), "{}\n");
+    expect(devCheckoutState(home)).toBeUndefined();
+    expect(defaultStatePath(home, {})).toBe(join(moved, "state.json"));
+
+    // A folder carrying a package.json of some other project is not this one either.
+    const other = mkdtempSync(join(tmpdir(), "wsp-other-repo-"));
+    dirs.push(other);
+    writeFileSync(join(other, "package.json"), `${JSON.stringify({ name: "something-else" })}\n`);
+    expect(devCheckoutState(other)).toBeUndefined();
+
+    // The repository this test runs out of is one, read off the file it really carries.
+    const repo = fileURLToPath(new URL("../../../", import.meta.url));
+    expect(devCheckoutState(repo)).toBe(join(repo, ".wsp", "state.json"));
+  });
+
   it("gives the commands that parse flags the same reading and the same sentence", () => {
     const { user, moved } = computer();
     const cwd = mkdtempSync(join(tmpdir(), "wsp-state-opts-"));
     dirs.push(cwd);
     vi.stubEnv("HOME", user);
-    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+    checkoutAt(cwd);
     const back = process.cwd();
     process.chdir(cwd);
     try {

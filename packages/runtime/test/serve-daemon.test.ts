@@ -226,7 +226,7 @@ describe("who may open a channel", () => {
     const road = { url: `ws://127.0.0.1:${daemon.port}`, expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: DAEMON_TOKEN };
     const local: LocalWiring = {
       backend: new LocalBackend({ root: localRoot }),
-      execStream: o => localExecStream({ root: localRoot!, ...o }),
+      execStream: o => localExecStream({ root: localRoot!, runDir: join(localRoot!, "runs"), ...o }),
       home: () => join(localRoot!, ".claude"),
       homeDir: localRoot,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),

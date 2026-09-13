@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -8,13 +8,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type EventUnion, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
-import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
+import { grandchild, sweepStrays } from "./strays.js";
+import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
 /** A scripted adapter that runs one real command on the machine it was given through ctx.execStream and answers with
@@ -153,12 +155,15 @@ describe("local workspace", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localws-"));
     store = memoryStore();
-    handed = [];
+    // Each case's own list, closed over by that case's wiring: a runtime an earlier case left running still asks
+    // its own wiring for a factory, and a shared variable would file those asks under the case reading it.
+    const mine: (MachineExecOptions | undefined)[] = [];
+    handed = mine;
     localWiring = {
       backend: new LocalBackend({ root }),
       execStream: o => {
-        handed.push(o);
-        return localExecStream({ root, ...o });
+        mine.push(o);
+        return localExecStream({ root, runDir: join(root, "runs"), ...o });
       },
       home: () => join(root, ".claude"),
       homeDir: root,
@@ -701,15 +706,17 @@ describe("local workspace", () => {
 
 describe("a local turn and a host restart", () => {
   let root: string;
+  let runDir: string;
   let store: Store;
   let localWiring: LocalWiring;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-localcut-"));
+    runDir = join(root, "runs");
     store = memoryStore();
     localWiring = {
       backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, ...o }),
+      execStream: o => localExecStream({ root, runDir, ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
@@ -717,33 +724,96 @@ describe("a local turn and a host restart", () => {
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+    sweepStrays();
   });
 
-  /** A turn that starts and never replies, the way a real one looks while the agent is still working. */
-  const hangingAdapter: HarnessAdapterFactory = () => ({
-    steers: false,
-    start: ({ onEvent }) => {
-      const sessionId = "33333333-3333-4333-8333-333333333333";
-      onEvent({ type: "session.start", sessionId, cwd: "/root" });
-      return { localId: sessionId, finished: new Promise(() => {}), interrupt: async () => {} };
-    },
-  });
+  /** An adapter whose turn is a real run on this computer, read through the factory its kind handed it: it reports
+   * the run its stream named and re-opens one an earlier host process left, which is what both shipped adapters do
+   * with the factory's own attach. A line the run prints is one delta; the exit code ends the turn. */
+  const runAdapter = (command: string): HarnessAdapterFactory => ctx => {
+    const sessionId = "33333333-3333-4333-8333-333333333333";
+    const read = (stream: ExecStream, onEvent: (event: AdapterEvent) => void): HarnessSession => {
+      const finished = (async () => {
+        onEvent({ type: "session.start", sessionId, cwd: root });
+        let text = "";
+        for await (const line of stream.lines) {
+          text += line;
+          onEvent({ type: "turn.delta", sessionId, kind: "text", text: line });
+        }
+        const exitCode = await stream.exited;
+        const result = { status: exitCode === 0 ? "completed" : "failed", text } as const;
+        onEvent({ type: "turn.done", sessionId, result });
+        onEvent({ type: "session.end", sessionId, exitCode, sawResult: true });
+        return result;
+      })();
+      return { localId: sessionId, finished, ...(stream.run !== undefined ? { run: stream.run } : {}), interrupt: async () => {} };
+    };
+    const attach = ctx.execStream.attach?.bind(ctx.execStream);
+    return {
+      steers: false,
+      start: ({ onEvent }) => read(ctx.execStream(command, { env: { ...ctx.env } }), onEvent),
+      ...(attach === undefined
+        ? {}
+        : {
+            attach: async (o: AdapterAttachOptions) => {
+              const stream = await attach(o.run, { input: false });
+              return stream === "gone" ? "gone" : read(stream, o.onEvent);
+            },
+          }),
+    };
+  };
 
-  it("a local turn dies with the host that started it, so a restart settles it as cut with one honest line and the next send resumes past it", async () => {
-    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: hangingAdapter }, local: localWiring });
+  it("a local turn outlives the host that started it: the row keeps its run, stays running across the restart and the reply lands in the thread", async () => {
+    const gate = join(root, "gate");
+    const marker = join(root, "turn.pid");
+    // A turn that prints, then waits for the file the test writes once the new host is up, then replies: every line
+    // of it lands whether or not a host is reading at the time. It goes on after the reply, since this process is
+    // still holding the reader the first host left and two readers would race to reap the run at its end, which is
+    // an artifact of running both hosts here: a real one goes with its process.
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo $$ > ${marker}; echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo wrote the fix; sleep 30`) }, local: localWiring });
     const ws = await rt1.workspaces.createLocal("mac");
-    const handle = await rt1.sessions.start(ws.id, { prompt: "build it" });
-    expect((await rt1.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
-    // A local turn's harness is a child of this host: nothing on a machine outlives it, so the local exec factory
-    // offers no attach and the next host has no run to re-open.
-    expect(localExecStream({ root }).attach).toBeUndefined();
+    await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
+    await grandchild(marker);
+    // The host goes with the turn still running, the way a launchctl kickstart takes it.
     await rt1.close();
 
-    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: hangingAdapter }, local: localWiring });
-    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["failed"]);
+    // The row keeps the handle the run is named by on this computer, which is what the next host re-opens it with.
+    const stored = (await store.get("sessions", ws.id)) as { sessions: { status: string; run?: string }[] };
+    expect(stored.sessions.map(s => s.status)).toEqual(["running"]);
+    const runs = readdirSync(runDir).filter(name => name.endsWith(".d"));
+    expect(runs).toHaveLength(1);
+    expect(stored.sessions[0]!.run).toBe(join(runDir, runs[0]!.slice(0, -".d".length)));
+
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: localWiring });
+    // No false failure on the way back: the row is handed to the new host as the running turn it is.
+    expect((await rt2.sessions.list(ws.id)).map(s => s.status)).toEqual(["running"]);
+    writeFileSync(gate, "go\n");
+    await until(async () => (await rt2.sessions.history(ws.id)).some(e => e.type === "session.delta" && e.text === "wrote the fix"), 20_000);
+    // The run's log is read from its first byte, so the line the old host already wrote is read past rather than
+    // written to the thread twice, and the reply the new host was there for lands after it.
     const history = await rt2.sessions.history(ws.id);
-    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, reason: "host restarted while the agent was working" });
-    expect((await rt2.sessions.list(ws.id))[0]!.endedAt).toBeDefined();
+    expect(history.filter(e => e.type === "session.delta").map(e => e.text)).toEqual(["reading the ticket", "wrote the fix"]);
+    expect((await rt2.sessions.list(ws.id))[0]!.status).toBe("running");
+    await rt2.close();
+  }, 30_000);
+
+  it("a run this computer no longer holds ends its turn as cut, with the truth and no false failure in between", async () => {
+    const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("sleep 30") }, local: localWiring });
+    const ws = await rt1.workspaces.createLocal("mac");
+    const handle = await rt1.sessions.start(ws.id, { prompt: "build it" });
+    await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
+    await rt1.close();
+
+    // Whatever was launched is gone: the person restarted the computer, or the sweep of another host took it.
+    const held = readdirSync(runDir).filter(name => name.endsWith(".d"));
+    expect(held).toHaveLength(1);
+    for (const name of readdirSync(runDir)) rmSync(join(runDir, name), { recursive: true, force: true });
+
+    const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("true") }, local: localWiring });
+    await until(async () => (await rt2.sessions.list(ws.id))[0]!.status === "failed");
+    const history = await rt2.sessions.history(ws.id);
+    expect(history.at(-1)).toMatchObject({ type: "session.end", exitCode: null, reason: RUN_GONE_LINE });
     await rt2.close();
 
     // The thread is not lost: the next send resumes it and says the transcript may be missing what the cut turn did.
@@ -753,7 +823,7 @@ describe("a local turn and a host restart", () => {
     const starts = (await rt3.sessions.history(ws.id)).filter(e => e.type === "session.start");
     expect(starts.at(-1)).toMatchObject({ prompt: "carry on", afterCut: true });
     await rt3.close();
-  });
+  }, 30_000);
 });
 
 describe("one registry for what a workspace's kind means", () => {

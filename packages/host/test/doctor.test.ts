@@ -53,6 +53,9 @@ import { redact } from "../src/init-log.js";
 import type { CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 
@@ -1013,7 +1016,7 @@ describe("the doctor's local road", () => {
         backend: new NoProviderBackend(),
         store: memoryStore(),
         adapters,
-        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }) },
+        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }) },
         hostId: "box:h1",
       }),
     };

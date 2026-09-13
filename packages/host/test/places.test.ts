@@ -49,6 +49,9 @@ import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, 
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceRunner } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const dirs: string[] = [];
 const servers: WebSocketServer[] = [];
