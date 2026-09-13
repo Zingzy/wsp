@@ -8,11 +8,10 @@ import { dirname, join } from "node:path";
 import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
 import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
-import { Recipe, type LoginChoice, type RecipeRow } from "@wsp/protocol";
+import { Recipe, SIGN_IN_ANSWERS, type LoginChoice, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
-import { SIGN_IN_WORDS } from "./signin-words.js";
 import { outsideRow } from "./recipe-file.js";
 import { FISH_FILE, SH_FILE } from "./init-secrets.js";
 export { loadRecipe, outsideCatalog, outsideRowsOf, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
@@ -127,14 +126,20 @@ export function initialTicks(e: ManifestEntry): boolean {
   return e.bring ?? e.default === "bring";
 }
 
-/** A login that cannot be copied (a reason, or a skip default) is signed in on the machine. */
+/** The answer a login takes when no copy from this computer can carry it: its only road is then a browser, which
+ * waits on the person, so it is left to the first time the tool is needed on a workspace. The one home for that rule,
+ * read by the screens' default below and by every row a run flips because the copy it wanted cannot happen here. */
+export const WITHOUT_A_COPY: LoginChoice = "later";
+
+/** A login that cannot be copied (a reason, or a skip default) goes where WITHOUT_A_COPY says; signing in during the
+ * build is the answer to move it to. A saved answer wins over both. */
 export function initialChoice(e: ManifestEntry): LoginChoice {
   // A credential-shaped row copies only on a saved copy answer; a tick alone, or an answer it never offered, is skip.
   if (e.consent === true) return e.choice === "copy" ? "copy" : "skip";
   if (e.choice !== undefined) return e.choice;
-  if (!isTickable(e)) return "machine";
-  if (e.bring !== undefined) return e.bring ? "copy" : "machine";
-  return e.default === "bring" ? "copy" : "machine";
+  if (!isTickable(e)) return WITHOUT_A_COPY;
+  if (e.bring !== undefined) return e.bring ? "copy" : WITHOUT_A_COPY;
+  return e.default === "bring" ? "copy" : WITHOUT_A_COPY;
 }
 
 /** The catalog entry a login row belongs to, by the login id it is filed under; a row the catalog does not know is its own. */
@@ -173,8 +178,8 @@ export function defaultAnswers(manifest: Manifest, brew: BrewTable, coming: Read
 }
 
 /** Every catalog agent as a row, the collector's where it found one here and a bare one otherwise, with a bare login
- * row beside it so the agent can be ticked for the machine and signed in there after the build. A bare row has
- * nothing to copy and starts off; the recipe decides its tick. */
+ * row beside it so the agent can be ticked for the machine and signed in there. A bare row has nothing to copy and
+ * starts off; the recipe decides its tick. */
 export function withCatalogAgents(manifest: Manifest): Manifest {
   const has = (rung: Rung, name: string): boolean => manifest.entries.some(e => e.rung === rung && agentName(e) === name);
   const bare = (rung: Rung, id: string, label: string): ManifestEntry => ({ rung, id, label, paths: [], bytes: 0, default: "skip" });
@@ -290,7 +295,7 @@ export function agentName(e: ManifestEntry): string {
  * files that came or went with it are not listed again. */
 export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Manifest): string[] {
   const label = (id: string): string => manifest.entries.find(e => e.id === id)?.label ?? id;
-  const word = (choice: string | undefined): string => (isLoginChoice(choice) ? SIGN_IN_WORDS[choice].short : (choice ?? "ticked"));
+  const word = (choice: string | undefined): string => (isLoginChoice(choice) ? SIGN_IN_ANSWERS[choice].short : (choice ?? "ticked"));
   const out: string[] = [];
   const noted = new Set<string>();
   const was = new Map(from.ticks.map(t => [t.id, t]));

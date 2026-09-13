@@ -143,7 +143,7 @@ describe("recipe diff", () => {
     const to = snap([row("shell", "shell/zshrc"), row("logins", "logins/gh", { choice: "machine" })], []);
     expect(describeDiff(diffRecipes(from, to))).toEqual([
       "kept on the golden, no longer on this computer: ~/.zshrc",
-      "gh: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it",
+      "gh: a sign-in during the build is not done by an update, so it would not be in the golden; pick the rebuild for it",
     ]);
     expect(isSmallDelta(diffRecipes(from, to), bytesIn(to))).toBe(false);
   });
@@ -239,7 +239,7 @@ describe("describing and sizing the delta", () => {
       "retire 1 file: ~/.config/gh/hosts.yml, left on the image",
       "retire 1 tool: yq, left on the image",
       "retire 1 agent: codex, left on the image",
-      "gh: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it",
+      "gh: a sign-in during the build is not done by an update, so it would not be in the golden; pick the rebuild for it",
       "copy the codex",
     ]);
   });

@@ -3,7 +3,7 @@
 // against the recipe now, as rows to apply on top and rows the recipe stopped
 // asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
 import { ROAD_MODULES, isRoad } from "@wsp/catalog";
-import { INSTALLER_MOVED_LINE, listedName, MCP_ID_PREFIX, NO_ROAD_WORDS, roadMovedLine, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
+import { INSTALLER_MOVED_LINE, listedName, MCP_ID_PREFIX, NO_ROAD_WORDS, roadMovedLine, SIGN_IN_LATER, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -162,7 +162,8 @@ interface LoginAnswer {
  * and the road can never drift apart the way they did when a new answer fell through a catch-all. */
 const LOGIN_ANSWERS: Record<LoginChoice, LoginAnswer> = {
   copy: { line: label => `copy the ${label}`, needsFreshMachine: false },
-  machine: { line: label => `${label}: sign in on the machine is not done by an update, so it would not be in the golden; pick the rebuild for it`, needsFreshMachine: true },
+  machine: { line: label => `${label}: a sign-in during the build is not done by an update, so it would not be in the golden; pick the rebuild for it`, needsFreshMachine: true },
+  later: { line: label => `${label}: nothing runs for it here; ${SIGN_IN_LATER} on the workspace`, needsFreshMachine: false },
   key: { line: label => `${label}: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it`, needsFreshMachine: true },
   skip: { line: label => `retire the ${label}, left signed in on the image`, needsFreshMachine: false },
 };

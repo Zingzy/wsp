@@ -97,7 +97,7 @@ export interface RecipeInput {
   tick?: RecipeTick;
   /** `<id>=on` or `<id>=off`, repeatable: applied over the rule, on top of the ticks already in the file. */
   set?: readonly string[];
-  /** `<id>=copy|machine|key|skip`, repeatable: what happens to that row's sign-in. */
+  /** `<id>=<one of LOGIN_CHOICES>`, repeatable: what happens to that row's sign-in. */
   signin?: readonly string[];
   /** `<id>=<install command>`, repeatable: a tool the catalog does not carry, added to the file beside the rows. */
   add?: readonly string[];

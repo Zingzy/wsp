@@ -6,9 +6,10 @@
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
+import { SIGN_IN_DEFERRED_WORD, initRowFailed, initSignInOutcome } from "@wsp/protocol";
 import { describe, expect, it } from "vitest";
 import { CALLBACK_DISPLAY, cadence, codeIn, handoffStage, rowFinish, signInEnv, type HandoffOptions } from "../src/init-handoff.js";
-import { SignInCodes, flowHooks, type SignInFlow } from "../src/init-signin.js";
+import { SIGN_IN_CAP_MS, SignInCodes, flowHooks, type SignInFlow } from "../src/init-signin.js";
 import { signInFor } from "../src/signin-table.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 import { ASKED, loginOf } from "./signin-questions.js";
@@ -167,15 +168,30 @@ describe("the sign-in hand-off", () => {
     expect(r).toMatchObject({ state: "signed-in", exit: 0, note: "gh auth status says signed in" });
   });
 
-  it("a deadline that passes leaves the row not signed in with what the last check said, and the run goes on", async () => {
+  it("the cap that passes defers the row with what the last check said, and the run goes on", async () => {
     const link = ghLink({ after: 99, hold: true });
     const st = stage(link, { deadlineMs: 60, pollMs: 10 });
     const [r] = await st.run;
-    expect(r).toMatchObject({ state: "not-signed-in", note: "no sign-in within 60ms; gh auth status says not signed in" });
+    expect(r).toMatchObject({ state: "deferred", note: "no sign-in within 60ms; gh auth status says not signed in" });
     expect(r).not.toHaveProperty("exit");
-    expect(st.json.at(-1)).toMatchObject({ event: "sign-in-result", state: "not-signed-in" });
-    expect(st.text()).toContain("GitHub CLI login: not signed in");
+    expect(st.json.at(-1)).toMatchObject({ event: "sign-in-result", state: "deferred" });
+    expect(st.text()).toContain(`GitHub CLI login: ${SIGN_IN_DEFERRED_WORD}`);
     expect(link.ptys[0]!.killed).toBe(true);
+    // The stage ended, so the build goes on to the seal, and the row is no failure: the person chose to wait during
+    // the build and the wait ended.
+    expect(initRowFailed(initSignInOutcome(r!.state, "darwin"))).toBe(false);
+  });
+
+  it("gives every sign-in the same two minutes, whatever the tool itself would wait for", async () => {
+    expect(SIGN_IN_CAP_MS).toBe(2 * 60_000);
+    // No deadline of the caller's: the cap is the whole wait, and the row says so before anyone opens the page.
+    const link = ghLink({ after: 99, hold: true });
+    const st = stage(link, { deadlineMs: undefined, pollMs: 5 });
+    for (let i = 0; i < 200 && !st.json.some(j => j["browserUrl"] !== undefined); i++) await new Promise(r => setTimeout(r, 5));
+    expect(st.json.find(j => j["browserUrl"] !== undefined)).toMatchObject({ waitSeconds: 120 });
+    expect(st.text()).toContain("this run waits up to 2m for you");
+    link.exit(link.ptys[0]!, 0);
+    await st.run;
   });
 
   it("a command that ends 0 by itself is signed in without another check; one that ends badly is judged by the tool's status", async () => {
@@ -311,7 +327,7 @@ describe("the sign-in hand-off", () => {
     // A page printed after the forwarded one is not handed over: only the forwarded one returns to the machine.
     link.data(pty!, `If nothing happens, open ${DEVICE}?fallback=1 yourself\r\n`);
     const [r] = await st.run;
-    expect(r).toMatchObject({ state: "not-signed-in" });
+    expect(r).toMatchObject({ state: "deferred" });
     expect(st.json.filter(j => j["event"] === "sign-in" && j["browserUrl"] !== undefined).map(j => j["browserUrl"])).toEqual([BANNER, DEVICE, PAGE]);
     expect(st.json.filter(j => j["event"] === "sign-in").at(-1)).toMatchObject({ code: CODE, nextCommand: `open '${PAGE}'` });
     // The relay's own line for that page reached this stage's output instead of the host's plain log.
@@ -332,7 +348,7 @@ describe("the sign-in hand-off", () => {
     const flow: SignInFlow = { armed: false };
     const st = stage(link, { flow, deadlineMs: 60, pollMs: 10 });
     const [r] = await st.run;
-    expect(r).toMatchObject({ state: "not-signed-in", note: "no sign-in within 60ms; no page to open was ever printed or asked for; gh auth status says not signed in" });
+    expect(r).toMatchObject({ state: "deferred", note: "no sign-in within 60ms; no page to open was ever printed or asked for; gh auth status says not signed in" });
     expect(st.json.some(j => j["event"] === "sign-in" && j["browserUrl"] !== undefined)).toBe(false);
     expect(flow).toEqual({ armed: false });
   });

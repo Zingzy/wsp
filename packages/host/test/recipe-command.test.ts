@@ -215,7 +215,9 @@ describe("wsp recipe", () => {
     await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
     expect(saved().rows.find(r => r.id === "claude")?.signIn).toBe("machine");
     expect(parseSignIn("hermes=key")).toEqual({ id: "hermes", choice: "key" });
-    expect(() => parseSignIn("claude=maybe")).toThrow("--signin takes <id>=copy|machine|key|skip");
+    // A recipe is the whole answer, so the word that leaves a sign-in to first use is one a recipe can name too.
+    expect(parseSignIn("gcloud=later")).toEqual({ id: "gcloud", choice: "later" });
+    expect(() => parseSignIn("claude=maybe")).toThrow("--signin takes <id>=copy|machine|later|key|skip");
     expect(() => parseSignIn("clawd=copy")).toThrow('the catalog has no row called "clawd"');
     // A word a row cannot take is not refused here: the sign-ins screen falls back to the first word it takes.
     expect(parseSignIn("gh=key")).toEqual({ id: "gh", choice: "key" });
