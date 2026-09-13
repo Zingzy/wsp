@@ -31,9 +31,16 @@ import { psCpuSeconds, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/prot
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 
+/** One reading of the work a turn's process group has done, in the ticks the activity clock counts, or undefined
+ * when this computer cannot answer for the group. */
+export type GroupWorkReader = (pgid: number, then: (ticks: number | undefined) => void) => void;
+
 export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
   root: string;
+  /** How the turn's tree is read; ps is the road on this computer. A test hands in a reader that answers off the
+   * clock the rule measures against, since what a real tree is given on a loaded box is not what the rule is. */
+  readWork?: GroupWorkReader;
 }
 
 /** How often the limits are read against the clock, and the turn's tree with them; the cloud road reads both at its
@@ -86,7 +93,7 @@ function cpuTicks(time: string): number {
  * node hands only five errnos to a spawn's async error path and throws the rest (EPERM where ps is out of reach,
  * ENOMEM on a full box) straight out of execFile, so both roads answer with no reading, and a turn whose tree
  * cannot be read is left on its stream alone. */
-function readGroupWork(pgid: number, then: (ticks: number | undefined) => void): void {
+const readGroupWork: GroupWorkReader = (pgid, then) => {
   const sum = (stdout: string): number => {
     let ticks = 0;
     for (const row of stdout.split("\n")) {
@@ -100,7 +107,7 @@ function readGroupWork(pgid: number, then: (ticks: number | undefined) => void):
   } catch {
     then(undefined);
   }
-}
+};
 
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
  * for more, and the final tail with no newline is yielded when the streams close. Two streams share one queue so
@@ -169,6 +176,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
   const waiting = isWaiting ?? (() => false);
   const now = opts.now ?? Date.now;
   const checkMs = opts.pollMs ?? CHECK_MS;
+  const readWork = opts.readWork ?? readGroupWork;
   const factory: ExecStreamFactory = (command, { env, input }) => {
     const child: ChildProcessWithoutNullStreams = spawn("bash", ["-c", command], {
       cwd: opts.root,
@@ -222,7 +230,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
       const quietMs = activity.quietMs(at);
       if (pgid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
         reading = true;
-        readGroupWork(pgid, ticks => {
+        readWork(pgid, ticks => {
           reading = false;
           if (ticks !== undefined) activity.read(ticks, at);
         });

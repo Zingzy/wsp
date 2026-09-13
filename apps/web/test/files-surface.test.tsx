@@ -137,7 +137,7 @@ describe("files surface", () => {
     const pane = container.querySelector<HTMLElement>("[data-files-pane]")!;
     // Nothing was clicked in the pane: it is focusable and took focus as it was shown, so the keys are live.
     expect(pane.getAttribute("tabindex")).toBe("0");
-    expect(document.activeElement).toBe(pane);
+    await waitFor(() => expect(document.activeElement).toBe(pane));
 
     // From a tree row, where the key is pressed in practice: the row lives in the tree's shadow root.
     fireEvent.keyDown(rowFor(container, "index.ts"), { key: "Backspace" });
