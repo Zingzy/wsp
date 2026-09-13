@@ -52,13 +52,14 @@ export function advertisedUrl(bound: string, port: number, asked?: string, inter
 }
 
 /** What a turn's launch is told about this host, for the kinds that need it. The address the person named with
- * --advertise stands above every kind's own answer; the address a machine somewhere else dials is the name a relay
- * carries this host under while a connector is holding it, since that one works from anywhere, else what this
- * computer answers on; and the port travels only where the host bound the wildcard. That last one is the whole
- * rule about a kind's own address: a host on the wildcard answers on every address this computer has, the ones a
- * machine knows of its own included, and a host bound to one address answers there and nowhere else, however a
- * machine would rather reach it. The url is read at each turn: a quick tunnel is given a new name every time its
- * connector runs. */
+ * --advertise stands above everything, both above every kind's own answer at the launch and above the name a relay
+ * carries this host under: somebody who names an address has said which one the other end can reach, and a relay
+ * name they never asked for is a guess. Where they named none, the relay's name is what a machine somewhere else
+ * dials, since that one works from anywhere, else what this computer answers on; and the port travels only where the
+ * host bound the wildcard. That last one is the whole rule about a kind's own address: a host on the wildcard
+ * answers on every address this computer has, the ones a machine knows of its own included, and a host bound to one
+ * address answers there and nowhere else, however a machine would rather reach it. The url is read at each turn: a
+ * quick tunnel is given a new name every time its connector runs. */
 export function hostReach(
   at: { address: string; port: number },
   asked: string | undefined,
@@ -69,8 +70,8 @@ export function hostReach(
   return {
     ...(advertise !== undefined ? { advertise } : {}),
     get url(): string | undefined {
-      const relayed = publicAt();
-      return relayed !== undefined ? relayUrlOf(relayed) : advertisedUrl(at.address, at.port, undefined, interfaces);
+      const relayed = advertise === undefined ? publicAt() : undefined;
+      return relayed !== undefined ? relayUrlOf(relayed) : advertisedUrl(at.address, at.port, asked, interfaces);
     },
     ...(isWildcard(at.address) ? { port: at.port } : {}),
   };

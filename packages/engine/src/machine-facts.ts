@@ -41,6 +41,18 @@ export const UPTIME_READ: readonly string[] = [
  * starts in: the read that records a workspace and the read behind its rows both ask for it this way. */
 export const HOME_READ = `printf "home %s\\n" "$HOME"`;
 
+/** The line that asks what chip the machine runs on. Every binary wsp puts on a machine is built for one, and this
+ * is the only word the machine itself uses for it, so what is sent there is picked off this and never off the chip
+ * of the computer doing the sending. */
+export const ARCH_READ = `printf "arch %s\\n" "$(uname -m)"`;
+
+/** What the machine said its chip is, or nothing where it answered none; the word is the machine's own and is
+ * matched against a table rather than read apart here. */
+export function archOf(values: Record<string, string>): string | undefined {
+  const arch = values["arch"];
+  return arch === undefined || arch === "" ? undefined : arch;
+}
+
 /** The operating system as its maker names it: macOS by its product version, a Linux by its distribution's own
  * name, and the kernel where neither answered. Absent where the machine answered none of the three, which is a
  * machine that did not run the lines rather than one without a name. */

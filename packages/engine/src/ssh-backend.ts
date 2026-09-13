@@ -16,7 +16,7 @@ import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
-import { HOME_READ, OS_READ, UPTIME_READ, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
+import { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
 /** How the ssh client is dialled: who to log in as, where, on which port, and the person's own key when they named
@@ -339,6 +339,7 @@ export const LOGIN_READ = ["printf \"path %s\\n\" \"$PATH\"", ...SSH_STORE_VARS.
  * them. Linux answers the first branch of each size pair, macOS the second. */
 export const SSH_READ_SCRIPT = [
   HOME_READ,
+  ARCH_READ,
   'printf "user %s\\n" "$(id -un)"',
   `bash -lc ${shellQuote(LOGIN_READ)} 2>/dev/null`,
   'printf "cpu %s\\n" "$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 0)"',
@@ -352,7 +353,7 @@ export const SSH_FACTS_SCRIPT = [...OS_READ, ...UPTIME_READ, HOME_READ].join("\n
 
 /** One dial that both proves the machine answers and records what wsp needs of it. A dial that fails carries the
  * client's own words back, since they are what tells the person whether it was the key, the host or the network. */
-export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape }> {
+export async function readSshMachine(reach: SshReach, transport: SshTransport = sshClient): Promise<{ login: SshLogin; shape: MachineShape; arch?: string }> {
   const res = await transport(reach, SSH_READ_SCRIPT, { timeoutMs: 30_000 });
   if (res.exitCode !== 0) throw new Error(`${reach.user}@${reach.host} did not answer over ssh: ${(clientWords(res.stderr) || res.stdout.trim()).slice(-300)}`);
   const values = readValues(res.stdout);
@@ -367,9 +368,11 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
   }
   const cpu = Number(values["cpu"] ?? 0);
   const memMb = Math.round(Number(values["memkb"] ?? 0) / 1024);
+  const arch = archOf(values);
   return {
     login: { ...stores, HOME: home, USER: values["user"] ?? reach.user, PATH: plainPath(values["path"]) },
     shape: { cpu, memMb },
+    ...(arch !== undefined ? { arch } : {}),
   };
 }
 
@@ -597,10 +600,10 @@ export class SshBackend implements MachineBackend {
    * workspace is also the one that proves the dial works. The key it answers with is read after that dial and not
    * out of it: accept-new wrote the entry as the connection was made, while a dial riding a master the last minute
    * left open exchanges no key at all, and a record with no identity is a machine that can be recorded twice. */
-  async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; hostKey?: string }> {
-    const { login, shape } = await readSshMachine(reach, this.transport);
+  async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; arch?: string; hostKey?: string }> {
+    const { login, shape, arch } = await readSshMachine(reach, this.transport);
     const hostKey = await this.keyFor(reach);
-    return { machine: new SshMachine(reach, this.transport), login, shape, ...(hostKey !== undefined ? { hostKey } : {}) };
+    return { machine: new SshMachine(reach, this.transport), login, shape, ...(arch !== undefined ? { arch } : {}), ...(hostKey !== undefined ? { hostKey } : {}) };
   }
 
   /** The key this computer's ssh client holds for a machine, read with nothing dialled, or nothing where it holds
