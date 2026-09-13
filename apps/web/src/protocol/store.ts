@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -12,6 +12,7 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
+import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
@@ -31,6 +32,8 @@ export interface CreationLine {
   readonly at: string;
   readonly elapsedMs: number;
   readonly notice?: string;
+  /** What the machine answered this step with, for the line's title; never drawn as a sentence. */
+  readonly detail?: string;
 }
 
 /** A workspace being created: the sidebar row and the center view read it until workspace.created replaces it. */
@@ -172,6 +175,10 @@ interface State {
   /** A workspace view the runtime handed back to a caller, over the one in the rail: no event carries the image a
    * workspace forks from, so a move to a newer golden version would read stale until the next full refresh. */
   applyWorkspace(workspace: WorkspaceView): void;
+  /** The project an import landed, onto the workspace it landed on: the host answers the record it has just kept, so
+   * the pane lists the folder as soon as the import returns, whether or not the machine's daemon is up to say
+   * anything about what is in it. */
+  landProject(workspaceId: string, project: WorkspaceProject): void;
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
@@ -187,6 +194,9 @@ interface State {
   /** The same for Connect a provider, so a person who types it into the palette lands where the button leads. */
   openConnectProvider(): void;
   closeConnectProvider(): void;
+  /** Asks the host to dial one computer once and takes the row it answers with, so every surface reading that row
+   * says the same thing about it. Answers the whole of what came back for the slot that asked. */
+  dialPlace(placeId: string): Promise<PlaceDial>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -648,10 +658,24 @@ export const useStore = create<State>((set, get) => {
     closeAddComputer() { set({ addComputerOpen: false }); },
     openConnectProvider() { set({ settingsOpen: true, connectProviderOpen: true }); },
     closeConnectProvider() { set({ connectProviderOpen: false }); },
+    async dialPlace(placeId) {
+      const api = get().api;
+      if (api?.dialPlace === undefined) throw new Error(WHERE_WORDS.cannotDial);
+      const answer = await api.dialPlace(placeId);
+      set(s => ({ places: s.places.map(p => (p.id === answer.place.id ? answer.place : p)) }));
+      return answer;
+    },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),
         statuses: s.statuses[workspace.id] ? { ...s.statuses, [workspace.id]: { ...s.statuses[workspace.id]!, ...workspace } } : s.statuses,
+      }));
+    },
+    landProject(workspaceId, project) {
+      const put = <T extends WorkspaceView>(w: T): T => (w.id === workspaceId ? { ...w, projects: withProject(workspaceProjects(w), project) } : w);
+      set(s => ({
+        workspaces: s.workspaces.map(put),
+        statuses: s.statuses[workspaceId] ? { ...s.statuses, [workspaceId]: put(s.statuses[workspaceId]!) } : s.statuses,
       }));
     },
     applyEvent(e) {
@@ -729,7 +753,14 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "workspace.creating": {
-          const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
+          const line: CreationLine = {
+            stage: e.stage,
+            message: e.message,
+            at: new Date().toISOString(),
+            elapsedMs: e.elapsedMs,
+            ...(e.notice !== undefined ? { notice: e.notice } : {}),
+            ...(e.detail !== undefined ? { detail: e.detail } : {}),
+          };
           set(s => {
             // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up
             // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created

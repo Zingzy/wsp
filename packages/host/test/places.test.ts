@@ -13,6 +13,7 @@ import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
+import type { SshReach, SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { daemonFlags, PLACE_JOINED_LINE, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -31,6 +32,7 @@ import {
   joinCommand,
   placeDaemonFlags,
   placeInstaller,
+  placeDialler,
   preparePlaceHome,
   joinPlace,
   addableProviders,
@@ -313,6 +315,9 @@ describe("what this computer says about itself", () => {
     expect(report.login["HOME"]).toBe(home);
     expect(report.wsp.length).toBeGreaterThan(0);
     expect(["darwin", "linux"]).toContain(report.platform);
+    // How long it has been up rides the report, so a row for a computer that stopped answering says what it last
+    // was rather than standing at pending for a fact nothing is coming back with.
+    expect(report.uptimeMs).toBeGreaterThan(0);
   });
 
   it("reads the PATH a login shell here gives, not the one the shell that typed the join happened to hold", () => {
@@ -573,6 +578,59 @@ describe("wsp add on a computer reached over ssh", () => {
   });
 });
 
+describe("dialling a box whose agent stopped calling home", () => {
+  /** One ssh child, as the transport sees it: the dial it was given and the script it was asked to run. */
+  const dialler = (answer: { exitCode: number; stdout?: string; stderr?: string }) => {
+    const asked: { reach: SshReach; script: string }[] = [];
+    const transport: SshTransport = async (reach, script) => {
+      asked.push({ reach, script });
+      return { exitCode: answer.exitCode, stdout: answer.stdout ?? "", stderr: answer.stderr ?? "" };
+    };
+    return { asked, dial: placeDialler({ transport }) };
+  };
+
+  it("opens one connection over the login on the record, runs a command every unix has, and installs nothing", async () => {
+    const { asked, dial } = dialler({ exitCode: 0 });
+    await dial({ ssh: "root@65.21.4.12" });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.reach).toEqual({ user: "root", host: "65.21.4.12", port: 22 });
+    expect(asked[0]!.script).toBe("exit 0");
+  });
+
+  it("hands back ssh's own line and nothing of the reader that asked, which is the sentence the person came for", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const { dial } = dialler({ exitCode: 255, stderr: `${said}\n` });
+    // Not "root@... did not say what it is over ssh (exit 255): ...": the half before the colon is the reader
+    // talking about itself, which is the class of leak the absent computer's own sentence was cut of.
+    await expect(dial({ ssh: "root@65.21.4.12" })).rejects.toThrow(said);
+    await expect(dial({ ssh: "root@65.21.4.12" })).rejects.toThrow(/^ssh: connect to host/);
+  });
+
+  it("drops ssh's debug chatter, keeping the line a person would have read in their own terminal", async () => {
+    const said = "root@65.21.4.12: Permission denied (publickey).";
+    const { dial } = dialler({ exitCode: 255, stderr: `debug1: Reading configuration data\ndebug2: resolving\n${said}\n` });
+    await expect(dial({ ssh: "root@65.21.4.12" })).rejects.toThrow(said);
+    await expect(dial({ ssh: "root@65.21.4.12" })).rejects.not.toThrow(/debug/);
+  });
+
+  it("says who refused where ssh itself said nothing, rather than throwing an empty sentence", async () => {
+    const { dial } = dialler({ exitCode: 255 });
+    await expect(dial({ ssh: "root@65.21.4.12" })).rejects.toThrow("root@65.21.4.12 refused the login over ssh (exit 255)");
+  });
+
+  it("dials with the key file the add was given, since ssh here runs with BatchMode and would refuse for the publickey", async () => {
+    const { asked, dial } = dialler({ exitCode: 0 });
+    await dial({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" });
+    expect(asked[0]!.reach.keyPath).toBe("/Users/lena/.ssh/hetzner");
+  });
+
+  it("dials the port the login names, so a box on a port of its own is reached at it", async () => {
+    const { asked, dial } = dialler({ exitCode: 0 });
+    await dial({ ssh: "root@65.21.4.12:2222" });
+    expect(asked[0]!.reach.port).toBe(2222);
+  });
+});
+
 describe("the install over ssh marks its steps off the lines the deploy prints", () => {
   /** A daemon asset folder with a stand-in binary per guest target, and a wsp command as npm lays it out. */
   function assets(root: string): { daemonDir: string; cliDir: string } {
@@ -587,6 +645,29 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     writeFileSync(join(cliDir, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "0.0.0" }));
     return { daemonDir, cliDir };
   }
+
+  it("answers the login it used and the key file it was given, so a later dial of that box takes the same road", async () => {
+    const root = tmp("install-road");
+    const machine = {
+      id: "ssh://maya@box:22",
+      kind: "sandbox",
+      putBytes: async () => {},
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      facts: async () => ({ os: "Linux 6.8.0" }),
+      run: async (script: string) => (script.includes("PREFLIGHT_OK") ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" } : { exitCode: 0, stdout: "DAEMON_UP\n", stderr: "" }),
+    };
+    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 } }) };
+    const install = placeInstaller({ backend: backend as never, ...assets(root) });
+    // Without a key: the login alone, in the spelling a person would type back.
+    expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toEqual({ name: "box", ssh: "maya@box" });
+    // With one: the path rides back, since every ssh child here runs with BatchMode and a dial without it would be
+    // refused for the publickey on a box that is switched on.
+    expect(await install({ address: "maya@box", sshPort: 2222, keyPath: "/Users/lena/.ssh/box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toEqual({
+      name: "box",
+      ssh: "maya@box:2222",
+      sshKeyPath: "/Users/lena/.ssh/box",
+    });
+  });
 
   it("reads WSP_READY and PLACE_JOINED off the script's own echo lines, and never waits on a node version", async () => {
     const root = tmp("install-steps");
@@ -618,7 +699,9 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       { address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] },
       (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`),
     );
-    expect(installed).toEqual({ name: "box", hostKey: "ssh-ed25519 SHA256:abc" });
+    // The login it logged in as rides back with the name: it is the road to the box when its agent stops dialling
+    // in, and the join frame the record is made from says nothing about how the box was reached.
+    expect(installed).toEqual({ name: "box", ssh: "maya@box", hostKey: "ssh-ed25519 SHA256:abc" });
     // The deploy printed the two words the parser reads, and nothing of a node version.
     expect(printed).toEqual([WSP_READY_LINE, PLACE_JOINED_LINE]);
     expect(ran.join("\n")).not.toContain("NODE_VERSION");

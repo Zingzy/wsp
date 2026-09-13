@@ -6,7 +6,8 @@
 // has to say before anything else. Every client renders these words, so the
 // sidebar, the pane header and the command line never say two things about
 // one thread.
-import type { SessionStatus, ThreadView } from "./index.js";
+import { askingLine } from "./format.js";
+import type { SessionPermissionEvent, SessionStatus, ThreadView } from "./index.js";
 
 export type ThreadState = SessionStatus | "waiting";
 
@@ -30,4 +31,11 @@ export function threadStateWord(state: ThreadState): string {
 /** The word a thread's row shows, the short road every surface takes. */
 export function threadWordOf(thread: Pick<ThreadView, "status" | "asking">): string {
   return threadStateWord(threadState(thread));
+}
+
+/** What a terminal watching a turn prints the moment that turn stops on a prompt: the thread's own state word, in
+ * the lowercase a line of work reads, and under it the lead the app puts the question by. The word comes off the
+ * table above, so the terminal and the sidebar cannot say two things about one stopped thread. */
+export function needsYouLine(ask: Pick<SessionPermissionEvent, "toolName" | "input" | "detail">): string {
+  return `${threadStateWord("waiting").toLowerCase()}: ${askingLine(ask)}`;
 }

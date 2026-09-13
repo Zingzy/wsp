@@ -154,9 +154,16 @@ export function sizeFromWord(word: string): WorkspaceSize | undefined {
   return cpu > 0 && memMb > 0 ? { cpu, memMb } : undefined;
 }
 
+/** The row a size names among the ones offered, with whatever that row carries beside the shape, or nothing where
+ * the provider offers no such size. The one match, so a picker reading a size's rate and a refusal reading whether
+ * it is offered cannot disagree about which row a size is. */
+export function sizeOffer<T extends WorkspaceSize>(sizes: readonly T[], size: WorkspaceSize): T | undefined {
+  return sizes.find(s => s.cpu === size.cpu && s.memMb === size.memMb);
+}
+
 /** Whether a size is one the provider offers; the golden's own size is taken without this check. */
 export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize): boolean {
-  return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
+  return sizeOffer(sizes, size) !== undefined;
 }
 
 /** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
@@ -1285,11 +1292,32 @@ export function storeUnreadLine(store: string, why: string): string {
   return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
-/** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
- * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
-export function vaultKeptLine(why: string): string {
-  return `the nap kept what was saved before it; ${why}`;
+/** The verdict when a nap could not store a fresh backup, said once with whatever the machine answered on the
+ * line's title: the machine's own words name folders and commands nobody asked for, and a person reading this
+ * needs to know where their files stand. The second clause is what is true of this workspace: an earlier nap's
+ * backup is what a rebuild would restore, older than the files the person left, and a workspace whose naps have
+ * never stored one has nothing off the machine at all. */
+export function vaultKeptLine(w: Pick<WorkspaceView, "vaultedAt">): string {
+  return `the nap saved no backup; ${w.vaultedAt === undefined ? "nothing is saved off the machine" : "what was saved before is kept"}`;
 }
+
+/** The verdict when a guest refused the hostname the fork asked for. Naming a fork is cosmetic, so the create goes
+ * on and the workspace answers to the name the machine booted with; the guest's own refusal rides the title. */
+export const HOSTNAME_KEPT = "hostname not set; the workspace keeps the machine's own name";
+
+/** The same step where the guest took the name, in the one form the creation log's lines are written in: lower
+ * case, no full stop, the workspace and never the machine's own id. */
+export function hostnameSetLine(host: string): string {
+  return `hostname set to ${host}`;
+}
+
+/** The creation log's line for the fork itself, in the words the app says a workspace and a computer in. */
+export function startingLine(name: string, where: string): string {
+  return `starting ${name} on ${where}`;
+}
+
+/** The last line of a create, as the word table ends it. */
+export const CREATE_READY = "ready";
 
 /** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the
  * time of day is noise on a row about thirty characters wide. */
@@ -2404,6 +2432,14 @@ export function undrivenRefusal(name: string, machine: string, action: string): 
   return `${name} is ${machine}, which wsp does not run; it cannot ${action}`;
 }
 
+/** The one sentence a forget on a workspace wsp does not run the machine of is refused with. Such a machine is
+ * never gone, so the sentence about a machine still standing at a provider says two impossible things on it: there
+ * is no provider to pause it at, and the road that takes the record away is the delete, which asks a provider for
+ * nothing either. */
+export function forgetUndrivenRefusal(name: string, machine: string): string {
+  return `${name} runs on ${machine}, which is not at a provider; run wsp delete ${name}`;
+}
+
 /** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
  * road for that verb: the machine is wsp's to move, so the refusal names the provider's limit rather than telling a
  * person their fork is their own computer. Each verb reads its own capability, so what is missing is that verb's
@@ -3001,6 +3037,35 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
 /** The one line that takes wsp off a computer it is typed on. */
 export const PLACE_LEAVE_LINE = "wsp leave";
 
+/** Everything wsp puts on a computer it is installed on, named once. The Add sheet writes its lines and the note
+ * under them from this list and the Remove dialog writes its sentence from the same, so what a person is told
+ * before they press Add is what they are told on the way out. Nothing here is called a shim: a person reads what
+ * the thing does, since nobody outside this repo knows what a shim is.
+ *
+ * The paths behind the words are placeOwnedPaths', which is the list a sweep actually walks. */
+export const PLACE_INSTALL = {
+  /** Where wsp's own files land under that login's home, and what they weigh there. */
+  folder: "~/.wsp",
+  weight: "about 40 MB",
+  /** Whose service manager holds the agent up: that login's own, never the system's, so nothing here needs root. */
+  service: "a user service",
+  /** The three things a sweep takes off again, in the order placeOwnedPaths walks them and in the grammar Remove
+   * says them: the unit that holds the agent up, the files under wsp's own folder, and the command beside them.
+   * The Add lines name the same three in their own grammar, so a fourth thing landing on a box cannot show on one
+   * screen and not the other. */
+  taken: {
+    service: "the agent's service",
+    files: "wsp's own files under that login's home",
+    opener: "the command beside them that opens sign-in pages in your browser",
+  },
+  /** What that command does, as its own sentence for a screen that lists what lands rather than what comes off. */
+  openerLine: "Sign-in pages started on that computer open in your browser here.",
+  /** What Docker on that computer ends up holding, and when. The size is the image's own, where this host has
+   * built one; a host with none yet says the sentence without a figure rather than a figure it is guessing. */
+  imageCopy: (size: string | undefined): string =>
+    `Your image${size === undefined ? "" : ` (${size})`} is copied into Docker there the first time a workspace is created. Remove takes all of it off again.`,
+} as const;
+
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
 export const PLACES_WORDS = {
   section: "Where agents run",
@@ -3038,7 +3103,7 @@ export const PLACES_WORDS = {
     leaveLine: PLACE_LEAVE_LINE,
     /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
      * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. */
-    leaveTakes: "It takes off the agent's service, wsp's own files under that login's home, and the browser shim beside it. Your work folder stays, and so do any copies of your image in Docker there.",
+    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and so do any copies of your image in Docker there.`,
   },
 } as const;
 

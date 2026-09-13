@@ -461,6 +461,7 @@ describe("the list of every place", () => {
     expect(await relayed.request("places.list")).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.remove", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     expect(await relayed.request("places.add", { address: "root@10.0.0.9" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    expect(await relayed.request("places.dial", { placeId: "p_1" })).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
     relayed.close();
     expect(THREAD_OPS).not.toContain("places.list");
     expect(THREAD_OPS).not.toContain("places.remove");
@@ -545,6 +546,198 @@ describe("a workspace on a place", () => {
     expect(away.reach.state).toBe("unreachable");
     expect(away.reason).toBe(absentComputer("old-macbook", null).sentence);
     expect(workspaceState({ phase: away.phase, machineState: away.machineState, reach: away.reach.state })).toBe("unreachable");
+  });
+});
+
+describe("dialling a computer that stopped answering", () => {
+  /** The one road the app's Try now takes, over the person's own socket. */
+  const dialled = async (placeId: string): Promise<Record<string, unknown>> => {
+    const c = await WsClient.connect(srv!.port, { token: "host-token" });
+    const answer = await c.request("places.dial", { placeId });
+    c.close();
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    return answer;
+  };
+
+  it("sends one frame over the link a computer is holding and answers how long it took", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, {
+      code: await code(),
+      answers: c =>
+        c.ws.on("message", raw => {
+          const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
+          if (frame.op === "ping") c.ws.send(JSON.stringify({ id: frame.id, ok: true }));
+        }),
+    });
+    sockets.push(client.ws);
+    const answer = await dialled(placeId);
+    expect(answer["dialled"]).toMatchObject({ answered: true });
+    expect((answer["dialled"] as { roundTripMs: number }).roundTripMs).toBeGreaterThanOrEqual(0);
+    expect(String(answer["line"])).toContain("old-macbook answered");
+    // The answer is written on the row, so a window opened after the press reads what the press got.
+    expect((answer["place"] as PlaceView).dialled).toMatchObject({ answered: true });
+  });
+
+  it("logs in over the road the computer was installed on when it is holding no link, and says the computer is on", async () => {
+    const hostKey = newPlaceKeyPair();
+    const logins: { ssh: string; keyPath?: string }[] = [];
+    let box: WsClient | undefined;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          return { name: "vps", ssh: "root@65.21.4.12" };
+        },
+        dial: async login => {
+          logins.push(login);
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    // The login the install used is kept on the row: the join frame the record was made from says nothing about it.
+    expect(added.place.road?.ssh).toBe("root@65.21.4.12");
+    box?.close();
+    await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
+    const answer = await dialled(added.place.id);
+    expect(logins).toEqual([{ ssh: "root@65.21.4.12" }]);
+    expect(answer["dialled"]).toMatchObject({ answered: true });
+    expect(String(answer["line"])).toContain("the agent on it is not dialling this host");
+    // An ssh login that answered is the box speaking and not the agent, so it does not date the silence.
+    expect((answer["place"] as PlaceView).present).toBe(false);
+  });
+
+  it("dials with the key file the add was given, since every ssh child runs with BatchMode on", async () => {
+    const hostKey = newPlaceKeyPair();
+    const logins: { ssh: string; keyPath?: string }[] = [];
+    let box: WsClient | undefined;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          return { name: "vps", ssh: "root@65.21.4.12", ...(req.keyPath === undefined ? {} : { sshKeyPath: req.keyPath }) };
+        },
+        dial: async login => {
+          logins.push(login);
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now());
+    box?.close();
+    await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
+    await dialled(added.place.id);
+    expect(logins).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
+    // A path on this computer is the host's business: the row a client reads carries the login and the address the
+    // link came from, and never the key file.
+    const road = (await placesOf()).find(p => p.id === added.place.id)!.road!;
+    expect(road.ssh).toBe("root@65.21.4.12");
+    expect(Object.keys(road).sort()).toEqual(["from", "ssh"]);
+  });
+
+  it("hands back ssh's own sentence when the login is refused, and keeps it on the row", async () => {
+    const hostKey = newPlaceKeyPair();
+    let box: WsClient | undefined;
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          return { name: "vps", ssh: "root@65.21.4.12" };
+        },
+        dial: () => Promise.reject(new Error(said)),
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    box?.close();
+    await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
+    const answer = await dialled(added.place.id);
+    expect(answer["dialled"]).toMatchObject({ answered: false, said });
+    expect(String(answer["line"])).toBe(said);
+    // And it stands on the row after the press, which is what the sentence under the pane reads back.
+    expect((await placesOf()).find(p => p.id === added.place.id)!.dialled).toMatchObject({ said });
+  });
+
+  it("drops what the last dial said when the computer dials in again, since a refusal from before it came back is not news", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId, pair } = await join(hostKey, { code: await code() });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    await dialled(placeId);
+    expect((await placesOf()).find(p => p.id === placeId)!.dialled).toBeDefined();
+    const back = await relink(hostKey, placeId, pair);
+    sockets.push(back.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
+    expect((await placesOf()).find(p => p.id === placeId)!.dialled).toBeUndefined();
+  });
+
+  it("bounds the dial itself, so a road that hangs rather than refusing still answers the hand that pressed", async () => {
+    const hostKey = newPlaceKeyPair();
+    let box: WsClient | undefined;
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeDialWaitMs: 60,
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          return { name: "vps", ssh: "root@65.21.4.12" };
+        },
+        // A road that neither answers nor refuses: an ssh child on a network that swallows the packets.
+        dial: () => new Promise<void>(() => {}),
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@65.21.4.12", hostUrls: DOOR }, Date.now());
+    box?.close();
+    await until(async () => (await placesOf()).find(p => p.id === added.place.id)!.present === false);
+    const answer = await dialled(added.place.id);
+    expect(answer["dialled"]).toMatchObject({ answered: false });
+    expect(String((answer["dialled"] as { said: string }).said)).toContain("root@65.21.4.12");
+    expect(String(answer["line"])).toContain("was not answered");
+  });
+
+  it("says there is no road at all on a computer that joined by typing a code and is holding no link", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const answer = await dialled(placeId);
+    expect(answer["dialled"]).toMatchObject({ answered: false });
+    expect(String(answer["line"])).toContain("joined by typing a code");
+  });
+
+  it("keeps the address a computer dialled in from on its row, which is the only one a code join gives", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.road?.from !== undefined);
+    const row = (await placesOf()).find(p => p.id === placeId)!;
+    expect(row.road?.from).toMatch(/\d+\.\d+\.\d+\.\d+|::1|127\.0\.0\.1/);
+    // And what it last said about itself, for the slots that would otherwise stand at pending while it is away,
+    // with the stamp of the report it said it in: the uptime grows while the computer is up, so a row dating it by
+    // the last frame would read an old figure as a fresh one.
+    expect(row.home).toBe("/home/maya");
+    expect(Date.parse(row.reportedAt!)).toBeGreaterThan(0);
   });
 });
 

@@ -93,7 +93,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     createWorkspace: ReturnType<typeof vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>>;
   } = {
     planProject: vi.fn(async () => ({ source: "/Users/dev/proj", repo: true, files: 1, bytes: 20, secrets: [], excluded: [], skipped: [], agents: [] })),
-    importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [] })),
+    importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: "/root/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 20 } })),
     listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
     snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
       const taken = pg(`snap_taken-${projects.length + 1}`, "snap_golden-v12", { workspaceId: id, createdAt: new Date(Date.now() + projects.length).toISOString() });
@@ -217,7 +217,7 @@ describe("machine facts", () => {
     }
   });
 
-  it("a nap whose vault was refused reads as a muted word in the facts with the cap under them; a machine whose vault stands has no such row", async () => {
+  it("a nap that saved no backup reads as a muted word in the facts with one verdict under them; a machine whose backup stands has no such row", async () => {
     const w = { ...view("ws_a", "api", "napping"), vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" };
     const api = await mount([w]);
     expect(fact("vault")).toBe("no backup since 2026-09-08");
@@ -226,7 +226,14 @@ describe("machine facts", () => {
     expect(cell.className).toContain("font-mono");
     expect(cell.querySelector("span")!.className).toContain("text-muted-foreground");
     expect(document.querySelector('[data-slot="badge"]')).toBeNull();
-    expect(fact("vault-refused")).toBe("the export was 646 MB, over the 200 MB cap");
+    // The verdict, once, in words about this workspace; what the machine answered rides the line's title.
+    expect(fact("vault-refused")).toBe("the nap saved no backup; what was saved before is kept");
+    expect(document.querySelector('[data-k="vault-refused"]')!.getAttribute("title")).toBe("the export was 646 MB, over the 200 MB cap");
+    expect(document.body.textContent).not.toContain("the export was 646 MB");
+    // A workspace whose naps never stored one has nothing kept anywhere, and the row beside it says so with no day.
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: undefined } }));
+    await waitFor(() => expect(fact("vault")).toBe("no backup"));
+    expect(fact("vault-refused")).toBe("the nap saved no backup; nothing is saved off the machine");
     // A nap that stores one clears both: the row goes, and nothing about backups is said.
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
     await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());
@@ -1004,6 +1011,133 @@ describe("where a workspace runs", () => {
     expect(fact("reason")).toBe(sentence);
     expect(document.body.textContent).not.toContain(placeMachineId("p_1"));
     expect(document.body.textContent).not.toContain("no daemon on it");
+  });
+
+  /** A workspace that is a computer somebody joined, and the row this host holds for that computer, as they stand
+   * once it has stopped answering: the row keeps what the computer last said about itself. */
+  const awayBox = (over: Partial<PlaceView> = {}): { place: PlaceView; workspace: WorkspaceView } => ({
+    place: {
+      ...HETZNER,
+      name: "vps",
+      present: false,
+      lastSeenAt: new Date(Date.now() - 32 * 60_000).toISOString(),
+      os: "Debian GNU/Linux 12",
+      home: "/root",
+      uptimeMs: 4 * 3_600_000 + 12 * 60_000,
+      // The report was read three hours before the link went, which is the span the uptime is dated by.
+      reportedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      road: { ssh: "root@65.21.4.12" },
+      workspaceId: "ws_p",
+      ...over,
+    },
+    workspace: { ...view("ws_p", "vps"), kind: "place", machineId: placeMachineId("p_1"), golden: "" },
+  });
+
+  const mountAway = async (over: Partial<PlaceView> = {}, api: Partial<Api> = {}): Promise<Api> => {
+    const { place, workspace } = awayBox(over);
+    useStore.setState({ places: [HERE_PLACE, place, ASCII] });
+    const made = fakeApi([workspace]);
+    // The status a host pushes for a machine on a computer it can ask nothing of: no facts on it at all.
+    made.watchStatuses = vi.fn(async () => [{ ...status(workspace), kind: "place" as const, size: { cpu: 4, memMb: 8192 }, rateUsdPerHour: 0, reach: { state: "unreachable" as const } }]);
+    Object.assign(made, api);
+    useStore.getState().bind(made);
+    render(<MachineSurface workspaceId="ws_p" />);
+    await waitFor(() => expect(fact("state")).toBe("Unreachable"));
+    return made;
+  };
+
+  it("reads the OS, uptime and folder the computer last reported, marked as last known, never pending", async () => {
+    await mountAway();
+    // The facts are on the row this host already holds; a pane that said pending was asking the machine while the
+    // row beside it in Settings was showing the answer.
+    expect(fact("os")).toBe("Debian GNU/Linux 12 · last seen 32 min ago");
+    // The mark rides one row: a folder does not go stale, and the OS row above it already dates the lot.
+    expect(fact("folder")).toBe("/root");
+    // The uptime is the one figure that grows while the computer is up, so it cannot stand unmarked; it is dated
+    // by the report it was read in and not by the last frame this host saw, which can be hours later.
+    expect(fact("uptime")).toBe("4h 12m · reported 3 h ago");
+    expect([fact("os"), fact("uptime"), fact("folder")]).not.toContain("pending");
+  });
+
+  it("keeps the Address row standing whether or not the computer is answering, so nothing under it moves", async () => {
+    const { place, workspace } = awayBox({ present: true, lastSeenAt: new Date().toISOString() });
+    useStore.setState({ places: [HERE_PLACE, place, ASCII] });
+    const api = fakeApi([workspace]);
+    api.watchStatuses = vi.fn(async () => [
+      { ...status(workspace), kind: "place" as const, size: { cpu: 4, memMb: 8192 }, rateUsdPerHour: 0, facts: { os: "Debian GNU/Linux 12", uptimeMs: 60_000, folder: "/root" } },
+    ]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_p" />);
+    await waitFor(() => expect(fact("os")).toBe("Debian GNU/Linux 12"));
+    // The row a computer that answers 3 s ago carries in the spec's own detail: the day it goes quiet, the three
+    // rows under it must not drop a row's height.
+    expect(fact("address")).toBe("root@65.21.4.12 · ssh");
+    const rows = () => [...document.querySelectorAll("[data-k='state'],[data-k='where'],[data-k='size'],[data-k='cost'],[data-k='address'],[data-k='os'],[data-k='uptime'],[data-k='folder']")].map(e => e.getAttribute("data-k"));
+    expect(rows()).toEqual(["state", "where", "size", "cost", "address", "os", "uptime", "folder"]);
+    cleanup();
+    await mountAway();
+    expect(rows()).toEqual(["state", "where", "size", "cost", "address", "os", "uptime", "folder"]);
+  });
+
+  it("dates the uptime by the silence on a row written before the report carried a stamp of its own", async () => {
+    await mountAway({ reportedAt: undefined });
+    expect(fact("uptime")).toBe("4h 12m · last seen 32 min ago");
+  });
+
+  it("names the login the app expects the computer at, and says when it last answered beside it", async () => {
+    await mountAway();
+    expect(fact("address")).toBe("root@65.21.4.12 · ssh");
+    // The client here carries no dial road, so the reason the button is held stands in the same slot after it.
+    expect(fact("absent-road")).toBe("wsp logs in to vps at root@65.21.4.12 over ssh; it last answered 32 min ago. This wsp cannot dial a computer from here.");
+  });
+
+  it("names the address a computer that joined with a code dialled in from, which is the only one there is", async () => {
+    await mountAway({ road: { from: "192.168.1.34" } });
+    expect(fact("address")).toBe("192.168.1.34 · dials in");
+    expect(fact("absent-road")).toContain("wsp waits for vps to dial in, last from 192.168.1.34");
+  });
+
+  it("carries the last refusal, so a person reads what went wrong before they press anything", async () => {
+    await mountAway({ dialled: { at: new Date().toISOString(), answered: false, said: "ssh: Connection refused" } });
+    expect(fact("absent-road")).toContain("The last try said: ssh: Connection refused");
+  });
+
+  it("dials once when Try now is pressed and reports the answer in the slot the sentence was in", async () => {
+    const { place } = awayBox();
+    const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
+    const dialPlace = vi.fn(async (placeId: string) => ({ dialled: { at: new Date().toISOString(), answered: true, roundTripMs: 412 }, line, place: { ...place, id: placeId } }));
+    await mountAway({}, { dialPlace } as Partial<Api>);
+    fireEvent.click(screen.getByRole("button", { name: "Try now" }));
+    await waitFor(() => expect(fact("absent-road")).toBe(line));
+    expect(dialPlace).toHaveBeenCalledTimes(1);
+    expect(dialPlace).toHaveBeenCalledWith("p_1");
+  });
+
+  it("holds Try now on a wsp whose own client cannot dial, and writes why in the slot rather than on a tooltip", async () => {
+    await mountAway();
+    const button = screen.getByRole("button", { name: "Try now" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    // No tooltip carries a reason: it is read before any pointer touches the button.
+    expect(button.getAttribute("title")).toBeNull();
+    // A whole sentence, since it stands after one: a clause opening in lower case after a full stop reads as a
+    // line that broke.
+    expect(fact("dial-held")).toBe(" This wsp cannot dial a computer from here.");
+    expect(fact("absent-road")).toContain("wsp logs in to vps at root@65.21.4.12 over ssh");
+  });
+
+  it("says nothing about a road on a computer that is answering", async () => {
+    const { place, workspace } = awayBox({ present: true, lastSeenAt: new Date().toISOString() });
+    useStore.setState({ places: [HERE_PLACE, place, ASCII] });
+    const api = fakeApi([workspace]);
+    api.watchStatuses = vi.fn(async () => [{ ...status(workspace), kind: "place" as const, size: { cpu: 4, memMb: 8192 }, rateUsdPerHour: 0, facts: { os: "Debian GNU/Linux 12", uptimeMs: 60_000, folder: "/root" } }]);
+    useStore.getState().bind(api);
+    render(<MachineSurface workspaceId="ws_p" />);
+    await waitFor(() => expect(fact("os")).toBe("Debian GNU/Linux 12"));
+    // The machine is answering, so the rows are the machine's own readings and nothing is marked as last known,
+    // and there is nothing to say about reaching a computer that is already there.
+    expect(fact("os")).not.toContain("last seen");
+    expect(document.querySelector('[data-k="absent-road"]')).toBeNull();
+    expect(screen.queryByRole("button", { name: "Try now" })).toBeNull();
   });
 
   it("falls back to the row's own short word on a host that lists no computers", async () => {

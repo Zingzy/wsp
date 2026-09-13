@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the new-workspace dialog in either theme
-// (?theme=light) with two rows to pick from, the provider's checked so its two
-// sizes are drawn, so a test can lay out and photograph the Where control, its
-// caption and the size rows. With ?refusal=<sentence> the keycap is held and
+// (?theme=light) with two rows to pick from, the provider's checked so its
+// three sizes are drawn, so a test can lay out and photograph the Where
+// control, its caption and the size rows. With ?refusal=<sentence> the keycap is held and
 // that sentence is its tooltip, which is the dialog while the image is still
 // building; with ?places=none the dialog has nowhere to put a workspace.
 import { createRoot } from "react-dom/client";
@@ -17,6 +17,7 @@ document.documentElement.classList.toggle("dark", params.get("theme") !== "light
 const SIZES = [
   { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
   { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
+  { cpu: 4, memMb: 16_384, rateUsdPerHour: 0.29 },
 ];
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: false, engine: "none", present: true };

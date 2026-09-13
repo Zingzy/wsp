@@ -27,7 +27,7 @@ import type { HostHandle } from "../src/server.js";
 import { CLI_VERBS, hasTool } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { EXPORT_SOURCE, PAGE, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
+import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 
@@ -171,6 +171,12 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("thread read", "thread", "read", opened.threadId, "--last")).toEqual({ threadId: opened.threadId, messages: [{ who: "agent", at: expect.any(Number), text: "re: again" }] });
     await last("thread read", "thread", "read", opened.threadId);
     await last("stop", "stop", opened.threadId);
+    // A thread stopped on a permission question, answered from here the way the app's own buttons answer it.
+    for (const [verb, task] of [["thread allow", "allow"], ["thread deny", "deny"]] as const) {
+      const asking = (await last("run", "run", "alpha", "--detach", ASKS)) as { threadId: string };
+      await vi.waitFor(async () => expect((await rt.sessions.list()).find(v => v.threadId === asking.threadId)!.asking).toBeDefined());
+      expect(await last(verb, "thread", task, asking.threadId)).toEqual({ threadId: asking.threadId, askId: SCRIPTED_ASK.askId, optionId: expect.any(String) });
+    }
     await last("thread rename", "thread", "rename", opened.threadId, "the name he typed");
     // A launch that never started its agent leaves a row with no turn on it, which is the one a forget takes.
     const dead = await run("run", "alpha", "--agent", "codex", "never gets going", "--json");
@@ -245,6 +251,12 @@ describe("the agent contract on the command line and the tool door", () => {
     const dangling = await run("fork", "alpha", "--model", "claude-sonnet-5", "--json");
     expect(dangling.code).toBe(3);
     expect(failure(dangling.io)).toEqual({ error: '--model says how a thread opens, and this line opens none. Add --send "<task>", or drop --model.', class: "usage", exit: 3 });
+
+    // A name this host holds nothing by is a value nothing takes, however far down the line it was read.
+    const missing = await run("pause", "nope", "--json");
+    expect(missing.code).toBe(EXIT_CODES.usage);
+    expect(missing.io.lines).toEqual([]);
+    expect(failure(missing.io)).toEqual({ error: "no workspace nope", class: "usage", exit: 3 });
   });
 
   it("an auth refusal exits 2: the host refusing the token, or no token file to read", async () => {
@@ -297,12 +309,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(failure(refused.io)).toEqual({ error: "no such op", class: "provider", exit: 1 });
   });
 
-  it("a provider failure exits 1: the host refusing the name, the machine cap, no host serving, and a turn that failed", async () => {
-    const missing = await run("pause", "nope", "--json");
-    expect(missing.code).toBe(EXIT_CODES.provider);
-    expect(missing.io.lines).toEqual([]);
-    expect(failure(missing.io)).toEqual({ error: "no workspace nope", class: "provider", exit: 1 });
-
+  it("a provider failure exits 1: the machine cap, no host serving, and a turn that failed", async () => {
     await run("new", "alpha");
     const died = await run("run", "alpha", "die");
     expect(died.code).toBe(1);
@@ -348,7 +355,7 @@ describe("the agent contract on the command line and the tool door", () => {
         const r = await client.callTool({ name, arguments: args });
         return { text: (r.content as { text?: string }[]).map(p => p.text ?? "").join(""), structured: r.structuredContent, isError: r.isError === true };
       };
-      expect(await call("pause", { workspace: "nope" })).toEqual({ text: "no workspace nope", structured: { error: "no workspace nope", class: "provider", exit: 1 }, isError: true });
+      expect(await call("pause", { workspace: "nope" })).toEqual({ text: "no workspace nope", structured: { error: "no workspace nope", class: "usage", exit: 3 }, isError: true });
       await call("new", { name: "alpha" });
       const relative = await call("exec", { workspace: "alpha", argv: ["true"], cwd: "packages" });
       const cwdRefusal = '--cwd is a path on the machine, absolute, and got "packages". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.';

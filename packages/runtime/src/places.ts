@@ -28,6 +28,8 @@ import {
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeStillInstalledLine,
+  placeDialLine,
+  placeNoDialLine,
   BackendFacts,
   type DaemonEvent,
   type PlaceAddStep,
@@ -37,7 +39,10 @@ import {
   type PlaceJoinReply,
   type PlaceJoinRequest,
   type PlaceEvent,
+  type PlaceDial,
+  type PlaceDialled,
   type PlaceReport,
+  type PlaceRoad,
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
@@ -77,6 +82,22 @@ export interface PlaceRecord {
    * fork standing on this place can be held at host start, before the computer has dialled in: the capabilities,
    * the sizes and the budgets a road reads are facts about that computer, not about this moment's socket. */
   backendFacts?: BackendFacts;
+  /** Where this host expects that computer: the ssh login it was installed over, and the address its last link
+   * dialled in from. Written at the install and at every attach, so a row can say which machine it means while
+   * the computer is saying nothing. */
+  road?: PlaceRecordRoad;
+  /** What the last dial of it came to. Kept so the answer outlives the window that asked for it. */
+  dialled?: PlaceDialled;
+  /** When the report on this record was taken. Not lastSeenAt: that moves every minute while the link is held,
+   * and the uptime in the report grows with the computer, so a row dating one by the other reads an hours-old
+   * figure as a minutes-old one. */
+  reportedAt?: string;
+}
+
+/** The road as the record keeps it: what a client is told, and the key file the person named at the add, which is
+ * a path on this computer and stays here. */
+export interface PlaceRecordRoad extends PlaceRoad {
+  keyPath?: string;
 }
 
 const isPlaceRecord = (v: unknown): v is PlaceRecord => {
@@ -112,7 +133,16 @@ export interface PlaceWiring {
   /** How the agent is put on a computer over ssh; absent on a runtime served without the road that installs it,
    * where the printed join line is the only way in. */
   install?: PlaceInstaller;
+  /** One login over the road a computer was added on, to tell a computer that is off from an agent that is not
+   * calling home. Nothing is installed and nothing is left running: it answers or it throws the road's own line.
+   * Absent on a runtime served without the ssh road, where a computer that is not linked can only be waited for. */
+  dial?: PlaceDialler;
 }
+
+/** One dial of a computer over the login this host holds for it, with the key file the add was given where there
+ * was one. Throws with the road's own sentence (ssh's line on the ssh road), which is what a person reads in place
+ * of a wsp-shaped refusal. */
+export type PlaceDialler = (login: { ssh: string; keyPath?: string }) => Promise<void>;
 
 /** What one install is told: where to log in, what to call the computer, the single-use code it spends on this
  * host, and the addresses that computer is to dial it at, in the order its link tries them. The addresses are the
@@ -131,6 +161,13 @@ export interface PlaceInstallRequest {
 export interface PlaceInstalled {
   name: string;
   hostKey?: string;
+  /** The login it logged in as, in the spelling a person would type back; kept on the record as that computer's
+   * address and used by every later dial of it. */
+  ssh?: string;
+  /** The key file the person named at the add, where they named one. Every ssh child runs with BatchMode on, so a
+   * later dial that did not carry it would be refused for the publickey on a computer that is on, which is the
+   * confusion this road exists to end. */
+  sshKeyPath?: string;
 }
 
 /** How far one install has got; the words for each step are the protocol's. */
@@ -170,6 +207,9 @@ export interface PlaceDoorOptions {
   onStage?: (event: PlaceStageEvent) => void;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
+  /** How long one dial of a computer gets before it is an answer of its own. The bound is the runtime's and not
+   * the backend's: a road that hangs rather than refusing must still answer the person who pressed the button. */
+  dialWaitMs?: number;
   /** How long between the writes of a linked place's last seen, so a link held for a day is not a write a second. */
   seenEveryMs?: number;
   now?: () => number;
@@ -222,6 +262,10 @@ export interface PlaceDoor {
   /** Puts the agent on a computer over ssh and waits for it to dial back as a place. Refused in one sentence on a
    * host that wired no installer. */
   add(req: { addId?: string; address: string; name?: string; sshPort?: number; keyPath?: string; hostUrls: readonly string[] }, now: number): Promise<PlaceAdded>;
+  /** Dials one computer once: a frame over the link it is holding, or one login over the road it was added on when
+   * it holds none. Answers what came back and writes it on the record, so a window opened later reads the same
+   * answer. Nothing is installed and nothing is left running either way. */
+  dial(placeId: string, now: number): Promise<PlaceDial>;
   /** The port on this computer's loopback that carries to the daemon on a linked place, opened at the first ask
    * and held with the link. Throws with the place's name when it is not connected or has said no port. */
   road(placeId: string): Promise<number>;
@@ -381,6 +425,10 @@ const LINK_FRAME_MS = 300_000;
  * a person is watching both, and a place that does not answer in time shows what this host already knows. */
 const BACKEND_FACTS_MS = 10_000;
 const CAPACITY_MS = 5_000;
+/** How long one dial of a computer gets before it is an answer of its own: a person is watching the button they
+ * pressed, and a road that is going to answer answers in well under this. */
+const DIAL_MS = 20_000;
+
 /** How long a computer has to dial back after its own join wrote its place file. A join that landed and a link
  * that never arrives is a network between the two, which is what the sentence says. */
 const JOIN_WAIT_MS = 90_000;
@@ -389,6 +437,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
   const seenEveryMs = opts.seenEveryMs ?? SEEN_EVERY_MS;
+  const dialWaitMs = opts.dialWaitMs ?? DIAL_MS;
   const live = new Map<string, Live>();
   /** The records as they stand, by id: `load` fills it and every write below keeps it, so the one road that must
    * answer without waiting (which backend a fork's record stands on) can. */
@@ -560,6 +609,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     // of its own; a box whose kernel that check turns down runs the person's agents as its own one workspace.
     takesForks: record.report.runsWorkspaces === true,
     ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+    // Field by field rather than spread: the key file on the record is a path on this computer and no client's
+    // business, and a road copied whole would hand it over.
+    ...(record.road === undefined ? {} : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}) } }),
+    // The folder a turn there starts in and how long it had been up: read off the same report the system name is
+    // read from, so a computer that stopped answering shows what it last was rather than nothing at all.
+    ...(record.report.login["HOME"] !== undefined ? { home: record.report.login["HOME"] } : {}),
+    ...(record.report.uptimeMs !== undefined ? { uptimeMs: record.report.uptimeMs } : {}),
+    ...(record.reportedAt !== undefined ? { reportedAt: record.reportedAt } : {}),
+    ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
   });
 
   const door: PlaceDoor = {
@@ -573,7 +631,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // computer's link would replace the newer's on every dial.
       const id = `p_${randomBytes(8).toString("hex")}`;
       const stamp = new Date(at).toISOString();
-      const record: PlaceRecord = { id, name: taken.name, publicKey: req.publicKey, joinedAt: stamp, lastSeenAt: stamp, report: taken };
+      const record: PlaceRecord = { id, name: taken.name, publicKey: req.publicKey, joinedAt: stamp, lastSeenAt: stamp, reportedAt: stamp, report: taken };
       await keep(record);
       // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
       await markDefault(id);
@@ -629,7 +687,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         socket.close(1000, "this host no longer holds that place");
         return;
       }
-      const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString() };
+      // Where the link dialled in from is the only address this host has for a computer that joined with a code,
+      // so it is kept rather than only announced on the event. What the last dial of this computer said goes with
+      // the link that arrived: the computer is here now, and a refusal from before it came back is not news.
+      const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
       await keep(moved);
       // What a turn there runs under is this link's report and not the join's: a person installs a tool on their own
       // computer and the next link is where wsp learns it.
@@ -827,8 +888,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
             woken(id);
           };
         });
-        const held = await recordOf(placeId);
-        if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
+        const found = await recordOf(placeId);
+        if (found === undefined) throw new Error(placeNoLinkLine(installed.name));
+        // The login the install used is the road back to this computer when its agent stops dialling, so the record
+        // keeps it: the join frame the record was made from says nothing about how the computer was reached.
+        const held: PlaceRecord =
+          installed.ssh === undefined ? found : { ...found, road: { ...found.road, ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) } };
+        if (installed.ssh !== undefined) await keep(held);
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
         stage("join", "done", `workspaces ${held.report.runsWorkspaces ? "yes" : "no"} · engine ${held.report.engine}`);
@@ -841,6 +907,41 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       } finally {
         awaiting.delete(code);
       }
+    },
+
+    async dial(placeId, at) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, [...kept.values()].map(r => r.name)));
+      const stamp = new Date(at).toISOString();
+      const linked = live.get(placeId)?.reach;
+      const started = clockNow();
+      const took = (): number => Math.max(0, Math.round(clockNow() - started));
+      let dialled: PlaceDialled;
+      if (linked !== undefined) {
+        // The link's own heartbeat op: the cheapest frame that proves the computer at the other end is still
+        // answering, rather than that this host is still holding a socket to it.
+        try {
+          await bounded(linked.request("ping"), dialWaitMs, `ping on ${held.name}`);
+          dialled = { at: stamp, answered: true, roundTripMs: took() };
+        } catch (e) {
+          dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
+        }
+      } else if (held.road?.ssh !== undefined && wiring.dial !== undefined) {
+        const login = { ssh: held.road.ssh, ...(held.road.keyPath !== undefined ? { keyPath: held.road.keyPath } : {}) };
+        try {
+          await bounded(wiring.dial(login), dialWaitMs, `ssh ${held.road.ssh}`);
+          dialled = { at: stamp, answered: true, roundTripMs: took() };
+        } catch (e) {
+          dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
+        }
+      } else {
+        dialled = { at: stamp, answered: false, said: placeNoDialLine(held.name) };
+      }
+      // A frame the computer itself answered is that computer heard from, so the silence is dated from it; an ssh
+      // login that answered is the box speaking and not the agent, and it does not move that date.
+      const moved: PlaceRecord = { ...held, dialled, ...(dialled.answered && linked !== undefined ? { lastSeenAt: stamp } : {}) };
+      await keep(moved);
+      return { dialled, line: placeDialLine({ name: held.name, road: held.road, linked: linked !== undefined, dialled }), place: viewOf(moved, await defaultId()) };
     },
 
     async road(placeId) {

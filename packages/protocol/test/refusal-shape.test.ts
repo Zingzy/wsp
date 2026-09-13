@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { actionRefusal, agentsKindRefusal, goneRefusal, imageMoveRefusal, NO_REBUILD_NEEDED } from "../src/index.js";
+import { actionRefusal, agentsKindRefusal, goneRefusal, imageMoveRefusal, NO_REBUILD_NEEDED, notAnsweringYet } from "../src/index.js";
 import { ROOT, sourceFiles } from "./source-files.js";
 
 interface Call {
@@ -69,6 +69,8 @@ function refusalCalls(): Call[] {
  * semicolon rather than arriving as two arguments. */
 const HELD_REFUSALS = (): ReadonlyArray<string | null> => [
   NO_REBUILD_NEEDED,
+  notAnsweringYet("rebuild"),
+  notAnsweringYet("forget"),
   goneRefusal("wake"),
   actionRefusal("paused", "import"),
   actionRefusal("waking", "import"),

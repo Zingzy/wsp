@@ -113,7 +113,7 @@ describe("project.import on a workspace", () => {
     const bundler = fakeBundler();
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], bundler });
     expect(bundler.calls).toEqual(["plan", "pack .env"]);
-    expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [], agents: [] });
+    expect(result).toEqual({ dest: "/root/work/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [], agents: [], project: { name: "proj", dest: "/root/work/proj", importedAt: expect.any(String), size: 4000 } });
     const stages = imports(events);
     expect(stages.map(e => e.stage)).toEqual(["planned", "consented", "packing", "uploading", "uploading", "landing", "done"]);
     expect(stages[0]!.message).toBe("6 files, 4 KB and the repository; 3 secret-shaped files; 2 caches left behind.");
@@ -169,7 +169,7 @@ describe("project.import on a workspace", () => {
     const bundler = fakeBundler([GIT_CONFIG]);
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: [".env"], rewrite: [".git/config"], bundler });
     expect(bundler.calls).toEqual(["plan", "pack .env rewrite .git/config"]);
-    expect(result).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [".git/config"], agents: [] });
+    expect(result).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: ["config/secrets.json", "keys/id_ed25519"], rewritten: [".git/config"], agents: [], project: { name: "proj", dest: "/root/proj", importedAt: expect.any(String), size: 4000 } });
     const stages = imports(events);
     expect(stages[0]!.message).toBe("6 files, 4 KB and the repository; 4 secret-shaped files; 2 caches left behind.");
     expect(stages[1]!.message).toBe("Carrying .env; rewriting .git/config to https://github.com/example/proj.git; cut config/secrets.json, keys/id_ed25519.");
@@ -392,7 +392,7 @@ describe("project.import on a workspace", () => {
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const imported = await wsRequest(srv.port, "t", { op: "project.import", workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: ["keys/id_ed25519"], rewrite: [".git/config"], agents: ["pi"] });
     expect(imported["ok"]).toBe(true);
-    expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"], rewritten: [".git/config"], agents: [{ agent: "pi", files: 1, bytes: Buffer.byteLength("pi at /root/proj\n"), outcome: "moved" }] });
+    expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"], rewritten: [".git/config"], agents: [{ agent: "pi", files: 1, bytes: Buffer.byteLength("pi at /root/proj\n"), outcome: "moved" }], project: { name: "proj", dest: "/root/proj", importedAt: expect.any(String), size: 4000 } });
     expect(sources).toEqual([SOURCE, SOURCE]);
     await srv.close();
     srv = await serveRuntime(rt, { port: 0, authToken: "t" });

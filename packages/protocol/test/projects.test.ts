@@ -2,7 +2,7 @@
 // The projects a workspace holds and the one rule for which of them a thread
 // starts in: the composer, the command line and the runtime all read it here.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, dropTileLine, folderName, hiddenFolder, isMacMachine, goldenForkName, homeShortened, lastTargetLine, noProjectLine, noWorkspaceForFolderLine, projectAt, projectCountCell, projectFor, ProjectGolden, projectsInPlace, REGISTERING_LINE, registeredLine, registerRequest, registerTakesNoConsentLine, THIS_COMPUTER, threadOpenedLine, workspaceForFolder, workspaceProjects, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { DEFAULT_PREFERENCES, dropTileLine, folderName, hiddenFolder, isMacMachine, goldenForkName, homeShortened, lastTargetLine, noProjectLine, noWorkspaceForFolderLine, projectAt, projectCountCell, projectFor, ProjectGolden, projectsInPlace, REGISTERING_LINE, registeredLine, registerRequest, registerTakesNoConsentLine, THIS_COMPUTER, threadOpenedLine, withProject, workspaceForFolder, workspaceProjects, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -24,6 +24,13 @@ describe("the projects on a workspace", () => {
   it("a view without the list reads as none, so no client guards an absent field", () => {
     expect(workspaceProjects({})).toEqual([]);
     expect(workspaceProjects({ ...view, projects: [spoo] })).toEqual([spoo]);
+  });
+
+  it("a landed import goes on the end, and a folder imported again is the one project at what the last import made of it", () => {
+    const again: WorkspaceProject = { ...spoo, importedAt: "2026-09-12T10:00:00Z", size: 2048 };
+    expect(withProject([], spoo)).toEqual([spoo]);
+    expect(withProject([spoo], wsp)).toEqual([spoo, wsp]);
+    expect(withProject([spoo, wsp], again)).toEqual([wsp, again]);
   });
 
   it("the default project: the one named, else the last used on the workspace, else the only one, else none", () => {
