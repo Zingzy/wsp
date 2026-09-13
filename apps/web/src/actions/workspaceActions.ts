@@ -2,7 +2,7 @@
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
 import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
-import { NO_REBUILD_NEEDED, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type LookPart, type MachineState, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
@@ -11,6 +11,7 @@ import {
   CLIENT_CANNOT_REBUILD,
   CLIENT_CANNOT_RENAME_WORKSPACE,
   FORGET_HINT,
+  goneRoadRefusal,
   NEW_THREAD_WAITS,
   NO_WORKSPACE_FORK,
   PROJECTS_WAIT,
@@ -109,7 +110,7 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     rowLabel: target => rowVerb("Rebuild", target.displayName),
     buttonWord: () => "Rebuild",
     hint: target => target.wakeRefused ?? target.reason ?? REBUILD_HINT,
-    refusal: (target, verbs) => (!dead(target) ? NO_REBUILD_NEEDED : verbs.rebuild === undefined ? CLIENT_CANNOT_REBUILD : null),
+    refusal: (target, verbs) => (!dead(target) ? goneRoadRefusal(stateOf(target), "rebuild") : verbs.rebuild === undefined ? CLIENT_CANNOT_REBUILD : null),
     run: (target, verbs) => verbs.rebuild?.(target.id),
   },
   {

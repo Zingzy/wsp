@@ -586,9 +586,11 @@ describe("agents spawning agents", () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 1 } });
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: ws.id, rootThreadId: "t_root" };
+    // The first stage after the record enters the live map: the create names the machine before it names the
+    // workspace on it, so a fork still booting is already one this guard counts.
     const booting = new Promise<void>(done => {
       const off = rt.events.on("*", e => {
-        if (e.type === "workspace.creating" && (e as { name?: string }).name === "b1" && (e as { stage?: string }).stage === "machine-booting") {
+        if (e.type === "workspace.creating" && (e as { name?: string }).name === "b1" && (e as { stage?: string }).stage === "hostname-set") {
           off();
           done();
         }

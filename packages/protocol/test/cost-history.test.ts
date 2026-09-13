@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { appendCostPoint, COST_HISTORY_CAP, type WorkspaceCostEvent } from "../src/index.js";
+import { accruedAt, appendCostPoint, COST_HISTORY_CAP, monthStart, rateAt, spentSince, type WorkspaceCostEvent } from "../src/index.js";
 
 const tick = (minute: number, rate: number, accruedUsd: number): WorkspaceCostEvent => ({
   type: "workspace.cost",
@@ -36,5 +36,52 @@ describe("appendCostPoint", () => {
     for (let i = 0; i < COST_HISTORY_CAP + 10; i++) points = appendCostPoint(points, tick(i, i % 2 === 0 ? 0.11 : 0, i));
     expect(points).toHaveLength(COST_HISTORY_CAP);
     expect(points.at(-1)!.awakeMs).toBe((COST_HISTORY_CAP + 9) * 60_000);
+  });
+});
+
+describe("what a series says at one instant", () => {
+  const at = (minute: number): number => Date.UTC(2026, 8, 5, 9, minute);
+
+  it("reads the total between two ticks off the line between them, and holds it past the newest", () => {
+    const points = [tick(0, 0.12, 0), tick(30, 0.12, 0.06)];
+    expect(accruedAt(points, at(0))).toBe(0);
+    expect(accruedAt(points, at(15))).toBeCloseTo(0.03, 10);
+    expect(accruedAt(points, at(30))).toBe(0.06);
+    expect(accruedAt(points, at(90))).toBe(0.06);
+  });
+
+  it("says nothing at all before the first tick, which is a total nothing here knows", () => {
+    expect(accruedAt([tick(10, 0.12, 0)], at(9))).toBeNull();
+    expect(accruedAt([], at(9))).toBeNull();
+    expect(rateAt([tick(10, 0.12, 0)], at(9))).toBeNull();
+  });
+
+  it("holds a tick's rate until the next one", () => {
+    const points = [tick(0, 0.12, 0), tick(30, 0, 0.06)];
+    expect(rateAt(points, at(29))).toBe(0.12);
+    expect(rateAt(points, at(31))).toBe(0);
+  });
+});
+
+describe("what a month took", () => {
+  it("begins a month at midnight on its first day, in the zone the computer is set to", () => {
+    const start = monthStart(Date.parse("2026-09-13T04:20:00.000Z"));
+    const d = new Date(start);
+    expect([d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds()]).toEqual([1, 0, 0, 0]);
+    expect(d.getMonth()).toBe(new Date(Date.parse("2026-09-13T04:20:00.000Z")).getMonth());
+    expect(monthStart(start)).toBe(start);
+  });
+
+  it("counts what a series took since an instant, taking the total at that instant off the newest", () => {
+    const points = [tick(0, 0.12, 0.5), tick(60, 0.12, 0.62)];
+    expect(spentSince(points, Date.UTC(2026, 8, 5, 9, 0))).toBeCloseTo(0.12, 10);
+    expect(spentSince(points, Date.UTC(2026, 8, 5, 9, 30))).toBeCloseTo(0.06, 10);
+  });
+
+  it("counts the whole of a series that began after the instant, and nothing from one that ended before it", () => {
+    const points = [tick(0, 0.12, 0), tick(60, 0.12, 0.12)];
+    expect(spentSince(points, Date.UTC(2026, 8, 1))).toBeCloseTo(0.12, 10);
+    expect(spentSince(points, Date.UTC(2026, 9, 1))).toBe(0);
+    expect(spentSince([], Date.UTC(2026, 8, 1))).toBe(0);
   });
 });

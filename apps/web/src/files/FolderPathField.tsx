@@ -4,7 +4,8 @@
 // this Mac. Enter reads the folder where the caller reads folders, and one
 // that is not there is refused in the slot under the field, which stands at
 // its two lines whether or not it holds a sentence, so nothing below it moves
-// when a refusal arrives. A system chooser's result takes the same road as a
+// when a refusal arrives. The same slot holds the reason the keycap beside the
+// field waits, in the muted ink, until a refusal takes it. A system chooser's result takes the same road as a
 // typed path, so a folder the computer holding it will not read is refused in
 // the one place with the one set of words, however it was named.
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
@@ -49,6 +50,10 @@ export const folderGhost = (home: string): string => `${home.endsWith("/") ? hom
 
 export interface FolderPick {
   readonly path: string;
+  /** The last path a read was started for, which is the folder everything beside the field is about; "" before the
+   * first one. A caller showing the folder somewhere else follows this rather than the text, so a browser and a
+   * summary are never about a path the field is still halfway through. */
+  readonly applied: string;
   readonly refusal: FolderRefusal | null;
   readonly reading: boolean;
   /** What is in the field; "" both clears it and drops the refusal, which is how a picker reopens empty. */
@@ -63,6 +68,7 @@ export interface FolderPick {
  * so a slow read cannot write its answer over a path typed after it. */
 export function useFolderPick(read: (path: string) => Promise<FolderRefusal | null>): FolderPick {
   const [path, setPath] = useState("");
+  const [applied, setApplied] = useState("");
   const [refusal, setRefusal] = useState<FolderRefusal | null>(null);
   const [reading, setReading] = useState(false);
   const shown = useRef("");
@@ -77,6 +83,7 @@ export function useFolderPick(read: (path: string) => Promise<FolderRefusal | nu
       shown.current = folder;
       setPath(folder);
       if (folder === "") return;
+      setApplied(folder);
       if (!folder.startsWith("/")) {
         setRefusal(FOLDER_PATH_WORDS.notAbsolute);
         return;
@@ -92,7 +99,7 @@ export function useFolderPick(read: (path: string) => Promise<FolderRefusal | nu
     },
     [read],
   );
-  return { path, refusal, reading, edit, submit };
+  return { path, applied, refusal, reading, edit, submit };
 }
 
 /** The field, its label and the standing refusal slot under it. The keys are kept off whatever holds the field: a
@@ -100,12 +107,15 @@ export function useFolderPick(read: (path: string) => Promise<FolderRefusal | nu
  * path half typed in a menu that has already closed. Escape is the exception, since it belongs to whatever holds the
  * field and nothing else there dismisses: a menu or a dialog closes on it, and a field that swallowed it left the
  * person with no key out. */
-export function FolderPathField({ id, label, placeholder, hold, disabled, autoFocus, className }: {
+export function FolderPathField({ id, label, placeholder, hold, waiting, disabled, autoFocus, className }: {
   id: string;
   /** The field's own label; absent where what holds the field already names it, as a dialog's section does. */
   label?: string;
   placeholder: string;
   hold: FolderPick;
+  /** Why the keycap beside this field cannot be pressed yet, in the slot's muted ink until a refusal takes the slot:
+   * the one place a held keycap's reason is written, as every sheet with a held keycap writes it. */
+  waiting?: string;
   disabled?: boolean;
   autoFocus?: boolean;
   className?: string;
@@ -140,7 +150,7 @@ export function FolderPathField({ id, label, placeholder, hold, disabled, autoFo
         onChange={e => hold.edit(e.target.value)}
         onKeyDown={keyDown}
       />
-      <RefusalSlot k="folder-path-refusal" {...(hold.refusal === null ? {} : hold.refusal)} />
+      <RefusalSlot k="folder-path-refusal" {...(hold.refusal === null ? {} : hold.refusal)} {...(waiting === undefined ? {} : { waiting })} />
     </div>
   );
 }

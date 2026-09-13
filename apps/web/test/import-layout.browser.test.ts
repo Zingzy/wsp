@@ -15,7 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { textContrast } from "./contrast";
+import { fillDelta, textContrast } from "./contrast";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
 
@@ -178,12 +178,39 @@ describe.skipIf(renderSkipped !== undefined)("the import dialog laid out in Chro
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-plain-${theme}.png`) });
   }, 30_000);
 
+  it.each(["dark", "light"] as const)("in the %s theme, before a folder is read, the summary's rows stand as bars that read on the card and the reason Import waits stands under the field", async theme => {
+    await page!.goto(`${base}?theme=${theme}&tab=1&read=0`);
+    await page!.waitForSelector("[data-k=summary] [data-slot=skeleton]");
+    const bars = await fillDelta(page!, "[data-k=summary] [data-slot=skeleton]");
+    console.info(`${theme}: the summary's five bars stand ${bars.join(", ")} of 255 from the card they sit on`);
+    expect(bars).toHaveLength(5);
+    // A bar that is 3 of 255 from its card is a blank; the hairline tier is what the eye reads as a row on its way.
+    for (const delta of bars) expect(delta).toBeGreaterThanOrEqual(10);
+    // The held key's reason is on the screen before any pointer moves, in the slot under the field it waits on.
+    const slot = page!.locator("[data-k=folder-path-refusal]");
+    expect(await slot.textContent()).toBe("type the folder's path first");
+    const said = await slot.locator("[data-k=waiting]").evaluate(el => {
+      const s = getComputedStyle(el);
+      return { size: s.fontSize, font: s.fontFamily, ink: s.color, muted: getComputedStyle(document.documentElement).getPropertyValue("--muted-foreground") };
+    });
+    console.info(`${theme}: the reason reads ${said.size} ${said.font.split(",")[0]} in ${said.ink}`);
+    expect(said.size).toBe("12px");
+    expect(said.font.toLowerCase()).toMatch(/mono/);
+    expect(await page!.locator("[data-slot=button]", { hasText: "Import" }).evaluate(el => (el as HTMLButtonElement).disabled)).toBe(true);
+    expect(await page!.locator("[data-slot=tooltip-popup]").count()).toBe(0);
+    await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `import-typing-${theme}.png`) });
+  });
+
   it.each(["dark", "light"] as const)("in the %s theme the browser a tab gets is one quiet list on the consent rows' height, keeps that height across a level, and reads at AA", async theme => {
     await page!.goto(`${base}?theme=${theme}&tab=1`);
     // The imports above remembered their folder in this origin's local storage, which is what opens the browser there
     // on a later visit; this case is about the layout, so it starts from a first visit.
     await page!.evaluate(() => window.localStorage.clear());
     await page!.reload();
+    // The page hands the dialog a folder that is already read, so the list opens inside it; the first crumb walks
+    // back out to the root, which is the level a person types nothing into.
+    await page!.waitForFunction(() => document.querySelector("[data-k=browse-state]")?.textContent === "2 folders in /Users/me/code/spoo.");
+    await page!.locator("[data-folder-crumb]").first().click();
     await page!.waitForFunction(() => document.querySelectorAll("[data-k=browse-folder]").length === 8);
     const dialog = page!.locator("[role=dialog]");
     const size = (b: Box): { width: number; height: number } => ({ width: Math.round(b.width), height: Math.round(b.height) });

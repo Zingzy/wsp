@@ -193,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -618,12 +618,11 @@ interface LiveWorkspace {
   wakeAsk?: { ask: number; of: number };
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
-  /** Why the nap in flight kept the previous vault, for the napping status it pushes; said once. */
-  vaultNote?: string;
 }
 
-/** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. */
-type StageReport = (stage: WorkspaceCreateStage, message: string, notice?: string) => void;
+/** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
+ * line written for a person; a detail is what the machine answered, which rides the line's title. */
+type StageReport = (stage: WorkspaceCreateStage, message: string, said?: { notice?: string; detail?: string }) => void;
 
 export interface SessionHandle {
   readonly id: string;
@@ -1694,8 +1693,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The login environment a turn of one harness runs under there, read the same way. */
     env: (entry: LiveWorkspace, agentId: string) => Readonly<Record<string, string>>;
     /** How a folder on this computer gets onto a machine of this kind: packed and landed on a fork, its path recorded
-     * with nothing copied on this computer, refused where no road exists yet. Answers what landed, the project the
-     * record gains and the done line; the caller keeps the record and the roots file, which every road shares. */
+     * with nothing copied on this computer, refused where no road exists yet. Answers what landed, which carries the
+     * project the record gains, and the done line; the caller keeps the record and the roots file, which every road
+     * shares. */
     import: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
     /** Names the project folders the machine's daemon may browse beside its home, where the kind has a daemon. */
     roots: (entry: LiveWorkspace, dests: readonly string[]) => Promise<void>;
@@ -1744,7 +1744,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   type ImportReport = (stage: ProjectImportStage, message: string, progress?: { bytes: number; total: number }) => void;
   interface ImportLanded {
     result: ProjectImportResult;
-    project: WorkspaceProject;
     done: string;
   }
   const projectOf = (dest: string, size: number): WorkspaceProject => ({ name: folderName(dest), dest, importedAt: new Date(clock.now()).toISOString(), size });
@@ -1755,8 +1754,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     report("landing", REGISTERING_LINE);
     const plan = await o.bundler.plan();
     return {
-      result: { dest: o.dest, files: plan.files, bytes: plan.bytes, parts: 0, cut: [], rewritten: [], agents: [] },
-      project: projectOf(o.dest, plan.bytes),
+      result: { dest: o.dest, files: plan.files, bytes: plan.bytes, parts: 0, cut: [], rewritten: [], agents: [], project: projectOf(o.dest, plan.bytes) },
       done: registeredLine(o.dest),
     };
   };
@@ -3228,9 +3226,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
         // Named by its record before the claim is released, so no sweep sees it unclaimed.
         bind(machine);
-        report?.("machine-booting", `Machine ${machine.id} is booting.`);
+        // No line for the machine coming up: the starting line above is the step a person waits through, and a
+        // fork's own id names nothing to them.
         const named = await setHostname(machine, record.name);
-        report?.("hostname-set", named.refused === undefined ? `Hostname set to ${named.host}.` : "Hostname left as the guest booted it.", named.refused);
+        if (named.refused === undefined) report?.("hostname-set", hostnameSetLine(named.host));
+        else report?.("hostname-set", HOSTNAME_KEPT, { detail: named.refused });
         // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
         const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
         if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
@@ -3296,9 +3296,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             delete record.vaultRefused;
           } catch (e) {
             const why = e instanceof Error ? e.message : String(e);
-            // The record carries it, not only the nap's status: the files stay unbacked until a nap stores one.
+            // The record carries it, and the record alone: the files stay unbacked until a nap stores one, so the
+            // verdict stands on the pane's own backup line rather than passing through one nap's status.
             record.vaultRefused = why;
-            entry.vaultNote = vaultKeptLine(why);
             console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
           }
         },
@@ -3394,7 +3394,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "pausing";
         await persist(entry.record);
         await emitStatus(entry, "napping");
-        delete entry.vaultNote;
         try {
           await entry.ws.nap();
         } catch (e) {
@@ -3411,9 +3410,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
-        const said = [reason, entry.vaultNote].filter((s): s is string => s !== undefined);
-        delete entry.vaultNote;
-        await emitStatus(entry, "napping", said.length === 0 ? undefined : said.join("; "));
+        await emitStatus(entry, "napping", reason);
         return view(entry.record);
       } finally {
         delete entry.napping;
@@ -3886,7 +3883,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       landed?.();
     };
     const notices: string[] = [];
-    report("fork-requested", "Fork of the golden image requested.");
+    // The computer the fork lands on, by the name its own row carries: the place a person picked, else the
+    // provider word this host's machines wear, which is what every other surface names a fork's home by.
+    const where = placeId === undefined ? places.wired : placeDoorOf().nameOf(placeId);
+    report("fork-requested", startingLine(record.name, where));
     try {
       await fork(record, bind, undefined, report);
     } catch (e) {
@@ -3905,7 +3905,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await forgetBuilder(x.record.id);
         notices.push(stopped);
         console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)} (${x.record.id})`);
-        report("fork-requested", "Fork of the golden image requested again.", stopped);
+        report("fork-requested", `${startingLine(record.name, where)} again`, { notice: stopped });
         try {
           await fork(record, bind, undefined, report);
           made = true;
@@ -3931,21 +3931,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
           report("preview-route", "Preview route to the daemon minted.");
         } catch (e) {
-          report("preview-route", "No preview route to the daemon.", `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`);
+          report("preview-route", "No preview route to the daemon.", { notice: `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})` });
         }
       }
       // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
       // keeps asking and names a zombie. Asked the way the wake and the poll ask, so a machine reached without a
       // route is asked here too rather than left with no word at all.
       const fault = await pingDaemon(entry);
-      report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", fault);
+      report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", { notice: fault });
       void syncDaemon(entry);
     }
     await persist(record);
     // The place a fork landed on is where the next one lands when nobody says.
     await placeDoor?.markUsed(placeId);
     delete entry.creating;
-    report("ready", "Ready.");
+    report("ready", CREATE_READY);
     const v = view(record);
     bus.emit({ type: "workspace.created", workspace: v });
     return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
@@ -4059,7 +4059,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
       // tree rule has nothing to read until then, so a thread watching its own fork boot would see it start midway.
       const askedBy = spawned !== undefined ? { threadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : undefined;
-      const report: StageReport = (stage, message, notice) => {
+      const report: StageReport = (stage, message, said) => {
         bus.emit({
           type: "workspace.creating",
           workspaceId: id,
@@ -4067,7 +4067,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           stage,
           message,
           elapsedMs: clock.now() - began,
-          ...(notice !== undefined ? { notice } : {}),
+          ...(said?.notice !== undefined ? { notice: said.notice } : {}),
+          ...(said?.detail !== undefined ? { detail: said.detail } : {}),
           ...(askedBy !== undefined ? { askedBy } : {}),
         });
       };
@@ -4156,7 +4157,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const rows = held();
       // A name names one workspace at most: the create and the rename both refuse a name another already holds.
       const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
-      if (entry === undefined) throw new Error(noWorkspaceRefusal(ref));
+      if (entry === undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
       refuseRelayed(entry.record, origin);
       return view(entry.record);
     },
@@ -4426,6 +4427,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async forget(id, origin) {
       const entry = await entryOf(id, origin);
+      const kind = entry.record.kind;
+      if (!kindWords(kind).driven) throw Object.assign(new Error(forgetUndrivenRefusal(entry.record.name, machineWord(kind))), { kind: "conflict" });
       const state = await entry.machine.state();
       if (state !== "gone") {
         throw Object.assign(new Error(`${entry.record.name}'s machine ${entry.machine.id} is still ${state}; pause it or delete it at the provider first`), { kind: "conflict" });
@@ -4992,11 +4995,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * too, since it may stand for hours past the synchronous run that raised it. */
     let answerAsk: HarnessSession["answer"];
 
-    /** What the row says the thread is waiting on, and the turn's own reading of whether it is blocked on a person:
-     * the oldest prompt still open leads, since that is the one the harness stopped at. Written on every open and
-     * close, so the sidebar, the command line and the turn's idle clock read one fact. */
+    /** What the row says the thread is waiting on, and the turn's own reading of whether it is blocked on a person,
+     * by the protocol's one rule for which open prompt leads. Written on every open and close, so the sidebar, the
+     * command line and the turn's idle clock read one fact. */
     const readsOpen = (): void => {
-      const lead = [...open.values()][0];
+      const lead = leadAsk(open.values());
       if (lead === undefined) delete view.asking;
       else view.asking = askingLine(lead);
       if (t.waiting !== undefined) t.waiting.on = open.size > 0;
@@ -5754,7 +5757,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const held = [...sessions].filter(([, s]) => s.view.threadId === threadId);
       const workspaceId = held[0]?.[1].view.workspaceId;
-      if (workspaceId === undefined) throw new Error(`no thread ${threadWord(threadId)}`);
+      if (workspaceId === undefined) throw notFoundRefusal(`no thread ${threadWord(threadId)}`);
       await entryOf(workspaceId, origin);
       if (threadRan(held.map(([, s]) => s.view))) throw Object.assign(new Error(threadForgetRefusal(threadId)), { kind: "conflict" });
       for (const [id] of held) sessions.delete(id);
@@ -6709,8 +6712,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       report("landing", `Landing sessions: ${outcomes()}.`);
     }
     return {
-      result: { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents },
-      project: projectOf(o.dest, packed.bytes),
+      result: { dest: o.dest, files: packed.files, bytes: packed.bytes, parts, cut: packed.cut, rewritten: packed.rewritten, agents, project: projectOf(o.dest, packed.bytes) },
       done: `${plural(packed.files, "file")}, ${fmtBytes(packed.bytes)}, landed at ${o.dest}${parts > 1 ? ` in ${parts} parts` : ""}${agents.length > 0 ? `; sessions: ${outcomes()}` : ""}.`,
     };
   };
@@ -6728,7 +6730,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       try {
         const kind = moduleOf(entry.record.kind);
         const landed = await kind.import(entry, o, report);
-        const projects = [...workspaceProjects(entry.record).filter(p => p.dest !== landed.project.dest), landed.project];
+        const projects = withProject(workspaceProjects(entry.record), landed.result.project);
         await kind.roots(entry, projects.map(p => p.dest));
         entry.record.projects = projects;
         await persist(entry.record);

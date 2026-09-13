@@ -25,6 +25,7 @@ import {
   placeLinkTranscript,
   sshDaemonPaths,
   workFolderIn,
+  workspacePlaceId,
   wspBinIn,
 } from "../src/index.js";
 
@@ -233,5 +234,44 @@ describe("a pairing code as a person reads it and as the host takes it", () => {
     expect(sentPairCode("QW4K-7PZX")).toBe("QW4K7PZX");
     expect(sentPairCode("qw4k-7pzx")).toBe("QW4K7PZX");
     expect(sentPairCode(shownPairCode("QW4K7PZX"))).toBe("QW4K7PZX");
+  });
+});
+
+describe("which row of the places list a workspace stands on", () => {
+  const here = { id: "here", kind: "computer" as const };
+  const laptop = { id: "p_1", kind: "computer" as const };
+  const ascii = { id: "box", kind: "provider" as const };
+  const solari = { id: "solari", kind: "provider" as const };
+  const places = [here, laptop, ascii, solari];
+
+  it("takes the computer a record names, wherever the name is written", () => {
+    expect(workspacePlaceId({ kind: "place", machineId: "place:p_1" }, places)).toBe("p_1");
+    expect(workspacePlaceId({ kind: "place", machineId: "m1", place: "p_1" }, places)).toBe("p_1");
+  });
+
+  it("puts this computer's own workspace on the first row, which is the computer the host runs on", () => {
+    expect(workspacePlaceId({ kind: "local", machineId: "local" }, places)).toBe("here");
+  });
+
+  it("puts a fork on the provider its record was stamped with, so two providers in one list do not share a total", () => {
+    expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1", provider: "solari" }, places)).toBe("solari");
+    expect(workspacePlaceId({ kind: "cloud", machineId: "fk_2", provider: "box" }, places)).toBe("box");
+  });
+
+  it("stands a fork written before records carried that word at the first provider, where a host that forks at one put it", () => {
+    expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1" }, places)).toBe("box");
+    expect(workspacePlaceId({ machineId: "fk_1" }, places)).toBe("box");
+  });
+
+  it("places a fork stamped with a provider this list does not hold nowhere, so a removed provider's spend is on nobody's row", () => {
+    // Removing a provider deletes its workspaces where they stand and keeps their series for the month. Falling
+    // back to the first provider would add every one of them to the provider that is left.
+    expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1", provider: "hetzner" }, places)).toBeUndefined();
+    expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1", provider: "solari" }, [here, ascii])).toBeUndefined();
+  });
+
+  it("places nothing it cannot: a computer that has been removed, and a fork on a list with no provider at all", () => {
+    expect(workspacePlaceId({ kind: "place", machineId: "place:p_gone" }, places)).toBeUndefined();
+    expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1" }, [here])).toBeUndefined();
   });
 });

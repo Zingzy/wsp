@@ -10,12 +10,14 @@
 // answers, and the composer opens when the process exits. not-running means
 // the turn beat the click and is no error; not-found and a refused request
 // show in the line above the box. The editor is disabled with the reason
-// while the runtime or the workspace is not live or the agents here have not
-// answered yet, and one reading of that reason serves the slot above the box,
-// the send button's name and tooltip and the Enter path alike: the block heads
-// the slot as one muted mono sentence, the button is held at the weight every
-// held primary wears, and an Enter leaves the draft where it was typed with
-// that line still standing, so Enter never fails silently. A running turn
+// while the runtime is not live or the agents here have not answered yet, and
+// one reading of that reason serves the slot above the box, the send button's
+// name and tooltip and the Enter path alike: the block heads the slot as one
+// muted mono sentence, the button is held at the weight every held primary
+// wears, and an Enter leaves the draft where it was typed with that line still
+// standing, so Enter never fails silently. A workspace whose machine is not
+// answering keeps its editor open and holds the send alone, so the wait can be
+// spent writing the message that goes when the machine answers. A running turn
 // blocks nothing: Enter then queues the message under the thread's key in the
 // draft store, the rows stack above the box, and when the turn ends the head
 // row starts the next turn; a fresh thread's rows wait under the workspace id
@@ -53,10 +55,11 @@
 // every start, so a change mid-thread applies at the next turn.
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ClipboardEvent } from "react";
 import { ImageIcon } from "lucide-react";
-import { foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
+import { composerHeldLine, foldThreads, HOST_ASLEEP_SEND, IMAGES_AFTER_TURN, IMAGES_MAX, IMAGE_ACCEPT, IMAGE_MAX_WORDS, IMAGE_TYPE_WORDS, TURN_IN_FLIGHT, movesRunningAccess, noImagesLine, readsImages, screenCommandLine, screenCommandTyped, screenCommandsOf, sendNowFailedLine, sendRefusal, stillWorkingLine, stopFailedLine, type SendRefusalKind, type WorkspaceState } from "@wsp/protocol";
 import type { ConnStatus } from "../../protocol/client";
 import { hostAsleep } from "../../boot";
 import { useAbsentComputer, useHarnessCatalogs, useStore, useWorkspace, useWorkspaceState } from "../../protocol/store";
+import { useComputerName } from "../../sidebar/workspaceRows";
 import { onComposerFocusRequest } from "../../shell/shellRequests";
 import { useThreadStart } from "../../files/root";
 import { useLinkDownLine } from "../../terminal/paneWords";
@@ -175,6 +178,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [dismissedSearchKey, setDismissedSearchKey] = useState<string | null>(null);
 
   const absent = useAbsentComputer(workspaceId);
+  const computer = useComputerName(workspaceId);
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
@@ -182,12 +186,23 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";
-  // A window on another computer whose wsp has gone quiet says which computer is asleep, not that wsp is not
-  // running: nothing here is broken, and the turn starts when that computer wakes.
-  // A computer that is not answering says so in its own sentence rather than in the state table's: the person's
-  // next move is to switch that computer on, and no wire word says that. The send is held either way, so nothing
-  // leaves the box and no refusal comes back as a line in the sidebar's corner.
-  const unavailable = blocked === null || wakesFirst ? null : absent !== null ? absent.sentence : hostAsleep(conn) ? HOST_ASLEEP_SEND : sendRefusal(blocked);
+  // A machine that is not answering is the one block a person can write through. The turn cannot go now, but what
+  // they write while they wait is what goes the moment it answers, so the box takes it and the send alone is held,
+  // named after the computer rather than after the wire's state word, since switching that computer on is the move.
+  // Nothing leaves on its own when it comes back: the draft sits in the editor, which no effect here reads, and the
+  // person's own send starts the turn. Every other block leaves the box shut, its sentence being about this app
+  // rather than about a machine to wait for; a window on another computer whose wsp has gone quiet says which
+  // computer is asleep rather than that wsp is not running, nothing there being broken.
+  const heldForAnswer = blocked === "unreachable";
+  const unavailable =
+    blocked === null || wakesFirst
+      ? null
+      : heldForAnswer
+        ? composerHeldLine(computer)
+        : hostAsleep(conn)
+          ? HOST_ASLEEP_SEND
+          : sendRefusal(blocked);
+  const shut = unavailable !== null && !heldForAnswer;
   // Everything that holds this send, in one reading: what blocks every send in this workspace, then what this draft
   // alone cannot be sent as. The slot, the send button and the Enter path all take it from here, so a person is told
   // once and told the same thing wherever they look.
@@ -284,14 +299,14 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
     (files: readonly File[]) => {
       // Paste and drop answer to the same state the picker button does: one door open and two shut would take an
       // image the send could not carry.
-      if (files.length === 0 || unavailable !== null) return;
+      if (files.length === 0 || shut) return;
       if (!canAttach) {
         setImageRefusal(noImagesLine(harnessId));
         return;
       }
       void addImages(workspaceId, files).then(setImageRefusal);
     },
-    [addImages, canAttach, harnessId, unavailable, workspaceId],
+    [addImages, canAttach, harnessId, shut, workspaceId],
   );
 
   const onPaste = useCallback(
@@ -577,7 +592,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                       editorRef={editorRef}
                       value={draft.prompt}
                       cursor={draft.cursor}
-                      disabled={unavailable !== null}
+                      disabled={shut}
                       placeholder={composerPlaceholder(catalog)}
                       onChange={onChange}
                       onCommandKeyDown={onCommandKeyDown}
@@ -594,7 +609,7 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
                         variant="ghost-muted"
                         aria-label="Add an image"
                         title={`Add an image: paste, drop or pick one. ${IMAGE_TYPE_WORDS}, at most ${IMAGES_MAX} and ${IMAGE_MAX_WORDS} each.`}
-                        disabled={unavailable !== null}
+                        disabled={shut}
                         onClick={() => pickerRef.current?.click()}
                         data-composer-image-picker="true"
                       >

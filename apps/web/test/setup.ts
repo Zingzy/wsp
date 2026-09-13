@@ -5,10 +5,20 @@
 // exist in jsdom; matchMedia drives DPR and reduced-motion tracking. The
 // libghostty wasm arrives through Vite ?url imports, which resolve to served
 // paths here, so fetch reads those two vendored files from disk instead.
+import { configure } from "@testing-library/react";
 import { beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+// What every findBy and waitFor in these files is given to see the DOM settle. The library's own default is one
+// second, which is the case budget's reasoning ignored: a gate at load average 135 stretches cases of 0.05 to 0.2 s
+// to 5 to 8 s (the note on testTimeout in apps/web/vite.config.ts), and this file measured 3.3 s idle against 9.9 s
+// under a parallel run of its own project alone. A findBy that ran out at one second in a landing gate reported the
+// element as missing and printed the body, which reads as a fault in the app rather than as the machine being busy.
+// Five seconds is a quarter of the case budget, so a wait that is really never going to land still fails well
+// inside its case.
+configure({ asyncUtilTimeout: 5_000 });
 
 const metrics = { width: 8, actualBoundingBoxAscent: 9, actualBoundingBoxDescent: 3 };
 const ctx2d = new Proxy({} as Record<string | symbol, unknown>, {

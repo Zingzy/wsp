@@ -14,18 +14,18 @@
 // block box, which a table row is not, and TableRow already dims itself on
 // has-aria-expanded for exactly this.
 import { ChevronRightIcon, MoreHorizontalIcon } from "lucide-react";
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { PLACES_WORDS, absentRoad, awayMsOf, lastKnown, offlineFor, workspaceStateOf, workspaceWord, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { PLACES_TICKET_REFUSAL, PLACES_WORDS, offlineFor, placeSpendLine, placesSpendFoot, workspaceStateOf, workspaceWord, type PlaceSpend, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
 import { Button, WARN_BUTTON } from "../components/ui/button.js";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js";
 import { TableCell, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
-import { useStore } from "../protocol/store.js";
+import { useProtocolEvents, useStore } from "../protocol/store.js";
 import { TryNowButton, useDialPlace } from "./AbsentRoad.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, placeOf, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
+import { NOTHING_HELD, isProviderPlace, placeOf, placeWorkspaceCounts, threadWord, type PlaceHolding } from "./places.js";
 import { PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
@@ -61,11 +61,46 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
   const [copies, setCopies] = useState<readonly SealedImageCopy[]>([]);
   const [open, setOpen] = useState<string | null>(null);
   const [removing, setRemoving] = useState<PlaceView | null>(null);
+  /** What each place has taken this month and burns now, as the host totals it over every workspace metered on it,
+   * the deleted ones with the rest. A row the host said nothing about has no figure rather than a zero. */
+  const [spend, setSpend] = useState<readonly PlaceSpend[]>([]);
+  const asking = useRef(false);
+  /** Set when this window may not read the money at all, so it stops asking at every tick. Only that refusal sets
+   * it: a read dropped while the socket reconnects is asked again at the next tick, where giving up on any failure
+   * left the figures blank until the page was opened again. */
+  const refused = useRef(false);
+
+  const readSpend = useCallback((): void => {
+    if (api?.spend === undefined || asking.current || refused.current) return;
+    asking.current = true;
+    void api
+      .spend()
+      .then(
+        rows => setSpend(rows),
+        (e: unknown) => {
+          if (e instanceof Error && e.message.includes(PLACES_TICKET_REFUSAL)) refused.current = true;
+        },
+      )
+      .finally(() => {
+        asking.current = false;
+      });
+  }, [api]);
 
   const readCopies = useCallback((): void => {
     void api?.image?.().then(view => setCopies(view.copies), () => setCopies([]));
   }, [api]);
   useEffect(readCopies, [readCopies]);
+  useEffect(readSpend, [readSpend]);
+  // Every cost tick moves what a place has taken, so the figures follow the meter rather than the page being
+  // reopened; the read in flight is what keeps a tick a workspace and a tick a second from asking twice at once.
+  useProtocolEvents(
+    useCallback(
+      e => {
+        if (e.type === "workspace.cost") readSpend();
+      },
+      [readSpend],
+    ),
+  );
 
   const threadsOf = (workspaceId: string): number => sessions[workspaceId]?.length ?? 0;
   const holdings = holdingsFor(places, workspaces, threadsOf, id => statuses[id] ?? null);
@@ -73,6 +108,12 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
   /** What that computer's own copy of the image weighs, where the provider's listing gave a size for it. */
   const imageBytesOn = (place: PlaceView): number | undefined => copyOn(copies, place)?.sizeBytes;
   const holdingOf = (place: PlaceView): PlaceHolding => holdings[place.id] ?? NOTHING_HELD;
+  const spendOn = (place: PlaceView): PlaceSpend | undefined => spend.find(row => row.place === place.id);
+  /** The providers that have taken something this month and what they took together: a person who runs their own
+   * computers alone is charged by nobody, and the foot says nothing at all. A provider whose workspaces have all
+   * been asleep since last month is not one of them, so the count never says two charged where one did. */
+  const paying = places.filter(place => isProviderPlace(place) && (spendOn(place)?.monthUsd ?? 0) > 0);
+  const monthUsd = paying.reduce((sum, place) => sum + (spendOn(place)?.monthUsd ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-3">
@@ -81,6 +122,7 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
           // The list puts this computer first, which the protocol's own order guarantees, and it is the one row
           // nothing can be done to: it is the computer the host runs on, so there is nothing to take it off.
           const own = at === 0;
+          const took = spendOn(place);
           return (
             <Fragment key={place.id}>
               <PlaceRow
@@ -88,8 +130,10 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
                 now={now}
                 workspaces={counts[place.id] ?? 0}
                 here={own}
+                {...(took === undefined ? {} : { monthUsd: took.monthUsd })}
                 {...(own
-                  ? {}
+                  ? // The column is there and empty: a row short of a cell is a row shorter than the rest.
+                    { menu: null }
                   : {
                       open: open === place.id,
                       onToggle: () => setOpen(held => (held === place.id ? null : place.id)),
@@ -106,11 +150,25 @@ export function WhereAgentsRun({ now = Date.now() }: { now?: number }) {
                       ),
                     })}
               />
-              {open === place.id ? <PlaceDetail place={place} holding={holdingOf(place)} now={now} onRemove={() => setRemoving(place)} /> : null}
+              {open === place.id ? (
+                <PlaceDetail
+                  place={place}
+                  holding={holdingOf(place)}
+                  now={now}
+                  workspaces={counts[place.id] ?? 0}
+                  {...(took === undefined ? {} : { spend: took })}
+                  onRemove={() => setRemoving(place)}
+                />
+              ) : null}
             </Fragment>
           );
         })}
       </PlaceTable>
+      {paying.length === 0 ? null : (
+        <p className="text-right font-mono text-[11px] tabular-nums text-muted-foreground" data-k="places-spend">
+          {placesSpendFoot(monthUsd, paying.length)}
+        </p>
+      )}
       <div className="flex gap-2">
         <Button size="xs" variant="outline" data-k="add-computer-button" onClick={openAddComputer}>
           {PLACES_WORDS.addComputer}
@@ -167,10 +225,10 @@ function PlaceActions({ place, onRemove, inMenu = true }: { place: PlaceView; on
 }
 
 /** What the host knows about one computer, under its row: where it expects that computer, what it is, the
- * workspaces standing on it, when it joined and when it last answered, with how long the last dial of it took.
- * Only facts the host carries are rows; the image copy this computer holds is drawn nowhere here, since nothing
- * on the wire says it yet. */
-function PlaceDetail({ place, holding, now, onRemove }: { place: PlaceView; holding: PlaceHolding; now: number; onRemove: () => void }) {
+ * workspaces standing on it, what a provider charged, when it joined and when it last answered, with how long the
+ * last dial of it took. Only facts the host carries are rows; the image copy this computer holds is drawn nowhere
+ * here, since nothing on the wire says it yet. */
+function PlaceDetail({ place, holding, now, workspaces, spend, onRemove }: { place: PlaceView; holding: PlaceHolding; now: number; workspaces: number; spend?: PlaceSpend; onRemove: () => void }) {
   const { dial, busy, line, held, heldWhy } = useDialPlace(place.id);
   // How long this host has not heard from it, and null while it is holding its link: a computer that is answering
   // reads its facts plain, since nothing about them is stale.
@@ -191,6 +249,8 @@ function PlaceDetail({ place, holding, now, onRemove }: { place: PlaceView; hold
       : [{ k: "system", label: WHERE_WORDS.system, value: lastKnown(place.docker === true ? `${place.os} · docker` : place.os, away) }]),
     ...(place.agents === undefined || place.agents.length === 0 ? [] : [{ k: "agents", label: WHERE_WORDS.agents, value: place.agents.join(", ") }]),
     { k: "workspaces", label: PLACES_WORDS.columns[3]!, value: holding.workspaces.length === 0 ? WHERE_WORDS.none : holding.workspaces.map(w => `${w.name} · ${w.state} · ${threadWord(w.threads)}`).join(", ") },
+    // A computer of the person's own charges them nothing, so only a provider has a Spend row at all.
+    ...(spend === undefined || !isProviderPlace(place) ? [] : [{ k: "spend", label: WHERE_WORDS.spend, value: placeSpendLine(spend, workspaces) }]),
     ...(place.joinedAt === undefined ? [] : [{ k: "joined", label: WHERE_WORDS.joined, value: WHERE_WORDS.ago(offlineFor(now - Date.parse(place.joinedAt))) }]),
     // When it last answered is the road reading's, not a second span worked out here: the pane says the same thing
     // in its sentence and the two may not date one silence differently.

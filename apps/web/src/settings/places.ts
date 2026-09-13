@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, fmtBytes, fmtRate, hereWord, isLocalWorkspace, plural, thisComputer, workspacePlace, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, fmtBytes, fmtRate, hereWord, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -93,15 +93,12 @@ export const placeNamed = (place: PlaceView, word: string): boolean => word === 
  * so it is never offered as somewhere to put another. */
 export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPlace(place) || place.docker === true;
 
-/** Which row a workspace stands on, or nothing for one this list cannot place. The id a joined computer's machine
- * carries names its row; what runs on this computer is the first row, which is the computer the host runs on; and
- * anything else was forked at the provider. The one reading, so the pane's Where row and the table's own holdings
- * cannot disagree about which computer a workspace is on. */
-export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place">): PlaceView | undefined {
-  const named = workspacePlace(workspace);
-  if (named !== undefined) return places.find(p => p.id === named);
-  if (isLocalWorkspace(workspace)) return places[0];
-  return places.find(isProviderPlace);
+/** Which row a workspace stands on, or nothing for one this list cannot place, read the protocol's one way so the
+ * pane's Where row, the table's own holdings and the host's month total cannot disagree about which computer a
+ * workspace is on. */
+export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceView, "kind" | "machineId" | "place" | "provider">): PlaceView | undefined {
+  const at = workspacePlaceId(workspace, places);
+  return at === undefined ? undefined : places.find(p => p.id === at);
 }
 
 /** The one state of the computer a workspace stands on, while that computer is not answering; null while it is,
@@ -154,8 +151,9 @@ export const WHERE_PICK_WORDS = {
   /** How long the first workspace there takes, which is the image being built before it. */
   firstBuild: "builds your image there first, about 4 min",
   imageThere: (version: number): string => `your image is there, v${version}`,
-  /** The dialog with nowhere to put a workspace: what is missing, and what to do about it. */
-  nowhereYet: "Nowhere to put a new workspace yet.",
+  /** The dialog with nowhere to put a workspace: why this computer is not on the list, since a person who has just
+   * read Settings knows it is a computer where agents run, and then what to do about it. */
+  nowhereYet: `${THIS_COMPUTER_WORD} is already a workspace, the only one it can be`,
   addOne: "Add a computer you own or connect a provider, and workspaces can be created there.",
   /** Why Create is held with no name typed. */
   nameFirst: "give the workspace a name",
@@ -165,9 +163,12 @@ export const WHERE_PICK_WORDS = {
  * there costs, how much room is left on it, and whether the image is there already or is built first. A fact the
  * row has not reported is left out rather than guessed, so a caption says only what this host knows.
  *
+ * The rate is the one the workspace being made will be charged at: the size the person picked where they picked
+ * one, since a caption quoting the row's default while another size is ticked prices a machine nobody asked for.
+ *
  * Every figure is the protocol's own formatter (fmtRate, plural), never a second spelling of one. */
-export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined): string {
-  const cost = place.rateUsdPerHour === undefined ? [WHERE_PICK_WORDS.free] : [`${fmtRate(place.rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
+export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined, rateUsdPerHour = place.rateUsdPerHour): string {
+  const cost = rateUsdPerHour === undefined ? [WHERE_PICK_WORDS.free] : [`${fmtRate(rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
   const forks = place.forks;
   // A row with no room left ends on what to do about it: where the image stands is no longer the question, since
   // nothing can be created there until a workspace goes.

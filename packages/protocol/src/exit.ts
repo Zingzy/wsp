@@ -26,7 +26,7 @@ export const EXIT_WORDS: Readonly<Record<ExitClass, string>> = {
 export const VerbFailure = z.object({ error: z.string(), class: ExitClass.exclude(["ok"]), exit: z.number().int() });
 export type VerbFailure = z.infer<typeof VerbFailure>;
 
-const KIND_CLASS: Readonly<Record<string, Exclude<ExitClass, "ok">>> = { usage: "usage", invalid: "usage", auth: "auth" };
+const KIND_CLASS: Readonly<Record<string, Exclude<ExitClass, "ok">>> = { usage: "usage", invalid: "usage", auth: "auth", "not-found": "usage" };
 
 /** The class of an error, by the kind stamped on it; one with no kind, or a kind no class claims, is the provider's. */
 export function exitClassOf(e: unknown): Exclude<ExitClass, "ok"> {
@@ -46,3 +46,7 @@ export const usageRefusal = (happened: string, fix: string): Error => Object.ass
 
 /** No key, no sign-in, or a token the host refused. */
 export const authRefusal = (message: string): Error => Object.assign(new Error(message), { kind: "auth" });
+
+/** A name this host holds nothing by: a workspace, a thread. Nothing ran and no provider was asked, so it classes
+ * with the other values nothing takes rather than with what a provider refused, whichever door was typed. */
+export const notFoundRefusal = (message: string): Error => Object.assign(new Error(message), { kind: "not-found" });
