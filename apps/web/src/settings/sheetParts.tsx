@@ -20,8 +20,22 @@ const COPIED_MS = 1_400;
 const LABEL_WIDTH = "w-14";
 
 /** A fact somebody has to type on another computer: its label in a fixed column, the fact in mono, and the glyph
- * that copies it. The code wears the big size, since it is read off one screen and typed on another. */
-export function CopyRow({ label, value, big = false, k, children }: { label?: string; value: string; big?: boolean; k: string; children?: ReactNode }) {
+ * that copies it. */
+export function CopyRow({
+  label,
+  value,
+  whole = false,
+  k,
+  children,
+}: {
+  label?: string;
+  value: string;
+  /** A value there is no reading half of: it wraps to as many lines as it takes and the row grows to hold them,
+   * where every other row ends a value too long for it in an ellipsis. */
+  whole?: boolean;
+  k: string;
+  children?: ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
   const copy = (): void => {
     void copyText(value).then(
@@ -33,12 +47,12 @@ export function CopyRow({ label, value, big = false, k, children }: { label?: st
     );
   };
   return (
-    <div data-copy-row={k} className="flex h-10 w-full items-center gap-3 rounded-md border border-border bg-card px-3">
+    <div data-copy-row={k} className={cn("flex w-full items-center gap-3 rounded-md border border-border bg-card px-3", whole ? "min-h-10 py-2" : "h-10")}>
       {label === undefined ? null : (
         <span className={cn(LABEL_WIDTH, "shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground")}>{label}</span>
       )}
       {/* The name is on the value, not the row: a reader after the fact alone must not also get the label. */}
-      <span data-k={k} className={cn("min-w-0 flex-1 truncate font-mono tabular-nums text-foreground", big ? "text-xl tracking-[0.18em]" : "text-xs")} title={value}>
+      <span data-k={k} className={cn("min-w-0 flex-1 font-mono text-xs tabular-nums text-foreground", whole ? "break-all" : "truncate")} title={value}>
         {value}
       </span>
       {children}

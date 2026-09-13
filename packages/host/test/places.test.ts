@@ -11,10 +11,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PlaceReport, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonPaths, placeLinkTranscript, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { PlaceStaging } from "@wsp/runtime";
-import { SshBackend, SSH_READ_SCRIPT, type SshReach, type SshTransport } from "@wsp/engine";
+import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, PLACE_JOINED_LINE, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
@@ -49,6 +49,7 @@ import {
   UNSAID_CHIP_REFUSAL,
   ADD_LOOPBACK_REFUSAL,
   advertisedLoopbackRefusal,
+  hostKeyHere,
 } from "../src/places.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
@@ -91,7 +92,7 @@ interface FakeHost {
   frames: Record<string, unknown>[];
 }
 
-async function fakeHost(opts: { wrongKey?: boolean; refuse?: string; hostUrls?: string[] } = {}): Promise<FakeHost> {
+async function fakeHost(opts: { wrongKey?: boolean; strangerKey?: boolean; refuse?: string; hostUrls?: string[] } = {}): Promise<FakeHost> {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   const key = { publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"), pem: privateKey.export({ type: "pkcs8", format: "pem" }).toString() };
   const other = generateKeyPairSync("ed25519");
@@ -113,13 +114,16 @@ async function fakeHost(opts: { wrongKey?: boolean; refuse?: string; hostUrls?: 
         const nonce = Buffer.alloc(32, 5).toString("base64");
         const bytes = placeLinkTranscript("host", placeId, String(frame["nonce"]), nonce);
         // A host whose signature is made by a key other than the one it sent is the one thing a join must refuse.
-        const signature = sign(null, bytes, opts.wrongKey === true ? other.privateKey : createPrivateKey(key.pem)).toString("base64");
+        // A stranger answering at the host's address holds a key of its own and signs the transcript with it
+        // perfectly well: what tells it from the host is which key it is, not whether it can sign.
+        const answering = opts.strangerKey === true ? other.publicKey.export({ type: "spki", format: "der" }).toString("base64") : key.publicKey;
+        const signature = sign(null, bytes, opts.wrongKey === true || opts.strangerKey === true ? other.privateKey : createPrivateKey(key.pem)).toString("base64");
         ws.send(
           JSON.stringify({
             id: frame["id"],
             ok: true,
             placeId,
-            hostPublicKey: key.publicKey,
+            hostPublicKey: answering,
             nonce,
             signature,
             hostName: "zingzy-mbp",
@@ -149,6 +153,13 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+/** The one token a join line carries, for the host a test started: the code that host will spend and the
+ * fingerprint of the key it will prove. */
+const codeFor = (host: FakeHost, code: string): string => joinToken(code, keyFingerprint(host.publicKey));
+
+/** A token naming a key no host in these tests holds, for the dials that reach nothing at all. */
+const NOWHERE_CODE = joinToken("X", `SHA256:${"a".repeat(43)}`);
+
 const joinDepsFor = (home: string, runner: ServiceRunner): Parameters<typeof joinCommand>[3] => ({
   dial: url => new WebSocket(wsUrlOf(url)),
   run: runner,
@@ -159,16 +170,18 @@ const joinDepsFor = (home: string, runner: ServiceRunner): Parameters<typeof joi
 
 describe("what wsp add prints with no argument", () => {
   it("names the line to type on that computer at every address this host answers on, and the other two roads", () => {
-    const lines = addLines("7QK3M2VD", 600_000, 0, ["http://192.168.1.20:4400"], "p_ab12cd34.singhi.me").join("\n");
-    expect(lines).toContain("wsp join http://192.168.1.20:4400 --code 7QK3M2VD");
-    expect(lines).toContain("wsp join https://p_ab12cd34.singhi.me --code 7QK3M2VD");
+    const token = joinToken("7QK3M2VD", `SHA256:${"b".repeat(43)}`);
+    const lines = addLines(token, 600_000, 0, ["http://192.168.1.20:4400"], "p_ab12cd34.singhi.me").join("\n");
+    // One word beside --code on every address: the code the host will spend and the key it will prove.
+    expect(lines).toContain(`wsp join http://192.168.1.20:4400 --code ${token}`);
+    expect(lines).toContain(`wsp join https://p_ab12cd34.singhi.me --code ${token}`);
     expect(lines).toContain("spent by the first join");
     expect(lines).toContain("wsp add user@host");
     for (const id of addableProviders()) expect(lines).toContain(`wsp add ${id}`);
   });
 
   it("leaves the relay line out when the host is on no relay", () => {
-    expect(addLines("X", 1, 0, ["http://10.0.0.2:4400"], undefined).join("\n")).not.toContain("relay");
+    expect(addLines(joinToken("X", `SHA256:${"b".repeat(43)}`), 1, 0, ["http://10.0.0.2:4400"], undefined).join("\n")).not.toContain("relay");
   });
 
   it("takes every provider the table says how to add, and nothing it names no way of adding", () => {
@@ -360,7 +373,7 @@ describe("a computer joining a wsp", () => {
     const host = await fakeHost();
     const runner = fakeRunner();
     const io = captured();
-    expect(await joinCommand(io, [host.url], { code: "7QK3M2VD", name: "old-macbook" }, joinDepsFor(home, runner.run))).toBe(0);
+    expect(await joinCommand(io, [host.url], { code: codeFor(host, "7QK3M2VD"), name: "old-macbook" }, joinDepsFor(home, runner.run))).toBe(0);
     const file = readPlaceFile(placeFilePath(home))!;
     expect(file).toMatchObject({ placeId: "p_ab12cd34ab12cd34", name: "old-macbook", hostUrls: [host.url], hostPublicKey: host.publicKey });
     expect(statSync(placeFilePath(home)).mode & 0o777).toBe(0o600);
@@ -388,7 +401,7 @@ describe("a computer joining a wsp", () => {
     const home = tmp("join-bad-key");
     const host = await fakeHost({ wrongKey: true });
     const io = captured();
-    await expect(joinCommand(io, [host.url], { code: "X" }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(/did not prove the key/);
+    await expect(joinCommand(io, [host.url], { code: codeFor(host, "X") }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(/did not prove the key/);
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
   });
@@ -396,38 +409,38 @@ describe("a computer joining a wsp", () => {
   it("carries the host's own refusal back and writes nothing when the code was spent", async () => {
     const home = tmp("join-spent");
     const host = await fakeHost({ refuse: "that pairing code is not one this host is waiting for" });
-    await expect(joinCommand(captured(), [host.url], { code: "X" }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(/not one this host is waiting for/);
+    await expect(joinCommand(captured(), [host.url], { code: codeFor(host, "X") }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(/not one this host is waiting for/);
     expect(existsSync(placeFilePath(home))).toBe(false);
   });
 
   it("says which of the two things a person typed a refusal is about, where it is about one of them", async () => {
     // The code: the one refusal a host has for a code it is not holding, spent, expired or never minted.
     const spent = await fakeHost({ refuse: PLACE_CODE_REFUSAL });
-    await expect(joinCommand(captured(), [spent.url], { code: "X" }, joinDepsFor(tmp("join-code"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "code" });
+    await expect(joinCommand(captured(), [spent.url], { code: codeFor(spent, "X") }, joinDepsFor(tmp("join-code"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "code" });
     // The address: nothing is listening there. The port was this computer's a moment ago and is free again.
     const closed = await freePort();
-    await expect(joinCommand(captured(), [`http://127.0.0.1:${closed}`], { code: "X" }, joinDepsFor(tmp("join-gone"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "address" });
+    await expect(joinCommand(captured(), [`http://127.0.0.1:${closed}`], { code: NOWHERE_CODE }, joinDepsFor(tmp("join-gone"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "address" });
     // A refusal about neither field carries neither: a host that would not prove its key, and any other word of its own.
     const wrong = await fakeHost({ wrongKey: true });
-    await expect(joinCommand(captured(), [wrong.url], { code: "X" }, joinDepsFor(tmp("join-key"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
+    await expect(joinCommand(captured(), [wrong.url], { code: codeFor(wrong, "X") }, joinDepsFor(tmp("join-key"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
     const other = await fakeHost({ refuse: "this host takes no places while it is building your image" });
-    await expect(joinCommand(captured(), [other.url], { code: "X" }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
+    await expect(joinCommand(captured(), [other.url], { code: codeFor(other, "X") }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
   });
 
   it("refuses a second join on a computer that already belongs to a wsp", async () => {
     const home = tmp("join-again");
     const host = await fakeHost();
     const runner = fakeRunner();
-    expect(await joinCommand(captured(), [host.url], { code: "A" }, joinDepsFor(home, runner.run))).toBe(0);
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
     const io = captured();
-    expect(await joinCommand(io, [host.url], { code: "B" }, joinDepsFor(home, runner.run))).toBe(1);
+    expect(await joinCommand(io, [host.url], { code: codeFor(host, "B") }, joinDepsFor(home, runner.run))).toBe(1);
     expect(io.errors).toEqual([ALREADY_JOINED_LINE]);
   });
 
   it("takes the code as the other screen shows it, since a person copies the code they can read", async () => {
     const home = tmp("join-dashed");
     const host = await fakeHost();
-    expect(await joinCommand(captured(), [host.url], { code: "qw4k-7pzx" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(await joinCommand(captured(), [host.url], { code: `qw4k-7pzx.${keyFingerprint(host.publicKey)}` }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     expect(String((host.frames.find(f => f["op"] === "place.join")!)["code"])).toBe("QW4K7PZX");
   });
 
@@ -435,10 +448,49 @@ describe("a computer joining a wsp", () => {
     const home = tmp("join-code-file");
     const host = await fakeHost();
     const codeFile = join(home, "join-code");
-    writeFileSync(codeFile, "7QK3M2VD\n");
+    writeFileSync(codeFile, `${codeFor(host, "7QK3M2VD")}\n`);
     expect(await joinCommand(captured(), [host.url], { codeFile }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     expect(existsSync(codeFile)).toBe(false);
     expect(String((host.frames.find(f => f["op"] === "place.join")!)["code"])).toBe("7QK3M2VD");
+  });
+
+  it("refuses a host that proves a key the join line did not name, before it sends anything of its own", async () => {
+    const home = tmp("join-stranger");
+    // A peer that answered where the host was expected: its own key, its own valid signature over this computer's
+    // nonce. Every signature checks out; the key is not the one the line named.
+    const stranger = await fakeHost({ strangerKey: true });
+    const io = captured();
+    await expect(joinCommand(io, [stranger.url], { code: codeFor(stranger, "7QK3M2VD") }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(joinKeyRefusal(stranger.url));
+    // Nothing of this computer's went over: no report, no signature of its own, nothing past the first frame.
+    expect(stranger.frames.map(f => f["op"])).toEqual(["place.join"]);
+    // And nothing was written here: no place record, no pinned key, no unit for a daemon to hold a socket open on.
+    expect(existsSync(placeFilePath(home))).toBe(false);
+    expect(existsSync(placeKeyPath(home))).toBe(false);
+    expect(existsSync(join(home, ".config", "systemd", "user"))).toBe(false);
+  });
+
+  it("joins the host whose key the line named, as it did before", async () => {
+    const home = tmp("join-named-key");
+    const host = await fakeHost();
+    const runner = fakeRunner();
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, runner.run))).toBe(0);
+    expect(readPlaceFile(placeFilePath(home))!.hostPublicKey).toBe(host.publicKey);
+    // The code that went over is the code alone: the fingerprint is this computer's to check and no part of the frame.
+    expect(host.frames.find(f => f["op"] === "place.join")!["code"]).toBe("7QK3M2VD");
+    expect(runner.ran.length).toBeGreaterThan(0);
+  });
+
+  it("refuses a line that names no key and says to run wsp add again, on the flag and on the file alike", async () => {
+    const home = tmp("join-keyless");
+    const host = await fakeHost();
+    await expect(joinCommand(captured(), [host.url], { code: "7QK3M2VD" }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(JOIN_NO_KEY_REFUSAL);
+    const codeFile = join(home, "join-code");
+    writeFileSync(codeFile, "7QK3M2VD\n");
+    await expect(joinCommand(captured(), [host.url], { codeFile }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow(JOIN_NO_KEY_REFUSAL);
+    // Refused before anything is dialled: the host saw no frame and this computer wrote nothing.
+    expect(host.frames).toEqual([]);
+    expect(existsSync(placeFilePath(home))).toBe(false);
+    expect(JOIN_NO_KEY_REFUSAL).toContain("wsp add");
   });
 
   it("refuses both roads to a code at once", async () => {
@@ -513,7 +565,7 @@ describe("a join with more than one address to try", () => {
     const host = await fakeHost();
     const io = captured();
     const args = ["http://127.0.0.1:1", host.url, "http://10.0.0.2:4400"];
-    expect(await joinCommand(io, args, { code: "7QK3M2VD" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(await joinCommand(io, args, { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     // The one that answered, then the rest: that is the order the link dials them in from now on.
     expect(readPlaceFile(placeFilePath(home))!.hostUrls).toEqual([host.url, "http://127.0.0.1:1", "http://10.0.0.2:4400"]);
   });
@@ -523,7 +575,7 @@ describe("a join with more than one address to try", () => {
     const host = await fakeHost();
     const io = captured();
     // Port 1 on loopback answers nothing at all, which is the address an installer picked that this computer cannot route to.
-    expect(await joinCommand(io, ["http://127.0.0.1:1", host.url], { code: "7QK3M2VD" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(await joinCommand(io, ["http://127.0.0.1:1", host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     expect(io.errors.join("\n")).toContain("http://127.0.0.1:1");
     expect(readPlaceFile(placeFilePath(home))!.hostUrls[0]).toBe(host.url);
   });
@@ -532,7 +584,7 @@ describe("a join with more than one address to try", () => {
     const home = tmp("join-refused");
     const host = await fakeHost({ refuse: "that join code is not one this host is waiting for" });
     const io = captured();
-    await expect(joinCommand(io, [host.url, "http://127.0.0.1:1"], { code: "SPENT" }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow("not one this host is waiting for");
+    await expect(joinCommand(io, [host.url, "http://127.0.0.1:1"], { code: codeFor(host, "SPENT") }, joinDepsFor(home, fakeRunner().run))).rejects.toThrow("not one this host is waiting for");
     expect(io.errors.join("\n")).not.toContain("http://127.0.0.1:1");
     expect(existsSync(placeFilePath(home))).toBe(false);
   });
@@ -1027,11 +1079,13 @@ describe("what wsp add asks the host for", () => {
   it("opens the door by asking for it and prints its address, so a host on loopback alone is still one a computer can join", async () => {
     const home = tmp("add-door");
     const io = captured();
-    const fake = fakeClient({ port: 4420, addresses: ["http://192.168.1.20:4420"] });
+    const fake = fakeClient({ port: 4420, addresses: ["http://192.168.1.20:4420"], hostKey: `SHA256:${"c".repeat(43)}` });
     const opts = { statePath: join(home, "state.json"), home, env: { HOME: home, WSP_HOME: home } };
     expect(await addCommand(io, opts, [], {}, addDeps(fake.client))).toBe(0);
     expect(fake.asked).toEqual(["pair.issue", "places.door"]);
-    expect(io.lines.join("\n")).toContain("wsp join http://192.168.1.20:4420 --code 7QK3M2VD");
+    // The token names the key the host on this computer signs with, off the pair beside its state file, so the
+    // computer typing this line can tell that host from anything else answering at that address.
+    expect(io.lines.join("\n")).toContain(`wsp join http://192.168.1.20:4420 --code ${joinToken("7QK3M2VD", hostKeyHere(opts.statePath))}`);
     // The loopback refusal is about a host nothing can dial; a host that just opened a door is not one.
     expect(io.errors.join("\n")).not.toContain("--listen");
   });
@@ -1054,6 +1108,8 @@ describe("what wsp add asks the host for", () => {
     expect(await addCommand(io, opts, [], {}, addDeps(fake.client))).toBe(0);
     expect(io.errors.join("\n")).toContain("--listen");
     expect(io.lines.join("\n")).toContain("wsp join http://127.0.0.1:");
+    // A door that would not open still leaves the key readable here, so the line it prints names one.
+    expect(io.lines.join("\n")).toContain(hostKeyHere(opts.statePath));
   });
 });
 
@@ -1115,6 +1171,7 @@ describe("a join as the app's shell runs it", () => {
       home,
       addresses: [host.url],
       code: "7QK3M2VD",
+      hostKey: keyFingerprint(host.publicKey),
       name: "old-macbook",
       client: true,
       wsp: { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/opt/wsp/bin.js"], version: "9.9.9", PATH: "", shim: `${home}/.wsp/bin/wsp` },
@@ -1142,7 +1199,7 @@ describe("a join as the app's shell runs it", () => {
     const home = tmp("join-cli-argv");
     const host = await fakeHost();
     const runner = fakeRunner();
-    expect(await joinCommand(captured(), [host.url], { code: "A" }, joinDepsFor(home, runner.run))).toBe(0);
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
     const unitDir = join(home, ".config", "systemd", "user");
     const written = readFileSync(join(unitDir, readdirSync(unitDir)[0]!), "utf8");
     expect(written).toContain(`ExecStart=${shellQuote(daemonBinaryHere())} '--host' '127.0.0.1'`);
@@ -1155,9 +1212,9 @@ describe("a join as the app's shell runs it", () => {
     const home = tmp("join-bare");
     const host = await fakeHost();
     const bare = new URL(host.url).host;
-    expect(await joinCommand(captured(), [bare], { code: "A" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(await joinCommand(captured(), [bare], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     expect(readPlaceFile(placeFilePath(home))!.hostUrls).toEqual([`http://${bare}`]);
-    await expect(joinCommand(captured(), ["box"], { code: "A" }, joinDepsFor(tmp("join-word"), fakeRunner().run))).rejects.toThrow(/not an address/);
+    await expect(joinCommand(captured(), ["box"], { code: NOWHERE_CODE }, joinDepsFor(tmp("join-word"), fakeRunner().run))).rejects.toThrow(/not an address/);
   });
 });
 
@@ -1203,14 +1260,14 @@ describe("holding a joined computer awake", () => {
   it("writes the hold on at the join when the flag asked for it", async () => {
     const home = tmp("join-awake");
     const host = await fakeHost();
-    expect(await joinCommand(captured(), [host.url], { code: "A", awake: true }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A"), awake: true }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     expect(readPlaceFile(placeFilePath(home))!.awake).toBe(true);
   });
 
   it("flips it on the file and keeps every other field, since the agent watches that file and nothing restarts", async () => {
     const home = tmp("awake-flip");
     const host = await fakeHost();
-    expect(await joinCommand(captured(), [host.url], { code: "A" }, joinDepsFor(home, fakeRunner().run))).toBe(0);
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(0);
     const before = placeStanding(home)!;
     const after = writePlaceAwake(home, true);
     expect(after).toEqual({ ...before, awake: true });
@@ -1229,7 +1286,7 @@ describe("the sweep a joined computer runs on itself", () => {
     const home = tmp("leave-after-join");
     const host = await fakeHost();
     const runner = fakeRunner();
-    expect(await joinCommand(captured(), [host.url], { code: "A" }, joinDepsFor(home, runner.run))).toBe(0);
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
     const unitDir = join(home, ".config", "systemd", "user");
     const work = join(home, "wsp-work");
     mkdirSync(work, { recursive: true });
@@ -1247,14 +1304,14 @@ describe("which manager holds the agent's unit", () => {
   it("takes the manager the platform has, and refuses a computer that has none before it writes or dials anything", async () => {
     const host = await fakeHost();
     const none = tmp("manager-none");
-    await expect(joinPlace(captured(), { home: none, addresses: [host.url], code: "A", platform: "win32", dial: url => new WebSocket(wsUrlOf(url)) })).rejects.toThrow("writes no service on win32");
+    await expect(joinPlace(captured(), { home: none, addresses: [host.url], code: "A", hostKey: keyFingerprint(host.publicKey), platform: "win32", dial: url => new WebSocket(wsUrlOf(url)) })).rejects.toThrow("writes no service on win32");
     // Nothing would keep the daemon up there, so nothing of a join lands: no place file, no key, no frame to the host.
     expect(existsSync(placeFilePath(none))).toBe(false);
     expect(host.frames.filter(f => f["op"] === "place.join")).toEqual([]);
     const home = tmp("manager-own");
     const own = captured();
     const runner = fakeRunner();
-    await joinPlace(own, { home, addresses: [host.url], code: "B", platform: "linux", run: runner.run, dial: url => new WebSocket(wsUrlOf(url)) });
+    await joinPlace(own, { home, addresses: [host.url], code: "B", hostKey: keyFingerprint(host.publicKey), platform: "linux", run: runner.run, dial: url => new WebSocket(wsUrlOf(url)) });
     // Whichever manager this computer has: it was asked to take the unit, which the branch above never does.
     expect(runner.ran.length).toBeGreaterThan(0);
     expect(own.errors.join("\n")).not.toContain("writes no service");

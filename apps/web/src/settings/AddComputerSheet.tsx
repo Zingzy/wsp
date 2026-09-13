@@ -13,7 +13,7 @@
 // stages off the installer as it reports them.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACE_INSTALL, PLACES_WORDS, PlaceAddStep, fmtBytes, joinAddressWord, placeAddSheetWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACE_INSTALL, PLACES_WORDS, PlaceAddStep, fmtBytes, joinAddressWord, joinToken, placeAddSheetWord, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "../components/ui/input-group.js";
@@ -201,7 +201,7 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
           ) : road === "ssh" ? (
             <SshFields login={login} port={port} refusal={refusal} {...(sshHeld === undefined ? {} : { held: sshHeld })} onLogin={setLogin} onPort={setPort} onEnter={add} />
           ) : (
-            <AppRoad place={joined} address={address} code={code} said={codeSaid} expired={expired} arrived={arrived} reported={reported} relay={door?.relay} now={now()} onNewCode={newCode} />
+            <AppRoad place={joined} address={address} code={code} said={codeSaid} expired={expired} arrived={arrived} reported={reported} relay={door?.relay} hostKey={door?.hostKey} now={now()} onNewCode={newCode} />
           )}
           {/* The plan and the run are one list in one place, so Add fills the lines in under the hand rather than
               swapping them for another list. */}
@@ -259,8 +259,10 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
 
 /** The app road, from the code standing to the computer joined: the two things to type on the other computer, or
  * the computer's own row once it is there, and under either of them the lines the join writes as it happens. */
-function AppRoad({ place, address, code, said, expired, arrived, reported, relay, now, onNewCode }: { place: PlaceView | undefined; address: string | undefined; code: { code: string; expiresAt: number } | null; said: string | null; expired: boolean; arrived: { from: string } | null; reported: boolean; relay: string | undefined; now: number; onNewCode: () => void }) {
-  const shown = code === null ? "" : shownPairCode(code.code);
+function AppRoad({ place, address, code, said, expired, arrived, reported, relay, hostKey, now, onNewCode }: { place: PlaceView | undefined; address: string | undefined; code: { code: string; expiresAt: number } | null; said: string | null; expired: boolean; arrived: { from: string } | null; reported: boolean; relay: string | undefined; /** The fingerprint of the key this host proves at a join; the terminal line carries it beside the code. */ hostKey: string | undefined; now: number; onNewCode: () => void }) {
+  // The one word a person copies, on the row and in the terminal line alike: the code and the fingerprint of the
+  // key this host proves. No key, no line, since a line the other computer cannot hold a host to is one it refuses.
+  const token = code === null || hostKey === undefined ? "" : joinToken(code.code, hostKey);
   const lines: RoadLine[] =
     arrived === null
       ? [{ word: WORDS.waiting, state: "running" }]
@@ -277,7 +279,7 @@ function AppRoad({ place, address, code, said, expired, arrived, reported, relay
           <p className="text-[15px] text-foreground">{WORDS.appRoad}</p>
           <div className="flex flex-col gap-2">
             <CopyRow k="copy-address" label={WORDS.address} value={address ?? ""} />
-            <CopyRow k="copy-code" label={WORDS.code} value={shown} big />
+            <CopyRow k="copy-code" label={WORDS.code} value={token} whole />
             <span className="flex items-center gap-2">
               <span data-k="code-life" className={cn("font-mono text-[11px] tabular-nums", said === null ? "text-muted-foreground" : "text-destructive-foreground")}>
                 {said ?? (expired ? CODE_EXPIRED_LINE : CODE_GOOD_LINE)}
@@ -297,7 +299,7 @@ function AppRoad({ place, address, code, said, expired, arrived, reported, relay
         </PlaceTable>
       )}
       <RoadLines lines={lines} />
-      {place !== undefined || address === undefined || code === null ? null : (
+      {place !== undefined || address === undefined || code === null || hostKey === undefined ? null : (
         <Collapsible>
           <CollapsibleTrigger data-k="no-app" className="group flex items-center gap-1.5 text-left text-[13px] text-muted-foreground">
             {WORDS.noApp}
@@ -307,8 +309,8 @@ function AppRoad({ place, address, code, said, expired, arrived, reported, relay
             <div className="flex flex-col gap-2 pt-3">
               <p className="text-[13px] text-muted-foreground">{WORDS.noAppLine}</p>
               <CopyRow k="install-line" value={WORDS.install} />
-              <CopyRow k="join-line" value={WORDS.joinLine(address, shown)} />
-              {relay === undefined ? null : <CopyRow k="relay-line" value={WORDS.joinLine(joinAddressWord(relay), shown)} />}
+              <CopyRow k="join-line" value={WORDS.joinLine(address, token)} />
+              {relay === undefined ? null : <CopyRow k="relay-line" value={WORDS.joinLine(joinAddressWord(relay), token)} />}
             </div>
           </CollapsiblePanel>
         </Collapsible>

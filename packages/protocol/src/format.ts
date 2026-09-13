@@ -3367,7 +3367,9 @@ export const PLACES_WORDS = {
     noApp: "No app on that computer",
     noAppLine: "In its terminal, install wsp, then join:",
     install: "npm i -g @zingzy/wsp",
-    joinLine: (url: string, code: string): string => `wsp join ${url} --code ${code}`,
+    /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
+     * key this host will prove, as joinToken writes them, so the line names which host it is joining. */
+    joinLine: (url: string, token: string): string => `wsp join ${url} --code ${token}`,
     escStays: "esc closes, the code stays good",
     newCode: "New code",
     close: "Close",

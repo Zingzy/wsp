@@ -1732,8 +1732,9 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
-/** What the join screen sends the shell: the address as it is typed on the other screen, and the code beside it. */
-export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(64) });
+/** What the join screen sends the shell: the address as it is typed on the other screen, and the one token the
+ * join line carried beside it, which is the code and the fingerprint of that host's key. */
+export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(128) });
 export type JoinAsk = z.infer<typeof JoinAsk>;
 
 /** What this computer is to another wsp, read off its place file. */
@@ -3511,6 +3512,35 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
   return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
 }
 
+/** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is
+ * written in PAIR_CODE_ALPHABET with the dash the screens group it with, and a fingerprint is base64. */
+export const JOIN_TOKEN_MARK = ".";
+
+/** The one word a person copies off a join line: the single-use code and the fingerprint of the key the host will
+ * prove, as one string, so a join stays two things to copy and the screens keep the fields they have. */
+export const joinToken = (code: string, hostKey: string): string => `${shownPairCode(code)}${JOIN_TOKEN_MARK}${hostKey}`;
+
+/** The same token read back on the computer being joined, whichever road it came by: a person's paste, the flag,
+ * or the file an install over ssh landed. The code is taken as any screen's code is taken; the fingerprint is left
+ * exactly as it was written, since its own alphabet is case sensitive. A token that carries no fingerprint answers
+ * none, and the caller refuses rather than dialling. */
+export function readJoinToken(typed: string): { code: string; hostKey?: string } {
+  const trimmed = typed.trim();
+  const at = trimmed.indexOf(JOIN_TOKEN_MARK);
+  if (at === -1) return { code: sentPairCode(trimmed) };
+  const hostKey = trimmed.slice(at + 1).trim();
+  const code = sentPairCode(trimmed.slice(0, at));
+  return hostKey === "" ? { code } : { code, hostKey };
+}
+
+/** The refusal a join gets for a line that named no key: every line wsp add prints carries one, so a line without
+ * one was written by hand or cut in half on its way over. Nothing is dialled. */
+export const JOIN_NO_KEY_REFUSAL = "that join line names no key for the host, so this computer cannot tell which host it is joining; run wsp add on the host again and copy the whole code it prints";
+
+/** The refusal a join gets when the host at that address proved a key that is not the one the join line named:
+ * something answered where the host was expected. Nothing of this computer's went to it. */
+export const joinKeyRefusal = (url: string): string => `the host at ${url} proved a key the join line did not name, so it is not the host that printed that line; nothing was sent to it`;
+
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
  * mints this one, since a person joining a computer never typed wsp host pair. */
@@ -3563,6 +3593,9 @@ export const PlaceDoorView = z.object({
   port: z.number().int().min(1).max(65535),
   /** `http://<address>:<port>` for every address this computer answers on that leaves it, loopback left out. */
   addresses: z.array(z.string().url()).min(1),
+  /** The fingerprint of the key this host proves at a join, for the token the join line carries: what tells the
+   * computer being joined that the host answering at one of those addresses is the one that printed the line. */
+  hostKey: z.string().min(1).max(200),
   /** The relay hostname as an https address, when the host is linked and its connector is running. */
   relay: z.string().url().optional(),
 });
