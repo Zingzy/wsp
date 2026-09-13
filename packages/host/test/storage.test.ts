@@ -82,24 +82,24 @@ describe("the orphan lines", () => {
 describe("the retention line", () => {
   it("names what goes, what it holds, what it saves and what stays, in one line", () => {
     const plan = { keep: [version(4, 3), version(3, 2)], drop: [version(1), version(2, 1)], abandoned: [], guarded: [], parentAssumed: false, freedBytes: 15.8 * GB, savesUsdPerMonth: 15.8 * 0.05 };
-    expect(describeRetention(plan, PRICING)).toBe("Delete golden v1 and v2, 15.8 GB, saving about $0.79/month from 2026-10-01? v4 and v3 stay.");
+    expect(describeRetention(plan, PRICING)).toBe("Delete image v1 and v2, 15.8 GB, saving about $0.79/month from 2026-10-01? v4 and v3 stay.");
   });
 
   it("names the abandoned branches in the same line, after what stays", () => {
     const plan = { keep: [version(5, 2), version(2, 1)], drop: [version(1), version(3, 2), version(4, 3)], abandoned: [version(3, 2), version(4, 3)], guarded: [], parentAssumed: false, freedBytes: 24.5 * GB, savesUsdPerMonth: 24.5 * 0.05 };
-    expect(describeRetention(plan, PRICING)).toBe("Delete golden v1, v3 and v4, 24.5 GB, saving about $1.23/month from 2026-10-01? v5 and v2 stay. v3 and v4 are abandoned branches: v5 was not built through them.");
+    expect(describeRetention(plan, PRICING)).toBe("Delete image v1, v3 and v4, 24.5 GB, saving about $1.23/month from 2026-10-01? v5 and v2 stay. v3 and v4 are abandoned branches: v5 was not built through them.");
     const one = { ...plan, drop: [version(4, 3)], abandoned: [version(4, 3)], freedBytes: 8.5 * GB, savesUsdPerMonth: 8.5 * 0.05 };
-    expect(describeRetention(one, PRICING)).toBe("Delete golden v4, 8.5 GB, saving about $0.43/month from 2026-10-01? v5 and v2 stay. v4 is an abandoned branch: v5 was not built through it.");
+    expect(describeRetention(one, PRICING)).toBe("Delete image v4, 8.5 GB, saving about $0.43/month from 2026-10-01? v5 and v2 stay. v4 is an abandoned branch: v5 was not built through it.");
   });
 
   it("says when the kept parent was taken by version order, since the head was sealed before parents were recorded", () => {
     const plan = { keep: [version(4), version(3)], drop: [version(1), version(2)], abandoned: [], guarded: [], parentAssumed: true, freedBytes: 15.8 * GB, savesUsdPerMonth: 15.8 * 0.05 };
-    expect(describeRetention(plan, PRICING)).toBe("Delete golden v1 and v2, 15.8 GB, saving about $0.79/month from 2026-10-01? v4 and v3 stay. v3 is taken as the parent by version order: v4 was sealed before parents were recorded.");
+    expect(describeRetention(plan, PRICING)).toBe("Delete image v1 and v2, 15.8 GB, saving about $0.79/month from 2026-10-01? v4 and v3 stay. v3 is taken as the parent by version order: v4 was sealed before parents were recorded.");
   });
 
   it("a drop inside the free GB says nothing is saved yet; three versions read as a list", () => {
     const plan = { keep: [version(5, 4), version(4, 3)], drop: [version(1), version(2, 1), version(3, 2)], abandoned: [], guarded: [], parentAssumed: false, freedBytes: 3 * GB, savesUsdPerMonth: 0 };
-    expect(describeRetention(plan, PRICING)).toBe("Delete golden v1, v2 and v3, 3.0 GB, inside the free 10 GB, so nothing saved yet? v5 and v4 stay.");
+    expect(describeRetention(plan, PRICING)).toBe("Delete image v1, v2 and v3, 3.0 GB, inside the free 10 GB, so nothing saved yet? v5 and v4 stay.");
   });
 });
 
@@ -127,8 +127,8 @@ describe("the retention offer over the stub backend", () => {
     const g = await golden();
     await retentionOffer({ rt: g.rt, interactive: false, yes: true, ...streams(g) });
     const out = g.text();
-    expect(out).toContain("Delete golden v1 and v2, 17.0 GB, saving about $0.85/month from 2026-10-01? v4 and v3 stay. Taken as yes (--yes).");
-    expect(out).toContain("Deleted golden v1 and v2.");
+    expect(out).toContain("Delete image v1 and v2, 17.0 GB, saving about $0.85/month from 2026-10-01? v4 and v3 stay. Taken as yes (--yes).");
+    expect(out).toContain("Deleted image v1 and v2.");
     expect(out).toContain("storage: 2 snapshots, 21.0 GB; about $0.55/month above the free 10 GB from 2026-10-01");
     expect(g.backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v3", "snap_golden-v4"]);
     expect((await g.rt.golden.get())!.versions.map(v => v.version)).toEqual([3, 4]);
@@ -140,8 +140,8 @@ describe("the retention offer over the stub backend", () => {
     await g.rt.workspaces.nap(alpha.id);
     await retentionOffer({ rt: g.rt, interactive: false, yes: false, ...streams(g) });
     const out = g.text();
-    expect(out).toContain("Golden v1 stays: workspace alpha was forked from it.");
-    expect(out).toContain("Delete golden v2, 9.0 GB, saving about $0.45/month from 2026-10-01? v4 and v3 stay. Taken as yes (no terminal).");
+    expect(out).toContain("Image v1 stays: workspace alpha was forked from it.");
+    expect(out).toContain("Delete image v2, 9.0 GB, saving about $0.45/month from 2026-10-01? v4 and v3 stay. Taken as yes (no terminal).");
     expect(g.backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v1", "snap_golden-v3", "snap_golden-v4"]);
     expect((await g.rt.golden.get())!.versions.map(v => v.version)).toEqual([1, 3, 4]);
   });
@@ -159,8 +159,8 @@ describe("the retention offer over the stub backend", () => {
     };
     await sealed(g);
     await retentionOffer({ rt: g.rt, interactive: false, yes: true, ...streams(g) });
-    expect(g.text()).toContain("Delete golden v1, v3 and v4, 29.0 GB, saving about $1.45/month from 2026-10-01? v5 and v2 stay. v3 and v4 are abandoned branches: v5 was not built through them. Taken as yes (--yes).");
-    expect(g.text()).toContain("Deleted golden v1, v3 and v4.");
+    expect(g.text()).toContain("Delete image v1, v3 and v4, 29.0 GB, saving about $1.45/month from 2026-10-01? v5 and v2 stay. v3 and v4 are abandoned branches: v5 was not built through them. Taken as yes (--yes).");
+    expect(g.text()).toContain("Deleted image v1, v3 and v4.");
     expect(g.backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v5"]);
 
     const h = await golden();
@@ -168,8 +168,8 @@ describe("the retention offer over the stub backend", () => {
     await sealed(h);
     await h.rt.workspaces.create({ golden: "snap_golden-v4", name: "alpha" });
     await retentionOffer({ rt: h.rt, interactive: false, yes: true, ...streams(h) });
-    expect(h.text()).toContain("Golden v4 stays: workspace alpha was forked from it.");
-    expect(h.text()).toContain("Delete golden v1 and v3, 18.0 GB, saving about $0.90/month from 2026-10-01? v5 and v2 stay. v3 is an abandoned branch: v5 was not built through it. Taken as yes (--yes).");
+    expect(h.text()).toContain("Image v4 stays: workspace alpha was forked from it.");
+    expect(h.text()).toContain("Delete image v1 and v3, 18.0 GB, saving about $0.90/month from 2026-10-01? v5 and v2 stay. v3 is an abandoned branch: v5 was not built through it. Taken as yes (--yes).");
     expect(h.backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v2", "snap_golden-v4", "snap_golden-v5"]);
     expect((await h.rt.golden.get())!.versions.map(v => v.version)).toEqual([2, 4, 5]);
   });
@@ -178,20 +178,20 @@ describe("the retention offer over the stub backend", () => {
     const g = await golden();
     const asked = retentionOffer({ rt: g.rt, interactive: true, yes: false, ...streams(g) });
     await new Promise(r => setTimeout(r, 20));
-    // The prompt wraps the question to the terminal's width.
-    expect(g.text()).toContain("Delete golden v1 and v2, 17.0 GB, saving about $0.85/month from 2026-10-01?");
-    expect(g.text()).toContain("v4 and v3 stay.");
+    // The prompt wraps the question to the terminal's width, so the line is read back unwrapped.
+    const asOneLine = (): string => g.text().replace(/\n┃\s+/g, " ");
+    expect(asOneLine()).toContain("Delete image v1 and v2, 17.0 GB, saving about $0.85/month from 2026-10-01? v4 and v3 stay.");
     expect(g.text()).toContain("No keeps every version.");
     await g.press("n");
     await asked;
-    expect(g.text()).toContain("Every golden version is kept.");
+    expect(g.text()).toContain("Every image version is kept.");
     expect(g.backend.snapshots).toHaveLength(4);
 
     const again = retentionOffer({ rt: g.rt, interactive: true, yes: false, ...streams(g) });
     await new Promise(r => setTimeout(r, 20));
     await g.press("y");
     await again;
-    expect(g.text()).toContain("Deleted golden v1 and v2.");
+    expect(g.text()).toContain("Deleted image v1 and v2.");
     expect(g.backend.snapshots.map(r => r.id)).toEqual(["snap_golden-v3", "snap_golden-v4"]);
   });
 
@@ -213,7 +213,7 @@ describe("the retention offer over the stub backend", () => {
       throw new Error("502 Bad Gateway");
     };
     await retentionOffer({ rt: g.rt, interactive: false, yes: true, ...streams(g) });
-    expect(g.text()).toContain("Snapshot storage was not read (502 Bad Gateway); every golden version is kept.");
+    expect(g.text()).toContain("Snapshot storage was not read (502 Bad Gateway); every image version is kept.");
     expect((await g.rt.golden.get())!.versions).toHaveLength(4);
   });
 });

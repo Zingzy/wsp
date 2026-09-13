@@ -622,11 +622,12 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.noRoad);
   });
 
-  /** The four lines of the plan, as they read at this moment: the words with the fact slot after them, and the
-   * state each line is in. */
+  /** The lines of the plan, as they read at this moment: the words with the fact slot after them, and the state
+   * each line is in. */
   const plan = (): [string | null, string | null][] => [...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")]);
   const WAITING: [string, string][] = [
     [placeAddSheetWord("connect", "running"), "waiting"],
+    [placeAddSheetWord("host-key", "running"), "waiting"],
     [`${placeAddSheetWord("wsp", "running")}${PLACE_INSTALL.weight}`, "waiting"],
     [placeAddSheetWord("service", "running"), "waiting"],
     [placeAddSheetWord("join", "running"), "waiting"],
@@ -642,8 +643,10 @@ describe("the ssh road of the sheet", () => {
   it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, the image and the opener", async () => {
     await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], projects: [] }) } as unknown as Partial<Api>);
     const lines = plan().map(([word]) => word ?? "");
-    expect(lines[1]).toBe(`installing wsp under ~/.wsp${PLACE_INSTALL.weight}`);
-    expect(lines[2]).toBe("starting the agent as a user service");
+    // The one line that is about this computer rather than the box, in the file's own name.
+    expect(lines[1]).toBe("keeps the box's host key in ~/.ssh/known_hosts here");
+    expect(lines[2]).toBe(`installing wsp under ~/.wsp${PLACE_INSTALL.weight}`);
+    expect(lines[3]).toBe("starting the agent as a user service");
     await waitFor(() => expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image (4.2 GB) is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is."));
     expect(document.querySelector("[data-k='opener-note']")?.textContent).toBe(PLACE_INSTALL.openerLine);
     // The one word Lena could not read on the way out is on neither screen now.
@@ -656,7 +659,7 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
   });
 
-  it("fills the same four lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
+  it("fills the same lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
     let report: ((stage: InstallStage) => void) | undefined;
     await openSheet({ addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => (report = onStage)) } as unknown as Partial<Api>);
     const list = (): Element | null => document.querySelector("[data-k='plan']");
@@ -664,17 +667,20 @@ describe("the ssh road of the sheet", () => {
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='ssh-login']")).toBeTruthy());
-    // The press takes the fields away and leaves the list standing: the same element, still four lines.
+    // The press takes the fields away and leaves the list standing: the same element, the same lines.
     expect(list()).toBe(before);
     expect(plan()).toEqual(WAITING);
     act(() => {
       report?.({ step: "connect", word: "connected · Ubuntu 24.04", state: "done" });
+      report?.({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done", fact: "ssh-ed25519 SHA256:abc" });
       report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "running" });
     });
     expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
     expect(plan()).toEqual([
       ["connected · Ubuntu 24.04", "done"],
+      // The key the dial kept is the step's own fact, so a person can check it against the box's own.
+      [`${placeAddSheetWord("host-key", "done")}ssh-ed25519 SHA256:abc`, "done"],
       // The weight stands in the slot while the step runs: the installer reports no note of its own for it, and
       // what wsp takes on the box is what a person pressed Add without knowing.
       [`installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"],
@@ -683,8 +689,8 @@ describe("the ssh road of the sheet", () => {
     ]);
     // A step reported again is that line moving on, never a second line for the same step.
     act(() => report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "done", fact: "9 s" }));
-    expect(plan()[1]).toEqual(["installing wsp 0.2.09 s", "done"]);
-    expect(plan()).toHaveLength(4);
+    expect(plan()[2]).toEqual(["installing wsp 0.2.09 s", "done"]);
+    expect(plan()).toHaveLength(5);
   });
 
   it("reads the box as joined once the installer answers with it, and says it runs workspaces", async () => {
@@ -721,6 +727,7 @@ describe("the ssh road of the sheet", () => {
     };
     await act(async () => {
       stage("connect", "done", "Ubuntu 24.04");
+      stage("host-key", "done", "ssh-ed25519 SHA256:abc");
       stage("wsp", "done", "0.2.0");
       stage("service", "done");
       stage("join", "running");
@@ -728,9 +735,10 @@ describe("the ssh road of the sheet", () => {
     });
     expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
-    // The plan's own four lines, the ones the installer has reached filled in and the one it has not standing.
+    // The plan's own lines, the ones the installer has reached filled in and the one it has not standing.
     expect([...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
       [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
+      [`${placeAddSheetWord("host-key", "done")}ssh-ed25519 SHA256:abc`, "done"],
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
       [placeAddSheetWord("service", "done"), "done"],
       [placeAddSheetWord("join", "running"), "running"],
@@ -745,10 +753,11 @@ describe("the ssh road of the sheet", () => {
     });
     await waitFor(() => expect(document.querySelector("[data-k='title']")?.textContent).toBe(PLACES_WORDS.sheet.joinedTitle("hetzner")));
     const drawn = [...document.querySelectorAll("[data-k='plan'] [data-k='line']")];
-    // Still the four the plan stands at: the join step wears different words once it is over, and the line it was
+    // Still the lines the plan stands at: the join step wears different words once it is over, and the line it was
     // already on is the one that moves on rather than a second line arriving under it.
     expect(drawn.map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
       [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
+      [`${placeAddSheetWord("host-key", "done")}ssh-ed25519 SHA256:abc`, "done"],
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
       [placeAddSheetWord("service", "done"), "done"],
       [`${placeAddSheetWord("join", "done")}workspaces yes · engine none`, "done"],

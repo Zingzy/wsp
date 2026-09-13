@@ -209,7 +209,7 @@ function describeKept(b: GoldenBuilderView, rateUsdPerHour: number): string {
 function describeSealed(b: GoldenBuilderView, sealed: { at: string; version: number }, rateUsdPerHour: number): string {
   const ageMs = Date.now() - Date.parse(b.createdAt);
   const since = describeAge(Date.now() - Date.parse(sealed.at)).replace(/ old$/, "");
-  return `reap: left alone ${b.id}: your builder saved as golden v${sealed.version}, kept ${since} since the save and holding one of the account's machine slots, ${describeCost(rateUsdPerHour, ageMs)}; wsp init updates the golden on it, or it is stopped ten minutes after the save`;
+  return `reap: left alone ${b.id}: your builder saved as image v${sealed.version}, kept ${since} since the save and holding one of the account's machine slots, ${describeCost(rateUsdPerHour, ageMs)}; wsp init updates your image on it, or it is stopped ten minutes after the save`;
 }
 
 /** Kills what this host owns and nothing claims, says which machines went and
@@ -229,7 +229,7 @@ async function sweepOrphans(rt: Runtime, log: (line: string) => void, listSpared
 
 class NoGoldenError extends Error {
   constructor() {
-    super("no golden image yet; run wsp init first");
+    super("no image yet; run wsp init first");
   }
 }
 

@@ -87,12 +87,12 @@ export function describeRetention(plan: RetentionPlan, pricing: { freeGb: number
   const parent = plan.keep[1];
   const assumed = plan.parentAssumed && parent !== undefined ? ` v${parent.version} is taken as the parent by version order: v${plan.keep[0]!.version} was sealed before parents were recorded.` : "";
   const abandoned = plan.abandoned.length > 0 ? ` ${versionList(plan.abandoned)} ${plan.abandoned.length === 1 ? "is an abandoned branch" : "are abandoned branches"}: v${plan.keep[0]!.version} was not built through ${plan.abandoned.length === 1 ? "it" : "them"}.` : "";
-  return `Delete golden ${versionList(plan.drop)}, ${gb(plan.freedBytes)}, ${saving}? ${versionList(plan.keep)} stay.${assumed}${abandoned}`;
+  return `Delete image ${versionList(plan.drop)}, ${gb(plan.freedBytes)}, ${saving}? ${versionList(plan.keep)} stay.${assumed}${abandoned}`;
 }
 
 export function describeGuarded(g: RetentionPlan["guarded"][number]): string {
   const who = g.workspaces.length === 1 ? `workspace ${g.workspaces[0]} was` : `workspaces ${g.workspaces.join(", ")} were`;
-  return `Golden v${g.version.version} stays: ${who} forked from it.`;
+  return `Image v${g.version.version} stays: ${who} forked from it.`;
 }
 
 export interface RetentionOfferOptions {
@@ -111,7 +111,7 @@ export async function retentionOffer(o: RetentionOfferOptions): Promise<void> {
   try {
     plan = await o.rt.golden.retention();
   } catch (e) {
-    log.warn(`Snapshot storage was not read (${e instanceof Error ? e.message : String(e)}); every golden version is kept.`, out);
+    log.warn(`Snapshot storage was not read (${e instanceof Error ? e.message : String(e)}); every image version is kept.`, out);
     return;
   }
   if (plan === undefined) return;
@@ -121,15 +121,15 @@ export async function retentionOffer(o: RetentionOfferOptions): Promise<void> {
   if (o.interactive) {
     const go = await confirmPrompt({ message: line, hint: "No keeps every version.", initialValue: true, input: o.input, output: o.output });
     if (isCancel(go) || !go) {
-      log.step("Every golden version is kept.", out);
+      log.step("Every image version is kept.", out);
       return;
     }
   } else {
     log.step(`${line} Taken as yes (${o.yes ? "--yes" : "no terminal"}).`, out);
   }
   const { dropped, failed } = await o.rt.golden.prune();
-  if (dropped.length > 0) log.success(`Deleted golden ${versionList(dropped)}.`, out);
-  for (const f of failed) log.warn(`Golden v${f.version} was not deleted (${f.message}); it stays in the lineage.`, out);
+  if (dropped.length > 0) log.success(`Deleted image ${versionList(dropped)}.`, out);
+  for (const f of failed) log.warn(`Image v${f.version} was not deleted (${f.message}); it stays in the lineage.`, out);
   const storage = await o.rt.golden.storage().catch(() => undefined);
   if (storage !== undefined) log.info(describeStorage(storage), out);
 }

@@ -10,11 +10,13 @@
 // of them the control is gone and two notes say why. Every word under the
 // control is a fact of that row as the places list already formats it
 // (whereCaption), so this dialog holds no second spelling of a rate, a count
-// or an image version.
+// or an image version. The sizes are the picked row's own, off the same list,
+// since one list for every row quoted one provider's prices under another's
+// name.
 import { useState } from "react";
-import { PLACES_WORDS, fmtRate, fmtSize, offeredSize, sizeOffer, sizeWord, type MachineSizeOffer, type PlaceView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
+import { PLACES_WORDS, fmtPrice, fmtSize, offeredSize, sizeOffer, sizeWord, type PlaceView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
 import { copyOn } from "../settings/image.js";
-import { WHERE_PICK_WORDS, isProviderPlace, placeIsFull, placeName, whereCaption, whereSegments } from "../settings/places.js";
+import { WHERE_PICK_WORDS, placeIsFull, placeName, whereCaption, whereSegments } from "../settings/places.js";
 import { Button } from "../components/ui/button.js";
 import {
   Dialog,
@@ -40,7 +42,6 @@ export function NewWorkspaceDialog({
   initialName,
   places,
   copies,
-  sizes,
   goldenSize,
   refusal,
   onCreate,
@@ -52,8 +53,6 @@ export function NewWorkspaceDialog({
   places: readonly PlaceView[];
   /** The copies of the image that are already built, so a row says whether one is there or is built first. */
   copies: readonly SealedImageCopy[];
-  /** What the provider offers; none hides the size rows and the workspace takes the image's size. */
-  sizes: readonly MachineSizeOffer[];
   /** The image's own size, the row checked until the person picks; null while unknown or when no image says. */
   goldenSize: WorkspaceSize | null;
   /** Why there is nothing to fork yet, which holds the keycap and stands in the caption; null when the fork can go ahead. */
@@ -70,7 +69,9 @@ export function NewWorkspaceDialog({
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
   const where = segments.find(p => p.id === pickedWhere) ?? segments.find(p => p.default) ?? segments[0];
   const trimmed = name.trim();
-  const offers = where !== undefined && isProviderPlace(where) ? sizes : [];
+  // The row's own sizes at the row's own rates: a place that offers no pick hides the rows and the workspace takes
+  // the image's size.
+  const offers = where?.sizes ?? [];
   const checked = picked ?? (goldenSize !== null && offeredSize(offers, goldenSize) ? goldenSize : null);
   // The caption prices the workspace this dialog would make, so it quotes the ticked row's rate; with no row ticked
   // it passes none and the caption falls back to the place's own rate, which is that rule's one home.
@@ -159,7 +160,7 @@ export function NewWorkspaceDialog({
                         <label key={sizeWord(s)} data-size={sizeWord(s)} className="flex h-9 cursor-pointer items-center gap-2.5 font-mono text-[11px] text-muted-foreground">
                           <Radio value={sizeWord(s)} />
                           <span className="flex-1 tabular-nums">{fmtSize(s)}</span>
-                          <span className="tabular-nums">{fmtRate(s.rateUsdPerHour)}</span>
+                          <span className="tabular-nums">{fmtPrice(s.rateUsdPerHour)}</span>
                         </label>
                       ))}
                     </RadioGroup>

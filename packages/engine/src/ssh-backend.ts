@@ -269,6 +269,15 @@ export async function knownHostKey(reach: SshReach, run: SshLocalRun = localRun)
   return hostKeyFound(found, values["hostkeyalgorithms"] ?? "");
 }
 
+/** The file accept-new writes a machine's key into on this computer, off the same `ssh -G` the key is read
+ * through: the first the client names, which is the person's own where a config points `UserKnownHostsFile`
+ * somewhere other than the default. Nothing where the client answers nothing or writes no file at all, which
+ * leaves a screen to name the default rather than a path this computer did not confirm. */
+export async function knownHostsWritten(reach: SshReach, run: SshLocalRun = localRun): Promise<string | undefined> {
+  const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
+  return config.exitCode === 0 ? knownHostFiles(readValues(config.stdout))[0] : undefined;
+}
+
 /** What a machine over ssh is, as the machine itself answers: the key it holds and the login a turn runs as. Two
  * records of the same machine under different keys, ports, aliases or addresses answer with this same string, which
  * is what keeps one workspace on one machine. */
@@ -276,11 +285,17 @@ export function sshIdentity(hostKey: string, user: string): string {
   return `${hostKey} as ${user}`;
 }
 
-/** The client's own words with its debug log taken out: what a person can act on when a dial fails. */
+/** ssh's own note for the key accept-new wrote on its way in. The road that offers the login names that file before
+ * anything is dialled, so the note is not news about the refusal it rides in on and it crowds out the sentence a
+ * person can act on in a slot two lines high. */
+const WROTE_KNOWN_HOSTS = /^Warning: Permanently added .* to the list of known hosts\.?$/;
+
+/** The client's own words with its debug log and its note about known_hosts taken out: what a person can act on
+ * when a dial fails. */
 function clientWords(text: string): string {
   return text
     .split("\n")
-    .filter(line => !/^debug\d+:/.test(line))
+    .filter(line => !/^debug\d+:/.test(line) && !WROTE_KNOWN_HOSTS.test(line))
     .join("\n")
     .trim();
 }
@@ -517,6 +532,8 @@ export interface SshBackendOptions {
   transport?: SshTransport;
   /** How the key a machine holds is read; the client's own known_hosts entry for it unless a test hands its own. */
   hostKey?: SshHostKeyReader;
+  /** Which file on this computer that entry was written into; the client's own answer unless a test hands its own. */
+  knownHosts?: (reach: SshReach) => Promise<string | undefined>;
 }
 
 /** The backend for every ssh machine a host has a record of. It holds no fleet of its own: a machine that already
@@ -549,10 +566,12 @@ export class SshBackend implements MachineBackend {
 
   private readonly transport: SshTransport;
   private readonly hostKey: SshHostKeyReader;
+  private readonly knownHosts: (reach: SshReach) => Promise<string | undefined>;
 
   constructor(opts: SshBackendOptions = {}) {
     this.transport = opts.transport ?? sshClient;
     this.hostKey = opts.hostKey ?? knownHostKey;
+    this.knownHosts = opts.knownHosts ?? knownHostsWritten;
   }
 
   async create(): Promise<Machine> {
@@ -580,8 +599,22 @@ export class SshBackend implements MachineBackend {
    * left open exchanges no key at all, and a record with no identity is a machine that can be recorded twice. */
   async adopt(reach: SshReach): Promise<{ machine: SshMachine; login: SshLogin; shape: MachineShape; hostKey?: string }> {
     const { login, shape } = await readSshMachine(reach, this.transport);
-    const hostKey = await this.hostKey(reach);
+    const hostKey = await this.keyFor(reach);
     return { machine: new SshMachine(reach, this.transport), login, shape, ...(hostKey !== undefined ? { hostKey } : {}) };
+  }
+
+  /** The key this computer's ssh client holds for a machine, read with nothing dialled, or nothing where it holds
+   * none. Asked on its own by a road that has to say what a dial wrote here whether or not the login that followed
+   * it stood, which is a question `adopt` cannot answer once it has thrown. */
+  async keyFor(reach: SshReach): Promise<string | undefined> {
+    return this.hostKey(reach);
+  }
+
+  /** The file that key was written into on this computer, as the client itself answers rather than as a default:
+   * a config pointing UserKnownHostsFile somewhere else is read out, so a screen naming the file names the true
+   * one. Nothing where the client answers nothing, which leaves that screen its default to name. */
+  async knownHostsFile(reach: SshReach): Promise<string | undefined> {
+    return this.knownHosts(reach);
   }
 }
 

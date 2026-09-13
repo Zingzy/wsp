@@ -108,7 +108,9 @@ describe("the recipe verb's flags", () => {
     expect(lines.join("\n")).toContain("--add-check <id>=<command> saying it is");
     const usage: string[] = [];
     expect(await cli(["recipe", "--help"], io(usage, []))).toBe(0);
-    expect(usage.join("\n")).toContain("[--add <id>=<command>] [--add-check <id>=<command>]");
+    // The usage wraps between its groups on a narrow page, so each flag is read on its own rather than as a pair.
+    expect(usage.join("\n")).toContain("[--add <id>=<command>]");
+    expect(usage.join("\n")).toContain("[--add-check <id>=<command>]");
   });
 
   it("refuses a spec that is not <id>=<command> before it reads this computer, and writes nothing", async () => {

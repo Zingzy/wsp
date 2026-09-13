@@ -135,6 +135,17 @@ export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): st
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
 export const FREE_WORD = "free";
 
+/** Whether a place charges nothing an hour: a rate of nothing, and a rate nobody reported, both read free, since
+ * neither is a figure to weigh against another. The one reading, so a caption that builds its own clauses and the
+ * formatter below cannot disagree about which rows are free. */
+export const chargesNothing = (usdPerHour: number | undefined): usdPerHour is undefined | 0 => usdPerHour === undefined || usdPerHour === 0;
+
+/** A rate a person is being quoted before they pick: a size on offer, a place's own hourly price. A place that
+ * charges nothing reads free, since $0.00/hr beside a row a person is choosing between reads as a figure that has
+ * not arrived rather than as the fact that nobody is billed. A rate that was metered rather than quoted, which is
+ * what a place is burning this minute, keeps its figure and reads fmtRate. */
+export const fmtPrice = (usdPerHour: number): string => (chargesNothing(usdPerHour) ? FREE_WORD : fmtRate(usdPerHour));
+
 /** What a pane prints in the slot a reading would fill on a kind whose machines serve that reading on no road: the
  * Machine tab's Live rows and the Processes table both read it, in place of a pending that would never settle. The
  * kind table says which kinds serve which reading, so a pane says this within one probe window. */
@@ -352,9 +363,11 @@ export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: n
   return parts;
 }
 
-/** The chat footer as one line, for a stream that has no footer: the outcome word, then what it worked and cost. */
-export function turnSettledLine(result: TurnResult): string {
-  return [result.status, ...turnSettledParts(result)].join(" · ");
+/** The chat footer as one line, for a stream that has no footer: the outcome word, then what it worked and cost.
+ * `spendWord` is what the figure is, where the surface knows: a turn on a computer of the person's own ran on
+ * their own sign-in and its figure is LIST_PRICE_WORD, which is the word the app's footer already gives it. */
+export function turnSettledLine(result: TurnResult, spendWord?: string): string {
+  return [result.status, ...turnSettledParts(result, undefined, spendWord)].join(" · ");
 }
 
 /** The row a turn's end leaves in a read transcript: the footer above, and why it did not complete where it did
@@ -1179,6 +1192,17 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** What a launch that woke a machine and then died before its agent said a word answers with. The wake was this
+ * launch's and nothing else ran there, so the machine goes back where the launch found it rather than billing out
+ * an idle window for work that never happened. */
+export const workspaceAsleepAgainLine = (name: string): string => `${name} is asleep again`;
+
+/** The same launch on a machine it did not wake, or one another thread is working on: nothing is touched, so the
+ * line says what that costs by naming when the idle window takes it. Whole minutes, since nothing turns on the
+ * seconds and a countdown a person reads once need not move. */
+export const workspaceStaysAwakeLine = (name: string, napsInMs?: number): string =>
+  `${name} stays awake${napsInMs === undefined ? "" : ` · naps in ${fmtUptime(napsInMs)}`}`;
+
 /** The reason a status carries when the runtime's idle policy napped a workspace, with the one reading of it back
  * beside it: the runtime stamps the nap through `of` and the app's paused line takes the window out through
  * `windowIn`, so the words and their parse are one thing and a rewording moves both at once. */
@@ -1538,9 +1562,13 @@ export function nameDeletingRefusal(name: string): string {
 export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
 
 /** The one sentence every machine road answers with on a computer set up with no machine provider key: wsp init took
- * the local road, so this computer is a workspace and there is nothing to fork, pause or seal until a key is here.
- * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
-export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to build your image";
+ * the local road, so this computer is a workspace and there is nothing to fork, pause or seal until a provider is
+ * added. The provider module a keyless host wires says it, and so does the command line before it asks for anything.
+ *
+ * It ends on the verb off the front page that fixes it, never on a shell variable: this is the first refusal a
+ * person who typed wsp new on a fresh home reads, and a variable named there is neither one of the sixteen words
+ * nor true of the other providers. wsp add with no argument prints the words it takes. */
+export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; wsp add <provider> connects one, and wsp init then builds your image on it";
 
 /** What an image build is refused with when no place this host holds runs workspaces: a joined computer whose doctor
  * said yes is such a place, and so is a provider with a key. The init job and the command line beside it both say it. */
@@ -1918,6 +1946,16 @@ export const NETWORK_LOST_LINE = "This computer lost its network";
 /** The failures a provider client raises when the network is gone rather than when the provider refused. */
 const OFFLINE_FAILURE = /^fetch failed$|\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETDOWN|ENETUNREACH|EHOSTUNREACH)\b/;
 
+/** What to do about a file the build would put on the machine and this computer has not got, which is read before
+ * the confirm so nothing is booted and nothing bills for a file the deploy was always going to ask for. The file
+ * itself is no part of this: a terminal says it once above this line, the way every other refusal there names the
+ * fault and then the fix. A shipped install carries every one, so the fix names the install first and the
+ * checkout's own build after it. */
+export const BUILD_NEEDS_FILE_FIX = "Nothing was booted. An installed wsp carries it; a checkout builds the command and places the daemon binaries with packages/wspx/scripts/daemon-binary.mjs.";
+
+/** The same refusal with the file in front of it, for the one line a client has to draw a stage that failed. */
+export const buildNeedsFileLine = (missing: string): string => `${missing}. ${BUILD_NEEDS_FILE_FIX}`;
+
 /** The sentence a stopped build shows for what happened: this computer's own word when every part of the error is
  * the network going away, else the error's parts said once. A run that failed the same way twice reports it twice;
  * the person reads one reason, not a list. */
@@ -1925,6 +1963,15 @@ export function initStoppedLine(error: string): string {
   const parts = [...new Set(error.split(";").map(p => p.trim()).filter(p => p !== ""))];
   if (parts.length === 0) return error;
   return parts.every(p => OFFLINE_FAILURE.test(p)) ? NETWORK_LOST_LINE : parts.join("; ");
+}
+
+/** The sentence a build that stopped on its own ends on: what stopped it, then what became of the machine it had
+ * booted, in the same words a stop the person asked for uses. A build that never booted one says nothing of a
+ * machine: the stage it refused at already says nothing was booted. */
+export function initFailedLine(error: string, machine?: "gone" | "left"): string {
+  const said = initStoppedLine(error);
+  if (machine === undefined) return said;
+  return `${said} ${machine === "gone" ? MACHINE_GONE_LINE : STOP_LEFT_MACHINE_LINE}`;
 }
 
 /** Whether the job's phase is one it ends on. */
@@ -2277,6 +2324,20 @@ export function agentsWord(agents: { spawn: boolean; maxMachines: number } | und
 /** What a listing and the workspace card say about a workspace's switch, one line either way. */
 export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
   return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "workspace" : "workspaces"}`;
+}
+
+/** Where the ssh client on this computer writes the key a machine first answered with under its own default
+ * config, in the words a person would type, since the file is theirs and nothing wsp owns. This is what a screen
+ * can name before anything is dialled, which is where a person reads what pressing Add will do; the file that was
+ * actually written is the client's own answer, and the step that writes it says which one it was. */
+export const KNOWN_HOSTS = "~/.ssh/known_hosts";
+
+/** What the step that wrote a machine's key into this computer's known_hosts says it left there: the fingerprint
+ * whole, so it can be checked against the machine's own, and the file the client answered with where that is not
+ * the one the plan line named. A person with UserKnownHostsFile pointed elsewhere reads the true path here rather
+ * than the default above it. */
+export function hostKeyKeptNote(hostKey: string, file?: string): string {
+  return file === undefined || file.endsWith(KNOWN_HOSTS.slice(1)) ? hostKey : `${hostKey} in ${file}`;
 }
 
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare

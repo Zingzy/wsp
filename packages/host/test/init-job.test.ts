@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowOver, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowOver, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -442,7 +442,7 @@ describe("the init job, manual road", () => {
     expect(goldenHead(await f.rt.golden.get())?.version).toBe(1);
     expect((await f.rt.workspaces.list()).map(w => w.name)).toEqual(["first"]);
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(1);
-    expect(done.log.some(l => l.includes("Golden v1 sealed"))).toBe(true);
+    expect(done.log.some(l => l.includes("Image v1 sealed"))).toBe(true);
     // Done: the setup carries the job for a client opening late, and a new start is allowed again.
     expect((await f.jobs.get()).job?.phase).toBe("done");
   });
@@ -731,8 +731,9 @@ describe("the init job, manual road", () => {
     await f.settled();
     const view = f.jobs.view()!;
     expect(view.phase).toBe("failed");
-    // The raw error, doubled by the two fetches that failed, is not the sentence a person reads.
-    expect(view.error).toBe(NETWORK_LOST_LINE);
+    // The raw error, doubled by the two fetches that failed, is not the sentence a person reads; the machine the
+    // stage had booted is answered for in the same words a stop the person asked for uses.
+    expect(view.error).toBe(`${NETWORK_LOST_LINE} ${MACHINE_GONE_LINE}`);
     // Every stage stays, in the build's order, with the sign-ins where they happen and the first workspace last.
     const stages = view.rows.filter(r => r.kind === "stage").map(r => r.label);
     expect(stages).toEqual(Object.values(GOLDEN_STAGE_WORDS));
@@ -745,7 +746,7 @@ describe("the init job, manual road", () => {
     // The stage that failed ends its block on the sentence the head shows, and the raw error reaches no row; the ones after it wait.
     const failed = view.rows.find(r => r.state === INIT_ROW_STATES.failed)!;
     expect(failed.label).toBe(GOLDEN_STAGE_WORDS["deploying-daemon"]);
-    expect(failed.lines!.at(-1)).toBe(NETWORK_LOST_LINE);
+    expect(failed.lines!.at(-1)).toBe(view.error);
     expect(JSON.stringify(view.rows)).not.toContain("fetch failed");
     expect(view.rows.find(r => r.id === "stage/snapshotting")!.state).toBe(INIT_ROW_STATES.waiting);
   });

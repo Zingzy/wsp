@@ -35,6 +35,7 @@ import {
   placeNoDialLine,
   BackendFacts,
   type DaemonEvent,
+  type MachineSizeOffer,
   type PlaceAddStep,
   type PlaceStageEvent,
   type PlaceAuthReply,
@@ -500,6 +501,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     if (at === undefined) return placeId === wiredProvider() ? wiring.provider()?.rateUsdPerHour : undefined;
     return at.pricing.rateUsdPerHour(at.pricing.defaultSize);
   };
+  /** The sizes one provider offers, each at that provider's own rate, read off the backend the host built for it.
+   * A picker that took one list for every row quoted one provider's prices under another's name. Empty where this
+   * host holds no backend for the row, which is a row with no pick to offer rather than a row of free sizes. */
+  const providerSizes = (placeId: string): readonly MachineSizeOffer[] => providerBackend(placeId)?.capabilities.sizes ?? [];
   const recordOf = async (placeId: string): Promise<PlaceRecord | undefined> => {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
@@ -1108,8 +1113,18 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         }),
         ...providers.map(id => {
           const rate = providerRate(id);
+          const sizes = providerSizes(id);
           const build = opts.copyBuild?.(id);
-          return { id, kind: "provider" as const, name: id, default: marked === id, takesForks: true, ...(rate !== undefined ? { rateUsdPerHour: rate } : {}), ...(build !== undefined ? { build } : {}) };
+          return {
+            id,
+            kind: "provider" as const,
+            name: id,
+            default: marked === id,
+            takesForks: true,
+            ...(rate !== undefined ? { rateUsdPerHour: rate } : {}),
+            ...(sizes.length > 0 ? { sizes: [...sizes] } : {}),
+            ...(build !== undefined ? { build } : {}),
+          };
         }),
       ];
     },

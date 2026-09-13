@@ -4026,7 +4026,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       let made = false;
       await refreshBuilders();
       for (const x of [...builders.values()].filter(x => (x.life === "own" || x.life === "reusable") && x.record.sealed !== undefined)) {
-        const stopped = `Stopped the builder kept from golden v${x.record.sealed!.version} to make room at the machine cap.`;
+        const stopped = `Stopped the builder kept from image v${x.record.sealed!.version} to make room at the machine cap.`;
         graceTimers.get(x.record.id)?.();
         graceTimers.delete(x.record.id);
         await killUntilGone(backend, x.builder.machine, opts.killConfirm);
