@@ -193,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, vaultKeptLine, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -618,12 +618,11 @@ interface LiveWorkspace {
   wakeAsk?: { ask: number; of: number };
   /** Set from the fork until the create is ready: the sweep knows the machine, nothing else can reach it yet. */
   creating?: true;
-  /** Why the nap in flight kept the previous vault, for the napping status it pushes; said once. */
-  vaultNote?: string;
 }
 
-/** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. */
-type StageReport = (stage: WorkspaceCreateStage, message: string, notice?: string) => void;
+/** Reports one create stage as it is reached; the runtime stamps id, name and elapsed time. A notice is a second
+ * line written for a person; a detail is what the machine answered, which rides the line's title. */
+type StageReport = (stage: WorkspaceCreateStage, message: string, said?: { notice?: string; detail?: string }) => void;
 
 export interface SessionHandle {
   readonly id: string;
@@ -3224,9 +3223,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
         // Named by its record before the claim is released, so no sweep sees it unclaimed.
         bind(machine);
-        report?.("machine-booting", `Machine ${machine.id} is booting.`);
+        // No line for the machine coming up: the starting line above is the step a person waits through, and a
+        // fork's own id names nothing to them.
         const named = await setHostname(machine, record.name);
-        report?.("hostname-set", named.refused === undefined ? `Hostname set to ${named.host}.` : "Hostname left as the guest booted it.", named.refused);
+        if (named.refused === undefined) report?.("hostname-set", hostnameSetLine(named.host));
+        else report?.("hostname-set", HOSTNAME_KEPT, { detail: named.refused });
         // The fork carries the golden's copy; this one names the workspace and reads the disk and secrets as they are now.
         const context = await applyMachineContext(machine, { workspace: { name: record.name }, ...(golden !== undefined ? { golden } : {}) });
         if (context.failure !== undefined) console.warn(`machine context for ${record.id} on ${machine.id} ${context.summary}`);
@@ -3292,9 +3293,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             delete record.vaultRefused;
           } catch (e) {
             const why = e instanceof Error ? e.message : String(e);
-            // The record carries it, not only the nap's status: the files stay unbacked until a nap stores one.
+            // The record carries it, and the record alone: the files stay unbacked until a nap stores one, so the
+            // verdict stands on the pane's own backup line rather than passing through one nap's status.
             record.vaultRefused = why;
-            entry.vaultNote = vaultKeptLine(why);
             console.warn(`nap vault for ${record.id} not stored, previous kept: ${why}`);
           }
         },
@@ -3390,7 +3391,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "pausing";
         await persist(entry.record);
         await emitStatus(entry, "napping");
-        delete entry.vaultNote;
         try {
           await entry.ws.nap();
         } catch (e) {
@@ -3407,9 +3407,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         entry.record.phase = "napping";
         await persist(entry.record);
         bus.emit({ type: "workspace.napped", workspaceId: id });
-        const said = [reason, entry.vaultNote].filter((s): s is string => s !== undefined);
-        delete entry.vaultNote;
-        await emitStatus(entry, "napping", said.length === 0 ? undefined : said.join("; "));
+        await emitStatus(entry, "napping", reason);
         return view(entry.record);
       } finally {
         delete entry.napping;
@@ -3882,7 +3880,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       landed?.();
     };
     const notices: string[] = [];
-    report("fork-requested", "Fork of the golden image requested.");
+    // The computer the fork lands on, by the name its own row carries: the place a person picked, else the
+    // provider word this host's machines wear, which is what every other surface names a fork's home by.
+    const where = placeId === undefined ? places.wired : placeDoorOf().nameOf(placeId);
+    report("fork-requested", startingLine(record.name, where));
     try {
       await fork(record, bind, undefined, report);
     } catch (e) {
@@ -3901,7 +3902,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         await forgetBuilder(x.record.id);
         notices.push(stopped);
         console.warn(`workspace ${record.id}: ${stopped.charAt(0).toLowerCase()}${stopped.slice(1, -1)} (${x.record.id})`);
-        report("fork-requested", "Fork of the golden image requested again.", stopped);
+        report("fork-requested", `${startingLine(record.name, where)} again`, { notice: stopped });
         try {
           await fork(record, bind, undefined, report);
           made = true;
@@ -3927,21 +3928,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await until(entry.ws.daemonReach(), Date.now() + lifecycleOf(entry).budgets.daemonAnswersMs, "preview route");
           report("preview-route", "Preview route to the daemon minted.");
         } catch (e) {
-          report("preview-route", "No preview route to the daemon.", `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})`);
+          report("preview-route", "No preview route to the daemon.", { notice: `preview route for ${entry.machine.id} not minted (${e instanceof Error ? e.message : String(e)})` });
         }
       }
       // A daemon that does not answer is reported, not fatal: the workspace exists either way, and the status check
       // keeps asking and names a zombie. Asked the way the wake and the poll ask, so a machine reached without a
       // route is asked here too rather than left with no word at all.
       const fault = await pingDaemon(entry);
-      report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", fault);
+      report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", { notice: fault });
       void syncDaemon(entry);
     }
     await persist(record);
     // The place a fork landed on is where the next one lands when nobody says.
     await placeDoor?.markUsed(placeId);
     delete entry.creating;
-    report("ready", "Ready.");
+    report("ready", CREATE_READY);
     const v = view(record);
     bus.emit({ type: "workspace.created", workspace: v });
     return notices.length > 0 ? { ...v, notice: notices.join(" ") } : v;
@@ -4055,7 +4056,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Who asked rides every stage from the first, which is emitted before the fork has a record: the stream's
       // tree rule has nothing to read until then, so a thread watching its own fork boot would see it start midway.
       const askedBy = spawned !== undefined ? { threadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : undefined;
-      const report: StageReport = (stage, message, notice) => {
+      const report: StageReport = (stage, message, said) => {
         bus.emit({
           type: "workspace.creating",
           workspaceId: id,
@@ -4063,7 +4064,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           stage,
           message,
           elapsedMs: clock.now() - began,
-          ...(notice !== undefined ? { notice } : {}),
+          ...(said?.notice !== undefined ? { notice: said.notice } : {}),
+          ...(said?.detail !== undefined ? { detail: said.detail } : {}),
           ...(askedBy !== undefined ? { askedBy } : {}),
         });
       };

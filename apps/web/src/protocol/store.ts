@@ -31,6 +31,8 @@ export interface CreationLine {
   readonly at: string;
   readonly elapsedMs: number;
   readonly notice?: string;
+  /** What the machine answered this step with, for the line's title; never drawn as a sentence. */
+  readonly detail?: string;
 }
 
 /** A workspace being created: the sidebar row and the center view read it until workspace.created replaces it. */
@@ -729,7 +731,14 @@ export const useStore = create<State>((set, get) => {
           return;
         }
         case "workspace.creating": {
-          const line: CreationLine = { stage: e.stage, message: e.message, at: new Date().toISOString(), elapsedMs: e.elapsedMs, ...(e.notice !== undefined ? { notice: e.notice } : {}) };
+          const line: CreationLine = {
+            stage: e.stage,
+            message: e.message,
+            at: new Date().toISOString(),
+            elapsedMs: e.elapsedMs,
+            ...(e.notice !== undefined ? { notice: e.notice } : {}),
+            ...(e.detail !== undefined ? { detail: e.detail } : {}),
+          };
           set(s => {
             // Ours is matched by the id once known, before that by the name it was asked for; another client's create shows up
             // too. Two clients creating the same name at once can swap logs until the reply lands, and workspace.created

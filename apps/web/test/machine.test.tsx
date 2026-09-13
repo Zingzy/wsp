@@ -217,7 +217,7 @@ describe("machine facts", () => {
     }
   });
 
-  it("a nap whose vault was refused reads as a muted word in the facts with the cap under them; a machine whose vault stands has no such row", async () => {
+  it("a nap that saved no backup reads as a muted word in the facts with one verdict under them; a machine whose backup stands has no such row", async () => {
     const w = { ...view("ws_a", "api", "napping"), vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" };
     const api = await mount([w]);
     expect(fact("vault")).toBe("no backup since 2026-09-08");
@@ -226,7 +226,14 @@ describe("machine facts", () => {
     expect(cell.className).toContain("font-mono");
     expect(cell.querySelector("span")!.className).toContain("text-muted-foreground");
     expect(document.querySelector('[data-slot="badge"]')).toBeNull();
-    expect(fact("vault-refused")).toBe("the export was 646 MB, over the 200 MB cap");
+    // The verdict, once, in words about this workspace; what the machine answered rides the line's title.
+    expect(fact("vault-refused")).toBe("the nap saved no backup; what was saved before is kept");
+    expect(document.querySelector('[data-k="vault-refused"]')!.getAttribute("title")).toBe("the export was 646 MB, over the 200 MB cap");
+    expect(document.body.textContent).not.toContain("the export was 646 MB");
+    // A workspace whose naps never stored one has nothing kept anywhere, and the row beside it says so with no day.
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: undefined } }));
+    await waitFor(() => expect(fact("vault")).toBe("no backup"));
+    expect(fact("vault-refused")).toBe("the nap saved no backup; nothing is saved off the machine");
     // A nap that stores one clears both: the row goes, and nothing about backups is said.
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
     await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());

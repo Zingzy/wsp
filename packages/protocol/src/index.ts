@@ -1221,8 +1221,13 @@ export const isSessionEvent = (e: { type: string }): e is SessionEvent => SESSIO
  * up, so a change to a record a client already holds is never this event. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
-export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
+export const WorkspaceCreateStage = z.enum(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
 export type WorkspaceCreateStage = z.infer<typeof WorkspaceCreateStage>;
+/** Whether a line of a create's log is the step the create is waiting on, rather than a note on a step it already
+ * took. A surface with one line for the whole create shows the last of these, so a cosmetic step's verdict never
+ * stands where the create's state belongs. Takes the word a line carries, since the image build's own lines share
+ * that log and are steps like any other. */
+export const creationAwaits = (stage: string): boolean => stage !== "hostname-set";
 /** Progress of one create, from the first request to ready or failed: the id the workspace will carry, its name, one
  * plain sentence per stage, the time since the create began, and a notice when a step did something worth reading
  * (a kept builder was stopped to make room at the machine cap). */
@@ -1234,6 +1239,9 @@ export const WorkspaceCreatingEvent = z.object({
   message: z.string(),
   elapsedMs: z.number(),
   notice: z.string().optional(),
+  /** What the machine answered this step with, for the line's title: a guest's refusal is evidence a person may
+   * need and never a sentence written at them, so no surface draws it as one. */
+  detail: z.string().optional(),
   /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
    * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
    * yet. Absent where a person asked for the machine. */
