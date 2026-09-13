@@ -521,11 +521,32 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       try {
         const reach = await link.target.reach();
         if (reach.daemonToken === undefined) throw new Error("no daemon token");
+        // The daemon pushes to a socket the moment it has authed it, which is before this dial resolves and before
+        // the link is holding it. An event acted on in that gap reaches a link with no socket: a sign-in page
+        // opened and its callback port was never forwarded, with no line saying so. Events wait here instead, for
+        // this dial alone, and are acted on in arrival order once the link is up.
+        const early: Record<string, unknown>[] = [];
+        let recorded = false;
+        const cannotHandle = (e: unknown): void =>
+          o.log(`${link.target.name}: an event from the workspace could not be handled (${e instanceof Error ? e.message : String(e)})`);
+        /** The one road every event from this machine takes, live or out of the queue, so a throw from a hook this
+         * relay's caller owns says so and the link lives rather than tearing down the socket the event arrived on.
+         * The catch is here and not in the connect the dial happened to use, since that road is the caller's too. */
+        const deliver = (raw: Record<string, unknown>): void => {
+          try {
+            onEvent(link, raw);
+          } catch (e) {
+            cannotHandle(e);
+          }
+        };
         sock = await connect({
           url: reach.url,
           token: reach.daemonToken,
-          onEvent: raw => onEvent(link, raw),
-          onEventError: e => o.log(`${link.target.name}: an event from the workspace could not be handled (${e instanceof Error ? e.message : String(e)})`),
+          onEvent: raw => {
+            if (recorded) deliver(raw);
+            else early.push(raw);
+          },
+          onEventError: cannotHandle,
         });
         if (link.stopped) {
           sock.close();
@@ -537,6 +558,12 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
         link.ports = new Set(portsOf(watched["ports"]));
         attempt = 0;
         resume(link, sock);
+        // After resume, not before: a forward a queued event opens ahead of it reads to resume as a forward that
+        // outlived a dial, and the person is told the link is back on a link that was never away. Nothing queued on
+        // a fresh dial is lost by the wait, since the daemon pushes the port events only to a socket that has asked
+        // for them and the watch reply is what seeds those.
+        recorded = true;
+        for (const raw of early) deliver(raw);
         await sock.closed;
         // Every forward stays bound here across the redial; only its tunnels died with the socket.
         for (const f of allForwards(link.target.id)) {

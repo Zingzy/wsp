@@ -741,7 +741,7 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toEqual([
-      `reap: left alone ${kept.id}: your earlier builder from this setup, still first-life, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init, or it is stopped at six hours`,
+      `reap: left alone ${kept.id}: your earlier builder from this setup, still sealable, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init, or it is stopped at six hours`,
     ]);
     expect(await store.get("builders", kept.id)).toMatchObject({ firstLife: true });
   });

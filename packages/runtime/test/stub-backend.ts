@@ -52,9 +52,6 @@ export interface StubBackend extends MachineBackend {
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
   beforeSnapshot?: (m: StubMachine, nth: number) => void;
-  /** The stub refuses a snapshot of a resumed machine as the provider it stands in for does; a test whose provider
-   * copies the disk from any life turns this on. */
-  snapshotsAnyLife: boolean;
   /** Every snapshot taken and not deleted, as the provider would list it. */
   snapshots: SnapshotRow[];
   /** What the next snapshot is listed at; a golden measured 7.8 to 8.5 GB live. */
@@ -127,6 +124,7 @@ export function stubBackend(mark?: string): StubBackend {
       containers: true,
       callbackRelay: true,
       diskSnapshots: true,
+      snapshotsAnyLife: false,
       snapshotListing: true,
       templates: false,
       kept: false,
@@ -138,7 +136,6 @@ export function stubBackend(mark?: string): StubBackend {
     puts,
     snapshots,
     snapshotBytes: 8_000_000_000,
-    snapshotsAnyLife: false,
     templates,
     promoted,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
@@ -178,7 +175,8 @@ export function stubBackend(mark?: string): StubBackend {
         },
         async snapshot(name: string, life: MachineLife): Promise<string> {
           m.snapshotLives.push(life);
-          if (!life.firstLife && !backend.snapshotsAnyLife) throw new NotFirstLifeError(m.id, `snapshot ${name}`);
+          // The provider's own row says which life a copy may be taken from; the stub refuses the same one it declares.
+          if (!life.firstLife && !backend.capabilities.snapshotsAnyLife) throw new NotFirstLifeError(m.id, `snapshot ${name}`);
           snapshotAsks.set(m.id, (snapshotAsks.get(m.id) ?? 0) + 1);
           backend.beforeSnapshot?.(m, snapshotAsks.get(m.id)!);
           // The provider mints an id per call; a repeated name (two in one millisecond) must not fold into one row.

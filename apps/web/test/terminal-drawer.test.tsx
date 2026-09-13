@@ -571,7 +571,7 @@ describe("panes on a workspace that is not running", () => {
     (inputs("drawer")[0] as HTMLElement).focus();
     act(() => setPane("waking", { machineState: "starting", reach: { state: "napping" } }, wakes));
     await waitFor(() => expect(overlay()?.dataset["terminalOverlay"]).toBe("waking"));
-    expect(document.activeElement).toBe(overlay());
+    await waitFor(() => expect(document.activeElement).toBe(overlay()));
     // The overlay held focus, so when it lifts the surface gets it back instead of the body.
     act(() => {
       setPane("running", {}, wakes);

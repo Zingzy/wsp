@@ -431,6 +431,8 @@ describe("the words the clients print for the job", () => {
     expect(folded.signIns.map(r => r.id)).toEqual(["sign-in/gh", "sign-in/claude"]);
     const settled = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: "not signed in", login: "not-signed-in" as const } : r)));
     expect(settled.rows[1], "a sign-in that ran out keeps the stage from reading done and hands it its own outcome").toMatchObject({ state: "not signed in", login: "not-signed-in" });
+    // The count reads the same answer the cross does: a fold whose sign-in ran out is over, and it is not done.
+    expect(initStageCount(settled.rows)).toEqual({ done: 1, total: 3 });
     // The stage folds on the outcomes, so a run on a Linux computer folds where a Mac's does, on the words that computer drew.
     const linux = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: INIT_SIGN_IN_WORDS.copied("linux"), login: "copied" as const } : r)));
     expect(linux.rows[1]).toMatchObject({ state: "done" });

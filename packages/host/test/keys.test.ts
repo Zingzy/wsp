@@ -377,13 +377,14 @@ describe("loadKeys", () => {
     vi.stubEnv("WSP_HOME", home);
     vi.spyOn(process, "cwd").mockReturnValue(cwd);
     const io = fakeIO([]);
-    for (const flag of [["--no-local"], ["--first-workspace", "proj"], ["--import", cwd], ["--recipe", "r.json"], ["--project", cwd], ["--on", "spoo"]]) {
+    for (const flag of [["--no-local"], ["--first-workspace", "proj"], ["--import", cwd], ["--recipe", "r.json"], ["--project", cwd], ["--on", "spoo"], ["--rebuild"]]) {
       const code = await cli(["init", "--state", join(home, "state.json"), ...flag], io);
       expect([flag.join(" "), code]).toEqual([flag.join(" "), 3]);
     }
     expect(io.output.join("\n")).toContain("--no-local would leave it with nothing");
     expect(io.output.join("\n")).toContain("--first-workspace would do nothing here");
     expect(io.output.join("\n")).toContain("--import would do nothing here");
+    expect(io.output.join("\n")).toContain("--rebuild would do nothing here");
     // A place is the serving host's to know; with none serving the flag names nothing this run can reach.
     expect(io.output.join("\n")).toContain("--on names a place of the host serving");
   });

@@ -249,7 +249,7 @@ describe("a workspace row's menu", () => {
     expect(refusalOf(WORKSPACE_WORDS.pause)).toBeNull();
     expect(item(WORKSPACE_WORDS.openTerminal).querySelector("kbd")?.textContent).toBe("⌘J");
     // The first row that can run holds focus; arrows walk every row, disabled ones too, so their refusal can be read.
-    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause));
+    await waitFor(() => expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause)));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.rebuild));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
@@ -262,7 +262,7 @@ describe("a workspace row's menu", () => {
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.pause));
     fireEvent.keyDown(opened, { key: "Escape" });
     await waitFor(() => expect(menu()).toBeNull());
-    expect(document.activeElement).toBe(row);
+    await waitFor(() => expect(document.activeElement).toBe(row));
   });
 
   it("a row chosen by click or Enter runs its handler and closes; a disabled row does nothing; a click elsewhere closes", async () => {
@@ -460,7 +460,7 @@ describe("a thread row's menu", () => {
 
     const input = (await screen.findByRole("textbox", { name: THREAD_WORDS.rename })) as HTMLInputElement;
     expect(input.value).toBe("fix the port list");
-    expect(document.activeElement).toBe(input);
+    await waitFor(() => expect(document.activeElement).toBe(input));
     // The input took the title's place inside the row, and the row is the same row it was.
     expect(input.closest("[data-sidebar-row]")).toBe(rowOf2("thread:thr_1"));
     expect(rowOf2("thread:thr_1").className).toBe(rowClass);
@@ -665,7 +665,7 @@ describe("a workspace row's name box", () => {
     const rowClass = rowOf2("ws:ws_a").className;
     const input = await openFromMenu();
     expect(input.value).toBe("api");
-    expect(document.activeElement).toBe(input);
+    await waitFor(() => expect(document.activeElement).toBe(input));
     // The field took the name's place inside the row, and the row is the same row it was.
     expect(input.closest("[data-sidebar-row]")).toBe(rowOf2("ws:ws_a"));
     expect(rowOf2("ws:ws_a").className).toBe(rowClass);
@@ -690,7 +690,7 @@ describe("a workspace row's name box", () => {
     fireEvent.click(item(WORKSPACE_WORDS.rename));
     const input = await nameBox();
     expect(input.value).toBe("api");
-    expect(document.activeElement).toBe(input);
+    await waitFor(() => expect(document.activeElement).toBe(input));
     // The block swaps a button for a plain box while it holds the field, since an input may not sit inside a button.
     expect(input.closest("[data-space-header]")).toBe(document.querySelector("[data-space-header]"));
     fireEvent.change(input, { target: { value: "the name he typed" } });

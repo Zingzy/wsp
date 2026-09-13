@@ -464,6 +464,7 @@ impl Ops {
                 containers: engine::socket_of(&crate::doctor::read_facts()).is_ok(),
                 callback_relay: true,
                 disk_snapshots: true,
+                snapshots_any_life: true,
                 snapshot_listing: true,
                 templates: true,
                 sizes,
@@ -1180,7 +1181,7 @@ mod tests {
         // Containers read true exactly where this box has an engine with its socket: the doctor's reading.
         assert_eq!(facts.capabilities.containers, engine::socket_of(&crate::doctor::read_facts()).is_ok());
         assert!(facts.capabilities.replaces_machine && facts.capabilities.callback_relay && facts.capabilities.disk_snapshots);
-        assert!(facts.capabilities.snapshot_listing && facts.capabilities.templates);
+        assert!(facts.capabilities.snapshots_any_life && facts.capabilities.snapshot_listing && facts.capabilities.templates);
         assert_eq!(facts.capabilities.sizes.len(), 2);
         assert_eq!(
             (facts.capabilities.sizes[1].cpu, facts.capabilities.sizes[1].mem_mb, facts.capabilities.sizes[1].rate_usd_per_hour),

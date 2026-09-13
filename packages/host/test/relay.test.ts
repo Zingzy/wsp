@@ -64,7 +64,15 @@ interface FakeLink extends DaemonSocket {
 }
 
 /** A daemon socket the test drives: records ops, answers ok, pushes events. */
-function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; links: FakeLink[]; targets: string[]; refuseDials: boolean; slowDial?: () => Promise<void> } {
+function fakeConnect(): {
+  connect(o: ConnectOptions): Promise<DaemonSocket>;
+  links: FakeLink[];
+  targets: string[];
+  refuseDials: boolean;
+  slowDial?: () => Promise<void>;
+  pushDuringDial?: Record<string, unknown>;
+  slowWatch?: () => Promise<void>;
+} {
   const links: FakeLink[] = [];
   const targets: string[] = [];
   const fake = {
@@ -74,6 +82,11 @@ function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; lin
     refuseDials: false,
     /** When set, a dial waits on it after it is counted in targets, the way a slow edge holds the connect open. */
     slowDial: undefined as (() => Promise<void>) | undefined,
+    /** When set, the daemon pushes this event while the dial is still open. The real one pushes to a socket the
+     * moment it has authed it, which is before this promise resolves and before any caller can have recorded it. */
+    pushDuringDial: undefined as Record<string, unknown> | undefined,
+    /** When set, the ports.watch reply waits on it, the way the real one waits on the daemon's own port poll. */
+    slowWatch: undefined as (() => Promise<void>) | undefined,
     async connect(o: ConnectOptions): Promise<DaemonSocket> {
       if (fake.refuseDials) throw new Error("connect ECONNREFUSED edge");
       targets.push(o.url);
@@ -88,7 +101,10 @@ function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; lin
         async op(op, extra = {}) {
           link.ops.push({ op, extra });
           if (op === "tunnel.open" && link.refuseTunnels) throw new Error("connect ECONNREFUSED 127.0.0.1");
-          if (op === "ports.watch") return { ok: true, ports: link.ports.map(port => ({ port, pid: null, inode: port, uid: 0, loopback: true })) };
+          if (op === "ports.watch") {
+            if (fake.slowWatch) await fake.slowWatch();
+            return { ok: true, ports: link.ports.map(port => ({ port, pid: null, inode: port, uid: 0, loopback: true })) };
+          }
           return { ok: true };
         },
         close() {
@@ -107,6 +123,11 @@ function fakeConnect(): { connect(o: ConnectOptions): Promise<DaemonSocket>; lin
         },
       };
       links.push(link);
+      const early = fake.pushDuringDial;
+      if (early !== undefined) {
+        fake.pushDuringDial = undefined;
+        link.emit(early);
+      }
       return link;
     },
   };
@@ -168,10 +189,25 @@ async function heldOnOneFamily(): Promise<{ server: Server; port: number }> {
   throw new Error("no port free on both 127.0.0.1 and ::1 in 20 tries");
 }
 
-async function until(cond: () => boolean, ms = 3000, what = "condition"): Promise<void> {
+/** A port a guest listener can hold on 127.0.0.1 while the relay binds the same number on [::1]. The kernel picks
+ * ephemeral ports per family, so a port free on one says nothing about the other, and a relay refused on its own
+ * family logs the refusal and opens no forward at all: the wait for that forward then never comes true. */
+async function freeOnBothLoopbacks(): Promise<number> {
+  const { server, port } = await heldOnOneFamily();
+  await new Promise<void>(r => server.close(() => r()));
+  return port;
+}
+
+/** Polls until the condition holds. The failure carries the predicate's own source and, where a caller passes one,
+ * what the relay had said by then, since a wait that reports only that it timed out costs a rerun to place and the
+ * reruns are where these flakes are read from. */
+async function until(cond: () => boolean, ms = 3000, said?: () => readonly string[]): Promise<void> {
   const deadline = Date.now() + ms;
   while (!cond()) {
-    if (Date.now() > deadline) throw new Error(`${what} not met in time`);
+    if (Date.now() > deadline) {
+      const heard = said === undefined ? "" : `; the relay had said: ${JSON.stringify(said())}`;
+      throw new Error(`waited ${ms}ms and this never came true: ${cond.toString()}${heard}`);
+    }
     await new Promise(r => setTimeout(r, 10));
   }
 }
@@ -211,9 +247,22 @@ describe("callback relay over a fake daemon link", () => {
     for (const s of servers.splice(0)) await new Promise<void>(r => s.close(() => r()));
   });
 
-  async function setup(o: { window?: number; cap?: number; autoOpen?: boolean; guestPorts?: number[]; jitter?: number; openLine?: (workspace: string, hostname: string, url: string) => string } = {}) {
+  async function setup(
+    o: {
+      window?: number;
+      cap?: number;
+      autoOpen?: boolean | (() => boolean);
+      guestPorts?: number[];
+      jitter?: number;
+      openLine?: (workspace: string, hostname: string, url: string) => string;
+      duringDial?: Record<string, unknown>;
+      watchMs?: number;
+    } = {},
+  ) {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
+    fake.pushDuringDial = o.duringDial;
+    if (o.watchMs !== undefined) fake.slowWatch = () => new Promise(r => setTimeout(r, o.watchMs));
     const guestPorts = o.guestPorts ?? [];
     const clock = fakeClock();
     const opened: string[] = [];
@@ -234,7 +283,7 @@ describe("callback relay over a fake daemon link", () => {
       },
       ...(o.window !== undefined ? { windowMs: o.window } : {}),
       ...(o.cap !== undefined ? { capMs: o.cap } : {}),
-      ...(o.autoOpen ? { autoOpen: () => true } : {}),
+      ...(o.autoOpen ? { autoOpen: typeof o.autoOpen === "function" ? o.autoOpen : () => true } : {}),
       ...(o.openLine !== undefined ? { openLine: o.openLine } : {}),
       jitter: () => o.jitter ?? 0,
     });
@@ -266,6 +315,57 @@ describe("callback relay over a fake daemon link", () => {
     });
     return { rt, fake, opened, lines };
   }
+
+  it("an event pushed while the dial is still open is acted on once the socket is recorded, not dropped", async () => {
+    const port = await freePort();
+    // The daemon pushes to a socket the moment it has authed it. That is before the dial's promise resolves here,
+    // so the link has no socket recorded yet and the event has nowhere to be acted on until it does.
+    // The reply waits, the way the real one waits on the daemon's port poll, so a forward opened ahead of resume
+    // would be there for resume to read: that is the window the line came out of. The reply also names the port as
+    // one the guest listens on, and the forward reading that is the one sign from out here that resume went through.
+    const { lines, opened, ws } = await setup({
+      autoOpen: true,
+      guestPorts: [port],
+      duringDial: { type: "browser.open", url: AUTH(port), port },
+      watchMs: 300,
+    });
+    await until(() => relay!.forwards().length === 1, 5000, () => lines);
+    expect(relay!.forwards()).toMatchObject([{ targetId: ws.id, port, kind: "callback" }]);
+    expect(opened).toEqual([AUTH(port)]);
+    expect(lines.filter(l => l.includes("forwarding localhost:"))).toEqual([
+      `task-1: forwarding localhost:${port} on this computer to the workspace for the sign-in callback (while the workspace listens, 15 min at most)`,
+    ]);
+    expect(await refused(port)).toBe(false);
+    // The forward opens after resume, which therefore had nothing to resume: nobody is told a link is back that
+    // was never away. Read once the forward has the guest's listener, which is resume's own doing on the other road.
+    await until(() => relay!.forwards()[0]?.listener === true, 5000, () => lines);
+    expect(lines.filter(l => l.includes("the daemon link is back"))).toEqual([]);
+  }, 15_000);
+
+  it("a hook of this relay's caller that throws on a queued event says so and leaves the link it arrived on up", async () => {
+    const port = await freePort();
+    let asked = 0;
+    const { fake, lines, link } = await setup({
+      duringDial: { type: "browser.open", url: AUTH(port), port },
+      autoOpen: () => {
+        asked++;
+        throw new Error("the opener said no");
+      },
+    });
+    expect(asked).toBe(1);
+    expect(lines).toEqual(["task-1: an event from the workspace could not be handled (the opener said no)"]);
+    // The throw is the caller's, not the machine's: the socket the event arrived on is still the link's.
+    expect(link.open).toBe(true);
+    expect(fake.links).toHaveLength(1);
+    expect(relay!.forwards()).toEqual([]);
+  });
+
+  it("a url the guest printed during the same dial is kept too: the queue is every event kind, not the sign-in one", async () => {
+    const port = await freePort();
+    const { lines } = await setup({ duringDial: { type: "localhost.url", port } });
+    await until(() => relay!.forwards().length === 1, 5000, () => lines);
+    expect(relay!.forwards()).toMatchObject([{ port, kind: "url" }]);
+  }, 15_000);
 
   it("by default browser.open opens nothing here: one line says a page is ready, and the port is forwarded at once", async () => {
     const { opened, lines, link, ws } = await setup();
@@ -935,8 +1035,8 @@ describe("callback relay end to end through a real daemon", () => {
         s.end("HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok");
       });
     });
-    await new Promise<void>(r => guest!.listen(0, "127.0.0.1", r));
-    const port = (guest.address() as { port: number }).port;
+    const port = await freeOnBothLoopbacks();
+    await new Promise<void>(r => guest!.listen(port, "127.0.0.1", r));
 
     const opened: string[] = [];
     const lines: string[] = [];
@@ -960,7 +1060,7 @@ describe("callback relay end to end through a real daemon", () => {
       await new Promise(r => setTimeout(r, 100));
     }
     expect(opened[0]).toBe(url);
-    await until(() => relay!.forwards().length === 1, 5000);
+    await until(() => relay!.forwards().length === 1, 5000, () => lines);
 
     const res = await fetch(`http://[::1]:${port}/oauth/callback?code=abc&state=S`);
     expect(res.status).toBe(200);
@@ -1394,12 +1494,12 @@ describe("localhost forwards over a fake daemon link", () => {
     const ports: number[] = [];
     for (let i = 0; i < FORWARD_MAX_PER_TARGET - 1; i++) ports.push(await freePort());
     for (const port of ports) link.emit({ type: "localhost.url", port });
-    await until(() => ports.every(p => forwarded().has(p)), 3000, "every url port forwarded");
+    await until(() => ports.every(p => forwarded().has(p)));
     const x = await freePort();
     const y = await freePort();
     link.emit({ type: "callback.port", port: x });
     link.emit({ type: "localhost.url", port: y });
-    await until(() => forwarded().has(x) && forwarded().has(y), 3000, "the callback port and the last url port forwarded");
+    await until(() => forwarded().has(x) && forwarded().has(y));
     expect(relay!.forwards().filter(f => f.kind === "url")).toHaveLength(FORWARD_MAX_PER_TARGET);
     expect(relay!.forwards().find(f => f.port === x)?.kind).toBe("callback");
   });
@@ -1451,8 +1551,8 @@ describe("localhost forwards end to end through a real daemon", () => {
         s.end(`HTTP/1.1 200 OK\r\ncontent-type: text/html\r\ncontent-length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
       });
     });
-    await new Promise<void>(r => guest!.listen(0, "127.0.0.1", r));
-    const port = (guest.address() as { port: number }).port;
+    const port = await freeOnBothLoopbacks();
+    await new Promise<void>(r => guest!.listen(port, "127.0.0.1", r));
 
     const lines: string[] = [];
     const events: ForwardEvent[] = [];

@@ -287,6 +287,8 @@ export class FakeBackend implements MachineBackend {
       containers: true,
       callbackRelay: false,
       diskSnapshots: true,
+      // The stand-in copies whatever it is asked for: nothing here refuses a machine for having been woken.
+      snapshotsAnyLife: true,
       snapshotListing: true,
       templates: false,
       sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),

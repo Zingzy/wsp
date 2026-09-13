@@ -242,6 +242,9 @@ pub struct Capabilities {
     pub containers: bool,
     pub callback_relay: bool,
     pub disk_snapshots: bool,
+    /// A copy may be taken from any life of the machine, not only its first; false where the provider refuses a
+    /// machine that was resumed.
+    pub snapshots_any_life: bool,
     pub snapshot_listing: bool,
     pub templates: bool,
     pub sizes: Vec<MachineSizeOffer>,

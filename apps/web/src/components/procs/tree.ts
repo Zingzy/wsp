@@ -6,9 +6,9 @@
 // whose command is twenty characters of the same flags is still told apart by
 // what started it.
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import type { ProcEntry } from "@wsp/protocol";
+import { byProcColumn, type ProcEntry, type ProcSort } from "@wsp/protocol";
 
-export type ProcSort = "cpu" | "mem";
+export type { ProcSort };
 
 /** One thread of this workspace and the process the host started for it, which that thread's tree is rooted at. */
 export interface ProcThread {
@@ -34,11 +34,6 @@ export interface ProcTable {
   threads: ProcThreadTree[];
   rest: ProcRow[];
 }
-
-const byKey = (sort: ProcSort) => (a: ProcEntry, b: ProcEntry): number => {
-  const d = sort === "cpu" ? b.cpu - a.cpu : b.rss - a.rss;
-  return d !== 0 ? d : a.pid - b.pid;
-};
 
 const hit = (p: ProcEntry, needle: string): boolean => [String(p.pid), p.comm, p.cmdline, p.user].some(s => s.toLowerCase().includes(needle));
 
@@ -79,7 +74,7 @@ export function procTable(procs: readonly ProcEntry[], sort: ProcSort, filter: s
     for (const head of heads) mark(head);
     const out: ProcRow[] = [];
     const walk = (list: readonly ProcEntry[], depth: number): void => {
-      for (const proc of [...list].sort(byKey(sort))) {
+      for (const proc of [...list].sort(byProcColumn(sort))) {
         if (!keep.has(proc.pid)) continue;
         out.push({ proc, depth });
         walk(kidsOf(proc.pid), depth + 1);

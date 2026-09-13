@@ -530,17 +530,27 @@ export function needsRebuild(input: WorkspaceStateInput): boolean {
   return workspaceState(input) === "gone" || input.reach === "zombie" || (input.wakeRefused ?? null) !== null;
 }
 
-/** The one sentence for a rebuild asked of a machine that still answers, so the row's disabled tooltip and the
- * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule.
- * Two halves like every other refusal here: what is so, then when the rebuild is there to take. */
-export const NO_REBUILD_NEEDED = "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering";
-
 /** Why a road out that opens only once the machine is gone is refused on one that is merely not answering. The
  * rebuild and the forget are both such roads and stand four rows apart in one list, so they read the workspace's
  * state off the same field and say it in the same words: a machine nothing has heard from does not answer, and a
  * person told both at once stops believing either. Two halves as every refusal here has them: what is so, then when
  * the road is there to take. */
 export const notAnsweringYet = (road: "rebuild" | "forget"): string => `This one is not answering yet; the ${road} is offered once it is gone`;
+
+/** The half of the forget's refusal that holds whatever the workspace is: what is so about it comes after, and
+ * two callers word that half differently. */
+export const FORGET_NEEDS_GONE = "Only a workspace whose computer is gone can be forgotten";
+
+/** Why a road that waits on the machine being gone is refused, for the two roads that wait on it: the rebuild and
+ * the forget. Both read the one folded state and say it in the one word the row under them shows; each names its
+ * own road in the second half, which is all that differs between them. The command line and the app refuse a
+ * rebuild through this same sentence off the same state, so the terminal and the row can no longer say two things
+ * about one workspace. Two halves as every refusal here has them: what is so, then when the road is there to take. */
+export function goneRoadRefusal(state: WorkspaceState, road: "rebuild" | "forget"): string {
+  if (state === "unreachable") return notAnsweringYet(road);
+  const word = workspaceWord(state).toLowerCase();
+  return road === "rebuild" ? `This one is ${word}, so nothing needs rebuilding; the rebuild is offered once a workspace is gone` : `${FORGET_NEEDS_GONE}; this one is ${word}`;
+}
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
  * caller holds them; rebuild and delete are the roads out. */

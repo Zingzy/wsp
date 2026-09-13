@@ -925,6 +925,15 @@ export function nameList(names: readonly string[]): string {
   return names.map(listedName).join(", ");
 }
 
+/** What the copy answer reads as on the row of a tool signed in as one account at a time: the answer's own words and
+ * the login a copy would carry, so the row says whose sign-in lands on the machine before anyone answers it. */
+export const copyNamesLogin = (copy: string, login: string): string => `${copy} · ${login}`;
+
+/** That row's own detail: the login the tool is in use as here, and the accounts a copy leaves where they are,
+ * since the machine is signed in as one of them and a file naming the rest would hold no token for them. */
+export const loginsHereLine = (login: string, left: readonly string[]): string =>
+  left.length === 0 ? `signed in here as ${login}` : `signed in here as ${login}; ${nameList(left)} ${left.length === 1 ? "stays" : "stay"} on this computer`;
+
 /** A thread count with its noun, as the sidebar's counts and the verbs' lines say it. */
 export function fmtThreads(n: number): string {
   return plural(n, "thread");
@@ -1914,10 +1923,6 @@ const ROW_UNRUN: ReadonlySet<string> = new Set([INIT_ROW_STATES.skipped, INIT_RO
  * than a check, which would read as work that happened. */
 export const initRowUnrun = (state: string): boolean => ROW_UNRUN.has(state);
 
-/** The end states that are not an end well: what the count leaves out of its done, so a build that failed, was
- * stopped, or never reached a stage never reads complete. */
-const ROW_UNDONE: ReadonlySet<string> = new Set([INIT_ROW_STATES.failed, ...ROW_UNRUN]);
-
 /** Whether a row is a failure to show as one: the stage that failed, and the sign-in or the stage it folds into whose
  * sign-in ran out, which must never wear a tick. The one answer to "this sign-in ran out", so the cross, the
  * attention mark and the Retry keycap all read it and none of them spells it again. */
@@ -2097,11 +2102,12 @@ export function initBuildRows(rows: readonly InitRow[]): { rows: InitRow[]; sign
  * card's top edge, the count beside the title and the host's own progress field, so the sidebar and the sheet can
  * never say two things. Stages alone, so the bar measures the build and not the agents given the tools, the first
  * workspace or its project; it takes the rows initBuildRows hands over, with the sign-ins folded into their stage.
- * A stage that failed, that a stop ended, or that the build never reached is over without having run, so a build
- * that stopped never reads complete however early it stopped. */
+ * A stage the glyph draws a cross on, that a stop ended, or that the build never reached is over without having
+ * ended well, so a build that stopped never reads complete however early it stopped, and the folded sign-in stage
+ * whose row ran out is counted the way its own cross reads. */
 export function initStageCount(rows: readonly InitRow[]): { done: number; total: number } {
   const stages = rows.filter(r => r.kind === "stage");
-  return { done: stages.filter(r => initRowOver(r) && !ROW_UNDONE.has(r.state)).length, total: stages.length };
+  return { done: stages.filter(r => initRowOver(r) && !initRowFailed(r) && !initRowUnrun(r.state)).length, total: stages.length };
 }
 
 /** Where a step sits in the steps its run shows, over the title ("2/4"): the steps the person sees, the build or the
@@ -3374,7 +3380,9 @@ export const PLACES_WORDS = {
     noApp: "No app on that computer",
     noAppLine: "In its terminal, install wsp, then join:",
     install: "npm i -g @zingzy/wsp",
-    joinLine: (url: string, code: string): string => `wsp join ${url} --code ${code}`,
+    /** The line typed in a terminal on the computer being joined. The token is the code and the fingerprint of the
+     * key this host will prove, as joinToken writes them, so the line names which host it is joining. */
+    joinLine: (url: string, token: string): string => `wsp join ${url} --code ${token}`,
     escStays: "esc closes, the code stays good",
     newCode: "New code",
     close: "Close",

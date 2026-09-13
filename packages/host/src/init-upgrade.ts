@@ -54,9 +54,10 @@ export function describeCost(o: Pick<UpgradeOffer, "onBuilder" | "rateUsdPerHour
   return o.onBuilder ? `a smoke fork boots beside it, ${rate} while it runs` : `a fork and a smoke fork boot, ${rate} each while they run`;
 }
 
-/** The builder an update would land on: this setup's, kept as the current version, inside its window, held by nobody else. */
+/** The builder an update would land on: this setup's, kept as the current version, still sealable, inside its
+ * window, held by nobody else. */
 export function keptBuilder(builders: readonly GoldenBuilderView[], version: number, name = "default"): GoldenBuilderView | undefined {
-  return builders.find(b => b.name === name && b.firstLife === true && b.sealed?.version === version && b.heldBy === undefined && b.foreignOwner === undefined && Date.now() - Date.parse(b.sealed.at) < GRACE_MS);
+  return builders.find(b => b.name === name && b.sealable === true && b.sealed?.version === version && b.heldBy === undefined && b.foreignOwner === undefined && Date.now() - Date.parse(b.sealed.at) < GRACE_MS);
 }
 
 /** Before a rebuild boots: the kept builder holds one of the account's machine slots, so it goes first, said once.

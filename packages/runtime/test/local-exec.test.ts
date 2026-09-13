@@ -5,13 +5,21 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { turnCutLine, type ExecStream } from "@wsp/protocol";
-import { localExecStream } from "../src/local-exec.js";
+import { localExecStream, type GroupWorkReader } from "../src/local-exec.js";
 import { alive, gone, grandchild, sweepStrays } from "./strays.js";
 
 async function collect(lines: AsyncIterable<string>): Promise<string[]> {
   const out: string[] = [];
   for await (const line of lines) out.push(line);
   return out;
+}
+
+/** A tree burning one core, counted on the clock the idle rule compares its readings against. A real burner is no
+ * use here: ps answers whole seconds of CPU on Linux, so a tree given a fraction of a loaded box shows nothing at
+ * all until a whole second of its own has passed, and no idle limit is long enough to outrun that ratio. */
+function burningTree(now: () => number): GroupWorkReader {
+  const from = now();
+  return (_pgid, then) => then(Math.floor((now() - from) / 10));
 }
 
 describe("local exec stream", () => {
@@ -78,23 +86,15 @@ describe("local exec stream", () => {
   });
 
   it("a child that prints nothing while the tree it started burns a core is not cut at the idle limit", async () => {
-    const marker = join(root, "busy.pid");
-    // The tree is read once the stream has been quiet for half the limit, so the limit leaves room for the pair of
-    // readings a rate takes. Linux's ps prints whole seconds of CPU where this Mac's prints hundredths, so the pair
-    // only differs once the tree has burned a whole second: the limit is long enough for that on either computer.
-    const factory = localExecStream({ root, runDir, idleMs: 4_000, deadlineMs: 30_000, pollMs: 100 });
-    const stream = factory(`( while :; do :; done ) & echo $! > ${marker}; sleep 8.5; echo still working; sleep 20`, { env: {} });
-    const busy = await grandchild(marker);
-    // The line lands more than two idle limits into a silent turn, so only the tree's work can have held the turn
-    // open. A cut turn never delivers it: its own words wait on the child's streams closing, which a grandchild
-    // holding the inherited pipe never lets happen.
+    const factory = localExecStream({ root, runDir, idleMs: 400, deadlineMs: 30_000, pollMs: 20, readWork: burningTree(Date.now) });
+    const stream = factory("sleep 2; echo still working; sleep 20", { env: {} });
+    // The line lands five idle limits into a silent turn, so only the tree's work can have held the turn open.
     const first = stream.lines[Symbol.asyncIterator]().next();
-    const late = new Promise<string>(resolve => setTimeout(() => resolve("nothing reached the reader"), 12_000));
+    const late = new Promise<string>(resolve => setTimeout(() => resolve("the turn printed nothing and was not cut"), 10_000));
     expect(await Promise.race([first, late])).toEqual({ value: "still working", done: false });
     stream.kill();
     expect(await stream.exited).not.toBe(0);
-    await gone(busy);
-  }, 20_000);
+  }, 15_000);
 
   it("a child that prints nothing while the tree it started sleeps is cut at the idle limit, and the cut leaves no grandchild", async () => {
     const marker = join(root, "idle.pid");

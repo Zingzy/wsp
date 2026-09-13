@@ -39,7 +39,7 @@ describe("the right panel's folder panes", () => {
     });
     const { container } = render(<Panel />);
     await waitFor(() => expect(container.querySelector("[data-diff-surface]")).not.toBeNull());
-    expect(document.activeElement).toBe(container.querySelector("[data-diff-surface]"));
+    await waitFor(() => expect(document.activeElement).toBe(container.querySelector("[data-diff-surface]")));
 
     // The tab is clicked, not the pane: focus is outside the Files pane until the pane takes it. The tab button is
     // not focused by hand here, as its tooltip would open and Base UI popups never settle under jsdom.
@@ -47,7 +47,7 @@ describe("the right panel's folder panes", () => {
     await waitFor(() => expect(container.querySelector("[data-files-pane]")).not.toBeNull());
     const pane = container.querySelector<HTMLElement>("[data-files-pane]")!;
     expect(pane.getAttribute("tabindex")).toBe("0");
-    expect(document.activeElement).toBe(pane);
+    await waitFor(() => expect(document.activeElement).toBe(pane));
     expect(shownFolder(container)).toBe("/root/app/lib");
 
     fireEvent.keyDown(document.activeElement!, { key: "Backspace" });

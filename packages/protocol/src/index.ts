@@ -203,10 +203,15 @@ export const Capabilities = z.object({
   callbackRelay: z.boolean(),
   /** The provider copies a running machine's disk into an image it keeps, which is what a version and a project
    * golden are sealed as and what a fork boots from. False where the disk is the person's own and nothing copies it
-   * (this computer, a machine reached over ssh). Which life the copy may be taken from is the provider's own rule.
+   * (this computer, a machine reached over ssh). Which life the copy may be taken from is snapshotsAnyLife.
    * Whether a fork of that image comes up with the processes still running is liveCloneForks and says nothing about
    * whether one can be taken. */
   diskSnapshots: z.boolean(),
+  /** The copy may be taken from a machine that was paused and woken, not only from one that never was. False where
+   * the provider refuses a resumed machine (Solari answers 502 and consumes the builder), which is the one reason a
+   * builder that woke can no longer be sealed. Read wherever the golden road asks whether a builder still has a
+   * seal in it, so that question is the provider's and never the road's; meaningless where diskSnapshots is false. */
+  snapshotsAnyLife: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
   /** The provider promotes a snapshot to a template that survives its own restarts, so a sealed version is recorded
@@ -1727,8 +1732,9 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
-/** What the join screen sends the shell: the address as it is typed on the other screen, and the code beside it. */
-export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(64) });
+/** What the join screen sends the shell: the address as it is typed on the other screen, and the one token the
+ * join line carried beside it, which is the code and the fingerprint of that host's key. */
+export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(128) });
 export type JoinAsk = z.infer<typeof JoinAsk>;
 
 /** What this computer is to another wsp, read off its place file. */
@@ -2071,8 +2077,9 @@ export const GoldenBuilderView = z.object({
   /** What the provider built, so a builder left running can be priced. */
   size: z.object({ cpu: z.number(), memMb: z.number() }),
   screen: z.object({ streamUrl: z.string() }).optional(),
-  /** True while the machine has never been paused, resumed or restored, so it can still be sealed. */
-  firstLife: z.boolean().optional(),
+  /** True while a seal can still be taken from this builder: the machine has never been paused, resumed or
+   * restored, or the place it stands on copies a disk from any life of a machine. */
+  sealable: z.boolean().optional(),
   /** The recipe this builder carries; a prepare with the same hash attaches to it instead of booting. */
   recipeHash: z.string().optional(),
   /** The parts behind recipeHash; absent on a builder recorded without them. */
@@ -2607,6 +2614,19 @@ export const ProcEntry = z.object({
 });
 export type ProcEntry = z.infer<typeof ProcEntry>;
 
+/** Which column a list of processes is ordered by: what is spending the cpu, or what is holding the memory. */
+export type ProcSort = "cpu" | "mem";
+
+/** Processes heaviest first on that column, ties broken by pid so one snapshot always lays out the same way. The
+ * app's pane sorts each set of siblings by this and the command line's own list reads it flat; a second copy of the
+ * rule is how the two would come to disagree about which process is the busiest. */
+export const byProcColumn =
+  (sort: ProcSort) =>
+  (a: ProcEntry, b: ProcEntry): number => {
+    const d = sort === "cpu" ? b.cpu - a.cpu : b.rss - a.rss;
+    return d !== 0 ? d : a.pid - b.pid;
+  };
+
 /** cwd is null when unreadable; ports are the TCP ports this pid listens on;
  * children are the pids whose parent it is, as of the last snapshot. */
 export const ProcInspectReply = z.object({
@@ -3125,7 +3145,8 @@ const DAEMON_CONTENTS = [
   "35236ee3220f12db35f3307812b2d2ea8c8762f8910e656d9d57a44bb599b0e3",
   "372241b199d0b23db89c2618409d8edf611bc5f29811fdaffca813ec2b283295",
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
-  "8e8172ba91d154a31fd3568dbafdb233e50d35bd6d6870a8e2557a0287bf9a85",
+  "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
+  "9c15d9117a6ba2db152e185782ff883ff63c6be7bf1ebb6cdf9488d283185fb4",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3193,8 +3214,11 @@ const DAEMON_CONTENTS = [
  * bytes in a snapshot row, an image row and the swept count are what the tree's files hold, and the sweep at the
  * daemon's start drops any blob it finds beside its tree. Version 30 asks a machine for the service manager its
  * daemon would be held up by before a byte lands on it, rather than inside the install: the deploy script carries
- * that check no longer, and a machine wsp did not build is turned away with nothing written on it. Version 31 holds
- * every workspace on a computer somebody keeps to a size that leaves that computer a core and a gigabyte: the
+ * that check no longer, and a machine wsp did not build is turned away with nothing written on it. Version 31 lets a
+ * place say which life a copy may be taken from: a provider whose snapshot is the disk as it stands answers
+ * snapshotsAnyLife and a builder that woke there is sealed, where one that answers only its first life still refuses
+ * after a restart. Version 32 holds every workspace on a computer somebody keeps to a size that leaves that
+ * computer a core and the smaller of half its memory and a gigabyte, a spec that names no size included: the
  * create answers the size it gave and one sentence saying so, the record holds that size, and the capacity says
  * what the workspaces there hold of the computer. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
@@ -3500,6 +3524,35 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
   return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
 }
 
+/** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is
+ * written in PAIR_CODE_ALPHABET with the dash the screens group it with, and a fingerprint is base64. */
+export const JOIN_TOKEN_MARK = ".";
+
+/** The one word a person copies off a join line: the single-use code and the fingerprint of the key the host will
+ * prove, as one string, so a join stays two things to copy and the screens keep the fields they have. */
+export const joinToken = (code: string, hostKey: string): string => `${shownPairCode(code)}${JOIN_TOKEN_MARK}${hostKey}`;
+
+/** The same token read back on the computer being joined, whichever road it came by: a person's paste, the flag,
+ * or the file an install over ssh landed. The code is taken as any screen's code is taken; the fingerprint is left
+ * exactly as it was written, since its own alphabet is case sensitive. A token that carries no fingerprint answers
+ * none, and the caller refuses rather than dialling. */
+export function readJoinToken(typed: string): { code: string; hostKey?: string } {
+  const trimmed = typed.trim();
+  const at = trimmed.indexOf(JOIN_TOKEN_MARK);
+  if (at === -1) return { code: sentPairCode(trimmed) };
+  const hostKey = trimmed.slice(at + 1).trim();
+  const code = sentPairCode(trimmed.slice(0, at));
+  return hostKey === "" ? { code } : { code, hostKey };
+}
+
+/** The refusal a join gets for a line that named no key: every line wsp add prints carries one, so a line without
+ * one was written by hand or cut in half on its way over. Nothing is dialled. */
+export const JOIN_NO_KEY_REFUSAL = "that join line names no key for the host, so this computer cannot tell which host it is joining; run wsp add on the host again and copy the whole code it prints";
+
+/** The refusal a join gets when the host at that address proved a key that is not the one the join line named:
+ * something answered where the host was expected. Nothing of this computer's went to it. */
+export const joinKeyRefusal = (url: string): string => `the host at ${url} proved a key the join line did not name, so it is not the host that printed that line; nothing was sent to it`;
+
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
  * mints this one, since a person joining a computer never typed wsp host pair. */
@@ -3552,6 +3605,9 @@ export const PlaceDoorView = z.object({
   port: z.number().int().min(1).max(65535),
   /** `http://<address>:<port>` for every address this computer answers on that leaves it, loopback left out. */
   addresses: z.array(z.string().url()).min(1),
+  /** The fingerprint of the key this host proves at a join, for the token the join line carries: what tells the
+   * computer being joined that the host answering at one of those addresses is the one that printed the line. */
+  hostKey: z.string().min(1).max(200),
   /** The relay hostname as an https address, when the host is linked and its connector is running. */
   relay: z.string().url().optional(),
 });
@@ -3990,8 +4046,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
    * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none.
-   * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place. */
-  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional() }),
+   * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place.
+   * `rebuild` seals the next version from a fresh machine rather than from the image plus the changes, which is the
+   * question a run at a terminal is asked; absent takes whichever road the changes call for. */
+  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional(), rebuild: z.boolean().optional() }),
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine, as the person would at
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */
@@ -4297,7 +4355,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

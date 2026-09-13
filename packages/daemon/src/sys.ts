@@ -7,7 +7,7 @@
 // daemon; the first subscriber starts it and the last one leaving stops it.
 import { EventEmitter } from "node:events";
 import { readFile, statfs } from "node:fs/promises";
-import { SYS_SAMPLER_STARTED, SYS_SAMPLER_STOPPED, type SysSample } from "@wsp/protocol";
+import { DAEMON_SAMPLER_INTERVAL_MS, SYS_SAMPLER_STARTED, SYS_SAMPLER_STOPPED, type SysSample } from "@wsp/protocol";
 
 /** Jiffies from the aggregate cpu line: idle includes iowait, total the eight time columns (guest time is already inside user and nice). */
 export interface CpuTimes {
@@ -89,7 +89,7 @@ export class SysSampler extends EventEmitter {
   constructor(source: SysSource, opts: { intervalMs?: number; log?: (line: string) => void } = {}) {
     super();
     this.source = source;
-    this.intervalMs = opts.intervalMs ?? 2000;
+    this.intervalMs = opts.intervalMs ?? DAEMON_SAMPLER_INTERVAL_MS;
     this.log = opts.log ?? (() => {});
   }
 
