@@ -189,7 +189,7 @@ import {
   registerRequest,
   registerTakesNoConsentLine,
   shellQuote,
-  fmtRate,
+  fmtPrice,
   threadOpenedLine,
   threadWithoutIdRefusal,
   threadWord,
@@ -197,6 +197,7 @@ import {
   workspaceProjects,
   HERE_PLACE_ID,
   isLocalWorkspace,
+  turnSpendWord,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
@@ -449,7 +450,7 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
     p.runsWorkspaces === undefined ? "" : p.runsWorkspaces ? "yes" : "no",
     p.engine === undefined ? "" : p.engine,
-    p.kind === "provider" ? fmtRate(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
+    p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
@@ -1058,7 +1059,7 @@ export async function createFromHead(client: HostClient, out: Out, name: string,
   const landing = await forkable(client, on);
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
-  if (head === undefined) throw new Error("no golden yet; run wsp init");
+  if (head === undefined) throw new Error("no image yet; run wsp init");
   return create(client, out, head.snapshotId, name, size, agents, on, engine, landing);
 }
 
@@ -1105,7 +1106,7 @@ export async function projectGoldenOf(client: HostClient, ref: string): Promise<
   if (byId !== undefined) return byId;
   const byName = projectGoldens.filter(g => g.projects.some(p => p.name === ref)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (byName[0] !== undefined) return byName[0];
-  throw new Error(`no project golden named ${ref}; wsp snapshot <workspace> takes one`);
+  throw new Error(`no project image named ${ref}; wsp snapshot <workspace> takes one`);
 }
 
 /** Sets what the agents on the workspace a person names may ask of this host; the record, as every director shows it. */
@@ -1121,9 +1122,9 @@ export async function snapshot(client: HostClient, ref: string): Promise<Project
 }
 
 export function projectGoldenLine(g: ProjectGolden): string {
-  const version = g.version !== undefined ? `golden v${g.version}` : `golden ${g.golden}`;
+  const version = g.version !== undefined ? `image v${g.version}` : `image ${g.golden}`;
   const carried = g.projects.map(p => `${p.name} imported ${p.importedAt.slice(0, 10)}`).join(", ");
-  return `project golden ${g.snapshotId}: ${version} plus ${carried}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${goldenForkName(g)}`;
+  return `project image ${g.snapshotId}: ${version} plus ${carried}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${goldenForkName(g)}`;
 }
 
 /** `size` is the --size word; absent, the workspace takes the golden's size. `engine` asks the place for its
@@ -1793,15 +1794,33 @@ function answering(ctx: VerbContext, client: HostClient, say: (line: string) => 
   };
 }
 
+/** What wsp send and wsp stop take in place of the whole id, said beside the id the moment a person first meets
+ * one: the ids are 36 characters and nobody retypes one, so the line that hands one over says the shorthand that
+ * already works rather than leaving it to be found. */
+export const THREAD_PREFIX_WORD = "wsp send and wsp stop take its first characters";
+
 /** The first line a thread's opening prints: its id, and where it went when no workspace was named. */
 const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
+
+/** The same line at a terminal, where a person has to retype the id to say anything else to the thread. The tool
+ * door prints it without the clause: an agent holding the id passes it whole. */
+const openedThreadSaid = (threadId: string, opened: ((threadId: string) => string) | undefined): string => `${openedThreadLine(threadId, opened)} · ${THREAD_PREFIX_WORD}`;
+
+
+/** What a followed turn says about itself beyond the reply: the line that names the thread it opened where the
+ * workspace was inferred, and the word the turn's own figure carries where this run knows what the figure is. */
+interface SaidAbout {
+  opened?: ((threadId: string) => string) | undefined;
+  spend?: string | undefined;
+}
 
 /** The verbs' way through a turn: text, the tool calls behind it and what each answered stream to stderr as they
  * arrive, and the reply is read once. Where the stream is the person's own screen the streamed prose is that copy
  * and stdout adds only the lines around it; where stdout parts from the stream it carries the finished text whole,
  * with --json every event of the turn up to its done instead; a turn that did not complete is the verb's failure,
  * in the harness's words. */
-async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, opened?: (threadId: string) => string): Promise<Turn> {
+async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, said: SaidAbout = {}): Promise<Turn> {
+  const { opened, spend } = said;
   const stream = turnStream(ctx);
   const asks = answering(ctx, client, line => stream.says(line));
   /** Each call this turn has open, by the id the harness named it, so its result is read against the call's own
@@ -1818,7 +1837,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         joinedWaiting = event.waiting === true;
       },
       started: (t: Turn) => {
-        if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadLine(t.threadId, opened));
+        if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadSaid(t.threadId, opened));
         if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
         if (joinedWaiting) ctx.io.error(WAITING_ON_A_PERSON);
       },
@@ -1843,7 +1862,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
         }
         if (e.type === "session.permission") asks.opened(e, t.threadId);
         if (e.type === "session.permission.closed") asks.closed(e.askId);
-        if (e.type === "session.done") stream.line(turnSettledLine(e.result));
+        if (e.type === "session.done") stream.line(turnSettledLine(e.result, spend));
         if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
       },
     });
@@ -1861,7 +1880,7 @@ async function followVerb(ctx: VerbContext, client: HostClient, start: Record<st
 async function detachVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, picks: Picks = {}, opened?: (threadId: string) => string): Promise<void> {
   const turn = await startDetached(client, start, "cli", () => ctx.io.error(WAITING));
   if (turn.outcome !== "started") ctx.io.error(JOINED[turn.outcome](picks));
-  ctx.out.emit(turnView(turn), openedThreadLine(turn.threadId, opened));
+  ctx.out.emit(turnView(turn), openedThreadSaid(turn.threadId, opened));
 }
 
 export type ExecExit = Extract<ExecEvent, { type: "exec.exit" }>;
@@ -2146,7 +2165,7 @@ const PICK_INPUTS = {
   access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
 };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
-const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the golden's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
+const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
 const SpawnIn = z.enum(["on", "off"]).optional().describe("whether the agents on this workspace may drive this host: open threads and fork machines under the thread they run in, capped. Absent is off, which is what every workspace made without it reads as");
 const MaxMachinesIn = z.number().int().min(0).optional().describe("how many machines may stand at once under one root thread when spawn is on; needs spawn on beside it, and defaults to 3");
 const MaxDepthIn = z.number().int().min(1).optional().describe("how many levels deep the tree under a root thread may go when spawn is on; 1 is the root's own children and no further, which is the default, and it needs spawn on beside it");
@@ -2269,7 +2288,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every workspace this host runs, as the app lists them: id, name, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, the golden it forked from and its projects (projects lists them with their sizes). A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no golden and runs while the host does; kind says which, and the name is what run and every other verb take.",
+        "Every workspace this host runs, as the app lists them: id, name, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it) where the kind has one, the image it forked from and its projects (projects lists them with their sizes). A workspace is a machine wsp forked at the provider, or this computer itself, which forks from no image and runs while the host does; kind says which, and the name is what run and every other verb take.",
       input: {},
       output: { workspaces: z.array(WorkspaceListing) },
       call: async (_args, deps) => asJson({ workspaces: await workspaceStatuses(await deps.client()) }),
@@ -2454,7 +2473,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "new",
-    usage: "wsp new <name> [--on <place>] [--from <project golden>] [--size <cpu>x<memGb>] [--engine] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
+    usage: "wsp new <name> [--on <place>] [--from <project image>] [--size <cpu>x<memGb>] [--engine] [--spawn on|off] [--max-machines <n>] [--max-depth <n>]",
     about: "a workspace from your image; --on <place> says where, and you meet it only once you have more than one place; --engine gives it the place's Docker or podman through a socket that sees its own containers alone",
     page: "front",
     options: { from: { type: "string" }, size: { type: "string" }, on: { type: "string" }, engine: { type: "boolean" }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
@@ -2483,10 +2502,10 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A new workspace forked from the golden image's head, or with from, from a project golden (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; a place that forks nothing runs the person's agents as its own one workspace instead, which this records under the name given when there is none there yet and names when there is.",
+        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; a place that forks nothing runs the person's agents as its own one workspace instead, which this records under the name given when there is none there yet and names when there is.",
       input: {
         name: z.string().describe("the workspace name, which the sidebar and every other line call it by"),
-        from: z.string().optional().describe("a project golden: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
+        from: z.string().optional().describe("a project image: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
         size: SizeIn,
         on: z.string().optional().describe("the place the workspace lands on, by the name or the id places lists; absent takes the place a fork last landed on, which on a host with no joined computer is its own provider"),
         engine: z.boolean().optional().describe("give the workspace the place's container engine (Docker or podman) through a socket at the path a Docker client expects, which sees that workspace's containers alone; a place with no engine refuses it, and absent takes what the image's recipe says"),
@@ -2561,7 +2580,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "snapshot",
     usage: "wsp snapshot <workspace>",
-    about: "a project golden of the workspace: its golden plus the project as it is now, ready to fork",
+    about: "a project image of the workspace: your image plus the project as it is now, ready to fork",
     page: "agent",
     options: {},
     run: async ctx => {
@@ -2572,7 +2591,7 @@ export const VERBS: readonly Verb[] = [
       return 0;
     },
     tool: tool({
-      description: "A project golden of the workspace: its golden version plus the project loaded on it as it stands now, ready for new with from. Only a running machine with a project imported, on a provider that copies a machine's disk, can be snapshotted, and which life the copy may come from is that provider's rule: a machine that was never resumed on the cloud, any life on a container fork. Anything else is refused in one line and nothing is taken.",
+      description: "A project image of the workspace: its image version plus the project loaded on it as it stands now, ready for new with from. Only a running machine with a project imported, on a provider that copies a machine's disk, can be snapshotted, and which life the copy may come from is that provider's rule: a machine that was never resumed on the cloud, any life on a container fork. Anything else is refused in one line and nothing is taken.",
       input: { workspace: WorkspaceIn },
       output: { projectGolden: ProjectGolden },
       call: async ({ workspace: ref }, deps) => asJson({ projectGolden: await snapshot(await deps.client(), ref) }),
@@ -2581,7 +2600,7 @@ export const VERBS: readonly Verb[] = [
   {
     name: "fork",
     usage: 'wsp fork <workspace> [--name <n>] [--size <cpu>x<memGb>] [--send "<task>" [run\'s flags]]',
-    about: "a new machine from the source's golden version, not a copy of its live disk; --size as new's",
+    about: "a new machine from the source's image version, not a copy of its live disk; --size as new's",
     page: "agent",
     options: { name: { type: "string" }, size: { type: "string" }, send: { type: "string" }, agent: { type: "string" }, ...PICK_OPTIONS, cwd: { type: "string" }, notify: { type: "string", multiple: true }, spawn: { type: "string" }, "max-machines": { type: "string" }, "max-depth": { type: "string" } },
     run: async ctx => {
@@ -2600,11 +2619,11 @@ export const VERBS: readonly Verb[] = [
       if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"), agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth")));
       if (task === undefined) return 0;
-      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true)) });
+      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true, {}, { spend: turnSpendWord(created.workspace) })) });
       return 0;
     },
     tool: tool({
-      description: "A sibling workspace from the source's golden version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with run on it rather than forking again.",
+      description: "A sibling workspace from the source's image version (a new machine, not a copy of its live disk); with a task, its first thread is opened and the reply returned. When that first turn fails, the error still names the workspace, which exists: continue with run on it rather than forking again.",
       input: { workspace: WorkspaceIn, name: z.string().optional().describe("defaults to <source>-fork"), size: SizeIn, task: z.string().optional(), agent: AgentIn, ...PICK_INPUTS, cwd: CwdIn, notify: NotifyIn, spawn: SpawnIn, max_machines: MaxMachinesIn, max_depth: MaxDepthIn },
       output: Created.extend({ turn: TurnOut.optional(), failure: z.string().optional() }).shape,
       stream: ["workspace", "notice"],
@@ -2779,7 +2798,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Moves the workspace onto the newest version of the image it was forked from: a fresh machine of that image replaces the old one and the workspace's home folder comes across, less the files the image itself wrote and nobody changed here, whose newer copies come with the image. `kept` names the files of the image's own this workspace had changed, which travelled instead. An archive carries no deletion, so a file taken out of a folder the image writes into comes back with the new image. Anything installed outside the home folder comes from the new image, and everything running on the old machine stops with it. Refused in one line on a workspace that is not running, one forked from a project image, and one whose image no golden here knows; one already on the newest version comes back untouched and says so.",
+        "Moves the workspace onto the newest version of the image it was forked from: a fresh machine of that image replaces the old one and the workspace's home folder comes across, less the files the image itself wrote and nobody changed here, whose newer copies come with the image. `kept` names the files of the image's own this workspace had changed, which travelled instead. An archive carries no deletion, so a file taken out of a folder the image writes into comes back with the new image. Anything installed outside the home folder comes from the new image, and everything running on the old machine stops with it. Refused in one line on a workspace that is not running, one forked from a project image, and one whose image this host no longer holds; one already on the newest version comes back untouched and says so.",
       input: { workspace: WorkspaceIn },
       output: { workspace: WorkspaceOut, moved: z.boolean(), kept: z.array(z.string()), fallback: z.boolean().optional() },
       call: async ({ workspace: ref }, deps) => {
@@ -2856,7 +2875,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "run",
-    usage: 'wsp run [<workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"',
+    usage: 'wsp run [<workspace>] [--agent <id>] [--model, --effort, --access <word>] [--project <name>] [--cwd <path>] [--notify <thread|me>] [--title <title>] [--image <path>] [--detach] "<task>"',
     about: "an agent works in the workspace and you read its reply: a thread with the agent, model, effort and access the app offers, in the project named or the one the app's pick would take; with no workspace, run from inside a registered repo, on the workspace that project last ran on; follows its first turn, or with --detach prints the id and returns",
     page: "front",
     options: { agent: { type: "string" }, ...PICK_OPTIONS, project: { type: "string" }, cwd: { type: "string" }, notify: { type: "string", multiple: true }, title: { type: "string" }, image: { type: "string", multiple: true }, detach: { type: "boolean" } },
@@ -2876,7 +2895,7 @@ export const VERBS: readonly Verb[] = [
       const workspace = await awake(client, found, "send", line => ctx.io.error(line));
       const opening = openingOf(ctx.env, workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true, {}, opened)));
+      else ctx.out.emit(turnView(await followVerb(ctx, client, opening, true, {}, { opened, spend: turnSpendWord(workspace) })));
       return 0;
     },
     tool: tool({
@@ -3001,10 +3020,10 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       const thread = await threadOf(client, ref);
       await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
-      await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
+      const workspace = await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       const images = flagList(ctx.flags, "image");
       if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, images), picks);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images), false, picks)));
+      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images), false, picks, { spend: turnSpendWord(workspace) })));
       return 0;
     },
     tool: tool({
@@ -3305,12 +3324,73 @@ export function findVerb(argv: ReadonlyArray<string>): CliVerb | CliOnlyVerb | u
 /** Every line of help fits this many columns. */
 export const HELP_WIDTH = 80;
 
+/** What each flag a verb reads says in that verb's own help, one short line each: a reminder, not a lesson. A word
+ * that means the same thing wherever it is read is keyed by the word alone; one that means two things is keyed by
+ * the verb and the word, since a sentence covering both meanings is the paragraph this table was split out of. The
+ * parity test holds every flag of every verb to a row here, so a flag added to a verb is documented or named.
+ *
+ * The tool inputs' own descriptions are not these: an agent reading a tool needs the whole rule before it calls,
+ * and a person at a terminal needs the line that reminds them which word to type.
+ *
+ * The words after model, effort and access are examples a person reads before they type, not the list the run is
+ * held to: the agent's own catalog is that, it is fetched per agent at the turn, and a line printed before any
+ * agent is named cannot await it. A word outside the catalog is refused by the runtime naming the list it does
+ * hold, which is where the truth is said. */
+export const FLAG_WORDS: Readonly<Record<string, string>> = {
+  agent: "which agent runs the thread, by its catalog id (claude, codex); the workspace's own default without it",
+  agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
+  "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
+  add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",
+  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); its default without it",
+  cut: "a path inside the folder to leave behind, on top of the plan's own answer; repeats",
+  cwd: "the folder on the machine to work in; the project's folder without it",
+  detach: "print the thread's id and return, leaving the reply to the thread's finished line",
+  effort: "how hard the agent thinks, by its own word (low, medium, high, xhigh, max); its default without it",
+  engine: "give it the place's Docker or podman through a socket that sees its own containers alone",
+  "recipe engine": "mark the recipe so every workspace from its image gets the place's Docker or podman; it stays in the file until you edit it out",
+  "export from": "the folder on the machine to bring home; the project registered for the folder you named without it",
+  force: "build again even where the place already holds this version",
+  hidden: "list the folders whose names start with a dot too",
+  image: "an image file on this computer to send with the message; repeats",
+  "import yes": "take the plan's own answer for every row instead of being asked",
+  keep: "a path inside the folder to carry to the machine, on top of the plan's own answer; repeats",
+  last: "the final reply alone, the whole message the thread's finished line carries",
+  "max-depth": "how many levels of threads may stand under the root thread; needs --spawn on, and defaults to 1",
+  "max-machines": "how many machines may stand at once under one root thread; needs --spawn on, and defaults to 3",
+  model: "the model the turn runs on, by the agent's own slug (claude-sonnet-5); the thread's own without it",
+  name: "what to call the new workspace; <source>-fork without it",
+  "new from": "a project image to start from, by its project's name or its snapshot id, as wsp snapshot returns them",
+  notify: "where each turn's end is sent, a thread's id or me; repeats",
+  on: "the place it lands on, by the name wsp places lists; where the last one landed without it",
+  out: "where the recipe file is written",
+  project: "the project inside the workspace to work in, by name; the one the last thread there used without it",
+  "recipe project": "a folder on this computer to weigh the histories by; repeats",
+  "recipe scan project": "a folder on this computer to weigh the histories by; repeats",
+  replace: "overwrite what is already at the destination",
+  scheme: `which side of a light:...,dark:... theme to read; ${TerminalScheme.options.join(" or ")}`,
+  send: "a task for the new workspace's first thread, with run's own flags after it",
+  set: "<id>=on|off flipping one row of the recipe by its id; repeats",
+  signin: `<id>=${LOGIN_CHOICES.join("|")} answering one sign-in by catalog id; repeats`,
+  size: "the machine size as <cpu>x<memGb>, like 2x4; a size the provider does not offer is refused naming the ones it does",
+  spawn: "on lets the agents there open threads and fork machines of their own, capped; off is what a workspace made without it is",
+  tick: `the rule that decides every tick: ${RECIPE_TICKS.join(", ")}`,
+  timeout: "how long to wait before answering that they are still running",
+  title: "what to call the thread; the agent names it from the task without one",
+  tree: "indent the threads an agent opened under the one that opened them",
+  yes: "go ahead without being asked",
+};
+
+/** The line one flag gets in one verb's own help: the verb's own row where the word means two things, else the
+ * word's own. Nothing where no row carries it, which the parity test refuses. */
+export const flagSays = (verb: string, name: string): string | undefined => FLAG_WORDS[`${verb} ${name}`] ?? FLAG_WORDS[name];
+
 /** The verb's about behind the indent, wrapped to the help's width. */
 const aboutLines = (verb: CliVerb | CliOnlyVerb, indent: string): string[] => wrap(`${indent}${verb.about}`, HELP_WIDTH, indent);
 
 /** The usage wrapped at the gaps between its groups and never inside a bracket, so a flag stays on the line with its
- * value. */
-export function usageLines(usage: string, indent: string): string[] {
+ * value. `lead` is what the first line opens with, so a page that opens it with `usage: ` is wrapped to the columns
+ * it will actually stand in rather than to two spaces and then widened by five. */
+export function usageLines(usage: string, indent: string, lead = "  "): string[] {
   let depth = 0;
   const grouped = [...usage]
     .map(c => {
@@ -3319,7 +3399,7 @@ export function usageLines(usage: string, indent: string): string[] {
       return c === " " && depth > 0 ? "\u00a0" : c;
     })
     .join("");
-  return wrap(`  ${grouped}`, HELP_WIDTH, indent).map(line => line.replaceAll("\u00a0", " "));
+  return wrap(`${lead}${grouped}`, HELP_WIDTH, indent).map(line => line.replaceAll("\u00a0", " "));
 }
 
 /** The lines of one page: each usage, then what it does indented under it, so no line runs wide. */
@@ -3327,6 +3407,42 @@ export function verbHelp(page?: Page): string {
   return CLI_VERBS.filter(v => page === undefined || v.page === page)
     .map(v => [...usageLines(v.usage, "    "), ...aboutLines(v, "      ")].join("\n"))
     .join("\n");
+}
+
+/** Every flag a verb reads beside the ones every verb takes, in the order the verb declares them. */
+export const ownFlagsOf = (verb: CliVerb | CliOnlyVerb): string[] => Object.keys(verb.options).filter(name => !Object.hasOwn(COMMON, name));
+
+/** What the flags every line takes say, wherever a page prints them. One home, so a verb's own help, a command's
+ * own help and the agent page cannot word the same flag three ways, which they did. `hostSide` is what --host means
+ * to a line that runs at its own host's terminal and dials nobody else. */
+export const COMMON_FLAG_WORDS = {
+  json: "print the raw protocol values, one JSON object per line, with everything else on stderr",
+  state: "the state file the host serves",
+  host: "run the line against a host on another computer, by the name wsp host connect gave it; WSP_HOST names one for a whole shell",
+  hostSide: "read to say this line runs at its own host's terminal; it dials no other",
+} as const;
+
+/** One page of help: the usage wrapped as every page wraps it, what the line does, then a line per flag. The one
+ * renderer, so a verb's page, a command's page and the tool server's own read alike. */
+export function helpPage(usage: string, about: readonly string[], rows: readonly (readonly [string, string])[]): string {
+  const width = Math.max(...rows.map(([word]) => word.length), 0) + 4;
+  return [
+    ...usageLines(usage, "       ", "usage: "),
+    ...about,
+    ...(rows.length === 0 ? [] : ["", ...rows.flatMap(([word, says]) => wrap(`  ${word.padEnd(width)}${says}`, HELP_WIDTH, " ".repeat(width + 2)))]),
+  ].join("\n");
+}
+
+/** What one verb's own `--help` prints: its usage, what it does, its own flags one line each, then the three every
+ * verb takes. A page that named ten flags on the usage line and then documented three of them left the person to
+ * guess what the other seven took. */
+export function verbPage(verb: CliVerb | CliOnlyVerb, host: string): string {
+  return helpPage(verb.usage, aboutLines(verb, "  "), [
+    ...ownFlagsOf(verb).map((name): [string, string] => [`--${name}`, flagSays(verb.name, name) ?? ""]),
+    ["--json", COMMON_FLAG_WORDS.json],
+    ["--state", COMMON_FLAG_WORDS.state],
+    ["--host", host],
+  ]);
 }
 
 /** The usage of every verb that opens with this word, for a command that stopped short of one; none when no verb does. */
@@ -3383,8 +3499,8 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
   const hostSide = "hostSide" in verb ? verb.hostSide : undefined;
   if (flags["help"] === true) {
     // A line that runs at its own host's terminal takes the flag only to say so, which is what its own line says.
-    const host = hostSide === undefined ? "a host on another computer, by the name wsp host connect gave it" : "read to say this line runs at its own host's terminal; it dials no other";
-    io.log(`usage: ${verb.usage}\n${aboutLines(verb, "  ").join("\n")}\n\n  --json         print the raw protocol values, one JSON line each\n  --state PATH   the state file the host serves\n  --host NAME    ${host}`);
+    const host = hostSide === undefined ? COMMON_FLAG_WORDS.host : COMMON_FLAG_WORDS.hostSide;
+    io.log(verbPage(verb, host));
     return 0;
   }
   const statePath = statePathOf(flag(flags, "state"));

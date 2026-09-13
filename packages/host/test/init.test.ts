@@ -43,7 +43,7 @@ import { loginOf } from "./signin-questions.js";
 const SOLARI = "slr_live_fake_solari_key";
 const KEY = { up: "\x1b[A", down: "\x1b[B", right: "\x1b[C", left: "\x1b[D", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const URL_RE = /http:\/\/127\.0\.0\.1:\d+\//;
-const SEAL_Q = (v: number) => `Seal this machine as golden v${v}?`;
+const SEAL_Q = (v: number) => `Seal this machine as image v${v}?`;
 const BOOT = /Boot a \d+ vCPU/;
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE, builderDiskGb: BUILDER_DISK_GB };
 
@@ -485,7 +485,7 @@ describe("wsp init, interactive", () => {
     const again = fake({ yes: true, tty: false, home: f.opts.home, statePath: f.opts.statePath, collect, brew });
     onShared(again);
     expect((await runInit(again.opts, again.io)).code).toBe(0);
-    expect(again.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(again.text()).toContain("Image v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(1);
   });
 
@@ -611,7 +611,7 @@ describe("wsp init, interactive", () => {
     expect(f.relaysClosed).toBe(1);
     expect(f.hosts).toBe(0);
     const out = f.text();
-    expect(out).toContain("Sealing golden v1. Taken as yes (--yes).");
+    expect(out).toContain("Sealing image v1. Taken as yes (--yes).");
     expect(out).toContain("The fork failed its check");
     expect(out).toContain("Seal failed and the builder is gone. Run wsp init again; the recipe is kept.");
     expect(out).toContain(`The run log is ${join(dirname(f.opts.statePath), "init.log")}`);
@@ -1273,7 +1273,7 @@ describe("wsp init, the secrets step", () => {
     const out = f.text();
     expect(out.indexOf("Paste each value")).toBeGreaterThan(out.indexOf("Ready"));
     expect(out.indexOf("Paste each value")).toBeLessThan(out.indexOf("Signing in on the machine"));
-    expect(out.indexOf("Signing in on the machine")).toBeLessThan(out.indexOf("Ready to seal golden v1"));
+    expect(out.indexOf("Signing in on the machine")).toBeLessThan(out.indexOf("Ready to seal image v1"));
     expect(out).toMatch(/Secrets\n│\s+ANTHROPIC_API_KEY\s+set on the machine\n/);
     expect(out).not.toContain("s3cret");
     // The machine's secrets file is read first (nothing there on a fresh builder, no fish), then the one write, and
@@ -1633,12 +1633,12 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.handle).toBeUndefined();
     const out = f.text();
     expect(out).toContain("Taken as yes (no terminal)");
-    expect(out).toContain("Sealing golden v1. Taken as yes (no terminal).");
-    expect(out).toContain("Golden v1 sealed.");
+    expect(out).toContain("Sealing image v1. Taken as yes (no terminal).");
+    expect(out).toContain("Image v1 sealed.");
     // Nobody is here to use the app or to pay for a machine nobody asked for: no host and no fork. This computer is
     // not a fork and bills nothing, so the tick stands and the run still ends in a workspace.
-    expect(out).not.toContain("forked from golden v1");
-    expect(out).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
+    expect(out).not.toContain("forked from image v1");
+    expect(out).toContain("Done. Image v1 is sealed; wsp up opens the app.");
     expect(out).not.toMatch(URL_RE);
     expect((await f.runtimes.at(-1)!.workspaces.list()).map(w => ({ name: w.name, kind: w.kind }))).toEqual([{ name: LOCAL_NAME, kind: "local" }]);
     expect(f.trail).toEqual(["local"]);
@@ -1698,8 +1698,8 @@ describe("wsp init, flags and no terminal", () => {
     expect(out).not.toMatch(/◆  Agents|◆  Sign-ins/);
     expect(out).not.toContain("is in use on this computer");
     expect(out).toContain("Taken as yes (--non-interactive)");
-    expect(out).toContain("Sealing golden v1. Taken as yes (--non-interactive).");
-    expect(out).toContain("Done. Golden v1 is sealed; wsp up --state /tmp/wsp-test/state.json opens the app.");
+    expect(out).toContain("Sealing image v1. Taken as yes (--non-interactive).");
+    expect(out).toContain("Done. Image v1 is sealed; wsp up --state /tmp/wsp-test/state.json opens the app.");
     const rt = f.runtimes.at(-1)!;
     expect(goldenHead(await rt.golden.get())?.snapshotId).toBe("snap_wsp-h1-default-v1");
     // An agent pays for no machine it did not ask for: nothing is forked. This computer costs nothing, so the tick
@@ -1736,7 +1736,7 @@ describe("wsp init, flags and no terminal", () => {
     const workspace = (await f.runtimes.at(-1)!.workspaces.list())[0]!;
     expect(workspace.name).toBe("proj");
     expect(f.records.at(-1)).toEqual({ event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up", workspace: { id: workspace.id, name: "proj" } });
-    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
+    expect(f.text()).toContain("Done. Image v1 is sealed; wsp up opens the app.");
     expect(f.hosts).toBe(0);
   });
 
@@ -1799,9 +1799,9 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(1);
     expect(result.handle).toBeUndefined();
     const out = f.text();
-    expect(out).toContain("Golden v1 sealed.");
+    expect(out).toContain("Image v1 sealed.");
     expect(out).toContain("listen EADDRINUSE: address already in use 127.0.0.1:4410");
-    expect(out).toContain("Golden v1 is sealed and recorded. The app did not start; fix that and run wsp up, with --port when a port is taken.");
+    expect(out).toContain("Image v1 is sealed and recorded. The app did not start; fix that and run wsp up, with --port when a port is taken.");
     expect(out).not.toContain(FIRST_QUESTION);
     expect(goldenHead(await f.runtimes.at(-1)!.golden.get())?.snapshotId).toBe("snap_wsp-h1-default-v1");
     // The builder is kept ten minutes for one more change and recorded as saved; the smoke fork is gone; no workspace was forked.
@@ -1931,8 +1931,8 @@ describe("wsp init, flags and no terminal", () => {
     const out = f.text();
     expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/#w\/ws_[0-9a-f]+$/m);
     expect(out).toContain("wsp keeps serving the app from this terminal; Ctrl-C stops it.");
-    expect(out).not.toContain("Done. Golden v1 is sealed");
-    expect(out.indexOf("Golden v1 sealed.")).toBeLessThan(out.indexOf("Open http://"));
+    expect(out).not.toContain("Done. Image v1 is sealed");
+    expect(out.indexOf("Image v1 sealed.")).toBeLessThan(out.indexOf("Open http://"));
   });
 
   it("a refused create for the account cap waits and retries, killing nothing", async () => {
@@ -2616,7 +2616,7 @@ describe("wsp init, flags and no terminal", () => {
     const first = fake({ yes: true });
     first.opts.runtime = runtimeOver(first);
     expect((await runInit(first.opts, first.io)).code).toBe(0);
-    expect(first.text()).toContain("Golden v1 sealed.");
+    expect(first.text()).toContain("Image v1 sealed.");
     await first.runtimes.at(-1)!.close();
 
     // The seal kept that builder for its window; a changed recipe updates the golden on it and seals v2 there.
@@ -2625,8 +2625,8 @@ describe("wsp init, flags and no terminal", () => {
     second.opts.runtime = runtimeOver(second);
     expect((await runInit(second.opts, second.io)).code).toBe(0);
     await second.until("Sealed");
-    expect(second.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
-    expect(second.text()).not.toContain("Golden v1 sealed");
+    expect(second.text()).toMatch(/Image v2 sealed in \d+s on the builder kept since the save/);
+    expect(second.text()).not.toContain("Image v1 sealed");
     // The kept builder and the first run's workspace; the update road forks none.
     expect(shared.machines.filter(m => !m.killed).map(m => m.spec.fromSnapshot)).toEqual([undefined, "snap_wsp-h1-default-v1"]);
   });
@@ -3186,7 +3186,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     };
     first.opts.host = quietHost();
     expect((await runInit(first.opts, first.io)).code).toBe(0);
-    expect(first.text()).toContain("Golden v1 sealed.");
+    expect(first.text()).toContain("Image v1 sealed.");
     expect(first.text()).toContain("The first workspace could not be forked: no workspace in this fixture. Create one from the app.");
     const builder = shared.machines[0]!;
     await first.runtimes.at(-1)!.close();
@@ -3231,7 +3231,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     // The same recipe again: the pin folds away and nothing is built.
     const same = next({ tty: false, collect });
     expect((await runInit(same.opts, same.io)).code).toBe(0);
-    expect(same.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(same.text()).toContain("Image v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(1);
 
     // A stale pin, as a recipe from elsewhere would carry: the row is changed, reinstalled at the recorded release, and the sum checked.
@@ -3241,7 +3241,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const out = stale.text();
     expect(out).toContain("Builds version 2 on top of version 1: 1 tool updated");
     expect(out).toContain("update 1 tool: GitHub CLI (release v2.86.0 to v2.85.0)");
-    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
+    expect(out).toContain("Updating your image. Taken as the default (--yes).");
     expect(out).not.toMatch(BOOT);
     expect(roadRuns()).toHaveLength(2);
     const pinned = roadRuns()[1]!;
@@ -3258,7 +3258,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     // And v2 with the pin it recorded is, again, no change.
     const again = next({ tty: false, collect });
     expect((await runInit(again.opts, again.io)).code).toBe(0);
-    expect(again.text()).toContain("Golden v2 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(again.text()).toContain("Image v2 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(2);
 
     // Under --recipe <file>, the file's pin wins over the state's: the row is planned at the file's tag.
@@ -3275,7 +3275,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     writeFileSync(file, JSON.stringify({ ...small(), rows: small().rows.map(r => { const { pin: _pin, ...rest } = r; return rest; }) }));
     const unpinned = next({ tty: false, collect, recipeFile: file });
     expect((await runInit(unpinned.opts, unpinned.io)).code).toBe(0);
-    expect(unpinned.text()).toContain("Golden v3 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(unpinned.text()).toContain("Image v3 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(3);
   });
 
@@ -3318,13 +3318,13 @@ describe("wsp init with a golden already built from a recipe", () => {
     // The same file again: the pin folds away and nothing is built.
     const same = next({ tty: false, collect, brew, recipeFile: file });
     expect((await runInit(same.opts, same.io)).code).toBe(0);
-    expect(same.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(same.text()).toContain("Image v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(1);
 
     // A plain run: the tick and the pin come from the recipe beside the state, so the row stands and nothing is built.
     const plain = next({ tty: false, collect, brew });
     expect((await runInit(plain.opts, plain.io)).code).toBe(0);
-    expect(plain.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(plain.text()).toContain("Image v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(1);
     expect(small().rows.find(r => r.id === tap.id)).toEqual({ ...outside, pin });
 
@@ -3383,7 +3383,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     // The same file again: the pin folds away, nothing is built and nothing is fetched a second time.
     const same = next({ tty: false, collect, brew, recipeFile: file });
     expect((await runInit(same.opts, same.io)).code).toBe(0);
-    expect(same.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(same.text()).toContain("Image v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(roadRuns()).toHaveLength(1);
   });
 
@@ -3396,17 +3396,17 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(result.code).toBe(0);
     expect(f.hosts).toBe(0);
     const out = f.text();
-    expect(out).toContain("Changes since golden v1");
+    expect(out).toContain("Changes since image v1");
     expect(out).toContain("update 1 file: ~/.zshrc");
     expect(out).toContain("Small change: update on the builder kept since the save, under a minute");
     expect(out).toMatch(/about \$0\.11\/hr/);
-    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
-    expect(out.match(/Updating the golden to v2: files, tools, agents and logins on it are kept and only the changes above are applied; workspaces on v1 stay there until you upgrade them\./g)).toHaveLength(1);
+    expect(out).toContain("Updating your image. Taken as the default (--yes).");
+    expect(out.match(/Updating your image to v2: files, tools, agents and logins on it are kept and only the changes above are applied; workspaces on v1 stay there until you upgrade them\./g)).toHaveLength(1);
     expect(out).not.toMatch(BOOT);
     expect(out).not.toContain("A builder from an earlier wsp init is still running");
     for (const step of ["Machine ready", "Changes applied", "Files uploaded", "Tools installed", "Agents installed", "MCP servers installed", "Ready", "Snapshot taken", "Fork booted and checked", "Sealed"]) expect(out).toContain(step);
     expect(out).toContain("your builder from v1, kept since the save");
-    expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
+    expect(out).toMatch(/Image v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
     expect(out).toContain("The builder stays up (about $0.11/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires.");
     // The builder, v1's smoke fork, v2's smoke fork: nothing else booted.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, false], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
@@ -3422,7 +3422,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     // The saved recipe is the new one, and a run on the same answers finds nothing to update.
     const again = next({ tty: false });
     expect((await runInit(again.opts, again.io)).code).toBe(0);
-    expect(again.text()).toContain("Golden v2 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(again.text()).toContain("Image v2 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(shared.machines).toHaveLength(3);
   });
 
@@ -3442,7 +3442,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const ran = builder.execLog.slice(before);
     expect(ran.filter(c => c.includes("brew uninstall yq"))).toEqual([]);
     expect(ran.some(c => c.includes("brew install"))).toBe(false);
-    expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
+    expect(out).toMatch(/Image v2 sealed in \d+s on the builder kept since the save/);
     expect(out).toMatch(/Tools, agents and machine context: 0 installed, 1 retired, 0 failed, 0 skipped; the list is in .*golden-import\.json/);
     expect(out).toContain("yq retired: out of the recipe, left on the image");
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({ tools: [], retired: [{ id: "tools/brew/yq", name: "yq" }] });
@@ -3464,7 +3464,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const f = next({ tty: false });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
+    expect(out).toMatch(/Image v2 sealed in \d+s on the builder kept since the save; new workspaces fork it\./);
     expect(out).not.toContain("The builder stays up");
     expect(out).toContain("Run wsp to serve.");
     expect(shared.machines[0]!.killed).toBe(true);
@@ -3487,7 +3487,7 @@ describe("wsp init with a golden already built from a recipe", () => {
       return rt;
     };
     expect((await runInit(f.opts, f.io)).code).toBe(0);
-    expect(f.text()).toContain("Golden v1 sealed.");
+    expect(f.text()).toContain("Image v1 sealed.");
     expect(f.text()).not.toContain("The builder stays up ten minutes");
     expect(shared.machines[0]!.killed).toBe(true);
     // The builder gave up its slot to the smoke fork; nothing else boots, and the fork is the person's to ask for.
@@ -3518,9 +3518,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect((await runInit(again.opts, again.io)).code).toBe(0);
     const out = again.text();
     expect(out).toContain("Attaching to your earlier builder: default (m3)");
-    expect(out).not.toContain("Changes since golden v1");
+    expect(out).not.toContain("Changes since image v1");
     expect(out).not.toMatch(BOOT);
-    expect(out).toContain("Golden v2 sealed.");
+    expect(out).toContain("Image v2 sealed.");
     // The attached builder goes with its seal, since nobody at a terminal stays to end a kept one's window; v2's smoke fork too.
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], [undefined, true], ["snap_wsp-h1-default-v2", true]]);
   });
@@ -3532,7 +3532,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const f = next({ tty: false });
     expect((await runInit(f.opts, f.io)).code).toBe(1);
     const out = f.text();
-    expect(out).toContain("Golden v1 is unchanged and the builder kept since the save is gone. Run wsp init again to retry on a fork of the golden (about two minutes), or pick the rebuild.");
+    expect(out).toContain("Image v1 is unchanged and the builder kept since the save is gone. Run wsp init again to retry on a fork of your image (about two minutes), or pick the rebuild.");
     expect(shared.machines[0]!.killed).toBe(true);
   });
 
@@ -3551,7 +3551,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     shared.beforeSnapshot = undefined;
     const h = next({ tty: false });
     expect((await runInit(h.opts, h.io)).code).toBe(0);
-    expect(h.text()).toContain("Golden v2 is sealed");
+    expect(h.text()).toContain("Image v2 is sealed");
     expect(goldenHead(await h.runtimes.at(-1)!.golden.get())).toMatchObject({ version: 2, snapshotId: "snap_wsp-h1-default-v2" });
     expect(shared.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true], ["snap_wsp-h1-default-v2", true]]);
 
@@ -3577,7 +3577,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     const { shared, next } = await sealed();
     const f = next();
     expect((await runInit(f.opts, f.io)).code).toBe(0);
-    expect(f.text()).toContain("Golden v1 already matches this recipe. Nothing to update; run wsp to serve it.");
+    expect(f.text()).toContain("Image v1 already matches this recipe. Nothing to update; run wsp to serve it.");
     expect(f.text()).not.toContain("Changes since");
     expect(f.hosts).toBe(0);
     expect(shared.machines).toHaveLength(2);
@@ -3588,18 +3588,18 @@ describe("wsp init with a golden already built from a recipe", () => {
     writeFileSync(join(first.opts.home, ".zshrc"), "export A=1\nexport B=2\n");
     const second = next({ tty: false });
     expect((await runInit(second.opts, second.io)).code).toBe(0);
-    expect(second.text()).toMatch(/Golden v2 sealed in \d+s/);
+    expect(second.text()).toMatch(/Image v2 sealed in \d+s/);
     // A big change takes the rebuild road; its seal is v3, so v1 is the one to offer.
     const third = next({ recipe: async () => ticking("codex"), tty: false });
     third.opts.roads = () => quietRoads;
     expect((await runInit(third.opts, third.io)).code).toBe(0);
     const out = third.text();
     expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
-    expect(out).toContain("Golden v3 sealed.");
-    expect(out).toMatch(/Delete golden v1, [\d.]+ GB, .*\? v3 and v2 stay\..* Taken as yes \(--yes\)\./);
-    expect(out).toContain("Deleted golden v1.");
-    expect(out.indexOf("Golden v3 sealed.")).toBeLessThan(out.indexOf("Delete golden v1"));
-    expect(out.indexOf("Deleted golden v1.")).toBeLessThan(out.indexOf("Done. Golden v3 is sealed;"));
+    expect(out).toContain("Image v3 sealed.");
+    expect(out).toMatch(/Delete image v1, [\d.]+ GB, .*\? v3 and v2 stay\..* Taken as yes \(--yes\)\./);
+    expect(out).toContain("Deleted image v1.");
+    expect(out.indexOf("Image v3 sealed.")).toBeLessThan(out.indexOf("Delete image v1"));
+    expect(out.indexOf("Deleted image v1.")).toBeLessThan(out.indexOf("Done. Image v3 is sealed;"));
     expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v2", "snap_wsp-h1-default-v3"]);
   });
 
@@ -3615,9 +3615,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     const third = next({ tty: false });
     expect((await runInit(third.opts, third.io)).code).toBe(0);
     const out = third.text();
-    expect(out).toMatch(/Golden v3 sealed in \d+s/);
-    expect(out).toContain("Delete golden v1, 8.0 GB, saving about $0.40/month from 2026-10-01? v3 and v2 stay. Taken as yes (--yes).");
-    expect(out).toContain("Deleted golden v1.");
+    expect(out).toMatch(/Image v3 sealed in \d+s/);
+    expect(out).toContain("Delete image v1, 8.0 GB, saving about $0.40/month from 2026-10-01? v3 and v2 stay. Taken as yes (--yes).");
+    expect(out).toContain("Deleted image v1.");
     expect(out).toContain("storage: 2 snapshots, 16.0 GB; about $0.30/month above the free 10 GB from 2026-10-01");
     expect(shared.snapshots.map(r => r.id)).toEqual(["snap_wsp-h1-default-v2", "snap_wsp-h1-default-v3"]);
     expect(await store.get("goldens", copyKey("default", "default"))).toMatchObject({ head: 3, versions: [{ version: 2 }, { version: 3 }] });
@@ -3631,7 +3631,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
     expect(out).toContain("Builds version 2 on top of version 1: 1 tool added");
-    expect(out).toContain("Updating the golden. Taken as the default (--yes).");
+    expect(out).toContain("Updating your image. Taken as the default (--yes).");
     // One road: the delta landed on the builder kept from v1, and nothing was built from scratch beside it.
     expect(out).not.toContain("Rebuilding from scratch");
     expect(out).not.toMatch(BOOT);
@@ -3641,7 +3641,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(manifest.versions.map(v => v.version)).toEqual([1, 2]);
     expect(manifest.versions[1]).toMatchObject({ version: 2, parentSnapshotId: manifest.versions[0]!.snapshotId });
     expect(manifest.versions[1]).not.toHaveProperty("retired");
-    expect(first.text()).toContain("Golden v1 sealed.");
+    expect(first.text()).toContain("Image v1 sealed.");
   });
 
   it("a row unticked after the seal is retired on the next version and left on the image: nothing is uninstalled, and the lineage carries it", async () => {
@@ -3712,7 +3712,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(out.replace(/\s*│?\s*\n│\s+/g, " ")).toContain("A big change: a rebuild from scratch is the safer road, about 22 minutes last time.");
     expect(out).toContain("Rebuilding from scratch. Taken as the default (--yes).");
     // The kept builder holds a slot the rebuild needs; it goes after the confirm and before the boot, said once.
-    expect(out).toContain("Stopping the builder kept from golden v1 (m1) to free its machine slot.");
+    expect(out).toContain("Stopping the builder kept from image v1 (m1) to free its machine slot.");
     expect(out.indexOf("Stopping the builder kept")).toBeGreaterThan(out.indexOf("Boot a "));
     expect(out.indexOf("Stopping the builder kept")).toBeLessThan(out.indexOf("Creating the machine"));
     expect(out).toMatch(BOOT);
@@ -3721,8 +3721,8 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(hosted).toEqual(["m4"]);
     // The rebuilt builder seals v2 and is kept; its smoke fork is gone. v1 stays for the workspace forked from it,
     // which stays where it is: no second workspace is forked, and the app opens on the one there.
-    expect(out).toContain("Golden v2 sealed.");
-    expect(out).toContain("Your 1 workspace stays on the golden version it was forked from; upgrade it from the app. New workspaces fork v2.");
+    expect(out).toContain("Image v2 sealed.");
+    expect(out).toContain("Your 1 workspace stays on the image version it was forked from; upgrade it from the app. New workspaces fork v2.");
     expect(out).not.toContain("Workspace first");
     expect(out).not.toContain("Forking your first workspace");
     expect(out).toMatch(/^◇\s+Open http:\/\/127\.0\.0\.1:4400\/$/m);
@@ -3737,10 +3737,10 @@ describe("wsp init with a golden already built from a recipe", () => {
     f.opts.firstWorkspace = "proj";
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).toContain("Golden v2 sealed.");
+    expect(out).toContain("Image v2 sealed.");
     // The step was answered, so the count of workspaces has nothing to say and the stay line stands down.
-    expect(out).not.toContain("stays on the golden version it was forked from");
-    expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from golden v2\./);
+    expect(out).not.toContain("stays on the image version it was forked from");
+    expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from image v2\./);
     expect(f.trail).toContain("fork proj");
     const workspaces = await f.runtimes.at(-1)!.workspaces.list();
     expect(workspaces.map(w => w.name).sort()).toEqual(["alpha", "proj"]);
@@ -3758,12 +3758,12 @@ describe("wsp init with a golden already built from a recipe", () => {
     await throughScreens(f);
     await f.until("How do you want to apply them?");
     const asked = f.text();
-    expect(asked).toContain("Update the golden (under a minute, about $0.11/hr while it runs)");
+    expect(asked).toContain("Update your image (under a minute, about $0.11/hr while it runs)");
     expect(asked).toContain("Rebuild from scratch (under a minute last time)");
-    expect(asked.indexOf("Update the golden")).toBeLessThan(asked.indexOf("Rebuild from scratch"));
+    expect(asked.indexOf("Update your image")).toBeLessThan(asked.indexOf("Rebuild from scratch"));
     await f.press(KEY.enter);
     expect((await run).code).toBe(0);
-    expect(f.text()).toMatch(/Golden v2 sealed in \d+s on the builder kept since the save/);
+    expect(f.text()).toMatch(/Image v2 sealed in \d+s on the builder kept since the save/);
     expect(f.text()).not.toMatch(BOOT);
     expect(shared.machines).toHaveLength(3);
   });
@@ -3800,11 +3800,11 @@ describe("wsp init with a golden already built from a recipe", () => {
     await throughScreens(f);
     await f.until(BOOT);
     const asked = f.text();
-    expect(asked).toContain("Changes since golden v1");
+    expect(asked).toContain("Changes since image v1");
     expect(asked).toContain("update 1 file: ~/.zshrc");
-    expect(asked).toContain("Golden v1 was sealed before the base tools existed and cannot take an update; the rebuild is the only road, under a minute last time.");
+    expect(asked).toContain("Image v1 was sealed before the base tools existed and cannot take an update; the rebuild is the only road, under a minute last time.");
     expect(asked).not.toContain("How do you want to apply them?");
-    expect(asked).not.toContain("Update the golden");
+    expect(asked).not.toContain("Update your image");
     expect(asked).not.toContain("Small change");
     await f.press(KEY.ctrlC);
     expect((await run).code).toBe(1);
@@ -3819,8 +3819,8 @@ describe("wsp init with a golden already built from a recipe", () => {
     const f = next({ tty: false });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     const out = f.text();
-    expect(out).toContain("Small change: update on a fork of the golden, about two minutes");
-    expect(out).toMatch(/Golden v2 sealed in \d+s from a fork of the golden/);
+    expect(out).toContain("Small change: update on a fork of your image, about two minutes");
+    expect(out).toMatch(/Image v2 sealed in \d+s from a fork of your image/);
   });
 
   it("interactive: down then enter picks the rebuild, and the boot question follows", async () => {
@@ -3847,7 +3847,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     await store.put("builders", "m1", { ...record, firstLife: false });
     const f = next({ tty: false });
     expect((await runInit(f.opts, f.io)).code).toBe(0);
-    expect(f.text()).toContain("Small change: update on a fork of the golden, about two minutes");
+    expect(f.text()).toContain("Small change: update on a fork of your image, about two minutes");
   });
 });
 
@@ -4064,11 +4064,11 @@ describe("wsp init, the first workspace and its project", () => {
     // The app's own defaults, unchanged: the rewrite travels, the bare secret is cut, the agent with sessions comes.
     expect(f.imports).toEqual([{ workspaceId: workspaces[0]!.id, source: folder, dest: folder, carry: [], rewrite: [".git/config"], agents: ["claude"] }]);
     const out = f.text();
-    expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from golden v1\./);
+    expect(out).toMatch(/Workspace proj \(ws_[0-9a-f]+\) forked from image v1\./);
     expect(out).toContain("12 files, 3 KB; the repository whole; 46 sessions from Claude Code; 2 secret-shaped files read for what may travel.");
     expect(out).toContain(`${folder} on proj: 12 files, 3 KB; 1 file rewritten without their credentials; 1 secret-shaped file cut.`);
     // Off a terminal no app is served: the run ends naming what serves it.
-    expect(out).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
+    expect(out).toContain("Done. Image v1 is sealed; wsp up opens the app.");
     expect(out).not.toMatch(URL_RE);
     expect(f.hosts).toBe(0);
   });
@@ -4144,7 +4144,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect((await runInit(f.opts, f.io)).code).toBe(0);
     expect(await f.runtimes.at(-1)!.workspaces.list()).toEqual([]);
     expect(f.trail).toEqual([]);
-    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp new first forks a workspace from it, and wsp up opens the app.");
+    expect(f.text()).toContain("Done. Image v1 is sealed; wsp new first forks a workspace from it, and wsp up opens the app.");
   });
 
   it("a host that refuses the tick is one line, and the fork beside it still opens the app", async () => {
@@ -4208,7 +4208,7 @@ describe("wsp init, the first workspace and its project", () => {
     expect(workspaces.map(w => w.name)).toEqual(["first", LOCAL_NAME]);
     expect(f.text()).toContain(`${folder} was not imported: the machine refused the upload. The workspace is up; import it from the app.`);
     // The workspace survived the failed import, so the run still ends done, with the workspace on the account.
-    expect(f.text()).toContain("Done. Golden v1 is sealed; wsp up opens the app.");
+    expect(f.text()).toContain("Done. Image v1 is sealed; wsp up opens the app.");
   });
 });
 

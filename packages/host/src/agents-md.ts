@@ -30,7 +30,7 @@ export function sectionText(): string {
     SECTION_BEGIN,
     "## wsp",
     "",
-    "wsp runs cloud machines called workspaces, forked in seconds from a golden image this computer sealed, each with",
+    "wsp runs cloud machines called workspaces, forked in seconds from the image this computer sealed, each with",
     "coding agents working inside it as threads. Whatever you run on one shows in the person's app, and they can read",
     `and answer any thread. The wsp skill is installed on this computer under \`${SKILL_NAME}\` in your agent's own`,
     "skills folder; read it before opening a thread, sending into one, or setting anyone up on wsp.",

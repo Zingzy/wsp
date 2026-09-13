@@ -1092,18 +1092,20 @@ describe("new workspace dialog", () => {
 
   it("a create that made room shows the notice as a toast, the way a failure shows its line", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.createFromGoldenHead = vi.fn(async (name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from golden v1 to make room at the machine cap." }));
+    api.createFromGoldenHead = vi.fn(async (name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from image v1 to make room at the machine cap." }));
     await mount(api, "api");
     const { input } = await openDialog();
     fireEvent.keyDown(input, { key: "Enter" });
-    await screen.findByRole("status", { name: /Stopped the builder kept from golden v1/ });
-    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
+    await screen.findByRole("status", { name: /Stopped the builder kept from image v1/ });
+    expect(useStore.getState().toast).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
   });
 
-  it("offers the provider's sizes with the golden's checked, and a picked size reaches the create; left alone, none does", async () => {
+  it("offers the picked place's own sizes with the image's checked, and a picked size reaches the create; left alone, none does", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+    // The sizes ride the place's own row: one list for every row priced a workspace at another provider's rates.
+    const sized: PlaceView[] = [PLACES[0]!, { ...PLACES[1]!, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }];
     const api = fakeApi([API], [status(API)]);
-    api.capabilities = vi.fn(async () => (caps({ resize: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] })));
+    api.placesList = vi.fn(async () => sized);
     api.getGolden = async () => ({ head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "t", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 4096 } }] });
     api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_new", name));
     await mount(api, "api");

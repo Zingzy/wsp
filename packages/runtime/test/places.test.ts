@@ -1201,6 +1201,31 @@ describe("a fork at a provider this host is not wired to", () => {
     expect(here.place).toBeUndefined();
   });
 
+  it("carries each provider's own sizes at its own rates on its row, so a picker reads the row it is under", async () => {
+    // One list of sizes for every row is what priced a workspace at another provider's rates to the cent: the
+    // dialog quoted the wired provider's three sizes under a row that bills nothing. The list is per row on the
+    // wire, off the backend this host holds for that row, or a client has nothing to read it from.
+    const solari = stubBackend();
+    const free = [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0 }];
+    const made = stubBackend();
+    const box: MachineBackend = { ...made, capabilities: { ...made.capabilities, sizes: free } };
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: solari,
+      store: memoryStore(),
+      adapters: {},
+      places: twoProviders("solari", { solari, box }),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const rows = await placesOf();
+    // The wired row reads off the runtime's own backend, the other off the one the table hands back for it.
+    expect(rows.find(p => p.id === "solari")!.sizes).toEqual(solari.capabilities.sizes);
+    expect(rows.find(p => p.id === "box")!.sizes).toEqual(free);
+    // A computer of the person's own offers no pick of its own, so it carries no list rather than an empty one.
+    expect(rows.find(p => p.kind === "computer")!.sizes).toBeUndefined();
+  });
+
   it("names every provider it holds when a word names none of them", async () => {
     const solari = stubBackend();
     const box = stubBackend();

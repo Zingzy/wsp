@@ -11,6 +11,11 @@ import { CATALOG_AGENTS, hasLogin } from "@wsp/catalog";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
 
+/** Where a key is read from, as a line says it: one wording for the screen that asks for one, for the refusal that
+ * says there was nobody to ask, and for the doctor's line on a key that is not here. It lives beside the reader of
+ * those files so every sentence about them reads off one spelling. */
+export const KEY_LAYER_WORDS = "the environment, ./.env, or ~/.wsp/.env";
+
 export interface Keys {
   /** The agents' key. The provider's is not here: which variable holds it is the provider row's own declaration,
    * and it travels in the environment the provider is picked out of. */

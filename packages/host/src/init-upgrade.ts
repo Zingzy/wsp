@@ -33,7 +33,7 @@ export const UPGRADE_STEPS: readonly StageWords[] = [
 
 /** Said once as the update runs: what stays and what is applied. */
 export function upgradeSentence(from: number, to: number): string {
-  return `Updating the golden to v${to}: files, tools, agents and logins on it are kept and only the changes above are applied; workspaces on v${from} stay there until you upgrade them.`;
+  return `Updating your image to v${to}: files, tools, agents and logins on it are kept and only the changes above are applied; workspaces on v${from} stay there until you upgrade them.`;
 }
 
 export interface UpgradeOffer {
@@ -65,7 +65,7 @@ export async function stopKeptBuilder(rt: Runtime, output: Writable): Promise<vo
   const version = (await rt.golden.get())?.head;
   const kept = version === undefined ? undefined : keptBuilder(await rt.golden.builders(), version);
   if (kept === undefined) return;
-  log.step(`Stopping the builder kept from golden v${version} (${kept.id}) to free its machine slot.`, { output });
+  log.step(`Stopping the builder kept from image v${version} (${kept.id}) to free its machine slot.`, { output });
   await rt.golden.kill(kept.id);
 }
 
@@ -74,7 +74,7 @@ const ON_BUILDER = "under a minute";
 const ON_FORK = "about two minutes";
 
 export function describeOffer(o: UpgradeOffer): string[] {
-  const where = o.onBuilder ? `on the builder kept since the save, ${ON_BUILDER}` : `on a fork of the golden, ${ON_FORK}`;
+  const where = o.onBuilder ? `on the builder kept since the save, ${ON_BUILDER}` : `on a fork of your image, ${ON_FORK}`;
   return [
     goldenBuildLine(o.version, o.version + 1, changeCounts(o.diff)),
     ...describeDiff(o.diff),
@@ -138,26 +138,26 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   const rowOf = (id: string): ManifestEntry | undefined => o.rows.find(e => e.id === id);
   const diff = diffRecipes(o.current, o.imp.recipe, id => rowOf(id)?.label ?? id.slice(id.lastIndexOf("/") + 1));
   if (isEmptyDiff(diff)) {
-    log.success(`Golden v${version} already matches this recipe. Nothing to update; run wsp to serve it.`, out);
+    log.success(`Image v${version} already matches this recipe. Nothing to update; run wsp to serve it.`, out);
     return 0;
   }
   const head = goldenHead(manifest);
   if (head?.base === undefined) {
-    note(describeDiff(diff).join("\n"), `Changes since golden v${version}`, out);
-    log.step(`Golden v${version} was sealed before the base tools existed and cannot take an update; the rebuild is the only road, ${rebuildEstimate(o.lastBuild)}.`, out);
+    note(describeDiff(diff).join("\n"), `Changes since image v${version}`, out);
+    log.step(`Image v${version} was sealed before the base tools existed and cannot take an update; the rebuild is the only road, ${rebuildEstimate(o.lastBuild)}.`, out);
     return "rebuild";
   }
   const kept = keptBuilder(await o.rt.golden.builders(), version);
   const rateUsdPerHour = o.rt.backend.pricing.rateUsdPerHour(head?.size ?? kept?.size ?? o.rt.backend.pricing.defaultSize);
   const offer: UpgradeOffer = { diff, small: isSmallDelta(diff, id => rowOf(id)?.bytes ?? 0), onBuilder: kept !== undefined, version, rateUsdPerHour, lastBuild: o.lastBuild };
-  note(describeOffer(offer).join("\n"), `Changes since golden v${version}`, out);
+  note(describeOffer(offer).join("\n"), `Changes since image v${version}`, out);
 
   let road: "update" | "rebuild";
   if (o.interactive) {
     const picked = await select<"update" | "rebuild">({
       message: "How do you want to apply them?",
       options: [
-        { value: "update", label: `Update the golden (${offer.onBuilder ? ON_BUILDER : ON_FORK}, about $${rateUsdPerHour.toFixed(2)}/hr while it runs)`, hint: `v${version + 1} from v${version} plus the changes` },
+        { value: "update", label: `Update your image (${offer.onBuilder ? ON_BUILDER : ON_FORK}, about $${rateUsdPerHour.toFixed(2)}/hr while it runs)`, hint: `v${version + 1} from v${version} plus the changes` },
         { value: "rebuild", label: `Rebuild from scratch (${rebuildEstimate(o.lastBuild)})`, hint: "a fresh machine, every file and tool again" },
       ],
       initialValue: offer.small ? "update" : "rebuild",
@@ -171,7 +171,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
     road = picked;
   } else {
     road = offer.small ? "update" : "rebuild";
-    log.step(`${road === "update" ? "Updating the golden" : "Rebuilding from scratch"}. Taken as the default (${o.yes ? "--yes" : "no terminal"}).`, out);
+    log.step(`${road === "update" ? "Updating your image" : "Rebuilding from scratch"}. Taken as the default (${o.yes ? "--yes" : "no terminal"}).`, out);
   }
   if (road === "rebuild") return "rebuild";
 
@@ -195,8 +195,8 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
     // A failed delta on the kept builder kills it, so the retry forks; the person hears that before they retry.
     outro(
       offer.onBuilder
-        ? `Golden v${version} is unchanged and the builder kept since the save is gone. Run wsp init again to retry on a fork of the golden (${ON_FORK}), or pick the rebuild.`
-        : `Golden v${version} is unchanged. Run wsp init again to retry, or pick the rebuild.`,
+        ? `Image v${version} is unchanged and the builder kept since the save is gone. Run wsp init again to retry on a fork of your image (${ON_FORK}), or pick the rebuild.`
+        : `Image v${version} is unchanged. Run wsp init again to retry, or pick the rebuild.`,
       out,
     );
     return 1;
@@ -206,7 +206,7 @@ export async function updateRoad(o: UpdateRoadOptions): Promise<0 | 1 | "rebuild
   const rate = o.rt.backend.pricing.rateUsdPerHour(builder?.size ?? o.rt.backend.pricing.defaultSize);
   log.success(
     [
-      `Golden v${result.version.version} sealed in ${seconds}s ${result.road === "builder" ? "on the builder kept since the save" : "from a fork of the golden"}; new workspaces fork it.`,
+      `Image v${result.version.version} sealed in ${seconds}s ${result.road === "builder" ? "on the builder kept since the save" : "from a fork of your image"}; new workspaces fork it.`,
       ...(result.builderKept
         ? [dim(`The builder stays up (about $${rate.toFixed(2)}/h, one of the account's machine slots) until wsp init updates on it again, a wsp sweep stops it ten minutes after the save, or the provider's six-hour idle kill fires. Run wsp to serve.`)]
         : [dim("Run wsp to serve.")]),

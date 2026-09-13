@@ -129,7 +129,7 @@ describe("promoteGoldens", () => {
     backend.capabilities.templates = true;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, hostId: "h1" });
     const { lines, io: cli } = io();
-    expect(await promoteGoldens(rt, cli)).toBe("no golden to make durable");
+    expect(await promoteGoldens(rt, cli)).toBe("no image to make durable");
     expect(lines).toEqual([]);
   });
 

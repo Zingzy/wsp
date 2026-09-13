@@ -292,7 +292,7 @@ describe("host serves the app", () => {
     await handle.close();
     const bare = testRuntime(false);
     handle = await startHost({ runtime: bare.rt, port: 0, wsPort: 0, webDir: webDir() });
-    await expect(handle.createWorkspace("first")).rejects.toThrow("no golden image yet; run wsp init first");
+    await expect(handle.createWorkspace("first")).rejects.toThrow("no image yet; run wsp init first");
   });
 
   it("carries the terminal font the saved recipe ticks, read on every page load; an unticked or absent row carries none", async () => {
@@ -467,7 +467,7 @@ describe("host serves the app", () => {
     }
   });
 
-  it("refuses workspace creation without a golden image", async () => {
+  it("refuses workspace creation without an image", async () => {
     const { rt } = testRuntime(false);
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
@@ -477,7 +477,7 @@ describe("host serves the app", () => {
     });
     expect(res.status).toBe(409);
     const body = (await res.json()) as { error: string };
-    expect(body.error).toMatch(/golden/i);
+    expect(body.error).toMatch(/image/i);
   });
 
   it("reports daemon reach by probing the minted preview URL", async () => {
@@ -755,7 +755,7 @@ describe("host sweeps orphaned machines", () => {
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), log: l => lines.push(l) });
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(new RegExp(`^reap: left alone ${b.id}: your builder saved as golden v1, kept \\d+ s since the save and holding one of the account's machine slots, \\$0\\.11/h \\(about \\$0\\.00 so far\\); wsp init updates the golden on it, or it is stopped ten minutes after the save$`));
+    expect(lines[0]).toMatch(new RegExp(`^reap: left alone ${b.id}: your builder saved as image v1, kept \\d+ s since the save and holding one of the account's machine slots, \\$0\\.11/h \\(about \\$0\\.00 so far\\); wsp init updates your image on it, or it is stopped ten minutes after the save$`));
     // The seal's snapshot is on the account now, so the storage line follows the sweep.
     expect(lines[1]).toBe("storage: 1 snapshot, 8.0 GB; inside the free 10 GB, nothing to pay from 2026-10-01");
     await handle.close();
