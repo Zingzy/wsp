@@ -261,6 +261,13 @@ describe("the table wsp places prints", () => {
     expect(placeLines([]).join("")).toContain("wsp add prints the join line");
   });
 
+  it("says on the row what a copy of the image there is doing, and nothing where the copy stands", () => {
+    const printed = placeLines([{ ...rows[1]!, build: "building your image · creating the machine" }, rows[2]!]);
+    expect(printed[0]).toContain("IMAGE");
+    expect(printed[1]).toContain("building your image · creating the machine");
+    expect(printed[2]).not.toContain("building");
+  });
+
   it("says how many forks a place holds of how many it takes, and nothing there for one that forks nowhere", () => {
     const printed = placeLines([
       { ...rows[1]!, forks: { running: 1, room: 2 } },

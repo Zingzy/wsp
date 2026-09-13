@@ -98,7 +98,8 @@ describe("the window on a Mac with no other computer", () => {
     await waitFor(() => expect(useStore.getState().addComputerOpen).toBe(true));
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useStore.getState().setupOpen).toBe(false);
-    const sheet = await screen.findByText(PLACES_WORDS.sheet.description);
+    // The header's sentence, which the lid line is said at the end of, so the road's own half is matched inside it.
+    const sheet = await screen.findByText(PLACES_WORDS.sheet.description, { exact: false });
     expect(sheet).toBeDefined();
     expect(document.body.textContent).not.toContain(CLOUD_SETUP_WORDS.choice.headline);
     expect(document.body.textContent).not.toMatch(/wsp init|slr_live/);
