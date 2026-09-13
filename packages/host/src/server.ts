@@ -91,6 +91,10 @@ export interface HostHandle extends WorkspaceRoads {
   close(): Promise<void>;
 }
 
+/** What this host answers about the door a computer you own dials: where it is, and nothing about the key proved
+ * there, which the runtime reads off the pair its place door signs with. */
+type DoorAt = Omit<PlaceDoorView, "hostKey">;
+
 /** Orphan sweep period after the one at start. Matches the age a stray
  * workspace machine must reach before reap treats it as abandoned. */
 export const REAP_INTERVAL_MS = 10 * 60_000;
@@ -413,9 +417,10 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
   const doorServer = createServer(handler(() => false));
   let doorAt: number | undefined;
-  let doorOpening: Promise<PlaceDoorView> | undefined;
-  /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host. */
-  const viewOf = (at: number, bound: string): PlaceDoorView => {
+  let doorOpening: Promise<DoorAt> | undefined;
+  /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host.
+   * The key proved at that door is the runtime's to name, so it is not here. */
+  const viewOf = (at: number, bound: string): DoorAt => {
     const relay = publicHostname(opts.statePath ?? "");
     return {
       port: at,
@@ -423,11 +428,11 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
       ...(relay === undefined ? {} : { relay: relayUrlOf(relay) }),
     };
   };
-  const openDoor = async (): Promise<PlaceDoorView> => {
+  const openDoor = async (): Promise<DoorAt> => {
     // A host that already answers beyond this computer needs no second listener: it names its own port instead.
     if (!boundHere) return viewOf(port, address);
     if (doorAt !== undefined) return viewOf(doorAt, WILDCARD);
-    doorOpening ??= new Promise<PlaceDoorView>((resolve, reject) => {
+    doorOpening ??= new Promise<DoorAt>((resolve, reject) => {
       const failed = (e: NodeJS.ErrnoException): void => {
         doorOpening = undefined;
         reject(e.code === "EADDRINUSE" ? new Error(doorPortHeldLine(doorPort)) : e);

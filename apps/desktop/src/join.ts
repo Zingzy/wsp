@@ -31,7 +31,7 @@ import {
   type CliIO,
   type HostRecord,
 } from "@wsp/host";
-import { JoinAsk, joinAddressOf, placeFactsLine, sentPairCode, servedHostname, type HostOutcome, type PlaceStanding } from "@wsp/protocol";
+import { JOIN_NO_KEY_REFUSAL, JoinAsk, joinAddressOf, placeFactsLine, readJoinToken, servedHostname, type HostOutcome, type PlaceStanding } from "@wsp/protocol";
 
 export type { JoinAsk };
 
@@ -132,6 +132,10 @@ export function joinRoad(deps: JoinRoadDeps): JoinRoad {
       const url = joinAddressOf(ask.address);
       if (url === undefined) return { ok: false, why: "address" };
       if (joinedAlready(deps.home)) return { ok: false, why: "already" };
+      // The code field carries one token: the code and the fingerprint of the key the other wsp will prove. A
+      // token with no key in it names no host, so it is refused under the code field before anything is dialled.
+      const token = readJoinToken(ask.code);
+      if (token.hostKey === undefined) return { ok: false, why: "code", said: JOIN_NO_KEY_REFUSAL };
       // The join speaks to a terminal as it goes; those lines are for the log this window keeps, never for the
       // screen, which has two fixed lines to refuse in and writes its own to fit them.
       let joined: Awaited<ReturnType<typeof joinPlace>>;
@@ -139,7 +143,8 @@ export function joinRoad(deps: JoinRoadDeps): JoinRoad {
         joined = await joinAt(io, {
           home: deps.home,
           addresses: [url],
-          code: sentPairCode(ask.code.trim()),
+          code: token.code,
+          hostKey: token.hostKey,
           // The same code buys the token this window holds: the person meant one thing, and a second code typed on
           // the other screen would be the same intent asked for twice.
           client: true,

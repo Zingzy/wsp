@@ -16,6 +16,7 @@ import { CATALOG_AGENTS } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
+import { keyFingerprint } from "./key-fingerprint.js";
 import { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 import type { BackendPricing, ExecResult, Machine, MachineBackend, MachineShape, MachineState, RunOptions, SnapshotStoragePricing } from "./machine.js";
 
@@ -230,12 +231,6 @@ export function knownHostFiles(values: Record<string, string>, home?: string): s
     .map(file => (file.startsWith("~/") ? join(home ?? userInfo().homedir, file.slice(2)) : file));
 }
 
-/** A key's fingerprint as every ssh tool prints it: the SHA256 of the key's own bytes, base64 with the padding
- * dropped. Worked out here rather than by a second ssh-keygen, since it is a hash of what the line already carries. */
-function sshFingerprint(blob: string): string {
-  return createHash("sha256").update(Buffer.from(blob, "base64")).digest("base64").replace(/=+$/, "");
-}
-
 /** The key a dial to this machine is checked against, out of every entry the client holds for it. A machine is
  * usually known by one key per type, and the one a connection negotiates is the client's most preferred type it is
  * known by, so that is the one the identity stands on and the answer does not turn on which line was written first.
@@ -252,7 +247,7 @@ export function hostKeyFound(found: string, algorithms: string): string | undefi
     const fields = line.trim().split(/\s+/);
     const rank = fields.length < 3 ? -1 : preferred.indexOf(fields[1]!);
     if (rank === -1) continue;
-    if (best === undefined || rank < best.rank) best = { rank, key: `${fields[1]!} SHA256:${sshFingerprint(fields[2]!)}` };
+    if (best === undefined || rank < best.rank) best = { rank, key: `${fields[1]!} ${keyFingerprint(fields[2]!)}` };
   }
   return best?.key;
 }

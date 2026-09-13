@@ -24,6 +24,11 @@ import {
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
+  PLACES_WORDS,
+  JOIN_NO_KEY_REFUSAL,
+  joinKeyRefusal,
+  joinToken,
+  readJoinToken,
   placeWorkspacesLine,
   placeEngineLine,
   PLACE_LINK_NONCE_BYTES,
@@ -46,11 +51,10 @@ import {
   joinAddressOf,
   placeLinkTranscript,
   relayUrlOf,
-  sentPairCode,
   usageRefusal,
   wsUrlOf,
 } from "@wsp/protocol";
-import { SshBackend, checkProviderKey, keyCheckLine, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { SshBackend, checkProviderKey, keyCheckLine, keyFingerprint, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
 import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
@@ -116,6 +120,11 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
   return made;
 }
 
+/** The fingerprint of the key the host on this computer proves at a join, read off the pair it signs with. The
+ * join line carries it so the computer being joined can tell that host from anything else that answers at the
+ * address it dials. */
+export const hostKeyHere = (statePath: string): string => keyFingerprint(hostPlaceKey(statePath).publicKey);
+
 /** What a host wires for its places: its own pair, the provider it is set up for as a row of the same list, and
  * this computer's own row. */
 export function placeWiring(statePath: string, env: ProviderEnv, advertise?: string): PlaceWiring {
@@ -153,9 +162,11 @@ export function placeHere(name: string = placeNameHere()): HerePlace {
 const JOIN_MS = 20_000;
 
 /** The whole of what wsp add prints with no argument: the line to type on the computer being joined, at every
- * address this host answers on, and the other two roads in one line each. */
-export function addLines(code: string, expiresAt: number, now: number, urls: readonly string[], publicAt: string | undefined): string[] {
-  const join = (url: string, note?: string): string => `  wsp join ${url} --code ${code}${note === undefined ? "" : `      (${note})`}`;
+ * address this host answers on, and the other two roads in one line each. The token is the code and the host key's
+ * fingerprint as one word, off the protocol's own writing of the line, so the terminal and the sheet print one
+ * thing. */
+export function addLines(token: string, expiresAt: number, now: number, urls: readonly string[], publicAt: string | undefined): string[] {
+  const join = (url: string, note?: string): string => `  ${PLACES_WORDS.sheet.joinLine(url, token)}${note === undefined ? "" : `      (${note})`}`;
   return [
     "wsp add: a computer you own joins by dialing this host. On that computer, with wsp installed:",
     ...urls.map(url => join(url)),
@@ -436,7 +447,9 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
     if ("refusal" in asked && asked.refusal !== PLACE_DOOR_UNSERVED) io.error(asked.refusal);
     else if (door === undefined && isLoopback(address) && publicAt === undefined) io.error(pairOnLoopbackLine(address));
     const urls = door?.addresses ?? reachAddresses(address).map(at => `http://${authority(at, lock?.port ?? 0)}`);
-    for (const line of addLines(code, expiresAt, deps.now(), urls, publicAt)) io.log(line);
+    // Off the key file beside the state file this line is aimed at, which is the pair the host serving it signs
+    // with: a door that would not open still prints a line naming the key that will answer once one does.
+    for (const line of addLines(joinToken(code, hostKeyHere(opts.statePath)), expiresAt, deps.now(), urls, publicAt)) io.log(line);
     return 0;
   } finally {
     client.close();
@@ -633,17 +646,25 @@ export function preparePlaceHome(home: string): void {
   writeFileSync(at.tokenPath, `${randomBytes(24).toString("hex")}\n`, { mode: 0o600 });
 }
 
-/** The join code, off the flag or off the file the installer landed it in, which is deleted before the dial: a code
- * left on a computer's disk is a code somebody else could spend. */
-function joinCode(flags: JoinFlags): string {
+/** The join token, off the flag or off the file the installer landed it in, which is deleted before the dial: a
+ * token left on a computer's disk is a join somebody else could spend. It carries the code and the fingerprint of
+ * the key the host is to prove; a token that names no key is refused here, before anything is dialled. */
+function joinCode(flags: JoinFlags): { code: string; hostKey: string } {
   if (flags.code !== undefined && flags.codeFile !== undefined) throw usageRefusal("wsp join takes --code or --code-file, not both.", "Drop one of them.");
-  if (flags.code !== undefined) return sentPairCode(flags.code.trim());
+  if (flags.code !== undefined) return withHostKey(readJoinToken(flags.code));
   if (flags.codeFile === undefined) throw usageRefusal("wsp join needs the code the host printed.", JOIN_USAGE);
   const path = resolve(flags.codeFile);
-  const code = sentPairCode(readFileSync(path, "utf8").trim());
+  const read = readJoinToken(readFileSync(path, "utf8"));
   rmSync(path, { force: true });
-  if (code === "") throw usageRefusal(`${path} held no join code.`, "Run wsp add on the host again and write the code it prints into that file.");
-  return code;
+  if (read.code === "") throw usageRefusal(`${path} held no join code.`, "Run wsp add on the host again and write the code it prints into that file.");
+  return withHostKey(read);
+}
+
+/** The one rule for a token whichever road it came by: a code with no key beside it is a line this computer cannot
+ * hold a host to, so it says so rather than pinning whatever answers. */
+function withHostKey(read: { code: string; hostKey?: string }): { code: string; hostKey: string } {
+  if (read.hostKey === undefined) throw new Error(JOIN_NO_KEY_REFUSAL);
+  return { code: read.code, hostKey: read.hostKey };
 }
 
 /** Every address in turn until one answers: a host on a network answers on several, and the one a person typed or
@@ -654,6 +675,7 @@ async function handshakeAt(
   io: CliIO,
   urls: readonly string[],
   code: string,
+  hostKey: string,
   name: string,
   home: string,
   client: boolean,
@@ -662,7 +684,7 @@ async function handshakeAt(
   let last: Error | undefined;
   for (const url of urls) {
     try {
-      return { ...(await handshake(io, url, code, name, home, client, dial)), dialed: url };
+      return { ...(await handshake(io, url, code, hostKey, name, home, client, dial)), dialed: url };
     } catch (e) {
       if (!(e instanceof JoinRefused) || e.about !== "address") throw e;
       last = e;
@@ -673,12 +695,14 @@ async function handshakeAt(
   throw last ?? usageRefusal("wsp join needs an address to dial.", JOIN_USAGE);
 }
 
-/** One dial that joins this computer to a wsp: the key is made here, the host's own key is trusted on this first use
- * because the code proved the person meant it, and nothing is written until the host has proved that key back. */
+/** One dial that joins this computer to a wsp: the key is made here, the host's own key is held to the fingerprint
+ * the join line carried, and nothing is written or sent until the host has proved that key back. */
 async function handshake(
   io: CliIO,
   url: string,
   code: string,
+  /** The fingerprint the join line named, which the key the host answers with has to match. */
+  hostKey: string,
   name: string,
   home: string,
   /** Whether this join also buys the device token this computer's own window holds; it wears `name`. */
@@ -722,7 +746,13 @@ async function handshake(
             return;
           }
           const { placeId, hostPublicKey, nonce: hostNonce, signature, hostName, device } = reply.data;
-          // Nothing of this computer's is written or sent past here until the host has proved the key it sent.
+          // Nothing of this computer's is written or sent past here: not its report, not its own signature. The key
+          // is read before the signature it came with, since a stranger answering at this address signs for itself
+          // perfectly well and the only thing that tells it from the host is which key it is.
+          if (keyFingerprint(hostPublicKey) !== hostKey) {
+            end(new Error(joinKeyRefusal(url)));
+            return;
+          }
           if (!verifyPlaceBytes(hostPublicKey, placeLinkTranscript("host", placeId, nonce, hostNonce), signature)) {
             end(new Error(hostKeyRefusal(url)));
             return;
@@ -762,6 +792,9 @@ export interface JoinPlaceOptions {
    * all, so it keeps dialling when the one it reached stops answering. */
   addresses: readonly string[];
   code: string;
+  /** The fingerprint of the key the host is to prove, as the join line carried it beside the code. A host that
+   * answers with any other key is refused before this computer sends its own report or signature. */
+  hostKey: string;
   /** What the host will call this computer; its own name lowercased when nobody says. */
   name?: string;
   /** Also buy a device token for this computer's own window with the same code. The device is named after the
@@ -797,7 +830,7 @@ export interface JoinedPlace {
  * that dials again at every login. It refuses a computer that already belongs to a wsp, since a place file is the
  * one wsp this computer is in. Throws the host's own sentence on a refusal; the caller decides what a person reads. */
 export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<JoinedPlace> {
-  const { home, addresses, code } = opts;
+  const { home, addresses, code, hostKey } = opts;
   if (home === "") throw new Error("a join needs this login's home folder, and this process has none");
   const file = placeFilePath(home);
   if (joinedAlready(home)) throw new Error(ALREADY_JOINED_LINE);
@@ -809,7 +842,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   const name = opts.name?.trim() !== undefined && opts.name.trim() !== "" ? opts.name.trim() : placeNameHere();
   const now = opts.now ?? Date.now;
   const dial = opts.dial ?? ((url: string) => new WebSocket(wsUrlOf(url)));
-  const joined = await handshakeAt(io, addresses, code, name, home, opts.client === true, dial);
+  const joined = await handshakeAt(io, addresses, code, hostKey, name, home, opts.client === true, dial);
   const address = joined.dialed;
   const key = placeKeyPath(home);
   mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
@@ -900,11 +933,12 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     io.error(ALREADY_JOINED_LINE);
     return 1;
   }
-  const code = joinCode(flags);
+  const { code, hostKey } = joinCode(flags);
   await joinPlace(io, {
     home,
     addresses,
     code,
+    hostKey,
     ...(flags.name !== undefined ? { name: flags.name } : {}),
     ...(flags.awake === true ? { awake: true } : {}),
     platform: deps.platform,
