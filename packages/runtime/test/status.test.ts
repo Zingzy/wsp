@@ -66,8 +66,8 @@ type Cost = EventUnion & { type: "workspace.cost" };
  * purpose, so a fold that fell back to the first provider row instead of reading the stamp would be seen.  */
 const PLACES: PlaceView[] = [
   { id: "here", kind: "computer", name: "this-mac", default: true },
-  { id: "box", kind: "provider", name: "box", default: false },
-  { id: "default", kind: "provider", name: "default", default: false },
+  { id: "box", kind: "provider", name: "box", default: false, takesForks: true },
+  { id: "default", kind: "provider", name: "default", default: false, takesForks: true },
 ];
 
 /** The clock jumps an hour in the tests below: the idle window must not nap the workspace behind the test. */

@@ -448,6 +448,44 @@ async fn lists_by_our_labels_and_answers_the_size_the_listing_carries() {
 }
 
 #[tokio::test]
+async fn a_reading_of_a_workspace_is_what_its_cgroup_its_record_and_its_network_say() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let capacity = w.ok("machine.capacity", json!({})).await;
+    let id = w.create(spec(json!({ "cpu": 1, "memMb": 1024 }))).await;
+    // Something for the cgroup to have counted: a second of a core, and a process that stays.
+    w.exec(&id, "nohup sleep 300 > /dev/null 2>&1 & timeout 1 sh -c 'while :; do :; done'; true").await;
+    let reading = w.ok("machine.metrics", json!({ "machineId": id })).await["reading"].clone();
+    assert_eq!(reading["state"], "running");
+    // One core is under the clamp on any box that runs workspaces at all, which keeps one for itself.
+    assert_eq!(reading["cpu"].as_f64(), Some(1.0));
+    assert_eq!(reading["memMb"], 1024.min(capacity["machineMemMb"].as_u64().unwrap()));
+    let mem = reading["memBytes"].as_u64().unwrap();
+    assert!(mem > 0 && mem <= reading["memMb"].as_u64().unwrap() * 1024 * 1024, "{reading}");
+    // The busy second is a second of processor time, give or take the scheduler.
+    assert!(reading["cpuUsageUsec"].as_u64().unwrap() > 500_000, "{reading}");
+    assert!(reading["uptimeMs"].as_u64().unwrap() > 0, "{reading}");
+    // The init, the sleep, and whatever the shell left behind it.
+    assert!(reading["procs"].as_u64().unwrap() >= 2, "{reading}");
+    assert_eq!(reading["address"], w.network(&id).address.to_string());
+    assert_eq!(reading["cgroup"], format!("{CGROUPS}/{id}"));
+    assert_eq!(reading["upper"], root().join("run").join(&id).join("upper").to_string_lossy().as_ref());
+    // A workspace that is stopped keeps its sizes and its paths and has no live figures to give.
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    let napping = w.ok("machine.metrics", json!({ "machineId": id })).await["reading"].clone();
+    assert_eq!(napping["state"], "paused");
+    assert_eq!(napping["memMb"], reading["memMb"]);
+    assert_eq!(napping["cgroup"], reading["cgroup"]);
+    for figure in ["memBytes", "cpuUsageUsec", "uptimeMs", "procs"] {
+        assert!(napping.get(figure).is_none(), "{figure} in {napping}");
+    }
+    w.ok("machine.resume", json!({ "machineId": id })).await;
+    w.close().await;
+}
+
+#[tokio::test]
 async fn puts_bytes_where_they_belong_and_serves_no_signed_url() {
     if !live() {
         return;

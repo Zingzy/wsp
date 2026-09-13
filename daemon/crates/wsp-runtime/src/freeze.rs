@@ -91,6 +91,20 @@ pub fn memory_current(cgroup: &Path) -> io::Result<u64> {
     text.trim().parse().map_err(|e| io::Error::other(format!("memory.current: {e}")))
 }
 
+/// Every process in the cgroup and in the cgroups under it. The count is the subtree's because a workspace running
+/// a container engine holds its containers' processes in cgroups of their own, and pids.current is not read: the
+/// pids controller is not one a workspace needs, so a box that delegates only memory and cpu has no such file.
+pub fn pids_in(cgroup: &Path) -> io::Result<u64> {
+    let mut count = fs::read_to_string(cgroup.join("cgroup.procs"))?.lines().filter(|line| !line.trim().is_empty()).count() as u64;
+    for entry in fs::read_dir(cgroup)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            count += pids_in(&entry.path())?;
+        }
+    }
+    Ok(count)
+}
+
 /// cpu.stat's usage_usec.
 pub fn cpu_usage_usec(cgroup: &Path) -> io::Result<u64> {
     let text = fs::read_to_string(cgroup.join("cpu.stat"))?;

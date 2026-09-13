@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { computerWord, fmtThreads, JOINED_COMPUTER, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineFacts, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -106,10 +106,6 @@ export const MACHINE_LEFT = "machine is left as it is";
  * file on it, and a delete takes exactly those off again; the machine is theirs and stays. */
 const SSH_SWEPT = "daemon, its unit and its login line come off the machine, which is otherwise left as it is";
 
-/** What deleting a joined computer's workspace leaves: the computer is still joined to this wsp, holding its link
- * and ready for another workspace, and the one road that takes wsp off it is the remove that drops it. */
-const PLACE_KEPT = "computer stays joined to this wsp; wsp remove takes the agent off it";
-
 /** What the Workspace panel holds for a computer that already existed: no spend and no version behind it, so the
  * panel is what the computer is running and how it is doing. */
 const OWN_COMPUTER_PANEL = "What the computer is running, its projects and how it is doing.";
@@ -134,7 +130,6 @@ export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
   cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
   local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
   ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
-  place: { machine: JOINED_COMPUTER, rowReadsMachine: true, cpu: "cores", where: JOINED_COMPUTER, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: PLACE_KEPT, done: () => `its ${PLACE_KEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
 
 /**

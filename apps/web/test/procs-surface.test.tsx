@@ -316,8 +316,8 @@ describe("processes surface", () => {
   it("says the computer is not answering in the pane itself, in two halves, when that computer is the one holding the workspace", async () => {
     act(() =>
       useStore.setState({
-        workspaces: [{ ...view, kind: "place", machineId: "place:p_oldlaptop" }],
-        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS }],
+        workspaces: [{ ...view, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" }],
+        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString() }],
       }),
     );
     render(<ProcessesSurface workspaceId={WS} />);

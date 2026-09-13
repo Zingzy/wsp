@@ -179,12 +179,12 @@ describe("terminal as a right-panel surface", () => {
   });
 
   it("a computer that is not answering refuses the Terminal and Processes panels in the panel itself, and asks for no pty", async () => {
-    const onPlace: WorkspaceView = { ...view, kind: "place", machineId: "place:p_oldlaptop" };
+    const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" };
     const { count } = fakeLink();
     act(() =>
       useStore.setState({
         workspaces: [onPlace],
-        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS }],
+        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString() }],
       }),
     );
     render(<Panel />);
@@ -211,12 +211,12 @@ describe("terminal as a right-panel surface", () => {
   });
 
   it("asks for no pty on an absent computer from the shortcut, the split or the panel's own button either, so nothing toasts", async () => {
-    const onPlace: WorkspaceView = { ...view, kind: "place", machineId: "place:p_oldlaptop" };
+    const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" };
     const { count } = fakeLink();
     act(() =>
       useStore.setState({
         workspaces: [onPlace],
-        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS }],
+        places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString() }],
       }),
     );
     // The tab click is held by the panel; these three roads reach the link directly, and from a pane that was

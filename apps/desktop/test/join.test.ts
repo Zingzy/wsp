@@ -42,7 +42,7 @@ const REPORT = {
   shape: { cpu: 4, memMb: 8192 },
   diskFreeBytes: 97_710_505_984,
   login: {},
-  runsWorkspaces: false,
+  runsWorkspaces: true,
   engine: "none",
   daemonVersion: 1,
   wsp: [SHIM],
@@ -151,7 +151,7 @@ describe("the road a computer that joined another wsp runs on", () => {
     expect(fake.asks[0]).toMatchObject({ home: road.home, addresses: ["http://192.168.1.20:4420"], code: "QW4K7PZX", hostKey: HOST_KEY, client: true, wsp: expect.objectContaining({ shim: SHIM }) });
     // The joined screen's card: this computer's name, its shape and disk in the app's own words, and whether it
     // forks, all off the report the join frame carried rather than a second read of this computer.
-    expect(answer).toEqual({ ok: true, here: { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"), runsWorkspaces: false } });
+    expect(answer).toEqual({ ok: true, here: { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0") } });
   });
 
   it("writes the host record the window opens on, named after the wsp it joined and reached the way it was reached", async () => {
@@ -203,10 +203,13 @@ describe("the road a computer that joined another wsp runs on", () => {
     expect(fake.asks).toEqual([]);
   });
 
-  it("puts each refusal where the screen has a slot for it: the address, the code, and everything else", async () => {
+  it("puts each refusal where the screen has a slot for it: the address, the code, the wsp's own word about this computer, and everything else", async () => {
     const cases = [
       { threw: new JoinRefused("address", "http://192.168.1.20:4420 could not be reached: connect ECONNREFUSED"), why: "answer" },
       { threw: new JoinRefused("code", "that join code is not one this host is waiting for"), why: "code" },
+      // The wsp over there answered and turned this computer down: a Mac cannot boot an image, so what it gets is
+      // the doctor's one sentence and the join stops there. It travels whole, since the screen prints it as it is.
+      { threw: new JoinRefused("host", "old-macbook cannot run wsp workspaces: it runs workspaces on a Linux computer"), why: "refused" },
       { threw: new Error("the host at http://192.168.1.20:4420 did not prove the key this computer learned at join"), why: "shell" },
     ];
     for (const one of cases) {

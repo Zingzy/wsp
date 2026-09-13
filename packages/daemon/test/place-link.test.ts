@@ -206,7 +206,7 @@ describe("the socket a place proved, served as an inbound one", () => {
     expect(rejectedEvents(events)).toEqual([]);
   });
 
-  it("refuses a machine op on both roads: the link has no backend behind it, and the place's own door is not the link", async () => {
+  it("the link has no backend behind it, the door answers the listing, and an op that drives a workspace is still the link's", async () => {
     const key = placePair();
     const host = await fakePlaceHost({ key });
     const place = placeFile([host.url], key.publicKey, placePair().privateKeyPem);
@@ -229,24 +229,36 @@ describe("the socket a place proved, served as an inbound one", () => {
     // A daemon with no backend names the op it cannot answer, whichever words its runtime puts around it.
     expect(onLink["ok"]).toBe(false);
     expect(String(onLink["error"])).toContain("machine.list");
-    // The same op from a client holding the place's own token: a client on this machine does not drive its forks. A
-    // daemon that registers the machine ops on its link refuses by the road; one that registers none has never
-    // heard of the op. Both are refusals and neither serves it.
+    // The same op from a client holding the place's own token. The listing only reads what this computer holds, so
+    // it is answered on that door whatever road it came in on: a daemon whose runtime lists answers the machines,
+    // and one that lists nothing names the op it cannot answer in its own words. What neither says is the road.
     const own = new WebSocket(`ws://127.0.0.1:${d.port}`);
-    const inbound = await new Promise<Record<string, unknown>>((done, fail) => {
+    const replies: Record<string, unknown>[] = [];
+    await new Promise<void>((done, fail) => {
       own.on("error", fail);
       own.on("open", () => {
         own.send(JSON.stringify({ id: 1, op: "auth", token: "link-token" }));
         own.send(JSON.stringify({ id: 2, op: "machine.list" }));
+        // An op that drives a workspace, on the same socket: a client on this machine does not drive its forks. A
+        // daemon that knows the op refuses it by the road, one that registers none has never heard of it.
+        own.send(JSON.stringify({ id: 3, op: "machine.kill", machineId: "wsp-x" }));
       });
       own.on("message", raw => {
         const f = JSON.parse(String(raw)) as Record<string, unknown>;
-        if (f["id"] === 2) done(f);
+        if (f["type"] === undefined) replies.push(f);
+        if (f["id"] === 3) done();
       });
     });
     own.close();
-    expect(inbound["ok"]).toBe(false);
-    expect([NOT_ON_THIS_ROAD, unknownOpLine("machine.list")]).toContain(inbound["error"]);
+    const inbound = replies.find(f => f["id"] === 2)!;
+    if (inbound["ok"] === true) expect(Array.isArray(inbound["machines"])).toBe(true);
+    else {
+      expect(String(inbound["error"])).toContain("machine.list");
+      expect(inbound["error"]).not.toBe(NOT_ON_THIS_ROAD);
+    }
+    const drove = replies.find(f => f["id"] === 3)!;
+    expect(drove["ok"]).toBe(false);
+    expect([NOT_ON_THIS_ROAD, unknownOpLine("machine.kill")]).toContain(drove["error"]);
   });
 
   it("answers place.leave with what the sweep took and then ends the process", async () => {

@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 32,
+  "daemonVersion": 33,
   "execBodyMax": 16384,
   "execOutputMax": 2097152,
   "execTimeoutDefaultMs": 20000,
@@ -19,6 +19,7 @@
   "openBodyMax": 8192,
   "daemonDefaultHost": "0.0.0.0",
   "daemonDefaultPort": 7070,
+  "daemonSamplerIntervalMs": 2000,
   "daemonTokenPath": "/root/.wsp-daemon-token",
   "daemonRootsPath": "/root/.wsp/roots",
   "guestInboxDir": "/root/inbox",

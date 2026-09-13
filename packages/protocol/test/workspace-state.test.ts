@@ -216,14 +216,14 @@ describe("what a workspace's kind changes about its words", () => {
     // The computer the host runs on is read where it runs. Every other machine answers for itself over the link a
     // pane holds, and the processes of every kind, this computer's included, are read on that machine.
     expect(readingRoad("local", "metrics")).toBe("host");
-    for (const kind of ["cloud", "ssh", "place"] as const) expect(readingRoad(kind, "metrics")).toBe("daemon");
-    for (const kind of ["cloud", "local", "ssh", "place"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
+    for (const kind of ["cloud", "ssh"] as const) expect(readingRoad(kind, "metrics")).toBe("daemon");
+    for (const kind of ["cloud", "local", "ssh"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
     // Whichever road it is read on, a kind that answers a reading is a kind whose slot waits for a figure.
-    for (const kind of ["cloud", "local", "ssh", "place"] as const) expect(servesReading(kind, "metrics")).toBe(true);
+    for (const kind of ["cloud", "local", "ssh"] as const) expect(servesReading(kind, "metrics")).toBe(true);
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "place", "ssh"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
   });
 
   it("the delete sentence says what the delete does to this kind's machine, the ssh sweep included", () => {
@@ -329,7 +329,6 @@ describe("where a workspace runs, in the person's words", () => {
   });
 
   it("names the computer this host holds a row for by the name it was given, above the provider that computer forks with, and a fork whose record names no provider by what it is", () => {
-    expect(whereWord({ kind: "place", machineId: "pl_7" }, "vps")).toBe("vps");
     expect(whereWord({ kind: "cloud", provider: "docker", machineId: "fk_dkr_1" }, "vps")).toBe("vps");
     expect(whereWord({ kind: "cloud", machineId: "fk_slr_1" })).toBe("a provider");
     expect(whereWord({ kind: "ssh", machineId: "ssh://dev@box:22" })).toBe("ssh://dev@box:22");

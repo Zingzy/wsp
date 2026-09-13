@@ -295,10 +295,13 @@
       /** Draws one refusal in a slot: what happened in the destructive ink, then what to do in the foreground ink,
        * with the shell's own words, where there are any, on the title. */
       function refuse(slot, happened, fix, said) {
-        const what = document.createElement("span");
-        what.className = "fix";
-        what.textContent = fix;
-        slot.replaceChildren(`${happened} `, what);
+        if (fix === "") slot.replaceChildren(happened);
+        else {
+          const what = document.createElement("span");
+          what.className = "fix";
+          what.textContent = fix;
+          slot.replaceChildren(`${happened} `, what);
+        }
         if (said === undefined) slot.removeAttribute("title");
         else slot.title = said;
       }
@@ -440,11 +443,14 @@
         answer: { slot: "address-said", field: "address", happened: "Nothing answered at that address.", fix: "Check both Macs are on one network and the address on the other screen." },
         code: { slot: "code-said", field: "code", happened: "Wrong or expired.", fix: "Get a fresh one." },
         already: { slot: "join-said", happened: "This Mac already runs threads for another wsp.", fix: "Leave it from the sidebar first." },
+        // The wsp over there answered and turned this computer down, so its own sentence is what happened; there is
+        // nothing for this screen to add and nothing to press again. A Mac reads that wsp runs workspaces on Linux.
+        refused: { slot: "join-said", happened: null, fix: "" },
         shell: { slot: "join-said", happened: "This Mac could not join that wsp.", fix: "Press Join again." },
       };
-      /** What the second row of the joined card says about this computer: one whose daemon runs workspaces builds
-       * a copy of your image on first use; one whose kernel cannot runs the agents you have here as one workspace. */
-      const WORKSPACES = { yes: "runs your workspaces · your image builds here on first use", no: "runs your agents, one workspace" };
+      /** What the second row of the joined card says about this computer. A computer that joined boots your image,
+       * so there is one thing to say: the join turns down every computer whose kernel cannot. */
+      const WORKSPACES = "runs your workspaces · your image builds here on first use";
 
       const joinSlots = () => [$("address-said"), $("code-said"), $("join-said")];
       function clearJoinRefusals() {
@@ -475,7 +481,9 @@
       /** Draws what the shell refused where it belongs, and marks the field it was about. */
       function sayRefusal(answer) {
         const said = JOIN_REFUSALS[answer.why] ?? JOIN_REFUSALS.shell;
-        refuse($(said.slot), said.happened, said.fix, answer.said);
+        // A refusal whose words are the other wsp's carries no sentence of its own: what happened is what it said.
+        const happened = said.happened ?? answer.said ?? JOIN_REFUSALS.shell.happened;
+        refuse($(said.slot), happened, said.fix, answer.said);
         if (said.field !== undefined) $(said.field).setAttribute("aria-invalid", "true");
       }
 
@@ -492,7 +500,7 @@
           if (answer.ok) {
             $("here-name").textContent = answer.here.name;
             $("here-facts").textContent = answer.here.facts;
-            $("here-workspaces").textContent = answer.here.runsWorkspaces ? WORKSPACES.yes : WORKSPACES.no;
+            $("here-workspaces").textContent = WORKSPACES;
             show("joined");
             return;
           }

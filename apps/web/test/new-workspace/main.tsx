@@ -20,9 +20,9 @@ const SIZES = [
   { cpu: 4, memMb: 16_384, rateUsdPerHour: 0.29 },
 ];
 
-const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: false, engine: "none", present: true };
-const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: false, shape: { cpu: 2, memMb: 4096 }, runsWorkspaces: true, engine: "docker", present: true, forks: { running: 0, room: 3 } };
-const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018, sizes: SIZES };
+const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, engine: "none", present: true, takesForks: false };
+const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: false, shape: { cpu: 2, memMb: 4096 }, engine: "docker", present: true, takesForks: true, forks: { running: 0, room: 3 } };
+const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018, sizes: SIZES, takesForks: true };
 
 const places = params.get("places") === "none" ? [HERE] : [HERE, HETZNER, ASCII];
 

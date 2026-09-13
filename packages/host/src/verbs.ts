@@ -205,8 +205,8 @@ import {
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
-  placeRunsOneWorkspaceFix,
-  placeRunsOneWorkspaceLine,
+  localRunsOneFix,
+  localRunsOneLine,
   packageOf,
   type SealedPin,
 } from "@wsp/protocol";
@@ -455,7 +455,6 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.shape === undefined ? "" : String(p.shape.cpu),
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
-    p.runsWorkspaces === undefined ? "" : p.runsWorkspaces ? "yes" : "no",
     p.engine === undefined ? "" : p.engine,
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
@@ -463,7 +462,7 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.default ? "default" : "",
     p.build ?? "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "WORKSPACES", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "IMAGE"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -1249,17 +1248,10 @@ export async function placeNamed(client: HostClient, word: string): Promise<Plac
   return found;
 }
 
-/** The workspace a place that forks nothing already runs: the one its row names for a computer somebody joined, and
- * the local workspace for the computer the host itself is on, which the places list does not name. */
-async function workspaceOnPlace(client: HostClient, place: PlaceView): Promise<WorkspaceOut | undefined> {
-  const all = await workspaces(client);
-  return place.workspaceId !== undefined ? all.find(w => w.id === place.workspaceId) : all.find(isLocalWorkspace);
-}
-
-/** `wsp new --on` where the place forks nothing: the place is its own one workspace, so this records that workspace
- * under the name given when there is none there yet and names the one there is when there is. It never answers with
- * a workspace it did not make. */
-export async function onPlaceItself(
+/** `wsp new --on` aimed at the computer the app itself runs on, which forks nothing: its local mode is one
+ * workspace, so this records that workspace under the name given when there is none yet and names the one there is
+ * when there is. Every place on the list forks, so this is the only row that reaches here. */
+export async function onThisComputer(
   client: HostClient,
   out: Out,
   place: PlaceView,
@@ -1269,13 +1261,8 @@ export async function onPlaceItself(
   if (asked.from !== undefined || asked.size !== undefined || asked.engine === true) throw usageRefusal(`${place.name} forks nothing, so it takes no --from, --size or --engine.`, "Drop them.");
   // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads.
   if (asked.agents?.spawn === true && !agentsMayDrive("local")) throw usageRefusal(agentsKindRefusal("local"), "Drop --spawn on, or name a place that forks.");
-  const already = await workspaceOnPlace(client, place);
-  if (already !== undefined) throw usageRefusal(placeRunsOneWorkspaceLine(place.name, already.name), placeRunsOneWorkspaceFix(already.name));
-  // The extension law's one named exception: every other road here reads a fact off the row, and this reads which
-  // row it is. It stands because only the computer the host runs on can reach this line with no workspace to name.
-  // A joined computer records one at its join, and a provider never takes this road at all, so the branch is the
-  // guard for a record that went missing rather than a road a person takes.
-  if (place.id !== HERE_PLACE_ID) throw usageRefusal(placeForksNowhereLine(place.name), "Run wsp places.");
+  const already = (await workspaces(client)).find(isLocalWorkspace);
+  if (already !== undefined) throw usageRefusal(localRunsOneLine(already.name), localRunsOneFix(already.name));
   return createLocalWorkspace(client, out, name);
 }
 
@@ -2582,7 +2569,7 @@ export const VERBS: readonly Verb[] = [
       if (on !== undefined) {
         const place = await placeNamed(client, on);
         if (place.takesForks !== true) {
-          await onPlaceItself(client, ctx.out, place, name, { from, size, engine, agents });
+          await onThisComputer(client, ctx.out, place, name, { from, size, engine, agents });
           return 0;
         }
       }
@@ -2595,7 +2582,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; a place that forks nothing runs the person's agents as its own one workspace instead, which this records under the name given when there is none there yet and names when there is.",
+        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; the computer the app runs on forks nothing and takes its one local workspace instead, which this records under the name given when there is none there yet and names when there is.",
       input: {
         name: z.string().describe("the workspace name, which the sidebar and every other line call it by"),
         from: z.string().optional().describe("a project image: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
@@ -2612,7 +2599,7 @@ export const VERBS: readonly Verb[] = [
         const agents = agentsAsked(spawn, maxMachines, maxDepth);
         if (on !== undefined) {
           const place = await placeNamed(client, on);
-          if (place.takesForks !== true) return asJson(await onPlaceItself(client, QUIET, place, name, { from, size: word, engine, agents }));
+          if (place.takesForks !== true) return asJson(await onThisComputer(client, QUIET, place, name, { from, size: word, engine, agents }));
         }
         if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on, engine));
         const landing = await forkable(client, on);
