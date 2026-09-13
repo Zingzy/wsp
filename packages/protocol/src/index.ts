@@ -3123,6 +3123,7 @@ const DAEMON_CONTENTS = [
   "35236ee3220f12db35f3307812b2d2ea8c8762f8910e656d9d57a44bb599b0e3",
   "372241b199d0b23db89c2618409d8edf611bc5f29811fdaffca813ec2b283295",
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
+  "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3190,7 +3191,10 @@ const DAEMON_CONTENTS = [
  * bytes in a snapshot row, an image row and the swept count are what the tree's files hold, and the sweep at the
  * daemon's start drops any blob it finds beside its tree. Version 30 asks a machine for the service manager its
  * daemon would be held up by before a byte lands on it, rather than inside the install: the deploy script carries
- * that check no longer, and a machine wsp did not build is turned away with nothing written on it. */
+ * that check no longer, and a machine wsp did not build is turned away with nothing written on it. Version 31 lets a
+ * place say which life a copy may be taken from: a provider whose snapshot is the disk as it stands answers
+ * snapshotsAnyLife and a builder that woke there is sealed, where one that answers only its first life still refuses
+ * after a restart. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
