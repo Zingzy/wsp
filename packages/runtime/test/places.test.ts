@@ -26,11 +26,14 @@ import {
   placeNoDaemonPortLine,
   placeNoLinkLine,
   workFolderIn,
+  copyStoppedLine,
+  type GoldenStageEvent,
   type PlaceStageEvent,
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
 import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, type MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
@@ -1007,6 +1010,8 @@ interface ForkingPlace {
   asked: Record<string, number>;
   /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
   daemonAnswersAfter: number;
+  /** How long a snapshot job there reads running before it reads done; the layer takes time to write. */
+  snapshotTakesMs: number;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
   holdResumes(): () => void;
 }
@@ -1054,6 +1059,8 @@ function forks(
     images: [{ id: "sha256:i", sizeBytes: 4 * 1024 * 1024 * 1024 }],
     machines: { running: 1, paused: 0 },
   },
+  /** What a command run on a machine there answers; nothing and exit 0 unless the test says. */
+  exec: (cmd: string) => { exitCode: number; stdout: string; stderr: string } = () => ({ exitCode: 0, stdout: "", stderr: "" }),
 ): ForkingPlace {
   let held: ((...args: never[]) => void)[] | undefined;
   const seen: ForkingPlace = {
@@ -1066,6 +1073,7 @@ function forks(
     ops: [],
     asked: {},
     daemonAnswersAfter: 1,
+    snapshotTakesMs: 0,
     holdResumes: () => {
       held = [];
       return () => {
@@ -1075,6 +1083,7 @@ function forks(
     },
   };
   let made = 0;
+  const jobs = new Map<string, { name: string; started: number }>();
   // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
   let state: "running" | "paused" = "running";
   client.ws.on("message", raw => {
@@ -1084,6 +1093,10 @@ function forks(
     const id = frame["id"];
     const say = (payload: Record<string, unknown>): void => client.ws.send(JSON.stringify({ id, ok: true, ...payload }));
     const machine = (machineId: string): Record<string, unknown> => ({ machine: { id: machineId, kind: "sandbox", daemonSupervisor: "entrypoint", roads: PLACE_ROADS } });
+    // A machine the host killed is gone from that computer, as the daemon there answers: a get or a state read of
+    // it is refused as missing, which is what the kill's own wait for gone reads.
+    const gone = (machineId: string): boolean => seen.killed.includes(machineId);
+    const missing = (machineId: string): void => void client.ws.send(JSON.stringify({ id, ok: false, error: `no such machine: ${machineId}`, kind: "missing", status: 404 }));
     if (op.startsWith("machine.") || op.startsWith("tunnel.")) seen.ops.push(op);
     seen.asked[op] = (seen.asked[op] ?? 0) + 1;
     switch (op) {
@@ -1101,11 +1114,11 @@ function forks(
         return say(machine(`k${++made}`));
       }
       case "machine.get":
-        return say(machine(String(frame["machineId"])));
+        return gone(String(frame["machineId"])) ? missing(String(frame["machineId"])) : say(machine(String(frame["machineId"])));
       case "machine.state":
-        return say({ state });
+        return gone(String(frame["machineId"])) ? missing(String(frame["machineId"])) : say({ state });
       case "machine.exec":
-        return say({ result: { exitCode: 0, stdout: "", stderr: "" } });
+        return say({ result: exec(String(frame["cmd"])) });
       case "machine.describe":
         return say({ shape: { cpu: 2, memMb: 4096 } });
       case "machine.facts":
@@ -1116,9 +1129,18 @@ function forks(
         return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
       case "machine.previewUrl":
         return say({ reach: { url: "http://127.0.0.1:49155", token: "", expiresAt: 1 } });
+      // A snapshot is a job there: named at once, asked after until the layer is written.
       case "machine.snapshot":
         seen.snapshots.push(String(frame["name"]));
-        return say({ snapshotId: `sha256:${String(frame["name"])}` });
+        jobs.set(`job-${seen.snapshots.length}`, { name: String(frame["name"]), started: Date.now() });
+        return say({ job: `job-${seen.snapshots.length}` });
+      case "machine.snapshotJob": {
+        const job = jobs.get(String(frame["job"]));
+        if (job === undefined) return void client.ws.send(JSON.stringify({ id, ok: false, error: `no such snapshot job: ${String(frame["job"])}`, kind: "missing", status: 404 }));
+        const elapsed = Date.now() - job.started;
+        if (elapsed < seen.snapshotTakesMs) return say({ state: "running", bytes: Math.floor((elapsed / seen.snapshotTakesMs) * 5_000_000), total: 5_000_000 });
+        return say({ state: "done", bytes: 5_000_000, total: 5_000_000, snapshotId: `sha256:${job.name}` });
+      }
       case "machine.pause":
         seen.paused++;
         state = "paused";
@@ -1412,6 +1434,34 @@ describe("a fork on a computer you joined", () => {
     expect(backend.snapshots).toEqual([]);
   });
 
+  it("a snapshot there that outlasts the link's frame bound completes: the job is asked after a frame at a time, and every frame answers inside the bound", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    // A frame bound far under the job: the old road, one frame waiting on the whole layer, failed here.
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey), placeFrameWaitMs: 300 });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    place.snapshotTakesMs = 1_500;
+    await store.put("project-goldens", "snap_p", {
+      snapshotId: "snap_p",
+      golden: "snap_g",
+      projects: [{ name: "proj", dest: "/root/proj", importedAt: "2026-09-12T00:00:00.000Z", size: 20 }],
+      workspaceId: "ws_older",
+      workspaceName: "older",
+      createdAt: "2026-09-12T00:00:00.000Z",
+    });
+    const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
+    const started = Date.now();
+    const golden = await runtime.workspaces.snapshot(made.id);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
+    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
+    expect(place.asked["machine.snapshot"]).toBe(1);
+    expect(place.asked["machine.snapshotJob"]).toBeGreaterThanOrEqual(2);
+  });
+
   it("says the computer is not connected rather than asking the provider anything, and reads it again when it is back", async () => {
     const { hostKey } = await serving();
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
@@ -1565,19 +1615,17 @@ function dialLocal(port: number, expectCut = false): Promise<string> {
 }
 
 describe("the image built through a computer you joined", () => {
-  const copyRecipe = (): GoldenRecipe => ({ setup: "true", smoke: "true" });
-
   it("a copy build names the computer by its name or id, learns its backend from the computer itself, and is refused at the record rather than at the name", async () => {
     const { hostKey } = await serving();
     let place: ForkingPlace | undefined;
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    await expect(runtime!.image.build({ place: "srv", recipe: copyRecipe })).rejects.toThrow(/owns no image named default/);
-    await expect(runtime!.image.build({ place: placeId, recipe: copyRecipe })).rejects.toThrow(/owns no image named default/);
+    await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(/owns no image named default/);
+    await expect(runtime!.image.build({ place: placeId })).rejects.toThrow(/owns no image named default/);
     // One frame taught this host what srv forks with; nothing was made there.
     expect(place!.asked["machine.backend"]).toBe(1);
     expect(place!.created).toEqual([]);
-    await expect(runtime!.image.build({ place: "nowhere", recipe: copyRecipe })).rejects.toThrow(/no place named nowhere; you have .*srv/);
+    await expect(runtime!.image.build({ place: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv/);
   });
 
   it("the image is built on the joined computer when it is the default place, and when the provider this host forks on forks nothing", async () => {
@@ -1614,7 +1662,7 @@ describe("the image build and the computer whose doctor said no, or that does no
     const reason = placeForksNowhereLine("srv", BLOCKED);
     expect(reason).toBe("srv mounts cgroup v1 at /sys/fs/cgroup");
     await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(reason);
-    await expect(runtime!.image.build({ place: "srv", recipe: copyRecipe })).rejects.toThrow(reason);
+    await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(reason);
     await expect(runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(reason);
     await expect(runtime!.workspaces.landing({ on: "srv" })).rejects.toThrow(reason);
     // Marked default, it runs no workspaces, so the one place that does is where the build goes.
@@ -1634,7 +1682,136 @@ describe("the image build and the computer whose doctor said no, or that does no
 
   it("this computer is never built into: naming it for a copy build or a build place is refused rather than read as the provider this host forks on", async () => {
     await serving();
-    await expect(runtime!.image.build({ place: HERE.name, recipe: copyRecipe })).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
+    await expect(runtime!.image.build({ place: HERE.name })).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
     await expect(runtime!.golden.buildPlace(HERE.name)).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
+  });
+});
+
+describe("a computer joining a host that holds a sealed image", () => {
+  /** A host that forks at a provider stub and composes the recipe a copy builds from; with `sealed`, its image is
+   * sealed at that provider before anything joins. The key and the store are handed in for a host that comes back. */
+  async function imageHost(o: { sealed: boolean; store?: Store; hostKey?: PlaceKeyPair }): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const hostKey = o.hostKey ?? newPlaceKeyPair();
+    const store = o.store ?? memoryStore();
+    runtime = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(), copyRecipe: () => COPY_RECIPE, hostId: "h1", places: wiredPlace("solari", backend), placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    if (o.sealed) {
+      const b = await runtime.golden.prepare();
+      await runtime.golden.seal(b.id);
+    }
+    return { hostKey, store };
+  }
+
+  const settled = (): Promise<void> => new Promise(r => setTimeout(r, 60));
+  const rowOf = async (placeId: string): Promise<PlaceView> => (await placesOf()).find(p => p.id === placeId)!;
+  /** A computer answering what a builder asks of it, as far as a fake goes: its exec answers the checks, and the
+   * builder's own setup is where a build there stops. */
+  const answering =
+    (hold: (p: ForkingPlace) => void) =>
+    (c: WsClient): void =>
+      hold(forks(c, undefined, cmd => dfOk(undefined, cmd)));
+  const framesOf = (): GoldenStageEvent[] => {
+    const frames: GoldenStageEvent[] = [];
+    runtime!.events.on("golden.stage", e => {
+      if (e.type === "golden.stage") frames.push(e);
+    });
+    return frames;
+  };
+
+  it("builds that computer's copy on the agent's link, not on the join's own socket: the join socket closes behind its prove and the row says nothing, the link that dials in next starts the build, and where the build stops the row says so, the builder is killed by its id and no copy is filed", async () => {
+    const { hostKey } = await imageHost({ sealed: true });
+    const frames = framesOf();
+    // The join command's road: join and prove on one socket that answers no machine frame and closes once the
+    // prove is answered; the agent's link dials in after it.
+    const joined = await join(hostKey, { code: await code(), name: "srv" });
+    const { placeId, pair } = joined;
+    await until(async () => (await rowOf(placeId)).present === true);
+    joined.client.close();
+    await until(async () => (await rowOf(placeId)).present === false);
+    await settled();
+    expect(frames.filter(f => f.place === placeId)).toEqual([]);
+    expect((await rowOf(placeId)).build).toBeUndefined();
+    let place!: ForkingPlace;
+    const linked = await relink(hostKey, placeId, pair, report("srv"), answering(p => (place = p)));
+    sockets.push(linked.client.ws);
+    expect(linked.proved.ok, String(linked.proved["error"])).toBe(true);
+    await until(() => place.asked["machine.create"] === 1, 5000);
+    expect(frames.some(f => f.place === placeId && f.stage === "creating")).toBe(true);
+    // The fake computer runs no builder's setup, so the build stops there: the row says so in the seal's own
+    // words, and the stopped build starts no second one on its own.
+    await until(async () => (await rowOf(placeId)).build?.startsWith(copyStoppedLine()) === true, 5000);
+    expect(frames.filter(f => f.place === placeId).map(f => f.stage)).toContain("failed");
+    expect(place.killed).toHaveLength(1);
+    expect((await runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);
+    expect(place.asked["machine.create"]).toBe(1);
+  });
+
+  it("builds nothing for a computer whose doctor said no, and nothing at all on a host that holds no image", async () => {
+    const { hostKey } = await imageHost({ sealed: true });
+    let blocked!: ForkingPlace;
+    const laptop = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { runsWorkspaces: false }), answers: c => (blocked = forks(c)) });
+    sockets.push(laptop.client.ws);
+    await until(async () => (await rowOf(laptop.placeId)).present === true);
+    await settled();
+    expect(blocked.asked["machine.create"]).toBeUndefined();
+    expect((await rowOf(laptop.placeId)).build).toBeUndefined();
+
+    await srv?.close();
+    await runtime?.close();
+    const { hostKey: bare } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(bare, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    await until(async () => (await rowOf(placeId)).present === true);
+    await settled();
+    expect(place.asked["machine.create"]).toBeUndefined();
+    expect((await rowOf(placeId)).build).toBeUndefined();
+  });
+
+  it("a computer not connected at the cut builds nothing then and its row says nothing; its next link builds the copy", async () => {
+    const { hostKey } = await imageHost({ sealed: false });
+    let place!: ForkingPlace;
+    const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
+    // The computer said what it forks with, then went away.
+    await until(() => place.asked["machine.backend"] === 1);
+    joined.client.close();
+    await until(async () => (await rowOf(joined.placeId)).present === false);
+    const frames = framesOf();
+    const b = await runtime!.golden.prepare();
+    await runtime!.golden.seal(b.id);
+    await settled();
+    expect(frames.filter(f => f.place === joined.placeId)).toEqual([]);
+    expect((await rowOf(joined.placeId)).build).toBeUndefined();
+    let back!: ForkingPlace;
+    const linked = await relink(hostKey, joined.placeId, joined.pair, report("srv"), answering(p => (back = p)));
+    sockets.push(linked.client.ws);
+    await until(() => back.asked["machine.create"] === 1, 5000);
+    expect(frames.some(f => f.place === joined.placeId && f.stage === "creating")).toBe(true);
+  });
+
+  it("a host restarted while a copy was building on a computer you joined reads the builder back through that computer once it dials in and the sweep stops it there; the wired provider is never asked about it and no copy is half filed", async () => {
+    const { hostKey, store } = await imageHost({ sealed: false });
+    let place!: ForkingPlace;
+    const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
+    await until(() => place.asked["machine.backend"] === 1);
+    // What a host that died mid build leaves behind: the builder's record, marked building, naming the computer it
+    // was made on.
+    await store.put("builders", "k7", { id: "k7", name: "default", kind: "sandbox", baseTemplate: "ubuntu:24.04", setupSha: "x", createdAt: new Date().toISOString(), size: { cpu: 2, memMb: 4096 }, firstLife: true, building: true, place: joined.placeId });
+    joined.client.close();
+    await srv!.close();
+    await runtime!.close();
+    // The host comes back on the same state and the computer dials in again.
+    await imageHost({ sealed: false, store, hostKey });
+    let again!: ForkingPlace;
+    const linked = await relink(hostKey, joined.placeId, joined.pair, report("srv"), answering(p => (again = p)));
+    sockets.push(linked.client.ws);
+    const swept = await runtime!.reap();
+    expect(again.asked["machine.get"]).toBeGreaterThanOrEqual(1);
+    expect(again.killed).toEqual(["k7"]);
+    expect(swept.reaped.map(r => r.id)).toContain("k7");
+    expect(await store.get("builders", "k7")).toBeUndefined();
+    expect(await store.keys("goldens")).toEqual([]);
   });
 });

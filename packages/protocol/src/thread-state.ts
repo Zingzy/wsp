@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one vocabulary for a thread's state, read off the rows the runtime
 // writes and nowhere else. The latest turn's own state leads, except while
-// that turn has a permission prompt nobody has answered: the turn is stopped
-// on a question and the thread is waiting on the person, which is what a row
+// that turn is stopped on a question nobody has answered: its own prompt, or
+// the prompt of the thread its running call is behind, which stops it just as
+// dead. Either way the thread is waiting on the person, which is what a row
 // has to say before anything else. Every client renders these words, so the
 // sidebar, the pane header and the command line never say two things about
 // one thread.
@@ -12,8 +13,15 @@ import type { SessionPermissionEvent, SessionStatus, ThreadView } from "./index.
 export type ThreadState = SessionStatus | "waiting";
 
 /** What a thread reads as, from its folded row alone. */
-export function threadState(thread: Pick<ThreadView, "status" | "asking">): ThreadState {
-  return thread.asking !== undefined ? "waiting" : thread.status;
+export function threadState(thread: Pick<ThreadView, "status" | "asking" | "waitingOn">): ThreadState {
+  return thread.asking !== undefined || thread.waitingOn !== undefined ? "waiting" : thread.status;
+}
+
+/** What a waiting thread is stopped on, in one line: its own open prompt, else the question the thread it is behind
+ * has open, named as the answer somebody else's row is holding. Nothing for a thread waiting on nobody. */
+export function waitingLine(thread: Pick<ThreadView, "asking" | "waitingOn">): string | undefined {
+  if (thread.asking !== undefined) return thread.asking;
+  return thread.waitingOn === undefined ? undefined : `${askingLine(thread.waitingOn.prompt)} needs an answer`;
 }
 
 const WORDS: Record<ThreadState, string> = {
@@ -21,7 +29,7 @@ const WORDS: Record<ThreadState, string> = {
   running: "Working",
   completed: "Idle",
   interrupted: "Idle",
-  failed: "Ended",
+  failed: "Failed",
 };
 
 export function threadStateWord(state: ThreadState): string {
@@ -29,7 +37,7 @@ export function threadStateWord(state: ThreadState): string {
 }
 
 /** The word a thread's row shows, the short road every surface takes. */
-export function threadWordOf(thread: Pick<ThreadView, "status" | "asking">): string {
+export function threadWordOf(thread: Pick<ThreadView, "status" | "asking" | "waitingOn">): string {
   return threadStateWord(threadState(thread));
 }
 

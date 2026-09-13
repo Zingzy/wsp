@@ -6,11 +6,13 @@
 // Both roads read the same three lines here, so a copy is planned the way the
 // image itself was and nothing can drift between them.
 import type { Manifest, ManifestEntry, Platform } from "@wsp/collect";
+import { catalogIdOfRow } from "@wsp/catalog";
 import type { BrewTable } from "@wsp/engine";
-import { BREW_ID_PREFIX, customRows, type Recipe, type SealedImage } from "@wsp/protocol";
+import { BREW_ID_PREFIX, customRows, type Recipe, type SealedImage, type SealedPin } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import { importFor, refusedIsDir, type ImportOptions } from "./init-import.js";
 import { answeredRows, defaultAnswers, goldenRecipeFor, lockRefused, manifestFor, tickLoginTools, withoutAgentTools } from "./init-recipe.js";
+import { withoutPins } from "./recipe-file.js";
 
 /** What a build is planned against beyond the rows themselves: this computer, its Homebrew table for the rows a
  * formula installs, the Keychain values already read for it, and the keys its agents run with. A copy's build reads
@@ -41,7 +43,8 @@ export function planImport(picked: readonly ManifestEntry[], o: BuildContext & {
 
 /** The whole recipe a build runs from: what installs and travels, the envs each ticked agent asks for, and the
  * small recipe kept on it as what the build was planned from, which is what a copy at another place is built from
- * later. */
+ * later. The small recipe goes on the record without the pins an earlier seal wrote on it: the record keeps what
+ * this seal read beside it. */
 export function planGoldenRecipe(
   o: BuildContext & { rows: readonly ManifestEntry[]; small: Recipe; deployDaemon?: (machine: Machine) => Promise<void | string> } & Pick<ImportOptions, "onResult" | "onContext">,
 ): { bring: ManifestEntry[]; import: GoldenImport; recipe: GoldenRecipe } {
@@ -50,29 +53,29 @@ export function planGoldenRecipe(
   return {
     bring,
     import: imp,
-    recipe: goldenRecipeFor(bring, o.agentKeys, { import: imp, source: o.small, ...(o.deployDaemon !== undefined ? { deployDaemon: o.deployDaemon } : {}) }),
+    recipe: goldenRecipeFor(bring, o.agentKeys, { import: imp, source: withoutPins(o.small), ...(o.deployDaemon !== undefined ? { deployDaemon: o.deployDaemon } : {}) }),
   };
 }
 
-/** What a copy's build reads off this computer: the collector, the Homebrew table where there is one, and where the
- * rows are read from. The same readers wsp init takes, minus the ones that only a person's screens use. */
+/** What a copy's build reads off this computer: the collector and the Homebrew table where there is one. The same
+ * readers wsp init takes, minus the ones that only a person's screens use. */
 export interface CopyReaders extends Pick<BuildContext, "home" | "platform" | "agentKeys"> {
   collect(): Promise<Manifest>;
   brew?: () => Promise<BrewTable>;
-  statePath: string;
   deployDaemon?: (machine: Machine) => Promise<void | string>;
 }
 
-/** The rows a copy is planned from: this computer as it is now with the record's own recipe written over it, and
- * every sign-in row set to skip and unticked. The place gets the person's files, tools and agents from this
- * computer and their sign-ins from the vault, so no sign-in runs there and no Keychain is read here.
+/** The rows a copy is planned from: this computer as it is now with the record's own recipe written over it, the
+ * record's pins on the rows they name, and every sign-in row set to skip and unticked. The place gets the person's
+ * files, tools and agents from this computer and their sign-ins from the vault, so no sign-in runs there and no
+ * Keychain is read here.
  *
  * The tool each answered sign-in needs is ticked before the answers go, the way wsp init ticks it: the small recipe
  * records the answer and not the tick it caused, so a copy planned off the answers as written would land a login on
  * a machine with nothing to read it. */
-export function copyRows(manifest: Manifest, image: SealedImage & { recipe: Recipe }, o: { home: string; brew: BrewTable; statePath: string }): ManifestEntry[] {
+export function copyRows(manifest: Manifest, image: SealedImage & { recipe: Recipe }, o: { home: string; brew: BrewTable }): ManifestEntry[] {
   const here = lockRefused({ ...manifest, entries: withoutAgentTools(manifest.entries) }, refusedIsDir(o.home));
-  const applied = manifestFor({ manifest: here }, image.recipe, o.statePath);
+  const applied = withRecordPins(manifestFor({ manifest: here }, image.recipe), image.pins ?? []);
   const { ticks, choices } = defaultAnswers(applied, o.brew);
   tickLoginTools(applied, choices, ticks, o.brew);
   for (const e of applied.entries) {
@@ -81,6 +84,25 @@ export function copyRows(manifest: Manifest, image: SealedImage & { recipe: Reci
     ticks.delete(e.id);
   }
   return answeredRows(applied, ticks, choices);
+}
+
+/** The record's pins on the rows they name, by the id a row is known by on every computer: the catalog id where the
+ * catalog carries the tool, so the pin lands whether this computer has the tool by its own manager or the catalog's
+ * bare row installs it, else the row's own id. A row whose road fixes a version takes the pin's as its own, in place
+ * of whatever this computer runs today, so the copy installs what the seal read; a row marked latest carries the pin
+ * for the record's sake and no version, since its road installs the current one wherever it runs. */
+export function withRecordPins(manifest: Manifest, pins: readonly SealedPin[]): Manifest {
+  const byId = new Map(pins.map(p => [p.id, p]));
+  return {
+    ...manifest,
+    entries: manifest.entries.map(e => {
+      const p = byId.get(catalogIdOfRow(e) ?? e.id);
+      if (p === undefined) return e;
+      const { id: _id, road: _road, ...pin } = p;
+      const { version: _own, ...rest } = e;
+      return { ...rest, pin, ...(pin.latest === true ? {} : { version: pin.tag }) };
+    }),
+  };
 }
 
 /** The recipe a copy at another place is built from, composed off the record alone. The record carries the small
@@ -94,7 +116,7 @@ export async function copyGoldenRecipe(image: SealedImage, o: CopyReaders): Prom
   // leaves the measured table standing: a formula's size decides no tick on a plan the record already settled.
   const wanted = manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX));
   const brew = (wanted ? await o.brew?.().catch(() => undefined) : undefined) ?? new Map();
-  const rows = copyRows(manifest, { ...image, recipe: image.recipe }, { home: o.home, brew, statePath: o.statePath });
+  const rows = copyRows(manifest, { ...image, recipe: image.recipe }, { home: o.home, brew });
   return planGoldenRecipe({
     rows,
     small: image.recipe,

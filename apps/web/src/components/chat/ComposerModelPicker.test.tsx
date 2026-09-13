@@ -1,8 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { THIS_COMPUTER, type HarnessCatalog } from "@wsp/protocol";
-import { ComposerModelPicker, UNLISTED_MODEL_LINE, listModels } from "./ComposerModelPicker";
+
+// Base UI mounts a tooltip's popup only on a real hover, which jsdom does not give it; the stand-in draws it where
+// it is written, so what a person reads on the rail is readable here.
+vi.mock("../ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render: element, children }: { render: ReactElement<{ children?: ReactNode }>; children?: ReactNode }) => cloneElement(element, {}, children),
+  TooltipPopup: ({ children }: { children: ReactNode }) => <div role="tooltip">{children}</div>,
+}));
+
+import { ComposerModelPicker, UNLISTED_MODEL_LINE, agentAndModelLine, listModels } from "./ComposerModelPicker";
 
 const CLAUDE: HarnessCatalog = {
   harness: "claude",
@@ -21,13 +31,19 @@ const CLAUDE: HarnessCatalog = {
   images: true,
 };
 
+const CODEX: HarnessCatalog = { ...CLAUDE, harness: "codex", label: "Codex", models: [] };
+
 const FABLE = { value: "claude-fable-5-1", label: "claude-fable-5-1" };
 
+const button = () => screen.getByRole("button", { name: agentAndModelLine(CLAUDE, FABLE) });
+
 function open() {
-  return act(async () => fireEvent.click(screen.getByRole("button", { name: "Model: claude-fable-5-1" })));
+  return act(async () => fireEvent.click(button()));
 }
 
 describe("ComposerModelPicker", () => {
+  afterEach(cleanup);
+
   it("lists a model the thread runs on that the catalog does not carry, under its own id", () => {
     expect(listModels(CLAUDE, [], "", FABLE).map(m => m.value)).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-fable-5-1"]);
     expect(listModels(CLAUDE, [], "", { value: "claude-opus-5", label: "Opus 5" }).map(m => m.value)).toEqual(["claude-opus-5", "claude-sonnet-5"]);
@@ -38,7 +54,7 @@ describe("ComposerModelPicker", () => {
   it("names that model on the button and gives it a muted row that picks like any other", async () => {
     const picked: string[] = [];
     render(<ComposerModelPicker catalogs={[CLAUDE]} catalog={CLAUDE} model={FABLE} pinned where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={(_h, m) => picked.push(m)} />);
-    expect(screen.getByRole("button", { name: "Model: claude-fable-5-1" }).textContent).toContain("claude-fable-5-1");
+    expect(button().textContent).toContain("claude-fable-5-1");
     await open();
     const row = screen.getByRole("option", { name: /claude-fable-5-1/ });
     expect(row.getAttribute("aria-selected")).toBe("true");
@@ -46,5 +62,30 @@ describe("ComposerModelPicker", () => {
     expect(row.querySelector("[data-unlisted-model]")).not.toBeNull();
     await act(async () => fireEvent.click(row));
     expect(picked).toEqual(["claude-fable-5-1"]);
+  });
+
+  it("names the agent that will run the turn on the button, beside the model", () => {
+    render(<ComposerModelPicker catalogs={[CLAUDE, CODEX]} catalog={CLAUDE} model={CLAUDE.models[0]!} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    // The button wore the model alone, so the one question a person asks before they send, which agent runs this,
+    // had no answer anywhere on the row.
+    const trigger = screen.getByRole("button", { name: "Claude Code · Opus 5" });
+    expect(trigger.textContent).toBe("Claude Code · Opus 5");
+  });
+
+  it("names the slot rather than standing empty while no model is resolved", () => {
+    render(<ComposerModelPicker catalogs={[CODEX]} catalog={CODEX} model={null} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    expect(screen.getByRole("button", { name: "Codex · Model" }).textContent).toBe("Codex · Model");
+  });
+
+  it("says each rail row's agent in text a person sees, not only in an attribute", async () => {
+    render(<ComposerModelPicker catalogs={[CLAUDE, CODEX]} catalog={CLAUDE} model={FABLE} pinned={false} where={THIS_COMPUTER} onPickHarness={() => {}} onPickModel={() => {}} />);
+    await open();
+    for (const entry of [CLAUDE, CODEX]) {
+      const said = document.querySelector(`[data-composer-harness="${entry.harness}"]`)?.nextElementSibling;
+      expect(said?.getAttribute("role")).toBe("tooltip");
+      expect(said?.textContent).toBe(entry.label);
+    }
+    // The rail's own name is read out to a person too, and the word the code uses for an agent is not one.
+    expect(screen.getByRole("tablist").getAttribute("aria-label")).toBe("Agents");
   });
 });

@@ -8,7 +8,7 @@
 // at a stated default for its kind. Nothing here runs a command: the host reads
 // the Mac's Homebrew and hands the table in.
 import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, catalogToolOf, formulaOf, isTap, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
-import { MIB, ROADS, catalogEntry, catalogToolByRoad, catalogToolFor, sizeBytes, type RoadName } from "@wsp/catalog";
+import { MIB, catalogEntry, catalogToolByRoad, catalogToolFor, isRoad, sizeBytes, type RoadName } from "@wsp/catalog";
 import { BREW_ID_PREFIX, toolRowPrefix, type RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
 
@@ -150,9 +150,6 @@ function closureOf(name: string, brew: BrewTable): Set<string> {
   }
   return seen;
 }
-
-/** Whether a word names one of the catalog's roads. */
-export const isRoad = (s: string | undefined): s is RoadName => (ROADS as readonly string[]).includes(s ?? "");
 
 /** The catalog's measured size for a row: a catalog row's own, or the size of the catalog tool that installs the
  * same package by the same road as this Mac's row (a formula by brew, a global by npm). */

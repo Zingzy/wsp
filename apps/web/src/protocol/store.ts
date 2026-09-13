@@ -3,11 +3,11 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
-import type { SidebarProjectSnapshot } from "../adapt/view-model.js";
+import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
 import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
@@ -127,6 +127,10 @@ interface State {
   freshThread: boolean;
   creations: Creation[];
   sessions: Record<string, SessionView[]>;
+  /** The send that has opened no thread yet, per workspace. The runtime writes a session row only once the agent
+   * announces itself, which on this computer is the seconds the agent takes to boot, so between the send and that
+   * row the sidebar had nothing to draw while the message was already in the transcript. */
+  launches: Record<string, Launch>;
   ready: boolean;
   /** How many reconnects the runtime could not replay events for; anything built from sessions.history reloads when it moves. */
   gaps: number;
@@ -200,6 +204,14 @@ interface State {
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
+  /** Holds a send whose thread the runtime has yet to write a row for, so every surface reading the workspace's
+   * threads has the one the transcript already shows. */
+  launching(workspaceId: string, launch: Launch): void;
+  /** Drops it: any start or end of this workspace's own means the runtime's rows are the newer answer, and a send
+   * refused before it reached the runtime drops its own by request id, so a late refusal cannot take a newer send's
+   * row away. A refresh drops every one of them in the same write as the rows it answered, since that list is the
+   * whole of what threads there are. */
+  launched(workspaceId: string, requestId?: string): void;
   /** Names the thread's harness session through the runtime, which writes it into the harness's own store: the
    * machine comes up first, as the command line's own rename does, then the name goes, then the workspace's rows are
    * reloaded so the sidebar shows it. True once the store took the name; an answer that named nothing and a failure
@@ -420,6 +432,7 @@ export const useStore = create<State>((set, get) => {
     freshThread: false,
     creations: [],
     sessions: {},
+    launches: {},
     ready: false,
     gaps: 0,
     preferences: bootPreferences(),
@@ -527,15 +540,28 @@ export const useStore = create<State>((set, get) => {
     async refresh() {
       const api = get().api;
       if (!api) return;
-      const [workspaces, rows] = await Promise.all([api.listWorkspaces(), api.listSessions().catch(() => NO_SESSIONS)]);
+      const [workspaces, answered] = await Promise.all([api.listWorkspaces(), api.listSessions().then(rows => rows, () => null)]);
       const s = get();
+      const rows = answered ?? NO_SESSIONS;
       const sessions = groupSessions(rows);
       // The address is read on every refresh, not only the first: a reconnect after the host restarted rebuilds this
       // store from nothing, and what the person is reading is recorded there rather than here.
       const address = readAddress();
       const selectedId = s.selectedId ?? addressed(address, workspaces) ?? remembered(workspaces) ?? firstRow({ workspaces, statuses: s.statuses, sessions });
       const open = openThreadOf(address, selectedId, s.selectedThreadId, rows);
-      set({ workspaces, sessions, ready: true, selectedId, selectedThreadId: open.threadId, freshThread: open.fresh, ...(open.toast !== undefined ? { toast: open.toast } : {}) });
+      set({
+        workspaces,
+        sessions,
+        ready: true,
+        selectedId,
+        selectedThreadId: open.threadId,
+        freshThread: open.fresh,
+        // A list the runtime answered is the whole of what threads there are: a send it has since written a row for
+        // is that row now, and one it has not is a turn that died while this client was away, so neither may keep a
+        // row of its own. A list it refused says nothing, and the sends in flight stand until a start or an end.
+        ...(answered === null ? {} : { launches: {} }),
+        ...(open.toast !== undefined ? { toast: open.toast } : {}),
+      });
       if (selectedId === null || !workspaces.some(w => w.id === selectedId)) return;
       // The chat for the workspace clears itself when it takes this, whether it is mounted yet or not.
       if (open.fresh && !s.freshThread) requestNewThread({ workspaceId: selectedId });
@@ -550,6 +576,17 @@ export const useStore = create<State>((set, get) => {
       } catch {
         // the next session event asks again
       }
+    },
+    launching(workspaceId, launch) {
+      set(s => ({ launches: { ...s.launches, [workspaceId]: launch } }));
+    },
+    launched(workspaceId, requestId) {
+      set(s => {
+        const held = s.launches[workspaceId];
+        if (held === undefined || (requestId !== undefined && held.requestId !== requestId)) return {};
+        const { [workspaceId]: _gone, ...rest } = s.launches;
+        return { launches: rest };
+      });
     },
     async renameThread({ sessionId, workspaceId, harness, title }) {
       const api = get().api;
@@ -812,7 +849,7 @@ export const useStore = create<State>((set, get) => {
             workspaces: s.workspaces.map(remember),
             statuses: s.statuses[e.workspaceId] ? { ...s.statuses, [e.workspaceId]: remember(s.statuses[e.workspaceId]!) } : s.statuses,
           }));
-          void get().reloadSessions(e.workspaceId);
+          void get().reloadSessions(e.workspaceId).then(() => get().launched(e.workspaceId));
           // The runtime re-asks the binary at a start, so a Claude Code upgrade on the machine shows within its TTL.
           void get().loadHarnesses(e.workspaceId);
           return;
@@ -823,14 +860,27 @@ export const useStore = create<State>((set, get) => {
           return;
         case "session.end":
           set(s => ({ spending: { ...s.spending, [e.workspaceId]: Math.max(0, (s.spending[e.workspaceId] ?? 0) - 1) } }));
-          void get().reloadSessions(e.workspaceId);
+          // An end without a start of its own is a harness that died before it announced itself: the send it stood
+          // for has no row coming, so the row it was drawn as goes with it.
+          void get().reloadSessions(e.workspaceId).then(() => get().launched(e.workspaceId));
           return;
         case "session.permission":
         case "session.permission.closed":
           // The row the sidebar reads carries what the thread is waiting on, so a prompt opening or closing is a row
-          // that changed: every workspace's rows are read here, not only the open thread's.
-          void get().reloadSessions(e.workspaceId);
+          // that changed: every workspace's rows are read here, not only the open thread's. Every workspace and not
+          // only this one, since a thread waiting behind this one carries the same question and may run anywhere.
+          for (const id of Object.keys(get().sessions)) void get().reloadSessions(id);
           return;
+        case "session.delta": {
+          // A call that follows another thread to the end of its turn is what puts a thread behind a question it
+          // never asked, so the row moves when such a call opens, with no prompt of its own in sight. A call
+          // answering moves it back, but only where a row here is already behind something: every other turn writes
+          // hundreds of results that change no row at all.
+          const opens = e.kind === "tool_use" && e.toolName !== undefined && threadsFollowed({ toolName: e.toolName, input: e.text }) !== undefined;
+          const closes = e.kind === "tool_result" && (get().sessions[e.workspaceId] ?? []).some(row => row.waitingOn !== undefined);
+          if (opens || closes) void get().reloadSessions(e.workspaceId);
+          return;
+        }
         case "session.notify":
           if (e.notify === NOTIFY_ME) set({ toast: e.text });
           return;
@@ -885,6 +935,11 @@ export function useSidebarProjects(): SidebarProjectSnapshot[] {
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
   return useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+}
+
+/** Every workspace's send in flight, for the sidebar, which reads them beside the rows the runtime has written. */
+export function useLaunches(): Record<string, Launch> {
+  return useStore(s => s.launches);
 }
 
 export function useSelectedId(): string | null { return useStore(s => s.selectedId); }

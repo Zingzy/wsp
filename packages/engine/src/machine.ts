@@ -49,6 +49,17 @@ export interface RunOptions {
 
 
 
+/** How far a snapshot has got: the layer's bytes written so far, and what the machine had written since it booted
+ * once the backend has counted it. */
+export interface SnapshotProgress {
+  bytes: number;
+  total?: number;
+}
+
+export interface SnapshotOptions {
+  onProgress?: (progress: SnapshotProgress) => void;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -67,8 +78,9 @@ export interface Machine {
    * kills it; the result is shaped like exec's. */
   run(script: string, opts: RunOptions): Promise<ExecResult>;
   /** Answers when the provider holds the snapshot. A backend that refuses one of a resumed machine throws
-   * NotFirstLifeError before any call; one whose snapshot copies the disk from any life ignores `life`. */
-  snapshot(name: string, life: MachineLife): Promise<string>;
+   * NotFirstLifeError before any call; one whose snapshot copies the disk from any life ignores `life`. A backend
+   * that writes the snapshot as a job tells `onProgress` how far it has got; the rest say nothing until done. */
+  snapshot(name: string, life: MachineLife, opts?: SnapshotOptions): Promise<string>;
   pause(): Promise<void>;
   /** `signal` ends the call where the caller has stopped waiting on it, so a resume nobody is waiting on is not left
    * running behind them; the backend's own cap on how long it waits for an answer is its business, not the caller's. */

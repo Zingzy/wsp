@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { CLOUD_SETUP_WORDS, fmtPx, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, PLACE_CONNECTS, fmtPx, type PlaceDialRoad, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
 
 /** The caps mono label over a section, and the muted mono a fact wears in a row's slot. Two class strings the page,
  * the table and the sheet all draw with, so one type ladder holds across the three files. */
@@ -44,9 +44,11 @@ export const WHERE_WORDS = {
   address: "Address",
   none: "none",
   ago: (span: string): string => `${span} ago`,
-  /** The button beside that reading, which asks the host to dial the computer once, and its word while it is
-   * waiting on the answer: a pressed button keeps its variant and changes its word. */
-  tryNow: "Try now",
+  /** The button beside that reading, which asks the host to dial the computer once, worded by the road that dial
+   * would take: a frame on the link the computer is holding, or the ssh login it was installed over. A computer
+   * that joined by typing a code and is not answering has neither, and gets no button at all. */
+  dial: { link: "Try now", ssh: "Try over ssh" } satisfies Record<PlaceDialRoad, string>,
+  /** Its word while it is waiting on the answer: a pressed button keeps its variant and changes its word. */
   dialling: "Dialling…",
   /** What the app says when its own client carries no dial road, in place of a button that would ask nobody. A
    * whole sentence, because it stands after one in the pane's slot and a clause opening in lower case after a
@@ -65,7 +67,7 @@ export const ADD_COMPUTER_WORDS = {
   },
   ssh: {
     road: "Linux box over ssh",
-    description: "The app logs in over ssh as your terminal would, installs wsp on the box, and the box connects to this Mac.",
+    description: `The app logs in over ssh as your terminal would, installs wsp on the box, and the box ${PLACE_CONNECTS}.`,
     login: "Login",
     loginPlaceholder: "user@host",
     port: "Port",

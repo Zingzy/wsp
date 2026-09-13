@@ -303,9 +303,10 @@ export function notifyTail(result: TurnResult): string | undefined {
 }
 
 /** The one line a thread's end sends to whoever its start named, and the one a wait on it prints: the thread's first
- * eight characters, the outcome word with the duration and cost the harness reported, then the reply at `length`. */
+ * eight characters, the outcome word with how long the turn worked and what it cost, then the reply at `length`. */
 export function notifyLine(threadId: string, result: TurnResult, length: NotifyLength = "tail"): string {
-  const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
+  const clocked = turnWorkedMs(result);
+  const facts = [result.status, ...(clocked !== undefined ? [fmtDuration(clocked.worked)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
   const body = notifyBody(result, length);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${body !== undefined ? `: ${body}` : ""}`;
 }
@@ -329,13 +330,34 @@ export function turnSpendPart(costUsd: number, word?: string): string {
   return `${spendFigure(costUsd, word)} this turn`;
 }
 
+/** The minutes a settled turn stood stopped on a question, said where they are most of what it took: the figure
+ * beside it counts work, and a turn that did four seconds of work in three and a half minutes has to say where the
+ * rest went or the two readings of the same turn cannot be reconciled. */
+export function waitedOnYouPart(waitedMs: number): string {
+  return `waited on you ${fmtDuration(waitedMs)}`;
+}
+
+/** How long a settled turn worked and how long of it went on the person: the harness clocks wall time from launch
+ * to result, prompts included, and this is the one place that splits it. Every reading of a turn's length takes
+ * this, so the chat footer and the line a thread's end sends can never say two different minutes about one turn. */
+export function turnWorkedMs(turn: { durationMs?: number | null; waitedMs?: number | null }): { worked: number; waited: number } | undefined {
+  if (typeof turn.durationMs !== "number") return undefined;
+  const waited = Math.min(typeof turn.waitedMs === "number" && turn.waitedMs > 0 ? turn.waitedMs : 0, turn.durationMs);
+  return { worked: turn.durationMs - waited, waited };
+}
+
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
  * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
- * last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
+ * last line read from this one list. Worked for counts work: the spans the turn stood on a prompt nobody had
+ * answered come off it, and where they outweigh the work they are said in their own part. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null; waitedMs?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
   const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
-  if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
+  const clocked = turnWorkedMs(turn);
+  if (clocked !== undefined) {
+    parts.push(`Worked for ${fmtDuration(clocked.worked)}`);
+    if (clocked.waited > clocked.worked) parts.push(waitedOnYouPart(clocked.waited));
+  }
   if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd, spendWord) : spendFigure(turn.costUsd, spendWord));
   if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
@@ -444,7 +466,7 @@ function toolField(input: ToolInput, name: string): string | undefined {
 }
 
 /** A tool a server lends the agent, whose name carries both: `mcp__<server>__<tool>` as every harness spells it. */
-function serverTool(toolName: string): { server: string; tool: string } | undefined {
+export function serverTool(toolName: string): { server: string; tool: string } | undefined {
   const parts = toolName.split("__");
   return parts.length >= 3 && parts[0] === "mcp" && parts[1] !== "" ? { server: parts[1]!, tool: parts.slice(2).join("__") } : undefined;
 }
@@ -779,6 +801,11 @@ export function subagentTaskLine(input: string): string | undefined {
  * asking rather than reading one unowned question. */
 export const subagentAskerLine = (task: string): string => `${task} asks`;
 
+/** Who is asking, above a prompt drawn in a thread that did not raise it: the thread whose turn is stopped on the
+ * question, named, since the thread reading this one is only held up until somebody answers it. Two parts under the
+ * row grammar's middle dot, as every other line of facts on a row is joined. */
+export const waitingAskerLine = (title: string): string => `${title} asks · this thread waits on the answer`;
+
 /** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
  * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
  * its caller. */
@@ -819,6 +846,22 @@ export function sealedImageLine(image: SealedImage): string {
   const size = image.usedBytes === undefined ? [] : [fmtBytes(image.usedBytes)];
   return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join(" · ");
 }
+
+/** A sentence opening read mid-line: its first letter lowered, the rest as written. */
+export const lowerFirst = (words: string): string => `${words.charAt(0).toLowerCase()}${words.slice(1)}`;
+
+/** What a place's row says while a copy of the image is built there: the stage in the seal's own words, so the row
+ * and the init sheet name one stage one way. */
+export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string => `building your image · ${lowerFirst(GOLDEN_STAGE_WORDS[stage])}`;
+
+/** What the row says after a build there stopped: the seal's own headline, and the reason the way the sheet reads it.
+ * It stands until the next build there starts: wsp image build, the next version cut, or the computer connecting
+ * again. */
+export const copyStoppedLine = (reason?: string): string => {
+  const head = lowerFirst(CLOUD_SETUP_WORDS.build.failed);
+  const said = reason === undefined ? "" : initStoppedLine(reason);
+  return said === "" ? head : `${head} · ${said}`;
+};
 
 /** The two words a copy's standing is said in, either of which fits the slot the longer one needs. */
 export const COPY_CURRENT = "current";
@@ -1798,6 +1841,11 @@ export const initElapsedLine = (ms: number): string => (ms < 60_000 ? `${Math.ma
  * and the size when the builder's disk could be read. */
 export const snapshotStageLine = (bytes: number | undefined): string => `snapshotting${bytes === undefined ? "" : ` about ${fmtBytes(bytes)}`}, usually under a minute`;
 
+/** The snapshot stage's line while the layer is written: the bytes so far, over what the machine had written once
+ * the backend has counted it. The stage's own clock says how long it has taken. */
+export const snapshotProgressLine = (bytes: number, total: number | undefined): string =>
+  total === undefined ? `snapshotting, ${fmtBytes(bytes)} written` : `snapshotting, ${fmtBytes(bytes)} of about ${fmtBytes(total)} written`;
+
 /** The save stage's one line. */
 export const SAVING_IMAGE_LINE = "saving the image";
 
@@ -1857,7 +1905,7 @@ export const initRowOver = (row: Pick<InitRow, "state" | "login">): boolean => r
 
 /** Where a stopped build was, from the stage that was running: one spelling for the terminal's stop line and the
  * app's sentence, since the stage names read as sentence openings ("Creating the machine"). */
-export const initStageWhile = (stage: string): string => `while ${stage.charAt(0).toLowerCase()}${stage.slice(1)}`;
+export const initStageWhile = (stage: string): string => `while ${lowerFirst(stage)}`;
 
 /** The opening of every stop line, terminal and app alike: where the run was when it stopped. What follows it is
  * what became of the machine, which differs by who is reading. */
@@ -2663,14 +2711,35 @@ export function versionMovedLine(from: string | undefined, to: string | undefine
 /** The words for a tools row no road installs, where a road's own words would stand. */
 export const NO_ROAD_WORDS = "by no road";
 
-/** Why a tool installs differently now: the release it is fixed to moved, or the sum recorded for that release did. */
-export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined): string {
-  if (from === undefined) return `now fixed to release ${to!.tag}`;
-  if (to === undefined) return `no longer fixed to release ${from.tag}`;
-  return from.tag === to.tag ? `the checksum recorded for ${from.tag} changed` : `release ${from.tag} to ${to.tag}`;
+/** What a row marked latest does on every place: the words `wsp recipe`, `wsp image` and the seal's stage all use. */
+export const INSTALLS_LATEST = "installs latest";
+
+/** A pin beside its row, as `wsp recipe` shows it: the version, and for a road that fixes none that it installs
+ * latest wherever it is built. */
+export function pinWords(pin: ToolPin): string {
+  return pin.latest === true ? `${pin.tag}, ${INSTALLS_LATEST}` : pin.tag;
 }
 
-/** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
+/** The one line a stage says about what its installs read back: the rows fixed to what they installed, then, once,
+ * the rows whose road installs latest wherever the image is built, each with the version this build got and the
+ * road's own words. Nothing when no row read a version. */
+export function pinsReadLine(fixed: readonly { name: string; tag: string }[], latest: readonly { name: string; tag: string; words?: string }[]): string | undefined {
+  const parts = [
+    ...(fixed.length > 0 ? [`pinned: ${fixed.map(p => `${listedName(p.name)} ${p.tag}`).join(", ")}`] : []),
+    ...(latest.length > 0 ? [`${INSTALLS_LATEST} on every place: ${latest.map(p => `${listedName(p.name)} ${p.tag}${p.words === undefined ? "" : ` ${p.words}`}`).join(", ")}`] : []),
+  ];
+  return parts.length === 0 ? undefined : parts.join("; ");
+}
+
+/** One of the record's pins in one line, under `wsp image`: the row by name, what it installed, the checksum where the
+ * road recorded one, and for a road that fixes none that it installs latest, in the road's words. */
+export function sealedPinLine(name: string, pin: ToolPin, words?: string): string {
+  const sum = pin.sha256 === undefined ? [] : [`checksum ${shortSum(pin.sha256)}`];
+  const latest = pin.latest === true ? [`${INSTALLS_LATEST}${words === undefined ? "" : ` ${words}`}`] : [];
+  return [name, pin.tag, ...sum, ...latest].join(" · ");
+}
+
+/** Why a tool installs differently now when its road stands: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
 
 /** The detail of a tools row the catalog does not carry: it is on this computer, at the version this computer runs
@@ -3123,6 +3192,8 @@ export function placeWorkspacesCell(view: PlaceView, count: number, monthUsd?: n
  * title) reads placeWorkspacesCell instead; both are this one rule. */
 export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: number): { count: string; note?: string } {
   const n = `${count}`;
+  // A copy being built or stopped there is what the row has to say while it lasts: the workspaces the row counts wait on it.
+  if (view.build !== undefined) return { count: n, note: view.build };
   // Only a provider bills: a computer of the person's own runs their workspaces for nothing, whatever it runs them on.
   if (view.kind === "provider") return monthUsd === undefined ? { count: n } : { count: n, note: spentThisMonth(monthUsd) };
   return view.runsWorkspaces === true ? { count: n } : { count: n, note: AGENTS_ONLY };
@@ -3168,6 +3239,20 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
 /** The one line that takes wsp off a computer it is typed on. */
 export const PLACE_LEAVE_LINE = "wsp leave";
 
+/** What becomes of the copy of the image on a computer of the person's own when wsp comes off it, in the words
+ * every screen that mentions it says. The copy sits in that computer's own workspace store, which placeOwnedPaths
+ * does not name, so neither the sweep the host asks for over the link nor wsp leave at the terminal takes it: the
+ * sheet that adds a computer, the dialog that removes one and the line that dialog hands over all say it stays.
+ * The size is the copy's where the host knows it; a screen that does not know it says the clause without a figure
+ * rather than one it is guessing. */
+export const imageCopyStaysLine = (size?: string): string => `the copy of your image${size === undefined ? "" : ` (${size})`} stays where it is`;
+
+/** How a computer of the person's own reaches this Mac, in the one clause both roads of the Add sheet say it in.
+ * The computer opens the connection, never this host: at an address on the network, or at the name the door hands
+ * it beside those addresses once this host is signed in, which is what a computer somewhere else has to go by.
+ * Connects, not dials, and no name for the road between: neither is a word somebody meets on their first day. */
+export const PLACE_CONNECTS = "connects to this Mac over your network, or from outside it once you sign in";
+
 /** Everything wsp puts on a computer it is installed on, named once. The Add sheet writes its lines and the note
  * under them from this list and the Remove dialog writes its sentence from the same, so what a person is told
  * before they press Add is what they are told on the way out. Nothing here is called a shim: a person reads what
@@ -3191,10 +3276,11 @@ export const PLACE_INSTALL = {
   },
   /** What that command does, as its own sentence for a screen that lists what lands rather than what comes off. */
   openerLine: "Sign-in pages started on that computer open in your browser here.",
-  /** What Docker on that computer ends up holding, and when. The size is the image's own, where this host has
-   * built one; a host with none yet says the sentence without a figure rather than a figure it is guessing. */
+  /** What a computer that runs workspaces ends up holding of the image, when it lands and what becomes of it. The
+   * size is the image's own, where this host has built one; a host with none yet says the sentence without a
+   * figure rather than a figure it is guessing. */
   imageCopy: (size: string | undefined): string =>
-    `Your image${size === undefined ? "" : ` (${size})`} is copied into Docker there the first time a workspace is created. Remove takes all of it off again.`,
+    `Your image${size === undefined ? "" : ` (${size})`} is built there the first time a workspace is created on it. When wsp comes off, ${imageCopyStaysLine()}.`,
 } as const;
 
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
@@ -3205,7 +3291,11 @@ export const PLACES_WORDS = {
   connectProvider: "Connect a provider",
   sheet: {
     title: "Add a computer",
-    description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
+    description: `A computer you own runs threads for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
+    /** The one line both roads say, because it is the reason a person adds a computer at all: a turn already
+     * running there is that computer's own and its daemon holds it while this host sleeps, and only the start of
+     * the next one needs this host awake. */
+    whileAsleep: "Threads there keep running while this Mac sleeps; new ones start when it wakes.",
     appRoad: 'On that computer, open wsp and press "This Mac joins another wsp". Type these.',
     address: "Address",
     code: "Code",
@@ -3233,8 +3323,10 @@ export const PLACES_WORDS = {
      * agent's. */
     leaveLine: PLACE_LEAVE_LINE,
     /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
-     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. */
-    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and so do any copies of your image in Docker there.`,
+     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. What
+     * it leaves is that list read the other way: the work folder is not on it, and neither is the workspace store
+     * the copy of the image sits in. */
+    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
   },
 } as const;
 

@@ -15,7 +15,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS, THREAD_AGENTS, agentName } from "@wsp/catalog";
+import { CATALOG_AGENTS, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
@@ -49,6 +49,7 @@ import {
   GOLDEN_STAGE_WORDS,
   sealedBuiltLine,
   sealedCopyLine,
+  sealedPinLine,
   sealedExportLine,
   sealedImageLine,
   sealedProjectLine,
@@ -203,6 +204,8 @@ import {
   placeForksNowhereLine,
   placeRunsOneWorkspaceFix,
   placeRunsOneWorkspaceLine,
+  packageOf,
+  type SealedPin,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
@@ -454,8 +457,9 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
+    p.build ?? "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "WORKSPACES", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "WORKSPACES", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -774,13 +778,18 @@ export async function buildImageAt(client: HostClient, out: Out, word: string, f
   }
 }
 
-/** What every director prints for the image: the record, a row per place, and the project images under it. */
+/** A pin's row by name: the catalog's for a catalog id, else the package a row outside the catalog names. */
+const pinName = (pin: SealedPin): string => catalogEntry(pin.id)?.name ?? packageOf(pin);
+
+/** What every director prints for the image: the record, a row per place, what each row installed at the seal, and
+ * the project images under it. */
 function imageLines(view: SealedImageView): string[] {
   if (view.image === null) return [NO_SEALED_IMAGE];
   const image = view.image;
   return [
     sealedImageLine(image),
     ...view.copies.map(c => sealedCopyLine(image, c)),
+    ...(image.pins ?? []).map(p => `  ${sealedPinLine(pinName(p), p, isRoad(p.road) ? ROAD_MODULES[p.road].words : undefined)}`),
     ...view.projects.map(sealedProjectLine),
   ];
 }
@@ -2266,7 +2275,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every place this host holds, which is the whole of where work can run: this computer, each computer joined to it as a place, and the provider it forks on. A computer's row carries what it last reported (cores, memory, free disk, whether it runs workspaces and the engine it has for a project's own containers) and whether it is connected right now; a provider's row carries its hourly rate. Exactly one row is the default, which is the last place added. A place is not a workspace: a workspace on a place is what threads run in, and wsp workspaces lists those.",
+        "Every place this host holds, which is the whole of where work can run: this computer, each computer joined to it as a place, and the provider it forks on. A computer's row carries what it last reported (cores, memory, free disk, whether it runs workspaces and the engine it has for a project's own containers) and whether it is connected right now; a provider's row carries its hourly rate. A row whose copy of the image is building says which stage it is at, and one whose last build stopped says why; a row that says nothing holds its copy. Exactly one row is the default, which is the last place added. A place is not a workspace: a workspace on a place is what threads run in, and wsp workspaces lists those.",
       input: {},
       output: { places: z.array(PlaceView) },
       call: async (_args, deps) => asJson({ places: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),
@@ -2754,7 +2763,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing. Refused in one line for a place this host does not hold, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
+        "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing; a place whose copy is building is answered with that build, never a second one. A place that runs workspaces is kept current on its own: its copy is built behind its add, behind every version cut and when a computer connects again, so this line is for a copy wanted now, a stopped one at a provider first of all. Refused in one line for a place this host does not hold, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
       input: { place: z.string().describe("the place to build the copy at, by the name wsp places lists"), force: z.boolean().optional().describe("build even where the record holds no sign-ins, so the copy asks for every one of them again") },
       output: { copy: SealedImageCopy, built: z.boolean() },
       call: async ({ place, force }, deps) => {

@@ -10,9 +10,9 @@ import { shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
-import { USED_KB_CMD } from "../src/golden-tools.js";
+import { MIB, USED_KB_CMD } from "../src/golden-tools.js";
 import { goldenName } from "../src/snapshot-names.js";
-import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, TemplateRow } from "../src/machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
  * which `ignoreKill` answers true is accepted and changes nothing. */
@@ -28,6 +28,8 @@ function recordingBackend(
     /** The provider copies the disk from any life, as a container's commit does; without it a resumed machine is refused as Solari refuses one. */
     snapshotsAnyLife?: boolean;
     snapshot?: (id: string, nth: number) => void;
+    /** What the provider says of the snapshot as it writes it, each reading handed to the caller before it answers. */
+    snapshotProgress?: SnapshotProgress[];
     state?: (id: string) => void;
     /** The backend promotes snapshots to templates; what each read of a template answers, by how many reads it has had. */
     templates?: boolean;
@@ -73,10 +75,11 @@ function recordingBackend(
           if (opts.stream) for (const line of res.stdout.split("\n")) if (line !== "") o.onLine?.(line);
           return res;
         },
-        snapshot: async (name, life) => {
+        snapshot: async (name, life, o) => {
           if (!life.firstLife && opts.snapshotsAnyLife !== true) throw new NotFirstLifeError(id, `snapshot ${name}`);
           timeline.push(`snapshot ${id}`);
           opts.snapshot?.(id, timeline.filter(t => t === `snapshot ${id}`).length);
+          for (const p of opts.snapshotProgress ?? []) o?.onProgress?.(p);
           snapshots.push(name);
           return `snap_${name}`;
         },
@@ -544,12 +547,50 @@ describe("interactive golden: prepare then seal", () => {
     expect(stages.at(-1)).toBe("failed:the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and could not be read about the builder (upstream sad)");
   });
 
-  it("any other snapshot failure is not asked again and consumes the builder as before", async () => {
+  it("any other snapshot failure is not asked again and leaves the builder as it was: a snapshot that failed changed nothing on it", async () => {
     const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
     const builder = await prepareBuilder({ backend, setup: "a" });
-    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 })).rejects.toThrow("upstream sad");
-    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1"]);
-    expect(killed).toEqual(["m1"]);
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(SnapshotFailedError);
+    expect((err as SnapshotFailedError).builderState).toBe("running");
+    expect((err as Error).message).toBe("the snapshot failed 1 time: the provider answered 503 upstream sad (no request id from the provider, at " + (err as SnapshotFailedError).answer.at + ") while the builder read running");
+    expect(timeline).toEqual(["create m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+  });
+
+  it("a snapshot job that failed on a computer you own, with no status of its own, is reported as the provider's 500 and leaves the builder; the next seal snapshots the same builder", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { if (nth === 1) throw new Error("machine.snapshotJob on spoo was not answered in 300s"); } });
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(SnapshotFailedError);
+    expect((err as SnapshotFailedError).answer).toMatchObject({ status: 500, message: "machine.snapshotJob on spoo was not answered in 300s" });
+    expect(killed).toEqual([]);
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 });
+    expect(version.snapshotId).toBe("snap_wsp-h1-default-v1");
+    expect(timeline.slice(0, 3)).toEqual(["create m1", "snapshot m1", "snapshot m1"]);
+  });
+
+  it("what the provider says of the snapshot as it writes it reaches the stage as bytes written, over the whole once it is counted", async () => {
+    const { backend } = recordingBackend({}, { snapshotProgress: [{ bytes: 0 }, { bytes: 1024 * MIB, total: 5 * 1024 * MIB }, { bytes: 5 * 1024 * MIB + 90 * MIB, total: 5 * 1024 * MIB }] });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual([
+      "snapshotting:snapshotting, usually under a minute",
+      "snapshotting:snapshotting, 0 B written",
+      "snapshotting:snapshotting, 1 GB of about 5 GB written",
+      "snapshotting:snapshotting, 5.1 GB of about 5 GB written",
+    ]);
+  });
+
+  it("the snapshot's size is what the backend says the machine wrote, where it can say, and df inside is never asked then", async () => {
+    const { backend, inline } = recordingBackend({ [USED_KB_CMD]: { exitCode: 0, stdout: "50000000\n", stderr: "" } }, { built: () => ({ cpu: 2, memMb: 4096, usedBytes: 5284823040 }) });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
+    expect(version.usedBytes).toBe(5284823040);
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:snapshotting about 4.9 GB, usually under a minute"]);
+    expect(inline.filter(x => x.cmd === USED_KB_CMD)).toEqual([]);
   });
 
   it("a failed seal kills every machine, drops the snapshot, and leaves the prior manifest untouched", async () => {
@@ -1234,9 +1275,68 @@ describe("golden import stages", () => {
     expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'gh'; do`);
     expect(results[0]!.tools).toEqual([
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
-      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0 },
+      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
     ]);
     expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
+  });
+
+  it("after the checks the stage reads every installed row's version back in one run: a package road's pin is what its line printed, a release keeps the tag and sum its own line said, a road that installs latest is marked so, and one line names them all", async () => {
+    const { backend, cmds, fetch } = backendFor([
+      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }],
+      ["wsp-version", { exitCode: 0, stdout: "wsp-version 0 4.1.0\nwsp-version 1 3.3a-3\n", stderr: "" }],
+    ]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/npm/wrangler", label: "wrangler", paths: [], bytes: 0, default: "bring", bring: true, version: "4.1.0" },
+      { rung: "tools", id: "tools/catalog/tmux", label: "tmux", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+      { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+    ]);
+    const recipe: RecipeDigest = { ticks: [{ id: "tools/catalog/gh", road: "release", installer: "k".repeat(64) }, { id: "tools/catalog/tmux", road: "apt", installer: "j".repeat(64) }, { id: "tools/npm/wrangler", version: "4.1.0", road: "npm", installer: "i".repeat(64) }], files: [] };
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, recipe, onResult: r => void results.push(r) }) });
+    // One run on the tools PATH, each row's own line in plan order; the release row is not in it, since its install already said its tag and sum.
+    const read = cmds.find(c => c.includes("wsp-version"))!;
+    expect(read).toMatch(/^export PATH=\/root\/\.local\/bin:/);
+    expect(read).toContain(`printf 'wsp-version %s %s\\n' 0 "$( ( node -p 'require(process.argv[1] + "/package.json").version' "$(npm root -g)/"'wrangler' ) 2>/dev/null | head -n 1 )"`);
+    expect(read).toContain("printf 'wsp-version %s %s\\n' 1 \"$( ( dpkg-query -W -f='${Version}\\n' 'tmux' 2>/dev/null ) 2>/dev/null | head -n 1 )\"");
+    expect(read).not.toContain("gh");
+    expect(Object.fromEntries(results[0]!.tools.map(t => [t.id, t.pin]))).toEqual({
+      "tools/npm/wrangler": { tag: "4.1.0" },
+      "tools/apt-index": undefined,
+      "tools/catalog/tmux": { tag: "3.3a-3", latest: true },
+      "tools/catalog/gh": { tag: "v2.86.0", sha256: "b".repeat(64) },
+    });
+    expect(stages).toContain("installing-tools:pinned: wrangler 4.1.0, GitHub CLI v2.86.0; installs latest on every place: tmux 3.3a-3 by apt");
+    expect(builder.import?.recipe?.ticks).toEqual([
+      { id: "tools/catalog/gh", road: "release", installer: "k".repeat(64), pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
+      { id: "tools/catalog/tmux", road: "apt", installer: "j".repeat(64), pin: { tag: "3.3a-3", latest: true } },
+      { id: "tools/npm/wrangler", version: "4.1.0", road: "npm", installer: "i".repeat(64), pin: { tag: "4.1.0" } },
+    ]);
+    // A read that printed nothing for a row records no pin for it, and a run that failed records none and says so.
+    const { backend: b2, fetch: f2 } = backendFor([["wsp-version", { exitCode: 0, stdout: "wsp-version 1 3.3a-3\n", stderr: "" }]]);
+    const quiet = await prepareBuilder({ backend: b2, setup: "true", fetch: f2, import: importOf({ tools: plan.installs, recipe }) });
+    expect(quiet.import?.recipe?.ticks.find(t => t.id === "tools/npm/wrangler")).not.toHaveProperty("pin");
+    expect(quiet.import?.recipe?.ticks.find(t => t.id === "tools/catalog/tmux")?.pin).toEqual({ tag: "3.3a-3", latest: true });
+    const { backend: b3, fetch: f3 } = backendFor([["wsp-version", { exitCode: 1, stdout: "", stderr: "bash: printf: broken" }]]);
+    const failed = stageRecorder();
+    const unread = await prepareBuilder({ backend: b3, setup: "true", fetch: f3, onStage: failed.onStage, import: importOf({ tools: plan.installs, recipe }) });
+    expect(unread.import?.recipe?.ticks.filter(t => t.pin !== undefined).map(t => t.id)).toEqual([]);
+    expect(failed.stages).toContain("installing-tools:the versions could not be read back (bash: printf: broken): wrangler, tmux record no pin");
+  });
+
+  it("the harness stage reads each installed agent's version back once its check passes, stamps the ledger, and its closing line names the pinned and the latest", async () => {
+    const { backend, fetch } = backendFor([
+      ["npm root -g", { exitCode: 0, stdout: "0.153.0\n", stderr: "" }],
+      ["'claude' --version", { exitCode: 0, stdout: "2.1.3\n", stderr: "" }],
+    ]);
+    const recipe: RecipeDigest = { ticks: [{ id: "agents/claude" }, { id: "agents/codex" }], files: [] };
+    const { stages, onStage } = stageRecorder();
+    const agents = [{ id: "agents/claude", ...AGENT_INSTALLERS["claude"]! }, { id: "agents/codex", ...AGENT_INSTALLERS["codex"]! }];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ agents, recipe }) });
+    // The vendor's installer takes the current release, so its row is marked latest; the npm install names its version, so a copy gets the same.
+    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude", pin: { tag: "2.1.3", latest: true } }, { id: "agents/codex", pin: { tag: "0.153.0" } }]);
+    const closing = stages.find(s => s.startsWith("installing-harness:Claude Code, Codex installed"))!;
+    expect(closing).toContain("; pinned: Codex 0.153.0; installs latest on every place: Claude Code 2.1.3 by its own installer; ");
   });
 
   it("the tools stage stamps the pin a release install recorded on the ledger's digest, so the sealed version says which release the row is fixed to", async () => {
@@ -2208,6 +2308,24 @@ describe("golden import stages", () => {
       expect(cmds[0]).toBe(FREE_KB_CMD);
       // Both agents are still on the image, but the recipe stopped asking for them, so their checks leave the smoke.
       expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version", recipe: SNAPSHOT });
+    });
+
+    it("a delta carries the head's pins onto the rows it leaves alone, and the rows it runs again record what they read now", async () => {
+      const { backend, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const recipe: RecipeDigest = { ticks: [{ id: "tools/brew/jq", road: "brew", installer: "a" }, { id: "tools/catalog/gh", road: "release", installer: "k" }, { id: "agents/codex" }], files: [] };
+      const previous: RecipeDigest = { ticks: recipe.ticks.map(t => ({ ...t, pin: { tag: `was-${t.id}` } })), files: [] };
+      const delta = deltaOf({ import: importOf({ recipeHash: "h2", recipe, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq", pin: { read: "brew list --versions jq", fixed: false, words: "with Homebrew" } }], agents: [] }), retired: [], retiredOnImage: [] });
+      const { ledger } = await applyDelta(machine, delta, { setup: "true", previousSmoke: "true", previousBase: head.base, previousRecipe: previous, fetch });
+      // jq ran again and its read printed nothing, so it records no pin; gh and the agent did not run and keep the head's.
+      expect(ledger.recipe?.ticks).toEqual([
+        { id: "tools/brew/jq", road: "brew", installer: "a" },
+        { id: "tools/catalog/gh", road: "release", installer: "k", pin: { tag: "was-tools/catalog/gh" } },
+        { id: "agents/codex", pin: { tag: "was-agents/codex" } },
+      ]);
+      // Without the head's digest nothing is carried, as a version sealed before pins were read gives nothing to carry.
+      const bare = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), delta, { setup: "true", previousSmoke: "true", previousBase: head.base, fetch });
+      expect(bare.ledger.recipe?.ticks.every(t => t.pin === undefined)).toBe(true);
     });
 
     it("a delta that retires nothing goes straight to the stages", async () => {

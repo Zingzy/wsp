@@ -124,6 +124,7 @@ function buildTurn(
     prompt: null,
     model: null,
     durationMs: null,
+    waitedMs: null,
     costUsd: null,
     error: null,
     startedAt,

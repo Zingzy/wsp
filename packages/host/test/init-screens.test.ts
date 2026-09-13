@@ -15,7 +15,7 @@ import { FIXTURE, RECIPE } from "./init-fixture.js";
 
 const HOME = "/Users/dev";
 const MIB = 1024 * 1024;
-const reading = (over: Partial<Reading> = {}): Reading => ({ manifest: FIXTURE, platform: "darwin", catalogRecipe: RECIPE, brew: new Map(), scanned: [], notes: [], source: "found on this computer", ...over });
+const reading = (over: Partial<Reading> = {}): Reading => ({ manifest: FIXTURE, platform: "darwin", catalogRecipe: RECIPE, savedPins: new Map(), brew: new Map(), scanned: [], notes: [], source: "found on this computer", ...over });
 const fresh = (recipe: Recipe = RECIPE): ScreenAnswers => ({ recipe, logins: new Map(), wspTicks: undefined });
 /** One formula a manager here could put on the image, so the Also screen has a row and is shown. */
 const SCANNED = { id: "brew/jq", name: "jq", manager: "brew", group: "Homebrew formulae", install: "brew install jq", check: "command -v jq", size: 2 * MIB } as const;

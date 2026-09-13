@@ -363,14 +363,20 @@ export interface AbsentRoad {
 const DIALS_IN = "dials in";
 const OVER_SSH_WORD = "ssh";
 
+/** The ssh login this host holds for a computer, where it holds one: the one road to a computer that is not
+ * answering. A record written without a login carries the word empty rather than absent, and a sentence built on
+ * an empty word names nothing, so every reading of a road asks here rather than comparing for itself. */
+export const sshRoadOf = (road?: { readonly ssh?: string | undefined } | undefined): string | undefined =>
+  road?.ssh === undefined || road.ssh === "" ? undefined : road.ssh;
+
 export function absentRoad(input: AbsentRoadInput): AbsentRoad {
-  const ssh = input.road?.ssh;
+  const ssh = sshRoadOf(input.road);
   const from = input.road?.from;
-  const address = ssh !== undefined && ssh !== "" ? `${ssh} · ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} · ${DIALS_IN}` : null;
+  const address = ssh !== undefined ? `${ssh} · ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} · ${DIALS_IN}` : null;
   const answered = input.awayMs === null ? "not since it joined" : `${offlineFor(input.awayMs)} ago`;
   const refused = input.dialled !== undefined && !input.dialled.answered && input.dialled.said !== undefined ? input.dialled.said : null;
   const where =
-    ssh !== undefined && ssh !== ""
+    ssh !== undefined
       ? `wsp logs in to ${input.name} at ${ssh} over ssh`
       : from !== undefined && from !== ""
         ? `wsp waits for ${input.name} to dial in, last from ${from}`
@@ -387,13 +393,26 @@ export function placeDialLine(input: { name: string; road?: { readonly ssh?: str
   if (!dialled.answered) return dialled.said ?? `${input.name} answered nothing.`;
   const took = dialled.roundTripMs === undefined ? "" : ` in ${dialled.roundTripMs} ms`;
   if (input.linked) return `${input.name} answered${took}.`;
-  const at = input.road?.ssh;
+  const at = sshRoadOf(input.road);
   return `${at ?? input.name} answered over ${OVER_SSH_WORD}${took}, so the computer is on; the agent on it is not dialling this host.`;
 }
 
 /** The one sentence a dial gets on a computer this host has no road to: it was joined by typing a code, so nothing
  * here can make it speak and the only thing to do is switch it on. */
 export const placeNoDialLine = (name: string): string => `wsp has no road to dial ${name}: it joined by typing a code, so it connects on its own when it is on.`;
+
+/** The roads a dial can take, in the order the host tries them. */
+export type PlaceDialRoad = "link" | "ssh";
+
+/** Which road a dial of this computer would take, and nothing at all where there is none: a computer holding its
+ * link answers a frame on it, one that is down is dialled over the ssh login it was installed with, and a computer
+ * that joined by typing a code and is not there can only be switched on, which is placeNoDialLine's whole subject.
+ * The host reads this to pick the road and the app reads it to decide whether to draw the button at all, so no
+ * screen offers a press whose only answer is that there was nothing to press. */
+export function placeDialRoad(place: { present?: boolean | undefined; road?: { readonly ssh?: string | undefined; readonly from?: string | undefined } | undefined }): PlaceDialRoad | undefined {
+  if (place.present === true) return "link";
+  return sshRoadOf(place.road) === undefined ? undefined : "ssh";
+}
 
 /** Why an action that needs the machine (send, import, export) cannot run in this state; null while running.
  * goneWords are the provider's, quoted when the caller holds them (the runtime does, the composer does not). */

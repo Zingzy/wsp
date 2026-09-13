@@ -8,12 +8,12 @@
 
 import { createHash } from "node:crypto";
 import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
-import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
+import { AGENT_INSTALLERS, NODE_PATH_LINE, TOOLS_PATH, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
+import { MIB, closing, freeBytes, freeNote, guardDeadlineMs, guarded, installTools, pinRead, plural, reasonOf, sweepCaches, usedBytes, withRecordedPins, type ToolResult } from "./golden-tools.js";
 import { installBase } from "./golden-base.js";
 import { applyMcp, mcpTally, type McpPlan, type McpResult } from "./golden-mcp.js";
 import { BROWSER_SHIM_PATH, applyMachineContext, type ContextResult } from "./machine-context.js";
@@ -75,9 +75,12 @@ export class SnapshotFailedError extends Error {
 }
 
 const isSnapshotRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "snapshotUnavailable";
+/** The provider's answer as the failure line reports it. A refusal carries its status; a failure that came with none
+ * (a job the far side failed, a link that dropped) is reported as the provider's 500, since the provider's side is
+ * where it stopped. */
 const answerOf = (e: unknown): ProviderAnswer => {
   const { status, requestId } = e as { status?: number; requestId?: string };
-  return { status: status ?? 502, message: messageOf(e), ...(requestId !== undefined ? { requestId } : {}), at: new Date().toISOString() };
+  return { status: status ?? (isSnapshotRefusal(e) ? 502 : 500), message: messageOf(e), ...(requestId !== undefined ? { requestId } : {}), at: new Date().toISOString() };
 };
 /** What the provider says the machine is now, one read: a 404 reads as gone, any other failed read as unread with its reason. */
 const readState = async (machine: Machine): Promise<{ state: BuilderReading; readError?: string }> => {
@@ -337,6 +340,8 @@ export interface AgentResult {
   outcome: "installed" | "failed" | "skipped";
   note?: string;
   ms?: number;
+  /** What the agent installed, read back once its version check passed; absent when the read printed nothing. */
+  pin?: ToolPin;
 }
 
 export interface ImportResult {
@@ -515,10 +520,12 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
         stage("installing-harness", `${agent.name} (${i + 1}/${imp.agents.length})`);
         const install = await machine.run(guardedHarness(`${NODE_PATH_LINE}\n${agent.install}`), { deadlineMs: guardDeadlineMs(AGENT_TIMEOUT_S), onLine: line => stage("installing-harness", `${agent.name}: ${line}`) });
         const check = install.exitCode === 0 ? await machine.run(`${NODE_PATH_LINE}\n${agent.smoke}`, { deadlineMs: 60_000 }) : install;
+        const pin = check.exitCode === 0 && agent.pin?.read !== undefined ? pinRead((await machine.exec(`${NODE_PATH_LINE}\nexport PATH=${TOOLS_PATH}:$PATH\n${agent.pin.read}`, { timeoutMs: INLINE_EXEC_MS })).stdout, agent.pin.fixed) : undefined;
         const ms = Date.now() - t0;
-        if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms });
+        if (check.exitCode === 0) result.agents.push({ id: agent.id, name: agent.name, outcome: "installed", ms, ...(pin !== undefined ? { pin } : {}) });
         else result.agents.push({ id: agent.id, name: agent.name, outcome: "failed", note: reasonOf(check, AGENT_TIMEOUT_S), ms });
       }
+      if (ledger.recipe !== undefined) ledger.recipe = withRecordedPins(ledger.recipe, result.agents);
       const installed = imp.agents.filter(a => result.agents.some(r => r.id === a.id && r.outcome === "installed"));
       const failed = result.agents.filter(r => r.outcome === "failed");
       // A golden with an agent missing is not sealed: the person ticked it, and the hand-off would open a terminal
@@ -530,7 +537,13 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       }
       ledger.smoke = joinSmoke(installed.map(a => a.smoke));
       const summary = result.agents.length === 0 ? "no agent ticked" : summarizeAgents(result.agents);
-      stage("installing-harness", imp.agents.length > 0 || node !== undefined ? closing(summary, await sweepCaches(machine), await freeNote(machine)) : summary);
+      const pinned = result.agents.filter(a => a.pin !== undefined);
+      const wordsOf = (id: string): string | undefined => imp.agents.find(a => a.id === id)?.pin?.words;
+      const pins = pinsReadLine(
+        pinned.filter(a => a.pin!.latest !== true).map(a => ({ name: a.name, tag: a.pin!.tag })),
+        pinned.filter(a => a.pin!.latest === true).map(a => ({ name: a.name, tag: a.pin!.tag, ...(wordsOf(a.id) !== undefined ? { words: wordsOf(a.id)! } : {}) })),
+      );
+      stage("installing-harness", imp.agents.length > 0 || node !== undefined ? closing(summary, pins, await sweepCaches(machine), await freeNote(machine)) : summary);
     }
     mark("installing-harness");
   }
@@ -862,17 +875,19 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
           // image vault is credential files and two secrets files, which that road can carry.
           ...(opts.backend.capabilities.signedUrls ? {} : { readRoad: "exec" as const }),
         });
-  // The 502 is asked again only while the provider still reads the builder running; one that reads otherwise is
-  // never snapshotted, so the seal stops at once and says what the provider said.
+  // A snapshot that failed changed nothing on the builder, so every failure here is typed as one that leaves it:
+  // the provider's 502 is asked again while it still reads the builder running, and any other failure (a job the
+  // far side failed, a link that dropped) is said once with the builder's state beside it. Only a resumed machine's
+  // refusal is another kind of failure, and it passes as itself.
   const takeSnapshot = async (): Promise<string> => {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await builder.machine.snapshot(name, { firstLife: builder.firstLife });
+        return await builder.machine.snapshot(name, { firstLife: builder.firstLife }, { onProgress: p => stage("snapshotting", snapshotProgressLine(p.bytes, p.total)) });
       } catch (e) {
-        if (!isSnapshotRefusal(e)) throw e;
+        if (e instanceof NotFirstLifeError) throw e;
         const answer = answerOf(e);
         const read = await readState(builder.machine);
-        if (read.state !== "running" || attempt >= SNAPSHOT_ATTEMPTS) throw new SnapshotFailedError(builder.machine.id, attempt, answer, read.state, read.readError);
+        if (!isSnapshotRefusal(e) || read.state !== "running" || attempt >= SNAPSHOT_ATTEMPTS) throw new SnapshotFailedError(builder.machine.id, attempt, answer, read.state, read.readError);
         stage("snapshotting", snapshotAttemptLine(attempt, SNAPSHOT_ATTEMPTS, answer, read.state, retryMs));
         await new Promise(r => setTimeout(r, retryMs));
       }
@@ -993,6 +1008,8 @@ export interface ApplyDeltaOptions {
   previousLeftBehind?: readonly GoldenLeftBehind[];
   /** The base tools read on the version being updated; a version sealed before they existed has none and is refused. */
   previousBase: readonly GoldenBaseTool[] | undefined;
+  /** The digest the version being updated was sealed with, whose pins the rows this delta leaves alone keep. */
+  previousRecipe?: RecipeDigest;
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -1041,6 +1058,13 @@ export function nextMissing(previous: readonly GoldenMissingTool[], delta: Golde
   return [...previous.filter(p => !touched.has(p.id)), ...fresh];
 }
 
+/** The pins the version being updated recorded, on the ticks this delta left alone: a row the delta did not run
+ * still stands on the image at what that version installed, so the next record says what a copy installs for it. */
+export function carriedPins(digest: RecipeDigest, previous: RecipeDigest, touched: ReadonlySet<string>): RecipeDigest {
+  const was = new Map(previous.ticks.map(t => [t.id, t.pin]));
+  return { ...digest, ticks: digest.ticks.map(t => { const pin = was.get(t.id); return t.pin === undefined && !touched.has(t.id) && pin !== undefined ? { ...t, pin } : t; }) };
+}
+
 /** What an updated image is without: the previous version's notes for rows the delta neither retired nor planned
  * again, then what this delta's pack left behind. */
 export function nextLeftBehind(previous: readonly GoldenLeftBehind[], delta: GoldenDelta, fresh: readonly GoldenLeftBehind[]): GoldenLeftBehind[] {
@@ -1085,6 +1109,7 @@ export async function applyDelta(machine: Machine, delta: GoldenDelta, opts: App
   const left = nextLeftBehind(opts.previousLeftBehind ?? [], delta, applied.ledger.leftBehind ?? []);
   if (left.length > 0) applied.ledger.leftBehind = left;
   else delete applied.ledger.leftBehind;
+  if (opts.previousRecipe !== undefined && applied.ledger.recipe !== undefined) applied.ledger.recipe = carriedPins(applied.ledger.recipe, opts.previousRecipe, touchedBy(delta));
   return { ledger: applied.ledger, result };
 }
 
@@ -1094,6 +1119,8 @@ export interface UpgradeBuilderOptions extends MachineSize {
   head: GoldenVersion;
   delta: GoldenDelta;
   setup: string;
+  /** The digest the head was sealed with; its pins ride onto the rows the delta leaves alone. */
+  previousRecipe?: RecipeDigest;
   fetch?: typeof globalThis.fetch;
   onStage?: StageListener;
 }
@@ -1125,6 +1152,7 @@ export async function upgradeBuilder(opts: UpgradeBuilderOptions): Promise<Build
       previousBase: opts.head.base,
       ...(opts.head.missingTools !== undefined ? { previousMissing: opts.head.missingTools } : {}),
       ...(opts.head.leftBehind !== undefined ? { previousLeftBehind: opts.head.leftBehind } : {}),
+      ...(opts.previousRecipe !== undefined ? { previousRecipe: opts.previousRecipe } : {}),
       onStage: stage,
       ...(opts.fetch !== undefined ? { fetch: opts.fetch } : {}),
     });

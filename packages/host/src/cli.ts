@@ -655,6 +655,8 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
     pick.id = wiredProviderId(env);
     pick.env = env;
   }
+  // The key is up: the provider is a place now, and its copy of the image is built behind the save.
+  void rt.image.keepCurrent(wiredProviderId(env));
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -695,6 +697,7 @@ export function makeRuntime(
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
+    copyRecipe: hostCopyRecipe(),
     hostId: hostIdentity(),
     vaultCaches: CACHE_RULE,
   });
@@ -705,14 +708,13 @@ export function makeRuntime(
 
 /** How a copy of the image is planned on this computer for a serving host: the same readers wsp init builds from,
  * the keys as they stand at the ask rather than at the start, and the daemon deploy every build made here gets. */
-function hostCopyRecipe(statePath: string): (image: SealedImage) => Promise<GoldenRecipe> {
+function hostCopyRecipe(): (image: SealedImage) => Promise<GoldenRecipe> {
   return image =>
     copyGoldenRecipe(image, {
       collect: () => collectThisComputer(() => {}),
       brew: () => readBrewTable(nodeHost()),
       home: homedir(),
       platform: hostPlatform(),
-      statePath,
       agentKeys: agentKeyEnvs(keysFound()),
       deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE),
     });
@@ -1191,7 +1193,6 @@ async function hostFor(
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
-      copyRecipe: hostCopyRecipe(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

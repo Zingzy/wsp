@@ -443,6 +443,64 @@ describe("ChatView", () => {
     expect(mounted).toBeLessThan(turns);
   });
 
+  it("draws the question the thread it is waiting on has open, says it is waiting, and answers that thread's turn", async () => {
+    // The thread on screen was asked nothing. Its own call is a wsp send into another thread, and that thread is
+    // stopped on a question: with only its own row to read it said Working with nothing to click.
+    const sc = { workspaceId: WS, sessionId: "sess_caller", turnId: "turn_caller", threadId: "thr_caller" };
+    const history: SessionEvent[] = [
+      { type: "session.start", ...sc, at: T0, model: "claude-sonnet-5", prompt: "ask the other one" },
+      { type: "session.delta", ...sc, at: T0 + 100, kind: "tool_use", text: JSON.stringify({ thread: "thr_target", message: "read hello.txt" }), toolName: "mcp__wsp__send", toolUseId: "toolu_send" },
+    ];
+    const waitingOn = {
+      threadId: "thr_target",
+      workspaceId: "ws_other",
+      sessionId: "sess_target",
+      title: "read the file",
+      prompt: {
+        askId: "ask_target",
+        toolName: "Write",
+        input: '{"file_path":"/root/hello.txt","content":"hi"}',
+        options: [
+          { id: "allow", label: "Allow", effect: "allow" as const },
+          { id: "deny", label: "Deny", effect: "deny" as const },
+        ],
+      },
+    };
+    const caller: SessionView = { id: "sess_caller", workspaceId: WS, harness: "claude", status: "running", threadId: "thr_caller", waitingOn };
+    const rows: SessionView[] = [caller];
+    const { api, emit } = fixtureApi([workspace], { [WS]: history }, rows);
+    const answered: { sessionId: string; askId: string; optionId: string }[] = [];
+    api.answerPermission = async (sessionId, askId, optionId) => {
+      answered.push({ sessionId, askId, optionId });
+      return "answered";
+    };
+    await setup(api);
+
+    const row = await waitFor(() => {
+      const drawn = document.querySelector<HTMLElement>('[data-permission-prompt="ask_target"]');
+      expect(drawn).not.toBeNull();
+      return drawn!;
+    });
+    expect(row.getAttribute("data-permission-open")).toBe("true");
+    // Whose question it is, said above it, since the thread being read did not raise it.
+    expect(row.querySelector("[data-permission-asker]")!.textContent).toBe("read the file asks · this thread waits on the answer");
+    expect(within(row).getByText("Write hello.txt in root (2 B)")).toBeDefined();
+    expect([...row.querySelectorAll("[data-permission-option]")].map(b => b.textContent)).toEqual(["Allow", "Deny"]);
+    // The count says the thread is stopped on a question rather than working.
+    expect(document.body.textContent).toContain("Waiting for you");
+    expect(document.body.textContent).not.toContain("Working for");
+
+    // The answer goes to the other thread's turn, which is what ends both waits.
+    fireEvent.click(row.querySelector('[data-permission-option="allow"]')!);
+    await waitFor(() => expect(answered).toEqual([{ sessionId: "sess_target", askId: "ask_target", optionId: "allow" }]));
+
+    // The runtime takes the wait off the row once the question is answered; the row is what this screen reads.
+    rows[0] = { ...caller, waitingOn: undefined };
+    emit({ type: "session.permission.closed", workspaceId: "ws_other", sessionId: "sess_target", turnId: "turn_target", threadId: "thr_target", at: T0 + 900, askId: "ask_target", outcome: "allowed", optionId: "allow" });
+    await waitFor(() => expect(document.querySelector('[data-permission-prompt="ask_target"]')).toBeNull());
+    expect(document.body.textContent).toContain("Working for");
+  });
+
   it("relays a permission prompt as its own row, answers it from the chat, and closes the row on the runtime's event", async () => {
     const sc = { workspaceId: WS, sessionId: "sess_perm", turnId: "turn_perm" };
     const ask = {
@@ -797,7 +855,7 @@ describe("the threads a thread opened", () => {
     });
     expect(opened.map(row => row.textContent)).toEqual([
       "openedbenchmark the new index · spoo-bench · ascii · Working",
-      "openedrewrite the web client · api · solari · Ended",
+      "openedrewrite the web client · api · solari · Failed",
     ]);
     const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
     expect(link.textContent).toBe("benchmark the new index");

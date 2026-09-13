@@ -7,7 +7,7 @@
 // second table of catalog rows.
 import { CATALOG_AGENTS, CATALOG_TOOLS, keysIdOf, loginIdOf, loginRow, signsInByDefault, hasLogin } from "@wsp/catalog";
 import { type CommandCount, type Platform, floorApplies } from "@wsp/collect";
-import { RecipeCustomRow, RecipeTick, alsoTitle, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
+import { RecipeCustomRow, RecipeTick, ToolPin, alsoTitle, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
 import { z } from "zod";
 import { table } from "./init-layout.js";
 import { FLOOR_LINE, GROUP_ORDER, USED_GROUP, recipeTable, tableLines, totalsLine, type TableRow } from "./init-table.js";
@@ -37,6 +37,8 @@ export const RecipeAnswerRow = z.object({
   heavy: z.boolean(),
   /** Why wsp cannot drive this agent yet; absent on every other row. */
   note: z.string().optional(),
+  /** What the last seal installed for this row; absent on a row no seal has read. */
+  pin: ToolPin.optional(),
 });
 export type RecipeAnswerRow = z.infer<typeof RecipeAnswerRow>;
 
@@ -54,6 +56,7 @@ const rowOf = (r: TableRow): RecipeAnswerRow => ({
   ...(r.size !== undefined ? { size: r.size } : {}),
   heavy: r.heavy,
   ...(r.note !== undefined ? { note: r.note } : {}),
+  ...(r.pin !== undefined ? { pin: r.pin } : {}),
 });
 
 /** The agents and the tools as the shared renderer groups and orders them, which is the order both screens draw. */
@@ -121,6 +124,7 @@ export const drawn = (r: RecipeAnswerRow): TableRow => ({
   ...(r.size !== undefined ? { size: r.size } : {}),
   heavy: r.heavy,
   ...(r.note !== undefined ? { note: r.note } : {}),
+  ...(r.pin !== undefined ? { pin: r.pin } : {}),
 });
 
 /** What sits under the Tools table's totals: the floor, once, when the rule the recipe went on weighs use. */

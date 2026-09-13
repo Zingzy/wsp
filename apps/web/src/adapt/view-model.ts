@@ -154,6 +154,9 @@ export interface TurnSummary {
   readonly prompt: string | null;
   readonly model: string | null;
   readonly durationMs: number | null;
+  /** How much of durationMs the turn stood on a permission prompt nobody had answered; null on a turn that waited
+   * on nobody. The footer takes it off the duration, so Worked for counts work. */
+  readonly waitedMs: number | null;
   readonly costUsd: number | null;
   readonly error: string | null;
   readonly startedAt: string | null;
@@ -211,7 +214,15 @@ export type MessagesTimelineRow =
       readonly assistantCopyStreaming: boolean;
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
-  | { readonly kind: "permission"; readonly id: string; readonly createdAt: string; readonly permission: PermissionPrompt }
+  | {
+      readonly kind: "permission";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly permission: PermissionPrompt;
+      /** Who raised it, where the thread reading this row did not: the thread this one's own call is waiting behind.
+       * Absent on every prompt of the thread's own turn. */
+      readonly asker?: string;
+    }
   | { readonly kind: "subagent"; readonly id: string; readonly createdAt: string; readonly subagent: SubagentRun }
   | {
       readonly kind: "working";
@@ -319,6 +330,17 @@ export interface SidebarThreadSnapshot {
   /** What the thread has spent, as the protocol's fold adds its rows up; null where no turn of it reported a
    * figure, which is not the same as nothing spent. */
   readonly costUsd: number | null;
+}
+
+/** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the
+ * thread whose message is in the transcript is in the list at the same moment. The message is the title, since it is
+ * the title the runtime writes when its row arrives. */
+export interface Launch {
+  /** The send's own id, which is what its refusal drops it by. */
+  readonly requestId: string;
+  readonly title: string;
+  /** The agent the send named, so the row wears the mark the runtime's row will wear. */
+  readonly harness: string;
 }
 
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */

@@ -116,7 +116,7 @@ const PLACES: PlaceView[] = [
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -203,9 +203,9 @@ describe("rows from the fixture wire", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     // a session without a prompt falls back to the harness session id
     expect(rowOf("59094224-bb3d").textContent).toContain("2d");
-    // status pills: the running one works, the one that never settled ended, the idle one is plain
+    // status pills: the running one works, the one that never settled failed, the idle one is plain
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
-    expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
+    expect(within(rowOf("59094224-bb3d")).getByLabelText("Failed")).toBeDefined();
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
     // Both workspaces head their shelf, whether or not one of their threads is working: ws_b's holds nothing but
     // the nested archive, and a shelf that holds only that is still a shelf.
@@ -802,6 +802,26 @@ describe("new thread", () => {
     fireEvent.click(within(line).getByRole("button", { name: /New thread/ }));
     expect(seen).toEqual(["ws_b"]);
     off();
+  });
+
+  it("a send in flight is a row of its own, so a workspace running the first message never reads that it has none", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const item = (row: HTMLElement) => row.closest<HTMLElement>('[data-sidebar="menu-item"]')!;
+    expect(within(item(rowOf("web"))).queryByText(/No threads yet/)).not.toBeNull();
+
+    // The transcript draws the sent message the moment it is sent; the runtime writes a row only once the agent
+    // announces itself, which is seconds later. The line and the row may not both be true at once.
+    act(() => useStore.setState({ launches: { ws_b: { requestId: "r1", title: "read the port list", harness: "claude" } } }));
+    expect(within(item(rowOf("web"))).queryByText(/No threads yet/)).toBeNull();
+    const launched = item(rowOf("web")).querySelector<HTMLElement>("[data-thread-launch]")!;
+    expect(launched.querySelector("[data-thread-title]")?.textContent).toBe("read the port list");
+    expect(launched.querySelector("[data-thread-meta]")?.textContent).toContain("Working");
+    // No time yet: nothing has started to count, and the slot stands at its width all the same.
+    expect(launched.querySelectorAll("[data-thread-title] ~ span")[0]?.textContent).toBe("");
+    expect(launched.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
+
+    // The workspace that has its own rows keeps them; the send belongs to the workspace it was made on.
+    expect(item(rowOf("api")).querySelector("[data-thread-launch]")).toBeNull();
   });
 
   it("no row carries an import or export glyph, with or without the project ops; a live row's glyphs are its chevron and its plus", async () => {
@@ -1830,7 +1850,7 @@ describe("a thread another thread's agent opened", () => {
     expect(meta("write the migration").className).toContain("font-mono");
     // The dot alone says it works, the rule a workspace row already follows; a row that failed keeps its word.
     expect(meta("write the migration").textContent).not.toContain("Working");
-    expect(meta("review the diff").textContent).toBe("Ended··solari");
+    expect(meta("review the diff").textContent).toBe("Failed··solari");
     // The opener word is dropped on a spawned row: the indent says an agent opened it. The row above keeps both.
     expect(meta("write the migration").textContent).not.toContain("agent");
     expect(meta("ship the search rewrite").textContent).toBe("Working··you");
