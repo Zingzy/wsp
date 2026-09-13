@@ -28,6 +28,9 @@ import { CLI_VERBS, hasTool } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const BIN = fileURLToPath(new URL("../dist/bin.js", import.meta.url));
 

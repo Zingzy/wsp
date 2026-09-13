@@ -13,6 +13,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const execFileAsync = promisify(execFile);
 const TOKEN = "0123456789abcdef".repeat(2);

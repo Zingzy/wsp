@@ -16,6 +16,9 @@ import { dialAddress } from "../src/host-lock.js";
 import { doorAddresses } from "../src/server.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
 import type { HostClient } from "../src/verbs.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 type Interfaces = Parameters<typeof reachAddresses>[1];
 

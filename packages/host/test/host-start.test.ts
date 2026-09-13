@@ -15,6 +15,9 @@ import { dialHost, noHostServingLine } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
 import { PAGE, captured } from "./verbs-fixture.js";
 import { stubBackend } from "./stub-backend.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const quietIO = (lines: string[] = [], errors: string[] = []): CliIO => ({ log: l => lines.push(l), error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt });

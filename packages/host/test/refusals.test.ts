@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HELP, cli } from "../src/cli.js";
 import { CLI_VERBS } from "../src/verbs.js";
 import { captured, type Captured } from "./verbs-fixture.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 describe("what wsp says when it will not run a line", () => {
   let dir: string;

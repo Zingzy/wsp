@@ -14,6 +14,9 @@ import { cli, localWiring, noClaudeKeyNote, up } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { fakeSsh } from "../../runtime/test/fake-ssh.js";
 import { PAGE, captured } from "./verbs-fixture.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 describe("a computer with no machine provider key", () => {
   let dir: string;
