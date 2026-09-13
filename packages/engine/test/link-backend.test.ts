@@ -13,6 +13,7 @@ interface Sent {
   op: string;
   params: Record<string, unknown>;
   timeoutMs?: number;
+  idempotencyKey?: string;
 }
 
 const CAPABILITIES: Capabilities = {
@@ -42,7 +43,7 @@ const FACTS: BackendFacts = {
 const ROADS: MachineHandle["roads"] = { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true };
 const HANDLE: MachineHandle = { id: "c1", kind: "sandbox", daemonSupervisor: "entrypoint", roads: ROADS };
 
-function link(answers: (sent: Sent) => unknown = () => ({})): { link: MachineLink; sent: Sent[]; forwarded: number[] } {
+function link(answers: (sent: Sent) => unknown = () => ({}), dialsBack?: () => Promise<boolean>): { link: MachineLink; sent: Sent[]; forwarded: number[] } {
   const sent: Sent[] = [];
   const forwarded: number[] = [];
   return {
@@ -50,11 +51,17 @@ function link(answers: (sent: Sent) => unknown = () => ({})): { link: MachineLin
     forwarded,
     link: {
       request: async (op, params, opts) => {
-        sent.push({ op, params: params ?? {}, ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}) });
+        sent.push({
+          op,
+          params: params ?? {},
+          ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          ...(opts?.idempotencyKey !== undefined ? { idempotencyKey: opts.idempotencyKey } : {}),
+        });
         const answer = answers(sent.at(-1)!);
         if (answer instanceof Error) throw answer;
         return (answer as Record<string, unknown>) ?? {};
       },
+      ...(dialsBack !== undefined ? { dialsBack } : {}),
       forward: async placePort => {
         forwarded.push(placePort);
         return { localPort: 51000 + forwarded.length };
@@ -166,6 +173,67 @@ describe("a machine over a link", () => {
     expect(Buffer.from(String(parts[0]!.params["data"]), "base64").length).toBe(MACHINE_PUT_PART_BYTES);
   });
 
+  it("names a create by the key its spec carries, so the far side answers the machine it already made, and names one with no key not at all", async () => {
+    const { l, backend } = await withMachine(() => ({}));
+    await backend.create({ kind: "sandbox", idempotencyKey: "workspace/ws_1:a1" });
+    expect(l.sent.at(-1)!.idempotencyKey).toBe("workspace/ws_1:a1");
+    await backend.create({ kind: "sandbox" });
+    expect(l.sent.at(-1)!.idempotencyKey).toBeUndefined();
+  });
+
+  it("names an exec the caller says lands the same twice, and sends every other one unnamed", async () => {
+    const { l, backend } = await withMachine(() => ({ result: { exitCode: 0, stdout: "", stderr: "" } }));
+    const machine = await backend.create({ kind: "sandbox" });
+    await machine.exec("rm -f /tmp/x", { idempotencyKey: "clean/1" });
+    expect(l.sent.at(-1)!.idempotencyKey).toBe("clean/1");
+    await machine.exec("echo hi");
+    expect(l.sent.at(-1)!.idempotencyKey).toBeUndefined();
+  });
+
+  it("carries no key on a part, and sends the whole upload again under a fresh id when the link went and came back", async () => {
+    let broken = true;
+    const l = link(
+      sent => {
+        if (sent.op === "machine.backend") return FACTS;
+        if (sent.op === "machine.create") return { machine: HANDLE };
+        if (sent.op === "machine.putBytes" && broken && sent.params["seq"] === 1) return new Error("connection lost");
+        return {};
+      },
+      async () => {
+        broken = false;
+        return true;
+      },
+    );
+    const machine = await (await LinkBackend.open(l.link)).create({ kind: "sandbox" });
+    await machine.putBytes!("/root/big", new Uint8Array(9 * 1024 * 1024));
+    const parts = l.sent.filter(s => s.op === "machine.putBytes");
+    // A part appended twice would splice the file, so no part names itself as one to ask again.
+    expect(parts.every(p => p.idempotencyKey === undefined)).toBe(true);
+    // Two parts of the broken upload, then all three again under a name the far side holds nothing under.
+    expect(parts.map(p => p.params["seq"])).toEqual([0, 1, 0, 1, 2]);
+    const ids = [...new Set(parts.map(p => p.params["uploadId"]))];
+    expect(ids).toHaveLength(2);
+    expect(parts.slice(2).every(p => p.params["uploadId"] === ids[1])).toBe(true);
+  });
+
+  it("fails an upload with the part's own answer when the computer never came back, and asks nothing again when the link never went", async () => {
+    const away = link(
+      sent => (sent.op === "machine.backend" ? FACTS : sent.op === "machine.create" ? { machine: HANDLE } : sent.op === "machine.putBytes" ? new Error("connection lost") : {}),
+      async () => false,
+    );
+    const gone = await (await LinkBackend.open(away.link)).create({ kind: "sandbox" });
+    await expect(gone.putBytes!("/root/big", new Uint8Array([1]))).rejects.toThrow("connection lost");
+    expect(away.sent.filter(s => s.op === "machine.putBytes")).toHaveLength(1);
+
+    const refused = link(
+      sent => (sent.op === "machine.backend" ? FACTS : sent.op === "machine.create" ? { machine: HANDLE } : sent.op === "machine.putBytes" ? new Error("no space left on device") : {}),
+      async () => false,
+    );
+    const full = await (await LinkBackend.open(refused.link)).create({ kind: "sandbox" });
+    await expect(full.putBytes!("/root/big", new Uint8Array([1]))).rejects.toThrow("no space left on device");
+    expect(refused.sent.filter(s => s.op === "machine.putBytes")).toHaveLength(1);
+  });
+
   it("sends one part for one byte", async () => {
     const { l, backend } = await withMachine(() => ({}));
     const machine = await backend.create({ kind: "sandbox" });
@@ -237,6 +305,10 @@ describe("a snapshot over a link is a job asked after a frame at a time", () => 
     // No frame of the job carries a bound of its own: each is one short ask under the link's own.
     expect(l.sent.every(s => s.timeoutMs === undefined)).toBe(true);
     expect(seen).toEqual([{ bytes: 0 }, { bytes: 1520442115, total: 5284823040 }, { bytes: 5373952000, total: 5284823040 }]);
+    // The ask after the job is a read of the job and is named by it, so a link that drops while a layer is written
+    // is waited out; the frame that starts the job is not, since a second one would start a second snapshot.
+    expect(l.sent[0]!.idempotencyKey).toBeUndefined();
+    expect(l.sent.slice(1).map(s => s.idempotencyKey)).toEqual(["snapshotJob/j1", "snapshotJob/j1", "snapshotJob/j1"]);
   });
 
   it("a job the far side failed is the refusal it failed with, and one it no longer knows reads missing", async () => {

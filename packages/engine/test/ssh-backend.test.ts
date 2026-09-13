@@ -125,6 +125,18 @@ describe("ssh backend", () => {
     expect(failed).not.toContain("debug1:");
   });
 
+  it("a refusal carries none of ssh's note about the key accept-new wrote, which the road that offers the login has already said", async () => {
+    const transport: SshTransport = async () => ({
+      exitCode: 255,
+      stdout: "",
+      stderr: "Warning: Permanently added '10.0.0.5' (ED25519) to the list of known hosts.\ndev@10.0.0.5: Permission denied (publickey).\n",
+    });
+    const failed = await sshBackend(transport).adopt(REACH).then(() => "", (e: unknown) => (e as Error).message);
+    expect(failed).toContain("Permission denied (publickey).");
+    expect(failed).not.toContain("Permanently added");
+    expect(failed).not.toContain("known hosts");
+  });
+
   it("a dial that exchanged no key still hands back the machine's identity, since the key is not read out of it", async () => {
     const { transport, carried } = fakeSsh();
     const { machine, hostKey } = await sshBackend(transport).adopt(REACH);

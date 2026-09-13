@@ -30,7 +30,7 @@ import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { webDirFor } from "./assets.js";
-import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
+import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
 import { ANTHROPIC_KEY, agentKeyEnvs, KEY_LAYER_WORDS, keyIn, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
@@ -770,6 +770,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
         }),
       roads: () => workspaceRoads(rt, agentHomes(home), workspaceEnvsFor(keysFound())),
       recipe: recipe => ({ ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }),
+      bundleFile: () => missingBundleFile(),
     },
   });
 }
@@ -1053,6 +1054,7 @@ async function init(
         brew: () => readBrewTable(nodeHost()),
         scan: recipe => scanTools(nodeHost(), recipe),
         runtime: recipe => makeRuntime(keys, opts.statePath, { ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }, providerEnv, agentsReachOf(opts)),
+        bundleFile: () => missingBundleFile(),
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,

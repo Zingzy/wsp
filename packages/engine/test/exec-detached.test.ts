@@ -283,15 +283,17 @@ function diskGuest(seed: Record<string, string> = {}) {
   const disk = guestDisk();
   for (const [path, text] of Object.entries(seed)) disk.files.set(path, text);
   const calls: string[] = [];
+  const keys: (string | undefined)[] = [];
   const machine = {
     id: "m2",
-    async exec(cmd: string): Promise<ExecResult> {
+    async exec(cmd: string, o?: { idempotencyKey?: string }): Promise<ExecResult> {
       calls.push(cmd);
+      keys.push(o?.idempotencyKey);
       disk.apply(cmd);
       return { exitCode: 0, stdout: `${cmd.split("\n").at(-1)!.replace(/^echo /, "")}\n`, stderr: "" };
     },
   } as unknown as Machine;
-  return { machine, calls, files: disk.files, marks: disk.marks };
+  return { machine, calls, keys, files: disk.files, marks: disk.marks };
 }
 
 /** The machine with every exec that carries `mark` run twice, as the backend does when the first answer is lost. */
@@ -321,6 +323,15 @@ describe("putFiles", () => {
     expect(last.slice(0, 3)).toEqual(["mkdir -p '/tmp/wsp-run'", "mkdir /tmp/wsp-run/t1.d || exit 0", "set -o pipefail"]);
     expect(last[3]).toBe("printf %s 'Y2xhdWRlIC1w' | base64 -d > '/tmp/wsp-run/t1.sh' || exit 1");
     expect(last.slice(4)).toEqual(["cat '/tmp/wsp-run/t1.in'.{0..1} | base64 -d > '/tmp/wsp-run/t1.in' || exit 1", "rm -f '/tmp/wsp-run/t1.in'.{0..1}", "mkfifo /tmp/wsp-run/t1.fifo", "echo WSP_LAUNCHED"]);
+  });
+
+  it("names every exec of one upload, since each lands the same whether it runs once or twice", async () => {
+    const g = diskGuest();
+    await putFiles(g.machine, [{ path: "/tmp/wsp-run/k1.sh", text: "echo hi" }, { path: "/tmp/wsp-run/k1.in", text: BIG_INPUT }], { after: ["echo WSP_LAUNCHED"] });
+    expect(g.keys.every(k => k !== undefined)).toBe(true);
+    expect(new Set(g.keys).size).toBe(g.keys.length);
+    // One upload, one name, so a road that asks the same exec again knows it is the same ask.
+    expect(new Set(g.keys.map(k => k!.split("/")[0])).size).toBe(1);
   });
 
   it("an append over the cap goes up in pieces and joins onto the end of what the file holds", async () => {

@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
+import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2261,13 +2261,14 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "wsp", "service", "join"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "wsp", "service", "join"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
  * node it got), which is the step's own to say and never a second sentence about it. */
 export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   connect: "connecting over ssh",
+  "host-key": `remembering the box's host key in ${KNOWN_HOSTS}`,
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
@@ -2278,6 +2279,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
  * not be one, so the words above stay as they are. `done` is read once a step is finished, where a line under a
  * check would otherwise say the wait it was in rather than the state it reached. */
 export const PLACE_ADD_SHEET_WORDS: Partial<Record<PlaceAddStep, { word: string; done?: string }>> = {
+  "host-key": { word: `keeps the box's host key in ${KNOWN_HOSTS} here` },
   wsp: { word: `installing wsp under ${PLACE_INSTALL.folder}` },
   service: { word: `starting the agent as ${PLACE_INSTALL.service}` },
   join: { word: "waiting for it to connect to this Mac", done: "connected to this Mac" },
@@ -3112,6 +3114,7 @@ const DAEMON_CONTENTS = [
   "ad9341f55ebc6a724a35b9febb11f7ca5cf5133a90d7a631bf39cf9a496657ac",
   "cebb929363226a20c057702cfe24235fa2f24749c70355539f5bab4b3bcfd3da",
   "bbdd3b1dc7fb73b04d5986128d099e11a723d777bd1a3c7cddd14819f1ee8cfc",
+  "35236ee3220f12db35f3307812b2d2ea8c8762f8910e656d9d57a44bb599b0e3",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3172,7 +3175,9 @@ const DAEMON_CONTENTS = [
  * names no shared library; a binary that did was installed once and its container init called address zero.
  * Version 27 answers machine.snapshot with a job and machine.snapshotJob with how far it has got, so a layer that
  * takes minutes to write waits on no one frame; the layer is a plain tar, the shape carries the bytes the workspace
- * wrote, and a snapshot's failure is the job's own refusal. */
+ * wrote, and a snapshot's failure is the job's own refusal. Version 28 runs every exec behind the workspace's
+ * seccomp filter: a process an exec started ran with none while the init ran behind one, and now loads the same
+ * filter before its command, or the exec is refused. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3508,6 +3513,10 @@ export const placeNoDaemonPortLine = (name: string): string => `${name} is conne
 /** What an install is refused with when the computer took the agent and never dialled back: the join landed, so
  * the computer belongs to this wsp, and what is missing is a road from it to here. */
 export const placeNoLinkLine = (name: string): string => `${name} took the agent and has not dialled this host yet; check that it can reach this computer on the address it was given, and wsp places shows it the moment it does`;
+
+/** What a stage reads while the computer it is running on has no link: the requests behind it are held until that
+ * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
+export const placeDialBackLine = (name: string): string => `waiting for ${name} to dial back`;
 
 /** The refusal wsp add over ssh gets on a host that wired no installer: the road that puts the agent on a computer
  * is the host command's, so a runtime served without one holds no way onto a machine it has never met. */

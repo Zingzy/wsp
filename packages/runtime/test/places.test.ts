@@ -25,6 +25,7 @@ import {
   placeLinkTranscript,
   placeNoDaemonPortLine,
   placeNoLinkLine,
+  placeDialBackLine,
   workFolderIn,
   copyStoppedLine,
   type GoldenStageEvent,
@@ -81,10 +82,16 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
-  runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey, opts.provider) });
+  runtime = createRuntime({
+    backend: stubBackend(),
+    store,
+    adapters: {},
+    placeLinks: wiring(hostKey, opts.provider),
+    ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
+  });
   srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
   return { hostKey, store };
 }
@@ -1012,6 +1019,8 @@ interface ForkingPlace {
   daemonAnswersAfter: number;
   /** How long a snapshot job there reads running before it reads done; the layer takes time to write. */
   snapshotTakesMs: number;
+  /** Ops this computer takes and never answers, so a test can close the socket with a frame in flight on it. */
+  swallow: Set<string>;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
   holdResumes(): () => void;
 }
@@ -1074,6 +1083,7 @@ function forks(
     asked: {},
     daemonAnswersAfter: 1,
     snapshotTakesMs: 0,
+    swallow: new Set<string>(),
     holdResumes: () => {
       held = [];
       return () => {
@@ -1099,6 +1109,7 @@ function forks(
     const missing = (machineId: string): void => void client.ws.send(JSON.stringify({ id, ok: false, error: `no such machine: ${machineId}`, kind: "missing", status: 404 }));
     if (op.startsWith("machine.") || op.startsWith("tunnel.")) seen.ops.push(op);
     seen.asked[op] = (seen.asked[op] ?? 0) + 1;
+    if (seen.swallow.has(op)) return;
     switch (op) {
       case "machine.backend":
         return say(PLACE_FACTS);
@@ -1479,6 +1490,64 @@ describe("a fork on a computer you joined", () => {
     await until(async () => (await runtime!.status.list()).find(r => r.id === made.id)!.reach.state !== "unreachable");
   });
 
+  it("refuses a keyed frame at a computer that is simply off at once, and waits only for one whose socket closed inside the wait", async () => {
+    const store = memoryStore();
+    const { hostKey } = await serving({ store, relinkWaitMs: 400 });
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(client.ws);
+    // One fork made while the computer is here, so the road is warm and what follows is the wait and nothing else.
+    await runtime!.workspaces.create({ golden: "snap_g", name: "warm", on: "srv" });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+
+    // A gap this host holds a closed socket for: a keyed frame waits, and the computer dialling back finishes it.
+    const waiting = runtime!.workspaces.create({ golden: "snap_g", name: "held", on: "srv" });
+    let back!: ForkingPlace;
+    const linked = await relink(hostKey, placeId, key, report("srv"), c => (back = forks(c)));
+    sockets.push(linked.client.ws);
+    expect((await waiting).name).toBe("held");
+    expect(back.created).toHaveLength(1);
+    linked.client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    // Past the wait, the same frame is refused with the one sentence every road on an absent computer reads.
+    await new Promise(r => setTimeout(r, 450));
+    let asked = Date.now();
+    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "late", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    expect(Date.now() - asked).toBeLessThan(50);
+
+    // And a host that has held no socket for that computer at all, which is every host at start, refuses at once
+    // rather than waiting out a computer that is off.
+    await srv!.close();
+    await runtime!.close();
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey), placeRelinkWaitMs: 50_000 });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    asked = Date.now();
+    await expect(runtime.workspaces.create({ golden: "snap_g", name: "cold", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    expect(Date.now() - asked).toBeLessThan(50);
+  });
+
+  it("never asks a frame with no key of its own a second time: the gap fails it, and the socket that computer opens next is not sent it", async () => {
+    const { hostKey } = await serving();
+    let first!: ForkingPlace;
+    const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (first = forks(c)) });
+    sockets.push(client.ws);
+    const made = await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    // A pause is the machine moving, not a reading: the far side has taken it by the time the answer is lost, and
+    // a second one would be a second move. So the frame names no key and the gap is its end.
+    first.swallow.add("machine.pause");
+    const napping = runtime!.workspaces.nap(made.id);
+    await until(() => first.asked["machine.pause"] === 1);
+    client.close();
+    await expect(napping).rejects.toThrow("connection lost");
+    let second!: ForkingPlace;
+    const back = await relink(hostKey, placeId, key, report("srv"), c => (second = forks(c)));
+    sockets.push(back.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
+    await new Promise(r => setTimeout(r, 60));
+    expect(second.asked["machine.pause"]).toBeUndefined();
+    expect(first.paused + second.paused).toBe(0);
+  });
+
   it("leaves a fork that was live through the blip alone, wake and all, when its computer dials again", async () => {
     const { hostKey } = await serving();
     let first!: ForkingPlace;
@@ -1690,12 +1759,22 @@ describe("the image build and the computer whose doctor said no, or that does no
 describe("a computer joining a host that holds a sealed image", () => {
   /** A host that forks at a provider stub and composes the recipe a copy builds from; with `sealed`, its image is
    * sealed at that provider before anything joins. The key and the store are handed in for a host that comes back. */
-  async function imageHost(o: { sealed: boolean; store?: Store; hostKey?: PlaceKeyPair }): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+  async function imageHost(o: { sealed: boolean; store?: Store; hostKey?: PlaceKeyPair; relinkWaitMs?: number }): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
     const backend = stubBackend();
     backend.execImpl = dfOk;
     const hostKey = o.hostKey ?? newPlaceKeyPair();
     const store = o.store ?? memoryStore();
-    runtime = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(), copyRecipe: () => COPY_RECIPE, hostId: "h1", places: wiredPlace("solari", backend), placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    runtime = createRuntime({
+      backend,
+      store,
+      adapters: {},
+      goldenRecipe: recipeWith(),
+      copyRecipe: () => COPY_RECIPE,
+      hostId: "h1",
+      places: wiredPlace("solari", backend),
+      placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
+      ...(o.relinkWaitMs !== undefined ? { placeRelinkWaitMs: o.relinkWaitMs } : {}),
+    });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     if (o.sealed) {
       const b = await runtime.golden.prepare();
@@ -1746,6 +1825,56 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(place.killed).toHaveLength(1);
     expect((await runtime!.image.get()).copies.map(c => c.place)).toEqual(["solari"]);
     expect(place.asked["machine.create"]).toBe(1);
+  });
+
+  it("a link that drops under a stage and dials back finishes the stage: the create is asked again on the socket that computer opens next, the build goes on to the stage after it, and the stage reads the wait while the gap lasts", async () => {
+    const { hostKey } = await imageHost({ sealed: false });
+    const frames = framesOf();
+    let first!: ForkingPlace;
+    const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (first = p)) });
+    await until(() => first.asked["machine.backend"] === 1);
+    // The computer takes the builder's create and says nothing back; then its socket goes.
+    first.swallow.add("machine.create");
+    // The fake computer runs no builder's setup, so the prepare stops there in the end; what this reads is how far
+    // it got, and its answer is taken here so nothing of it is loose while the test waits.
+    const preparing = runtime!.golden.prepare({ place: joined.placeId, recipe: { setup: "true", smoke: "true" } }).catch(() => undefined);
+    await until(() => first.asked["machine.create"] === 1, 5000);
+    joined.client.close();
+    await until(async () => (await rowOf(joined.placeId)).present === false);
+    expect(frames.some(f => f.stage === "creating" && f.detail === placeDialBackLine("srv"))).toBe(true);
+
+    let back!: ForkingPlace;
+    const linked = await relink(hostKey, joined.placeId, joined.pair, report("srv"), answering(p => (back = p)));
+    sockets.push(linked.client.ws);
+    // The same prepare goes on over the new socket: its create is asked again there and the stage after creating
+    // is reached, where with no wait at all the prepare was already over.
+    await until(() => back.asked["machine.create"] === 1, 5000);
+    await until(() => frames.some(f => f.stage === "deploying-daemon"), 5000);
+    expect(back.created).toHaveLength(1);
+    // And the wait's line is gone once the computer is back: the frame put back is the stage's own last frame,
+    // field for field, so a step a reader clocks and the machines a stage left behind ride the gap with its line.
+    const own = frames
+      .filter(f => f.stage === "creating" && f.detail !== placeDialBackLine("srv"))
+      .map(({ name, stage, detail, step, left, place }) => ({ name, stage, detail, step, left, place }));
+    expect(own).toHaveLength(2);
+    expect(own[1]).toEqual(own[0]);
+    await preparing;
+  });
+
+  it("a computer that never dials back fails the stage after the wait, with the sentence the stage fails with when nothing waits at all", async () => {
+    const { hostKey } = await imageHost({ sealed: false, relinkWaitMs: 300 });
+    let place!: ForkingPlace;
+    const joined = await join(hostKey, { code: await code(), name: "srv", answers: answering(p => (place = p)) });
+    await until(() => place.asked["machine.backend"] === 1);
+    place.swallow.add("machine.create");
+    const preparing = runtime!.golden.prepare({ place: joined.placeId, recipe: { setup: "true", smoke: "true" } });
+    await until(() => place.asked["machine.create"] === 1, 5000);
+    const at = Date.now();
+    joined.client.close();
+    // The wait is a wait, not a second answer: past its bound the stage fails with the frame's own words, which is
+    // what a person read on this stage before anything waited at all.
+    await expect(preparing).rejects.toThrow("connection lost");
+    expect(Date.now() - at).toBeGreaterThanOrEqual(300);
   });
 
   it("builds nothing for a computer whose doctor said no, and nothing at all on a host that holds no image", async () => {
