@@ -107,7 +107,7 @@ describe("wsp new --on", () => {
   });
 });
 
-describe("the place beside a workspace's name", () => {
+describe("the computer a workspace's row names", () => {
   const row = {
     id: "ws_1",
     name: "x",
@@ -122,12 +122,15 @@ describe("the place beside a workspace's name", () => {
     reach: { state: "reachable" as const },
   };
 
-  it("names the computer a fork lives on, by the name the person gave it", () => {
-    expect(workspaceLine({ ...row, place: "p_ab12cd34" }, new Map([["p_ab12cd34", "srv"]]))[0]).toBe("x · srv");
+  it("names the computer a fork lives on under WHERE, by the name the person gave it, and leaves the name column the name alone", () => {
+    const listed = workspaceLine({ ...row, place: "p_ab12cd34" }, new Map([["p_ab12cd34", "srv"]]));
+    expect(listed[0]).toBe("x");
+    expect(listed[2]).toBe("srv");
   });
 
-  it("falls back to the id when the places are not to hand, and says nothing for a fork at the provider", () => {
-    expect(workspaceLine({ ...row, place: "p_ab12cd34" })[0]).toBe("x · p_ab12cd34");
-    expect(workspaceLine(row)[0]).toBe("x");
+  it("falls back to the id when the places are not to hand, and a fork at the provider names what it runs at", () => {
+    expect(workspaceLine({ ...row, place: "p_ab12cd34" })[2]).toBe("p_ab12cd34");
+    expect(workspaceLine({ ...row, provider: "solari" })[2]).toBe("solari");
+    expect(workspaceLine(row)[2]).toBe("a provider");
   });
 });

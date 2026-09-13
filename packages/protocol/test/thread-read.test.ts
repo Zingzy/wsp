@@ -71,6 +71,16 @@ describe("a thread's messages", () => {
     ]);
   });
 
+  it("holds a call in the present until its result lands, so a read of a write nobody has allowed never says it happened", () => {
+    const events = [
+      { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "write it" },
+      { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 1, kind: "tool_use", toolName: "Write", toolUseId: "toolu_1", text: JSON.stringify({ file_path: "kai.txt" }) },
+    ] as const;
+    expect(threadMessages([...events], "t1").map(row => row.text)).toEqual(["write it", "writing kai.txt"]);
+    const answered = threadMessages([...events, { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 2, kind: "tool_result", toolUseId: "toolu_1", text: "File created successfully at: kai.txt" }], "t1");
+    expect(answered.map(row => row.text)).toEqual(["write it", "wrote kai.txt"]);
+  });
+
   it("gives a call the harness named no id for a row of its own, and never runs a new turn's words into the turn before it", () => {
     const rows = threadMessages(
       [
