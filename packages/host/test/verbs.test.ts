@@ -712,6 +712,9 @@ describe("wsp verbs over the host", () => {
     const init = commandPage("init", COMMANDS_FOR_HELP["init"]!).replace(/\s+/g, " ");
     expect(init).not.toMatch(/(three|five|six) screens/);
     expect(init).toContain("one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build");
+    // The road a run that asks nothing takes is a question the screens ask a person; the flag is how the answer is given.
+    expect(init).toContain("--rebuild");
+    expect(init).toContain("seal the next version from a fresh machine rather than from your image plus the changes");
   });
 
   it("every line of wsp --help fits 100 columns", () => {

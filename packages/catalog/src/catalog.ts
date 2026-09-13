@@ -4,7 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
-import { agentOfRow, packageOf, toolRowPrefix } from "@wsp/protocol";
+import { agentOfRow, packageOf, thisComputer, toolRowPrefix } from "@wsp/protocol";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "./codex-hooks.js";
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
@@ -436,13 +436,15 @@ export function baseEntryFor(pkg: string): ToolEntry | undefined {
   return e?.floor === true ? e : undefined;
 }
 
-/** What a ticked row the floor covers says in the build: the base row's name, or both majors when this Mac's differs
- * from the one the floor pins (as many dot-separated parts of the Mac's version as the pin names). */
-export function baseNote(e: ToolEntry, macVersion: string | undefined): string {
+/** What a ticked row the floor covers says in the build: the base row's name, or both majors when the computer the
+ * collector read differs from the one the floor pins (as many dot-separated parts of that version as the pin names).
+ * The computer is named by the platform that was read, never by the one this code was written for: an image built
+ * from a Linux computer says so. */
+export function baseNote(e: ToolEntry, hereVersion: string | undefined, platform: "darwin" | "linux"): string {
   const own = `${e.name} is part of the base`;
-  if (e.major === undefined || macVersion === undefined) return own;
-  const mac = macVersion.replace(/^v/, "").split(".").slice(0, e.major.version.split(".").length).join(".");
-  return mac === e.major.version ? own : `${e.major.name} ${e.major.version} is part of the base; this Mac runs ${e.major.name} ${mac}`;
+  if (e.major === undefined || hereVersion === undefined) return own;
+  const here = hereVersion.replace(/^v/, "").split(".").slice(0, e.major.version.split(".").length).join(".");
+  return here === e.major.version ? own : `${e.major.name} ${e.major.version} is part of the base; ${thisComputer(platform)} runs ${e.major.name} ${here}`;
 }
 
 /** The entry by its id, or nothing. */

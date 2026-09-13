@@ -7,7 +7,7 @@
 // the person's files take (an exec body has a cap a six-agent set exceeded)
 // through a hook per agent without any file of the person's being touched. A
 // hook the person's own file already claims is left alone and named in the result.
-import { CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
+import { BREW_PREFIX, CATALOG_AGENTS, CONTEXT_MARKER, MODE, SKILL_NAME, agentName, type AgentContext, type AgentEntry, type ContextHooks, type ContextOutcomeKind, type GuestFile, type GuestRoots } from "@wsp/catalog";
 import { TURN_END_WORDS, backgroundTasksLine, fmtBytes, shellQuote, type GoldenBaseTool, type GoldenVersion } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BASE_VERSION_LINES, parseVersions } from "./golden-base.js";
@@ -297,7 +297,7 @@ export function renderMachineContext(input: ContextInput): string {
   const machine: string[] = [];
   machine.push(`- Linux${probe.kernel !== undefined ? ` ${probe.kernel}` : ""}, user root, home /root. macOS apps, casks and Mac App Store apps are not here.`);
   if (probe.versions.length > 0) machine.push(`- On every wsp machine: ${probe.versions.map(v => `${v.name} ${v.version}`).join(", ")}.`);
-  if (probe.has.has("brew")) machine.push("- Homebrew is at /home/linuxbrew/.linuxbrew.");
+  if (probe.has.has("brew")) machine.push(`- Homebrew is at ${BREW_PREFIX}.`);
   if (probe.has.has("golden-path")) machine.push(`- Login shells get their PATH from /etc/profile.d/wsp-golden.sh: ${TOOLS_PATH}`);
   const containers = ["docker", "podman"].filter(b => probe.has.has(b));
   if (!probe.overlay) machine.push(`- Containers do not run here: the kernel has no overlayfs${containers.length === 0 ? ", and Docker and Podman are not installed" : ""}. Install services natively.`);

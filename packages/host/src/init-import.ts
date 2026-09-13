@@ -35,7 +35,7 @@ import {
   withApiKeyHelper,
   withImagePaths,
 } from "@wsp/engine";
-import { CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS } from "@wsp/catalog";
+import { baseNote, CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS } from "@wsp/catalog";
 import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
 
@@ -141,10 +141,21 @@ export const leftBehind = (what: string, why = "no token in the Keychain"): stri
 
 const leftBehindItem = (s: PlannedSecret): string => (s.command === undefined ? leftBehind(s.service) : leftBehind("the helper's key", "the helper did not run here"));
 
-/** The Keychain items the ticked rows would copy, in plan order, one per account where the tool files them so.
- * Runs before anything boots so a refused consent dialog never costs a machine. */
+/** The Keychain items the ticked rows would copy, in plan order: one per login, and for a tool that files an item
+ * per account, the one account the copy carries. An account the copy leaves behind is never read, so the consent
+ * dialog is raised once per item that travels. Runs before anything boots so a refused dialog never costs a machine. */
 export function keychainLogins(picked: readonly ManifestEntry[], platform: "darwin" | "linux", home: string): PlannedSecret[] {
-  return planFiles(picked.map(e => ({ ...e, bring: true })), { home, stat: () => undefined, read: readSmall, platform }).secrets;
+  return planFiles(picked.map(e => ({ ...e, bring: true })), { home, stat: () => undefined, read: readSmall, platform }).secrets.filter(s => s.left === undefined);
+}
+
+/** Which of a login's accounts a copy would carry and which it would leave, for a tool that keeps one Keychain item
+ * per signed-in user; nothing for every other row. Read off this computer as the screens are drawn, so the row says
+ * whose login lands on the machine before it is answered. */
+export function copiedLogin(e: ManifestEntry, platform: "darwin" | "linux", home: string): { carries?: string; left: string[] } | undefined {
+  const secrets = planFiles([{ ...e, bring: true, choice: "copy" }], { home, stat: () => undefined, read: readSmall, platform }).secrets.filter(s => s.account !== undefined);
+  if (secrets.length === 0) return undefined;
+  const carries = secrets.find(s => s.left === undefined)?.account;
+  return { ...(carries !== undefined ? { carries } : {}), left: secrets.filter(s => s.left !== undefined).map(s => s.account!) };
 }
 
 export async function readSecrets(wanted: readonly PlannedSecret[], reader: SecretReader): Promise<ReadSecrets> {
@@ -332,7 +343,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
         skipped.push({ id: s.id, path: secretPath(s), note: leftBehindItem(s) });
         continue;
       }
-      skipped.push({ id: s.id, path: secretPath(s), note: leftBehind(s.account) });
+      skipped.push({ id: s.id, path: secretPath(s), note: s.left === undefined ? leftBehind(s.account) : leftBehind(s.account, s.left) });
       const target = join(stage, s.dest);
       if (existsSync(target)) writeFileSync(target, s.drop(readFileSync(target, "utf8")));
     }
@@ -615,7 +626,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     agents: agents.installs,
     skippedAgents: agents.skipped.map(s => ({ id: s.id, name: label(s.id), note: s.note })),
     skippedTools: tools.skipped.map(s => ({ id: s.id, label: label(s.id), note: s.note })),
-    baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), note: b.note })),
+    baseTools: tools.base.map(b => ({ id: b.id, label: label(b.id), note: baseNote(b.entry, b.version, opts.platform) })),
     ...(mcp !== undefined ? { mcp } : {}),
     ...(opts.onResult !== undefined ? { onResult: opts.onResult } : {}),
     ...(opts.onContext !== undefined ? { onContext: opts.onContext } : {}),
