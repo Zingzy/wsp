@@ -5552,6 +5552,18 @@ describe("runtime golden update and the post-seal grace", () => {
     await srv.close();
   });
 
+  it("a computer that would not fork at the size asked for says so on the create, and the record keeps the size it gave", async () => {
+    const { backend, rt } = started();
+    const b = await rt.golden.prepare();
+    const { version } = await rt.golden.seal(b.id);
+    await rt.golden.kill(b.id);
+    backend.createNotice = "size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB";
+    const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "on-the-box" });
+    expect(ws.notice).toBe("size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB");
+    // The sentence is the whole of what travels: the size a reader wants is the machine's own, not the ask.
+    expect(ws).not.toHaveProperty("cpu");
+  });
+
   it("with two kept builders one is stopped per refusal: the first retry succeeds and the second builder stays", async () => {
     const { backend, store, rt } = started();
     const a = await rt.golden.prepare({ name: "a" });

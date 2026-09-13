@@ -14,6 +14,7 @@
       },
       "replayed": true,
       "daemonSupervisor": "entrypoint",
+      "notice": "size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB",
       "roads": {
         "previewUrl": false,
         "daemonAnswers": true,

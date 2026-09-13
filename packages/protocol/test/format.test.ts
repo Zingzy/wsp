@@ -75,6 +75,7 @@ import {
   fmtMemGb,
   fmtRate,
   fmtSize,
+  boxRoomLines,
   placeFactsLine,
   fmtThreads,
   fmtUptime,
@@ -228,6 +229,26 @@ describe("a computer of the person's own in one line", () => {
     expect(placeFactsLine({ cpu: 8, memMb: 16384 })).toBe("8 cores · 16 GB".replace(/ /g, "\u00a0"));
     // Cores, never vCPU: a computer somebody owns has the cores it has.
     expect(line).not.toContain("vCPU");
+  });
+});
+
+describe("the room left on a box, as the doctor reads it back", () => {
+  const box = { cores: 2, memMb: 4096 };
+  it("counts the forks that exist and leaves the rest free", () => {
+    // Two forks on a two core box, one core and one gigabyte each: the box is full of cores and has memory left.
+    expect(boxRoomLines({ ...box, cpuTaken: 2, memTakenMb: 2048 })).toEqual(["2 cores, 2 in use by forks, 0 free", "4 GB, 2 GB in use by forks, 2 GB free"]);
+    expect(boxRoomLines({ ...box, cpuTaken: 1, memTakenMb: 1024 })).toEqual(["2 cores, 1 in use by forks, 1 free", "4 GB, 1 GB in use by forks, 3 GB free"]);
+    // A box with nothing on it, and the one core singular.
+    expect(boxRoomLines({ cores: 1, memMb: 2048, cpuTaken: 0, memTakenMb: 0 })).toEqual(["1 core, 0 in use by forks, 1 free", "2 GB, 0 GB in use by forks, 2 GB free"]);
+  });
+
+  it("says nothing at all where the computer counts neither", () => {
+    expect(boxRoomLines(box)).toEqual([]);
+    expect(boxRoomLines({ ...box, cpuTaken: 1 })).toEqual([]);
+  });
+
+  it("never reads back less than nothing free when the forks hold more than the box has", () => {
+    expect(boxRoomLines({ ...box, cpuTaken: 3, memTakenMb: 8192 })).toEqual(["2 cores, 3 in use by forks, 0 free", "4 GB, 8 GB in use by forks, 0 GB free"]);
   });
 });
 

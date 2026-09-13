@@ -125,6 +125,14 @@ describe("a machine over a link", () => {
     expect(machine.hostUrl).toBeUndefined();
   });
 
+  it("carries the sentence the computer answered the create with, and none where it answered none", async () => {
+    const said = "size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB";
+    const l = opened(sent => (sent.op === "machine.create" ? { machine: { ...HANDLE, notice: said } } : {}));
+    expect((await (await LinkBackend.open(l.link)).create({ kind: "sandbox", cpu: 2, memMb: 4096 })).notice).toBe(said);
+    const { backend } = await withMachine(() => ({}));
+    expect((await backend.create({ kind: "sandbox" })).notice).toBeUndefined();
+  });
+
   it("leaves out a road the handle did not name", async () => {
     const l = opened(sent => (sent.op === "machine.create" ? { machine: { ...HANDLE, roads: { ...ROADS, previewUrl: false, metrics: false } } } : {}));
     const machine = await (await LinkBackend.open(l.link)).create({ kind: "sandbox" });

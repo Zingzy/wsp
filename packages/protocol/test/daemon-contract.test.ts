@@ -296,6 +296,8 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         memMb: 7751,
         memRoomMb: 2851,
         machineMemMb: 3875,
+        cpuTaken: 1,
+        memTakenMb: 1024,
         diskFreeBytes: 47400000000,
         images: [
           { id: "sha256:a61567bd31828687156d735ea8eb01ba4e37636e225dd6a48ba94136a70d9d61", name: "ubuntu:24.04", sizeBytes: 29763253 },
@@ -317,6 +319,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
           seen: { state: "running", createdAt: "2026-09-12T13:00:00.000Z" },
           replayed: true,
           daemonSupervisor: "entrypoint",
+          notice: "size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB",
           roads: { previewUrl: false, daemonAnswers: true, putBytes: true, describe: true, facts: false, metrics: true },
         },
       },

@@ -116,6 +116,7 @@ export class LinkMachine implements Machine {
   readonly labels?: Record<string, string>;
   readonly seen?: { state: MachineState; createdAt?: string };
   readonly replayed?: boolean;
+  readonly notice?: string;
   readonly daemonSupervisor?: "systemd" | "entrypoint";
   readonly previewUrl?: (port: number) => Promise<PreviewReach>;
   readonly daemonAnswers?: (opts?: { timeoutMs?: number }) => Promise<boolean>;
@@ -136,6 +137,7 @@ export class LinkMachine implements Machine {
     if (handle.labels !== undefined) this.labels = handle.labels;
     if (handle.seen !== undefined) this.seen = handle.seen;
     if (handle.replayed !== undefined) this.replayed = handle.replayed;
+    if (handle.notice !== undefined) this.notice = handle.notice;
     if (handle.daemonSupervisor !== undefined) this.daemonSupervisor = handle.daemonSupervisor;
     if (handle.roads.previewUrl) this.previewUrl = port => this.routeTo(port);
     if (handle.roads.daemonAnswers) this.daemonAnswers = opts => this.askDaemon(opts);

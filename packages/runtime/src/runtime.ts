@@ -4056,6 +4056,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     }
     const entry = live.get(id)!;
+    // A computer that would not fork at the size asked for says so on the handle, and the create's own answer is
+    // where a person reads it: the record already holds the size that computer actually gave.
+    if (entry.machine.notice !== undefined) notices.push(entry.machine.notice);
     if (entry.machine.previewUrl !== undefined || entry.machine.daemonAnswers !== undefined) {
       // The route and the daemon are two questions, and the create asks them apart: minting is what the app and
       // the first client will dial, and a mint that fails is its own line rather than a verdict on the guest.

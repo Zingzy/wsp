@@ -173,10 +173,15 @@ impl World {
     }
 
     async fn create(&mut self, spec: Value) -> String {
+        self.created(spec).await["id"].as_str().unwrap().to_owned()
+    }
+
+    /// The whole handle the create answered with, for the cases that read what it says beside the id.
+    async fn created(&mut self, spec: Value) -> Value {
         let reply = self.ok("machine.create", json!({ "spec": spec })).await;
-        let id = reply["machine"]["id"].as_str().unwrap().to_owned();
-        self.made.push(id.clone());
-        id
+        let machine = reply["machine"].clone();
+        self.made.push(machine["id"].as_str().unwrap().to_owned());
+        machine
     }
 
     async fn exec(&self, id: &str, cmd: &str) -> (i64, String, String) {
@@ -239,6 +244,10 @@ async fn builds_the_container_from_the_spec_image_limits_labels_envs_and_the_boo
     }
     let mut w = World::open().await;
     let started = Instant::now();
+    // Two cores of a box that keeps one, so this reads the box rather than a number: a runner with two cores gives
+    // one and the assertions below follow it.
+    let cores = w.ok("machine.capacity", json!({})).await["cores"].as_f64().unwrap();
+    let given_cpu = 2.0f64.min((cores - 1.0).max(1.0));
     let id = w.create(spec(json!({ "cpu": 2, "memMb": 1024, "envs": { "WSP_TOKEN": "t" }, "idempotencyKey": format!("live-665-build-{}", checkout_key()) }))).await;
     let ready = started.elapsed();
     eprintln!("create to ready: {} ms", ready.as_millis());
@@ -248,7 +257,7 @@ async fn builds_the_container_from_the_spec_image_limits_labels_envs_and_the_boo
     assert_eq!(code, 0);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "1073741824", "{out}");
-    assert_eq!(lines[1], "200000 100000", "{out}");
+    assert_eq!(lines[1], format!("{} 100000", (given_cpu * 100_000.0) as i64), "{out}");
     assert_eq!(lines[2], "0", "{out}");
     assert_eq!(lines[3], "t");
     assert_eq!(lines[4], format!("wsp-live-665-build-{}", checkout_key()));
@@ -277,12 +286,23 @@ async fn holds_a_machines_size_to_what_the_box_has() {
     }
     let mut w = World::open().await;
     let capacity = w.ok("machine.capacity", json!({})).await;
-    let id = w.create(spec(json!({ "cpu": 512, "memMb": 9_000_000 }))).await;
+    let cores = capacity["cores"].as_f64().unwrap();
+    let made = w.created(spec(json!({ "cpu": 512, "memMb": 9_000_000 }))).await;
+    let id = made["id"].as_str().unwrap().to_owned();
+    // The box keeps a core and a gigabyte of its own, and the answer says what it gave instead.
     let shape = w.ok("machine.describe", json!({ "machineId": id })).await["shape"].clone();
-    assert_eq!(shape["cpu"].as_f64(), capacity["cores"].as_f64());
+    assert_eq!(shape["cpu"].as_f64(), Some((cores - 1.0).max(1.0)));
     assert_eq!(shape["memMb"], capacity["machineMemMb"]);
+    let notice = made["notice"].as_str().unwrap_or_default().to_owned();
+    assert!(notice.contains("cpu clamped to") && notice.contains("memory clamped to"), "{notice}");
     let (_, out, _) = w.exec(&id, "cat /sys/fs/cgroup/memory.max").await;
     assert_eq!(out.trim(), (capacity["machineMemMb"].as_u64().unwrap() * 1024 * 1024).to_string());
+    // The room the doctor reads counts this fork at the size the box gave it, beside whatever else is here.
+    let after = w.ok("machine.capacity", json!({})).await;
+    let taken_cpu = after["cpuTaken"].as_f64().unwrap() - capacity["cpuTaken"].as_f64().unwrap();
+    let taken_mem = after["memTakenMb"].as_u64().unwrap() - capacity["memTakenMb"].as_u64().unwrap();
+    assert_eq!(taken_cpu, (cores - 1.0).max(1.0));
+    assert_eq!(taken_mem, capacity["machineMemMb"].as_u64().unwrap());
     w.close().await;
 }
 

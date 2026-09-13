@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -130,6 +130,19 @@ export function fmtSize(size: WorkspaceSize, cpu: CpuWord = "vCPU"): string {
 export function placeFactsLine(shape: WorkspaceSize, diskFreeBytes?: number): string {
   const parts = [fmtSize(shape, "cores"), ...(diskFreeBytes === undefined ? [] : [`${fmtBytes(diskFreeBytes)} free`])];
   return parts.join(" · ").replace(/ /g, "\u00a0");
+}
+
+/** The room a box has left, as the doctor reads it back: what the computer has, what the workspaces on it hold
+ * right now, and what is left over. One line for the cores and one for the memory, built the same way so neither
+ * can say a different thing about the same box; a computer that counts neither says nothing rather than a guess. */
+export function boxRoomLines(capacity: Pick<PlaceCapacity, "cores" | "memMb" | "cpuTaken" | "memTakenMb">): string[] {
+  const { cpuTaken, memTakenMb } = capacity;
+  if (cpuTaken === undefined || memTakenMb === undefined) return [];
+  const cores = (n: number): string => `${n} ${n === 1 ? "core" : "cores"}`;
+  return [
+    `${cores(capacity.cores)}, ${cpuTaken} in use by forks, ${Math.max(0, capacity.cores - cpuTaken)} free`,
+    `${fmtMemGb(capacity.memMb)}, ${fmtMemGb(memTakenMb)} in use by forks, ${fmtMemGb(Math.max(0, capacity.memMb - memTakenMb))} free`,
+  ];
 }
 
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
