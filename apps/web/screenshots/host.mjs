@@ -34,6 +34,15 @@ export async function daemonBinaryHere(load = () => import(pathToFileURL(HOST_PA
   return target === undefined ? undefined : daemonBinaryIn(workspaceAsset("daemon"), target.triple);
 }
 
+/** The path a fixture's host is started with: this computer's own, which is the wsp command's own reading of what a
+ * machine may run, read out of that command rather than spelled a second time here. The shell that starts a lab may
+ * be a harness's, and a harness puts wrappers of its own first on the path under a temp folder; a turn that ran one
+ * of those dialled back into that harness and never answered. */
+export async function hostPath(load = () => import(pathToFileURL(HOST_PACKAGE).href)) {
+  const { thisComputersPath } = await load();
+  return thisComputersPath(process.env["PATH"]);
+}
+
 const notBuilt = (what, path, how) => `${what} is not built: ${path} is missing. Run ${how} first, or use the coordinator's screenshots.sh or lab.sh, which build.`;
 
 /** What a fixture's host must find built, and the command that builds each: the app it serves, the wsp command
@@ -82,7 +91,8 @@ export const providerFor = state => (Object.values(state.workspaces ?? {}).some(
  * A bare one, not this shell's: a Solari key or a WSP_PROVIDER word in the terminal would put the run on a real
  * provider, a stray WSP_HOME would take it to the person's own machines, and a thread's own variables would reach
  * the wsp under test and shape what it lists. The path is the one thing carried over, since the agents a turn runs
- * are found on it.
+ * are found on it, and it is this computer's own rather than this shell's: the wrappers a harness puts first on its
+ * own path are that harness's, and a turn that ran one never answered.
  *
  * The home a turn's agent runs under rides beside the host's. The screenshot run leaves it the person's, since it
  * runs no turn; a lab names its own, which is what keeps this Mac's own MCP servers and skills out of a tester's
@@ -101,9 +111,13 @@ export const providerFor = state => (Object.values(state.workspaces ?? {}).some(
  * screens rather than driving machines and a daemon per fork is a process per fork on this computer; it names the
  * stand-in's records file instead, so the fixture's sleeping forks come up asleep with nothing running on any of
  * them.
+ *
+ * The address a machine dials this host at is the caller's to name, and a lab names its own: the machines its forks
+ * stand on are this computer, so the address is this computer's loopback. Without one the runtime hands a turn no
+ * token of its own, and every tool call an agent in a thread makes arrives as the person: no opener on a thread a
+ * thread opened, no cap on what it may fork, and no tree.
  */
-export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, binDir, standIn, records }) {
-  const path = process.env["PATH"] ?? "/usr/bin:/bin";
+export function hostEnv({ home, state, personHome = homedir(), appDir, cloud, binDir, standIn, records, path = process.env["PATH"] ?? "/usr/bin:/bin" }) {
   return {
     // A lab's own wsp leads the path where it has one, so a turn that shells out to wsp reaches the lab's host
     // rather than the person's.
@@ -131,16 +145,20 @@ export const agentStoreRows = home => CATALOG_AGENTS.flatMap(a => (a.stateHomeEn
  * rows above, so the variable a host is started with and the files a lab writes cannot name two folders. */
 export const agentStores = home => Object.fromEntries(agentStoreRows(home).map(({ agent, store }) => [agent.stateHomeEnv, store]));
 
+/** The command line a fixture's host is served with. The address a machine dials this host at rides here rather
+ * than in the environment, since that is where the command takes it. */
+export const hostArgv = ({ statePath, port, wsPort, advertise }) => [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort), ...(advertise === undefined ? [] : ["--advertise", advertise])];
+
 /** Starts the built wsp command on a throwaway home holding one fixture state, and answers once it serves. A
  * secret is handed to the child and never written into the environment this answers with: the lab records and
  * prints what it started the host with, and a key in that record would be a key in a log. */
-export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, secrets = {} }) {
+export async function startHost({ home, state, port, wsPort, logPath, detached = false, personHome, appDir, cloud, binDir, standIn, records, advertise, secrets = {} }) {
   const statePath = join(home, ".wsp", "state.json");
   mkdirSync(dirname(statePath), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   const out = logPath === undefined ? "pipe" : openSync(logPath, "a");
-  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records });
-  const child = spawn(process.execPath, [HOST_BIN, "up", "--state", statePath, "--port", String(port), "--ws-port", String(wsPort)], {
+  const env = hostEnv({ home, state, personHome, appDir, cloud, binDir, standIn, records, path: await hostPath() });
+  const child = spawn(process.execPath, hostArgv({ statePath, port, wsPort, advertise }), {
     cwd: home,
     env: { ...env, ...secrets },
     stdio: ["ignore", out, out],
