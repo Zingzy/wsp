@@ -3,8 +3,8 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import { computerWord, fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import type { HarnessCatalog, MachineFacts, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -217,6 +217,27 @@ const WORDS: Record<WorkspaceState, string> = {
 
 export function workspaceWord(state: WorkspaceState): string {
   return WORDS[state];
+}
+
+/** What a row this workspace's machine stands on says under WHERE: the name this host has for the computer it runs
+ * on, which only a caller holding the places list can give and which is what a person calls that machine; else the
+ * provider its own record names, since this host may be wired to any of them and reading it off the kind would tell
+ * somebody on Docker their workspace is at Solari; else the kind's own word; else the name wsp has for the machine,
+ * which on those kinds is a login or a name somebody gave it and never an id a provider minted. Wherever that comes
+ * out as the computer the host runs on, it is said in that machine's own words. The one place a surface asks where
+ * a workspace runs. */
+export function whereWord(record: Pick<WorkspaceView, "machineId"> & { kind?: WorkspaceKind | undefined; provider?: string | undefined; facts?: Pick<MachineFacts, "os"> | undefined }, named?: string): string {
+  const word = named ?? record.provider ?? kindWords(workspaceKind(record)).where ?? record.machineId;
+  return word === THIS_COMPUTER ? computerWord(record.facts?.os) : word;
+}
+
+/** The line a verb that moved a workspace prints once the runtime has answered: the workspace and the word the next
+ * listing will show for it, in the lowercase a line of work reads. The one place that word is lowered, so a pause
+ * and a wake cannot spell one state two ways. A machine the provider has started and nothing on it answers gets a
+ * sentence of its own, since one word there would say the wake failed when what happened is that the machine is up
+ * and its daemon is not talking yet; a caller holding only a phase never reaches it. */
+export function workspaceStateLine(name: string, state: WorkspaceState): string {
+  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state).toLowerCase()}`;
 }
 
 /** Every word a slot beside facts can hold for a computer that is not answering, which is what lets a reader of

@@ -4,7 +4,7 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -177,16 +177,11 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
 // draws it from the root's copy of the token.
 const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
-/** The computer or the provider a workspace runs on, as a row names it: the provider the record itself carries,
- * else the kind's own word where it has one, else the name wsp holds for the machine, the live one once a status
- * has arrived. The provider leads because this host is wired to one of several and only the record knows which;
- * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. A fork whose
- * record names no provider falls to the kind's word rather than to that machine's id, which names nothing to the
- * person reading the row. The one place a surface asks where a workspace runs, so the day a computer carries the
- * name its owner gave it is one edit here. */
+/** The computer or the provider a workspace runs on, as a row names it: the live record once a status has arrived,
+ * read through the protocol's one reading of that question, so this row, the command line's table and the pane
+ * cannot name one machine three ways. */
 export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  const record = project.status ?? project.workspace;
-  return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
+  return whereOf({ ...(project.status ?? project.workspace), kind: workspaceKind(project.workspace) });
 }
 
 /** The fuller reading of the same question, for the pane that has a whole row for it: the computer or provider the

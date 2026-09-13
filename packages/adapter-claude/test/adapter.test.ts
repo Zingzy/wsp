@@ -29,7 +29,7 @@ interface ScriptedExec {
 }
 
 /** Replays scripted stdout lines; in hang mode the stream only ends on kill(). */
-function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean } = {}): ScriptedExec {
+function scriptedExec(lines: string[], opts: { exitCode?: number | null; hang?: boolean; signalled?: string } = {}): ScriptedExec {
   const calls: ScriptedExec["calls"] = [];
   const order: string[] = [];
   const factory: ExecStreamFactory = (command, { env, input }) => {
@@ -43,7 +43,7 @@ function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean
       lines: (async function* () {
         yield* lines;
         if (opts.hang) await exited;
-        else resolveExit(opts.exitCode ?? 0);
+        else resolveExit(opts.exitCode === undefined ? 0 : opts.exitCode);
       })(),
       teardown: () => {
         order.push("teardown");
@@ -61,6 +61,7 @@ function scriptedExec(lines: string[], opts: { exitCode?: number; hang?: boolean
         order.push("closeInput");
       },
       exited,
+      ...(opts.signalled !== undefined ? { signalled: opts.signalled } : {}),
     };
     return stream;
   };
@@ -682,6 +683,27 @@ describe("result classification", () => {
     const end = events.at(-1);
     if (end?.type !== "session.end") throw new Error("expected session.end");
     expect(end.sawResult).toBe(false);
+  });
+
+  it("a run killed by a signal says the agent was killed and names the signal, never a bare code", async () => {
+    const init = `{"type":"system","subtype":"init","session_id":"${FIXTURE_SESSION_ID}"}`;
+    const exec = scriptedExec([init], { exitCode: null, signalled: "SIGKILL" });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+
+    expect(result).toEqual({ status: "failed", error: "claude was killed (SIGKILL) before it answered" });
+  });
+
+  it("a launch nothing of the agent ever came back from says so, rather than naming a code the person cannot act on", async () => {
+    const exec = scriptedExec([], { exitCode: null });
+    const adapter = createClaudeAdapter({ exec: exec.factory, configDir: "/root/.claude-cfg" });
+    const { onEvent } = collect();
+
+    const result = await adapter.start({ prompt: "x", onEvent }).finished;
+
+    expect(result).toEqual({ status: "failed", error: "the launch never reached claude: its run ended before the agent said a word" });
   });
 
   it("exit 127 before any event is reported in words: the binary the shell could not find and the PATH it searched", async () => {

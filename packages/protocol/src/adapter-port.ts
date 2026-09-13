@@ -123,6 +123,10 @@ export interface ExecStream {
   /** Ends the stdin channel: the process reads EOF. Nothing after the stream ended. */
   closeInput(): void;
   readonly exited: Promise<number | null>;
+  /** The signal that ended the run, by the name the computer running it spells, once `exited` has settled; absent
+   * where it ended on its own and on a road that cannot tell, which is every run read off a machine's exit file.
+   * What says a harness was killed rather than answering with a code of its own. */
+  readonly signalled?: string | undefined;
 }
 
 export interface ExecStreamFactory {

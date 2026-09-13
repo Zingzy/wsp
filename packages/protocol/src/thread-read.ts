@@ -8,7 +8,7 @@
 // not rows, since a read is for the words of a thread and either of those runs
 // to megabytes.
 import { z } from "zod";
-import { NEWER_TURN_LINE, notifyBody, notifyReply, toolActivityLine, turnEndLine } from "./format.js";
+import { NEWER_TURN_LINE, notifyBody, notifyReply, toolActivityLine, toolDoneLine, turnEndLine } from "./format.js";
 import type { SessionEvent, SessionPermissionEvent, TurnResult } from "./index.js";
 
 /** Who a row of a read is: the message that opened or steered a turn, the agent's own words, one tool call, or the
@@ -79,6 +79,14 @@ export function threadMessages(events: ReadonlyArray<SessionEvent>, threadId: st
           if (open === undefined) open = rows.push(message("agent", event.at, event.text)) - 1;
           else rows[open]!.text += event.text;
           sawText = true;
+        } else if (event.kind === "tool_result") {
+          // The call's own row turns to the past here and nowhere else: what the transcript holds a result for is
+          // what actually ran, and a call still waiting on a person has no result and keeps its present.
+          const answered = event.toolUseId === undefined ? undefined : calls.get(event.toolUseId);
+          if (answered !== undefined && event.isError !== true) {
+            const did = toolDoneLine(answered.name, answered.input);
+            if (did !== undefined) rows[answered.row]!.text = did;
+          }
         } else if (event.kind === "tool_use") {
           open = undefined;
           const key = event.toolUseId;

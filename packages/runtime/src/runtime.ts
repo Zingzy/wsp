@@ -4946,6 +4946,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(s.view.threadId !== undefined ? { threadId: s.view.threadId } : {}),
       prompt: o.prompt,
       ...(o.requestId !== undefined ? { requestId: o.requestId } : {}),
+      // Read off the row the turn writes its open prompt on: a message that joined a turn stopped on one waits for
+      // the person as the turn does, and the caller says so rather than going quiet until the prompt is answered.
+      ...(s.view.asking !== undefined ? { waiting: true } : {}),
     });
   };
 

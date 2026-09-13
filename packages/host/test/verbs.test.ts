@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -17,7 +17,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, noOpenAskLine, threadRows, threadTree, threadsOf, type HostClient } from "../src/verbs.js";
+import { CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { writeHost } from "../src/hosts.js";
@@ -230,24 +230,37 @@ describe("wsp verbs over the host", () => {
     expect(sized.io.errors[0]).toBe(`wsp new: ${HERE} forks nothing, so it takes no --from or --size. Drop them.`);
   });
 
-  it("workspaces lists this computer beside a fork, its machine cell the size line its sidebar row reads and its state cell empty, and run takes it by name like any workspace", async () => {
+  it("this computer's row carries Running while its daemon answers and the reach word when it does not, as every other row does", () => {
+    const here = { id: "ws_1", name: "mac", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-12T00:00:00.000Z", machineState: "running" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 };
+    expect(workspaceLine({ ...here, reach: { state: "reachable" } })[4]).toBe("Running");
+    expect(workspaceLine({ ...here, reach: { state: "no-daemon" } })[4]).toBe("Unreachable");
+    expect(workspaceLine({ ...here, reach: { state: "unreachable" } })[4]).toBe("Unreachable");
+  });
+
+  it("workspaces gives every row one state word, where it runs in the person's words and its shape apart from it, and the machine id only in the json", async () => {
     await run("new", "alpha");
     await run("new", "mac", "--on", HERE);
     const listed = await run("workspaces");
     expect(listed.code).toBe(0);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
-    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS", "AGENTS"]);
-    // The fork names its provider machine and its state; this computer's machine cell is its cores and memory, the
-    // one size line the app's row reads, and it has no state to name, so that cell falls off the end of the row.
+    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "WHERE", "SIZE", "STATE", "PROJECTS", "AGENTS"]);
+    // One kind of thing per column: where it runs, then the shape, then one state word per row, this computer's
+    // included. The id the provider minted for the machine is on no row.
     expect(rows.map(r => r.split(/ {2,}/))).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
-      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB$/)],
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+\u00a0vCPU\u00a0·\u00a0\d+\u00a0GB$/), expect.stringMatching(/^\S+$/)],
+      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^this (?:Mac|computer)$/), expect.stringMatching(/^\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB$/), expect.stringMatching(/^\S+$/)],
     ]);
     expect(listed.io.errors).toEqual([]);
 
     const raw = await run("workspaces", "--json");
-    const rawRows = (json(raw.io)[0] as { workspaces: (WorkspaceView & { size: { cpu: number; memMb: number } })[] }).workspaces;
-    expect(rows[1]!.split(/ {2,}/)[2]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
+    const rawRows = (json(raw.io)[0] as { workspaces: WorkspaceListing[] }).workspaces;
+    expect(listed.io.lines[0]).not.toContain(rawRows[0]!.machineId);
+    expect(rows[0]!.split(/ {2,}/)[2]).toBe(whereWord(rawRows[0]!));
+    expect(rows[1]!.split(/ {2,}/)[2]).toBe(whereWord(rawRows[1]!));
+    expect(rows[1]!.split(/ {2,}/)[3]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
+    // Which word each row carries is the one predicate's, read off that row's own status: what this computer's
+    // daemon is doing on the machine this test runs on decides the word, and never whether there is a word.
+    expect(rows.map(r => r.split(/ {2,}/)[4])).toEqual(rawRows.map(w => workspaceWord(workspaceStateOf(w, w))));
     expect(rawRows.map(w => [w.name, workspaceKind(w), w.golden])).toEqual([
       ["alpha", "cloud", head(SEALED_GOLDEN).snapshotId],
       ["mac", "local", ""],
@@ -286,7 +299,7 @@ describe("wsp verbs over the host", () => {
         ["dark", "running"],
       ]);
       const [, ...rows] = listed.io.lines[0]!.split("\n");
-      expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[3]!))).toEqual([
+      expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[4]!))).toEqual([
         ["napped", expect.stringMatching(/^ws_/), "Paused"],
         ["dark", expect.stringMatching(/^ws_/), "Unreachable"],
       ]);
@@ -325,7 +338,7 @@ describe("wsp verbs over the host", () => {
 
       const listed = await run("workspaces");
       expect(listed.io.lines[0]).not.toContain("pt_token");
-      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[3]).toBe("Running");
+      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[4]).toBe("Running");
     } finally {
       await new Promise<void>(r => edge.close(() => r()));
     }
@@ -679,6 +692,28 @@ describe("wsp verbs over the host", () => {
     const missing = await run("wake", "nope");
     expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp wake: no workspace nope"]);
+  });
+
+  it("wake prints the word the next workspaces will print, and says a machine that came up and answers nothing is up and not answering yet", async () => {
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    const edge = createHttpServer((_req, res) => {
+      res.writeHead(502).end();
+    });
+    await new Promise<void>(r => edge.listen(0, "127.0.0.1", r));
+    try {
+      const port = (edge.address() as AddressInfo).port;
+      backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${port}/`, token: "stub", expiresAt: Date.now() + 3_600_000 });
+      const woken = await run("wake", "alpha");
+      expect(woken.code).toBe(0);
+      // The provider started it, so the phase alone would say running; nothing on it answers, so the table says
+      // Unreachable, and the wake says the same thing in a sentence rather than a second word for one machine.
+      expect(woken.io.lines).toEqual(["alpha is up and not answering yet"]);
+      const listed = await run("workspaces");
+      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[4]).toBe("Unreachable");
+    } finally {
+      await new Promise<void>(r => edge.close(() => r()));
+    }
   });
 
   it("a machine the provider paused on its own, under a record that says running, is woken by wake and by exec: the runtime's one state read settles it", async () => {
@@ -1212,6 +1247,7 @@ describe("wsp verbs over the host", () => {
         [
           { toolName: "Bash", input: { command: "git status\n--porcelain" }, output: "On branch main\nnothing to commit" },
           { toolName: "Read", input: { file_path: "packages/engine/src/golden-mcp.ts" }, output: "" },
+          { toolName: "Write", input: { file_path: "kai.txt" }, output: "File created successfully at: kai.txt" },
           { toolName: "Grep", input: { pattern: "shellQuote" }, output: "packages/host/src/exec.ts:12:  shellQuote(argv)" },
           { toolName: "Wombat", input: { fur: "grey" }, output: "no tool by that name", failed: true },
         ],
@@ -1222,11 +1258,15 @@ describe("wsp verbs over the host", () => {
     const io = captured();
     io.muted = text => `~${text}~`;
     expect(await cli(["run", "alpha", "look around", "--state", statePath], io, undefined, env)).toBe(0);
+    // Every call opens in the present, before it has run and before any prompt it waits on is answered; a call that
+    // changed a file says what it changed once its result says it did, and every other call says what came back.
     expect(io.streamed.split("\n")).toEqual([
       "~$ git status~",
       "~On branch main~",
-      "~read packages/engine/src/golden-mcp.ts~",
-      "~searched code for shellQuote~",
+      "~reading packages/engine/src/golden-mcp.ts~",
+      "~writing kai.txt~",
+      "~wrote kai.txt~",
+      "~searching code for shellQuote~",
       "~packages/host/src/exec.ts:12: shellQuote(argv)~",
       "~Wombat~",
       "~failed: no tool by that name~",
@@ -1243,6 +1283,7 @@ describe("wsp verbs over the host", () => {
     expect(calls.map(e => [e.kind, e.toolName])).toEqual([
       ["tool_use", "Bash"], ["tool_result", undefined],
       ["tool_use", "Read"], ["tool_result", undefined],
+      ["tool_use", "Write"], ["tool_result", undefined],
       ["tool_use", "Grep"], ["tool_result", undefined],
       ["tool_use", "Wombat"], ["tool_result", undefined],
     ]);
@@ -1574,8 +1615,8 @@ describe("wsp verbs over the host", () => {
     const workspaces = await run("workspaces");
     const table = workspaces.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/));
     expect(table).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running", "2"],
-      ["beta", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/vCPU/), "Running", "2"],
+      ["beta", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/vCPU/), "Running"],
     ]);
     const unknown = await run("projects", "nope");
     expect(unknown.code).toBe(EXIT_CODES.usage);
@@ -1786,6 +1827,22 @@ describe("wsp verbs over the host", () => {
     expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
     expect(history[1]).toMatchObject({ type: "session.steer", prompt: "end your last line with STEERED", requestId: expect.any(String) });
     expect(await rt.sessions.list()).toHaveLength(1);
+  });
+
+  it("a message that joined a turn stopped on a prompt says the turn is waiting on the person, so the quiet has a reason", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const first = run("run", "alpha", "write it");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    held.ask(0, { askId: "a1", toolName: "Write", input: JSON.stringify({ file_path: "kai.txt" }), options: [{ id: "allow", label: "Yes", effect: "allow" }, { id: "deny", label: "No", effect: "deny" }] });
+    const [row] = await rt.sessions.list();
+    const io = captured();
+    const sent = cli(["send", row!.threadId!, "yes", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(io.errors).toEqual(["joined the running turn", `the turn is waiting on a permission; wsp threads shows it as ${threadStateWord("waiting")}`]));
+    held.release(0, "done");
+    expect(await sent).toBe(0);
+    await first;
   });
 
   it("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
@@ -2639,6 +2696,46 @@ describe("wsp verbs over the host", () => {
       expect(io.lines).toEqual([]);
       expect(io.streamed).toBe("");
       expect(io.errors).toEqual(["wsp run: the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up"]);
+    } finally {
+      for (const client of old.clients) client.terminate();
+      await new Promise(r => old.close(r));
+    }
+  });
+
+  it("a request the host's own validator refuses reads as one line naming what it would not take and the form the verb takes, never the wire's schema", async () => {
+    await handle!.close();
+    handle = undefined;
+    const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await new Promise<void>(r => old.once("listening", r));
+    const wsPort = (old.address() as AddressInfo).port;
+    writeFileSync(hostTokenPath(statePath), "tok\n");
+    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+    const workspace = { id: "ws_1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-06T00:00:00.000Z" };
+    // The validator's own words, off the very schema the host parses a request with.
+    let refusal = RuntimeRequest.safeParse({ id: 1, op: "workspaces.exec" }).error!.message;
+    old.on("connection", socket => {
+      socket.on("message", raw => {
+        const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
+        if (op === "workspaces.exec") return void socket.send(JSON.stringify({ id, ok: false, error: refusal }));
+        const reply = op === "workspaces.resolve" || op === "workspaces.wake" ? { workspace } : {};
+        socket.send(JSON.stringify({ id, ok: true, ...reply }));
+      });
+    });
+    try {
+      const ran = await run("exec", "alpha", "--", "ls");
+      expect(ran.code).toBe(EXIT_CODES.usage);
+      expect(ran.io.errors).toEqual(["wsp exec: the host would not read the workspace and the command on this line. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      // None of the wire's own words reach the person: not a field name, not a code, not one of the ops it listed.
+      expect(ran.io.errors[0]).not.toContain("workspaceId");
+      expect(ran.io.errors[0]).not.toContain("invalid_type");
+
+      // An op the host does not know is the two builds differing, which no argument of the line can fix.
+      refusal = RuntimeRequest.safeParse({ id: 1, op: "a.verb.this.host.has.never.served" }).error!.message;
+      const skewed = await run("exec", "alpha", "--", "ls");
+      expect(skewed.code).toBe(EXIT_CODES.usage);
+      expect(skewed.io.errors).toEqual(["wsp exec: the host does not serve this line; it runs another version of wsp, restart it with wsp up. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      expect(skewed.io.errors[0]).not.toContain("discriminator");
+      expect(skewed.io.errors[0]).not.toContain("workspaces.createLocal");
     } finally {
       for (const client of old.clients) client.terminate();
       await new Promise(r => old.close(r));
