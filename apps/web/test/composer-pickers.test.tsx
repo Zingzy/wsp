@@ -276,8 +276,9 @@ describe("composer pickers", () => {
     const footer = document.querySelector("[data-chat-composer-footer]")!;
     expect(footer.contains(picker("model"))).toBe(true);
     expect(document.querySelector("[data-composer-checkout] [data-composer-picker]")).toBeNull();
-    // Defaults read: the catalog's default model under the harness's mark, the default context, the default mode.
-    expect(picker("model")?.textContent).toContain("Opus 5");
+    // Defaults read: the agent that will run the turn and the catalog's default model under its mark, the default
+    // context, and the mode under the word for what it sets.
+    expect(picker("model")?.textContent).toBe("Claude Code · Opus 5");
     const triggerMark = picker("model")?.querySelector('svg[data-harness-mark="claude"]');
     expect(triggerMark?.classList.contains("text-agent-claude")).toBe(true);
     // A monochrome mark would take the foreground from this span rather than the button's muted label colour.
@@ -285,7 +286,7 @@ describe("composer pickers", () => {
     expect(triggerMark?.parentElement?.classList.contains("text-foreground")).toBe(true);
     expect(picker("effort")?.textContent).toBe("High · 1M");
     expect(pickerValue("effort")).toBe("high");
-    expect(picker("permissionMode")?.textContent).toContain("Bypass");
+    expect(picker("permissionMode")?.textContent).toBe("Permissions: Bypass");
     expect(pickerValue("permissionMode")).toBe("bypassPermissions");
 
     // The model menu: the machine's three models with search, jump chips and stars; the footer names the source.
@@ -545,8 +546,9 @@ describe("composer pickers", () => {
     menu = await openModelMenu();
     fireEvent.click(codex());
     await waitFor(() => expect(picker("model")?.dataset["harness"]).toBe("codex"));
-    // The rail stays and the list is Codex's; the model button reads its name until one is picked, since Codex marks no default.
-    expect(picker("model")?.textContent).toContain("Model");
+    // The rail stays and the list is Codex's; the button names the agent it switched to and says the slot it has no
+    // value for yet, since Codex marks no default model.
+    expect(picker("model")?.textContent).toBe("Codex · Model");
     await waitFor(() => expect(within(modelMenu()!).getAllByRole("option").map(el => el.dataset["composerOption"])).toEqual(["gpt-6-astra"]));
     fireEvent.click(option("gpt-6-astra")!);
     await waitFor(() => expect(pickerValue("model")).toBe("gpt-6-astra"));
@@ -588,7 +590,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, access: { [WS]: "plan" } } });
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
-    expect(picker("permissionMode")?.textContent).toContain("Plan");
+    expect(picker("permissionMode")?.textContent).toBe("Permissions: Plan");
   });
 
   it("on a kept machine the access button wears the mode's short form and its menu row names the machine", async () => {
@@ -596,14 +598,15 @@ describe("composer pickers", () => {
     const { api } = fixtureApi({ table: [kept] });
     await setup(api);
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
-    expect(picker("permissionMode")?.textContent).toBe("Plan");
+    expect(picker("permissionMode")?.textContent).toBe("Permissions: Plan");
     fireEvent.click(picker("permissionMode")!);
     expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${THIS_COMPUTER}`);
     fireEvent.click(option("bypassPermissions")!);
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
-    // The button says the CLI's word; whose computer it is stays in the menu and in the button's accessible name.
-    expect(picker("permissionMode")?.textContent).toBe("Bypass");
-    expect(picker("permissionMode")?.getAttribute("aria-label")).toBe(`Access: Bypass on ${THIS_COMPUTER}`);
+    // The button leads with what it sets and then says the CLI's word; whose computer it is stays in the menu and
+    // in the button's accessible name. A chip reading `Default` alone named nothing a person could look for.
+    expect(picker("permissionMode")?.textContent).toBe("Permissions: Bypass");
+    expect(picker("permissionMode")?.getAttribute("aria-label")).toBe(`Permissions: Bypass on ${THIS_COMPUTER}`);
   });
 
   it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {

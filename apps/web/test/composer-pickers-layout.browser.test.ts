@@ -8,7 +8,8 @@
 // column sits at the shell's floor), every trigger reads
 // whole, none is cut by its own box or by the row's, and a pick of the access
 // mode whose label names the machine moves no other trigger: the access
-// trigger wears the short form and its menu row the long one. A project
+// trigger wears the word for what it sets with the short form behind it, and
+// its menu row the long one. A project
 // name, the one label a person writes and no width bounds, is cut on its
 // button inside the row rather than running under the send button, and
 // reads whole in its menu row. Photographed in both themes. Runs only when
@@ -20,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import type { Browser, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { THIS_COMPUTER } from "@wsp/protocol";
+import { accessChipWords } from "../src/components/chat/ComposerOptionPickers";
 import { SIDEBAR_MAX_WIDTH } from "../src/shell/sidebarWidth";
 import { launchRender, renderSkipped, stopRender } from "./render-browser";
 import { startVite, type ViteChild } from "./vite-child";
@@ -156,7 +158,7 @@ describe.skipIf(renderSkipped !== undefined)("the composer's picker row laid out
         expectWhole(before, `${width.label} before the pick in ${theme}`);
         expectWhole(after, `${width.label} after the pick in ${theme}`);
         const access = after.triggers.find(t => t.picker === "permissionMode")!;
-        expect(access.text).toBe("Bypass");
+        expect(access.text).toBe(accessChipWords("Bypass"));
         expect(menuRow).toContain(`Bypass on ${THIS_COMPUTER}`);
         // The pick moves nothing but the triggers after its own, and those only by the width of the word: every
         // trigger keeps its line and its height, the ones before the access pick keep their boxes, and the footer

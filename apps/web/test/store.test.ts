@@ -73,7 +73,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -539,6 +539,58 @@ describe("store sessions", () => {
     await flush();
     expect(listCalls).toEqual(["ws_a"]);
     expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+  });
+
+  it("holds a send the runtime has no row for and drops it only once the rows that replace it are in", async () => {
+    const sessions: SessionView[] = [];
+    const { api, emit } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+
+    useStore.getState().launching("ws_a", { requestId: "r1", title: "read the port list", harness: "claude" });
+    expect(useStore.getState().launches["ws_a"]?.title).toBe("read the port list");
+
+    sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" });
+    emit({ type: "session.start", workspaceId: "ws_a", sessionId: "c1" });
+    // The rows land first: dropping the send before them would leave the workspace reading as having no thread at
+    // all in the moment between the two.
+    expect(useStore.getState().launches["ws_a"]).toBeDefined();
+    await flush();
+    expect(useStore.getState().sessions["ws_a"]).toEqual(sessions);
+    expect(useStore.getState().launches["ws_a"]).toBeUndefined();
+  });
+
+  it("a refresh answers which threads there are, so a send the runtime has since written a row for stops standing twice", async () => {
+    const sessions: SessionView[] = [];
+    const { api } = fakeApi([view("ws_a")], sessions);
+    useStore.getState().bind(api);
+    await flush();
+    useStore.getState().launching("ws_a", { requestId: "r1", title: "read the port list", harness: "claude" });
+
+    // The socket dropped and came back with a gap: the runtime wrote the thread's row while this client was away,
+    // and a reconnect that left the send standing would draw the same thread twice.
+    sessions.push({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running", claudeSessionId: "c1" });
+    await useStore.getState().refresh();
+    expect(useStore.getState().sessions["ws_a"]).toHaveLength(1);
+    expect(useStore.getState().launches["ws_a"]).toBeUndefined();
+  });
+
+  it("keeps the sends in flight when the runtime refused the list, which answered no thread at all", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    useStore.getState().bind(api);
+    await flush();
+    useStore.getState().launching("ws_a", { requestId: "r1", title: "read the port list", harness: "claude" });
+    api.listSessions = async () => { throw new Error("no"); };
+    await useStore.getState().refresh();
+    expect(useStore.getState().launches["ws_a"]?.requestId).toBe("r1");
+  });
+
+  it("drops a send by its own request id, so a refusal landing late leaves the next send's row standing", () => {
+    useStore.getState().launching("ws_a", { requestId: "r2", title: "again", harness: "claude" });
+    useStore.getState().launched("ws_a", "r1");
+    expect(useStore.getState().launches["ws_a"]?.requestId).toBe("r2");
+    useStore.getState().launched("ws_a", "r2");
+    expect(useStore.getState().launches["ws_a"]).toBeUndefined();
   });
 
   it("session.done keeps the row running with no round trip; session.end refetches it to the settled status", async () => {
