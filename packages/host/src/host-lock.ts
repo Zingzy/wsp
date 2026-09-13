@@ -98,9 +98,15 @@ export function addressLines(statePath: string, at: { port: number; wsPort: numb
   return [
     `app         http://${authority(bound, at.port)}`,
     `runtime ws  ws://${authority(bound, at.wsPort)} (token: ${hostTokenPath(statePath)})`,
-    `state       ${statePath}`,
+    stateLine(statePath),
     ...(publicHostname !== undefined ? [publicAddressLine(publicHostname)] : []),
   ];
+}
+
+/** The one line naming the state a run works on, wherever a summary names it: the host's own start lines, wsp
+ * status and the relay link all read it here, so a person comparing two readings compares the same spelling. */
+export function stateLine(statePath: string): string {
+  return `state       ${statePath}`;
 }
 
 /** The one line naming where this host answers from anywhere: printed at start when the relay already had a name

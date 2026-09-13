@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { authority, fmtDuration, shellQuote } from "@wsp/protocol";
-import { addressLines, dialAddress, servingHost, type HostLock } from "./host-lock.js";
+import { addressLines, dialAddress, servingHost, stateLine, type HostLock } from "./host-lock.js";
 import { providerEnvNames } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { homeNamed } from "./serving-home.js";
@@ -405,7 +405,7 @@ export interface HostReading {
  * label and value, so a person reads the same columns wsp up prints when it starts. A host that took the lock and
  * answers nothing is a crash loop rewriting that lock, and the row says which of the two it is. */
 export function statusLines(statePath: string, host: HostReading | undefined, service: string, now = Date.now()): string[] {
-  if (host === undefined) return ["host        not running", `state       ${statePath}`, `service     ${service}`];
+  if (host === undefined) return ["host        not running", stateLine(statePath), `service     ${service}`];
   const { lock } = host;
   const publicAt = publicHostname(statePath);
   const up = `pid ${lock.pid}, up ${fmtDuration(now - Date.parse(lock.startedAt))}`;

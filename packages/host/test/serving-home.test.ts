@@ -11,7 +11,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { defaultStatePath, optsFor, statePick } from "../src/cli.js";
 import { servingHost } from "../src/host-lock.js";
-import { SERVING_HOME_SH, currentHome, currentHomePointer, servingHome } from "../src/serving-home.js";
+import { SERVING_HOME_SH, currentHome, currentHomePointer, servingElsewhere, servingHome } from "../src/serving-home.js";
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -90,6 +90,34 @@ describe("the home this computer's host serves", () => {
     writeFileSync(currentHomePointer(user), "\n");
     expect(currentHome(user)).toBeUndefined();
     expect(reading(user)).toEqual({ home: own, serving: true });
+  });
+
+  it("names the state a host here serves when a line works on another, and nothing when they are the same", () => {
+    const { user, own, moved } = computer();
+    const elsewhere = join(mkdtempSync(join(tmpdir(), "wsp-checkout-")), ".wsp", "state.json");
+    dirs.push(dirname(dirname(elsewhere)));
+
+    // Nothing is serving on this computer, so there is no other state to name.
+    expect(servingElsewhere(elsewhere, {}, user)).toBeUndefined();
+
+    lockOn(own, process.pid);
+    expect(servingElsewhere(elsewhere, {}, user)).toBe(join(own, "state.json"));
+    // The state the host serves is the state this line works on: nothing to say.
+    expect(servingElsewhere(join(own, "state.json"), {}, user)).toBeUndefined();
+
+    // A host under a moved home is the one this computer serves, and the pointer is how it is found.
+    pointAt(user, moved);
+    lockOn(moved, process.pid);
+    expect(servingElsewhere(elsewhere, {}, user)).toBe(join(moved, "state.json"));
+
+    // Its pid is gone, so the pointer is not followed and this computer's own home answers instead.
+    lockOn(moved, deadPid());
+    expect(servingElsewhere(elsewhere, {}, user)).toBe(join(own, "state.json"));
+
+    // One folder reached by two names is one state, which is what /tmp and /private/tmp are on a Mac.
+    const link = join(dirname(own), ".wsp-link");
+    symlinkSync(own, link);
+    expect(servingElsewhere(join(link, "state.json"), {}, user)).toBeUndefined();
   });
 
   it("is the state file every verb that names none works on, and a dev checkout keeps its own", () => {

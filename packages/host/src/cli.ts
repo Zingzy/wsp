@@ -3,9 +3,9 @@
 // on loopback. There is no control plane; the Solari key is read here
 // and used only for direct calls from this process to the machine API.
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
@@ -81,7 +81,7 @@ import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
-import { currentHome, currentHomePointer, homeNamed, servingHome } from "./serving-home.js";
+import { currentHome, currentHomePointer, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
@@ -387,14 +387,6 @@ export function goldenRecipe(
  * rule, since the bin and the desktop both apply it. */
 export function devCheckoutState(cwd: string): string | undefined {
   return existsSync(join(cwd, ".env")) ? join(cwd, ".wsp", "state.json") : undefined;
-}
-
-/** A path as the file system knows it, so one folder reached by two names (/tmp and /private/tmp on a Mac) is not
- * read as two states. Where nothing has made the file or its folder yet, the path as written is all there is. */
-function realState(path: string): string {
-  const dir = dirname(path);
-  if (existsSync(path)) return realpathSync(path);
-  return existsSync(dir) ? join(realpathSync(dir), basename(path)) : path;
 }
 
 /** Which state a line runs against, and what a person should be told about the choice. */
@@ -1172,10 +1164,9 @@ async function hostFor(
   const address = opts.address ?? LOOPBACK;
   const lockPath = lockPathFor(opts.statePath);
   const lock = takeLock(lockPath, opts.statePath, { port: opts.port, wsPort: opts.wsPort, address, ...(startedByVerb(process.env) ? { startedBy: "verb" as const } : {}) });
-  // Read before the host serves a byte: a linked box is reachable from anywhere the moment its connector is up,
-  // so the page it serves must carry no token even though it binds this computer alone. This follows the record
-  // alone and not the flag: a connector an earlier run left behind carries the tunnel to this same port whatever
-  // this run was asked for, and --no-relay stops that one rather than serving a token past it.
+  // Read before the host serves a byte, for the line that says what a linked box is open to; the page's token is
+  // withheld per request, off what the connector puts on the ones it forwards, so a connector an earlier run left
+  // behind changes nothing here.
   const linked = readRelayRecord(opts.statePath) !== undefined;
   // A computer that already joined dials the port its place file names, so the door binds as this host starts
   // rather than waiting for somebody to open the Add a computer sheet again.
@@ -1187,7 +1178,6 @@ async function hostFor(
       wsPort: opts.wsPort,
       listen: address,
       ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
-      beyondThisComputer: linked,
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
       webDir: opts.webDir ?? webDirFor(),
