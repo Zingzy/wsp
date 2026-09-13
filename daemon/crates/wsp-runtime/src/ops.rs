@@ -30,6 +30,7 @@ use wsp_frames::{
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
+use crate::engine::{self, Fence, Ports};
 use crate::fetch::{self, Client, Digest, Reference};
 use crate::freeze;
 use crate::net::{self, Net};
@@ -174,7 +175,9 @@ pub struct Ops {
     layout: Layout,
     store: Arc<Store>,
     runtime: Runtime,
-    net: Net,
+    net: Arc<Net>,
+    /// The fenced engine socket's accept loop of every running workspace that asked for one.
+    engines: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
     /// One pull, commit or sweep at a time, and a create from the resolve of its chain to the record that holds
     /// it: two pulls of one image would append to the same partial blob, and a sweep between a resolve and the
     /// record would take a layer the boot is about to mount.
@@ -204,12 +207,68 @@ impl Ops {
         let running = running_ids(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
         let (net, net_swept) = Net::open(Layout::new(root), &running)
             .map_err(|e| store::Error::Io { path: root.to_path_buf(), source: io::Error::other(e.to_string()) })?;
-        Ok(Ops { layout, store: Arc::new(store), runtime, net, pulls: Mutex::new(()), facts: BoxFacts::read(), swept, stopped, net_swept })
+        Ok(Ops {
+            layout,
+            store: Arc::new(store),
+            runtime,
+            net: Arc::new(net),
+            engines: Mutex::new(BTreeMap::new()),
+            pulls: Mutex::new(()),
+            facts: BoxFacts::read(),
+            swept,
+            stopped,
+            net_swept,
+        })
     }
 
-    /// The published ports of every running workspace, listening again where their records say.
+    /// The published ports of every running workspace, listening again where their records say, and the engine
+    /// socket of every running workspace that asked for one served again, its containers' ports joined. An engine
+    /// that left the box since leaves that workspace's socket unserved and the rest untouched.
     pub async fn restore(&self) -> Result<(), OpError> {
-        Ok(self.net.restore(&running_ids(&self.layout)?).await?)
+        let running = running_ids(&self.layout)?;
+        self.net.restore(&running).await?;
+        for record in self.records()? {
+            if record.engine && running.contains(&record.id) && self.serve_engine(&record.id).await.is_ok() {
+                self.join_ports(&record).await;
+            }
+        }
+        Ok(())
+    }
+
+    /// The workspace's socket bound in its directory and its accept loop started over the box's engine; one already
+    /// served is replaced.
+    async fn serve_engine(&self, id: &str) -> Result<(), OpError> {
+        let socket = engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
+        let listener = engine::bind(&self.layout.engine(id))?;
+        let fence = Fence {
+            workspace: id.to_owned(),
+            rootfs: self.layout.rootfs(id),
+            engine: socket,
+            ports: Arc::new(Inward { net: Arc::clone(&self.net), root: self.layout.root().to_path_buf() }),
+        };
+        let task = tokio::spawn(engine::serve(listener, Arc::new(fence)));
+        if let Some(old) = self.engines.lock().await.insert(id.to_owned(), task) {
+            old.abort();
+        }
+        Ok(())
+    }
+
+    /// The published ports of the workspace's running containers joined to its loopback, as after a wake or a
+    /// daemon restart; a container whose port cannot be joined is left for the next start to try again.
+    async fn join_ports(&self, record: &Workspace) {
+        let Ok(socket) = engine::socket_of(&crate::doctor::read_facts()) else { return };
+        let Ok(pairs) = engine::published(&socket, &record.id).await else { return };
+        for (inside, box_port) in pairs {
+            let _ = self.net.forward_inward(&record.id, record.init.pid, inside, box_port).await;
+        }
+    }
+
+    /// The accept loop ended and the socket file gone; the directory stays with the bundle.
+    async fn stop_engine(&self, id: &str) {
+        if let Some(task) = self.engines.lock().await.remove(id) {
+            task.abort();
+        }
+        let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
     }
 
     /// What the sweep at open removed.
@@ -408,7 +467,7 @@ impl Ops {
                 replaces_machine: true,
                 preview_urls: false,
                 signed_urls: false,
-                containers: false,
+                containers: engine::socket_of(&crate::doctor::read_facts()).is_ok(),
                 callback_relay: true,
                 disk_snapshots: true,
                 snapshot_listing: true,
@@ -531,6 +590,10 @@ impl Ops {
         // Held until the record is on disk, which is what makes the sweep keep the chain: a delete of the snapshot
         // or template the fork boots from waits here instead of taking the layer from under the mount.
         let _one_at_a_time = self.pulls.lock().await;
+        let engine = spec.engine == Some(true);
+        if engine {
+            engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
+        }
         let chain = self.resolve_chain(image).await?;
         let (cpu, mem_mb) = self.size_on_box(spec.cpu, spec.mem_mb);
         let hostname: String = id.chars().take(HOSTNAME_MAX).collect();
@@ -547,6 +610,7 @@ impl Ops {
             mem_mb,
             created_at: store::now_iso(),
             init: Init { pid: 0, started: 0, boot_id: String::new() },
+            engine,
         };
         self.boot(record).await
     }
@@ -562,6 +626,11 @@ impl Ops {
         }
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, None)?;
         bundle::mount_rootfs(&lowers, &self.layout.upper(&id), &self.layout.work(&id), &self.layout.rootfs(&id))?;
+        let engine_dir = record.engine.then(|| self.layout.engine(&id));
+        if let Some(dir) = &engine_dir {
+            fs::create_dir_all(dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
+            engine::link_client_path(&self.layout.rootfs(&id))?;
+        }
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
         let cgroup = self.layout.cgroup_name(&id);
@@ -574,6 +643,7 @@ impl Ops {
             cgroup: &cgroup,
             init: self.runtime.exe(),
             etc: &self.layout.etc(&id),
+            engine: engine_dir.as_deref(),
         };
         bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
         self.runtime.create(&id).await?;
@@ -584,8 +654,14 @@ impl Ops {
         // The same inode the container has bound, so the line lands inside.
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, Some(network.gateway))?;
         freeze::forbid_swap(&self.layout.cgroup_dir(&id))?;
+        if record.engine {
+            self.serve_engine(&id).await?;
+        }
         self.runtime.start(&id).await?;
         self.net.restore(std::slice::from_ref(&id)).await?;
+        if record.engine {
+            self.join_ports(&record).await;
+        }
         Ok(record)
     }
 
@@ -593,6 +669,7 @@ impl Ops {
     /// listeners go, the overlay is detached. The upper directory, the record and the network record stay: they are
     /// the saved layer and what the wake boots it with.
     async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
+        self.stop_engine(&record.id).await;
         self.runtime.kill(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
         bundle::unmount(&self.layout.rootfs(&record.id))?;
@@ -743,8 +820,16 @@ impl Ops {
         Ok(())
     }
 
-    /// Kills, deletes, takes the network down, unmounts and removes every trace of the workspace under the root.
+    /// Kills, deletes, takes the network down, unmounts and removes every trace of the workspace under the root,
+    /// and every container, network and volume it made on the engine, before its rootfs those containers may bind
+    /// goes. An engine that does not answer leaves them, and the workspace goes all the same.
     async fn remove(&self, id: &str, init: Option<&Init>) -> Result<(), OpError> {
+        self.stop_engine(id).await;
+        if bundle::read_record(&self.layout.record(id))?.is_some_and(|record| record.engine) {
+            if let Ok(socket) = engine::socket_of(&crate::doctor::read_facts()) {
+                let _ = engine::remove_all(&socket, id).await;
+            }
+        }
         self.runtime.kill(id, init).await?;
         self.net.down(id).await?;
         bundle::unmount(&self.layout.rootfs(id))?;
@@ -783,6 +868,28 @@ impl Ops {
 
     fn records(&self) -> Result<Vec<Workspace>, OpError> {
         records_under(&self.layout)
+    }
+}
+
+/// The join of a container's published port to the workspace's loopback, made off the proxy's own task once the
+/// engine has taken the start; a workspace whose init is gone gets none.
+struct Inward {
+    net: Arc<Net>,
+    root: PathBuf,
+}
+
+impl Ports for Inward {
+    fn published(&self, workspace: &str, inside: u16, box_port: u16) {
+        let Ok(Some(record)) = bundle::read_record(&Layout::new(&self.root).record(workspace)) else { return };
+        if !runtime::alive(&record.init) {
+            return;
+        }
+        let net = Arc::clone(&self.net);
+        let id = workspace.to_owned();
+        let pid = record.init.pid;
+        tokio::spawn(async move {
+            let _ = net.forward_inward(&id, pid, inside, box_port).await;
+        });
     }
 }
 
@@ -982,7 +1089,9 @@ mod tests {
         assert_eq!(facts.offer, "runtime");
         assert_eq!(facts.capabilities.pause_mode, Some(PauseMode::Disk));
         assert!(!facts.capabilities.live_clone_forks && !facts.capabilities.resize && !facts.capabilities.preview_urls);
-        assert!(!facts.capabilities.signed_urls && !facts.capabilities.containers && !facts.capabilities.kept);
+        assert!(!facts.capabilities.signed_urls && !facts.capabilities.kept);
+        // Containers read true exactly where this box has an engine with its socket: the doctor's reading.
+        assert_eq!(facts.capabilities.containers, engine::socket_of(&crate::doctor::read_facts()).is_ok());
         assert!(facts.capabilities.replaces_machine && facts.capabilities.callback_relay && facts.capabilities.disk_snapshots);
         assert!(facts.capabilities.snapshot_listing && facts.capabilities.templates);
         assert_eq!(facts.capabilities.sizes.len(), 2);

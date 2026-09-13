@@ -11,7 +11,7 @@ import { applySets, carriedOver, parseSet, parseSets, parseSignIn, runRecipe, ru
 import type { ScanRow } from "../src/scan.js";
 import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
-import { historyCache, saveSmallRecipe } from "../src/recipe-file.js";
+import { historyCache, loadRecipe, saveSmallRecipe } from "../src/recipe-file.js";
 import { BASE_GROUP, HERE_GROUP, PROJECT_GROUP, USED_GROUP } from "../src/init-table.js";
 import { allRows, commandTableLines, recipePrintout } from "../src/recipe-answer.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
@@ -78,6 +78,18 @@ describe("wsp recipe", () => {
     // A tool the catalog ships on but nobody here ran is off under this rule; only use ticks a row.
     expect(row("curl")).toMatchObject({ on: true, why: "always on the image", base: true });
     expect(Recipe.parse(JSON.parse(readFileSync(out, "utf8"))).tick).toBe("used");
+  });
+
+  it("--engine marks the file so every workspace from the image gets the place's engine, and the mark stands through later runs", async () => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-engine-"));
+    const out = outPath();
+    await runRecipe(laptop(), { out }, quiet, at);
+    expect(loadRecipe(out).engine).toBeUndefined();
+    await runRecipe(laptop(), { out, engine: true }, quiet, at);
+    expect(loadRecipe(out).engine).toBe(true);
+    await runRecipe(laptop(), { out, set: ["java=on"] }, quiet, at);
+    expect(loadRecipe(out).engine).toBe(true);
+    expect(rowOf(loadRecipe(out), "java")?.on).toBe(true);
   });
 
   it("flips one row by its catalog id, keeps the flip in the file and prints its size", async () => {
