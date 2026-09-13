@@ -196,7 +196,7 @@ export function ImportProjectDialog({ workspace, initialSource, onClose }: { wor
                     {NO_CHOOSER_HERE}
                   </p>
                   <FolderPathField id="import-source" placeholder={PLACEHOLDER} hold={hold} waiting={pathWaiting} disabled={sending} autoFocus={initialSource === undefined} />
-                  <FolderBrowser disabled={sending} start={hold.applied === "" ? lastFolder : hold.applied} onPick={dir => void submit(dir)} />
+                  <FolderBrowser disabled={sending} start={hold.settled === "" ? lastFolder : hold.settled} onPick={dir => void submit(dir)} />
                 </>
               ) : (
                 <FolderPickerRow path={source} placeholder={PLACEHOLDER} disabled={busy} onPick={() => void pickNative()} />

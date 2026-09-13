@@ -619,14 +619,23 @@ describe("import project dialog", () => {
     fireEvent.change(input, { target: { value: "/Users/dev/code" } });
     await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/dev/code"), { timeout: 3_000 });
     expect(within(root).getByRole("status").textContent).toBe("Reading the folder.");
-    // The read is still out, and the person is still typing into a field that takes it.
+    // Long enough for anything the read did not settle to land, so the list below is read after it would have moved
+    // rather than in the moment before it could.
+    await act(async () => { await new Promise(r => setTimeout(r, 50)); });
+    // The read is still out, and the person is still typing into a field that takes it. The list under the field is
+    // still the level it was: a path being read is not yet known to be a folder, and walking into it would move the
+    // rows under the hands of someone mid-path.
     expect(input.disabled).toBe(false);
+    expect(crumbs(root)).toEqual(["/Users/dev"]);
+    expect(browseRows(root)).toEqual(["code", "notes"]);
     expect(folderRow(root, "/Users/dev/notes").hasAttribute("disabled")).toBe(false);
     expect((within(root).getByRole("button", { name: "Use this folder" }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.change(input, { target: { value: "/Users/dev/code/spoo" } });
     expect(input.value).toBe("/Users/dev/code/spoo");
     await act(async () => settle(PLAN));
     await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/dev/code/spoo"), { timeout: 3_000 });
+    // The read that settled is the one the list follows, so it walks in once the folder is known to be one.
+    await waitFor(() => expect(crumbs(root)).toEqual(["/Users/dev", "code", "spoo"]));
   });
 
   it("does not read a path the folder it has already read starts with, since that is a parent on the way in; Enter reads it anyway", async () => {

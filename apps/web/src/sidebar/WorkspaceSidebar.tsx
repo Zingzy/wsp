@@ -36,7 +36,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
-import { catalogIn, useCapabilities, useLabs, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useCapabilities, useLabs, useLaunches, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
@@ -60,7 +60,7 @@ import { SpaceBar } from "./SpaceBar.js";
 import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
 import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
-import { ThreadRow } from "./ThreadRow.js";
+import { ThreadLaunchRow, ThreadRow } from "./ThreadRow.js";
 import { WorkspaceDropTile, WorkspaceRow, type DropTile } from "./WorkspaceRow.js";
 import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName, onQuietComputer, whereWord } from "./workspaceRows.js";
 
@@ -197,6 +197,7 @@ export function WorkspaceSidebar() {
   // nothing here knows what they are doing while it sleeps.
   const asleep = hostAsleep(conn);
   const projects = useSidebarProjects();
+  const launches = useLaunches();
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(
@@ -379,9 +380,12 @@ export function WorkspaceSidebar() {
     /** Everything the shelf holds, the archived rows included, since shutting it hides the archive with them: the
      * count on a shut shelf is what it took away, not only the rows it draws itself. */
     const shelved = settled.length + archived.length;
+    /** The send this workspace has in flight, which stands as a row of its own until the runtime writes that
+     * thread's: a workspace running a person's first message may not read that it has no threads. */
+    const launch = launches[project.id];
     return (
       <>
-        {newThreadAction.refusal === null && project.threads.length === 0 ? (
+        {newThreadAction.refusal === null && project.threads.length === 0 && launch === undefined ? (
           <SidebarMenuSub>
             <SidebarMenuSubItem data-thread-selection-safe>
               <span className="block min-h-8 px-2 py-2 text-[11px] leading-4 text-muted-foreground">
@@ -397,8 +401,9 @@ export function WorkspaceSidebar() {
             </SidebarMenuSubItem>
           </SidebarMenuSub>
         ) : null}
-        {!shut && active.length + shelved > 0 ? (
+        {!shut && (launch !== undefined || active.length + shelved > 0) ? (
           <SidebarMenuSub>
+            {launch === undefined ? null : <ThreadLaunchRow launch={launch} />}
             {active.map(thread => threadRow(thread, compactTimeLabel(thread.startedAt), project))}
             {shelved > 0 ? (
               <ThreadGroupRow rowId={groupRowId("settled", project.id)} label="Idle" count={shelved} open={settledOpen} onToggle={() => toggleSettled(project.id)} />

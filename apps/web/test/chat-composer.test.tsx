@@ -87,7 +87,7 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
  * catalogs are waited for unless the case is about a composer that has none: a send reads its model and its access
  * out of them, so a composer without them is held and a test that did not wait would be testing that hold. */
 async function setup(api: Api, conn: ConnStatus = "live", agents = true) {
-  useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, harnesses: [], harnessesByWorkspace: {} });
+  useStore.setState({ conn: "connecting", workspaces: [], statuses: {}, harnesses: [], harnessesByWorkspace: {}, launches: {} });
   useStore.getState().bind(api);
   useStore.getState().setConn(conn);
   await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
@@ -558,6 +558,35 @@ describe("composer while the workspace is not live", () => {
     release();
     await waitFor(() => expect(calls).toEqual([`wake ${WS}`, "start"]));
     expect(started[0]!.prompt).toBe("hello");
+  });
+
+  it("hands the sidebar the thread the runtime has written no row for yet", async () => {
+    // A workspace nobody has sent to: this send opens a thread, it does not resume one, so no row exists for it.
+    const { claudeSessionId: _none, ...fresh } = workspace;
+    await setup(fixtureApi([fresh]).api);
+
+    // The transcript draws the message on the send; the runtime writes its row only once the agent announces
+    // itself, so between the two the send is the only thing the sidebar can draw for this thread.
+    await typeInto(composerEditor(), "read the port list");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(useStore.getState().launches[WS]?.title).toBe("read the port list"));
+    expect(useStore.getState().launches[WS]?.harness).toBe("claude");
+  });
+
+  it("a refused send takes its row back: it opened no thread", async () => {
+    const { claudeSessionId: _none, ...fresh } = workspace;
+    const { api } = fixtureApi([fresh]);
+    let refuse!: (e: Error) => void;
+    api.startSession = () => new Promise((_answer, reject) => (refuse = reject));
+    await setup(api);
+    await typeInto(composerEditor(), "read the port list");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(useStore.getState().launches[WS]).toBeDefined());
+    await act(async () => {
+      refuse(new Error("the workspace refused the turn"));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(useStore.getState().launches[WS]).toBeUndefined());
   });
 
   it("on a window the host did not serve on this computer, a socket that drops reads as that computer asleep, not as wsp gone", async () => {
