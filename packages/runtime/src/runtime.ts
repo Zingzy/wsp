@@ -3199,8 +3199,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * a tick.
    * The evidence is the kind's own read of what its machine is, so only a kind whose machines answer that read can
    * be offered again: one that cannot say what it is gives the same nothing whether it is up or dark. What makes
-   * that whole today is that the ssh place is the only one carrying preflight lines, so no other kind records a
-   * refusal at all; a check added to another place's preflight needs that kind to answer for itself here first. */
+   * that whole is that a place asks its machine for something only where wsp did not build that machine, and a
+   * machine that already existed is one that answers the read; a fork asks nothing, so it records no refusal for
+   * anything to re-offer. A check added to a place whose machines answer no such read would sit on its row for
+   * good, so that kind answers for itself here first. */
   const offerDaemonAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
     if (entry.record.daemonRefusedAt === undefined || polled.facts === undefined) return;
     void syncDaemon(entry);

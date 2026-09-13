@@ -415,4 +415,82 @@ describe("the key a machine over ssh is known by", () => {
     const marked = FOUND.split("\n").map(line => (line.startsWith("#") ? line : `@revoked ${line}`)).join("\n");
     expect(hostKeyFound(marked, ALGORITHMS)).toBeUndefined();
   });
+
+  /** What `ssh-keygen -F` prints for a machine whose key this client trusts through an authority: the marker line
+   * for the signing key and nothing of the machine's own, which is what a cold dial leaves behind as much as a
+   * warm one, since accept-new writes no entry for a certificate it could already check. Measured on OpenSSH 9.6
+   * against a local sshd holding a CA signed host certificate. */
+  const CA_FOUND = [
+    "# Host [10.0.0.5]:2222 found: line 1 CA",
+    "@cert-authority [10.0.0.5]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKfANGYQHGkxSRKmhym/quMT78KoIKc7giNRg8nHlfF9",
+    "",
+  ].join("\n");
+
+  /** The signing key the line above carries, as a fingerprint: what a record would stand on if the marker line were
+   * read as a machine's own, which would make every machine that authority signed one machine. */
+  const AUTHORITY_KEY = "ssh-ed25519 SHA256:IGh+ehqXAjwW77irxqOmwHmu3koeqPEHgvUh/f71i34";
+
+  /** What `ssh-keyscan -p 2222 10.0.0.5` answered: the machine's own key, which is the key its certificate signs. */
+  const OFFERED = "[10.0.0.5]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOqrJ12qHMroq65CsKPtn/r4PuMQCbWynvVaYYSkR73z\n";
+  const OFFERED_KEY = "ssh-ed25519 SHA256:VWJESUiByqqBIKEH1I0uAkXiG6HL1qBI3XJke8oNyMs";
+
+  it("a machine trusted through an authority is known by the key its certificate signs, read off the machine", async () => {
+    const asked: { file: string; args: readonly string[] }[] = [];
+    const run: SshLocalRun = async (file, args) => {
+      asked.push({ file, args });
+      if (file === "ssh") return { exitCode: 0, stdout: CONFIG, stderr: "" };
+      if (file === "ssh-keyscan") return { exitCode: 0, stdout: OFFERED, stderr: "# 10.0.0.5:2222 SSH-2.0-OpenSSH_9.6\n" };
+      const named = args[args.indexOf("-f") + 1];
+      return named === "/Users/dev/.ssh/known_hosts" ? { exitCode: 0, stdout: CA_FOUND, stderr: "" } : { exitCode: 255, stdout: "", stderr: `Cannot stat ${named}\n` };
+    };
+    expect(await knownHostKey(REACH, run)).toBe(OFFERED_KEY);
+    // The machine is asked at the host and port the client resolved for the dial, not at the word that was typed.
+    expect(asked.at(-1)).toEqual({ file: "ssh-keyscan", args: ["-T", "5", "-p", "2222", "10.0.0.5"] });
+    // The authority's own key is never the answer: every machine it signed would then be the same machine.
+    expect(await knownHostKey(REACH, run)).not.toBe(AUTHORITY_KEY);
+    // One machine, one identity, whichever of its addresses a record was made under: the client resolves both to
+    // the same host, and what the machine offers there is what both records stand on.
+    expect(await knownHostKey({ ...REACH, host: "box" }, run)).toBe(OFFERED_KEY);
+  });
+
+  it("only a machine the client knows by nothing else is asked, and a machine that answers nothing keeps no identity", async () => {
+    const scans: string[] = [];
+    const run = (found: string, offered: string): SshLocalRun => async (file, args) => {
+      if (file === "ssh") return { exitCode: 0, stdout: CONFIG, stderr: "" };
+      if (file === "ssh-keyscan") {
+        scans.push(args.join(" "));
+        return offered === "" ? { exitCode: 1, stdout: "", stderr: "" } : { exitCode: 0, stdout: offered, stderr: "" };
+      }
+      return args[args.indexOf("-f") + 1] === "/Users/dev/.ssh/known_hosts" ? { exitCode: 0, stdout: found, stderr: "" } : { exitCode: 255, stdout: "", stderr: "" };
+    };
+    // A client holding the machine's own entry beside the authority's line reads it there and dials nothing.
+    expect(await knownHostKey(REACH, run(`${CA_FOUND}${FOUND}`, OFFERED))).toBe(ED25519);
+    // A machine the client holds no line for at all is not one an authority stands behind: nothing is asked of it.
+    expect(await knownHostKey(REACH, run("", OFFERED))).toBeUndefined();
+    expect(scans).toEqual([]);
+    // The machine was asked and said nothing: the record goes without an identity rather than with a guess.
+    expect(await knownHostKey(REACH, run(CA_FOUND, ""))).toBeUndefined();
+    expect(scans).toHaveLength(1);
+  });
+
+  it("a machine the client reaches through a jump or a command of the person's is asked nothing, since this road cannot take either", async () => {
+    const scans: string[] = [];
+    const run = (proxy: string): SshLocalRun => async (file, args) => {
+      if (file === "ssh") return { exitCode: 0, stdout: `${CONFIG}\n${proxy}`, stderr: "" };
+      if (file === "ssh-keyscan") {
+        scans.push(args.join(" "));
+        return { exitCode: 0, stdout: OFFERED, stderr: "" };
+      }
+      return args[args.indexOf("-f") + 1] === "/Users/dev/.ssh/known_hosts" ? { exitCode: 0, stdout: CA_FOUND, stderr: "" } : { exitCode: 255, stdout: "", stderr: "" };
+    };
+    // The scan dials the resolved name itself, which on this network is some other machine or nothing at all, and
+    // whatever answered there would be written down as this machine's identity.
+    for (const proxy of ["proxyjump bastion.example.com", "proxycommand nc %h %p"]) {
+      expect(await knownHostKey(REACH, run(proxy)), proxy).toBeUndefined();
+    }
+    expect(scans).toEqual([]);
+    // ssh prints neither line where the person set neither, so the machine is asked as it was.
+    expect(await knownHostKey(REACH, run(""))).toBe(OFFERED_KEY);
+    expect(scans).toHaveLength(1);
+  });
 });
