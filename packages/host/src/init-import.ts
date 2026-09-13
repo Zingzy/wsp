@@ -33,13 +33,13 @@ import {
   secretKey,
   secretPath,
   withApiKeyHelper,
+  withImagePaths,
 } from "@wsp/engine";
-import { CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, MCP_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, CLAUDE_CONFIG_REL, CLAUDE_SETTINGS_FILE, GUEST_HOME, MCP_AGENTS } from "@wsp/catalog";
 import type { GoldenLeftBehind, RecipeCustomRow } from "@wsp/protocol";
 import { tarPackCommand } from "./doctor.js";
 
 const execFileAsync = promisify(execFile);
-const GUEST_HOME = "/root";
 /** The largest file read whole here: an rc file or a login's own settings, never anything bigger. */
 const READ_LIMIT = 1024 * 1024;
 
@@ -211,6 +211,13 @@ function parentModes(files: readonly PlannedFile[], home: string): Map<string, n
   return modes;
 }
 
+/** A staged file's text, when it is one: within the read limit, and with no NUL byte, which is what a binary carries. */
+function stagedText(abs: string): string | undefined {
+  if (statSync(abs).size > READ_LIMIT) return undefined;
+  const bytes = readFileSync(abs);
+  return bytes.includes(0) ? undefined : bytes.toString("utf8");
+}
+
 /** A staged file rewritten in place. The copy keeps the laptop's mode, so a read-only one is opened writable for the
  * one write and closed again. */
 function rewriteStaged(staged: string, text: string): void {
@@ -289,6 +296,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     }
     const cut: CutNames[] = [];
     const silenced: string[] = [];
+    const macPaths: string[] = [];
     const { onImage, tools } = opts;
     const strip = (staged: string): void => {
       const text = readFileSync(staged, "utf8");
@@ -395,6 +403,24 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
       if (carried.text !== text) writeFileSync(staged, carried.text);
     }
     skipped.push(...left);
+    // Last over the staged tree, so a hook's script and a login's own file are repointed too and nothing written
+    // after this can put a Mac path back.
+    const repoint = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        const p = join(dir, name);
+        const st = lstatSync(p);
+        if (st.isDirectory()) repoint(p);
+        else if (!st.isFile()) continue;
+        else {
+          const text = stagedText(p);
+          if (text === undefined) continue;
+          const forImage = withImagePaths(text, relative(stage, p), { home: opts.home, rewrites: plan.rewrites });
+          for (const n of forImage.notes) if (!macPaths.includes(n)) macPaths.push(n);
+          if (forImage.text !== text) rewriteStaged(p, forImage.text);
+        }
+      }
+    };
+    repoint(stage);
     for (const [g, mode] of modes) if (existsSync(join(stage, g))) chmodSync(join(stage, g), mode);
     if (existsSync(join(stage, ".ssh"))) chmodSync(join(stage, ".ssh"), 0o700);
     const unpacked = treeBytes(stage);
@@ -403,7 +429,7 @@ export async function packPlan(plan: FilesPlan, opts: PackOptions): Promise<Pack
     const { file, args, env } = tarPackCommand(stage, tgz);
     await execFileAsync(file, args, { env });
     const tar = readFileSync(tgz);
-    return { tar, bytes: tar.length, unpacked, skipped, cut, silenced, ...(left.length > 0 ? { leftBehind: left } : {}) };
+    return { tar, bytes: tar.length, unpacked, skipped, cut, silenced, macPaths, ...(left.length > 0 ? { leftBehind: left } : {}) };
   } finally {
     rmSync(stage, { recursive: true, force: true });
     rmSync(out, { recursive: true, force: true });

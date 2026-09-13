@@ -24,7 +24,7 @@ export const digestOf = (recipeHash: string): RecipeDigest => ({ ticks: [{ id: "
 export const importOf = (recipeHash = "h1"): GoldenImport => ({
   recipeHash,
   recipe: digestOf(recipeHash),
-  files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [] }) },
+  files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [], macPaths: [] }) },
   tools: [],
   agents: [],
 });

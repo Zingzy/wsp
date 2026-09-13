@@ -808,7 +808,7 @@ describe("golden import stages", () => {
         rungs: { identity: 1, shell: 2 },
         bytes: 4096,
         skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }],
-        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: [] }),
+        pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: [], macPaths: [] }),
       },
       tools: [
         { id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: "brew-bootstrap" },
@@ -1005,7 +1005,7 @@ describe("golden import stages", () => {
   it("an archive over one upload part says how many parts it went up in", async () => {
     const { backend, puts, fetch } = backendFor();
     const stages: string[] = [];
-    const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [], silenced: [] }) } });
+    const big = importOf({ files: { ...importOf().files!, pack: async () => ({ tar: Buffer.alloc(33 * 1024 * 1024), bytes: 33 * 1024 * 1024, unpacked: 4096, skipped: [], cut: [], silenced: [], macPaths: [] }) } });
     await prepareBuilder({ backend, setup: "true", fetch, onStage: (s, d) => void stages.push(`${s}:${d ?? ""}`), import: big });
     expect(puts).toHaveLength(3);
     expect(stages).toContainEqual("uploading-files:part 1 of 2, 32 MB of 33 MB");
@@ -2089,7 +2089,7 @@ describe("golden import stages", () => {
     const { stages, onStage } = stageRecorder();
     const volatile = {
       paths: ["~/.claude.json", "~/.claude/plugins/installed_plugins.json"],
-      pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [], silenced: [] }),
+      pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [], silenced: [], macPaths: [] }),
     };
     const results: ImportResult[] = [];
     const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile }, onResult: r => void results.push(r) }), setup: "true", ledger: builder.import, fetch, onStage });
@@ -2115,7 +2115,7 @@ describe("golden import stages", () => {
     const before = { cmds: cmds.length, puts: puts.length };
     // A default recipe leaves about 250 MB free after the install stages, under the 256 MiB upload headroom.
     free = mb(200);
-    const volatile = { paths: ["~/.claude.json"], pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [], silenced: [] }) };
+    const volatile = { paths: ["~/.claude.json"], pack: async () => ({ tar: Buffer.from("volatile-tgz"), bytes: 300, unpacked: 2048, skipped: [], cut: [], silenced: [], macPaths: [] }) };
     const { stages, onStage } = stageRecorder();
     const again = await applyGoldenImport(builder.machine, { import: importOf({ files: { ...importOf().files!, volatile } }), setup: "true", ledger: builder.import, fetch, onStage });
     expect(puts.length).toBe(before.puts);
@@ -2168,7 +2168,7 @@ describe("golden import stages", () => {
   it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {
     const { backend, fetch } = backendFor();
     const { stages, onStage } = stageRecorder();
-    const pack = async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: ["starship", "eza", "diskbloom"] });
+    const pack = async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: ["starship", "eza", "diskbloom"], macPaths: [] });
     const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { ...importOf().files!, pack } }) });
     expect(builder.import?.silenced).toEqual(["starship", "eza", "diskbloom"]);
     expect(stages).toContain("applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer); silenced in the shell: starship, eza, diskbloom");
@@ -2178,6 +2178,18 @@ describe("golden import stages", () => {
     const quiet = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
     expect(quiet.import).not.toHaveProperty("silenced");
     expect((await sealGolden(quiet, { backend, hostId: "h1", smoke: "true" })).version).not.toHaveProperty("silenced");
+  });
+
+  it("the stage line names what became of every Mac path the copied files carried, and says nothing where none did", async () => {
+    const { backend, fetch } = backendFor();
+    const { stages, onStage } = stageRecorder();
+    const macPaths = ["/opt/homebrew/bin/gh now gh", "/Applications/Docker.app/Contents/Resources/bin out of .zshrc"];
+    const pack = async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: [], macPaths });
+    await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { ...importOf().files!, pack } }) });
+    expect(stages).toContain("applying-setup:1 KB packed; skipped ~/.bashrc (no longer on this computer); Mac paths: /opt/homebrew/bin/gh now gh, /Applications/Docker.app/Contents/Resources/bin out of .zshrc");
+    const { stages: quiet, onStage: onQuiet } = stageRecorder();
+    await prepareBuilder({ backend, setup: "true", fetch, onStage: onQuiet, import: importOf() });
+    expect(quiet.some(l => l.includes("Mac paths"))).toBe(false);
   });
 
   it("a builder whose tools all installed records no missing list, and its version carries none", async () => {
@@ -2198,7 +2210,7 @@ describe("golden import stages", () => {
   it("the ledger carries what the pack left off the image, the seal stamps it on the version, and an attach whose files are already there keeps it", async () => {
     const { backend, fetch } = backendFor();
     const leftBehind = [{ id: "agents/claude", path: "~/.claude/settings.json", note: "hook left behind: /opt/homebrew/bin/terminal-notifier" }];
-    const files = { ...importOf().files!, pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [...leftBehind], cut: [], silenced: [], leftBehind }) };
+    const files = { ...importOf().files!, pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [...leftBehind], cut: [], silenced: [], macPaths: [], leftBehind }) };
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ files }) });
     expect(builder.import?.leftBehind).toEqual(leftBehind);
     expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.leftBehind).toEqual(leftBehind);
