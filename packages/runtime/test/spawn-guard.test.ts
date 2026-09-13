@@ -23,6 +23,7 @@ import {
   spawnDepthRefusal,
   noWorkspaceRefusal,
   spawnReachRefusal,
+  threadReachRefusal,
   threadWord,
   type Caller,
   type McpServerSpec,
@@ -38,7 +39,7 @@ import { WsClient } from "./ws-client.js";
 
 /** What each turn's launch was handed, so a test reads the environment and the servers the runtime built rather
  * than trusting the record. The turn holds until it is ended by hand, which is the window a scoped token stands in. */
-function heldAdapter(opts: { takesMcpServers?: true } = {}): {
+function heldAdapter(opts: { takesMcpServers?: true; steers?: true; renames?: true } = {}): {
   factory: HarnessAdapterFactory;
   launches: { env: Readonly<Record<string, string>>; mcpServers?: Readonly<Record<string, McpServerSpec>> }[];
   end: (nth: number) => void;
@@ -46,7 +47,8 @@ function heldAdapter(opts: { takesMcpServers?: true } = {}): {
   const ends: (() => void)[] = [];
   const launches: { env: Readonly<Record<string, string>>; mcpServers?: Readonly<Record<string, McpServerSpec>> }[] = [];
   const factory: HarnessAdapterFactory = ctx => ({
-    steers: false,
+    steers: opts.steers === true,
+    ...(opts.renames === true ? { renameSession: async () => ({ kind: "written" as const }) } : {}),
     ...(opts.takesMcpServers === true ? { mcpServers: true as const } : {}),
     start: ({ resume, mcpServers, onEvent }) => {
       const sessionId = resume ?? randomUUID();
@@ -66,7 +68,7 @@ function heldAdapter(opts: { takesMcpServers?: true } = {}): {
       ends.push(mine);
       onEvent({ type: "session.start", sessionId });
       // Its own turn, never the newest: a stop that cascades reaches each turn through its own handle.
-      return { localId: sessionId, finished, interrupt: async () => mine() };
+      return { localId: sessionId, finished, interrupt: async () => mine(), ...(opts.steers === true ? { steer: async () => "accepted" as const } : {}) };
     },
   });
   return { factory, launches, end: nth => ends[nth]!() };
@@ -744,6 +746,73 @@ describe("agents spawning agents", () => {
       await handle.finished;
       await rt.close();
     }
+  });
+
+  it("a lead steers, stops, renames and sends into the threads under it, its own and theirs", async () => {
+    const held = heldAdapter({ steers: true, renames: true });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const leadThread = opener.view().threadId!;
+    const leadScope: ThreadScope = { kind: "thread", threadId: leadThread, workspaceId: ws.id, rootThreadId: leadThread };
+    const child = await rt.sessions.start(ws.id, { prompt: "builder" }, asThread(leadScope));
+    const childThread = child.view().threadId!;
+    const childScope: ThreadScope = { kind: "thread", threadId: childThread, workspaceId: ws.id, rootThreadId: leadThread };
+    const grandchild = await rt.sessions.start(ws.id, { prompt: "deeper" }, asThread(childScope));
+    const grandThread = grandchild.view().threadId!;
+    // The thread between the two drives the one it opened, a level down from the root.
+    expect((await rt.sessions.steer(grandchild.id, { prompt: "from your parent" }, asThread(childScope))).outcome).toBe("accepted");
+    // The lead reaches both its child and the child's child, with each of the four verbs.
+    expect((await rt.sessions.steer(child.id, { prompt: "a word" }, asThread(leadScope))).outcome).toBe("accepted");
+    expect((await rt.sessions.steer(grandchild.id, { prompt: "a word" }, asThread(leadScope))).outcome).toBe("accepted");
+    expect((await rt.sessions.rename(child.id, "the builder", asThread(leadScope))).outcome).toBe("renamed");
+    expect((await rt.sessions.rename(grandchild.id, "the builder's builder", asThread(leadScope))).outcome).toBe("renamed");
+    const sent = await rt.sessions.start(ws.id, { prompt: "more", thread: grandThread }, asThread(leadScope));
+    expect([sent.view().threadId, sent.outcome]).toEqual([grandThread, "steered"]);
+    expect((await rt.sessions.interrupt(grandchild.id, asThread(leadScope))).outcome).toBe("accepted");
+    expect((await rt.sessions.interrupt(child.id, asThread(leadScope))).outcome).toBe("accepted");
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a thread is refused on the person's own thread and on another lead's tree, whatever workspace they share", async () => {
+    const held = heldAdapter({ steers: true, renames: true });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 3, maxDepth: 2 } });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const leadThread = opener.view().threadId!;
+    const leadScope: ThreadScope = { kind: "thread", threadId: leadThread, workspaceId: ws.id, rootThreadId: leadThread };
+    const child = await rt.sessions.start(ws.id, { prompt: "builder" }, asThread(leadScope));
+    // The person's own thread on the very same workspace, and a second lead of theirs with a thread under it.
+    const mine = await rt.sessions.start(ws.id, { prompt: "mine" });
+    const mineThread = mine.view().threadId!;
+    const other = await rt.sessions.start(ws.id, { prompt: "another lead" });
+    const otherThread = other.view().threadId!;
+    const otherChild = await rt.sessions.start(ws.id, { prompt: "their builder" }, asThread({ kind: "thread", threadId: otherThread, workspaceId: ws.id, rootThreadId: otherThread }));
+    const otherChildThread = otherChild.view().threadId!;
+    for (const [id, threadId] of [
+      [mine.id, mineThread],
+      [other.id, otherThread],
+      [otherChild.id, otherChildThread],
+    ] as const) {
+      const refusal = threadReachRefusal(leadThread, threadId);
+      await expect(rt.sessions.steer(id, { prompt: "a word" }, asThread(leadScope))).rejects.toThrow(refusal);
+      await expect(rt.sessions.interrupt(id, asThread(leadScope))).rejects.toThrow(refusal);
+      await expect(rt.sessions.rename(id, "a name", asThread(leadScope))).rejects.toThrow(refusal);
+      await expect(rt.sessions.start(ws.id, { prompt: "a word", thread: threadId }, asThread(leadScope))).rejects.toThrow(refusal);
+    }
+    // Upwards is outside the tree too: a thread drives what it opened, never the thread that opened it.
+    const childScope: ThreadScope = { kind: "thread", threadId: child.view().threadId!, workspaceId: ws.id, rootThreadId: leadThread };
+    await expect(rt.sessions.steer(opener.id, { prompt: "a word" }, asThread(childScope))).rejects.toThrow(threadReachRefusal(child.view().threadId!, leadThread));
+    // The person keeps every verb on their own thread, and the refusal above took nothing from the tree's own rows.
+    expect((await rt.sessions.steer(mine.id, { prompt: "a word" })).outcome).toBe("accepted");
+    expect((await rt.sessions.rename(mine.id, "mine to name")).outcome).toBe("renamed");
+    expect((await rt.sessions.interrupt(mine.id)).outcome).toBe("accepted");
+    held.end(0);
+    held.end(1);
+    held.end(3);
+    held.end(4);
+    await rt.close();
   });
 
   it("stopping a root ends every thread its agents spawned under it", async () => {
