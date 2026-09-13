@@ -190,11 +190,6 @@ impl Platform {
     }
 }
 
-/// The media type of a layer the store commits itself: a plain tar. Compressing a built workspace's layer took
-/// five minutes of one core on a two core box, five times the tar itself, and the blob sits beside its unpacked
-/// copy on the same disk either way; a layer that leaves the box is compressed by the road that carries it.
-pub const LAYER_TAR: &str = "application/vnd.oci.image.layer.v1.tar";
-
 /// One blob a manifest names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Descriptor {
