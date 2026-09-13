@@ -11,7 +11,7 @@ import { mcpServerCommandLine, nextInsideAgentLine } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from "../src/cli.js";
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
-import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, type RunningWsp } from "../src/mcp-install.js";
+import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, thisComputersPath, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
@@ -396,6 +396,16 @@ describe("installing the MCP server for a local agent", () => {
     // The file codex also reads must not send it to ~/.claude/skills, and the file only Claude Code reads says the same.
     expect(shared).not.toContain("~/");
     expect(shared).toBe(readFileSync(join(project, "CLAUDE.md"), "utf8"));
+  });
+
+  it("leaves the folders a launcher made for itself out of this computer's own path", () => {
+    // A harness that starts a process puts wrappers of its own, under a temp folder, first on its path; one of those
+    // asked for its version by a machine's own catalog probe never answered, and the turn behind it never launched.
+    const temp = tmpdir();
+    expect(thisComputersPath(`${temp}/cli-shims/abc:/usr/local/bin:/tmp/other/bin:/usr/bin`, [temp, "/tmp"])).toBe("/usr/local/bin:/usr/bin");
+    // The temp folder itself, and nothing that merely begins with its letters.
+    expect(thisComputersPath(`${temp}:${temp}-keep/bin:/bin`, [temp, "/tmp"])).toBe(`${temp}-keep/bin:/bin`);
+    expect(thisComputersPath("", [temp, "/tmp"])).toBe("");
   });
 
   it("nobody named an agent and there is no terminal to ask at: every agent whose own command is on PATH takes the install, and none there is said in one line", async () => {
