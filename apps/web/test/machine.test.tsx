@@ -1107,6 +1107,10 @@ describe("where a workspace runs", () => {
     await mountAway({ road: { from: "192.168.1.34" } });
     expect(fact("address")).toBe("192.168.1.34 · dials in");
     expect(fact("absent-road")).toContain("wsp waits for vps to dial in, last from 192.168.1.34");
+    // There is no road back to a computer that joined by typing a code: the sentence stands on its own, with no
+    // button beside it whose only answer would be that sentence again.
+    expect(document.querySelector("[data-k='dial']")).toBeNull();
+    expect(document.querySelector("[data-k='dial-held']")).toBeNull();
   });
 
   it("carries the last refusal, so a person reads what went wrong before they press anything", async () => {
@@ -1119,15 +1123,15 @@ describe("where a workspace runs", () => {
     const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
     const dialPlace = vi.fn(async (placeId: string) => ({ dialled: { at: new Date().toISOString(), answered: true, roundTripMs: 412 }, line, place: { ...place, id: placeId } }));
     await mountAway({}, { dialPlace } as Partial<Api>);
-    fireEvent.click(screen.getByRole("button", { name: "Try now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try over ssh" }));
     await waitFor(() => expect(fact("absent-road")).toBe(line));
     expect(dialPlace).toHaveBeenCalledTimes(1);
     expect(dialPlace).toHaveBeenCalledWith("p_1");
   });
 
-  it("holds Try now on a wsp whose own client cannot dial, and writes why in the slot rather than on a tooltip", async () => {
+  it("holds the dial on a wsp whose own client cannot dial, and writes why in the slot rather than on a tooltip", async () => {
     await mountAway();
-    const button = screen.getByRole("button", { name: "Try now" });
+    const button = screen.getByRole("button", { name: "Try over ssh" });
     expect(button.hasAttribute("disabled")).toBe(true);
     // No tooltip carries a reason: it is read before any pointer touches the button.
     expect(button.getAttribute("title")).toBeNull();

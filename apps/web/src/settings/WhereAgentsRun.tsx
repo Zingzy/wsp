@@ -21,7 +21,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../components/ui/menu.js
 import { TableCell, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { useProtocolEvents, useStore } from "../protocol/store.js";
-import { TryNowButton, useDialPlace } from "./AbsentRoad.js";
+import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { ConnectProviderSheet } from "./ConnectProviderSheet.js";
 import { WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
@@ -235,7 +235,7 @@ function PlaceActions({ place, onRemove, inMenu = true }: { place: PlaceView; on
  * last dial of it took. Only facts the host carries are rows; the image copy this computer holds is drawn nowhere
  * here, since nothing on the wire says it yet. */
 function PlaceDetail({ place, holding, now, workspaces, spend, onRemove }: { place: PlaceView; holding: PlaceHolding; now: number; workspaces: number; spend?: PlaceSpend; onRemove: () => void }) {
-  const { dial, busy, line, held, heldWhy } = useDialPlace(place.id);
+  const { dial, busy, line, held, heldWhy, road: dialRoad } = useDialPlace(place);
   // How long this host has not heard from it, and null while it is holding its link: a computer that is answering
   // reads its facts plain, since nothing about them is stale.
   const away = place.present === true ? null : awayMsOf(place, now);
@@ -282,7 +282,7 @@ function PlaceDetail({ place, holding, now, workspaces, spend, onRemove }: { pla
             </p>
           )}
           <div className="flex gap-2 pt-1">
-            {road === null ? null : <TryNowButton busy={busy} held={held} onDial={dial} />}
+            {road === null || dialRoad === undefined ? null : <DialButton busy={busy} held={held} road={dialRoad} onDial={dial} />}
             <PlaceActions place={place} onRemove={onRemove} inMenu={false} />
           </div>
         </div>

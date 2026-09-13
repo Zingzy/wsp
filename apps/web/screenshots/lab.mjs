@@ -36,18 +36,24 @@
 // child's own environment, word for word, from a shell with nothing else in it,
 // because a wsp verb that runs under whatever the tester's terminal holds reads
 // their own state file, their own provider key, and the .env beside whichever
-// checkout they happen to stand in. A tester given a shell function to paste
-// wrote their own wrapper instead and was told both the lab's machines were
-// gone at the provider. The same lines are written into the lab's log and kept
-// in lab.json, so what a run met can be read afterwards.
-import { shellQuote } from "@wsp/protocol";
+// checkout they happen to stand in. Two testers given that shell wrote their own
+// wrapper instead and spent their visits on another host; the line now stands
+// alone at the foot of the start with nothing after it, and this lab's wsp
+// refuses a shell that is not this lab's rather than serving it. The same lines
+// are written into the lab's log and kept in lab.json, so what a run met can be
+// read afterwards.
+//
+// A start also asks the stand-in for one launch before it says it is up: a whole
+// round of testers met forks whose every turn and every exec died inside the
+// machine, and a lab that cannot launch is stopped here rather than handed over.
+import { spawnSync } from "node:child_process";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fixtureCloud, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureState } from "./fixture-state.mjs";
+import { fixtureCloud, fixtureFleet, fixtureFolders, FIXTURE_NAMES, fixtureRepos, fixtureState } from "./fixture-state.mjs";
 import { daemonBinaryHere, freePort, HOST_BIN, localReach, providerFor, sleep, startHost, whatIsNotBuilt } from "./host.mjs";
-import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, labLogs, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { AGENT_KEYS, binDir, copyApp, keyLayers, keysFound, labHome, labLogs, labShell, standInRoot, treeSha, writeAgentHome, writeKeys, writeShim, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 
 const USAGE = `usage: node lab.mjs start <name> [--fixture <fixture>] [--for <folder>]
        node lab.mjs stop <name> [--log <file>]
@@ -168,7 +174,9 @@ export function whyNotOursToRemove(home, holds = () => (existsSync(home) ? readd
 
 /** What a lab says when it comes up and when it is asked where it is, in one place so both say the same thing and a
  * tester's notes read alike whichever they ran: where the app is, which build it is serving, what a turn there is
- * signed in with, and the shell whose wsp is this lab's. */
+ * signed in with, and, alone at the foot, the shell whose wsp is this lab's. That line is last and has nothing
+ * after it because the tester it was written for read it as one sentence among several, wrote his own wrapper
+ * around the command instead, and ran his whole visit against this computer's own host. */
 export const labLines = facts => [
   `lab ${facts.name} serving ${facts.url} pid ${facts.pid} home ${facts.home}`,
   `built from ${facts.build.sha}, app ${facts.build.app} built ${facts.build.builtAt}, command ${facts.build.command}, served out of ${facts.build.appDir}`,
@@ -178,27 +186,49 @@ export const labLines = facts => [
   facts.signedIn ? "turns run in this lab's own home, signed in with the agents' key, with this lab's own wsp tools and no skill of this computer's" : `turns run in this lab's own home and none of ${AGENT_KEYS.join(", ")} was found, so an agent there answers that it is not logged in`,
   `this lab's log is kept at ${keptLog(facts.name, undefined, facts)} when it is stopped`,
   NO_FINDER_CHOOSER,
-  "a shell whose wsp is this lab's, carrying nothing of the tester's own:",
-  `  ${labShell(facts)}`,
+  "",
+  PASTE_THIS,
+  labShell(facts),
 ];
 
-/** The pty wrapper, by its own path: a shell started with nothing in its environment has only the path this lab
- * hands it to find a command on, and that path leads with the lab's own bin. This is the BSD spelling, where the
- * file to keep comes before the command; the one on a Linux box takes -c and would read this line as a file name.
- * A lab is a Mac's, since what it serves is the app a person runs on their own computer. */
-const PTY = "/usr/bin/script -q /dev/null";
+/** The one sentence over that line. Nothing is printed after the line itself, so what a tester copies is whole. */
+export const PASTE_THIS = "paste this line, and run every wsp verb in the shell it opens and in no other:";
 
 /** Said on every lab, since a tester who went looking for it wrote the app off: the folder chooser a Mac opens is
  * the desktop app's road, and a lab serves the same app in a browser, where a page cannot open one. */
 export const NO_FINDER_CHOOSER = "a lab serves the app in a browser, where a folder is typed: the Finder chooser is the desktop app's road and is not on this screen";
 
-/** The shell a tester runs this lab's verbs from: nothing of their own in it, and this lab's wsp first on the
- * path, so `wsp doctor` is this lab's doctor with no wrapper to write and nothing to paste.
- *
- * Under a pty, because a pipe is not a terminal: wsp prints a reply once when one screen holds both its streams
- * and twice when it cannot tell, and a tester whose shell had no tty read the doubling as the product repeating
- * itself. script is what gives a shell one here; the typescript it would keep goes nowhere. */
-export const labShell = facts => `env -i HOME=${shellQuote(facts.home)} PATH=${shellQuote(facts.env.PATH)} TERM=xterm-256color ${PTY} /bin/sh`;
+/** What the probe runs on a stand-in: a command every machine has, since the question is whether the launch gets
+ * that far at all. An exec takes the same road a turn's launch does, so a stand-in that cannot launch this reaches
+ * no agent either. */
+const PROBE_LINE = "true";
+
+/** How long that probe is given. A fork of a fixture is already running, so this is a launch and a poll. */
+const PROBE_MS = 60_000;
+
+/** Why a turn on this lab's forks would die before the agent heard it, in one sentence with what the machine said.
+ * A whole round of testers met this: every turn and every exec on a stand-in answered with a shell error from
+ * inside the machine, and nothing on any surface said what it was or that nothing else would work either. */
+export const launchDiesLine = (workspace, said) =>
+  `a turn on this lab's stand-in dies before the agent hears it: wsp exec ${workspace} answered ${JSON.stringify(said)}, and every turn and every exec on a fork here would answer the same.`;
+
+/** That sentence for this lab, or nothing when a launch lands. Run through the lab's own wsp, on the first fork the
+ * fixture has running, since that is the road a tester takes; a fixture with no fork has no stand-in to ask. */
+export function whyALaunchDies(home, state, run = probeRun) {
+  const fork = Object.values(state.workspaces ?? {}).find(w => w.kind === "cloud" && w.phase === "running");
+  if (fork === undefined) return undefined;
+  const said = run(join(binDir(home), "wsp"), ["exec", fork.name, "--", PROBE_LINE], home);
+  return said === undefined ? undefined : launchDiesLine(fork.name, said);
+}
+
+/** The probe itself: what the machine said when the launch failed, and nothing when it did not. The lab's own home
+ * and nothing else, since this lab's wsp serves no shell but this lab's and wipes the rest of what it is given. */
+const probeRun = (bin, args, home) => {
+  const done = spawnSync(bin, args, { env: { HOME: home }, encoding: "utf8", timeout: PROBE_MS });
+  if (done.status === 0) return undefined;
+  const said = `${done.stdout ?? ""}${done.stderr ?? ""}`.trim();
+  return said === "" ? `wsp exec ended with ${done.status ?? done.signal} and said nothing` : said.split("\n")[0];
+};
 
 async function start({ name, fixture, for: keepLogIn }) {
   const unbuilt = await whatIsNotBuilt();
@@ -223,7 +253,7 @@ async function start({ name, fixture, for: keepLogIn }) {
   // the folders those turns start in and the keys that sign them in.
   const app = copyApp(home);
   writeAgentHome(home);
-  writeWorkFolder(home, fixtureFolders(state));
+  writeWorkFolder(home, fixtureFolders(state), fixtureRepos(fixture, { home }));
   // The stand-in's own folder, holding this fixture's machines in the state it says they are in and the snapshots
   // its image says are already at the provider: a second host on this state file reads the same machines out of
   // it, and each machine gets a folder there with a daemon in it, which is what gives a fork a terminal, a process
@@ -247,6 +277,9 @@ async function start({ name, fixture, for: keepLogIn }) {
     appDir: app.dir,
     binDir: binDir(home),
     standIn: standInRoot(home),
+    // The machines this lab's forks stand on are this computer, so the address they dial this host at is its own
+    // loopback. A host that advertises none hands a turn no token, and the tools of every thread act as the person.
+    advertise: `http://127.0.0.1:${port}`,
     ...(cloud === undefined ? {} : { cloud }),
     ...(key ? { secrets: keys } : {}),
   });
@@ -279,6 +312,13 @@ async function start({ name, fixture, for: keepLogIn }) {
   writeFileSync(factsPath(home), `${JSON.stringify(facts, null, 2)}\n`);
   // Where a later command finds this lab whatever its own shell says the root is.
   writeFileSync(pointerPath(name), `${JSON.stringify({ home }, null, 2)}\n`);
+  // Written down first, so what the probe drives is a lab a stop can take away by the pid it recorded.
+  const dies = whyALaunchDies(home, state);
+  if (dies !== undefined) {
+    await stopLab({ name });
+    console.error(dies);
+    process.exit(1);
+  }
   const lines = labLines(facts);
   // Into the log as well as onto the screen: the log is what is kept when the lab is stopped, and what a run met
   // cannot be worked out afterwards from the host's own lines alone.

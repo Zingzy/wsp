@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, PLACES_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
+import { FOLDER_GHOST } from "../src/files/FolderPathField.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
 import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
@@ -656,7 +657,9 @@ describe("the cloud setup sheet", () => {
     expect(k(dialog, "sentence").textContent).toBe("Forked from the image as soon as the build finishes, on a 2 vCPU · 4 GB machine");
     expect((within(dialog).getByLabelText("Name") as HTMLInputElement).value).toBe("first");
     const folder = within(dialog).getByLabelText(/Project folder/) as HTMLInputElement;
-    expect(folder.placeholder).toBe("/Users/me/code/project");
+    // A ghost shaped like a path reads as the app naming a folder that is there; this one names the road instead.
+    expect(folder.placeholder).toBe(FOLDER_GHOST);
+    expect(folder.placeholder).not.toContain("/");
     // In a browser there is no bridge, so no Choose button is drawn.
     expect(dialog.querySelector("[data-k=choose]")).toBeNull();
     fireEvent.change(folder, { target: { value: "/Users/me/code/app" } });

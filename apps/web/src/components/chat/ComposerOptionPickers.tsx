@@ -5,9 +5,10 @@
 // empty does not exist. The effort button reads "<effort> · <context>", the
 // context alone for a model that takes no effort, and its menu has a Reasoning
 // and a Context Window section, each default marked and checked until a pick;
-// the access button carries the mode's icon and the mode's short form where
-// it has one (its label names the machine on a kept one; the menu row keeps
-// the label), and each mode its one line. No button shrinks: the row wraps
+// the access button is the one chip named by what it sets rather than by what
+// it holds: the mode's icon, the word Permissions, then the mode's short form
+// where it has one (its label names the machine on a kept one; the menu row
+// keeps the label), and each mode its one line. No button shrinks: the row wraps
 // before any of them is cut, so every pick reads whole down to a centre column
 // of about 300 px (measured 2026-09-09); the shell keeps the column wider
 // than that beside the inline panel. The one label a person writes, the
@@ -226,6 +227,15 @@ export function useAccessPick(workspaceId: string, running: RunningTurn | null, 
   return { pick, line: note !== null && note.turnId === running?.turnId ? ACCESS_REFUSED_LINE : null };
 }
 
+/** The word the access chip leads with, and what it says with a mode behind it. Every other chip in the row is
+ * named by the value it holds, which left this one reading `Default`, a word that names nothing: the one setting
+ * that hands the computer over has to be findable before a person sends, not after. */
+export const PERMISSIONS_WORD = "Permissions";
+
+export function accessChipWords(mode: string | undefined): string {
+  return mode === undefined ? PERMISSIONS_WORD : `${PERMISSIONS_WORD}: ${mode}`;
+}
+
 function AccessPicker({
   modes,
   value,
@@ -240,18 +250,17 @@ function AccessPicker({
 }) {
   const current = modes.find(o => o.value === value);
   const Icon = (value !== null ? ACCESS_ICONS[value] : undefined) ?? ShieldIcon;
-  const label = current?.label ?? "Access";
   return (
     <Menu>
       <MenuTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
         className={triggerClass}
-        aria-label={`Access: ${label}`}
+        aria-label={accessChipWords(current?.label)}
         data-composer-picker="permissionMode"
         data-value={value ?? undefined}
       >
         <Icon className="size-3.5 shrink-0" aria-hidden />
-        <span className="truncate">{current?.short ?? label}</span>
+        <span className="truncate">{accessChipWords(current === undefined ? undefined : current.short ?? current.label)}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
       <MenuPopup align="start" side="top" className="w-72">

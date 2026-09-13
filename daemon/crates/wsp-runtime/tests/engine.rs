@@ -2,6 +2,7 @@
 //! The fenced engine socket against a fake engine in this process: a Unix socket that records every request it is
 //! handed and answers what the route asks for. One case per allowed route, so what reaches the engine is read off
 //! the record, and one per refusal, so nothing reaches it.
+#![cfg(target_os = "linux")]
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};

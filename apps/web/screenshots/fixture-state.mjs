@@ -446,12 +446,18 @@ const asciiOnly = () =>
     meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 0, phase: "napping" })]),
   });
 
+/** The switch a fixture's forks carry, the one a person turns on when they want the threads on a machine to open
+ * threads of their own: on, capped at the two machines this account holds. Off is what a record without it reads
+ * as, and the AGENTS column is then empty on every row, which a tester read as an image that carries no agent at
+ * all. */
+const AGENTS_SPAWN = { spawn: true, maxMachines: 2, maxDepth: 1 };
+
 /** Forks on Solari and nothing else, one of them napping, which is where most of a fleet sits. */
 const solariOnly = () =>
   store({
     workspaces: [
-      fork("ws_api", "api", "fk_slr_1", { projects: [project("api", 48_200_000, 60 * 20)] }),
-      fork("ws_web", "web", "fk_slr_2", { phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
+      fork("ws_api", "api", "fk_slr_1", { agents: AGENTS_SPAWN, projects: [project("api", 48_200_000, 60 * 20)] }),
+      fork("ws_web", "web", "fk_slr_2", { agents: AGENTS_SPAWN, phase: "napping", vaultedAt: new Date(ago(90)).toISOString() }),
     ],
     goldens: sealed(),
     meters: Object.fromEntries([meter("ws_api", { rateUsdPerHour: FORK_RATE, hours: 8 }), meter("ws_web", { rateUsdPerHour: FORK_RATE, hours: 3, phase: "napping" })]),
@@ -598,12 +604,14 @@ const imageBuilt = () =>
   });
 
 /** Every setup a lab can serve, by the word `--fixture` takes. One row per kind of person: what builds its store,
- * and the cloud its machines are meant to be at, which the stand-in provider then wears as its own word. Without
- * that word every fork in a fixture reads "fake" on the row where a person reads which cloud they are paying.
- * Adding a fixture is a row here and its builder above. */
+ * the cloud its machines are meant to be at, which the stand-in provider then wears as its own word, and the
+ * repositories that person already keeps at the top of their home, which wsp has imported nowhere. Without the
+ * cloud word every fork in a fixture reads "fake" on the row where a person reads which cloud they are paying;
+ * without a repository of their own, a person told to point the app at one of their repositories has none to point
+ * it at. Adding a fixture is a row here and its builder above. */
 const FIXTURES = {
   "mac-in-use": { build: macInUse },
-  "mac-only": { build: thisComputer },
+  "mac-only": { build: thisComputer, repos: ["spoo"] },
   "mac-and-laptop": { build: macAndLaptop },
   "mac-and-vps": { build: macAndVps },
   "ascii-only": { build: asciiOnly, cloud: "box" },
@@ -677,6 +685,15 @@ export const fixtureFleet = state => ({ machines: fixtureMachines(state), snapsh
  * workspaces, which is where a turn on one of them starts. */
 export function fixtureFolders(state) {
   return Object.values(state.workspaces ?? {}).flatMap(w => (w.projects ?? []).map(p => p.dest));
+}
+
+/** The repositories a fixture's person already has, as folders under the home the host serving it runs in: work of
+ * their own at the top of their home, where a person keeps theirs and where the app's folder picker opens, and
+ * never a project any workspace has imported. A tester asked to import one of their own repositories walked up
+ * from the work folder, found the app, the bin folder and the work folder, and had nothing to point the app at.
+ * Empty for a fixture whose person keeps none. */
+export function fixtureRepos(name, { home = homedir() } = {}) {
+  return (fixtureRow(name).repos ?? []).map(folder => join(resolve(home), folder));
 }
 
 /** The cloud a fixture's machines are meant to be at, by the id that provider's own module carries; nothing for a

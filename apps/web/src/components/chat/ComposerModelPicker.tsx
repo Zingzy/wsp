@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The model picker in the composer box: the harness's mark and the model on
-// the button; behind it a rail of the harnesses that can run a turn, a search
-// box, the models with favourites first and a jump chip per row, and a footer
+// The model picker in the composer box: the agent's mark, its name and the
+// model on the button, since the chip has to say which agent runs a turn
+// before it says what that agent runs on; behind it a rail of the agents that
+// can run one, each named in text on hover, a search box, the models with
+// favourites first and a jump chip per row, and a footer
 // naming where the list came from in that agent's own words, on one line
 // whatever the words are and whole on hover, then two sentences that hold
 // whatever that line says: whose sign-in the turn runs on and where, and what
@@ -17,6 +19,7 @@ import { cn, isMacPlatform, normalizeSearchText } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Kbd } from "../ui/kbd";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { favouriteKey, useComposerFavouritesStore } from "./composerFavouritesStore";
 import { HarnessMark } from "./HarnessMark";
 
@@ -58,6 +61,13 @@ export function listModels(catalog: HarnessCatalog, favourites: ReadonlyArray<st
 export function jumpLabel(index: number, platform: string): string | null {
   if (index >= JUMP_KEYS) return null;
   return isMacPlatform(platform) ? `⌘${index + 1}` : `Ctrl+${index + 1}`;
+}
+
+/** What the button says: the agent that will run the turn, then the model it will run on. The model stood there
+ * alone until a person read the row and could find no agent named anywhere on it. With no model resolved the slot
+ * names what the button picks rather than standing empty. */
+export function agentAndModelLine(catalog: HarnessCatalog, model: HarnessModel | null): string {
+  return `${catalog.label} · ${model?.label ?? "Model"}`;
 }
 
 /** The one line the composer answers a cross-harness pick on a started thread with. */
@@ -118,13 +128,12 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
     [active, pick, rows],
   );
 
-  const label = model?.label ?? "Model";
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
         className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80"
-        aria-label={model === null ? "Model" : `Model: ${label}`}
+        aria-label={agentAndModelLine(catalog, model)}
         data-composer-picker="model"
         data-value={model?.value}
         data-harness={catalog.harness}
@@ -132,35 +141,40 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
         <span className="inline-flex text-foreground">
           <HarnessMark harness={catalog.harness} label={catalog.label} className="size-3.5" />
         </span>
-        <span className="truncate">{label}</span>
+        <span className="truncate">{agentAndModelLine(catalog, model)}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </PopoverTrigger>
       <PopoverPopup align="start" side="top" className="w-[22rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]">
         <div className="flex max-h-80 min-h-0" data-composer-model-menu onKeyDown={onKeyDown}>
-          <div className="flex w-10 shrink-0 flex-col gap-1 border-e border-border p-1" role="tablist" aria-label="Harness">
+          <div className="flex w-10 shrink-0 flex-col gap-1 border-e border-border p-1" role="tablist" aria-label="Agents">
             {catalogs.map(entry => {
               const selected = entry.harness === catalog.harness;
               return (
-                <button
-                  key={entry.harness}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  aria-label={entry.label}
-                  title={entry.label}
-                  data-composer-harness={entry.harness}
-                  onClick={() => {
-                    if (selected) return;
-                    if (pinned) setNotice(newThreadNotice(entry));
-                    else onPickHarness(entry.harness);
-                  }}
-                  className={cn(
-                    "flex aspect-square w-full items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    selected && "bg-foreground/[0.08] text-foreground",
-                  )}
-                >
-                  <HarnessMark harness={entry.harness} label={entry.label} className="size-4" />
-                </button>
+                <Tooltip key={entry.harness}>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        aria-label={entry.label}
+                        data-composer-harness={entry.harness}
+                        onClick={() => {
+                          if (selected) return;
+                          if (pinned) setNotice(newThreadNotice(entry));
+                          else onPickHarness(entry.harness);
+                        }}
+                        className={cn(
+                          "flex aspect-square w-full items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          selected && "bg-foreground/[0.08] text-foreground",
+                        )}
+                      />
+                    }
+                  >
+                    <HarnessMark harness={entry.harness} label={entry.label} className="size-4" />
+                  </TooltipTrigger>
+                  <TooltipPopup side="right">{entry.label}</TooltipPopup>
+                </Tooltip>
               );
             })}
           </div>

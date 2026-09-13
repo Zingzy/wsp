@@ -99,7 +99,10 @@ function vaultServer(puts: StubBackend["puts"], downloads: () => StubBackend["do
     }));
 }
 
-export function stubBackend(): StubBackend {
+/** `mark` goes into every snapshot id this backend mints. Two stubs standing for two places mint ids a test can tell
+ * apart, which is what lets an assertion about which place's copy a fork names go red. Unmarked ids are what every
+ * caller with one backend has always read. */
+export function stubBackend(mark?: string): StubBackend {
   let seq = 0;
   const machines: StubMachine[] = [];
   const snapshots: SnapshotRow[] = [];
@@ -177,7 +180,8 @@ export function stubBackend(): StubBackend {
           // The provider mints an id per call; a repeated name (two in one millisecond) must not fold into one row.
           const nth = (snapshotsNamed.get(name) ?? 0) + 1;
           snapshotsNamed.set(name, nth);
-          const id = nth === 1 ? `snap_${name}` : `snap_${name}-${nth}`;
+          const at = mark === undefined ? "" : `${mark}-`;
+          const id = nth === 1 ? `snap_${at}${name}` : `snap_${at}${name}-${nth}`;
           snapshots.push({ id, name, sizeBytes: backend.snapshotBytes, createdAt: new Date().toISOString() });
           return id;
         },

@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, daemonSilent, fmtBytes, fmtRate, hereWord, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -49,11 +49,14 @@ export const threadWord = (n: number): string => `${n} ${n === 1 ? "thread" : "t
 
 /** What a remove takes, computed from what the computer holds. A computer keeps its own files and is left as it
  * was; a provider's workspaces are deleted where they stand and its key is forgotten here. The second sentence is
- * about this Mac alone, so a computer holding nothing gets no second sentence. */
+ * about this Mac alone, so a computer holding nothing gets no second sentence.
+ *
+ * The copy of the image is one of the things left as they are: it sits in that computer's own workspace store,
+ * which no sweep walks, and only a computer that runs workspaces ever held one. The clause is the protocol's, the
+ * same one the Add sheet says before any of this. */
 export function removeSentence(place: PlaceView, holding: PlaceHolding, imageBytes?: number): string {
   const count = holding.workspaces.length;
   const threads = heldThreads(holding);
-  const image = imageBytes === undefined ? "your image" : `your image (${fmtBytes(imageBytes)})`;
   const held = count === 1 ? "its workspace" : `its ${count} workspaces`;
   const name = placeName(place);
   const lines: string[] = [];
@@ -61,7 +64,8 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, imageByt
     lines.push(count === 0 ? `The key for ${name} is forgotten on this Mac.` : `Its ${count === 1 ? "workspace is" : `${count} workspaces are`} deleted at ${name} and the key is forgotten on this Mac.`);
     if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave this Mac.`);
   } else {
-    lines.push(count === 0 ? `wsp and ${image} come off ${name}, which is otherwise left as it is.` : `wsp, ${image} and ${held} come off ${name}, which is otherwise left as it is.`);
+    const stays = place.runsWorkspaces === true ? `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}` : "";
+    lines.push(count === 0 ? `wsp comes off ${name}, which is otherwise left as it is${stays}.` : `wsp and ${held} come off ${name}, which is otherwise left as it is${stays}.`);
     if (count > 0) lines.push(`${count === 1 ? "The workspace's record" : "The workspaces' records"} and ${threadWord(threads)} leave this Mac.`);
   }
   // A computer that is not answering cannot be swept now, and the sentence says when it will be.
