@@ -15,6 +15,7 @@ import { cn } from "../../lib/utils.js";
 import { SETTINGS_WORDS } from "../../settings/format.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
+import { spaceWorkspaceId } from "../../sidebar/sidebarMode.js";
 import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
 import { compactTimeLabel, dotClassForTone, whereWord } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
@@ -114,7 +115,13 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
   const oneWorkspace = input.projects.length < 2;
   const walk = threadWalk(input.projects, selectedId);
   const oneThread = walk.length < 2;
-  const threadWalkDescription = walk.length === 0 ? "No threads to walk" : "Only one thread";
+  // A walk steps inside the workspace on screen, and the thread lists under these rows hold every workspace's, so a
+  // held Next thread over a list of four has to name the workspace it is walking and say the four are not in it.
+  // Nothing to step to covers both ways the walk can come up empty: no rows under that workspace at all, and rows
+  // the runtime stamped no thread id on, which pin the workspace alone and so are no step.
+  const walkingIn = walkedWorkspace(input);
+  const threadWalkDescription =
+    walk.length > 0 ? "Only one thread" : walkingIn === null ? "No threads to walk" : `Nothing to step to on ${walkingIn}; a walk stays inside one workspace`;
   items.push(
     {
       kind: "action",
@@ -213,6 +220,14 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     },
   );
   return items;
+}
+
+/** The workspace a walk steps inside, by the name the list under these rows shows for it; null while the sidebar
+ * has no workspace on screen, where there is no walk to explain. The same rule the walk itself takes its threads
+ * from, so the name and the list can never name two workspaces. */
+function walkedWorkspace(input: PaletteItemsInput): string | null {
+  const id = spaceWorkspaceId(input.projects.map(project => project.id), input.selectedId);
+  return input.projects.find(project => project.id === id)?.displayName ?? null;
 }
 
 function workspaceItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
