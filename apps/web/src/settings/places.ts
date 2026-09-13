@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -189,7 +189,9 @@ export const WHERE_PICK_WORDS = {
  *
  * Every figure is the protocol's own formatter (fmtRate, plural), never a second spelling of one. */
 export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined, rateUsdPerHour = place.rateUsdPerHour): string {
-  const cost = rateUsdPerHour === undefined ? [WHERE_PICK_WORDS.free] : [`${fmtRate(rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
+  // Nothing an hour is free, said in that word and read the protocol's one way: a caption reading $0.00/hr while
+  // awake · naps to $0 prices a workspace nobody is billed for in three clauses that all say nothing.
+  const cost = chargesNothing(rateUsdPerHour) ? [WHERE_PICK_WORDS.free] : [`${fmtRate(rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
   const forks = place.forks;
   // A row with no room left ends on what to do about it: where the image stands is no longer the question, since
   // nothing can be created there until a workspace goes.

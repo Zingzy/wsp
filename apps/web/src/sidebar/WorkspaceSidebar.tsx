@@ -36,7 +36,7 @@ import { useLocalStorage, type Codec } from "../hooks/useLocalStorage.js";
 import { useNowMinute } from "../hooks/useNowMinute.js";
 import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
-import { catalogIn, useCapabilities, useLabs, useLaunches, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
+import { catalogIn, useLabs, useLaunches, useReady, useSelectedId, useSelectedThreadId, useSelectedWorkspaceId, useSidebarProjects, useStore, useWorkspace, type Creation } from "../protocol/store.js";
 import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
@@ -145,7 +145,6 @@ export function WorkspaceSidebar() {
   const createLocal = useStore(s => s.createLocalWorkspace);
   // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
   const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
-  const capabilities = useCapabilities();
   // Where a workspace can go: the same list Settings draws, so the dialog and that table never offer two answers.
   const places = useStore(s => s.places);
   const openAddComputer = useStore(s => s.openAddComputer);
@@ -694,7 +693,6 @@ export function WorkspaceSidebar() {
           initialName={dialog.name}
           places={places}
           copies={dialog.copies}
-          sizes={capabilities?.sizes ?? []}
           goldenSize={dialog.goldenSize}
           refusal={createRefusal?.line ?? null}
           onCreate={(name, where, size) => void create(name, where, size)}

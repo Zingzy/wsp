@@ -176,16 +176,23 @@ export function providerBackendFor(env: ProviderEnv): MachineBackend {
   return providerModule(env).build(env);
 }
 
-/** Whether this row is somewhere work can stand: a row a person can add whose key they hold where it reads one, or
- * a stand-in wearing the cloud it is serving in place of, whose machines are at that cloud as far as every screen
- * goes. A row that is no place at all says so on itself, and a row whose key nobody has typed is one the provider
- * would only refuse, so neither is one; nothing here compares an id.
+/** Whether this row is somewhere work can stand: a row somebody has added, or a stand-in wearing the cloud it is
+ * serving in place of, whose machines are at that cloud as far as every screen goes. A row that is no place at all
+ * says so on itself; nothing here compares an id.
+ *
+ * Added is read off the road the row declares. A row opened by a key is added once that key is here, since a row
+ * whose key nobody has typed is one the provider would only refuse. A row opened by its own word is added once
+ * that word is here, which is what the row's own selects answers; before that it is a provider this computer
+ * could be set up for and not one it is, and listing it put a second place on every screen beside the one the
+ * person had connected, priced at the other one's rates.
  *
  * A stand-in counts because the screens a person reads are built from this: a harness serving a fixture of forks
  * at a cloud showed Settings with no provider row, New workspace with nowhere to create and the machines' own
  * cloud nowhere on the list they stood on. */
 export function isPlace(m: ProviderModule, env: ProviderEnv): boolean {
-  return m.standsFor?.(env) !== undefined || (addedBy(m) !== undefined && (m.keyEnv === undefined || keyIn(env, m.keyEnv) !== undefined));
+  if (m.standsFor?.(env) !== undefined) return true;
+  if (addedBy(m) === undefined) return false;
+  return m.keyEnv === undefined ? m.selects(env) : keyIn(env, m.keyEnv) !== undefined;
 }
 
 /** Every provider this computer is set up for, in the table's own order. These are the places a copy of the image

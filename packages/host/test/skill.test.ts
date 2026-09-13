@@ -190,10 +190,10 @@ describe("the wsp skill", () => {
       const body = lines.slice(at, next === -1 ? undefined : at + 1 + next);
       expect(body.filter(l => /^ *Expect: /.test(l)), line.slice(0, 40)).toHaveLength(1);
     }
-    // A serving host is not a sealed golden: init serves for the whole wizard, so only one step tells them apart.
+    // A serving host is not a sealed image: init serves for the whole wizard, so only one step tells them apart.
     const five = setup.slice(setup.indexOf("\n5. "), setup.indexOf("\n6. "));
     expect(five).toContain("which is the seal");
-    expect(five).toContain("step 6 is what tells a sealed golden from an init still running");
+    expect(five).toContain("step 6 is what tells a sealed image from an init still running");
     expect(setup).toContain("Every step below ends in an `Expect:` line");
     expect(setup).toContain("say what to run next inside their own agent");
     expect(setup).toContain("In Claude Code the skill is then `/wsp`");
@@ -254,7 +254,7 @@ describe("the wsp skill", () => {
     expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
     expect(section).toContain("anything that should not touch this computer");
     expect(section).toContain("`wsp snapshot <workspace>`");
-    expect(section).toContain("`wsp new <name> --from <that golden>`");
+    expect(section).toContain("`wsp new <name> --from <that image>`");
     expect(section).toContain("on 2 vCPU and 4 GB one thread runs tests or a build at a time");
     expect(section).toContain("its own git worktree");
     expect(section).toContain("`pnpm install --offline`");

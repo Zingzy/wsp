@@ -33,7 +33,10 @@ describe("no provider backend", () => {
     await expect(backend.create()).rejects.toThrow(NO_PROVIDER_LINE);
     await expect(backend.get()).rejects.toThrow(NO_PROVIDER_LINE);
     await expect(backend.deleteSnapshot()).rejects.toThrow(NO_PROVIDER_LINE);
-    expect(NO_PROVIDER_LINE).toContain("SOLARI_API_KEY");
+    // The road out is the verb off the front page, never a shell variable: this is the first refusal a person who
+    // typed wsp new on a fresh home reads, and one provider's variable is not the answer for the others.
+    expect(NO_PROVIDER_LINE).toContain("wsp add <provider>");
+    expect(NO_PROVIDER_LINE).not.toContain("SOLARI_API_KEY");
     expect(NO_PROVIDER_LINE).toContain("wsp init");
   });
 

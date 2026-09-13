@@ -176,7 +176,7 @@ describe("the build wsp init hands to the host serving the state", () => {
     expect(out.match(/Machine created/g)).toHaveLength(2);
     // A row that ended with nothing run says so rather than wearing the same glyph as work that happened.
     expect(out).toContain(`Tools installed  ${INIT_ROW_STATES.skipped}`);
-    expect(out).toContain("Golden v1 sealed on the host serving this state.");
+    expect(out).toContain("Image v1 sealed on the host serving this state.");
     expect(out).toContain("Workspace beside (ws_1) forked from it.");
     expect(out).toContain("The app is already running at http://127.0.0.1:4400.");
     client.close();
@@ -213,7 +213,7 @@ describe("the build wsp init hands to the host serving the state", () => {
     f.door.push({ phase: "done", golden: { version: 1 }, rows: [{ id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", ...initSignInOutcome("not-signed-in", "darwin") }] });
     expect(await run).toBe(0);
     expect(f.door.calls.map(c => c.op)).not.toContain("signInCode");
-    expect(f.text()).toContain("Golden v1 sealed on the host serving this state.");
+    expect(f.text()).toContain("Image v1 sealed on the host serving this state.");
     // Nothing of that prompt is left on stdin: a live one holds the terminal in raw mode and this process with it.
     expect((f.io.input as PassThrough).listenerCount("keypress")).toBe(0);
     client.close();

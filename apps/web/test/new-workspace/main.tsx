@@ -22,7 +22,7 @@ const SIZES = [
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: false, engine: "none", present: true };
 const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: false, shape: { cpu: 2, memMb: 4096 }, runsWorkspaces: true, engine: "docker", present: true, forks: { running: 0, room: 3 } };
-const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018 };
+const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018, sizes: SIZES };
 
 const places = params.get("places") === "none" ? [HERE] : [HERE, HETZNER, ASCII];
 
@@ -32,7 +32,6 @@ createRoot(document.getElementById("root")!).render(
       initialName="workspace-3"
       places={places}
       copies={[{ place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" }]}
-      sizes={SIZES}
       goldenSize={{ cpu: 2, memMb: 4096 }}
       refusal={params.get("refusal")}
       onCreate={() => {}}

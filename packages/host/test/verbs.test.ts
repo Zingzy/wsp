@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { LIST_PRICE_WORD, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -18,7 +18,7 @@ import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { awake, CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, napAfterDeadLaunch, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
-import { HOST_SIDE_VAULT } from "../src/verbs.js";
+import { HOST_SIDE_VAULT, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { writeHost } from "../src/hosts.js";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
@@ -378,7 +378,7 @@ describe("wsp verbs over the host", () => {
     await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");
     expect(code).toBe(1);
-    expect(io.errors).toEqual(["wsp new: no golden yet; run wsp init"]);
+    expect(io.errors).toEqual(["wsp new: no image yet; run wsp init"]);
     expect(await rt.workspaces.list()).toEqual([]);
   });
 
@@ -396,7 +396,7 @@ describe("wsp verbs over the host", () => {
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
-    expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
+    expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
@@ -697,8 +697,8 @@ describe("wsp verbs over the host", () => {
     expect(extra.io.errors.at(-1)).toBe("wsp image move takes one workspace. usage: wsp image move <workspace>");
   });
 
-  it("fork's help says it makes a new machine from the source's golden version, on the agent page and in wsp fork --help", async () => {
-    const line = "a new machine from the source's golden version";
+  it("fork's help says it makes a new machine from the source's image version, on the agent page and in wsp fork --help", async () => {
+    const line = "a new machine from the source's image version";
     expect(agentPage()).toContain(line);
     const { code, io } = await run("fork", "--help");
     expect(code).toBe(0);
@@ -1004,12 +1004,12 @@ describe("wsp verbs over the host", () => {
     await vi.waitFor(() => expect(held.starts).toHaveLength(1));
     const [row] = await rt.sessions.list();
     // The id is on stdout while the turn has said nothing: a person watching knows what to stop and what to read.
-    await vi.waitFor(() => expect(started.io.lines).toEqual([`thread ${row!.threadId}`]));
+    await vi.waitFor(() => expect(started.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]));
     expect(started.io.streamed).toBe("");
 
     held.release(0, "10");
     expect(await started.ended).toBe(0);
-    expect(started.io.screen.startsWith(`thread ${row!.threadId}\n10`)).toBe(true);
+    expect(started.io.screen.startsWith(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\n10`)).toBe(true);
   });
 
   it("a turn stopped on a prompt says so in the terminal that is blocked, with the keys that answer it, and a typed y answers it", async () => {
@@ -1214,7 +1214,7 @@ describe("wsp verbs over the host", () => {
     expect(row).toMatchObject({ harness: "codex", startedBy: "cli", prompt: "write tests", status: "completed" });
     expect(codex.starts.map(s => s.prompt)).toEqual(["write tests"]);
     expect(claude.starts).toEqual([]);
-    expect(io.lines).toEqual([`thread ${row!.threadId}`, "codex: write tests"]);
+    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "codex: write tests"]);
     expect(io.streamed).toBe("code\n$ ls\nx: write tests\ncompleted\n");
     expect(io.errors).toEqual([]);
   });
@@ -1231,10 +1231,10 @@ describe("wsp verbs over the host", () => {
     const [row] = await rt.sessions.list();
     held.release(0, "25.4.0");
     expect(await ended).toBe(0);
-    expect(io.screen).toBe(`thread ${row!.threadId}\n25.4.0\ncompleted\n`);
+    expect(io.screen).toBe(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\n25.4.0\ncompleted\n`);
     expect(io.screen.split("25.4.0")).toHaveLength(2);
     expect(io.screen.endsWith("\n")).toBe(true);
-    expect(io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
   });
 
   it("a turn watched at a terminal that streamed no prose prints its reply once under the work it showed, since nothing on the screen carries it yet", async () => {
@@ -1245,8 +1245,8 @@ describe("wsp verbs over the host", () => {
     io.sameScreen = true;
     expect(await cli(["run", "alpha", "print the kernel version and nothing else", "--state", statePath], io, undefined, env)).toBe(0);
     const [row] = await rt.sessions.list();
-    expect(io.screen).toBe(`thread ${row!.threadId}\n$ uname -r\n25.4.0\nthe kernel is 25.4.0\ncompleted\n`);
-    expect(io.lines).toEqual([`thread ${row!.threadId}`, "the kernel is 25.4.0"]);
+    expect(io.screen).toBe(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\n$ uname -r\n25.4.0\nthe kernel is 25.4.0\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "the kernel is 25.4.0"]);
   });
 
   it("a turn whose stdout is a pipe prints the reply once, at the end, with the stream beside it the person's own view of the work", async () => {
@@ -1259,7 +1259,7 @@ describe("wsp verbs over the host", () => {
     held.release(0, "25.4.0");
     expect(await piped.ended).toBe(0);
     expect(piped.io.sameScreen).toBeUndefined();
-    expect(piped.io.lines).toEqual([`thread ${row!.threadId}`, "25.4.0"]);
+    expect(piped.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "25.4.0"]);
     expect(piped.io.streamed).toBe("25.4.0\ncompleted\n");
   });
 
@@ -1270,8 +1270,8 @@ describe("wsp verbs over the host", () => {
     const ended = cli(["run", "alpha", "build it", "--state", statePath], io, undefined, env);
     expect(await ended).toBe(0);
     const [row] = await rt.sessions.list();
-    expect(io.screen).toBe(`thread ${row!.threadId}\nre: \n$ ls\nbuild it\nre: build it\ncompleted\n`);
-    expect(io.lines).toEqual([`thread ${row!.threadId}`, "re: build it"]);
+    expect(io.screen).toBe(`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}\nre: \n$ ls\nbuild it\nre: build it\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
   });
 
   it("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
@@ -1292,6 +1292,22 @@ describe("wsp verbs over the host", () => {
     expect(values[3]!.result).toMatchObject({ status: "completed", text: "25.4.0" });
     expect(values.at(-1)).toEqual({ threadId: row!.threadId, workspaceId: row!.workspaceId, harness: "claude", text: "25.4.0", outcome: "started" });
     expect(io.streamed).toBe("");
+  });
+
+  it("a turn on this computer prices its figure as the agent's list price, and a turn at a provider leaves the figure alone", async () => {
+    // A turn here runs on the person's own sign-in, so nobody is billed for it and the number is the agent's own
+    // table, which is the word the app's footer already gives the figure. A fork is billed and says nothing extra.
+    await restartHost({ claude: toolingAgent([], { status: "completed", text: "had a look", durationMs: 72_000, costUsd: 0.19 }) });
+    await run("new", "mac", "--on", HERE);
+    const here = captured();
+    expect(await cli(["run", "mac", "look around", "--state", statePath], here, undefined, env)).toBe(0);
+    expect(here.streamed).toContain(`completed · Worked for 1m 12s · $0.19 ${LIST_PRICE_WORD}`);
+
+    await run("new", "alpha");
+    const forked = captured();
+    expect(await cli(["run", "alpha", "look around", "--state", statePath], forked, undefined, env)).toBe(0);
+    expect(forked.streamed).toContain("completed · Worked for 1m 12s · $0.19\n");
+    expect(forked.streamed).not.toContain(LIST_PRICE_WORD);
   });
 
   it("a turn's tool calls stream one muted line each as they land, what each answered behind it, and its end reads as the app's status line", async () => {
@@ -1733,7 +1749,7 @@ describe("wsp verbs over the host", () => {
     const threads = await rt.sessions.list();
     const opened = threads.find(t => t.prompt === "hello from the repo")!;
     expect(opened.workspaceId).toBe(beta!.id);
-    expect(inferred.io.lines[0]).toBe(threadOpenedLine(opened.threadId!, "beta", "~/spoo"));
+    expect(inferred.io.lines[0]).toBe(`${threadOpenedLine(opened.threadId!, "beta", "~/spoo")} · ${THREAD_PREFIX_WORD}`);
     expect(inferred.io.lines).toEqual([inferred.io.lines[0], "re: hello from the repo"]);
     expect(claude.starts.at(-1)!.cwd).toBe("/root/spoo");
     expect(inferred.io.errors).toEqual([]);
@@ -1741,7 +1757,7 @@ describe("wsp verbs over the host", () => {
     const named = await run("run", "alpha", "named anyway");
     expect(named.code).toBe(0);
     expect((await rt.sessions.list()).find(t => t.prompt === "named anyway")!.workspaceId).toBe(alpha!.id);
-    expect(named.io.lines).toEqual([expect.stringMatching(/^thread [0-9a-f-]{36}$/), "re: named anyway"]);
+    expect(named.io.lines).toEqual([expect.stringMatching(/^thread [0-9a-f-]{36} · /), "re: named anyway"]);
 
     const before = (await rt.sessions.list()).length;
     const other = join(dir, "code", "other");
@@ -1897,7 +1913,8 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const relative = await run("run", "alpha", "--cwd", "packages/host", "look here");
     expect(relative.code).toBe(3);
-    expect(relative.io.errors).toEqual(['--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: wsp run [<workspace>] [--agent, --model, --effort, --access, --project <name>, --cwd, --notify, --title, --image <path>, --detach] "<task>"']);
+    // The usage the refusal carries is the verb's own, whatever its groups are; the words before it are the rule.
+    expect(relative.io.errors).toEqual([`--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see. usage: ${CLI_VERBS.find(v => v.name === "run")!.usage}`]);
     const forked = await run("fork", "alpha", "--send", "build it", "--cwd", "packages/host");
     expect(forked.code).toBe(3);
     expect(forked.io.errors[0]).toMatch(/^--cwd is a path on the machine, absolute, and got "packages\/host"\..* usage: wsp fork /);
@@ -1988,7 +2005,7 @@ describe("wsp verbs over the host", () => {
     expect(joined.io.errors).toEqual(["joined the running turn; --model, --effort dropped, it keeps its own model, effort and access"]);
     expect(joined.io.lines).toEqual(["done STEERED"]);
     expect(joined.io.streamed).toBe("done STEERED\ncompleted\n");
-    expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "done STEERED"]);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "done STEERED"]);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
     expect(history.map(e => e.type)).toEqual(["session.start", "session.steer", "session.delta", "session.done", "session.end"]);
@@ -2025,7 +2042,7 @@ describe("wsp verbs over the host", () => {
     held.release(0, "one done");
     await vi.waitFor(() => expect(held.starts).toHaveLength(2));
     expect(held.starts.map(s => [s.prompt, s.resume])).toEqual([["one", undefined], ["two", row!.claudeSessionId]]);
-    expect((await first).io.lines).toEqual([`thread ${row!.threadId}`, "one done"]);
+    expect((await first).io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "one done"]);
     held.release(1, "two done");
     const queued = await sent;
     expect(queued.code).toBe(0);
@@ -2124,7 +2141,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const [row] = await rt.sessions.list();
     const line = `thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`;
-    expect(io.lines).toEqual([`thread ${row!.threadId}`, "re: build it"]);
+    expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(io.errors).toEqual([line]);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
@@ -2151,10 +2168,10 @@ describe("wsp verbs over the host", () => {
     await vi.waitFor(() => expect(held.steered).toEqual([line]));
     const built = await kid;
     expect(built.code).toBe(0);
-    expect(built.io.lines).toEqual([`thread ${kidRow.threadId}`, "all green"]);
+    expect(built.io.lines).toEqual([`thread ${kidRow.threadId} · ${THREAD_PREFIX_WORD}`, "all green"]);
     expect(built.io.errors).toEqual([]);
     held.release(0, "read the report");
-    expect((await parent).io.lines).toEqual([`thread ${parentRow!.threadId}`, "read the report"]);
+    expect((await parent).io.lines).toEqual([`thread ${parentRow!.threadId} · ${THREAD_PREFIX_WORD}`, "read the report"]);
     expect(held.starts).toHaveLength(2);
     const [alpha] = await rt.workspaces.list();
     const history = await rt.sessions.history(alpha!.id);
@@ -2274,7 +2291,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const worker = (await rt.workspaces.list()).find(w => w.name === "worker")!;
     const [row] = await rt.sessions.list(worker.id);
-    expect(io.lines).toEqual([`created worker ${worker.id}`, `thread ${row!.threadId}`, "re: build it"]);
+    expect(io.lines).toEqual([`created worker ${worker.id}`, `thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
 
     const bad = await run("fork", "alpha", "--name", "never", "--send", "build it", "--notify", "nope");
@@ -2307,7 +2324,7 @@ describe("wsp verbs over the host", () => {
     const [row] = await rt.sessions.list();
     expect(row).toMatchObject({ status: "running", startedBy: "cli", prompt: "build it" });
     expect(opened.code).toBe(0);
-    expect(opened.io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
     expect(opened.io.errors).toEqual([]);
     expect(opened.io.streamed).toBe("");
     held.release(0, "first done");
@@ -2320,7 +2337,7 @@ describe("wsp verbs over the host", () => {
     held.release(1, "second done");
     // A detached send that meets a running turn on an agent that cannot steer waits for its own start, as a followed one does, and says so.
     const third = await run("send", row!.threadId!, "--detach", "third");
-    expect(third.io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(third.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
     expect(held.starts).toHaveLength(3);
     const fourth = starting("send", row!.threadId!, "--detach", "fourth");
     // The waiting line is the runtime's answer that this start is behind the running turn: releasing that turn before
@@ -2330,7 +2347,7 @@ describe("wsp verbs over the host", () => {
     held.release(2, "third done");
     await fourth.ended;
     expect(fourth.io.errors).toEqual(["waiting behind the running turn", "queued behind the running turn; it has ended and this turn started"]);
-    expect(fourth.io.lines).toEqual([`thread ${row!.threadId}`]);
+    expect(fourth.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`]);
     expect(held.starts.map(s => s.prompt)).toEqual(["build it", "more", "third", "fourth"]);
     held.release(3, "fourth done");
   });
@@ -2665,7 +2682,7 @@ describe("wsp verbs over the host", () => {
     const opened = await run("run", "alpha", "first");
     const [row] = await rt.sessions.list();
     expect(opened.code).toBe(0);
-    expect(opened.io.lines).toEqual([`thread ${row!.threadId}`, "re: first"]);
+    expect(opened.io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "re: first"]);
     expect(opened.io.errors).toEqual([]);
     const sent = await run("send", row!.threadId!, "second", "--json");
     expect(sent.code).toBe(0);
@@ -2944,7 +2961,7 @@ describe("wsp verbs over the host", () => {
     expect(code).toBe(0);
     const [golden] = await rt.golden.projects();
     expect(golden).toMatchObject({ projects: [{ name: "proj", dest: "/root/work/proj" }], golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
-    expect(io.lines).toEqual([`project golden ${golden!.snapshotId}: golden v1 plus proj imported ${golden!.projects[0]!.importedAt.slice(0, 10)}, taken from alpha\nfork it with: wsp new <name> --from proj`]);
+    expect(io.lines).toEqual([`project image ${golden!.snapshotId}: image v1 plus proj imported ${golden!.projects[0]!.importedAt.slice(0, 10)}, taken from alpha\nfork it with: wsp new <name> --from proj`]);
     expect(io.errors).toEqual([]);
 
     const asJson = await run("snapshot", alpha!.id, "--json");
@@ -2989,7 +3006,7 @@ describe("wsp verbs over the host", () => {
 
     const missing = await run("new", "task-c", "--from", "nope");
     expect(missing.code).toBe(1);
-    expect(missing.io.errors).toEqual(["wsp new: no project golden named nope; wsp snapshot <workspace> takes one"]);
+    expect(missing.io.errors).toEqual(["wsp new: no project image named nope; wsp snapshot <workspace> takes one"]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b", "task-d"]);
   });
 

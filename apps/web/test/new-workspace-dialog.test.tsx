@@ -8,7 +8,7 @@
 // on Enter and on the Create button.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fmtRate, fmtSize, type PlaceView, type SealedImageCopy } from "@wsp/protocol";
+import { fmtPrice, fmtSize, type PlaceView, type SealedImageCopy } from "@wsp/protocol";
 
 import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
@@ -16,13 +16,18 @@ afterEach(cleanup);
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: false, engine: "none", present: true };
 const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, shape: { cpu: 2, memMb: 4096 }, runsWorkspaces: true, engine: "docker", present: true, forks: { running: 0, room: 3 } };
-const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
-const COPY: SealedImageCopy = { place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" };
-
 const SIZES = [
   { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
   { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
 ];
+const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018, sizes: SIZES };
+/** A place that charges nothing an hour, offering its own two shapes: the row a person meets beside a provider. */
+const FREE_SIZES = [
+  { cpu: 2, memMb: 4096, rateUsdPerHour: 0 },
+  { cpu: 4, memMb: 8192, rateUsdPerHour: 0 },
+];
+const DOCKER: PlaceView = { id: "docker", kind: "provider", name: "docker", default: false, rateUsdPerHour: 0, sizes: FREE_SIZES };
+const COPY: SealedImageCopy = { place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" };
 
 /** What a keycap is drawn as, read the way ui/button.test.tsx reads it: the outline carries the input's hairline. */
 const isOutline = (button: HTMLElement): boolean => button.className.split(" ").includes("border-input") && !button.className.split(" ").includes("bg-primary");
@@ -32,7 +37,6 @@ const dialogWith = (props: Partial<Parameters<typeof NewWorkspaceDialog>[0]> = {
     initialName="workspace-1"
     places={[HERE, HETZNER, ASCII]}
     copies={[]}
-    sizes={[]}
     goldenSize={null}
     refusal={null}
     onCreate={() => {}}
@@ -99,14 +103,14 @@ describe("the Where control", () => {
   it("says a provider's rate and which image is there, and offers its sizes under the caption", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
-    const dialog = await open({ copies: [COPY], sizes: SIZES, goldenSize: { cpu: 2, memMb: 4096 }, onCreate });
+    const dialog = await open({ copies: [COPY], goldenSize: { cpu: 2, memMb: 4096 }, onCreate });
     expect(within(dialog).queryByRole("radiogroup", { name: "Size" })).toBeNull();
     fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
     // The ticked row's rate, not the provider's default: the caption prices the workspace this dialog would make.
     expect(caption(dialog)).toBe("$0.11/hr while awake · naps to $0 · your image is there, v1");
     const sizes = within(dialog).getByRole("radiogroup", { name: "Size" });
     const rows = within(sizes).getAllByRole("radio");
-    expect(rows.map(r => r.closest("label")!.textContent)).toEqual(SIZES.map(size => `${fmtSize(size)}${fmtRate(size.rateUsdPerHour)}`));
+    expect(rows.map(r => r.closest("label")!.textContent)).toEqual(SIZES.map(size => `${fmtSize(size)}${fmtPrice(size.rateUsdPerHour)}`));
     expect(rows.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
     fireEvent.click(rows[1]!);
     expect(caption(dialog)).toBe("$0.15/hr while awake · naps to $0 · your image is there, v1");
@@ -117,7 +121,7 @@ describe("the Where control", () => {
 
   it("quotes the row's own rate while no size is ticked, since none is priced yet", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
-    const dialog = await open({ copies: [COPY], sizes: SIZES, goldenSize: null });
+    const dialog = await open({ copies: [COPY], goldenSize: null });
     fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
     expect(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "false"]);
     expect(caption(dialog)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
@@ -127,7 +131,7 @@ describe("the Where control", () => {
   it("leaves a size behind when the pick moves to a row that offers none", async () => {
     vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
-    const dialog = await open({ sizes: SIZES, onCreate });
+    const dialog = await open({ onCreate });
     const where = within(dialog).getByRole("radiogroup", { name: "Where" });
     fireEvent.click(within(where).getByRole("radio", { name: "ASCII" }));
     fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio")[1]!);
@@ -148,6 +152,24 @@ describe("the Where control", () => {
     expect(isHeld(create(dialog))).toBe(true);
     fireEvent.click(create(dialog));
     expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("prices each row off its own list, and writes a row that charges nothing as free", async () => {
+    // One list of sizes for every row quoted the wired provider's three rates under a row that bills nothing, so
+    // two places read the same to the cent and there was nothing to choose between them.
+    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+    const dialog = await open({ places: [HERE, HETZNER, ASCII, DOCKER] });
+    const where = within(dialog).getByRole("radiogroup", { name: "Where" });
+    fireEvent.click(within(where).getByRole("radio", { name: "docker" }));
+    const rows = within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio");
+    expect(rows.map(r => r.closest("label")!.textContent)).toEqual(FREE_SIZES.map(size => `${fmtSize(size)}free`));
+    expect(caption(dialog)).toBe("free · builds your image there first, about 4 min");
+    // The row beside it keeps its own shapes and its own prices.
+    fireEvent.click(within(where).getByRole("radio", { name: "ASCII" }));
+    expect(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio").map(r => r.closest("label")!.textContent)).toEqual(
+      SIZES.map(size => `${fmtSize(size)}${fmtPrice(size.rateUsdPerHour)}`),
+    );
+    vi.unstubAllGlobals();
   });
 
   it("puts the rows in a select once there are more than four", async () => {

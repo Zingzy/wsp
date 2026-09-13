@@ -1502,18 +1502,18 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   }
 
   const next = ((await rt.golden.get())?.head ?? 0) + 1;
-  card(`Ready to seal golden v${next}`, sealSummary(landed, outcomes, secretOutcomes, widthOf(io.output)), io.output);
+  card(`Ready to seal image v${next}`, sealSummary(landed, outcomes, secretOutcomes, widthOf(io.output)), io.output);
   const result: InitResult = { code: 0, logins: outcomes, secrets: secretOutcomes };
   const builderRate = opts.pricing.rateUsdPerHour(builder.size);
   if (interactive) {
-    const go = await confirmPrompt({ message: `Seal this machine as golden v${next}?`, hint: "Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.", initialValue: true, input: io.input, output: io.output });
+    const go = await confirmPrompt({ message: `Seal this machine as image v${next}?`, hint: "Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.", initialValue: true, input: io.input, output: io.output });
     if (isCancel(go) || !go) {
       cancel(`Nothing was sealed. ${builderStaysLine(builder.id, builderRate, attachCommand)}`, out);
       await closeRuntime();
       return { ...result, code: 1 };
     }
   } else {
-    log.step(`Sealing golden v${next}. Taken as yes (${takenAs}).`, out);
+    log.step(`Sealing image v${next}. Taken as yes (${takenAs}).`, out);
   }
   let sealed: Awaited<ReturnType<Runtime["golden"]["seal"]>> | undefined;
   let error: unknown;
@@ -1548,8 +1548,8 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const kept = keptBuilder(await rt.golden.builders(), version);
   log.success(
     [
-      `Golden v${version} sealed.`,
-      ...(kept !== undefined ? [dim(`The builder stays up ten minutes (about $${opts.pricing.rateUsdPerHour(kept.size).toFixed(2)}/h, one of the account's machine slots) for one more change: stop wsp, run wsp init, and the golden updates on it.`)] : []),
+      `Image v${version} sealed.`,
+      ...(kept !== undefined ? [dim(`The builder stays up ten minutes (about $${opts.pricing.rateUsdPerHour(kept.size).toFixed(2)}/h, one of the account's machine slots) for one more change: stop wsp, run wsp init, and your image updates on it.`)] : []),
     ].join("\n"),
     out,
   );
@@ -1565,7 +1565,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     } catch (e) {
       log.error(e instanceof Error ? e.message : String(e), out);
       log.step(logLine(), out);
-      outro(`Golden v${version} is sealed and recorded. The app did not start; fix that and run ${opts.upCommand}, with --port when a port is taken.`, out);
+      outro(`Image v${version} is sealed and recorded. The app did not start; fix that and run ${opts.upCommand}, with --port when a port is taken.`, out);
       await closeRuntime();
       return { ...result, code: 1 };
     }
@@ -1578,7 +1578,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   let first: FirstResult | undefined;
   let local: WorkspaceView | undefined;
   if (named === undefined && existing.length > 0) {
-    log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the golden version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
+    log.step(`Your ${existing.length} workspace${existing.length === 1 ? " stays" : "s stay"} on the image version ${existing.length === 1 ? "it was" : "they were"} forked from; upgrade ${existing.length === 1 ? "it" : "them"} from the app. New workspaces fork v${version}.`, out);
   } else {
     const ask = await askFirst({
       interactive,
@@ -1611,7 +1611,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       ...(opened !== undefined ? { workspace: { id: opened.id, name: opened.name } } : { forkCommand: opts.forkCommand }),
     });
     log.step(logLine(), out);
-    outro(`Done. Golden v${version} is sealed${opened === undefined ? `; ${opts.forkCommand} forks a workspace from it, and ${opts.upCommand} opens the app` : `; ${opts.upCommand} opens the app`}.`, out);
+    outro(`Done. Image v${version} is sealed${opened === undefined ? `; ${opts.forkCommand} forks a workspace from it, and ${opts.upCommand} opens the app` : `; ${opts.upCommand} opens the app`}.`, out);
     await closeRuntime();
     return result;
   }
