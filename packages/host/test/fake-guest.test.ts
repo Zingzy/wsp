@@ -6,9 +6,11 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { standInMachinePath } from "@wsp/protocol";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { GUEST_WSP_BIN, standInMachinePath } from "@wsp/protocol";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import { closeStandInGuests, fakeGuestAt, fakeNoPortLine, guestPath, inGuestRoot } from "../src/fake-guest.js";
+import { onPath, thisComputersPath } from "../src/mcp-install.js";
 
 describe("a stand-in machine's guest", () => {
   const made: string[] = [];
@@ -98,6 +100,70 @@ describe("a stand-in machine's guest", () => {
     // minted no signed upload URL and the fork came up with no context at all.
     await guest.putBytes!("fk_c0ffee", "/root/.wsp/hello", new TextEncoder().encode("there"));
     expect(readFileSync(`${at}/root/.wsp/hello`, "utf8")).toBe("there");
+  });
+
+  it("launches a turn's script in a session of its own, so the pid written down is the group a reap takes", async () => {
+    const root = throwaway();
+    const guest = fakeGuestAt(root);
+    const at = guest.folder("fk_c0ffee");
+    // The words a launch runs on the machine it lands on (machine-exec's after line): the script in a session of
+    // its own, in the background, with its pid written down. Every turn and every exec on a stand-in died here,
+    // before the agent had been asked anything, and the tester read it as the launch never reaching the agent.
+    const run = guest.shell!("fk_c0ffee", "setsid bash -c 'echo up; sleep 30' > /root/run.log 2>&1 & echo $! > /root/run.pid; echo launched");
+    const { execFile } = await import("node:child_process");
+    const ran = await new Promise<{ out: string; err: string }>(done => {
+      execFile("bash", ["-c", run.cmd], { cwd: run.cwd, env: { ...process.env, ...run.env } }, (_e, out, err) => done({ out, err }));
+    });
+    expect([ran.err, ran.out.trim()]).toEqual(["", "launched"]);
+    // Waited for, never slept on: a launch answers the moment the shell has forked, and the script's first words
+    // land whenever this computer next runs the two execs behind them, which on a machine under a whole suite and
+    // five threads is no length a number here could name. The log the redirect opened is empty until then, and a
+    // launch that failed writes its own words into that same log, so an empty one is only a run not yet started.
+    await vi.waitFor(() => expect(readFileSync(`${at}/root/run.log`, "utf8")).toBe("up\n"), { timeout: 15_000, interval: 25 });
+    // The reap of a run kills the group the pid leads, so the launched process has to lead one: a shim that only
+    // ran the command would leave every turn's work behind at the end of the turn.
+    const pid = Number(readFileSync(`${at}/root/run.pid`, "utf8").trim());
+    const group = execFileSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    expect(group).toBe(String(pid));
+    process.kill(-pid, "SIGKILL");
+  }, 20_000);
+
+  it("gives a file landing on this machine the machine's own folders, since its text names the guest's", async () => {
+    const root = throwaway();
+    const guest = fakeGuestAt(root);
+    const at = guest.folder("fk_c0ffee");
+    // A script lands on a machine as base64 a shell decodes, so the rewrite a command line takes never reaches the
+    // words inside it: every turn's script wrote its exit code and read its input at paths on this computer, and
+    // the reader waited out a run whose answer it could not see.
+    const script = "export PATH=/root/.local/bin:/usr/bin\ncd '/root' && echo $? > /tmp/wsp-run/x.exit\n";
+    const landed = `printf %s ${JSON.stringify(Buffer.from(script, "utf8").toString("base64"))} | base64 -d > /tmp/landed.sh`;
+    const run = guest.shell!("fk_c0ffee", landed);
+    const { execFile } = await import("node:child_process");
+    await new Promise(done => execFile("bash", ["-c", run.cmd], { cwd: run.cwd, env: { ...process.env, ...run.env } }, done));
+    // The same answer the command line's own rewrite gives, since both read one rule.
+    expect(readFileSync(`${at}/tmp/landed.sh`, "utf8")).toBe(inGuestRoot(at, script));
+    expect(readFileSync(`${at}/tmp/landed.sh`, "utf8")).toContain(`${at}/tmp/wsp-run/x.exit`);
+  }, 20_000);
+
+  it("carries the agents and the wsp command a machine forked from this computer's image would have", () => {
+    const root = throwaway();
+    const guest = fakeGuestAt(root);
+    const at = guest.folder("fk_c0ffee");
+    // The turn's own script exports the image's PATH over the launch's, and that path leads with the golden's tools
+    // folder: an agent anywhere else is on no turn's path, and the turn ends before the agent says a word.
+    const run = guest.shell!("fk_c0ffee", "true");
+    const bin = join(at, "root", ".local", "bin");
+    expect(run.env["PATH"]!.startsWith(`${bin}:`)).toBe(true);
+    // Every agent this computer has, by the catalog's own name for its command; a computer with none gets none,
+    // which is what a machine forked from an image with no agent on it would have.
+    for (const agent of CATALOG_AGENTS) {
+      expect([agent.id, existsSync(join(bin, agent.bin))]).toEqual([agent.id, onPath(agent.bin, thisComputersPath()) !== undefined]);
+    }
+    // The runtime the tools and an agent shipped as a script are started with is this computer's own node.
+    expect(readFileSync(join(bin, "node"), "utf8")).toContain(process.execPath);
+    // The wsp tools of a turn on a fork are run from the machine's own bundle, which a stand-in has none of: the
+    // agent met a file that was not there and had no tools at all.
+    expect(readFileSync(guestPath(at, GUEST_WSP_BIN), "utf8")).toMatch(/^import "file:\/\/.*\.js";$/m);
   });
 
   it("has no road to any other port, since answering with this computer's own would frame whatever runs there", async () => {
