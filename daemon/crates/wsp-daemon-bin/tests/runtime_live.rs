@@ -6,6 +6,7 @@
 //! engine replaced by the kernel, then the network's: the box reaches a workspace at a published port, a
 //! workspace reaches its box, a registry and nothing of its neighbours; then the store's: snapshots, forks from
 //! them, templates, and the pause that stops a workspace and the wake that boots its saved layer.
+#![cfg(target_os = "linux")]
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
