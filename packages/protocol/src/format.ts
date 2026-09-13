@@ -2404,6 +2404,14 @@ export function undrivenRefusal(name: string, machine: string, action: string): 
   return `${name} is ${machine}, which wsp does not run; it cannot ${action}`;
 }
 
+/** The one sentence a forget on a workspace wsp does not run the machine of is refused with. Such a machine is
+ * never gone, so the sentence about a machine still standing at a provider says two impossible things on it: there
+ * is no provider to pause it at, and the road that takes the record away is the delete, which asks a provider for
+ * nothing either. */
+export function forgetUndrivenRefusal(name: string, machine: string): string {
+  return `${name} runs on ${machine}, which is not at a provider; run wsp delete ${name}`;
+}
+
 /** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
  * road for that verb: the machine is wsp's to move, so the refusal names the provider's limit rather than telling a
  * person their fork is their own computer. Each verb reads its own capability, so what is missing is that verb's
