@@ -37,7 +37,7 @@ use crate::freeze;
 use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
-use crate::size::{size_on_box, BoxFacts, SizeOnBox, LEAST_MEM_MB};
+use crate::size::{size_on_box, BoxFacts, SizeOnBox};
 use crate::snapshot;
 use crate::store::{self, Chain, Snapshot, Store, Swept};
 use crate::{answer_machine_op, no_backend_refusal};
@@ -1124,6 +1124,7 @@ pub fn stub(id: Option<RequestId>, op: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::size::LEAST_MEM_MB;
 
     #[test]
     fn the_id_word_is_what_youki_and_docker_both_take() {
