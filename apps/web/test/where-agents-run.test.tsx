@@ -26,29 +26,29 @@ const box: PlaceView = {
   name: "hetzner",
   default: false,
   present: true,
-  runsWorkspaces: true, engine: "docker",
+  takesForks: true,
+  engine: "docker",
   os: "Ubuntu 24.04",
   shape: { cpu: 2, memMb: 4096 },
   diskFreeBytes: 38 * 1024 ** 3,
   joinedAt: "2026-09-12T11:00:00.000Z",
   lastSeenAt: "2026-09-12T11:59:00.000Z",
-  workspaceId: "ws_c",
 };
 
-const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, runsWorkspaces: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3, workspaceId: "ws_a" };
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, takesForks: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3 };
 const laptop: PlaceView = {
   id: "p_1",
   kind: "computer",
   name: "old-macbook",
   default: false,
   present: false,
-  runsWorkspaces: false, engine: "none",
-  os: "macOS 15.6",
+  takesForks: true,
+  engine: "none",
+  os: "Ubuntu 24.04",
   agents: ["claude", "codex"],
   shape: { cpu: 4, memMb: 8192 },
   diskFreeBytes: 91 * 1024 ** 3,
   lastSeenAt: "2026-09-12T10:00:00.000Z",
-  workspaceId: "ws_b",
 };
 
 /** Only what these two draw asks the host for anything; the rest of the Api is never reached here. */
@@ -94,13 +94,13 @@ afterEach(() => {
   cleanup();
 });
 
-const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018 };
+const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018, takesForks: true };
 
-/** The workspaces the app holds, as the sidebar lists them: this computer's own, a fork at the provider, and the
- * one workspace a joined computer is. */
+/** The workspaces the app holds, as the sidebar lists them: this computer's own, and the forks, whether they stand
+ * at a provider or on a computer somebody joined. */
 const workspace = (id: string, kind: WorkspaceView["kind"], machineId: string): WorkspaceView => ({ id, name: id, kind, machineId, phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z" });
 const mine = workspace("ws_a", "local", "local");
-const onLaptop = workspace("ws_b", "place", "place:p_1");
+const onLaptop: WorkspaceView = { ...workspace("ws_b", "cloud", "ctr_9f"), place: "p_1" };
 const fork = (id: string): WorkspaceView => workspace(id, "cloud", `fk_${id}`);
 
 /** The four facts of a row; a row that can be acted on carries a fifth cell for its menu. */
@@ -114,14 +114,13 @@ describe("Where agents run", () => {
     expect(cells(rows[0]!)[0]).toContain("This Mac");
     expect(cells(rows[0]!)[0]).not.toContain("zingzy-mbp");
     expect(cells(rows[0]!)[0]).toContain("default");
-    expect(cells(rows[0]!).slice(1)).toEqual(["8 cores · 16 GB".replace(/ /g, " "), "210 GB", "1 · agents only"]);
+    expect(cells(rows[0]!).slice(1)).toEqual(["8 cores · 16 GB".replace(/ /g, " "), "210 GB", "1"]);
     // The table's slot holds the one word for the silence, in the words every other surface says it in; how long
-    // it has been away is on the row's title and in its detail. The Workspaces cell keeps to what the computer may
-    // hold, which is a different question and used to be a second wording of this one.
+    // it has been away is on the row's title and in its detail.
     expect(cells(rows[1]!)[0]).toContain("no answer");
     expect(cells(rows[1]!)[0]).not.toContain("offline");
     expect(cells(rows[1]!)[0]).not.toContain("2 h");
-    expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · agents only"]);
+    expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1"]);
     // The whole sentence rides the row's title, so the table and the sidebar row say one thing.
     expect(rows[1]!.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
   });
@@ -141,10 +140,10 @@ describe("Where agents run", () => {
   it("counts the workspaces standing on each row off the list the sidebar shows, not off the row", () => {
     // This Mac's own workspace and the forks at a provider are recorded on no row at all, so a cell read off the
     // row said 0 under Workspaces while the sidebar showed three.
-    useStore.setState({ places: [{ ...here, workspaceId: undefined }, ascii], workspaces: [mine, fork("ws_x"), fork("ws_y")] });
+    useStore.setState({ places: [here, ascii], workspaces: [mine, fork("ws_x"), fork("ws_y")] });
     render(<WhereAgentsRun now={NOW} />);
     const rows = screen.getAllByRole("row").slice(1);
-    expect(cells(rows[0]!)[3]).toBe("1 · agents only");
+    expect(cells(rows[0]!)[3]).toBe("1");
     expect(cells(rows[1]!)[3]).toBe("2");
   });
 
@@ -218,11 +217,11 @@ describe("the Add a computer sheet", () => {
     expect(screen.getByText(PLACES_WORDS.sheet.reading)).toBeTruthy();
     useStore.setState({ places: [here, { ...laptop, present: true }] });
     await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.joinedTitle("old-macbook"))).toBeTruthy());
-    expect(screen.getByText(PLACES_WORDS.sheet.joined("macOS 15.6", ["claude", "codex"]))).toBeTruthy();
-    expect(screen.getByText(PLACES_WORDS.sheet.cannotRunWorkspaces)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: PLACES_WORDS.sheet.open("old-macbook") }));
-    expect(opened).toEqual(["ws_b"]);
-    expect(closed).toBe(true);
+    expect(screen.getByText(PLACES_WORDS.sheet.joined("Ubuntu 24.04", ["claude", "codex"]))).toBeTruthy();
+    // The card says the box joined and what it carries; there is no workspace of its own to open, and nothing on
+    // the card offers one.
+    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
+    expect(opened).toEqual([]);
   });
 
   it("stands at the top right, 448 px wide, as tall as what it holds and capped at the window less its inset", async () => {
@@ -305,7 +304,7 @@ describe("the Add a computer sheet", () => {
 });
 
 describe("what the places cost this month", () => {
-  const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.11 };
+  const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.11, takesForks: true };
   const atProvider = (id: string, provider: string): WorkspaceView => ({ ...workspace(id, "cloud", `fk_${id}`), provider });
   /** One tick off the runtime's meter, which is what sends the section back for the month again. */
   const COST_TICK = { type: "workspace.cost", workspaceId: "ws_x", phase: "running", rateUsdPerHour: 0.16, awakeMs: 60_000, accruedUsd: 0.41, at: "2026-09-12T12:00:00.000Z", seq: 1 } as EventUnion;
@@ -328,8 +327,8 @@ describe("what the places cost this month", () => {
     render(<WhereAgentsRun now={NOW} />);
     const rows = () => screen.getAllByRole("row").slice(1);
     await waitFor(() => expect(cells(rows()[2]!)[3]).toBe("2 · $0.41 this month"));
-    expect(cells(rows()[0]!)[3]).toBe("1 · agents only");
-    expect(cells(rows()[1]!)[3]).toBe("1 · agents only");
+    expect(cells(rows()[0]!)[3]).toBe("1");
+    expect(cells(rows()[1]!)[3]).toBe("1");
   });
 
   it("gives each provider its own total, off the provider each fork was stamped with", async () => {
@@ -426,7 +425,7 @@ describe("what the places cost this month", () => {
 
   it("leaves a provider nothing was metered on out of the foot's count, and a computer that runs Docker out of the money", async () => {
     const docker: PlaceView = { ...ascii, id: "docker", name: "docker" };
-    const runsDocker: PlaceView = { ...here, runsWorkspaces: true, engine: "docker" };
+    const runsDocker: PlaceView = { ...here, engine: "docker" };
     const { api } = withSpend([
       { place: "here", monthUsd: 0, rateUsdPerHour: 0 },
       { place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 },
@@ -443,7 +442,7 @@ describe("a computer's own row", () => {
   const withWorkspaces = (): void => {
     useStore.setState({
       places: [here, laptop],
-      workspaces: [{ id: "ws_b", name: "spoo-fix", kind: "place", machineId: "place:p_1", phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z", home: "/home/dev" }] as never,
+      workspaces: [{ id: "ws_b", name: "spoo-fix", kind: "cloud", machineId: "ctr_9f", place: "p_1", phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z", home: "/home/dev" }] as never,
       sessions: { ws_b: [{ id: "s1" }, { id: "s2" }] } as never,
     });
   };
@@ -457,7 +456,7 @@ describe("a computer's own row", () => {
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     const detail = document.querySelector("[data-k='place-detail']")!;
     expect(detail.getAttribute("data-place")).toBe("p_1");
-    expect(detail.textContent).toContain("macOS 15.6");
+    expect(detail.textContent).toContain("Ubuntu 24.04");
     expect(detail.textContent).toContain("claude, codex");
     expect(detail.textContent).toContain("spoo-fix · Running · 2 threads");
     expect(document.querySelector("[data-place-row='p_1']")?.getAttribute("aria-expanded")).toBe("true");
@@ -482,7 +481,7 @@ describe("a computer's own row", () => {
     expect(detailValue("answered")).toBe(`${absentRoad({ name: "vps", awayMs: NOW - Date.parse(laptop.lastSeenAt!) }).answered} · 14 ms`);
     // And what it is, marked as last known, the way the pane's OS row is: a person who cannot tell which of two
     // screens is stale is what this ticket was filed for.
-    expect(detailValue("system")).toBe("macOS 15.6 · last seen 2 h ago");
+    expect(detailValue("system")).toBe("Ubuntu 24.04 · last seen 2 h ago");
   });
 
   it("says nothing about reaching a provider, which is a key and not a computer this host dials", () => {
@@ -514,7 +513,7 @@ describe("a computer's own row", () => {
     useStore.setState({ places: [here, live], workspaces: [], sessions: {} });
     render(<WhereAgentsRun now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_5']")!);
-    expect(detailValue("system")).toBe("macOS 15.6");
+    expect(detailValue("system")).toBe("Ubuntu 24.04");
   });
 
   it("keeps the last refusal under the rows and replaces it with what a press of Try now got", async () => {
@@ -536,7 +535,7 @@ describe("a computer's own row", () => {
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
-    expect(screen.getByText("wsp and its workspace come off old-macbook, which is otherwise left as it is. The workspace's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
+    expect(screen.getByText("wsp and its workspace come off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. The workspace's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
   });
 
   it("hands a computer that is offline the one line to run on it by hand, and names what that line takes off", () => {
@@ -582,7 +581,7 @@ describe("a computer's own row", () => {
   });
 
   it("says the same thing about the copy of the image as the sheet that added the computer said", () => {
-    const holding: PlaceView = { ...laptop, runsWorkspaces: true, engine: "docker" };
+    const holding: PlaceView = { ...laptop, engine: "docker" };
     useStore.setState({ places: [here, holding], workspaces: [], sessions: {} });
     render(<WhereAgentsRun now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
@@ -598,11 +597,11 @@ describe("a computer's own row", () => {
 
   it("says nothing of a record leaving for a computer that holds none, and takes it out on the host's own road", async () => {
     const removed: string[] = [];
-    useStore.setState({ places: [here, laptop], workspaces: [], sessions: {}, api: { subscribe: () => () => {}, removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [], dropped: [] }) } as unknown as Api });
+    useStore.setState({ places: [here, laptop], workspaces: [], sessions: {}, api: { subscribe: () => () => {}, removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [] }) } as unknown as Api });
     render(<WhereAgentsRun now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
-    expect(screen.getByText("wsp comes off old-macbook, which is otherwise left as it is. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
+    expect(screen.getByText("wsp comes off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(removed).toEqual(["p_1"]));
   });

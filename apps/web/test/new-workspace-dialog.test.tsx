@@ -14,19 +14,19 @@ import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
 afterEach(cleanup);
 
-const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: false, engine: "none", present: true };
-const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, shape: { cpu: 2, memMb: 4096 }, runsWorkspaces: true, engine: "docker", present: true, forks: { running: 0, room: 3 } };
+const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, engine: "none", present: true, takesForks: false };
+const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, shape: { cpu: 2, memMb: 4096 }, engine: "docker", present: true, takesForks: true, forks: { running: 0, room: 3 } };
 const SIZES = [
   { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
   { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
 ];
-const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018, sizes: SIZES };
+const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018, sizes: SIZES, takesForks: true };
 /** A place that charges nothing an hour, offering its own two shapes: the row a person meets beside a provider. */
 const FREE_SIZES = [
   { cpu: 2, memMb: 4096, rateUsdPerHour: 0 },
   { cpu: 4, memMb: 8192, rateUsdPerHour: 0 },
 ];
-const DOCKER: PlaceView = { id: "docker", kind: "provider", name: "docker", default: false, rateUsdPerHour: 0, sizes: FREE_SIZES };
+const DOCKER: PlaceView = { id: "docker", kind: "provider", name: "docker", default: false, rateUsdPerHour: 0, sizes: FREE_SIZES, takesForks: true };
 const COPY: SealedImageCopy = { place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" };
 
 /** What a keycap is drawn as, read the way ui/button.test.tsx reads it: the outline carries the input's hairline. */
@@ -181,7 +181,7 @@ describe("the Where control", () => {
 });
 
 describe("with nowhere to put a workspace", () => {
-  const NOWHERE: PlaceView[] = [HERE, { ...HETZNER, id: "p_9", name: "old-macbook", default: false, runsWorkspaces: false, engine: "none", forks: undefined }];
+  const NOWHERE: PlaceView[] = [HERE];
 
   it("drops the control for two notes, the first of them why this computer is not on the list, and makes the one road forward the loud key", async () => {
     const onAddComputer = vi.fn();

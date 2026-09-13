@@ -64,7 +64,7 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, imageByt
     lines.push(count === 0 ? `The key for ${name} is forgotten on this Mac.` : `Its ${count === 1 ? "workspace is" : `${count} workspaces are`} deleted at ${name} and the key is forgotten on this Mac.`);
     if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave this Mac.`);
   } else {
-    const stays = place.runsWorkspaces === true ? `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}` : "";
+    const stays = `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}`;
     lines.push(count === 0 ? `wsp comes off ${name}, which is otherwise left as it is${stays}.` : `wsp and ${held} come off ${name}, which is otherwise left as it is${stays}.`);
     if (count > 0) lines.push(`${count === 1 ? "The workspace's record" : "The workspaces' records"} and ${threadWord(threads)} leave this Mac.`);
   }
@@ -92,10 +92,10 @@ export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_CO
  * word rather than the id, so one predicate answers for both. */
 export const placeNamed = (place: PlaceView, word: string): boolean => namesPlace(place, word);
 
-/** Whether workspaces of their own can stand on this row at all: a provider forks by definition, and a computer
- * does once it has said it runs Docker. A computer that runs agents alone holds the one workspace it already is,
- * so it is never offered as somewhere to put another. */
-export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPlace(place) || place.runsWorkspaces === true;
+/** Whether workspaces can stand on this row at all, off the one fact the row carries: a provider and a computer
+ * somebody joined both fork, and the computer the app itself runs on does not, since its local mode is the one
+ * workspace it already is. */
+export const placeTakesWorkspaces = (place: PlaceView): boolean => place.takesForks === true;
 
 /** Which row a workspace stands on, or nothing for one this list cannot place, read the protocol's one way so the
  * pane's Where row, the table's own holdings and the host's month total cannot disagree about which computer a

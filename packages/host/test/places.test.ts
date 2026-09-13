@@ -7,11 +7,11 @@ import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:cr
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { PlaceStaging, PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -52,14 +52,16 @@ import {
   hostKeyHere,
   UPDATE_FLAGS_REFUSAL,
   placeNoUpdateRoadLine,
-  placeUnitName,
+  placeUnit,
+  PLACE_NO_KEEP_LINE,
   placeUpdateFailedLine,
   placeUpdateScript,
   placeUpdater,
+  updatedLines,
 } from "../src/places.js";
-import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
+import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
-import { SERVICE_MANAGERS, serviceTag, type RunResult, type ServiceRunner } from "../src/service.js";
+import { SERVICE_MANAGERS, type RunResult, type ServiceManager, type ServiceRunner } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
@@ -159,6 +161,14 @@ async function freePort(): Promise<number> {
   return port;
 }
 
+/** The systemd this computer's real one stands in for in these tests: the module as it is, with the machine's unit
+ * folder under the test's own home. Where a place's unit actually lands is pinned on the module itself, in
+ * service.test.ts; nothing here writes into the real /etc. */
+const unitsUnder = (home: string): ServiceManager => ({
+  ...SERVICE_MANAGERS.systemd,
+  unit: at => ({ name: SERVICE_MANAGERS.systemd.unit(at).name, path: join(home, "etc-systemd-system", SERVICE_MANAGERS.systemd.unit(at).name) }),
+});
+
 /** The one token a join line carries, for the host a test started: the code that host will spend and the
  * fingerprint of the key it will prove. */
 const codeFor = (host: FakeHost, code: string): string => joinToken(code, keyFingerprint(host.publicKey));
@@ -172,6 +182,8 @@ const joinDepsFor = (home: string, runner: ServiceRunner): Parameters<typeof joi
   platform: "linux",
   home,
   now: () => 0,
+  manager: unitsUnder(home),
+  uid: 0,
 });
 
 describe("what wsp add prints with no argument", () => {
@@ -266,16 +278,17 @@ describe("a provider as a place", () => {
 
 describe("the table wsp places prints", () => {
   const rows: PlaceView[] = [
-    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: true, engine: "docker", present: true, takesForks: false },
-    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, runsWorkspaces: true, engine: "none", present: true, lastSeenAt: "2026-09-12T00:00:00.000Z", takesForks: true },
+    { id: "here", kind: "computer", name: "zingzys-mac", default: false, shape: { cpu: 8, memMb: 16384 }, engine: "docker", present: true, takesForks: false },
+    { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 831 * 1024 ** 3, engine: "none", present: true, lastSeenAt: "2026-09-12T00:00:00.000Z", takesForks: true },
     { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.018, takesForks: true },
   ];
 
-  it("carries the cores, the memory, the free disk, whether it runs workspaces, its engine and the presence, with the default marked once", () => {
+  it("carries the cores, the memory, the free disk, its engine and the presence, with the default marked once, and no column for whether it runs workspaces", () => {
     const printed = placeLines(rows);
     expect(printed[0]).toContain("PLACE");
     expect(printed[0]).toContain("DISK FREE");
-    expect(printed[0]).toContain("WORKSPACES");
+    // Every place on this list forks, so the column that said yes or no said one word forever.
+    expect(printed[0]).not.toContain("WORKSPACES");
     expect(printed[0]).toContain("ENGINE");
     expect(printed[1]).toContain("zingzys-mac");
     expect(printed[2]).toContain("box");
@@ -309,10 +322,10 @@ describe("the table wsp places prints", () => {
     expect(placeLines([rows[2]!])[1]).not.toContain("daemon");
   });
 
-  it("says how many forks a place holds of how many it takes, and nothing there for one that forks nowhere", () => {
+  it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
     const printed = placeLines([
       { ...rows[1]!, forks: { running: 1, room: 2 } },
-      { ...rows[0]!, id: "p_2", name: "laptop", runsWorkspaces: false, engine: "none" },
+      { ...rows[0]!, id: "p_2", name: "laptop", engine: "none" },
     ]);
     expect(printed[0]).toContain("FORKS");
     expect(printed[1]).toContain("1 of 3");
@@ -321,11 +334,10 @@ describe("the table wsp places prints", () => {
 });
 
 describe("what a remove prints", () => {
-  it("names what came off the computer, what the workspaces said, and the note for a place that was off", () => {
-    const lines = removeLines("box", { swept: ["the systemd user unit", "/home/maya/.wsp/place.json"], dropped: ["workspace box (ws_1) and its threads are gone from this host"], note: "box is off this host" }).join("\n");
+  it("names what came off the computer and the note for a place that was off, and says nothing about workspaces, since a remove is refused while forks stand", () => {
+    const lines = removeLines("box", { swept: ["the systemd user unit", "/home/maya/.wsp/place.json"], note: "box is off this host" }).join("\n");
     expect(lines).toContain("removed from box:");
     expect(lines).toContain("  the systemd user unit");
-    expect(lines).toContain("workspace box (ws_1)");
     expect(lines).toContain("box is off this host");
     expect(lines).toContain("box is no longer a place in this wsp.");
   });
@@ -401,7 +413,7 @@ describe("a computer joining a wsp", () => {
     expect(statSync(placeKeyPath(home)).mode & 0o777).toBe(0o600);
     // The service runs the daemon itself, under the place's own name rather than the host's.
     expect(runner.ran.some(argv => argv.includes("enable") && argv.some(w => w.startsWith("wsp-place-")))).toBe(true);
-    const unit = join(home, ".config", "systemd", "user");
+    const unit = join(home, "etc-systemd-system");
     const written = readFileSync(join(unit, readdirSync(unit)[0]!), "utf8");
     expect(written).toContain(`ExecStart=${shellQuote(daemonBinaryHere())} '--host' '127.0.0.1'`);
     expect(written).toContain("'--kind' 'place'");
@@ -415,6 +427,23 @@ describe("a computer joining a wsp", () => {
     const sent = host.frames.find(f => f["op"] === "place.join")!;
     expect((sent["report"] as { name: string; dialed: string }).name).toBe("old-macbook");
     expect((sent["report"] as { dialed: string }).dialed).toBe(host.url);
+  });
+
+  it("refuses a login that is not root with one sentence and writes nothing, since the agent is the machine's service", async () => {
+    const home = tmp("join-plain");
+    const host = await fakeHost();
+    const runner = fakeRunner();
+    const io = captured();
+    const deps = { ...joinDepsFor(home, runner.run), uid: 1000 };
+    // The sentence itself, not just that something threw: every other reason a join can stop here throws too.
+    const said = await joinCommand(io, [host.url], { code: codeFor(host, "7QK3M2VD"), name: "old-macbook" }, deps).then(() => "", (e: unknown) => String(e));
+    expect(said).toContain(PLACE_NEEDS_ROOT_LINE);
+    // Before the handshake: no place file, no key, no unit, and the host was never dialled at all.
+    expect(existsSync(placeFilePath(home))).toBe(false);
+    expect(existsSync(placeKeyPath(home))).toBe(false);
+    expect(existsSync(join(home, "etc-systemd-system"))).toBe(false);
+    expect(runner.ran).toEqual([]);
+    expect(host.frames).toEqual([]);
   });
 
   it("writes nothing when the host could not prove the key it sent", async () => {
@@ -444,7 +473,7 @@ describe("a computer joining a wsp", () => {
     const wrong = await fakeHost({ wrongKey: true });
     await expect(joinCommand(captured(), [wrong.url], { code: codeFor(wrong, "X") }, joinDepsFor(tmp("join-key"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
     const other = await fakeHost({ refuse: "this host takes no places while it is building your image" });
-    await expect(joinCommand(captured(), [other.url], { code: codeFor(other, "X") }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
+    await expect(joinCommand(captured(), [other.url], { code: codeFor(other, "X") }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "host" });
   });
 
   it("refuses a second join on a computer that already belongs to a wsp", async () => {
@@ -555,20 +584,21 @@ describe("taking wsp off the computer it is typed on", () => {
 
   it("makes the manager forget the agent and takes its file, and stops nothing until the caller says so", async () => {
     const home = tmp("leave-order");
-    const unitDir = join(home, ".config", "systemd", "user");
-    mkdirSync(unitDir, { recursive: true });
+    const manager = unitsUnder(home);
     const runner = fakeRunner();
     writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString(), awake: false });
-    const unit = SERVICE_MANAGERS.systemd.unit({ role: "place", statePath: placeFilePath(home), home, uid: 1000 });
+    const unit = manager.unit({ role: "place", statePath: placeFilePath(home), home, uid: 0 });
+    mkdirSync(dirname(unit.path), { recursive: true });
     writeFileSync(unit.path, "[Unit]\n");
-    const swept = await sweepPlace({ home, manager: SERVICE_MANAGERS.systemd, run: runner.run, uid: 1000 });
-    // The file is gone and the link systemd keeps beside it was taken with it, so no login brings the agent back;
+    const swept = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
+    // The file is gone and the link systemd keeps beside it was taken with it, so no start brings the agent back;
     // nothing has been stopped yet, which is what lets the sweep answer the host before it dies.
     expect(existsSync(unit.path)).toBe(false);
     expect(swept.removed[0]).toContain(unit.name);
-    expect(runner.ran).toEqual([["systemctl", "--user", "disable", unit.name]]);
-    await stopPlaceService({ home, manager: SERVICE_MANAGERS.systemd, run: runner.run, uid: 1000 });
-    expect(runner.ran.at(-2)).toEqual(["systemctl", "--user", "disable", "--now", unit.name]);
+    // The agent is the machine's service, so its systemctl is the machine's and carries no --user.
+    expect(runner.ran).toEqual([["systemctl", "disable", unit.name]]);
+    await stopPlaceService({ home, manager, run: runner.run, uid: 0 });
+    expect(runner.ran.at(-2)).toEqual(["systemctl", "disable", "--now", unit.name]);
   });
 
   it("takes nothing off a computer that took nothing: the sweep is every path named and no more", async () => {
@@ -614,7 +644,7 @@ describe("wsp add on a computer reached over ssh", () => {
   it("asks the host to do it, prints each step as it lands and says what joined", async () => {
     const io = captured();
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
-    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, runsWorkspaces: true, engine: "none", present: true, takesForks: true };
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "box", default: true, shape: { cpu: 4, memMb: 4096 }, diskFreeBytes: 38 * 1024 ** 3, engine: "none", present: true, takesForks: true };
     const client = {
       request: async (op: string, params?: Record<string, unknown>) => {
         expect(op).toBe("places.add");
@@ -645,8 +675,9 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(said).toContain(`${PLACE_ADD_WORDS.connect}: Linux 6.8.0`);
     expect(said).toContain("box joined this wsp");
     expect(said).toContain("ssh-ed25519 SHA256:abc");
-    // The three doctor sentences, in the install's own lines: it runs workspaces, and it has no engine for a
-    expect(said).toContain("box runs your workspaces");
+    // A computer that joined runs your workspaces by definition, so the only doctor sentence left on the line is
+    // the engine a project's own containers would run on there.
+    expect(said).not.toContain("box runs your workspaces");
     expect(said).toContain("box has no container engine");
     expect(said).toContain("wsp remove box");
     expect(said).not.toContain("somebody else");
@@ -1171,13 +1202,17 @@ describe("wsp add <place> --update", () => {
   it("names the place by the word wsp places prints and asks the host to move it, then says both versions and the road", async () => {
     const home = tmp("update-place");
     const io = captured();
-    const fake = updateClient({ name: "spoo", from: 27, to: DAEMON_VERSION, road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon" });
+    const fake = updateClient({ name: "spoo", from: 27, to: DAEMON_VERSION, road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" });
     expect(await addCommand(io, opts(home), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
     // The id off the listing, never the word the person typed: two computers may share a name and the host keys by id.
     expect(fake.asked[1]!.params).toEqual({ placeId: "p_1" });
     expect(io.lines.join("\n")).toContain(`spoo: daemon 27 to ${DAEMON_VERSION}, over the link`);
     expect(io.lines.join("\n")).toContain("/home/maya/.wsp/daemon/wsp-daemon");
+    // Where the one it replaced was kept, which is the first thing to look at on a box that will not come up.
+    expect(io.lines.join("\n")).toContain("the old one     /home/maya/.wsp/daemon/wsp-daemon.old");
+    // A daemon that answered no kept path simply says nothing of it rather than an empty row.
+    expect(updatedLines({ name: "spoo", from: 27, to: 34, road: "link", at: "/x" }).some(line => line.includes("the old one"))).toBe(false);
   });
 
   it("says the note when the computer took the daemon and had not dialled back on it yet", async () => {
@@ -1242,7 +1277,7 @@ describe("which binary an update carries and how it travels", () => {
       link: {
         request: (op: string, params?: Record<string, unknown>) => {
           frames.push({ op, ...params });
-          return Promise.resolve(params?.["last"] === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon" } : {});
+          return Promise.resolve(params?.["last"] === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } : {});
         },
       } as never,
     };
@@ -1268,7 +1303,8 @@ describe("which binary an update carries and how it travels", () => {
     const dir = daemonDir();
     const { link, frames } = fakeLink();
     const landed = await placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "arm64" }), link });
-    expect(landed).toEqual({ road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon" });
+    // Both paths come off the last part's own reply, so the line names what that computer actually did.
+    expect(landed).toEqual({ road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" });
     // The chip the box said, so a host on x64 deploys to an arm64 box the binary that box can run.
     const wanted = readFileSync(daemonBinaryIn(dir, "aarch64-unknown-linux-musl"));
     expect(Buffer.concat(frames.map(f => Buffer.from(String(f["data"]), "base64")))).toEqual(wanted);
@@ -1302,12 +1338,16 @@ describe("which binary an update carries and how it travels", () => {
 
 describe("the update over the ssh road, where the link is down", () => {
   const HOME = "/home/maya";
-  const UNIT = placeUnitName(HOME);
+  const UNIT = placeUnit(HOME);
 
-  it("names the unit the join wrote, off the one path every file wsp keeps on a place sits under", () => {
-    expect(UNIT).toMatch(/^wsp-place-[0-9a-f]{8}\.service$/);
-    // Both sides read the rule off the place file's own path, so neither guesses the other's name.
-    expect(UNIT).toBe(`wsp-place-${serviceTag(placeDaemonPaths(HOME).placeFile)}.service`);
+  it("names the unit and its scope through the manager that writes them, never by spelling either here", () => {
+    const at = placeService(HOME, 0);
+    const manager = SERVICE_MANAGERS.systemd;
+    expect(UNIT.name).toBe(manager.unit(at).name);
+    // A place's unit is the machine's since #750's ruling, so it is driven with no --user and read the same way.
+    expect(manager.needsRoot?.(at)).toBe(true);
+    expect(UNIT.systemctl).toEqual(["systemctl"]);
+    expect(UNIT.journalctl).toEqual(["journalctl"]);
   });
 
   it("moves the landed binary over the path the unit itself names, keeps the old one and restarts, sweeping nothing", () => {
@@ -1315,15 +1355,20 @@ describe("the update over the ssh road, where the link is down", () => {
     const script = placeUpdateScript(HOME, landed);
     // The path is read back out of systemd rather than worked out here: the join wrote that unit with whatever
     // path the wsp on that computer resolved.
-    expect(script).toContain(`systemctl --user show -p ExecStart --value ${shellQuote(UNIT)}`);
+    expect(script).toContain(`systemctl show -p ExecStart --value ${shellQuote(UNIT.name)}`);
     expect(script).toContain("PLACE_NO_UNIT");
-    expect(script).toContain(`cp -f "$exe" "$exe.old"`);
+    // A keep that failed ends the update, as the link road's own install does: a box is never left on the new
+    // daemon with no way back to the one it ran.
+    expect(script).toContain(`cp -f "$exe" "$exe.old" || { echo ${PLACE_NO_KEEP_LINE}; exit 1; }`);
+    expect(script).not.toContain(`"$exe.old" 2>/dev/null || true`);
     // A move, never a write into a running executable.
     expect(script).toContain(`mv -f ${shellQuote(landed)} "$exe"`);
     expect(script).not.toMatch(/cat > "\$exe"|> "\$exe"/);
-    expect(script).toContain(`systemctl --user restart ${shellQuote(UNIT)}`);
-    // The port file is the proof the new daemon bound, so the old one is taken before the restart is waited on.
-    expect(script.indexOf(`rm -f ${shellQuote(placeDaemonPaths(HOME).portFile)}`)).toBeGreaterThan(script.indexOf("restart"));
+    expect(script).toContain(`systemctl restart ${shellQuote(UNIT.name)}`);
+    // The old port file goes before the restart, never after: a Type=simple restart returns as the process forks,
+    // so a daemon that binds quickly would have its own fresh port file removed and the wait below would read a
+    // daemon that is up as one that never came.
+    expect(script.indexOf(`rm -f ${shellQuote(placeDaemonPaths(HOME).portFile)}`)).toBeLessThan(script.indexOf("restart"));
     expect(script).toContain("PLACE_UPDATED");
     expect(script).toContain("PLACE_UPDATE_DOWN");
     // Nothing of the person's and nothing of the workspaces is touched: an update is not a leave.
@@ -1399,7 +1444,8 @@ describe("a join as the app's shell runs it", () => {
       name: "old-macbook",
       client: true,
       wsp: { execPath: "/usr/bin/node", execArgv: [], argv: ["/usr/bin/node", "/opt/wsp/bin.js"], version: "9.9.9", PATH: "", shim: `${home}/.wsp/bin/wsp` },
-      manager: SERVICE_MANAGERS.systemd,
+      manager: unitsUnder(home),
+      uid: 0,
       run: runner.run,
       dial: url => new WebSocket(wsUrlOf(url)),
     });
@@ -1407,7 +1453,7 @@ describe("a join as the app's shell runs it", () => {
     expect(joined.report.name).toBe("old-macbook");
     const file = readPlaceFile(placeFilePath(home))!;
     expect(file).toMatchObject({ hostName: "zingzy-mbp", awake: false, name: "old-macbook" });
-    const unitDir = join(home, ".config", "systemd", "user");
+    const unitDir = join(home, "etc-systemd-system");
     const written = readFileSync(join(unitDir, readdirSync(unitDir)[0]!), "utf8");
     // The unit runs the daemon; the shim is what the daemon reports as the wsp a turn's agent runs here.
     expect(written).toContain(`ExecStart=${shellQuote(daemonBinaryHere())} '--host' '127.0.0.1'`);
@@ -1424,7 +1470,7 @@ describe("a join as the app's shell runs it", () => {
     const host = await fakeHost();
     const runner = fakeRunner();
     expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
-    const unitDir = join(home, ".config", "systemd", "user");
+    const unitDir = join(home, "etc-systemd-system");
     const written = readFileSync(join(unitDir, readdirSync(unitDir)[0]!), "utf8");
     expect(written).toContain(`ExecStart=${shellQuote(daemonBinaryHere())} '--host' '127.0.0.1'`);
     expect(written).toContain("'--kind' 'place'");
@@ -1511,11 +1557,14 @@ describe("the sweep a joined computer runs on itself", () => {
     const host = await fakeHost();
     const runner = fakeRunner();
     expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
-    const unitDir = join(home, ".config", "systemd", "user");
+    const unitDir = join(home, "etc-systemd-system");
     const work = join(home, "wsp-work");
     mkdirSync(work, { recursive: true });
     writeFileSync(join(work, "a-thread-wrote-this"), "mine");
-    const removed = await leavePlace(home, runner.run, "linux");
+    // The sweep is given the manager the join wrote its unit with, so it looks under this test's home and not the machine's.
+    const manager = unitsUnder(home);
+    const { removed } = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
+    await stopPlaceService({ home, manager, run: runner.run, uid: 0 });
     expect(readdirSync(unitDir)).toEqual([]);
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
@@ -1535,8 +1584,9 @@ describe("which manager holds the agent's unit", () => {
     const home = tmp("manager-own");
     const own = captured();
     const runner = fakeRunner();
-    await joinPlace(own, { home, addresses: [host.url], code: "B", hostKey: keyFingerprint(host.publicKey), platform: "linux", run: runner.run, dial: url => new WebSocket(wsUrlOf(url)) });
-    // Whichever manager this computer has: it was asked to take the unit, which the branch above never does.
+    await joinPlace(own, { home, addresses: [host.url], code: "B", hostKey: keyFingerprint(host.publicKey), platform: "linux", uid: 0, manager: unitsUnder(home), run: runner.run, dial: url => new WebSocket(wsUrlOf(url)) });
+    // Linux's own module, with only the folder its unit lands in moved off this machine's real one: a platform that
+    // has a manager is asked to take the unit, which the branch above never does.
     expect(runner.ran.length).toBeGreaterThan(0);
     expect(own.errors.join("\n")).not.toContain("writes no service");
   });

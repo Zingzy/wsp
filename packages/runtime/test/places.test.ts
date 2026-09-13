@@ -23,6 +23,9 @@ import {
   absentComputer,
   placeBuildsNoImageLine,
   placeForksNowhereLine,
+  placeCannotBootLine,
+  placeNotAWorkspaceLine,
+  placeNotAWorkspaceFix,
   workspaceState,
   placeLinkTranscript,
   joinToken,
@@ -63,7 +66,7 @@ afterEach(async () => {
  * them rather than reading them a second time. */
 const DOOR = ["http://192.168.1.20:4400"];
 
-const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: true, engine: "docker" as const };
+const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, engine: "docker" as const };
 
 function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }, update?: PlaceUpdater): PlaceWiring {
   return { hostKey, provider: () => provider, here: () => HERE, hostName: () => "zingzys-mac", ...(update === undefined ? {} : { update }) };
@@ -213,25 +216,40 @@ describe("a computer joining", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     const second = await join(hostKey, { code: await code() });
     sockets.push(second.client.ws);
-    expect(String(second.reply["notice"])).toContain("old-macbook");
+    expect(second.placeId).toMatch(/^p_[0-9a-f]{16}$/);
+    expect((await placesOf()).filter(p => p.name === "old-macbook")).toHaveLength(2);
   });
 
-  it("spends the code, records the place with its key and report, marks it default, and records one workspace of the place kind", async () => {
+  it("spends the code, records the place with its key and report, marks it default, and records no workspace of its own", async () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code() });
     sockets.push(client.ws);
     expect(placeId).toMatch(/^p_[0-9a-f]{16}$/);
     const places = await placesOf();
     const row = places.find(p => p.id === placeId)!;
-    expect(row).toMatchObject({ kind: "computer", name: "old-macbook", default: true, runsWorkspaces: true, os: "Ubuntu 24.04", present: true });
+    expect(row).toMatchObject({ kind: "computer", name: "old-macbook", default: true, takesForks: true, os: "Ubuntu 24.04", present: true });
     expect(row.shape).toEqual({ cpu: 4, memMb: 4096 });
-    const workspaces = await runtime!.workspaces.list();
-    const ws = workspaces.find(w => w.name === "old-macbook")!;
-    expect(ws.kind).toBe("place");
-    expect(ws.machineId).toBe(`place:${placeId}`);
-    expect(ws.home).toBe("/home/maya");
-    expect(ws.folder).toBe(workFolderIn("/home/maya"));
-    expect(row.workspaceId).toBe(ws.id);
+    // The computer is a place, not a workspace: nothing is on the sidebar or in wsp workspaces until a fork lands.
+    expect(await runtime!.workspaces.list()).toEqual([]);
+  });
+
+  it("refuses a computer whose kernel cannot boot the image, in the doctor's own sentence, and writes no record for it", async () => {
+    const { hostKey, store } = await serving();
+    const blocked = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const { client, reply } = await join(hostKey, { code: await code(), report: report("laptop", { runsWorkspaces: false, workspacesBlocked: blocked }) });
+    sockets.push(client.ws);
+    expect(String(reply["error"])).toBe(placeCannotBootLine("laptop", blocked));
+    expect((await placesOf()).filter(p => p.id !== "here")).toEqual([]);
+    expect(await store.list("places")).toEqual([]);
+  });
+
+  it("names a word that is a place and not a workspace with the road to a workspace there, rather than calling it missing", async () => {
+    const { hostKey } = await serving();
+    const { client } = await join(hostKey, { code: await code() });
+    sockets.push(client.ws);
+    // What wsp run <place> and wsp exec <place> meet: both resolve their target through this one reading.
+    await expect(runtime!.workspaces.resolve("old-macbook")).rejects.toThrow(placeNotAWorkspaceLine("old-macbook"));
+    await expect(runtime!.workspaces.resolve("old-macbook")).rejects.toThrow(placeNotAWorkspaceFix("old-macbook"));
   });
 
   it("refuses a code this host is not holding, in the one sentence every reason reads as", async () => {
@@ -275,11 +293,9 @@ describe("a computer joining", () => {
     expect(slipped.proved).toMatchObject({ ok: false });
     expect(String(slipped.proved["error"])).toContain("not a plain path");
     expect(await slipped.client.closed()).toBe(4401);
-    // Nothing was attached and nothing of it reached the workspace standing on that place.
+    // Nothing was attached and the record kept the home the join proved, not the one the slipped report carried.
     expect((await placesOf()).find(p => p.id === slipped.placeId)!.present).toBe(false);
-    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
-    expect(ws.home).toBe("/home/maya");
-    expect(ws.folder).toBe(workFolderIn("/home/maya"));
+    expect((await runtime!.places!.reportOf(slipped.placeId))!.login["HOME"]).toBe("/home/maya");
   });
 
   it("refuses the same report on a relink, and the workspace keeps the login it had", async () => {
@@ -292,7 +308,29 @@ describe("a computer joining", () => {
     expect(String(again.proved["error"])).toContain("not a plain path");
     expect(await again.client.closed()).toBe(4401);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.present).toBe(false);
-    expect((await runtime!.workspaces.list()).find(w => w.kind === "place")!.home).toBe("/home/maya");
+    expect((await runtime!.places!.reportOf(joined.placeId))!.login["HOME"]).toBe("/home/maya");
+  });
+
+  it("turns a linked box down the moment it says its kernel no longer boots the image, and keeps the sentence on the row", async () => {
+    const { hostKey } = await serving();
+    const joined = await join(hostKey, { code: await code(), answers: c => forks(c) });
+    sockets.push(joined.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
+    const BLOCKED = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
+    // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
+    expect(again.proved).toMatchObject({ ok: false });
+    expect(String(again.proved["error"])).toBe(placeCannotBootLine("old-macbook", BLOCKED));
+    expect(await again.client.closed()).toBe(4401);
+    // The link is cut and the row says why, where every other refusal of a dial is kept; no forks-nowhere row and
+    // no place that reads present while nothing can be asked of it.
+    await until(async () => {
+      const at = (await placesOf()).find(p => p.id === joined.placeId)!;
+      return at.present === false && at.dialled !== undefined;
+    });
+    const row = (await placesOf()).find(p => p.id === joined.placeId)!;
+    expect(row.dialled).toMatchObject({ answered: false, said: placeCannotBootLine("old-macbook", BLOCKED) });
+    expect(row.takesForks).toBe(true);
   });
 
   it("keeps a report's PATH and store folders only where they are plain paths, as the ssh read does", async () => {
@@ -308,17 +346,15 @@ describe("a computer joining", () => {
     expect(kept!.login["HOME"]).toBe("/home/maya");
   });
 
-  it("records the place and says so as a notice when the name is one a workspace already holds", async () => {
+  it("records a second computer under a name another place already holds, since a place is no workspace and ids tell them apart", async () => {
     const { hostKey } = await serving();
     const first = await join(hostKey, { code: await code() });
     sockets.push(first.client.ws);
-    // Two computers under one name: ids tell them apart, the second joins, and the notice says who holds the name.
     const second = await join(hostKey, { code: await code() });
     sockets.push(second.client.ws);
-    expect(String(second.reply["notice"])).toContain("old-macbook");
-    const row = (await placesOf()).find(p => p.id === second.placeId)!;
-    expect(row.workspaceId).toBeUndefined();
-    expect((await runtime!.workspaces.list()).filter(w => w.kind === "place")).toHaveLength(1);
+    expect(second.reply["notice"]).toBeUndefined();
+    expect((await placesOf()).filter(p => p.name === "old-macbook").map(p => p.id).sort()).toEqual([first.placeId, second.placeId].sort());
+    expect(await runtime!.workspaces.list()).toEqual([]);
   });
 });
 
@@ -429,10 +465,8 @@ describe("the socket a place proved", () => {
     expect(proved.ok, String(proved["error"])).toBe(true);
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
     expect((await placesOf()).find(p => p.id === joined.placeId)!.shape).toEqual({ cpu: 8, memMb: 8192 });
-    // The workspace standing on it reads the newest login, so every path a turn there runs under moved with it.
-    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
-    await until(async () => (await runtime!.workspaces.get(ws.id)).home === "/home/maya-moved");
-    expect((await runtime!.workspaces.get(ws.id)).folder).toBe(workFolderIn("/home/maya-moved"));
+    // The record reads the newest login, so every path a fork there is built from moved with it.
+    await until(async () => (await runtime!.places!.reportOf(joined.placeId))!.login["HOME"] === "/home/maya-moved");
   });
 
   it("marks the place absent when the socket goes, and moves its last seen", async () => {
@@ -452,8 +486,8 @@ describe("the list of every place", () => {
     sockets.push(first.client.ws);
     const places = await placesOf();
     expect(places.map(p => p.kind)).toEqual(["computer", "computer", "provider"]);
-    expect(places[0]).toMatchObject({ id: "here", name: HERE.name, present: true, runsWorkspaces: true });
-    expect(places.at(-1)).toMatchObject({ id: "box", kind: "provider", rateUsdPerHour: 0.018 });
+    expect(places[0]).toMatchObject({ id: "here", name: HERE.name, present: true, takesForks: false });
+    expect(places.at(-1)).toMatchObject({ id: "box", kind: "provider", rateUsdPerHour: 0.018, takesForks: true });
     expect(places.filter(p => p.default)).toHaveLength(1);
     expect(places.find(p => p.default)!.id).toBe(first.placeId);
   });
@@ -612,8 +646,6 @@ describe("taking a place back out", () => {
     const { hostKey } = await serving();
     const { client, placeId } = await join(hostKey, { code: await code() });
     sockets.push(client.ws);
-    const before = await runtime!.workspaces.list();
-    expect(before.some(w => w.kind === "place")).toBe(true);
     // The place answers place.leave with what its own sweep took; the host never guesses that list.
     client.ws.on("message", raw => {
       const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
@@ -622,8 +654,6 @@ describe("taking a place back out", () => {
     const answer = await remove(placeId);
     expect(answer["removed"]).toBe(true);
     expect(answer["swept"]).toEqual(["the systemd user unit", "/home/maya/.wsp/place.json"]);
-    expect(String((answer["dropped"] as string[])[0])).toContain("old-macbook");
-    expect((await runtime!.workspaces.list()).some(w => w.kind === "place")).toBe(false);
     expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
   });
 
@@ -641,42 +671,6 @@ describe("taking a place back out", () => {
   it("answers that nothing was removed for an id this host holds no place by", async () => {
     await serving();
     expect(await remove("p_deadbeefdeadbeef")).toMatchObject({ removed: false });
-  });
-});
-
-describe("a workspace on a place", () => {
-  it("runs its commands over the link, refuses them with the place's name when it is not connected, and names no pane road yet", async () => {
-    const { hostKey } = await serving();
-    const { client, placeId } = await join(hostKey, { code: await code() });
-    sockets.push(client.ws);
-    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
-    // The exec op the host sends rides the link; the place answers it, so the test answers as the daemon would.
-    client.ws.on("message", raw => {
-      const frame = JSON.parse(String(raw)) as { id?: number; op?: string; cmd?: string };
-      if (frame.op === "exec") client.ws.send(JSON.stringify({ id: frame.id, ok: true, exitCode: 0, stdout: `ran ${frame.cmd ?? ""}`, stderr: "", truncated: false }));
-    });
-    expect(await runtime!.workspaces.exec(ws.id, "hostname")).toMatchObject({ exitCode: 0, stdout: "ran hostname" });
-    // The panes wait on a road from this computer to that daemon, which the round that forwards over the link answers.
-    await expect(runtime!.workspaces.daemonReach(ws.id)).rejects.toThrow(/old-macbook/);
-    client.close();
-    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    await expect(runtime!.workspaces.exec(ws.id, "hostname")).rejects.toThrow(/is not answering; it connects on its own when it is on/);
-    expect(placeDaemonPaths("/home/maya").runDir).toBe("/home/maya/.wsp/run");
-  });
-
-  it("reads unreachable with the computer's own sentence once that computer stops answering, as a fork on it does", async () => {
-    const { hostKey } = await serving();
-    const { client, placeId } = await join(hostKey, { code: await code() });
-    sockets.push(client.ws);
-    const ws = (await runtime!.workspaces.list()).find(w => w.kind === "place")!;
-    client.close();
-    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
-    const away = (await runtime!.status.list()).find(r => r.id === ws.id)!;
-    // The workspace a joined computer is carries that computer in its machine id rather than on a place field, and
-    // a status that read it off the field alone left this one reading running with no daemon road at all.
-    expect(away.reach.state).toBe("unreachable");
-    expect(away.reason).toBe(absentComputer("old-macbook", null).sentence);
-    expect(workspaceState({ phase: away.phase, machineState: away.machineState, reach: away.reach.state })).toBe("unreachable");
   });
 });
 
@@ -917,7 +911,7 @@ describe("putting the agent on a computer over ssh", () => {
     expect(added.addId).toBe("a_mine");
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
     // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
-    expect(stages.at(-1)?.note).toBe("workspaces yes · engine none");
+    expect(stages.at(-1)?.note).toBe("engine none");
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
@@ -1434,8 +1428,6 @@ describe("a fork on a computer you joined", () => {
     const here = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
     expect(here.provider).toBe("solari");
     expect(here.place).toBeUndefined();
-    // A computer the person owns is forked by nobody, so it names no provider at all.
-    expect((await runtime.workspaces.list()).find(w => w.kind === "place")!.provider).toBeUndefined();
   });
 
   it("takes the default place when nobody names one, and the host's own provider when that is the default", async () => {
@@ -1457,7 +1449,7 @@ describe("a fork on a computer you joined", () => {
     expect(place.created).toHaveLength(1);
   });
 
-  it("says on the row whether a place takes forks at all, off the list the verbs read, and forks where it says yes", async () => {
+  it("says every computer on the row forks and the computer the app runs on does not, off the list the verbs read", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
     runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
@@ -1465,21 +1457,19 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const withDocker = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(withDocker.client.ws);
-    const without = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { runsWorkspaces: false }) });
-    sockets.push(without.client.ws);
     const rows = await placesOf();
-    // The computer the host runs on is where the person's own agents run, never something the host forks into.
+    // The computer the app runs on is its own local mode, never something the host forks into; a computer that
+    // joined boots the image, since the join turns down every one whose kernel cannot.
     expect(rows.find(p => p.id === "here")!.takesForks).toBe(false);
     expect(rows.find(p => p.id === withDocker.placeId)!.takesForks).toBe(true);
-    expect(rows.find(p => p.id === without.placeId)!.takesForks).toBe(false);
     expect(rows.find(p => p.id === "solari")!.takesForks).toBe(true);
     // What the row promises is what the create does: the fork lands on that computer's own backend.
     const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
     expect(made.place).toBe(withDocker.placeId);
-    // And a row that says no forks nowhere: the refusal is that computer's, not a fork nobody asked for.
-    await expect(runtime.workspaces.create({ golden: "snap_g", name: "y", on: "laptop" })).rejects.toThrow(/laptop cannot run wsp workspaces/);
+    // What the sidebar and wsp workspaces list for that computer: its forks, and no row for the computer itself.
+    expect((await runtime.workspaces.list()).map(w => [w.name, w.place])).toEqual([["x", withDocker.placeId]]);
   });
 
   it("refuses a word that names no place, and names what this host holds", async () => {
@@ -1489,11 +1479,11 @@ describe("a fork on a computer you joined", () => {
     await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv.*solari/);
   });
 
-  it("refuses a computer that forks nowhere, in its own words", async () => {
+  it("never holds a computer that forks nowhere: the join turned it down, so no word names one", async () => {
     const { hostKey } = await serving();
     const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false }), answers: c => forks(c) });
     sockets.push(client.ws);
-    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv cannot run wsp workspaces/);
+    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/no place named srv/);
     expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
   });
 
@@ -1847,20 +1837,18 @@ describe("the image build and the computer whose doctor said no, or that does no
   const BLOCKED = "this computer mounts cgroup v1 at /sys/fs/cgroup";
   const copyRecipe = (): GoldenRecipe => ({ setup: "true", smoke: "true" });
 
-  it("a joined computer whose doctor said no is refused with the doctor's own sentence on every road that names it, and passed over for the provider that forks when it is the default", async () => {
-    const { hostKey } = await serving();
-    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }), answers: c => forks(c) });
+  it("a computer whose doctor said no never becomes a place: the join is refused in the doctor's own sentence and nothing is written", async () => {
+    const { hostKey, store } = await serving();
+    const { client, reply } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }), answers: c => forks(c) });
     sockets.push(client.ws);
-    const reason = placeForksNowhereLine("srv", BLOCKED);
-    expect(reason).toBe("srv mounts cgroup v1 at /sys/fs/cgroup");
-    await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(reason);
-    await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(reason);
-    await expect(runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(reason);
-    await expect(runtime!.workspaces.landing({ on: "srv" })).rejects.toThrow(reason);
-    // Marked default, it runs no workspaces, so the one place that does is where the build goes.
-    await runtime!.places!.markUsed(placeId);
-    const picked = await runtime!.golden.buildPlace();
-    expect([picked.place, picked.name]).toEqual(["default", "default"]);
+    expect(String(reply["error"])).toBe(placeCannotBootLine("srv", BLOCKED));
+    expect(String(reply["error"])).toBe("srv cannot run wsp workspaces: it mounts cgroup v1 at /sys/fs/cgroup");
+    // Nothing on the store, nothing on the list, and no road names it: the refusal is the whole of what happened.
+    expect(await store.list("places")).toEqual([]);
+    await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(/no place named srv/);
+    await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(/no place named srv/);
+    await expect(runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(/no place named srv/);
+    await expect(runtime!.workspaces.landing({ on: "srv" })).rejects.toThrow(/no place named srv/);
   });
 
   it("a default place that is not answering is the refusal the person reads, with its name in it, never a build sent to another place", async () => {
@@ -2000,15 +1988,14 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(Date.now() - at).toBeGreaterThanOrEqual(300);
   });
 
-  it("builds nothing for a computer whose doctor said no, and nothing at all on a host that holds no image", async () => {
+  it("builds nothing for a computer whose doctor said no, since its join never stood, and nothing at all on a host that holds no image", async () => {
     const { hostKey } = await imageHost({ sealed: true });
     let blocked!: ForkingPlace;
     const laptop = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { runsWorkspaces: false }), answers: c => (blocked = forks(c)) });
     sockets.push(laptop.client.ws);
-    await until(async () => (await rowOf(laptop.placeId)).present === true);
     await settled();
     expect(blocked.asked["machine.create"]).toBeUndefined();
-    expect((await rowOf(laptop.placeId)).build).toBeUndefined();
+    expect((await placesOf()).some(p => p.name === "laptop")).toBe(false);
 
     await srv?.close();
     await runtime?.close();

@@ -80,14 +80,16 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     efforts: CLAUDE_EFFORTS,
     contextWindows: CLAUDE_CONTEXT_WINDOWS,
     // default is the mode this CLI raises its own prompts in: with --permission-prompt-tool they reach the host over
-    // the control channel and the person answers them in the chat (measured on 2.1.263, 2026-09-08).
+    // the control channel and the person answers them in the chat (measured on 2.1.263, 2026-09-08). No mode here
+    // carries the default mark: which of the two below a thread starts at belongs to the workspace's kind, and
+    // workspaceAccess places the mark against it.
     keptMode: "default",
     bypassMode: "bypassPermissions",
     permissionModes: [
       option("default", "Default", "Asks in the chat about each action that needs permission"),
       option("acceptEdits", "Accept edits", "Edits files without asking; asks about commands that need permission"),
       option("plan", "Plan", "Reads and plans only; changes nothing"),
-      { ...option("bypassPermissions", "Bypass", "Runs every action without asking"), isDefault: true },
+      option("bypassPermissions", "Bypass", "Runs every action without asking"),
       option("auto", "Auto", "The agent decides which actions to ask about; where the account has no such mode it asks as Default does"),
       // A turn launched in manual comes back naming default as the mode it ran in, so its own report is no proof of it.
       option("manual", "Manual", "Asks before every action"),
@@ -118,7 +120,7 @@ export const HARNESS_CATALOGS: readonly HarnessCatalog[] = [
     permissionModes: [
       option("read-only", "Read only", "Reads only; edits no files and runs no command that writes"),
       option("workspace-write", "Workspace write", "Edits files and runs commands inside the working folder"),
-      { ...option("danger-full-access", "Full access", "Runs every action without asking, with no folder off limits"), isDefault: true },
+      option("danger-full-access", "Full access", "Runs every action without asking, with no folder off limits"),
     ],
   }),
   fromTable({

@@ -100,10 +100,11 @@ pub fn link_quiet(url: &str, seconds: impl std::fmt::Display) -> String {
     format!("the host at {url} sent nothing for {seconds}s; cutting the link and dialling again")
 }
 
-/// What an update's parts are refused with. The parts of one upload arrive in order on one socket, so a gap is an
-/// upload that starts again rather than a file with a hole in it.
-pub fn update_out_of_order(seq: u64, upload_id: &str) -> String {
-    format!("part {seq} of {upload_id} is out of order; the update is dropped and starts again")
+/// What an update's parts are refused with. The parts of one upload arrive in order on one socket, so a part that
+/// is not the one waited for, a repeat or a skip alike, is an upload that starts again rather than a file with a
+/// hole in it or the same bytes twice.
+pub fn update_out_of_order(seq: u64, wanted: u64, upload_id: &str) -> String {
+    format!("part {seq} of {upload_id} arrived where part {wanted} was waited for; the update is dropped and starts again")
 }
 
 /// What a binary whose bytes are not the ones the host named is refused with. Read before anything is moved over
@@ -115,4 +116,9 @@ pub fn update_bytes_differ(upload_id: &str, wanted: &str, landed: &str) -> Strin
 /// What the log says once the new binary stands where the unit starts it.
 pub fn update_landed(at: &str) -> String {
     format!("the daemon the host sent is at {at}; this one is ending so its supervisor starts the new one")
+}
+
+/// What the agent says when it starts and finds parts of an update nothing will name again.
+pub fn update_swept(parts: usize) -> String {
+    format!("swept {parts} leftover update part(s) from a link that dropped mid-upload")
 }

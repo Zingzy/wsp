@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, absentComputer, placeDaemonBehind, placeMachineId, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, absentComputer, placeDaemonBehind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
 import { NOTHING_HELD, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
 
-const here: PlaceView = { id: "here", kind: "computer", name: "This Mac", default: false, shape: { cpu: 8, memMb: 16 * 1024 }, diskFreeBytes: 210 * 1024 ** 3, runsWorkspaces: false, engine: "none", present: true };
+const here: PlaceView = { id: "here", kind: "computer", name: "This Mac", default: false, shape: { cpu: 8, memMb: 16 * 1024 }, diskFreeBytes: 210 * 1024 ** 3, engine: "none", present: true, takesForks: false };
 const hetzner: PlaceView = {
   id: "p_1",
   kind: "computer",
@@ -15,13 +15,14 @@ const hetzner: PlaceView = {
   default: true,
   shape: { cpu: 2, memMb: 4 * 1024 },
   diskFreeBytes: 38 * 1024 ** 3,
-  runsWorkspaces: true, engine: "docker",
+  engine: "docker",
   present: true,
+  takesForks: true,
   joinedAt: ago(60 * 60 * 1000),
   lastSeenAt: ago(3_000),
 };
-const laptop: PlaceView = { ...hetzner, id: "p_2", name: "old-macbook", default: false, shape: { cpu: 4, memMb: 8 * 1024 }, diskFreeBytes: 91 * 1024 ** 3, runsWorkspaces: false, engine: "none", present: false, lastSeenAt: ago(2 * 60 * 60 * 1000) };
-const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4 * 1024 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018 };
+const laptop: PlaceView = { ...hetzner, id: "p_2", name: "old-macbook", default: false, shape: { cpu: 4, memMb: 8 * 1024 }, diskFreeBytes: 91 * 1024 ** 3, engine: "none", present: false, lastSeenAt: ago(2 * 60 * 60 * 1000) };
+const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4 * 1024 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018, takesForks: true };
 
 describe("what the section computes beyond the table's own cells", () => {
   it("reads a provider row under the name a person knows it by", () => {
@@ -57,10 +58,10 @@ describe("the remove sentence", () => {
     expect(removeSentence(hetzner, NOTHING_HELD)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image stays where it is.");
   });
 
-  it("says nothing of an image on a computer that runs no workspaces, since none was ever built there", () => {
+  it("says what becomes of the copy of the image, since every computer that joined runs workspaces and holds one", () => {
     // What Remove promises about four gigabytes of somebody's disk is what the sweep does: it walks wsp's own
-    // folder and the unit, and never the store a copy of the image would sit in.
-    expect(removeSentence({ ...hetzner, runsWorkspaces: false, engine: "none" }, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is.");
+    // folder and the unit, and never the store the copy sits in, so the copy stays.
+    expect(removeSentence(hetzner, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
   });
 
   it("says a provider's workspaces are deleted there and its key forgotten here", () => {
@@ -71,7 +72,7 @@ describe("the remove sentence", () => {
 
   it("adds when an offline computer is swept", () => {
     expect(removeSentence(laptop, NOTHING_HELD)).toBe(
-      "wsp comes off old-macbook, which is otherwise left as it is. It is offline; what is on it is swept the next time it connects.",
+      "wsp comes off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. It is offline; what is on it is swept the next time it connects.",
     );
   });
 });
@@ -79,14 +80,14 @@ describe("the remove sentence", () => {
 describe("the rows the New workspace dialog offers, and what each says", () => {
   const copy = (place: string, version: number): SealedImageCopy => ({ place, version, snapshotId: `snap_${place}`, builtAt: ago(60_000) });
 
-  it("offers every computer and provider that takes a workspace, never the computer the host runs on", () => {
+  it("offers every computer and provider that takes a workspace, never the computer the app runs on", () => {
     // This computer runs Docker here: it can hold copies of the image, and it is still never somewhere to put
-    // another workspace, since it is already the one it can be.
-    expect(whereSegments([{ ...here, runsWorkspaces: true, engine: "docker" }, hetzner, laptop, ascii]).map(p => p.id)).toEqual(["p_1", "box"]);
+    // another workspace, since its local mode is already the one it can be.
+    expect(whereSegments([{ ...here, engine: "docker" }, hetzner, laptop, ascii]).map(p => p.id)).toEqual(["p_1", "p_2", "box"]);
   });
 
-  it("offers nothing at all where this computer is the only row that could hold one", () => {
-    expect(whereSegments([{ ...here, runsWorkspaces: true, engine: "docker" }, laptop])).toEqual([]);
+  it("offers nothing at all where this computer is the only row there is", () => {
+    expect(whereSegments([{ ...here, engine: "docker" }])).toEqual([]);
   });
 
   it("says a box costs nothing, how much room it has, and that the image is built there first", () => {
@@ -128,10 +129,10 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
 });
 
 describe("which row a workspace stands on", () => {
-  const on = (id: string, kind: WorkspaceView["kind"], machineId: string): WorkspaceView => ({ id, name: id, kind, machineId, phase: "running", golden: "", createdAt: ago(0) });
+  const on = (id: string, kind: WorkspaceView["kind"], machineId: string, place?: string): WorkspaceView => ({ id, name: id, kind, machineId, phase: "running", golden: "", createdAt: ago(0), ...(place === undefined ? {} : { place }) });
 
-  it("puts a joined computer's workspace on that computer's row", () => {
-    expect(placeOf([here, hetzner, ascii], on("ws_a", "place", placeMachineId("p_1")))?.id).toBe("p_1");
+  it("puts a fork on a joined computer on that computer's row", () => {
+    expect(placeOf([here, hetzner, ascii], on("ws_a", "cloud", "ctr_1", "p_1"))?.id).toBe("p_1");
   });
 
   it("puts what runs here on the first row, and a fork at the provider", () => {
@@ -141,18 +142,18 @@ describe("which row a workspace stands on", () => {
 
   it("places nothing where the list holds no row for it", () => {
     expect(placeOf([here], on("ws_d", "cloud", "fk_1"))).toBeUndefined();
-    expect(placeOf([here, ascii], on("ws_e", "place", placeMachineId("p_gone")))).toBeUndefined();
+    expect(placeOf([here, ascii], on("ws_e", "cloud", "ctr_1", "p_gone"))).toBeUndefined();
   });
 
-  it("counts what stands on each row off the workspace list: this computer's own, the forks at a provider, the one on a joined computer", () => {
+  it("counts what stands on each row off the workspace list: this computer's own, the forks at a provider, the forks on a joined computer", () => {
     const places = [here, hetzner, ascii];
-    const workspaces = [on("ws_a", "local", "local"), on("ws_b", "cloud", "fk_1"), on("ws_c", "cloud", "fk_2"), on("ws_d", "place", placeMachineId("p_1"))];
+    const workspaces = [on("ws_a", "local", "local"), on("ws_b", "cloud", "fk_1"), on("ws_c", "cloud", "fk_2"), on("ws_d", "cloud", "ctr_1", "p_1")];
     expect(placeWorkspaceCounts(places, workspaces)).toEqual({ here: 1, box: 2, p_1: 1 });
   });
 
   it("leaves a row nothing stands on out, and counts nothing for a workspace no row holds", () => {
     expect(placeWorkspaceCounts([here, hetzner], [on("ws_a", "local", "local")])).toEqual({ here: 1 });
-    expect(placeWorkspaceCounts([here], [on("ws_b", "place", placeMachineId("p_gone"))])).toEqual({});
+    expect(placeWorkspaceCounts([here], [on("ws_b", "cloud", "ctr_1", "p_gone")])).toEqual({});
   });
 });
 

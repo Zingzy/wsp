@@ -240,6 +240,11 @@ async fn place_update(ctx: &Arc<Ctx>, id: Option<RequestId>, frame: &Value) -> O
     let home = crate::place::place_home(ctx.options.home.as_deref());
     let bytes = lenient_base64(&data);
     let part = crate::place::update_part(&home, &upload_id);
+    // An upload beginning is the other moment nothing is arriving, so what an earlier try left goes here too.
+    if seq == 0 {
+        let (home, upload) = (home.clone(), upload_id.clone());
+        let _ = fs::blocking(move || Ok(crate::place::sweep_updates(&home, Some(&upload)))).await;
+    }
     let taking = {
         let (part, upload) = (part.clone(), upload_id.clone());
         fs::blocking(move || crate::place::take_update_part(&part, seq, &bytes, &upload).map_err(OpError::plain)).await
@@ -706,7 +711,7 @@ mod tests {
         // A part that is not the first with nothing landed drops the upload and says which part.
         let gap = handle(&link, &ctx, &part(1, false, "AAAA").to_string()).await;
         assert!(matches!(gap, Outgoing::Text(_)), "a refused part ended the daemon");
-        assert_eq!(said(&gap), json!({"id": 9, "ok": false, "error": words::update_out_of_order(1, "u1")}));
+        assert_eq!(said(&gap), json!({"id": 9, "ok": false, "error": words::update_out_of_order(1, 0, "u1")}));
 
         // Every part but the last is a plain ok and lands nothing.
         let first = handle(&link, &ctx, &part(0, false, "AAAA").to_string()).await;

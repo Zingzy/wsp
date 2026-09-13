@@ -4,14 +4,13 @@
 // The glyph's shape says what the machine is; its hue on the sidebar row says
 // the state, by the one rule in sidebar/workspaceRows.ts. Adding a kind is a
 // row in this table.
-import { CloudIcon, LaptopIcon, MonitorIcon, ServerIcon, type LucideIcon } from "lucide-react";
+import { CloudIcon, LaptopIcon, ServerIcon, type LucideIcon } from "lucide-react";
 import type { WorkspaceKind } from "@wsp/protocol";
 
 const GLYPHS: Record<WorkspaceKind, LucideIcon> = {
   cloud: CloudIcon,
   local: LaptopIcon,
   ssh: ServerIcon,
-  place: MonitorIcon,
 };
 
 export function workspaceKindGlyph(kind: WorkspaceKind): LucideIcon {
@@ -25,7 +24,6 @@ const NEW_TITLES: Record<WorkspaceKind, string> = {
   cloud: "New workspace",
   local: "This computer",
   ssh: "A computer over ssh",
-  place: "A computer you joined",
 };
 
 export function newWorkspaceTitle(kind: WorkspaceKind): string {

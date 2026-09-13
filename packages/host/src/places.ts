@@ -29,7 +29,6 @@ import {
   joinKeyRefusal,
   joinToken,
   readJoinToken,
-  placeWorkspacesLine,
   placeEngineLine,
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinReply,
@@ -57,9 +56,10 @@ import {
   relayUrlOf,
   usageRefusal,
   wsUrlOf,
+  PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
 import { SshBackend, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
@@ -70,7 +70,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
-import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedBy, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { advertiseWord, pairOnLoopbackLine, reachAddresses } from "./pairing.js";
@@ -79,7 +79,6 @@ import {
   runFailureLine,
   serviceEnv,
   serviceManagerFor,
-  serviceTag,
   systemRunner,
   type ServiceAddress,
   type ServiceManager,
@@ -160,7 +159,7 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
  * shown right after it joined somebody else's wsp cannot describe the same computer differently. */
 export function placeHere(name: string = placeNameHere()): HerePlace {
   const report = placeReport({ name });
-  return { name: report.name, os: report.os, shape: report.shape, runsWorkspaces: report.runsWorkspaces, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
+  return { name: report.name, os: report.os, shape: report.shape, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
 
 /** How long a join gets to open the socket and finish the handshake. A person is watching, and a host that is not
@@ -233,12 +232,11 @@ export const deviceLeftLine = (name: string, deviceIds: readonly string[]): stri
   return `${name} still holds ${one ? "a token" : `${deviceIds.length} tokens`} for this wsp, which its own window signs in with; ${revoke} take${one ? "s it" : " them"} back.`;
 };
 
-/** What a remove prints: what came off that computer, what the workspaces on it said as they went, the note for a
- * place that was not connected to sweep, and the device a join bought for it where one is still on record. */
-export function removeLines(name: string, answer: { swept: readonly string[]; dropped: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
+/** What a remove prints: what came off that computer, the note for a place that was not connected to sweep, and
+ * the device a join bought for it where one is still on record. */
+export function removeLines(name: string, answer: { swept: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
   return [
     ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...answer.swept.map(line => `  ${line}`)]),
-    ...answer.dropped,
     ...(answer.note === undefined ? [] : [answer.note]),
     ...(deviceIds.length === 0 ? [] : [deviceLeftLine(name, deviceIds)]),
     `${name} is no longer a place in this wsp.`,
@@ -255,14 +253,15 @@ export const noPlaceLine = (typed: string, names: readonly string[]): string =>
   `${typed}: this host holds no place by that name or id.${names.length === 0 ? " wsp add prints the join line." : ` It holds ${names.join(", ")}.`}`;
 
 /** The one place a word names among the computers joined to this host, or the refusal the line that typed it
- * prints. Every word that names a place reads it, so none of them invents a second reading or a second refusal. */
-async function onePlace(client: HostClient, typed: string, ref: string): Promise<{ place: PlaceView } | { refusal: string }> {
+ * prints. Every word that names a place reads it, so none of them invents a second reading or a second refusal.
+ * The computers it picked from come back with it, so a caller that has to name them later reads no second listing. */
+async function onePlace(client: HostClient, typed: string, ref: string): Promise<{ place: PlaceView; joined: PlaceView[] } | { refusal: string }> {
   const { places } = await client.request<{ places: PlaceView[] }>("places.list");
   const joined = places.filter(p => p.kind === "computer" && p.joinedAt !== undefined);
   const found = joined.filter(p => p.id === ref || p.name === ref);
   if (found.length === 0) return { refusal: noPlaceLine(typed, joined.map(p => p.name)) };
   if (found.length > 1) return { refusal: twoPlacesLine(typed, found.map(p => p.id)) };
-  return { place: found[0]! };
+  return { place: found[0]!, joined };
 }
 
 /** The line a join prints once the computer is in. */
@@ -377,10 +376,18 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
   };
 }
 
-/** The unit the join on that computer installed, named the way its own service manager names it: the role and the
- * first eight hex of the place file's path. The host can name it without asking because both sides read one rule
- * off one path, which is where every file wsp keeps on a place sits. */
-export const placeUnitName = (home: string): string => `wsp-place-${serviceTag(placeDaemonPaths(home).placeFile)}.service`;
+/** The unit the join on that computer installed and the words that reach the manager holding it, both read off the
+ * one rule that writes them: the manager for a Linux box, asked about that box's own place service. A second
+ * spelling of `wsp-place-<tag>` here would leave this road behind the day the unit scheme moves. The scope comes
+ * from the same manager: a unit it says must be installed by root is the machine's, so it is driven without --user.
+ * The uid decides nothing about either, and 0 is passed rather than this computer's, which is another computer's. */
+export function placeUnit(home: string): { name: string; systemctl: readonly string[]; journalctl: readonly string[] } {
+  const manager = serviceManagerFor("linux");
+  if (manager === undefined) throw new Error(noPlaceManagerLine("linux"));
+  const at = placeService(home, 0);
+  const scoped = manager.needsRoot?.(at) === true ? [] : ["--user"];
+  return { name: manager.unit(at).name, systemctl: ["systemctl", ...scoped], journalctl: ["journalctl", ...scoped] };
+}
 
 /** What a computer answers once the daemon the host sent is the one its unit runs, and what it says instead when
  * the unit did not come back up. Read off stdout, as every other deploy's lines are. */
@@ -389,28 +396,35 @@ export const PLACE_UPDATE_DOWN_LINE = "PLACE_UPDATE_DOWN";
 /** What the box says when its own service manager holds no unit for this place: the update stops there rather than
  * writing a binary nothing would start. */
 export const PLACE_NO_UNIT_LINE = "PLACE_NO_UNIT";
+/** What it says when the binary it is replacing could not be kept, which is the one refusal both roads share: the
+ * link road's install refuses there too, so a box is never left with the new daemon and no way back to the old. */
+export const PLACE_NO_KEEP_LINE = "PLACE_NO_KEEP";
 
 /** The update over the ssh road, run on the computer itself once the binary has landed beside its files. The path
  * the new binary is moved over is the one the unit itself names, read back out of systemd rather than worked out
  * here: the join wrote that unit with whatever path the wsp on that computer resolved, and a second reading of that
  * rule here would be a second copy of it. The old binary is kept beside the new one, as the coordinator kept it by
- * hand. Nothing is swept: the workspaces' records stay on the box and the daemon that comes up reads them again. */
-export function placeUpdateScript(home: string, landed: string, unit = placeUnitName(home)): string {
+ * hand, and a keep that fails ends the update as it does on the link road. Nothing is swept: the workspaces'
+ * records stay on the box and the daemon that comes up reads them again. */
+export function placeUpdateScript(home: string, landed: string, unit = placeUnit(home)): string {
   const at = placeDaemonPaths(home);
   const q = shellQuote;
+  const systemctl = unit.systemctl.join(" ");
   return [
-    'export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"',
     // systemd prints ExecStart as a record with the binary under path=; the first is the one it runs.
-    `exe="$(systemctl --user show -p ExecStart --value ${q(unit)} 2>/dev/null | sed -n 's/.*path=\\([^ ;]*\\).*/\\1/p' | head -n 1)"`,
+    `exe="$(${systemctl} show -p ExecStart --value ${q(unit.name)} 2>/dev/null | sed -n 's/.*path=\\([^ ;]*\\).*/\\1/p' | head -n 1)"`,
     `if [ -z "$exe" ]; then echo ${PLACE_NO_UNIT_LINE}; exit 1; fi`,
-    `cp -f "$exe" "$exe.old" 2>/dev/null || true`,
+    `cp -f "$exe" "$exe.old" || { echo ${PLACE_NO_KEEP_LINE}; exit 1; }`,
     // A move, never a write into it: the file is running, and a kernel refuses a write to a mapped executable.
     `mv -f ${q(landed)} "$exe"`,
     'chmod 0755 "$exe"',
-    `systemctl --user restart ${q(unit)}`,
+    // Before the restart, never after: a Type=simple restart returns the moment the process forks, so a daemon that
+    // binds and writes its port quickly would have that file removed out from under it and the wait below would
+    // read a daemon that is up as one that never came.
     `rm -f ${q(at.portFile)}`,
+    `${systemctl} restart ${q(unit.name)}`,
     `for _ in $(seq 80); do [ -s ${q(at.portFile)} ] && break; sleep 0.25; done`,
-    `if [ -s ${q(at.portFile)} ] && systemctl --user is-active --quiet ${q(unit)}; then echo ${PLACE_UPDATED_LINE} "$exe"; else journalctl --user -u ${q(unit)} -n 50 --no-pager; echo ${PLACE_UPDATE_DOWN_LINE}; fi`,
+    `if [ -s ${q(at.portFile)} ] && ${systemctl} is-active --quiet ${q(unit.name)}; then echo ${PLACE_UPDATED_LINE} "$exe"; else ${unit.journalctl.join(" ")} -u ${q(unit.name)} -n 50 --no-pager; echo ${PLACE_UPDATE_DOWN_LINE}; fi`,
   ].join("\n");
 }
 
@@ -446,7 +460,7 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const uploadId = randomBytes(8).toString("hex");
       const parts = Math.max(1, Math.ceil(bytes.length / MACHINE_PUT_PART_BYTES));
-      let at = "";
+      let landed: PlaceUpdateLanded = { road: "link", at: "" };
       for (let seq = 0; seq < parts; seq++) {
         const part = bytes.subarray(seq * MACHINE_PUT_PART_BYTES, (seq + 1) * MACHINE_PUT_PART_BYTES);
         const answer = await req.link.request("place.update", {
@@ -456,9 +470,9 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
           data: Buffer.from(part).toString("base64"),
           sha256,
         });
-        at = typeof answer["at"] === "string" ? answer["at"] : at;
+        if (typeof answer["at"] === "string") landed = { road: "link", at: answer["at"], ...(typeof answer["kept"] === "string" ? { kept: answer["kept"] } : {}) };
       }
-      return { road: "link", at };
+      return landed;
     }
     if (req.ssh === undefined) throw new Error(placeNoUpdateRoadLine(req.name));
     const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
@@ -473,7 +487,9 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     const printed = res.stdout.split("\n").map(line => line.trim()).filter(line => line !== "");
     const landed = printed.find(line => line.startsWith(PLACE_UPDATED_LINE));
     if (landed === undefined) throw new Error(placeUpdateFailedLine(req.name, `${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`.trim()));
-    return { road: "ssh", at: landed.slice(PLACE_UPDATED_LINE.length).trim() };
+    const exe = landed.slice(PLACE_UPDATED_LINE.length).trim();
+    // The script keeps the old one beside the new under this name, and refuses the update where it could not.
+    return { road: "ssh", at: exe, kept: `${exe}.old` };
   };
 }
 
@@ -601,10 +617,12 @@ export const UPDATE_FLAGS_REFUSAL =
 /** What the line prints once a place is on the daemon this host deploys, or once it has taken it and not yet come
  * back on it. The versions either side and the road the binary took, so a person reading it can tell the link road
  * from the ssh one without asking. */
-export function updatedLines(answer: { name: string; from: number; to: number; road: string; at: string; note?: string }): string[] {
+export function updatedLines(answer: { name: string; from: number; to: number; road: string; at: string; kept?: string; note?: string }): string[] {
   return [
     `${answer.name}: daemon ${answer.from} to ${answer.to}, over the ${answer.road === "ssh" ? "ssh road" : "link"}`,
     `its binary      ${answer.at}`,
+    // Where the one it replaced was kept: the first thing to look at on a box whose daemon will not come up.
+    ...(answer.kept === undefined ? [] : [`the old one     ${answer.kept}`]),
     ...(answer.note === undefined ? [] : [answer.note]),
   ];
 }
@@ -676,7 +694,7 @@ export function addedLines(place: PlaceView, hostKey: string | undefined): strin
   return [
     `${place.name} joined this wsp${place.shape === undefined ? "" : ` · ${fmtSize(place.shape, "cores")}`}${place.diskFreeBytes === undefined ? "" : ` · ${fmtBytes(place.diskFreeBytes)} free`}`,
     ...(hostKey === undefined ? [] : [`its ssh key      ${hostKey}`]),
-    ...[placeWorkspacesLine(place), placeEngineLine(place)].filter((line): line is string => line !== undefined),
+    ...[placeEngineLine(place)].filter((line): line is string => line !== undefined),
     `wsp remove ${place.name} takes it back out and sweeps wsp off it.`,
   ];
 }
@@ -719,9 +737,11 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
       return 1;
     }
     const place = picked.place;
-    const answer = await client.request<{ removed: boolean; swept: string[]; dropped: string[]; note?: string }>("places.remove", { placeId: place.id });
+    const answer = await client.request<{ removed: boolean; swept: string[]; note?: string }>("places.remove", { placeId: place.id });
     if (!answer.removed) {
-      io.error(noPlaceLine(typed, []));
+      // The list this place was picked out of, so a host that holds others still names them: the record went
+      // between the listing and the remove, which is the one way this is answered false.
+      io.error(noPlaceLine(typed, picked.joined.map(p => p.name)));
       return 1;
     }
     // The place's own name is what a join names the device it buys, so a device still wearing it is that computer's
@@ -743,7 +763,7 @@ const JOIN_USAGE = "usage: wsp join <address>... --code <code> [--name <name>]";
 /** Which of the two things a person typed a join refusal is about, where it is about one of them: an address
  * nothing answered at, or a code the host would not take. A refusal about neither (a host that would not prove its
  * key, a computer already in a wsp) carries none. */
-export type JoinRefusalAbout = "address" | "code";
+export type JoinRefusalAbout = "address" | "code" | "host";
 
 /** A join that did not happen, carrying what it was about where that is known. It is thrown where the reason is
  * known, so a screen with one slot per field puts a refusal under the right field rather than reading it back out
@@ -773,6 +793,10 @@ export interface JoinDeps {
   platform: string;
   home: string;
   now(): number;
+  /** Which manager holds the unit and which login is running this, for a caller that is not this process; this
+   * computer's own by default, which is what every terminal means. */
+  manager?: ServiceManager;
+  uid?: number;
 }
 
 const joinDeps = (): JoinDeps => ({
@@ -902,8 +926,9 @@ async function handshake(
         if (frame["ok"] !== true) {
           const said = String(frame["error"] ?? `${url} refused this join`);
           // The one refusal a host has for a code it is not holding, spent or expired or never minted, is the
-          // protocol's own constant; every other refusal from over there is about neither field.
-          end(said === PLACE_CODE_REFUSAL ? new JoinRefused("code", said) : new Error(said));
+          // protocol's own constant; every other refusal from over there is about this computer rather than about
+          // a field, and travels as the host's own sentence so a screen can print it instead of guessing.
+          end(new JoinRefused(said === PLACE_CODE_REFUSAL ? "code" : "host", said));
           return;
         }
         if (frame["id"] === 1) {
@@ -975,6 +1000,9 @@ export interface JoinPlaceOptions {
   /** Which computer this is, for the manager that holds the unit and the line said where there is none; this
    * process's own unless a caller names another. */
   platform?: string;
+  /** The login running the join, for the manager that says whether its unit needs root; this process's own unless
+   * a caller names another. */
+  uid?: number;
   /** Which manager holds the unit: the one that platform has unless the caller names another, and a caller that
    * means none names the key with nothing in it, as the sweep's own option already reads. */
   manager?: ServiceManager | undefined;
@@ -994,7 +1022,7 @@ export interface JoinedPlace {
 }
 
 /** The whole of a join, as a function: the key, the handshake, the two files at the person's own mode, and the unit
- * that dials again at every login. It refuses a computer that already belongs to a wsp, since a place file is the
+ * that dials again at every start. It refuses a computer that already belongs to a wsp, since a place file is the
  * one wsp this computer is in. Throws the host's own sentence on a refusal; the caller decides what a person reads. */
 export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<JoinedPlace> {
   const { home, addresses, code, hostKey } = opts;
@@ -1005,6 +1033,10 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
   const on = opts.platform ?? platform();
   const manager = "manager" in opts ? opts.manager : serviceManagerFor(on);
   if (manager === undefined) throw new Error(noPlaceManagerLine(on));
+  // The agent here is the machine's own service, so a login that cannot write one reads the sentence and stops:
+  // before the handshake, before the key, before the place file, before anything of wsp's is on this computer.
+  const uid = opts.uid ?? process.getuid?.() ?? 0;
+  if (manager.needsRoot?.({ role: "place", statePath: file, home, uid }) === true && uid !== 0) throw new Error(PLACE_NEEDS_ROOT_LINE);
   const bin = daemonBinaryHere();
   const name = opts.name?.trim() !== undefined && opts.name.trim() !== "" ? opts.name.trim() : placeNameHere();
   const now = opts.now ?? Date.now;
@@ -1035,7 +1067,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     report: joined.report,
     ...(joined.device === undefined ? {} : { device: joined.device }),
   };
-  const at: ServiceAddress = { role: "place", statePath: file, home, uid: process.getuid?.() ?? 0 };
+  const at: ServiceAddress = { role: "place", statePath: file, home, uid };
   const logPath = placeLogPath(home);
   // HOME is stated rather than inherited: the daemon keeps every file it has under the home its place file sits in,
   // and a manager that hands it the login's own default would put them somewhere else entirely. PATH is the one a
@@ -1048,7 +1080,7 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     if (installed) io.error(`the ${manager.words} ${unit.name} is still there at ${unit.path}; wsp leave takes it away.`);
     throw new Error(runFailureLine(failure));
   }
-  io.log(`${manager.words} ${unit.name} is loaded; it dials again at every login`);
+  io.log(`${manager.words} ${unit.name} is loaded; it dials again at every start`);
   io.log(`log         ${logPath}`);
   const after = manager.afterLoad?.(at);
   if (after !== undefined) io.log(after);
@@ -1109,6 +1141,8 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     ...(flags.name !== undefined ? { name: flags.name } : {}),
     ...(flags.awake === true ? { awake: true } : {}),
     platform: deps.platform,
+    ...(deps.manager !== undefined ? { manager: deps.manager } : {}),
+    ...(deps.uid !== undefined ? { uid: deps.uid } : {}),
     run: deps.run,
     dial: deps.dial,
     now: deps.now,
