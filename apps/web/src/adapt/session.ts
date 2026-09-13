@@ -188,6 +188,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
     t.summary = {
       ...t.summary,
       durationMs: result.durationMs ?? null,
+      waitedMs: result.waitedMs ?? null,
       costUsd: result.costUsd ?? null,
       error: result.error ?? null,
       completedAt: at || null,
@@ -227,6 +228,7 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       prompt: start?.prompt ?? null,
       model: start?.model ?? null,
       durationMs: null,
+      waitedMs: null,
       costUsd: null,
       error: null,
       startedAt: at || null,
