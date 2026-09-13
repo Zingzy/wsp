@@ -57,7 +57,7 @@ the verbs your agents use, and the two lines that serve a host by hand:
       with what to do about it and one line of why; --project weighs the
       histories by a folder and --json prints it as one object
   wsp recipe [--tick used|installed|default] [--set <id>=on|off]
-    [--signin <id>=copy|machine|key|skip] [--add <id>=<command>]
+    [--signin <id>=copy|machine|later|key|skip] [--add <id>=<command>]
     [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>]
       write the recipe and print it as a table: every catalog agent and tool
       with its tick, why it has it and what it costs on the machine, then the
@@ -66,20 +66,21 @@ the verbs your agents use, and the two lines that serve a host by hand:
       default, ticks what your agents actually ran here); --set <id>=on|off
       flips a row by its catalog id, or a package this computer's own package
       managers have by the id wsp recipe scan gives it, which the build installs
-      by that package's own road; --signin <id>=copy|machine|key|skip answers a
-      sign-in by catalog id, key bringing the key files beside a login and
-      nothing else of it; --add <id>=<command> carries a tool neither the
-      catalog nor this computer has, installed by that command on the machine,
-      with --add-check <id>=<command> saying it is there; --engine marks the
-      recipe so every workspace from its image gets the place's Docker or podman
-      through a socket of its own (a project whose compose file needs one), and
-      stays in the file until you edit it out; --project reads a folder's own
-      manifests for what it takes to build and weighs the histories by it, --out
-      says where the file goes and --json prints the table as one object. Naming
-      --tick or --project decides every tick again; without either, what the
-      file says stands and the flags flip rows on top of it. A sign-in answer
-      stands either way: no rule decides one. All of them repeat. Review it,
-      then wsp init --recipe
+      by that package's own road; --signin <id>=copy|machine|later|key|skip
+      answers a sign-in by catalog id, later leaving it to the first time the
+      tool is needed on the workspace and key bringing the key files beside a
+      login and nothing else of it; --add <id>=<command> carries a tool neither
+      the catalog nor this computer has, installed by that command on the
+      machine, with --add-check <id>=<command> saying it is there; --engine
+      marks the recipe so every workspace from its image gets the place's Docker
+      or podman through a socket of its own (a project whose compose file needs
+      one), and stays in the file until you edit it out; --project reads a
+      folder's own manifests for what it takes to build and weighs the histories
+      by it, --out says where the file goes and --json prints the table as one
+      object. Naming --tick or --project decides every tick again; without
+      either, what the file says stands and the flags flip rows on top of it. A
+      sign-in answer stands either way: no rule decides one. All of them repeat.
+      Review it, then wsp init --recipe
   wsp workspaces agents <workspace> --spawn on|off [--max-machines <n>]
     [--max-depth <n>]
       what the agents inside the workspace may ask of this host: off, or threads
@@ -226,8 +227,8 @@ so it is reachable with no port open to the world.
 
 ```text
 usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
-       [--first-workspace <name>] [--import <folder>] [--no-local] [--yes]
-       [--non-interactive] [--json]
+       [--first-workspace <name>] [--import <folder>] [--rebuild] [--no-local]
+       [--yes] [--non-interactive] [--json]
   seal this computer into your image, one screen at a time: Agents, Tools, Also
   on this computer, Sign-ins, wsp for your agents on this computer, each shown
   when it has a row to pick, then Build. Beside a host already serving this
@@ -238,8 +239,8 @@ usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
 
   --state              the state file: this word first, else WSP_HOME's
                        state.json, else ./.wsp/state.json when the current
-                       directory has a .env, else state.json in the home the
-                       running host serves
+                       directory is a checkout of wsp, else state.json in the
+                       home the running host serves
   --provider           which machine provider this computer forks on; without
                        it, a key saved under a provider's own variable wires
                        that provider
@@ -247,10 +248,10 @@ usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
                        computer's own socket without it
   --yes                take every default and ask nothing, which a run off a
                        terminal needs; a login with a browser or device sign-in,
-                       or one held in the Keychain, defaults to sign in on the
-                       machine unless a saved recipe answered copy, so macOS has
-                       nothing to ask either and the sign-ins wait for the app's
-                       terminal
+                       or one held in the Keychain, is left to the first time
+                       you need it on the workspace unless a saved recipe
+                       answered copy, so macOS has nothing to ask either and the
+                       build waits on nobody
   --recipe             tick the agents and tools from this recipe (wsp recipe
                        writes it) and go straight to the sign-ins
   --project            the project folder you are bringing first; its own files
@@ -262,6 +263,10 @@ usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
                        seals, without asking (default first)
   --import             import this folder's project onto that first workspace,
                        with the consent the app's import starts from
+  --rebuild            seal the next version from a fresh machine rather than
+                       from your image plus the changes, which is the question a
+                       run at a terminal is asked; without it a run that asks
+                       nothing takes whichever road the changes call for
   --no-local           leave this computer alone; the workspace step ticks it by
                        default, since a workspace here forks nothing and bills
                        nothing
@@ -282,8 +287,8 @@ usage: wsp add [<provider>|user@host] [--name <name>] [--ssh-port <port>]
   for the join line another computer types
 
   --state       the state file: this word first, else WSP_HOME's state.json,
-                else ./.wsp/state.json when the current directory has a .env,
-                else state.json in the home the running host serves
+                else ./.wsp/state.json when the current directory is a checkout
+                of wsp, else state.json in the home the running host serves
   --name        the name to call the computer by here; what its address calls it
                 without one
   --ssh-port    the port ssh dials that computer on (default 22)
@@ -315,8 +320,8 @@ usage: wsp remove <place>
   and the computer is left as wsp found it
 
   --state    the state file: this word first, else WSP_HOME's state.json, else
-             ./.wsp/state.json when the current directory has a .env, else
-             state.json in the home the running host serves
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
   --host     read to say this line runs at its own host's terminal; it dials no
              other
 ```
@@ -543,8 +548,8 @@ usage: wsp status [--watch]
   reads a host on another computer
 
   --state    the state file: this word first, else WSP_HOME's state.json, else
-             ./.wsp/state.json when the current directory has a .env, else
-             state.json in the home the running host serves
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
   --watch    draw the same rows again every second where they stand, until
              Ctrl-C; it needs a terminal to redraw on, and reads nothing but
              this computer's own agent
@@ -577,8 +582,9 @@ usage: wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
   line starts a host for itself when none serves
 
   --state          the state file: this word first, else WSP_HOME's state.json,
-                   else ./.wsp/state.json when the current directory has a .env,
-                   else state.json in the home the running host serves
+                   else ./.wsp/state.json when the current directory is a
+                   checkout of wsp, else state.json in the home the running host
+                   serves
   --port           the app port (default 4400); the runtime websocket port
                    follows 10 above it
   --ws-port        the runtime websocket port on its own (default 4410); --port
@@ -608,15 +614,15 @@ usage: wsp down
   verb started otherwise
 
   --state    the state file: this word first, else WSP_HOME's state.json, else
-             ./.wsp/state.json when the current directory has a .env, else
-             state.json in the home the running host serves
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
 ```
 
 ## wsp recipe
 
 ```text
 usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off]
-       [--signin <id>=copy|machine|key|skip] [--add <id>=<command>]
+       [--signin <id>=copy|machine|later|key|skip] [--add <id>=<command>]
        [--add-check <id>=<command>] [--engine] [--project <folder>]
        [--out <path>]
   write the recipe and print it as a table: every catalog agent and tool with
@@ -626,25 +632,26 @@ usage: wsp recipe [--tick used|installed|default] [--set <id>=on|off]
   agents actually ran here); --set <id>=on|off flips a row by its catalog id, or
   a package this computer's own package managers have by the id wsp recipe scan
   gives it, which the build installs by that package's own road; --signin
-  <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the
-  key files beside a login and nothing else of it; --add <id>=<command> carries
-  a tool neither the catalog nor this computer has, installed by that command on
-  the machine, with --add-check <id>=<command> saying it is there; --engine
-  marks the recipe so every workspace from its image gets the place's Docker or
-  podman through a socket of its own (a project whose compose file needs one),
-  and stays in the file until you edit it out; --project reads a folder's own
-  manifests for what it takes to build and weighs the histories by it, --out
-  says where the file goes and --json prints the table as one object. Naming
-  --tick or --project decides every tick again; without either, what the file
-  says stands and the flags flip rows on top of it. A sign-in answer stands
-  either way: no rule decides one. All of them repeat. Review it, then wsp init
-  --recipe
+  <id>=copy|machine|later|key|skip answers a sign-in by catalog id, later
+  leaving it to the first time the tool is needed on the workspace and key
+  bringing the key files beside a login and nothing else of it; --add
+  <id>=<command> carries a tool neither the catalog nor this computer has,
+  installed by that command on the machine, with --add-check <id>=<command>
+  saying it is there; --engine marks the recipe so every workspace from its
+  image gets the place's Docker or podman through a socket of its own (a project
+  whose compose file needs one), and stays in the file until you edit it out;
+  --project reads a folder's own manifests for what it takes to build and weighs
+  the histories by it, --out says where the file goes and --json prints the
+  table as one object. Naming --tick or --project decides every tick again;
+  without either, what the file says stands and the flags flip rows on top of
+  it. A sign-in answer stands either way: no rule decides one. All of them
+  repeat. Review it, then wsp init --recipe
 
   --out          where the recipe file is written
   --tick         the rule that decides every tick: used, installed, default
   --set          <id>=on|off flipping one row of the recipe by its id; repeats
-  --signin       <id>=copy|machine|key|skip answering one sign-in by catalog id;
-                 repeats
+  --signin       <id>=copy|machine|later|key|skip answering one sign-in by
+                 catalog id; repeats
   --add          <id>=<command> carrying a tool neither the catalog nor this
                  computer has, installed by that command on the machine; repeats
   --add-check    <id>=<command> proving that added tool is on the machine;
@@ -838,8 +845,8 @@ usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
   again at every login
 
   --state        the state file: this word first, else WSP_HOME's state.json,
-                 else ./.wsp/state.json when the current directory has a .env,
-                 else state.json in the home the running host serves
+                 else ./.wsp/state.json when the current directory is a checkout
+                 of wsp, else state.json in the home the running host serves
   --code         the code the other computer printed: wsp host pair for a host,
                  wsp add for a place
   --code-file    read the code off this file and delete the file before dialing,
@@ -858,8 +865,8 @@ usage: wsp leave
   cannot run wsp remove
 
   --state    the state file: this word first, else WSP_HOME's state.json, else
-             ./.wsp/state.json when the current directory has a .env, else
-             state.json in the home the running host serves
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
 ```
 
 ## wsp doctor
@@ -872,8 +879,8 @@ usage: wsp doctor [--local] [--yes]
   key
 
   --state    the state file: this word first, else WSP_HOME's state.json, else
-             ./.wsp/state.json when the current directory has a .env, else
-             state.json in the home the running host serves
+             ./.wsp/state.json when the current directory is a checkout of wsp,
+             else state.json in the home the running host serves
   --yes      also delete the snapshots and templates this host left behind,
              which is not reversible
   --local    prove a thread on this computer and its reply instead of a forked

@@ -19,7 +19,8 @@ interface Row {
   paths: string[];
   default: "bring" | "skip";
   detail?: string;
-  /** The sign-in column: what the row starts as on the Sign-ins screen, read off the collector's row by the wizard. */
+  /** The sign-in column: what the row starts as on the Sign-ins screen, read off the collector's row by the wizard.
+   * A row with nothing here to copy starts left to first use: its only road is a browser, and the build waits on nobody. */
   starts: LoginChoice;
 }
 
@@ -51,12 +52,12 @@ const filesOnly = (tool: string, ...except: Source[]): Unreachable[] =>
 
 const MATRIX: readonly Cell[] = [
   // gh: hosts.yml names the account; on macOS the token is a Keychain item that lands inside hosts.yml on the machine.
-  { tool: "gh", source: "file", laptop: { files: { "~/.config/gh/hosts.yml": 200 } }, row: { paths: ["~/.config/gh/hosts.yml"], default: "skip", starts: "machine" } },
+  { tool: "gh", source: "file", laptop: { files: { "~/.config/gh/hosts.yml": 200 } }, row: { paths: ["~/.config/gh/hosts.yml"], default: "skip", starts: "later" } },
   {
     tool: "gh",
     source: "keychain",
     laptop: { files: { "~/.config/gh/hosts.yml": 200 }, exec: { "security find-generic-password -s gh:github.com": "keychain: ...\n" } },
-    row: { paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], default: "skip", starts: "machine" },
+    row: { paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], default: "skip", starts: "later" },
   },
   { tool: "gh", source: "rc-key", unreachable: "gh's row is its hosts.yml; GH_TOKEN alone makes no row and travels only as a secret with the rc file", laptop: { files: { "~/.zshrc": "export GH_TOKEN=gho_x\n" } } },
   { tool: "gh", source: "helper", unreachable: "only Claude Code reads an apiKeyHelper" },
@@ -66,7 +67,7 @@ const MATRIX: readonly Cell[] = [
     tool: "gcloud",
     source: "file",
     laptop: { files: { "~/.config/gcloud/credentials.db": 4000, "~/.config/gcloud/configurations/config_default": 50 } },
-    row: { paths: ["~/.config/gcloud/credentials.db", "~/.config/gcloud/configurations"], default: "skip", starts: "machine" },
+    row: { paths: ["~/.config/gcloud/credentials.db", "~/.config/gcloud/configurations"], default: "skip", starts: "later" },
   },
   ...filesOnly("gcloud"),
   { tool: "gcloud", source: "none", laptop: {} },
@@ -75,7 +76,7 @@ const MATRIX: readonly Cell[] = [
     tool: "wrangler",
     source: "file",
     laptop: { files: { "~/Library/Preferences/.wrangler/config/default.toml": 300 } },
-    row: { paths: ["~/Library/Preferences/.wrangler/config/default.toml"], default: "skip", starts: "machine" },
+    row: { paths: ["~/Library/Preferences/.wrangler/config/default.toml"], default: "skip", starts: "later" },
   },
   {
     tool: "wrangler",
@@ -89,7 +90,7 @@ const MATRIX: readonly Cell[] = [
     laptop: {},
   },
 
-  { tool: "cloudflared", source: "file", laptop: { files: { "~/.cloudflared/cert.pem": 800 } }, row: { paths: ["~/.cloudflared/cert.pem"], default: "skip", starts: "machine" } },
+  { tool: "cloudflared", source: "file", laptop: { files: { "~/.cloudflared/cert.pem": 800 } }, row: { paths: ["~/.cloudflared/cert.pem"], default: "skip", starts: "later" } },
   ...filesOnly("cloudflared"),
   { tool: "cloudflared", source: "none", laptop: {} },
 
@@ -97,7 +98,7 @@ const MATRIX: readonly Cell[] = [
     tool: "vercel",
     source: "file",
     laptop: { files: { "~/Library/Application Support/com.vercel.cli/auth.json": 100 } },
-    row: { paths: ["~/Library/Application Support/com.vercel.cli/auth.json"], default: "skip", starts: "machine" },
+    row: { paths: ["~/Library/Application Support/com.vercel.cli/auth.json"], default: "skip", starts: "later" },
   },
   ...filesOnly("vercel"),
   { tool: "vercel", source: "none", laptop: {} },
@@ -106,7 +107,7 @@ const MATRIX: readonly Cell[] = [
     tool: "aws",
     source: "file",
     laptop: { files: { "~/.aws/credentials": 120, "~/.aws/config": 300 } },
-    row: { paths: ["~/.aws/credentials", "~/.aws/config"], default: "skip", starts: "machine" },
+    row: { paths: ["~/.aws/credentials", "~/.aws/config"], default: "skip", starts: "later" },
   },
   {
     tool: "aws",
@@ -122,12 +123,12 @@ const MATRIX: readonly Cell[] = [
   ...filesOnly("kube"),
   { tool: "kube", source: "none", laptop: {} },
 
-  { tool: "codex", source: "file", laptop: { files: { "~/.codex/auth.json": 900 } }, row: { paths: ["~/.codex/auth.json"], default: "skip", starts: "machine" } },
+  { tool: "codex", source: "file", laptop: { files: { "~/.codex/auth.json": 900 } }, row: { paths: ["~/.codex/auth.json"], default: "skip", starts: "later" } },
   { tool: "codex", source: "rc-key", unreachable: "the key alone makes no row; it travels as a secret with the rc file, and what codex login status prints for it was not measured", laptop: { files: { "~/.zshrc": "export OPENAI_API_KEY=sk-oai-x\n" } } },
   ...filesOnly("codex", "rc-key"),
   { tool: "codex", source: "none", laptop: {} },
 
-  { tool: "gemini", source: "file", laptop: { files: { "~/.gemini/oauth_creds.json": 500 } }, row: { paths: ["~/.gemini/oauth_creds.json"], default: "skip", starts: "machine" } },
+  { tool: "gemini", source: "file", laptop: { files: { "~/.gemini/oauth_creds.json": 500 } }, row: { paths: ["~/.gemini/oauth_creds.json"], default: "skip", starts: "later" } },
   {
     tool: "gemini",
     source: "rc-key",
@@ -150,7 +151,7 @@ const MATRIX: readonly Cell[] = [
   ...filesOnly("opencode", "rc-key"),
   { tool: "opencode", source: "none", laptop: {} },
 
-  { tool: "pi", source: "file", laptop: { files: { "~/.pi/agent/auth.json": 900 } }, row: { paths: ["~/.pi/agent/auth.json"], default: "skip", starts: "machine" } },
+  { tool: "pi", source: "file", laptop: { files: { "~/.pi/agent/auth.json": 900 } }, row: { paths: ["~/.pi/agent/auth.json"], default: "skip", starts: "later" } },
   {
     tool: "pi",
     source: "rc-key",
@@ -168,7 +169,7 @@ const MATRIX: readonly Cell[] = [
     tool: "hermes",
     source: "file",
     laptop: { files: { "~/.hermes/.env": 25_000, "~/.hermes/auth.json": 400 } },
-    row: { paths: ["~/.hermes/auth.json"], default: "skip", starts: "machine" },
+    row: { paths: ["~/.hermes/auth.json"], default: "skip", starts: "later" },
   },
   {
     tool: "hermes-keys",
@@ -188,20 +189,20 @@ const MATRIX: readonly Cell[] = [
 
   // The 1Password CLI signs in through the desktop app: its row is the binary's presence, and nothing of it travels.
   ...(["keychain", "rc-key", "file", "helper"] as const).map((source): Unreachable => ({ tool: "op", source, unreachable: "op signs in through the 1Password desktop app; nothing of it is copied" })),
-  { tool: "op", source: "none", laptop: { which: ["op"] }, row: { paths: [], default: "skip", starts: "machine" } },
+  { tool: "op", source: "none", laptop: { which: ["op"] }, row: { paths: [], default: "skip", starts: "later" } },
 
   // Claude Code: the env key wins over the helper, the helper over the OAuth credentials (measured on 2.1.257).
   {
     tool: "claude",
     source: "keychain",
     laptop: { exec: { "security find-generic-password -s Claude Code-credentials": "keychain: ...\n" } },
-    row: { paths: ["Keychain: Claude Code-credentials"], default: "skip", detail: "Claude Code uses OAuth credentials", starts: "machine" },
+    row: { paths: ["Keychain: Claude Code-credentials"], default: "skip", detail: "Claude Code uses OAuth credentials", starts: "later" },
   },
   {
     tool: "claude",
     source: "file",
     laptop: { platform: "linux", files: { "~/.claude/.credentials.json": 800 } },
-    row: { paths: ["~/.claude/.credentials.json"], default: "skip", detail: "Claude Code uses OAuth credentials", starts: "machine" },
+    row: { paths: ["~/.claude/.credentials.json"], default: "skip", detail: "Claude Code uses OAuth credentials", starts: "later" },
   },
   {
     tool: "claude",

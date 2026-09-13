@@ -12,7 +12,7 @@ import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -1922,13 +1922,6 @@ export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion 
 export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">): { spec: { template: string } | { fromSnapshot: string }; marks: readonly "volatile"[] } {
   return v.templateId !== undefined ? { spec: { template: v.templateId }, marks: [] } : { spec: { fromSnapshot: v.snapshotId }, marks: ["volatile"] };
 }
-
-/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
- * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
- * `wsp recipe --signin` takes. */
-export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
-export const LoginChoice = z.enum(LOGIN_CHOICES);
-export type LoginChoice = z.infer<typeof LoginChoice>;
 
 /** What a build recorded a row installed: the version, read back off the builder once the row ran (a release's tag,
  * a package's version), and the archive's sha256 where the road hashed one. `latest` marks a row whose road installs

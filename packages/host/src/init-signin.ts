@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The signing-in stage of wsp init: each login chosen as "sign in on the
-// machine" runs in this terminal over a pty on the builder, and its exit code
+// The signing-in stage of wsp init: each login chosen as "sign in during the
+// build" runs in this terminal over a pty on the builder, and its exit code
 // says whether it landed; a login whose files were copied is recorded as
-// copied. The summary before the seal offers a retry (with the no-browser
-// variant when the table has one) or a skip for a sign-in that failed. What
-// each login came to is written next to the import result so the golden's
-// notes carry it.
+// copied, and one left to first use is recorded as that with nothing run for
+// it. The summary before the seal offers a retry (with the no-browser variant
+// when the table has one) or a skip for a sign-in that failed or that the cap
+// ended. What each login came to is written next to the import result so the
+// golden's notes carry it.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { catalogEntry } from "@wsp/catalog";
-import { LOGIN_STATE_WORDS, type LoginState } from "@wsp/protocol";
+import { LOGIN_STATE_WORDS, type LoginChoice, type LoginState } from "@wsp/protocol";
 import type { GoldenBuilderView, Runtime } from "@wsp/runtime";
 import { S_BAR, log, note } from "@clack/prompts";
 import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
@@ -149,7 +150,8 @@ export async function builderLink(rt: Runtime, builder: GoldenBuilderView, conne
 }
 
 export interface SignInStageOptions {
-  /** The logins the stage owns: a choice of copy is recorded as copied, any other is signed in on the builder. */
+  /** The logins the stage owns: an answer SETTLED_AT names is recorded where it says with nothing run for it, any
+   * other is signed in on the builder. */
   logins: readonly ManifestEntry[];
   /** By login id, what its copy went to the machine without; shown beside the row's note throughout. */
   left?: ReadonlyMap<string, string>;
@@ -160,20 +162,16 @@ export interface SignInStageOptions {
   skipWhy?: string;
   open(url: string): Promise<boolean>;
   flow: SignInFlow;
-  /** A tool that never gives up is stopped after this. Default 15 min. */
+  /** How long a sign-in that runs here is given. Without it, SIGN_IN_CAP_MS. */
   capMs?: number;
   now?: () => number;
 }
 
-/** How long a sign-in is given when the tool itself names no wait. */
-export const SIGN_IN_CAP_MS = 15 * 60_000;
+/** The whole wait a sign-in running during the build gets, whatever the tool itself would wait for: the build never
+ * waits on a person, and a browser sign-in somebody is actually at lands well inside this. A row the cap ends is
+ * deferred to the workspace, not failed. */
+export const SIGN_IN_CAP_MS = 2 * 60_000;
 const dim = (s: string): string => styleText("dim", s);
-
-/** How long one sign-in command is given: what the tool itself waits, plus a minute for the person to finish, else the cap. */
-export function signInCapMs(s: SignIn, capMs: number): number {
-  return hasLogin(s) && s.toolTimeoutMs !== undefined ? s.toolTimeoutMs + 60_000 : capMs;
-}
-
 
 function minutes(ms: number): string {
   return `${Math.round(ms / 60_000)} min`;
@@ -192,36 +190,50 @@ export function stateLine(o: LoginOutcome, width = Infinity): string {
   return `${o.label}: ${colored}${detail !== "" ? dim(` (${detail})`) : ""}`;
 }
 
-/** The outcomes a sign-in stage starts from, with the copied logins already settled: a copied login's files are on
- * the machine, so nothing runs for it here and its status is the catalog's to check from the app, not this
- * terminal's. What is left is the rows to sign in on the machine, each beside the outcome it fills in. */
-export function copiedOutcomes(logins: readonly ManifestEntry[], left: ReadonlyMap<string, string> | undefined, output: Writable): { outcomes: LoginOutcome[]; machine: [ManifestEntry, LoginOutcome][] } {
+/** The outcome an answer reaches with nothing run for it: a copy's files are on the machine already, so its status is
+ * the catalog's to check from the app and not this terminal's, and a login left to first use never runs here at all.
+ * Nothing for the answers a stage signs in or another step takes. One entry per answer, so a fifth cannot be offered
+ * before it says whether the build runs it. */
+const SETTLED_AT: Record<LoginChoice, LoginState | undefined> = { copy: "copied", later: "deferred", machine: undefined, key: undefined, skip: undefined };
+
+/** Where this row lands with nothing run for it, or nothing when the stage is to sign it in. */
+const settledAt = (e: ManifestEntry): LoginState | undefined => (e.choice === undefined ? undefined : SETTLED_AT[e.choice]);
+
+/** The outcomes a sign-in stage starts from, with every answer the build runs nothing for already settled. What is
+ * left is the rows to sign in on the machine, each beside the outcome it fills in. */
+export function settledOutcomes(logins: readonly ManifestEntry[], left: ReadonlyMap<string, string> | undefined, output: Writable): { outcomes: LoginOutcome[]; machine: [ManifestEntry, LoginOutcome][] } {
   const outcomes = logins.map((e): LoginOutcome => {
     const had = left?.get(e.id);
     return { id: e.id, label: e.label, state: "skipped", ...(had !== undefined ? { left: had } : {}) };
   });
   const rows = logins.map((e, i): [ManifestEntry, LoginOutcome] => [e, outcomes[i]!]);
   for (const [e, r] of rows) {
-    if (e.choice !== "copy") continue;
-    r.state = "copied";
+    const settled = settledAt(e);
+    if (settled === undefined) continue;
+    r.state = settled;
     log.message(stateLine(r), { output, symbol: dim(S_BAR) });
   }
-  return { outcomes, machine: rows.filter(([e]) => e.choice !== "copy") };
+  return { outcomes, machine: rows.filter(([e]) => settledAt(e) === undefined) };
 }
 
-/** Label, state, detail per login; the detail is cut so the note frame (6 columns) never wraps a row. */
+/** A detail cut below this says nothing, so the column is left out rather than stubbed. */
+const DETAIL_ROOM = 12;
+
+/** Label, state, detail per login; the detail is cut so the note frame (6 columns) never wraps a row. A state word
+ * long enough to take the whole line leaves the detail out instead of pushing the row past the frame, which is what
+ * wrapped it; the line each row printed as it settled carries that detail whole. */
 function summaryRows(outcomes: readonly LoginOutcome[], width: number): string[] {
   const labelW = Math.max(...outcomes.map(r => r.label.length));
   const stateW = Math.max(...outcomes.map(r => LOGIN_STATE_WORDS[r.state].length));
-  const room = Math.max(12, width - 6 - labelW - stateW - 2 * GUTTER.length);
-  return table(outcomes.map(r => [r.label, LOGIN_STATE_WORDS[r.state], ellipsize(detailOf(r), room)]));
+  const room = width - 6 - labelW - stateW - 2 * GUTTER.length;
+  return table(outcomes.map(r => [r.label, LOGIN_STATE_WORDS[r.state], ellipsize(detailOf(r), room < DETAIL_ROOM ? 0 : room)]));
 }
 
 export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]> {
   const out = { output: o.terminal.output };
   const capMs = o.capMs ?? SIGN_IN_CAP_MS;
   if (o.logins.length === 0) return [];
-  const { outcomes, machine } = copiedOutcomes(o.logins, o.left, o.terminal.output);
+  const { outcomes, machine } = settledOutcomes(o.logins, o.left, o.terminal.output);
   if (o.skipWhy !== undefined) {
     for (const [, r] of machine) r.note = o.skipWhy;
     if (machine.length > 0) log.step(`Sign-ins on the machine skipped: ${machine.map(([, r]) => r.label).join(", ")}. ${o.skipWhy[0]!.toUpperCase()}${o.skipWhy.slice(1)}.`, out);
@@ -232,7 +244,6 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 
   /** The command's pty over one fresh link, its exit code the row's state; every failure is this login's note, never the run's end. */
   const attempt = async (entry: ManifestEntry, r: LoginOutcome, s: SignIn, command: string | undefined): Promise<void> => {
-    const timeoutMs = signInCapMs(s, capMs);
     const daemon = await o.dial();
     try {
       const show = (line: string): void => void o.terminal.output.write(`\r\n  ${dim(line)}\r\n`);
@@ -251,7 +262,7 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
             o.flow.openedUrl = url;
             o.flow.armed = url !== o.flow.callbackUrl;
           },
-          timeoutMs,
+          timeoutMs: capMs,
           ...(o.now !== undefined ? { now: o.now } : {}),
         });
       } finally {
@@ -268,8 +279,8 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
         return;
       }
       if (relayed.timedOut) {
-        r.state = "not-signed-in";
-        r.note = `stopped after ${minutes(timeoutMs)}`;
+        r.state = "deferred";
+        r.note = `stopped after ${minutes(capMs)}`;
         return;
       }
       // The shell's own "not found": the tool is not on the machine, and no retry or status check can change that.
@@ -324,11 +335,12 @@ export async function signInStage(o: SignInStageOptions): Promise<LoginOutcome[]
 
   for (;;) {
     note(summaryRows(outcomes, widthOf(o.terminal.output)).join("\n"), "Sign-ins", out);
-    // Not signed in (a copied login the check refused among them), or not verifiable after a command that did not
-    // end clean: both get the machine sign-in, or its retry, or a skip. A tool with no sign-in has nothing to offer.
+    // Not signed in (a copied login the check refused among them), not verifiable after a command that did not end
+    // clean, or run here and ended by the cap: all three get the machine sign-in, or its retry, or a skip. A tool
+    // with no sign-in has nothing to offer, and a row left to first use was never run, so there is nothing to retry.
     const pending = outcomes
       .map((r, i) => [r, i] as const)
-      .filter(([r, i]) => (r.state === "not-signed-in" || (r.state === "not-verified" && r.exit !== undefined && r.exit !== 0)) && signInFor(agentName(o.logins[i]!)).kind !== "none");
+      .filter(([r, i]) => (r.state === "not-signed-in" || (r.state === "deferred" && attempted.has(r)) || (r.state === "not-verified" && r.exit !== undefined && r.exit !== 0)) && signInFor(agentName(o.logins[i]!)).kind !== "none");
     if (pending.length === 0) break;
     for (const [r, i] of pending) {
       const entry = o.logins[i]!;
@@ -391,13 +403,14 @@ export function keyAsks(manifest: { entries: readonly ManifestEntry[] }, choices
   });
 }
 
-/** The logins the stage owns, each carrying its answer: those to sign in on the machine, and those whose files
- * went along (a copy answer on a ticked row) for the check. */
+/** The logins the stage owns, each carrying its answer: those to sign in on the machine, those left to first use
+ * (settled where they stand, so the build reports them without running anything), and those whose files went along
+ * (a copy answer on a ticked row) for the check. */
 export function stageLogins(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>, ticks: ReadonlySet<string>): ManifestEntry[] {
   return manifest.entries.flatMap((e): ManifestEntry[] => {
     if (e.rung !== "logins") return [];
     const choice = choices.get(e.id);
-    if (choice === "machine") return [{ ...e, choice }];
+    if (choice === "machine" || choice === "later") return [{ ...e, choice }];
     return choice === "copy" && ticks.has(e.id) ? [{ ...e, choice }] : [];
   });
 }
