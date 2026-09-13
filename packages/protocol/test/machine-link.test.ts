@@ -30,6 +30,7 @@ describe("the machine ops on a place link", () => {
       { id: 12, op: "machine.deleteTemplate", templateId: "wsp/dev:template" },
       { id: 13, op: "machine.exec", machineId: "c1", cmd: "echo hi", timeoutMs: 1000 },
       { id: 14, op: "machine.snapshot", machineId: "c1", name: "v1", life: { firstLife: true } },
+      { id: 27, op: "machine.snapshotJob", job: "3f9a1c2b4d5e6f70" },
       { id: 15, op: "machine.pause", machineId: "c1" },
       { id: 16, op: "machine.resume", machineId: "c1" },
       { id: 17, op: "machine.kill", machineId: "c1" },

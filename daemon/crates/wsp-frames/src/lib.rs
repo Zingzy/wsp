@@ -25,9 +25,9 @@ pub use machine::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonSupervisor, ExecResult, Lifecycle, LifecycleBudgets,
     MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind, MachineLife,
     MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineRoads, MachineSeen,
-    MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState,
-    MachineStateReply, MachineTemplateReply, MachineTemplatesReply, OnIdle, PauseMode, PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks,
-    SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, MACHINE_OPS,
+    MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply, MachineSpec,
+    MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, OnIdle, PauseMode, PlaceCapacity, PlaceImage,
+    PreviewReach, ResumeAsks, SnapshotJobState, SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, MACHINE_OPS,
 };
 pub use place::{
     place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,

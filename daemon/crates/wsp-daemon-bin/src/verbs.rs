@@ -106,7 +106,8 @@ mod linux {
     }
 
     /// The frame under a fresh id, answered by the ops on a runtime of this process's own; the network's forwards
-    /// live on that runtime and end with the process.
+    /// live on that runtime and end with the process. A snapshot is a job the ops name at once, so the verb asks
+    /// after it every second, each reading on stderr, and prints the reading that ends it.
     fn answer(root: &Path, frame: &str) -> Result<(String, u128), Box<dyn std::error::Error>> {
         let mut frame: serde_json::Value = serde_json::from_str(frame)?;
         frame["id"] = serde_json::Value::from(1);
@@ -116,7 +117,20 @@ mod linux {
             let ops = wsp_runtime::ops::Ops::open(root, exe)?;
             ops.restore().await?;
             let started = std::time::Instant::now();
-            let reply = ops.answer(Some(wsp_frames::RequestId::from(1)), &frame).await;
+            let mut reply = ops.answer(Some(wsp_frames::RequestId::from(1)), &frame).await;
+            let job = serde_json::from_str::<serde_json::Value>(&reply).ok().and_then(|v| v["job"].as_str().map(str::to_owned));
+            if let Some(job) = job {
+                loop {
+                    let ask = serde_json::json!({ "id": 1, "op": "machine.snapshotJob", "job": job });
+                    reply = ops.answer(Some(wsp_frames::RequestId::from(1)), &ask).await;
+                    let read: serde_json::Value = serde_json::from_str(&reply)?;
+                    if read["state"] != "running" {
+                        break;
+                    }
+                    eprintln!("{} ms {reply}", started.elapsed().as_millis());
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
             Ok((reply, started.elapsed().as_millis()))
         })
     }

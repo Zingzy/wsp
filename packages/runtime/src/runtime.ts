@@ -802,6 +802,8 @@ export interface RuntimeOptions {
   /** The same for one dial of a computer, which the door bounds itself rather than leaving to whatever road the
    * dial takes. */
   placeDialWaitMs?: number;
+  /** The same for one machine frame on a place link with no bound of its own. */
+  placeFrameWaitMs?: number;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
@@ -2358,6 +2360,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       copyBuild: placeId => copyRows.get(placeId),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
       ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
+      ...(opts.placeFrameWaitMs !== undefined ? { frameWaitMs: opts.placeFrameWaitMs } : {}),
       recording: {
         // Every one of these three reads the live records, so each waits on the one hydration every other road
         // waits on: a place that dials a host nothing has asked a verb of yet would otherwise find no records at all.

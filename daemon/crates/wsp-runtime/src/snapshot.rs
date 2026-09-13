@@ -7,11 +7,12 @@
 //! layer pays for it once. The store unpacks the layer through the same road a fetched one takes, so a fork mounts
 //! a deleted file as deleted. The workspace is held still by its caller while this reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tar::{Builder, EntryType, Header};
 
@@ -23,12 +24,72 @@ const OPAQUE_XATTR: &str = "trusted.overlay.opaque";
 /// The PAX key the tar crate reads an extended attribute back from.
 const PAX_XATTR: &str = "SCHILY.xattr.";
 
-/// The upper directory as a tar on `out`, parents before children.
-pub fn write_layer(upper: &Path, out: &mut dyn Write) -> io::Result<()> {
-    let mut tar = Builder::new(out);
+/// The upper directory as a tar on `out`, parents before children. `written` counts the tar's bytes as they go
+/// out, which is what a job reports while a layer that takes minutes is read.
+pub fn write_layer(upper: &Path, out: &mut dyn Write, written: &AtomicU64) -> io::Result<()> {
+    let mut counting = Counting { inner: out, written };
+    let mut tar = Builder::new(&mut counting as &mut dyn Write);
     tar.follow_symlinks(false);
     walk(&mut tar, upper, Path::new(""), &mut HashMap::new())?;
     tar.finish()
+}
+
+/// How many bytes the upper directory's files hold, each inode once: what the layer's tar comes to, give or take
+/// its headers. Read off the box, never off a df inside the workspace, which reads the box's whole disk. The
+/// workspace may be running while this reads, so an entry gone between the listing and its stat is skipped, never
+/// a failure of the whole count; only an upper directory that is not there fails.
+pub fn upper_bytes(upper: &Path) -> io::Result<u64> {
+    let mut seen = HashSet::new();
+    let mut total = 0;
+    for entry in fs::read_dir(upper)? {
+        count_entry(entry?, &mut seen, &mut total)?;
+    }
+    Ok(total)
+}
+
+/// One entry's bytes into the total, its directory walked under it; a vanished entry or directory counts nothing.
+fn count_entry(entry: fs::DirEntry, seen: &mut HashSet<(u64, u64)>, total: &mut u64) -> io::Result<()> {
+    let meta = match entry.metadata() {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.is_dir() {
+        let entries = match fs::read_dir(entry.path()) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        for child in entries {
+            count_entry(child?, seen, total)?;
+        }
+    } else if meta.is_file() && shared_inode(&meta).is_none_or(|key| seen.insert(key)) {
+        *total += meta.len();
+    }
+    Ok(())
+}
+
+/// The key of a file the workspace hard linked more than once, by device and inode: the layer carries its bytes
+/// once under the first name and a link under every other, and the count reads it once the same way.
+fn shared_inode(meta: &fs::Metadata) -> Option<(u64, u64)> {
+    (meta.is_file() && meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
+}
+
+struct Counting<'a> {
+    inner: &'a mut dyn Write,
+    written: &'a AtomicU64,
+}
+
+impl Write for Counting<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.written.fetch_add(n as u64, Ordering::Relaxed);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// `linked` is every inode already written that has more than one name, by device and inode, so its next name is
@@ -52,14 +113,14 @@ fn walk(tar: &mut Builder<&mut dyn Write>, dir: &Path, rel: &Path, linked: &mut 
             continue;
         }
         xattrs(tar, &path)?;
-        if kind.is_file() && meta.nlink() > 1 {
-            match linked.get(&(meta.dev(), meta.ino())) {
+        if let Some(key) = shared_inode(&meta) {
+            match linked.get(&key) {
                 Some(first) => {
                     hard_link(tar, &here, first, &meta)?;
                     continue;
                 }
                 None => {
-                    linked.insert((meta.dev(), meta.ino()), here.clone());
+                    linked.insert(key, here.clone());
                 }
             }
         }
@@ -116,6 +177,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_entry_gone_between_the_listing_and_its_read_counts_nothing_and_fails_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let upper = dir.path().join("upper");
+        fs::create_dir_all(upper.join("kept")).unwrap();
+        fs::write(upper.join("kept/file"), vec![1u8; 100]).unwrap();
+        fs::create_dir_all(upper.join("going")).unwrap();
+        fs::write(upper.join("going/file"), vec![1u8; 100]).unwrap();
+        // The listing is taken with both directories there; one is removed before its entry is walked.
+        let mut entries: Vec<fs::DirEntry> = fs::read_dir(&upper).unwrap().collect::<io::Result<_>>().unwrap();
+        entries.sort_by_key(fs::DirEntry::file_name);
+        fs::remove_dir_all(upper.join("going")).unwrap();
+        let mut seen = HashSet::new();
+        let mut total = 0;
+        for entry in entries {
+            count_entry(entry, &mut seen, &mut total).unwrap();
+        }
+        assert_eq!(total, 100);
+    }
+
+    #[test]
     fn a_deleted_file_is_a_whiteout_and_an_opaque_directory_carries_its_marker() {
         let dir = tempfile::tempdir().unwrap();
         let upper = dir.path().join("upper");
@@ -147,7 +228,14 @@ mod tests {
         assert!(long_first.as_os_str().len() > 150, "{}", long_first.display());
         fs::hard_link(deep.join("index.js"), upper.join("opt/linked.js")).unwrap();
         let mut bytes = Vec::new();
-        write_layer(&upper, &mut bytes).unwrap();
+        let written = AtomicU64::new(0);
+        write_layer(&upper, &mut bytes, &written).unwrap();
+        assert_eq!(written.load(Ordering::Relaxed), bytes.len() as u64);
+        // The upper's own bytes: the two names of one inode count once, as the layer carries them once.
+        let counted = upper_bytes(&upper).unwrap();
+        assert_eq!(counted, 4096 + 1 + 19);
+        assert!(upper_bytes(&dir.path().join("no-such-upper")).is_err(), "an upper that is not there is not a count of zero");
+        assert!(bytes.len() as u64 > counted, "the tar is the files plus their headers: {} over {counted}", bytes.len());
         let mut names = Vec::new();
         let mut kept = None;
         let mut links = Vec::new();

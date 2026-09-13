@@ -94,7 +94,8 @@ impl World {
         world
     }
 
-    /// A snapshot of the workspace under a name of this checkout's; answers its id.
+    /// A snapshot of the workspace under a name of this checkout's, asked after until its job reads done; answers
+    /// its id.
     async fn snapshot(&self, id: &str, name: &str, first_life: bool) -> String {
         let reply = self
             .ok(
@@ -102,7 +103,15 @@ impl World {
                 json!({ "machineId": id, "name": format!("{}-{name}", live_owner()), "life": { "firstLife": first_life } }),
             )
             .await;
-        reply["snapshotId"].as_str().unwrap().to_owned()
+        let job = reply["job"].as_str().unwrap().to_owned();
+        loop {
+            let read = self.ok("machine.snapshotJob", json!({ "job": job })).await;
+            if read["state"] == "done" {
+                assert!(read["total"].as_u64().is_some(), "{read}");
+                return read["snapshotId"].as_str().unwrap().to_owned();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
     }
 
     /// The listing's row for one snapshot.

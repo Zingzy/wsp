@@ -13,8 +13,8 @@ use serde_json::Value;
 use wsp_frames::{
     numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, MachineAnswersReply,
     MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachinePromoteReply, MachineReachReply, MachineShapeReply,
-    MachineSnapshotReply, MachineSnapshotsReply, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest,
-    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -193,6 +193,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "MachineSnapshotReply" => {
                     round_trip::<MachineSnapshotReply>(&sample, &at);
                 }
+                "MachineSnapshotJobReply" => {
+                    round_trip::<MachineSnapshotJobReply>(&sample, &at);
+                }
                 "MachineSnapshotsReply" => {
                     round_trip::<MachineSnapshotsReply>(&sample, &at);
                 }
@@ -225,6 +228,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachinePromoteReply",
         "MachineReachReply",
         "MachineShapeReply",
+        "MachineSnapshotJobReply",
         "MachineSnapshotReply",
         "MachineSnapshotsReply",
         "MachineStateReply",

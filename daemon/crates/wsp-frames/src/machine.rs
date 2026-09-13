@@ -121,6 +121,9 @@ pub enum MachineOp {
     },
     #[serde(rename = "machine.snapshot", rename_all = "camelCase")]
     Snapshot { machine_id: String, name: String, life: MachineLife },
+    /// How far the snapshot job a `machine.snapshot` answered with has got: the host asks again until it reads done.
+    #[serde(rename = "machine.snapshotJob")]
+    SnapshotJob { job: String },
     #[serde(rename = "machine.pause", rename_all = "camelCase")]
     Pause { machine_id: String },
     #[serde(rename = "machine.resume", rename_all = "camelCase")]
@@ -162,7 +165,7 @@ pub enum MachineOp {
 }
 
 /// The op names above, which the daemon refuses on every socket but the link.
-pub const MACHINE_OPS: [&str; 26] = [
+pub const MACHINE_OPS: [&str; 27] = [
     "machine.backend",
     "machine.capacity",
     "machine.checkKey",
@@ -177,6 +180,7 @@ pub const MACHINE_OPS: [&str; 26] = [
     "machine.deleteTemplate",
     "machine.exec",
     "machine.snapshot",
+    "machine.snapshotJob",
     "machine.pause",
     "machine.resume",
     "machine.kill",
@@ -370,6 +374,9 @@ pub struct MachineShape {
     pub disk_gb: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    /// What the machine has written since it booted, where the backend can read that: a workspace's upper directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -491,10 +498,30 @@ pub struct TemplateRow {
     pub created_at: Option<String>,
 }
 
+/// A snapshot is a job: the reply names it, and `machine.snapshotJob` under that name says how far it has got.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MachineSnapshotReply {
+    pub job: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SnapshotJobState {
+    Running,
+    Done,
+}
+
+/// One reading of a snapshot job: the layer's bytes written so far, the upper directory's bytes once they have
+/// been counted, and the snapshot's id once the job is done. A job that failed is a refusal with its reason.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct MachineSnapshotReply {
-    pub snapshot_id: String,
+pub struct MachineSnapshotJobReply {
+    pub state: SnapshotJobState,
+    pub bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -10,9 +10,9 @@ import { shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
-import { USED_KB_CMD } from "../src/golden-tools.js";
+import { MIB, USED_KB_CMD } from "../src/golden-tools.js";
 import { goldenName } from "../src/snapshot-names.js";
-import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, TemplateRow } from "../src/machine.js";
+import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
 /** A fake whose kill() resolves like the provider's DELETE does: a call for
  * which `ignoreKill` answers true is accepted and changes nothing. */
@@ -28,6 +28,8 @@ function recordingBackend(
     /** The provider copies the disk from any life, as a container's commit does; without it a resumed machine is refused as Solari refuses one. */
     snapshotsAnyLife?: boolean;
     snapshot?: (id: string, nth: number) => void;
+    /** What the provider says of the snapshot as it writes it, each reading handed to the caller before it answers. */
+    snapshotProgress?: SnapshotProgress[];
     state?: (id: string) => void;
     /** The backend promotes snapshots to templates; what each read of a template answers, by how many reads it has had. */
     templates?: boolean;
@@ -73,10 +75,11 @@ function recordingBackend(
           if (opts.stream) for (const line of res.stdout.split("\n")) if (line !== "") o.onLine?.(line);
           return res;
         },
-        snapshot: async (name, life) => {
+        snapshot: async (name, life, o) => {
           if (!life.firstLife && opts.snapshotsAnyLife !== true) throw new NotFirstLifeError(id, `snapshot ${name}`);
           timeline.push(`snapshot ${id}`);
           opts.snapshot?.(id, timeline.filter(t => t === `snapshot ${id}`).length);
+          for (const p of opts.snapshotProgress ?? []) o?.onProgress?.(p);
           snapshots.push(name);
           return `snap_${name}`;
         },
@@ -544,12 +547,50 @@ describe("interactive golden: prepare then seal", () => {
     expect(stages.at(-1)).toBe("failed:the snapshot failed 1 time: the provider answered 502 Failed to snapshot sandbox (request req_1) and could not be read about the builder (upstream sad)");
   });
 
-  it("any other snapshot failure is not asked again and consumes the builder as before", async () => {
+  it("any other snapshot failure is not asked again and leaves the builder as it was: a snapshot that failed changed nothing on it", async () => {
     const { backend, killed, timeline } = recordingBackend({}, { snapshot: () => { throw Object.assign(new Error("upstream sad"), { kind: "transient", status: 503 }); } });
     const builder = await prepareBuilder({ backend, setup: "a" });
-    await expect(sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 })).rejects.toThrow("upstream sad");
-    expect(timeline).toEqual(["create m1", "snapshot m1", "kill m1"]);
-    expect(killed).toEqual(["m1"]);
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(SnapshotFailedError);
+    expect((err as SnapshotFailedError).builderState).toBe("running");
+    expect((err as Error).message).toBe("the snapshot failed 1 time: the provider answered 503 upstream sad (no request id from the provider, at " + (err as SnapshotFailedError).answer.at + ") while the builder read running");
+    expect(timeline).toEqual(["create m1", "snapshot m1"]);
+    expect(killed).toEqual([]);
+  });
+
+  it("a snapshot job that failed on a computer you own, with no status of its own, is reported as the provider's 500 and leaves the builder; the next seal snapshots the same builder", async () => {
+    const { backend, killed, timeline } = recordingBackend({}, { snapshot: (_id, nth) => { if (nth === 1) throw new Error("machine.snapshotJob on spoo was not answered in 300s"); } });
+    const builder = await prepareBuilder({ backend, setup: "a" });
+    const err = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(SnapshotFailedError);
+    expect((err as SnapshotFailedError).answer).toMatchObject({ status: 500, message: "machine.snapshotJob on spoo was not answered in 300s" });
+    expect(killed).toEqual([]);
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", snapshotRetryMs: 1 });
+    expect(version.snapshotId).toBe("snap_wsp-h1-default-v1");
+    expect(timeline.slice(0, 3)).toEqual(["create m1", "snapshot m1", "snapshot m1"]);
+  });
+
+  it("what the provider says of the snapshot as it writes it reaches the stage as bytes written, over the whole once it is counted", async () => {
+    const { backend } = recordingBackend({}, { snapshotProgress: [{ bytes: 0 }, { bytes: 1024 * MIB, total: 5 * 1024 * MIB }, { bytes: 5 * 1024 * MIB + 90 * MIB, total: 5 * 1024 * MIB }] });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual([
+      "snapshotting:snapshotting, usually under a minute",
+      "snapshotting:snapshotting, 0 B written",
+      "snapshotting:snapshotting, 1 GB of about 5 GB written",
+      "snapshotting:snapshotting, 5.1 GB of about 5 GB written",
+    ]);
+  });
+
+  it("the snapshot's size is what the backend says the machine wrote, where it can say, and df inside is never asked then", async () => {
+    const { backend, inline } = recordingBackend({ [USED_KB_CMD]: { exitCode: 0, stdout: "50000000\n", stderr: "" } }, { built: () => ({ cpu: 2, memMb: 4096, usedBytes: 5284823040 }) });
+    const { stages, onStage } = stageRecorder();
+    const builder = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", onStage });
+    expect(version.usedBytes).toBe(5284823040);
+    expect(stages.filter(s => s.startsWith("snapshotting"))).toEqual(["snapshotting:snapshotting about 4.9 GB, usually under a minute"]);
+    expect(inline.filter(x => x.cmd === USED_KB_CMD)).toEqual([]);
   });
 
   it("a failed seal kills every machine, drops the snapshot, and leaves the prior manifest untouched", async () => {
