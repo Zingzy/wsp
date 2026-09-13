@@ -23,8 +23,8 @@ export function pinStateOf(version: string | undefined, pin: ToolPin | undefined
 
 /** The pin an install is fixed to: the recorded one while the road's version is its tag or names none; nothing once
  * the version moved past it, since that install is a first one again. */
-export function standingPin(road: InstallRoad): ToolPin | undefined {
-  return "pin" in road && pinStateOf(road.version, road.pin) === "same" ? road.pin : undefined;
+export function standingPin<R extends { road: string; version?: string; pin?: ToolPin }>(road: R): ToolPin | undefined {
+  return pinStateOf(road.version, road.pin) === "same" ? road.pin : undefined;
 }
 
 /** The road without the pin a build recorded on it: what a first run of it installs. */
@@ -40,15 +40,17 @@ export function pinCheckLine(what: string, tag: string, sha256: string): string 
   return `[ "$sum" = ${shellQuote(sha256)} ] || { echo "Error: ${pinMismatchLine(what, tag, shortSum(sha256), `\${sum:0:${SUM_SHOWN}}`)}" >&2; exit 1; }`;
 }
 
-/** A package manager's global; `version` absent means the current one, or the laptop's when a row mirrors one. */
+/** A package manager's global: at `version` when the row names one (the laptop's), else at the recorded `pin` while
+ * it stands, else the current one. */
 export interface PackageRoad<K extends string> {
   road: K;
   package: string;
   version?: string;
+  pin?: ToolPin;
 }
 
 export type InstallRoad =
-  | { road: "brew"; formula: string }
+  | { road: "brew"; formula: string; pin?: ToolPin }
   | (PackageRoad<"npm"> & { ignoreScripts?: true })
   | PackageRoad<"pnpm">
   | PackageRoad<"bun">
@@ -56,19 +58,28 @@ export type InstallRoad =
   | PackageRoad<"pipx">
   | PackageRoad<"cargo">
   /** `go install` of a module at a version; a row whose module nobody could read carries none and installs nothing. */
-  | { road: "go"; module?: string; version?: string }
+  | { road: "go"; module?: string; version?: string; pin?: ToolPin }
   /** A GitHub repository's Linux asset for the arch, at `version` (a tag) or the current release; `pin` is what the first
    * install of that tag recorded and `go` the main package `go install` falls back to, at its own version or the tag's;
    * with none there is no fall-through. A row that came back from a golden's digest names no repository: it only ever comes off. */
   | { road: "release"; repo?: string; version?: string; pin?: ToolPin; go?: string }
   /** A vendor's own Linux download, as its cask row scripts and hashes it. */
   | { road: "vendor"; cask: LinuxCask; version?: string; pin?: ToolPin }
-  | { road: "apt"; packages: readonly string[] }
-  /** A vendor installer with its own pin, as the stage runs it. */
-  | { road: "script"; script: string };
+  | { road: "apt"; packages: readonly string[]; pin?: ToolPin }
+  /** A vendor installer as the stage runs it. The script is fixed text and takes no version from outside; `version`
+   * is the one its own text fixes (a checksummed release, a tagged checkout), absent when it takes the current one. */
+  | { road: "script"; script: string; version?: string; pin?: ToolPin };
 
 export type RoadName = InstallRoad["road"];
 export const ROADS: readonly RoadName[] = ["brew", "npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "release", "vendor", "apt", "script"];
+/** Whether a word a digest or a record carries names a road. */
+export const isRoad = (s: string | undefined): s is RoadName => (ROADS as readonly string[]).includes(s ?? "");
+
+/** The version a road installs at: the row's own, else the recorded pin's while it stands, else nothing, which is
+ * the source's current one. The one rule every road that takes a version reads. */
+export function versionOf<R extends { road: string; version?: string; pin?: ToolPin }>(road: R): string | undefined {
+  return road.version ?? standingPin(road)?.tag;
+}
 
 /** A vendor installer its vendor documents as curl piped into bash, run the one way a road may: the script is
  * downloaded to a file through the road's curl function, so a retry re-reads the download and never a body a shell
@@ -253,7 +264,7 @@ export const FD_INSTALL = [APT_ENV, "apt-get install -y -qq fd-find", "ln -sfn /
 /** Yarn through the corepack Node 22 ships, pinned to the current stable line, with the download prompt off. */
 export const YARN_INSTALL = ["corepack enable yarn", "COREPACK_ENABLE_DOWNLOAD_PROMPT=0 corepack install -g yarn@stable"].join("\n");
 
-const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
+export const HERMES = { tag: "v2026.8.31", commit: "29112bef099274229cadff79cdff7bf7b99c4b77" } as const;
 
 /** https://hermes-agent.nousresearch.com/docs/developer-guide/contributing#manual-clone-fallback */
 export const HERMES_INSTALL = [

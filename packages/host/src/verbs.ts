@@ -15,7 +15,7 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import WebSocket from "ws";
 import { z } from "zod";
-import { CATALOG_AGENTS, THREAD_AGENTS, agentName } from "@wsp/catalog";
+import { CATALOG_AGENTS, ROAD_MODULES, THREAD_AGENTS, agentName, catalogEntry, isRoad } from "@wsp/catalog";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
 import {
   AFTER_CUT_LINE,
@@ -49,6 +49,7 @@ import {
   GOLDEN_STAGE_WORDS,
   sealedBuiltLine,
   sealedCopyLine,
+  sealedPinLine,
   sealedExportLine,
   sealedImageLine,
   sealedProjectLine,
@@ -202,6 +203,8 @@ import {
   placeForksNowhereLine,
   placeRunsOneWorkspaceFix,
   placeRunsOneWorkspaceLine,
+  packageOf,
+  type SealedPin,
 } from "@wsp/protocol";
 import type { CliIO } from "./cli.js";
 import { gitRootOf } from "./repo-root.js";
@@ -774,13 +777,18 @@ export async function buildImageAt(client: HostClient, out: Out, word: string, f
   }
 }
 
-/** What every director prints for the image: the record, a row per place, and the project images under it. */
+/** A pin's row by name: the catalog's for a catalog id, else the package a row outside the catalog names. */
+const pinName = (pin: SealedPin): string => catalogEntry(pin.id)?.name ?? packageOf(pin);
+
+/** What every director prints for the image: the record, a row per place, what each row installed at the seal, and
+ * the project images under it. */
 function imageLines(view: SealedImageView): string[] {
   if (view.image === null) return [NO_SEALED_IMAGE];
   const image = view.image;
   return [
     sealedImageLine(image),
     ...view.copies.map(c => sealedCopyLine(image, c)),
+    ...(image.pins ?? []).map(p => `  ${sealedPinLine(pinName(p), p, isRoad(p.road) ? ROAD_MODULES[p.road].words : undefined)}`),
     ...view.projects.map(sealedProjectLine),
   ];
 }

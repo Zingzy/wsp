@@ -91,7 +91,7 @@ import {
 
 import * as wire from "../src/index.js";
 
-import { COPY_CURRENT, COPY_STALE, NETWORK_LOST_LINE, buildsImages, copyBuildingLine, copyIsCurrent, copyStanding, copyStoppedLine, placeWorkspacesParts, sealedBuiltLine, sealedCopyLine, type PlaceView, type SealedImage, type SealedImageCopy } from "../src/index.js";
+import { COPY_CURRENT, COPY_STALE, NETWORK_LOST_LINE, SealedImage as SealedImageSchema, ToolPin, agentOfRow, buildsImages, copyBuildingLine, copyIsCurrent, copyStanding, copyStoppedLine, placeWorkspacesParts, recipePins, sealedBuiltLine, sealedCopyLine, type PlaceView, type SealedImage, type SealedImageCopy } from "../src/index.js";
 
 describe("a copy of the image beside the record", () => {
   const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
@@ -103,6 +103,30 @@ describe("a copy of the image beside the record", () => {
     expect(copyIsCurrent(image, copy({ version: 9, hash: image.hash }))).toBe(true);
     expect(copyIsCurrent(image, copy({ version: 2, hash: "b".repeat(64) }))).toBe(false);
     expect(copyIsCurrent(image, copy({ version: 2 }))).toBe(false);
+  });
+
+  it("keeps the pins beside the recipe, one per tick that recorded one in id order with its road, and parses without them as a record sealed before they were read", () => {
+    const pins = recipePins({
+      ticks: [{ id: "tools/npm/wrangler", version: "4.1.0", road: "npm", installer: "i", pin: { tag: "4.1.0" } }, { id: "agents/codex" }, { id: "tools/catalog/gh", road: "release", installer: "k", pin: { tag: "v2.86.0", sha256: "b".repeat(64) } }, { id: "tools/catalog/tmux", road: "apt", installer: "j", pin: { tag: "3.3a-3", latest: true } }],
+    });
+    expect(pins).toEqual([
+      { id: "tools/catalog/gh", tag: "v2.86.0", sha256: "b".repeat(64), road: "release" },
+      { id: "tools/catalog/tmux", tag: "3.3a-3", latest: true, road: "apt" },
+      { id: "tools/npm/wrangler", tag: "4.1.0", road: "npm" },
+    ]);
+    expect(SealedImageSchema.parse({ ...image, pins }).pins).toEqual(pins);
+    expect(SealedImageSchema.parse(image).pins).toBeUndefined();
+    // A caller's key names the row across computers; the pins sort by that key, so two rows for one tool cannot hide behind their order.
+    const keyed = recipePins({ ticks: [{ id: "tools/npm/wrangler", pin: { tag: "4.1.0" } }, { id: "tools/catalog/gh", pin: { tag: "v2.86.0" } }] }, id => id.slice(id.lastIndexOf("/") + 1));
+    expect(keyed.map(p => p.id)).toEqual(["gh", "wrangler"]);
+    // The one rule for the agents rung: the agent an agents row names, nothing for an MCP server's row or another rung.
+    expect(agentOfRow({ id: "agents/codex" })).toBe("codex");
+    expect(agentOfRow({ id: "agents/mcp/claude/wsp" })).toBeUndefined();
+    expect(agentOfRow({ id: "tools/npm/codex" })).toBeUndefined();
+    // The one pin shape: a version, a sum where a road hashed one, the latest mark; a sum alone or a bare object is none.
+    expect(ToolPin.parse({ tag: "4.1.0" })).toEqual({ tag: "4.1.0" });
+    expect(ToolPin.safeParse({ sha256: "b".repeat(64) }).success).toBe(false);
+    expect(ToolPin.safeParse({ tag: "4.1.0", latest: false }).success).toBe(false);
   });
 
   it("says how it stands in one word, and says nothing where the record holds no vault to judge it by", () => {
@@ -147,10 +171,11 @@ describe("a copy of the image beside the record", () => {
 });
 
 describe("the recipe's pins", () => {
-  it("a recipe row and a digest tick carry one pin shape, the tag and the sum, beside the tick's road and install lines", () => {
+  it("a recipe row and a digest tick carry one pin shape, the version with the sum where a road hashed one, beside the tick's road and install lines", () => {
     const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };
     expect(wire.ToolPin.parse(pin)).toEqual(pin);
-    expect(wire.ToolPin.safeParse({ tag: "v2.86.0" }).success).toBe(false);
+    expect(wire.ToolPin.parse({ tag: "4.1.0" })).toEqual({ tag: "4.1.0" });
+    expect(wire.ToolPin.safeParse({ sha256: "b".repeat(64) }).success).toBe(false);
     const row = { id: "gh", kind: "tool", on: true, source: { kind: "popular", sessions: 1, images: 1 }, pin };
     expect(wire.RecipeRow.parse(row)).toEqual(row);
     const tick = { id: "tools/catalog/gh", road: "release", installer: "a".repeat(64), pin };

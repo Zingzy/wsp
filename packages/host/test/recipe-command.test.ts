@@ -13,7 +13,8 @@ import { applyRecipe, withCatalogAgents } from "../src/init-recipe.js";
 import { signInItems } from "../src/init-pick.js";
 import { historyCache, loadRecipe, saveSmallRecipe } from "../src/recipe-file.js";
 import { BASE_GROUP, HERE_GROUP, PROJECT_GROUP, USED_GROUP } from "../src/init-table.js";
-import { allRows, commandTableLines, recipePrintout } from "../src/recipe-answer.js";
+import { allRows, commandTableLines, recipeAnswer, recipePrintout } from "../src/recipe-answer.js";
+import { RECIPE } from "./init-fixture.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
 const PROJ = `${HOME}/proj`;
@@ -286,6 +287,17 @@ describe("wsp recipe", () => {
     // The table is the catalog's: it draws none of them, and the file keeps them.
     expect(allRows(table).some(r => r.id === tap.id)).toBe(false);
     expect(carriedOver(out, () => {})).toEqual({ custom: [], ticks: new Map([[tap.id, true], [tsx.id, false]]), pins: new Map([[tap.id, tap.pin]]) });
+  });
+
+  it("the table shows what the last seal installed beside a row that carries a pin, in the protocol's words, and draws no such column when no row does", () => {
+    const pinned: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "gh" ? { ...r, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } } : r.id === "yq" ? { ...r, pin: { tag: "4.44.1-1", latest: true as const } } : r)) };
+    const answer = recipeAnswer(pinned, "/tmp/recipe.json");
+    expect(answer.tools.find(r => r.id === "gh")?.pin).toEqual({ tag: "v2.86.0", sha256: "b".repeat(64) });
+    expect(answer.tools.find(r => r.id === "tmux")).not.toHaveProperty("pin");
+    const lines = recipePrintout(answer);
+    expect(lines.find(l => l.includes("GitHub CLI"))).toMatch(/ v2\.86\.0$/);
+    expect(lines.find(l => l.includes(" yq "))).toMatch(/ 4\.44\.1-1, installs latest$/);
+    expect(recipePrintout(recipeAnswer(RECIPE, "/tmp/recipe.json")).some(l => l.includes("installs latest"))).toBe(false);
   });
 
   it("says so and rewrites the file when the recipe already there cannot be read, rather than refusing to run", async () => {

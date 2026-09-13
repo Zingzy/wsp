@@ -1924,9 +1924,12 @@ export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
 export const LoginChoice = z.enum(LOGIN_CHOICES);
 export type LoginChoice = z.infer<typeof LoginChoice>;
 
-/** What the first install of a release recorded: the tag it fetched and the asset's sha256. The one shape for the
- * recipe row that carries it, the collector's row, the catalog road that checks it and the tick the seal writes. */
-export const ToolPin = z.object({ tag: z.string().min(1), sha256: z.string().min(1) });
+/** What a build recorded a row installed: the version, read back off the builder once the row ran (a release's tag,
+ * a package's version), and the archive's sha256 where the road hashed one. `latest` marks a row whose road installs
+ * the current version wherever it runs, so the version is what that seal got and not what a copy is fixed to. The
+ * one shape for the recipe row that carries it, the collector's row, the catalog road that installs at it, the tick
+ * the seal writes and the record's pins. */
+export const ToolPin = z.object({ tag: z.string().min(1), sha256: z.string().min(1).optional(), latest: z.literal(true).optional() });
 export type ToolPin = z.infer<typeof ToolPin>;
 
 /** What a golden is built from, as its builder records it: every ticked row
@@ -1945,8 +1948,8 @@ export const RecipeDigest = z.object({
        * road that installs differently under the same id is a changed row. */
       road: z.string().optional(),
       installer: z.string().optional(),
-      /** The release a tools row is fixed to while its recorded pin stands. The build that records a pin stamps it
-       * here, so the recipe carrying the same pin reads as no change; it never enters the hash. */
+      /** The version the row installed, as the build that ran it read back and stamped here; a copy planned from
+       * the record installs at it. It never enters the recipe hash: the recipe that asked is the same recipe. */
       pin: ToolPin.optional(),
     }),
   ),
@@ -1981,8 +1984,8 @@ export const RecipeRow = z.object({
   source: RecipeSource,
   size: z.number().int().nonnegative().optional(),
   signIn: LoginChoice.optional(),
-  /** Only on a tool installed from a release: what its first install fetched and hashed, written by the build that
-   * recorded it. The next build installs that tag and fails the row when the download's sum is not this one. */
+  /** What the last seal installed for this row, written after the build for `wsp recipe` to show; the next seal
+   * reads its own and writes it over. A copy installs by the record's pins, never by these. */
   pin: ToolPin.optional(),
 });
 export type RecipeRow = z.infer<typeof RecipeRow>;
@@ -2136,17 +2139,35 @@ export const SealedVault = z.object({
 });
 export type SealedVault = z.infer<typeof SealedVault>;
 
+/** One row's pin as the record keeps it: the row by the id that names its tool on every computer (the catalog id
+ * where the catalog carries the tool, else the row's own id, which is the same on the computer that has it), what
+ * it installed, and the road it took, so a reader can say in the road's words why a latest row is one. */
+export const SealedPin = ToolPin.extend({ id: z.string().min(1), road: z.string().optional() });
+export type SealedPin = z.infer<typeof SealedPin>;
+
+/** The pins a sealed digest carries, one per tick that recorded one, in id order: what the record keeps beside the
+ * recipe and what its hash covers. `key` is the id a row is known by across computers, the caller's catalog rule;
+ * without one a tick keeps its own id. */
+export function recipePins(digest: Pick<RecipeDigest, "ticks">, key: (id: string) => string = id => id): SealedPin[] {
+  return digest.ticks
+    .flatMap((t): SealedPin[] => (t.pin === undefined ? [] : [{ id: key(t.id), ...t.pin, ...(t.road !== undefined ? { road: t.road } : {}) }]))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 /** The image the host owns: what every copy is built from. One per golden name. */
 export const SealedImage = z.object({
   name: z.string(),
   version: z.number().int().positive(),
-  /** sha256 over the recipe hash and the vault's sha256; two copies with this hash were built from the same thing. */
+  /** sha256 over the recipe hash, the vault's sha256 and the pins; two copies with this hash were built from the same thing. */
   hash: z.string().length(64),
   recipeHash: z.string(),
   /** The small recipe as it stood at the seal, so a later edit of recipe.json changes no copy until the next
    * version. Absent on a record backfilled from a golden sealed before records existed, and on one sealed by a
    * road that carried no small recipe: a copy of such a record is refused, since there is nothing to build from. */
   recipe: Recipe.optional(),
+  /** What each row installed at the seal, read back off the builder: a copy installs these versions, and a row
+   * marked latest installs the current one and is named as such. Absent on a record sealed before pins were read. */
+  pins: z.array(SealedPin).optional(),
   logins: z.array(GoldenLogin),
   sealedAt: z.string(),
   /** This computer's name at the seal, for the screen's "sealed from". */
@@ -2210,6 +2231,11 @@ export type SealedVaultHeader = z.infer<typeof SealedVaultHeader>;
 export const ALREADY_APPLIED = "already applied";
 /** Recipe rows under the agents rung that are MCP servers, not agents: `agents/mcp/<agent>/<name>`. The collector writes them, the engine's import reads them. */
 export const MCP_ID_PREFIX = "agents/mcp/";
+/** Recipe rows under the agents rung: `agents/<agent>`, the MCP servers' rows among them. */
+const AGENTS_PREFIX = "agents/";
+/** The agent an agents-rung row names, or nothing for an MCP server's row and for every other rung: the one rule
+ * for that rung, beside packageOf for the tools rung. */
+export const agentOfRow = (e: { id: string }): string | undefined => (e.id.startsWith(AGENTS_PREFIX) && !e.id.startsWith(MCP_ID_PREFIX) ? e.id.slice(AGENTS_PREFIX.length) : undefined);
 /** Where a manager's rows sit under the tools rung: what every id of its packages starts with. It lives here, not
  * beside the engine's other row prefixes, because the collector writes these ids and cannot import the engine. */
 export const toolRowPrefix = (manager: string): string => `tools/${manager}/`;

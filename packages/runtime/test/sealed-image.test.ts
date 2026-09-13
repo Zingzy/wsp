@@ -5,11 +5,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { NoProviderBackend, imageHash } from "@wsp/engine";
-import { NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, type Recipe, type SealedImage } from "@wsp/protocol";
+import { NO_BUILD_PLACE_LINE, NO_PROVIDER_LINE, RUNTIME_OPS, THREAD_OPS, SealedImageView, buildPlaceAskLine, placeBuildsNoImageLine, placeForksNothingPickLine, sealedCopyLine, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { COPY_RECIPE, EMPTY_TGZ_SHA, SMALL, dfOk, digestOf, recipeWith } from "./image-fixtures.js";
+import { COPY_RECIPE, EMPTY_TGZ_SHA, SMALL, dfOk, digestOf, importOf, recipeWith } from "./image-fixtures.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -50,7 +50,7 @@ describe("the image record a seal writes", () => {
     const image = (await store.get("images", "default")) as { hash: string; recipeHash: string; recipe: Recipe; vault: { sha256: string; paths: number } };
     expect(image).toMatchObject({ name: "default", version: 1, recipeHash: "h1", recipe: SMALL, sealedFrom: "h1" });
     expect(image.vault).toMatchObject({ sha256: EMPTY_TGZ_SHA, paths: 1 });
-    expect(image.hash).toBe(imageHash("h1", EMPTY_TGZ_SHA));
+    expect(image.hash).toBe(imageHash("h1", EMPTY_TGZ_SHA, []));
     expect(version.imageHash).toBe(image.hash);
     expect(await store.getBlob("image-vaults", "default@v1")).toBeDefined();
     const view = await rt.image.get();
@@ -68,8 +68,30 @@ describe("the image record a seal writes", () => {
     await rt.golden.seal(b.id);
     const image = (await store.get("images", "default")) as { hash: string; vault?: unknown };
     expect(image.vault).toBeUndefined();
-    expect(image.hash).toBe(imageHash("h1", undefined));
+    expect(image.hash).toBe(imageHash("h1", undefined, []));
     expect(await store.getBlob("image-vaults", "default@v1")).toBeUndefined();
+    await rt.close();
+  });
+
+  it("a seal records the pins the builder's digest carries beside the recipe, keyed by the catalog id where the catalog carries the tool, in id order with each row's road, and the hash covers them", async () => {
+    const pinned: RecipeDigest = {
+      ticks: [{ id: "tools/npm/wrangler", version: "4.1.0", road: "npm", pin: { tag: "4.1.0" } }, { id: "agents/codex" }, { id: "tools/catalog/tmux", road: "apt", pin: { tag: "3.3a-3", latest: true } }],
+      files: [],
+    };
+    const backend = stubBackend();
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: { ...recipeWith(), import: { ...importOf("h1"), recipe: pinned } }, hostId: "h1" });
+    const b = await rt.golden.prepare();
+    await rt.golden.seal(b.id);
+    const image = (await store.get("images", "default")) as SealedImage;
+    // The npm row this computer had and the catalog's bare row another computer would plan are one tool: the pin is filed under its catalog id.
+    const pins = [{ id: "tmux", tag: "3.3a-3", latest: true as const, road: "apt" }, { id: "wrangler", tag: "4.1.0", road: "npm" }];
+    expect(image.pins).toEqual(pins);
+    expect(image.hash).toBe(imageHash("h1", EMPTY_TGZ_SHA, pins));
+    // The same recipe and vault sealed with no pin read is another image.
+    expect(image.hash).not.toBe(imageHash("h1", EMPTY_TGZ_SHA, []));
+    expect((await rt.image.get()).image?.pins).toEqual(pins);
     await rt.close();
   });
 

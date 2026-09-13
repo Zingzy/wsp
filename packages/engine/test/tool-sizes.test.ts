@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { catalogEntry, sizeBytes } from "@wsp/catalog";
 import { MIB, TOOLS_DISK_FLOOR } from "../src/golden-tools.js";
-import { brewfileFor, pinState, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
+import { brewfileFor, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import {
   BREW_TOOLCHAIN_BYTES,
   BUILDER_DISK_GB,
@@ -296,7 +296,6 @@ describe("tap formulae without a Linux bottle", () => {
     const pin = { tag: "v0.1.0", sha256: "e".repeat(64) };
     const b = brewfileFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE);
     expect(b.roads).toEqual([{ id: "tools/brew/zingzy/tap/diskbloom", name: "diskbloom", source: { repo: "Zingzy/diskbloom", tag: "v0.1.0" }, pin }]);
-    expect(pinState(pin, b.roads[0]!.source)).toBe("same");
     const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
     // The failure names the download, its tag, and both sums cut to the width the reason line keeps, recorded then served.
     expect(road.cmd).toContain(`[ "$sum" = '${pin.sha256}' ] || { echo "Error: $asset at $tag does not match the checksum recorded on its first install: recorded ${"e".repeat(12)}, served \${sum:0:12}" >&2; exit 1; }`);
@@ -310,9 +309,6 @@ describe("tap formulae without a Linux bottle", () => {
 
   it("a pin from an older tag is not checked against the new release: the tag moved, so it is a first install again", () => {
     const pin = { tag: "v0.0.9", sha256: "e".repeat(64) };
-    const b = brewfileFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE);
-    expect(pinState(pin, b.roads[0]!.source)).toBe("moved");
-    expect(pinState(undefined, b.roads[0]!.source)).toBe("none");
     const road = toolInstallsFor([{ ...brew("zingzy/tap/diskbloom", "unknown"), pin }], TABLE).installs.at(-1)!;
     expect(road.cmd).not.toContain('[ "$sum" =');
     expect(road.cmd).not.toContain("e".repeat(64));
