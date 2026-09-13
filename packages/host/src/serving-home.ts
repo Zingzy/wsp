@@ -4,9 +4,9 @@
 // home of its own finds that host instead of a state file nothing serves. One
 // reading, since the command line here, the desktop and the probe a box
 // answers over ssh must not disagree about where the host is.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { servingHost } from "./host-lock.js";
 
 /** The folder wsp keeps a person's things in when nobody names another, under the home directory it is given. */
@@ -37,6 +37,23 @@ export function servingHome(env: Readonly<Record<string, string | undefined>> = 
   if (named !== undefined) return named;
   const pointed = currentHome(user);
   return pointed !== undefined && servingHost(join(pointed, "state.json")) !== undefined ? pointed : defaultHomeIn(user);
+}
+
+/** A path as the file system knows it, so one folder reached by two names (/tmp and /private/tmp on a Mac) is not
+ * read as two states. Where nothing has made the file or its folder yet, the path as written is all there is. */
+export function realState(path: string): string {
+  const dir = dirname(path);
+  if (existsSync(path)) return realpathSync(path);
+  return existsSync(dir) ? join(realpathSync(dir), basename(path)) : path;
+}
+
+/** The state file a host on this computer is serving, when that is not the one a line works on. A line typed in a
+ * folder carrying a `.wsp` of its own works on that folder's state, and nothing in the line says the host this
+ * computer serves is another one; whoever names the difference names this path. The two are compared as the file
+ * system knows them, so a state folder reached through a symlink is not read as a second state. */
+export function servingElsewhere(statePath: string, env: Readonly<Record<string, string | undefined>> = process.env, user: string = homedir()): string | undefined {
+  const served = join(servingHome(env, user), "state.json");
+  return realState(served) !== realState(statePath) && servingHost(served) !== undefined ? served : undefined;
 }
 
 /** The same reading in POSIX sh, for a box answering over ssh before any wsp of its own has run: it leaves $home
