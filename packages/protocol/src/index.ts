@@ -2893,6 +2893,9 @@ export const MachineHandle = z.object({
   seen: z.object({ state: MachineState, createdAt: z.string().optional() }).optional(),
   replayed: z.boolean().optional(),
   daemonSupervisor: DaemonSupervisor.optional(),
+  /** One sentence on a create whose size the computer would not give as asked, naming what it gave instead. The
+   * handle carries the size itself nowhere, so this is the whole of what the person is told, said once. */
+  notice: z.string().optional(),
   roads: z.object({ previewUrl: z.boolean(), daemonAnswers: z.boolean(), putBytes: z.boolean(), describe: z.boolean(), facts: z.boolean(), metrics: z.boolean() }),
 });
 export type MachineHandle = z.infer<typeof MachineHandle>;
@@ -2908,6 +2911,11 @@ export const PlaceCapacity = z.object({
    * clamped to. The room a fork takes is not the room the whole computer has, and the rule that says so is the
    * backend's own, so the number travels rather than the rule. */
   machineMemMb: z.number(),
+  /** What the machines on this computer hold of it right now, summed over the ones that are not stopped: the cores
+   * their quotas name and the memory their caps name. Absent from a backend that counts neither, which is what the
+   * room line reads before it says anything. */
+  cpuTaken: z.number().optional(),
+  memTakenMb: z.number().optional(),
   diskFreeBytes: z.number(),
   images: z.array(z.object({ id: z.string(), name: z.string().optional(), sizeBytes: z.number() })),
   machines: z.object({ running: z.number(), paused: z.number() }),
@@ -3138,6 +3146,7 @@ const DAEMON_CONTENTS = [
   "372241b199d0b23db89c2618409d8edf611bc5f29811fdaffca813ec2b283295",
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
+  "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3208,7 +3217,10 @@ const DAEMON_CONTENTS = [
  * that check no longer, and a machine wsp did not build is turned away with nothing written on it. Version 31 lets a
  * place say which life a copy may be taken from: a provider whose snapshot is the disk as it stands answers
  * snapshotsAnyLife and a builder that woke there is sealed, where one that answers only its first life still refuses
- * after a restart. */
+ * after a restart. Version 32 holds every workspace on a computer somebody keeps to a size that leaves that
+ * computer a core and the smaller of half its memory and a gigabyte, a spec that names no size included: the
+ * create answers the size it gave and one sentence saying so, the record holds that size, and the capacity says
+ * what the workspaces there hold of the computer. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

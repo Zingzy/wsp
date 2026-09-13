@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { boxRoomLines, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -1114,6 +1114,16 @@ export async function cleanOrphans(rt: Runtime, io: Pick<CliIO, "log">, yes: boo
   return done === undefined ? NO_SNAPSHOT_LISTING : describeDeleted(done);
 }
 
+/** The doctor's box row: what the computer this fork landed on has left once this run's own machine is on it. A
+ * box holds every fork down to a size that leaves the computer itself room, so the room is worth reading back
+ * here rather than after the first fork that would not start. Empty where the place counts no room or will not
+ * answer, which the caller reads as no row at all: a reading is not a step, and a computer that stays quiet about
+ * its room costs this run nothing. Returns the step's note. */
+export async function roomLeft(backend: Pick<MachineBackend, "capacity">): Promise<string> {
+  if (backend.capacity === undefined) return "";
+  return (await backend.capacity().then(boxRoomLines, () => [])).join("; ");
+}
+
 /** The doctor's teardown check. Only machines this host made count, by the owner stamp every machine wsp creates
  * wears: a second computer on the same account stands its own, and the doctor deleted none of them. Those are one
  * line, named and left alone; this host's own leftovers fail the run. Returns the step's note. */
@@ -1272,6 +1282,9 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     );
     workspaceId = view.id;
     const machine = await rt.backend.get(view.machineId);
+
+    const room = await roomLeft((view.place !== undefined ? rt.places?.backendOf(view.place) : undefined) ?? rt.backend);
+    if (room !== "") timings.add("room left where it landed", 0, room);
 
     const { token } = await timings.time(
       "wsp on that machine",

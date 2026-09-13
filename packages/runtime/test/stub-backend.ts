@@ -46,6 +46,9 @@ export interface StubBackend extends MachineBackend {
   /** Where a process inside each machine dials the computer this host runs on; absent, the machines know no road
    * back, as a VM at a provider does. Set before a machine is made. */
   machineHostUrl?: (port: number) => string;
+  /** What the computer answers a create with beside the machine, as a box that would not fork at the size asked for
+   * does; absent, every create answers with the machine alone. Set before a machine is made. */
+  createNotice?: string;
   execImpl: (m: StubMachine, cmd: string) => Promise<ExecResult> | ExecResult;
   /** Runs before each snapshot is taken, with which attempt on that machine this is; one that throws is the provider refusing. */
   beforeSnapshot?: (m: StubMachine, nth: number) => void;
@@ -157,6 +160,7 @@ export function stubBackend(mark?: string): StubBackend {
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         snapshotLives: [],
         ...(backend.machineHostUrl !== undefined ? { hostUrl: backend.machineHostUrl } : {}),
+        ...(backend.createNotice !== undefined ? { notice: backend.createNotice } : {}),
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });
           m.execLog.push(cmd);
