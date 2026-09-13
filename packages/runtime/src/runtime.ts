@@ -193,10 +193,10 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
-import { PlaceBackend, isNoProvider, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
+import { isNoProvider, isPlaceAbsent } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
@@ -1897,47 +1897,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await persist(entry.record);
     return detail;
   };
-  /** The place a workspace's machine names, read off the one written form of it. A record of this kind that names
-   * no place is a record no place road wrote. */
-  const placeIdOf = (entry: LiveWorkspace): string => {
-    const placeId = parsePlaceMachineId(entry.record.machineId ?? "");
-    if (placeId === undefined) throw new Error(`${entry.record.name} stands on ${entry.record.machineId ?? "no machine"}, which is not a place this host holds`);
-    return placeId;
-  };
-  /** The home the place reported, which every path a turn there is built from. Read in one place and refused when a
-   * record carries none, since the roads below would otherwise each pick a folder of their own. */
-  const placeHomeDir = (entry: LiveWorkspace): string => {
-    const home = loginOf(entry.record)["HOME"];
-    if (home === undefined) throw new Error(noMachineHomeLine(entry.record.name));
-    return home;
-  };
   /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind
    * this host does not serve answers. */
   let placeDoor: PlaceDoor | undefined;
   const placeDoorOf = (): PlaceDoor => {
     if (placeDoor === undefined) throw new Error(noKindLine("place"));
     return placeDoor;
-  };
-  /** The workspaces standing on one place. Read off the one written form of a place's machine and never off the
-   * record's kind: only a place's record carries such a machine id, so the three roads that ask this share one
-   * rule rather than each comparing a kind of its own. */
-  const placeWorkspaces = (placeId: string): LiveWorkspace[] => [...live.values()].filter(e => parsePlaceMachineId(e.record.machineId ?? "") === placeId);
-  /** Where a long run's files go on one place, off the login the workspace standing on it carries: the same rule the
-   * turn's own launch reads, so nothing picks a second folder. */
-  const placeRunDir = (placeId: string): string | undefined => {
-    const record = placeWorkspaces(placeId)[0]?.record;
-    const home = record === undefined ? undefined : loginOf(record)["HOME"];
-    return home === undefined ? undefined : placeDaemonPaths(home).runDir;
-  };
-  /** Every command on a place rides one exec frame on the link that place is holding. */
-  const placeBackend = opts.placeLinks === undefined ? undefined : new PlaceBackend((placeId, cmd, o) => placeDoorOf().exec(placeId, cmd, o), placeRunDir);
-  /** The road a pane takes to the daemon on a place: a port on this computer's own loopback, carried over the link
-   * that computer opened outward to the port its daemon bound on its own. Nothing on that computer listens past
-   * its own loopback, so the link is the whole road and this host is the only thing on the other end of it. */
-  const placeRoad = async (entry: LiveWorkspace): Promise<DaemonReachView> => {
-    const port = await placeDoorOf().road(placeIdOf(entry));
-    const token = await daemonTokenOf(entry.machine, placeDaemonPaths(placeHomeDir(entry)).tokenPath);
-    return { url: `http://${LOOPBACK}:${port}`, expiresAt: NEVER, ...(token !== undefined ? { daemonToken: token } : {}) };
   };
   const modules: Record<WorkspaceKind, KindModule | undefined> = {
     cloud: {
@@ -2065,41 +2030,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // fork's do; the road that carries them reads the machine for how, and over ssh that is the connection.
             import: (entry, o, report) => copyImport(entry, o, report),
             roots: (entry, dests) => writeRoots(entry, dests, sshDaemonPaths(sshHomeDir(entry)).rootsPath),
-          },
-    place:
-      placeBackend === undefined
-        ? undefined
-        : {
-            backend: () => placeBackend,
-            // The run's script, log and exit code live in wsp's own folder under the place's home, not a folder
-            // every login on it shares: on the person's own computer another account's temporary folder is theirs.
-            execStream: (entry, o, waiting) => machineExecStream(entry.machine, { ...o, runDir: placeDaemonPaths(placeHomeDir(entry)).runDir }, waiting),
-            // A turn starts in wsp's own work folder under their home, the same rule this computer's own workspace
-            // reads: a turn that started in the home itself committed inside the person's own repo once.
-            folder: record => {
-              const home = loginOf(record)["HOME"];
-              return home === undefined ? undefined : workFolderIn(home);
-            },
-            // The computer is the person's own, so each harness reads the store their own shell would: the folder
-            // their store variable names there when it named one, else the default under the home it reported.
-            home: (entry, id) => agentHome(placeHomeDir(entry), id, loginOf(entry.record)),
-            homeDir: record => loginOf(record)["HOME"],
-            env: entry => ({ ...loginOf(entry.record), ...MACHINE_SANDBOX_ENV }),
-            // No turn on a place is handed a token yet: the round that gives this kind's turns the wsp command
-            // answers the address and the token together, and until then nothing can relay from one.
-            relayed: () => false,
-            wspMcp: () => undefined,
-            hostUrl: () => undefined,
-            // While the link stands there is a daemon this host can reach, over the port the road below opens on
-            // this computer's loopback; a computer that is off has none until it dials again.
-            hasDaemon: entry => placeDoor?.link(placeIdOf(entry)) !== undefined,
-            daemonRoad: placeRoad,
-            scratch: entry => placeDaemonPaths(placeHomeDir(entry)).wsp,
-            daemonVersion: async entry => (await placeDoorOf().reportOf(placeIdOf(entry)))?.daemonVersion ?? null,
-            // The place stays joined when a workspace on it goes; wsp remove is the sweep, and it is the place's own.
-            dropped: async () => {},
-            import: (entry, o, report) => copyImport(entry, o, report),
-            roots: (entry, dests) => writeRoots(entry, dests, placeDaemonPaths(placeHomeDir(entry)).rootsPath),
           },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
@@ -2369,50 +2299,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(opts.placeFrameWaitMs !== undefined ? { frameWaitMs: opts.placeFrameWaitMs } : {}),
       ...(opts.placeRelinkWaitMs !== undefined ? { relinkWaitMs: opts.placeRelinkWaitMs } : {}),
       recording: {
-        // Every one of these three reads the live records, so each waits on the one hydration every other road
-        // waits on: a place that dials a host nothing has asked a verb of yet would otherwise find no records at all.
-        record: async place => {
-          await ready();
-          try {
-            // The place's own id is the machine's identity, so one computer carries one workspace however it dials.
-            const workspace = await recordExisting("place", place.name, undefined, async () => ({
-              machine: await placeBackend!.get(placeMachineId(place.id)),
-              size: place.report.shape,
-              shape: place.report.shape,
-              login: place.report.login,
-              identity: place.id,
-            }));
-            return { workspaceId: workspace.id };
-          } catch (e) {
-            // A name another workspace already holds leaves the place joined and says so: the join worked, and
-            // wsp new on it can name another.
-            return { notice: e instanceof Error ? e.message : String(e) };
-          }
-        },
-        refresh: async place => {
-          await ready();
-          const entry = placeWorkspaces(place.id)[0];
-          if (entry === undefined) return;
-          entry.record.login = place.report.login;
-          entry.record.size = place.report.shape;
-          entry.record.shape = place.report.shape;
-          await persist(entry.record);
-        },
-        // The forks on a place are records of their own, and the workspace the place itself is is not one of them:
-        // one carries the place's machine, the others carry a machine that place made.
+        // Reads the live records, so it waits on the one hydration every other road waits on: a place that dials a
+        // host nothing has asked a verb of yet would otherwise find no records at all.
         forksOn: async placeId => {
           await ready();
           return [...live.values()].filter(e => e.record.place === placeId).map(e => e.record.name);
-        },
-        drop: async placeId => {
-          await ready();
-          const lines: string[] = [];
-          for (const entry of placeWorkspaces(placeId)) {
-            endSessions(entry.record.id, DELETED_REASON);
-            await drop(entry.record.id);
-            lines.push(placeWorkspaceGoneLine(entry.record.name, entry.record.id));
-          }
-          return lines;
         },
       },
     });
@@ -4319,7 +4210,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const rows = held();
       // A name names one workspace at most: the create and the rename both refuse a name another already holds.
       const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
-      if (entry === undefined) throw notFoundRefusal(noWorkspaceRefusal(ref));
+      if (entry === undefined) {
+        // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
+        // one there rather than with absence, since the person typed the name of something this host does hold.
+        const place = (await placeDoor?.find(ref)) ?? [];
+        if (place.length > 0) throw notFoundRefusal(refusalLine(placeNotAWorkspaceLine(place[0]!.name), placeNotAWorkspaceFix(place[0]!.name)));
+        throw notFoundRefusal(noWorkspaceRefusal(ref));
+      }
       refuseRelayed(entry.record, origin);
       return view(entry.record);
     },
@@ -6199,7 +6096,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     if (placeDoor === undefined) return rows;
     for (const view of await placeDoor.list(clock.now())) {
-      if (view.kind !== "computer" || view.id === HERE_PLACE_ID || view.runsWorkspaces !== true) continue;
+      if (view.kind !== "computer" || view.id === HERE_PLACE_ID) continue;
       const at = await placeDoor.forkingBackend(view.id).catch(() => undefined);
       if (at !== undefined) rows.push({ place: view.id, name: view.name, backend: at });
     }

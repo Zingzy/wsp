@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -230,16 +230,16 @@ describe("wsp verbs over the host", () => {
     expect(listed.io.lines[0]!.split("\n").slice(1).every(r => r.includes("alpha"))).toBe(true);
   });
 
-  it("new on the place this computer is records it as that place's one workspace, and names that workspace when there is one", async () => {
+  it("new on the computer the app runs on records its one local workspace, and names that workspace when there is one", async () => {
     const { code, io } = await run("new", "mac", "--on", HERE);
     expect(code).toBe(0);
     expect(io.lines).toHaveLength(1);
     expect(io.lines[0]).toMatch(/^created mac ws_[0-9a-f]{8} \(this computer\)$/);
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
-    // A place that forks nothing runs one workspace, so a second is refused naming the one there is.
+    // Local mode is one workspace, so a second is refused naming the one there is.
     const again = await run("new", "other", "--on", HERE);
     expect(again.code).toBe(EXIT_CODES.usage);
-    expect(again.io.errors[0]).toBe(`wsp new: ${placeRunsOneWorkspaceLine(HERE, "mac")}. ${placeRunsOneWorkspaceFix("mac")}`);
+    expect(again.io.errors[0]).toBe(`wsp new: ${localRunsOneLine("mac")}. ${localRunsOneFix("mac")}`);
     // A word that names no place is refused with the ones there are.
     const nowhere = await run("new", "x", "--on", "srv");
     expect(nowhere.code).toBe(EXIT_CODES.usage);

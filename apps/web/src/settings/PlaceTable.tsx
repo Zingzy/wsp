@@ -55,9 +55,9 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
   );
 }
 
-/** How many workspaces stand on this row, and the note behind it: what it has cost this month, or that the
- * computer runs agents and no workspace of its own. The count is the figure a person is reading and stands in the
- * row's own ink; the note is the muted clause the mock draws behind it. */
+/** How many workspaces stand on this row, and the note behind it: what it has cost this month, or the copy of the
+ * image being built there. The count is the figure a person is reading and stands in the row's own ink; the note
+ * is the muted clause the mock draws behind it. */
 function Workspaces({ place, count, monthUsd }: { place: PlaceView; count: number; monthUsd?: number }) {
   const parts = placeWorkspacesParts(place, count, monthUsd);
   return (

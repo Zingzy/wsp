@@ -40,10 +40,9 @@ describe("the one state of a computer that is not answering", () => {
     }
   });
 
-  it("names the computer a workspace stands on however the workspace got there", () => {
-    expect(workspacePlace({ machineId: "place:p_oldlaptop" })).toBe("p_oldlaptop");
-    expect(workspacePlace({ machineId: "ctr_9f", place: "p_oldlaptop" })).toBe("p_oldlaptop");
-    expect(workspacePlace({ machineId: "sbx_44" })).toBeUndefined();
+  it("names the computer a fork stands on, and nothing for a workspace that stands on no place", () => {
+    expect(workspacePlace({ place: "p_oldlaptop" })).toBe("p_oldlaptop");
+    expect(workspacePlace({})).toBeUndefined();
   });
 
   it("folds a computer that answers nothing into the state word every surface reads", () => {

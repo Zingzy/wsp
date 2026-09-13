@@ -45,16 +45,17 @@ export const LEFT_ALONE_LINE = "This computer left, but the wsp it joined could 
 export const TOKEN_LEFT_LINE = "This computer left, but the token it held could not be handed back; the wsp over there holds it until somebody revokes it.";
 
 /** Why a join did not happen, as one word the screen has a slot and a sentence for: a word that is no address, an
- * address nothing answered at, a code the host would not take, a computer already in a wsp, and anything this Mac
- * itself refused. The screen owns the words; this says which of them. */
-export type JoinRefusal = "address" | "answer" | "code" | "already" | "shell";
+ * address nothing answered at, a code the host would not take, a computer already in a wsp, a wsp that answered and
+ * turned this computer down, and anything this Mac itself refused. The screen owns the words for all but `refused`,
+ * whose sentence is the wsp's own and is the whole of what the person needs: a Mac is not a place, and the doctor
+ * over there says why. */
+export type JoinRefusal = "address" | "answer" | "code" | "already" | "refused" | "shell";
 
 /** The computer the person is sitting at, as the joined screen draws its card. */
 export interface JoinedHere {
   name: string;
   /** Its cores, memory and the room left where its threads work, in the app's own words for them. */
   facts: string;
-  runsWorkspaces: boolean;
 }
 
 export type JoinOutcome = { ok: true; here: JoinedHere } | { ok: false; why: JoinRefusal; said?: string };
@@ -151,10 +152,12 @@ export function joinRoad(deps: JoinRoadDeps): JoinRoad {
           wsp: { ...runningWsp(), shim: deps.shim },
         });
       } catch (e) {
-        // The host's two words are about a field; the screen's five are about a sentence, and two of them are about
-        // the address field: `address` for a word that is no address, which never reaches the host, and `answer` for
-        // one it dialled and nothing answered at. The host's "address" is the second of those.
-        return { ok: false, why: e instanceof JoinRefused ? (e.about === "code" ? "code" : "answer") : "shell", said: text(e) };
+        // The host's three words map onto the screen's slots: `code` under the code field, `host` to the sentence
+        // the wsp over there gave about this computer, and `address` to the field it dialled and nothing answered
+        // at. Anything else is this Mac's own shell.
+        const about = e instanceof JoinRefused ? e.about : undefined;
+        const why: JoinRefusal = about === "code" ? "code" : about === "host" ? "refused" : about === "address" ? "answer" : "shell";
+        return { ok: false, why, said: text(e) };
       }
       const hostUrl = joined.hostUrls[0];
       const alias = hostUrl === undefined ? undefined : aliasOf(hostUrl);
@@ -174,7 +177,7 @@ export function joinRoad(deps: JoinRoadDeps): JoinRoad {
       // The report is what this computer told the host about itself on the join frame, so the card the person reads
       // and the row the host keeps are one reading rather than two.
       const { report } = joined;
-      return { ok: true, here: { name: report.name, facts: placeFactsLine(report.shape, report.diskFreeBytes), runsWorkspaces: report.runsWorkspaces } };
+      return { ok: true, here: { name: report.name, facts: placeFactsLine(report.shape, report.diskFreeBytes) } };
     },
     standing() {
       const place = placeStanding(deps.home);

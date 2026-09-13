@@ -10,10 +10,10 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
+import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
 import { bundledDaemonName, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
@@ -486,10 +486,58 @@ describe("the place a computer joined over ssh keeps its agent", () => {
 
   it("keeps every path the ssh road lays down, so one sweep takes the lot however the agent got there", () => {
     const place = joinedPlace(LOGIN, JOIN);
-    const { supervise: _ssh, kind: _k, ...ssh } = sshDaemonPlace(LOGIN);
-    const { supervise: _joined, kind: _jk, join: _j, onExit: _x, ...rest } = place;
+    const { supervise: _ssh, kind: _k, scope: _s, unitPath: _u, wantedBy: _w, preflight: _p, ...ssh } = sshDaemonPlace(LOGIN);
+    const { supervise: _joined, kind: _jk, join: _j, onExit: _x, scope: _js, unitPath: _ju, wantedBy: _jw, preflight: _jp, ...rest } = place;
     expect(rest).toEqual(ssh);
     expect(place.kind).toBe("place");
+  });
+
+  it("installs the daemon as a system service, since joining a computer you own needs root, and never asks that login to linger", () => {
+    const place = joinedPlace(LOGIN, JOIN);
+    expect(place.scope).toBe("system");
+    expect(place.unitPath).toBe(`/etc/systemd/system/${DAEMON_UNIT}`);
+    expect(daemonUnit(place)).toContain("WantedBy=multi-user.target");
+    expect(preflightScript(place)).not.toContain("enable-linger");
+    expect(preflightScript(place)).not.toContain(NO_LINGER_LINE);
+  });
+
+  it("reads one sentence and stops before anything is written when the login is not root", async () => {
+    const place = joinedPlace(LOGIN, JOIN);
+    expect(preflightScript(place)).toContain(PLACE_NEEDS_ROOT_LINE);
+    // The one line, under bash, with the login it reads standing in: the checks beside it ask this machine what it
+    // has, and the answer differs on a Mac and a Linux box, so running the whole script would read the machine the
+    // test is on rather than the condition under test.
+    const rootCheck = place.preflight.at(-1)!;
+    expect(rootCheck).toContain(PLACE_NEEDS_ROOT_LINE);
+    const asLogin = (uid: number): Promise<{ stdout: string; code?: number }> =>
+      promisify(execFile)("bash", ["-c", `id() { echo ${uid}; }\n${rootCheck}\necho ${PREFLIGHT_OK_LINE}`]).catch((e: unknown) => e as { stdout: string; code?: number });
+    const plain = await asLogin(1000);
+    expect(plain.stdout).toContain(PLACE_NEEDS_ROOT_LINE);
+    expect(plain.stdout).not.toContain(PREFLIGHT_OK_LINE);
+    expect(plain.code).toBe(1);
+    // The same line says nothing at all for root, so the check is the login and not the machine.
+    const asRoot = await asLogin(0);
+    expect(asRoot.stdout.trim()).toBe(PREFLIGHT_OK_LINE);
+    expect(asRoot.code).toBeUndefined();
+    // Nothing lands before the check: a refused preflight leaves the computer exactly as it was found.
+    const box = fakeMachine({ preflight: { exitCode: 1, stdout: `${PLACE_NEEDS_ROOT_LINE}\n` } });
+    await expect(deployDaemon(box.machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli() })).rejects.toThrow(PLACE_NEEDS_ROOT_LINE);
+    expect(box.wrote).toEqual([]);
+  });
+
+  it("takes the workspace profile back off, so a remove leaves a root install holding nothing of wsp's", () => {
+    const place = joinedPlace(LOGIN, JOIN);
+    const off = removeDaemonScript(place);
+    // Unloaded before the file goes: the kernel holds a profile by name, so a bare rm would leave it loaded for a
+    // binary that is gone. Guarded the way the step that wrote it is, and only where this scope could write it.
+    expect(off).toContain(`apparmor_parser -R ${WSP_WORKSPACE_APPARMOR_PATH}`);
+    expect(off).toContain(`rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`);
+    expect(off.indexOf("apparmor_parser -R")).toBeLessThan(off.indexOf(`rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`));
+    expect(off).toContain("command -v apparmor_parser >/dev/null 2>&1");
+    // The two scopes that write no such profile take none off: a login's own daemon owns no /etc.
+    expect(removeDaemonScript(sshDaemonPlace(LOGIN))).not.toContain("apparmor_parser");
+    // What the deploy wrote is what the remove takes: one path, named once.
+    expect(deployScript(place, "aabbcc")).toContain(WSP_WORKSPACE_APPARMOR_PATH);
   });
 
   it("says so when a place it is given names no wsp to join, rather than writing a join line with nothing in it", () => {
