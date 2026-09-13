@@ -36,7 +36,7 @@ describe.skipIf(renderSkipped !== undefined)("the usage chart laid out in Chromi
   it.each(["dark", "light"] as const)("in the %s theme the line spans the metered life, the ranges re-read the axis, and the empty box keeps the height", async theme => {
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector("[data-usage-line]");
-    await page!.waitForFunction(() => document.querySelector("[data-k=accrued]")?.textContent !== "$0.0000");
+    await page!.waitForFunction(() => (document.querySelector("[data-k=accrued]")?.textContent ?? "$0.00") !== "$0.00");
     const chart = page!.locator("[data-usage-chart]");
     const loaded = (await chart.boundingBox())!;
     expect(await page!.locator("[data-usage-chart] rect").count()).toBe(0);
@@ -78,7 +78,8 @@ describe.skipIf(renderSkipped !== undefined)("the usage chart laid out in Chromi
     const svg = (await page!.locator("[data-usage-chart] svg").boundingBox())!;
     await page!.mouse.move(svg.x + svg.width * 0.6, svg.y + svg.height / 2);
     await page!.waitForSelector("[data-usage-hover]", { state: "attached" });
-    expect(await page!.locator("[data-k=usage-readout]").textContent()).toMatch(/^\$\d+\.\d{4} · \$\d\.\d{3}\/hr · /);
+    // The spend reads in cents, as every figure a person reads does; the rate keeps its tenth of a cent.
+    expect(await page!.locator("[data-k=usage-readout]").textContent()).toMatch(/^\$\d+\.\d{2} · \$\d\.\d{3}\/hr · /);
     await page!.locator("[data-testid=machine-tab]").screenshot({ path: join(SHOTS, `usage-chart-hover-${theme}.png`) });
 
     await page!.goto(`${base}?theme=${theme}&empty=1`);

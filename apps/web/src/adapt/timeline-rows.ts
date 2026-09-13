@@ -6,6 +6,7 @@
 // MCP presentation tables. Turn duration comes from the turn summary because
 // entries are unstamped on our wire.
 import { fmtDuration, isCodeSearchTool } from "@wsp/protocol";
+import { isPromptOpen } from "./session.js";
 import type { MessagesTimelineRow, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry, WorkLogTone } from "./view-model.js";
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
@@ -80,7 +81,12 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   const activeIds = new Set(activeRow !== null || latestToolFailed ? activeToolEntries.map(e => e.id) : []);
 
   let hasActivityRow = false;
-  const pushWorking = (): void => { rows.push({ kind: "working", id: "working-indicator-row", createdAt: input.activeTurnStartedAt }); };
+  // Whether the turn the count belongs to is stopped on a question: a prompt of that turn and no other with no
+  // outcome on it. The turn matters. A host that restarted while a prompt stood open leaves it in the transcript
+  // with none, since the runtime cuts the row short at load and records nothing that closes the question, and the
+  // thread's own row reads the latest turn alone. Scoped here, the count and the row cannot say two things.
+  const waitingOnYou = unsettledTurnId !== null && entries.some(entry => entry.kind === "permission" && entry.permission.turnId === unsettledTurnId && isPromptOpen(entry.permission));
+  const pushWorking = (): void => { rows.push({ kind: "working", id: "working-indicator-row", createdAt: input.activeTurnStartedAt, waitingOnYou }); };
   const pushActive = (): void => {
     if (activeRow === null) return;
     rows.push(activeRow);
@@ -268,7 +274,8 @@ function lastUserMessageIndex(entries: ReadonlyArray<TimelineEntry>): number {
   return -1;
 }
 
-function entryTurnId(entry: TimelineEntry): string | null {
+/** The turn a rendered entry belongs to, or null where it belongs to none. */
+export function entryTurnId(entry: TimelineEntry): string | null {
   switch (entry.kind) {
     case "message":
       return entry.message.role === "assistant" ? entry.message.turnId : null;

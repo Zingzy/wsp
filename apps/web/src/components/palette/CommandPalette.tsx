@@ -6,11 +6,10 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { isLocalWorkspace } from "@wsp/protocol";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
-import { deriveSidebarProjects } from "../../adapt/index.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
-import { useLabs, useSelectedWorkspaceId, useStore } from "../../protocol/store.js";
+import { useLabs, useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
@@ -38,8 +37,6 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const { toggleSidebar } = useSidebar();
   const api = useStore(s => s.api);
   const workspaces = useStore(s => s.workspaces);
-  const statuses = useStore(s => s.statuses);
-  const sessions = useStore(s => s.sessions);
   const places = useStore(s => s.places);
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
@@ -68,7 +65,7 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
     [],
   );
 
-  const projects = useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+  const projects = useSidebarProjects();
   const handlers = useMemo<PaletteHandlers>(
     () => ({
       selectWorkspace: goToWorkspace,

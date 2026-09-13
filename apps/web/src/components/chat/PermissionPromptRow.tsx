@@ -22,7 +22,7 @@
 // it between the question and the buttons is what nobody reads, and the fold
 // opens into a box of its own height so the buttons stay on the screen.
 import { ChevronRightIcon } from "lucide-react";
-import type { PermissionPrompt } from "../../adapt";
+import { isPromptOpen, type PermissionPrompt } from "../../adapt";
 import { permissionOutcomeLine, permissionPromptWords, pickedOptions } from "@wsp/protocol";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
@@ -47,7 +47,7 @@ export function PermissionPromptRow({
    * several running agents knows which one this is. */
   asker?: string;
 }) {
-  const open = permission.outcome === null;
+  const open = isPromptOpen(permission);
   const answer = (optionId: string): void => onAnswer(permission.sessionId, permission.askId, optionId);
   const picked = pickedOptions(permission.options, permission.optionId ?? "");
   const named = picked === undefined || picked.length === 0 ? undefined : { label: picked.map(o => o.label).join(", "), effect: picked[0]!.effect };

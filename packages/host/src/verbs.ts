@@ -115,6 +115,15 @@ import {
   noMessagesLine,
   noReplyLine,
   noWorkspaceRefusal,
+  notFoundRefusal,
+  needsYouLine,
+  openAsk,
+  askingLine,
+  type PermissionEffect,
+  type PermissionOption,
+  type SessionAnswerOutcome,
+  SessionAnswerResult,
+  type SessionPermissionEvent,
   NO_PROVIDER_LINE,
   notAFileLine,
   notAnImageLine,
@@ -666,7 +675,7 @@ function pickThread(all: readonly ThreadView[], ref: string): ThreadView {
   const prefixed = all.filter(t => t.id.startsWith(ref));
   if (prefixed.length === 1) return prefixed[0]!;
   if (prefixed.length > 1) throw new Error(`${prefixed.length} threads start with ${ref}; give more of the id`);
-  throw new Error(`no thread ${ref}`);
+  throw notFoundRefusal(`no thread ${ref}`);
 }
 
 /** A thread by id, or by a prefix of it that names exactly one. */
@@ -1606,11 +1615,15 @@ const JOINED: Record<Exclude<SessionStartOutcome, "started">, (picks: Picks) => 
  * for each tool call, for what the call answered and for the turn's own end, so a turn that runs commands for
  * minutes shows work rather than silence. A line that lands mid-sentence breaks the sentence first; nothing is
  * redrawn, since the stream may be a file. The reply is one turn's text written once: `reply` hands the stdout
- * print the finished text only where the stream has not already put it in front of the same person, and closes the
- * streamed prose on a line of its own either way, so the lines under it start where they read. */
-function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void; reply(text: string | undefined): string | undefined } {
+ * print the finished text only where the stream has not already put it in front of the same person, and closes
+ * whatever the stream stopped mid-line on first, so the print under it never lands on the work's last line. */
+function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string): void; says(l: string): void; reply(text: string | undefined): string | undefined } {
   let atLineStart = true;
   let streamedProse = false;
+  const says = (l: string): void => {
+    ctx.out.stream(`${atLineStart ? "" : "\n"}${l}\n`);
+    atLineStart = true;
+  };
   return {
     text: t => {
       if (t === "") return;
@@ -1618,16 +1631,146 @@ function turnStream(ctx: VerbContext): { text(t: string): void; line(l: string):
       ctx.out.stream(t);
       atLineStart = t.endsWith("\n");
     },
-    line: l => {
-      ctx.out.stream(`${atLineStart ? "" : "\n"}${ctx.io.muted?.(l) ?? l}\n`);
-      atLineStart = true;
-    },
+    line: l => says(ctx.io.muted?.(l) ?? l),
+    says,
     reply: text => {
-      if (!streamedProse || ctx.io.sameScreen !== true) return text;
       if (!atLineStart) ctx.out.stream("\n");
       atLineStart = true;
-      return undefined;
+      return streamedProse && ctx.io.sameScreen === true ? undefined : text;
     },
+  };
+}
+
+/** How a prompt a turn stopped on is answered from a terminal: the key a person types while the turn is watched, and
+ * which of the prompt's own options that picks, by what picking it does to the call and never by the option's id,
+ * which is the harness's. `does` is what the line under the prompt says typing the key does; a road without it takes
+ * the option's own label, since which mode a harness offered is the harness's to say and its words ride the option.
+ * `answer` is the road another terminal takes: the verb, its help row and the line printed after that pick; absent
+ * where no verb carries the road. One row per answer, so an answer added later is a row here and reaches the keys,
+ * the verbs and every line at once. */
+interface AnswerRoad {
+  key: string;
+  effect: PermissionEffect;
+  does?: string;
+  answer?: { verb: string; about: string; said: string };
+}
+
+const ANSWER_ROADS: readonly AnswerRoad[] = [
+  { key: "y", effect: "allow", does: "run it", answer: { verb: "allow", about: "answers the prompt the thread is stopped on and lets the call run", said: "allowed" } },
+  { key: "n", effect: "deny", does: "refuse it", answer: { verb: "deny", about: "answers the prompt the thread is stopped on and refuses the call", said: "denied" } },
+  { key: "a", effect: "mode" },
+];
+
+/** The roads this prompt's own options carry, each beside the option it picks. A call that asks the person something
+ * rather than for consent carries its own answers and no road here, which is what leaves a terminal nothing to type. */
+function answerRoads(options: readonly PermissionOption[]): { road: AnswerRoad; option: PermissionOption }[] {
+  return ANSWER_ROADS.flatMap(road => {
+    const option = options.find(o => o.effect === road.effect);
+    return option === undefined ? [] : [{ road, option }];
+  });
+}
+
+/** What the person at the keyboard types to answer the prompt above, printed under it: each key with what it does,
+ * in the road's words or, where the road has none, in the words the option itself arrived with. */
+export function answerKeysLine(options: readonly PermissionOption[]): string {
+  const typed = answerRoads(options).map(({ road, option }) => `${road.key} to ${road.does ?? lowerFirst(option.label)}`);
+  return `answer here: type ${typed.join(", ")}`;
+}
+
+/** A sentence's first letter in the case a sentence takes, for a label written to stand on a button. */
+const lowerFirst = (words: string): string => `${words.slice(0, 1).toLowerCase()}${words.slice(1)}`;
+
+/** The same answer for a caller with nobody at the keyboard: the lines another terminal runs, by the thread's id. */
+export function answerVerbsLine(threadId: string): string {
+  const verbs = ANSWER_ROADS.flatMap(road => (road.answer === undefined ? [] : [`wsp thread ${road.answer.verb} ${threadWord(threadId)}`]));
+  return `answer from another terminal: ${verbs.join(", or ")}`;
+}
+
+/** What a prompt carrying none of the answers above is answered on: its options are the question's own, which no key
+ * and no verb here stands for. */
+export const ANSWER_IN_THE_APP = "answer it in the app: this prompt carries its own answers";
+
+/** What a prompt answered from a terminal says once the pick landed: which answer it was and which call it closed,
+ * so the line says what was allowed rather than only that something was. */
+export function answeredLine(threadId: string, ask: { toolName: string; input: string; detail?: string }, said: string): string {
+  return `${said} on thread ${threadWord(threadId)}: ${askingLine(ask)}`;
+}
+
+/** The one sentence a line that answers a prompt is refused with when the thread is stopped on none. */
+export function noOpenAskLine(threadId: string): string {
+  return `thread ${threadWord(threadId)} is waiting on no prompt; wsp threads says which threads need you`;
+}
+
+/** The one sentence it is refused with when the thread's prompt carries no option this answer stands for. */
+export function noSuchAnswerLine(threadId: string, verb: string): string {
+  return `the prompt thread ${threadWord(threadId)} is stopped on takes no ${verb}; wsp thread read shows what it asks`;
+}
+
+/** What a pick the host would not take came to, one line per outcome it can answer with; `answered` is the only one
+ * that is not a failure and has no line here. */
+const ANSWER_WORDS: Readonly<Record<Exclude<SessionAnswerOutcome, "answered">, string>> = {
+  gone: "the prompt closed before the answer reached it",
+  unsupported: "this thread's agent raises no prompt this host can answer",
+  "not-found": "this host holds no turn of that thread",
+  "no-option": "the prompt carries no option by that id",
+};
+
+/** Picks one option on a prompt the runtime holds open, the op the app's own buttons send; anything but a pick the
+ * harness took is the caller's failure, in the words of the outcome. */
+async function answerAsk(client: HostClient, sessionId: string, askId: string, optionId: string): Promise<void> {
+  const { outcome } = SessionAnswerResult.parse(await client.request("sessions.answer", { sessionId, askId, optionId }));
+  if (outcome !== "answered") throw new Error(ANSWER_WORDS[outcome]);
+}
+
+/** What a thread's open prompt answered by one of the roads above came to, for a terminal that is not watching the
+ * turn: the prompt is read off the transcript the host holds, so a thread anybody opened is answerable from here. */
+async function answerOpenAsk(client: HostClient, ref: string, road: AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> }): Promise<{ threadId: string; askId: string; optionId: string; line: string }> {
+  const thread = await threadOf(client, ref);
+  const threadId = threadIdOf(thread);
+  const ask = openAsk(await history(client, thread.workspaceId), threadId);
+  if (ask === undefined) throw new Error(noOpenAskLine(threadId));
+  const option = ask.options.find((o: PermissionOption) => o.effect === road.effect);
+  if (option === undefined) throw new Error(noSuchAnswerLine(threadId, road.answer.verb));
+  await answerAsk(client, ask.sessionId, ask.askId, option.id);
+  return { threadId, askId: ask.askId, optionId: option.id, line: answeredLine(threadId, ask, road.answer.said) };
+}
+
+/** The prompt road a watched turn takes: the ask said in the terminal that is blocked, the way to answer under it,
+ * and, where somebody is at the keyboard, the answer they type sent back as the option it picks. A prompt closed by
+ * anyone (this terminal, another one, the app, the turn ending) releases the read, so nothing sits on stdin after
+ * the question it belonged to is gone. */
+function answering(ctx: VerbContext, client: HostClient, say: (line: string) => void): { opened(ask: SessionPermissionEvent, threadId: string): void; closed(askId: string): void; stop(): void } {
+  let open: { askId: string; release: () => void } | undefined;
+  const release = (): void => {
+    open?.release();
+    open = undefined;
+  };
+  return {
+    opened: (ask, threadId) => {
+      const roads = answerRoads(ask.options);
+      // Nobody is offered keys where no line printed which keys answer: --json writes the events and no stream, so
+      // its caller answers by the verb, as a caller with no terminal does.
+      const keyed = ctx.flags["json"] === true ? undefined : ctx.io.answerKey;
+      say(needsYouLine(ask));
+      // The way to answer, in the words of whoever is reading: the keys where somebody is at the keyboard, the
+      // verbs where nobody is, and neither on a prompt whose options are the question's own.
+      say(roads.length === 0 ? ANSWER_IN_THE_APP : keyed === undefined ? answerVerbsLine(threadId) : answerKeysLine(ask.options));
+      if (keyed === undefined || roads.length === 0) return;
+      release();
+      let settle = (): void => {};
+      const until = new Promise<void>(done => (settle = done));
+      open = { askId: ask.askId, release: settle };
+      void keyed(roads.map(({ road }) => road.key), until)
+        .then(async typed => {
+          const picked = roads.find(({ road }) => road.key === typed);
+          if (picked !== undefined) await answerAsk(client, ask.sessionId, ask.askId, picked.option.id);
+        })
+        .catch((e: unknown) => ctx.io.error(e instanceof Error ? e.message : String(e)));
+    },
+    closed: askId => {
+      if (open?.askId === askId) release();
+    },
+    stop: release,
   };
 }
 
@@ -1641,27 +1784,35 @@ const openedThreadLine = (threadId: string, opened: ((threadId: string) => strin
  * in the harness's words. */
 async function followVerb(ctx: VerbContext, client: HostClient, start: Record<string, unknown>, announce: boolean, picks: Picks = {}, opened?: (threadId: string) => string): Promise<Turn> {
   const stream = turnStream(ctx);
-  const turn = await follow(client, start, "cli", {
-    queued: () => ctx.io.error(WAITING),
-    started: (t: Turn) => {
-      if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadLine(t.threadId, opened));
-      if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
-    },
-    event: e => {
-      ctx.out.emit(e, e.type === "session.done" ? stream.reply(e.result.text) : undefined);
-      if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
-      // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
-      if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
-      if (e.type === "session.delta" && e.kind === "text") stream.text(e.text);
-      if (e.type === "session.delta" && e.kind === "tool_use") stream.line(toolActivityLine(e.toolName, e.text));
-      if (e.type === "session.delta" && e.kind === "tool_result") {
-        const answer = toolResultLine(e.text, e.isError);
-        if (answer !== undefined) stream.line(answer);
-      }
-      if (e.type === "session.done") stream.line(turnSettledLine(e.result));
-      if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
-    },
-  });
+  const asks = answering(ctx, client, line => stream.says(line));
+  let turn: Turn;
+  try {
+    turn = await follow(client, start, "cli", {
+      queued: () => ctx.io.error(WAITING),
+      started: (t: Turn) => {
+        if (announce) ctx.out.emit({ type: "thread", id: t.threadId, workspaceId: t.session.workspaceId, harness: t.session.harness, startedBy: t.session.startedBy }, openedThreadLine(t.threadId, opened));
+        if (t.outcome !== "started") ctx.io.error(JOINED[t.outcome](picks));
+      },
+      event: (e, t) => {
+        ctx.out.emit(e, e.type === "session.done" ? stream.reply(e.result.text) : undefined);
+        if (e.type === "session.start" && e.afterCut === true) ctx.io.error(AFTER_CUT_LINE);
+        // The person's turn as the transcript keeps it: one bracket per image, since a terminal draws no pixels.
+        if (e.type === "session.start") for (const image of e.attachments ?? []) stream.line(imageLine(image));
+        if (e.type === "session.delta" && e.kind === "text") stream.text(e.text);
+        if (e.type === "session.delta" && e.kind === "tool_use") stream.line(toolActivityLine(e.toolName, e.text));
+        if (e.type === "session.delta" && e.kind === "tool_result") {
+          const answer = toolResultLine(e.text, e.isError);
+          if (answer !== undefined) stream.line(answer);
+        }
+        if (e.type === "session.permission") asks.opened(e, t.threadId);
+        if (e.type === "session.permission.closed") asks.closed(e.askId);
+        if (e.type === "session.done") stream.line(turnSettledLine(e.result));
+        if (e.type === "session.notify" && e.notify === NOTIFY_ME) ctx.io.error(e.text);
+      },
+    });
+  } finally {
+    asks.stop();
+  }
   const failure = turnRefusal(turn);
   if (failure !== undefined) throw failure;
   return turn;
@@ -2017,6 +2168,32 @@ function folderLines(listing: HostFolderListing): string[] {
     `${folderLevelLine(listing)} Browsable: ${listing.roots.join(", ")}.`,
   ];
 }
+
+/** The lines another terminal answers a thread's open prompt with, one per road that carries a verb: the same op the
+ * app's buttons send, by thread id, so a person or an agent watching a thread from anywhere can unstick it. */
+const ANSWER_VERBS: readonly CliVerb[] = ANSWER_ROADS.filter((road): road is AnswerRoad & { answer: NonNullable<AnswerRoad["answer"]> } => road.answer !== undefined).map(road => ({
+  name: `thread ${road.answer.verb}`,
+  usage: `wsp thread ${road.answer.verb} <thread>`,
+  about: road.answer.about,
+  page: "agent" as const,
+  options: {},
+  run: async (ctx: VerbContext) => {
+    const [ref] = ctx.args;
+    if (ref === undefined || ctx.args.length !== 1) throw usageRefusal(`wsp thread ${road.answer.verb} takes one thread.`, usageIs(ctx));
+    const answered = await answerOpenAsk(await ctx.client(), ref, road);
+    ctx.out.emit({ threadId: answered.threadId, askId: answered.askId, optionId: answered.optionId }, answered.line);
+    return 0;
+  },
+  tool: tool({
+    description: `${road.answer.about[0]!.toUpperCase()}${road.answer.about.slice(1)}, by thread id or a prefix of it. A thread stopped on a prompt reads Needs you in threads and runs nothing until somebody picks, so this is how a thread you did not open is unstuck; the prompt itself is on the thread's own rows, which thread_read prints. Refused in one line when the thread is waiting on no prompt and when the prompt it is stopped on carries no such answer, which is what a call that asks the person something rather than for consent does.`,
+    input: { thread: z.string().describe("the thread's id, or a prefix of it that names one, as threads lists them") },
+    output: { threadId: z.string(), askId: z.string(), optionId: z.string() },
+    call: async ({ thread: ref }, deps: VerbDeps) => {
+      const answered = await answerOpenAsk(await deps.client(), ref, road);
+      return asText(answered.line, { threadId: answered.threadId, askId: answered.askId, optionId: answered.optionId });
+    },
+  }),
+}));
 
 export const VERBS: readonly Verb[] = [
   {
@@ -2763,6 +2940,7 @@ export const VERBS: readonly Verb[] = [
       },
     }),
   },
+  ...ANSWER_VERBS,
   {
     name: "send",
     usage: 'wsp send <thread> [--model, --effort, --access <value>] [--image <path>] [--detach] "<message>"',

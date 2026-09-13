@@ -55,6 +55,27 @@ describe("ChatMarkdown", () => {
     );
   }, 30_000);
 
+  it.each(["light", "dark"] as const)("draws a one-line fenced block's line in the %s theme, in ink the block is not", async theme => {
+    let container!: HTMLElement;
+    await act(async () => {
+      ({ container } = render(
+        <ChatMarkdown text={"hello.txt says:\n\n```text\nbanana\n```"} cwd="/tmp/project" resolvedTheme={theme} />,
+      ));
+    });
+    await act(async () => {
+      await getSyntaxHighlighterPromise("text");
+    });
+    await waitFor(() => expect(container.querySelector(".chat-markdown-shiki .line")).not.toBeNull(), { timeout: 20_000 });
+
+    // The line is drawn, and it is drawn for the side the block is being shown on: a block highlighted for the
+    // other side draws its one line in the ink the box's own ground is, which reads as an empty box.
+    const pre = container.querySelector<HTMLElement>(".chat-markdown-shiki .shiki")!;
+    expect(container.querySelector(".chat-markdown-shiki .line")?.textContent).toBe("banana");
+    expect(pre.className).toContain(theme === "dark" ? "pierre-dark" : "pierre-light");
+    expect(pre.style.color).not.toBe("");
+    expect(pre.style.color).not.toBe(pre.style.backgroundColor);
+  }, 30_000);
+
   it("colours a cold line fully even when the tokenizer runs slowly", async () => {
     await act(async () => {
       await getSyntaxHighlighterPromise("tsx");

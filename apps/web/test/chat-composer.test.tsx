@@ -4,7 +4,7 @@
 // shape as chat.test.tsx; no live daemon.
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { HOST_ASLEEP_SEND, absentComputer, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { HOST_ASLEEP_SEND, composerHeldLine, screenCommandLine, SEND_BLOCK_WORDS, sendRefusal, stillWorkingLine, type EventUnion, type HarnessCatalog, type SessionEvent, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { installFakeLayout } from "./fake-layout.js";
 import { composerEditor, isEditable, press, typeInto } from "./composer-harness.js";
 import { useStore } from "../src/protocol/store.js";
@@ -516,6 +516,24 @@ describe("composer while the workspace is not live", () => {
     expect(sendButton().getAttribute("title")).toBeNull();
   });
 
+  it("a paused workspace woken by something else keeps the words in the box until the person sends them", async () => {
+    const { api, emit, started } = fixtureApi([{ ...workspace, phase: "napping" }]);
+    await setup(api);
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe(WAKE_AND_SEND_LABEL));
+    await typeInto(composerEditor(), "run the tests");
+    // The machine comes up on its own, woken from the command line or another window. The words are still the
+    // person's: the box holds a draft, never a queued row, so nothing here has a send to make.
+    emit({ type: "workspace.status", status: { ...workspace, phase: "running", machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
+    await waitFor(() => expect(sendButton().getAttribute("aria-label")).toBe(SEND_LABEL));
+    // A send that can be pressed is the accent again, which is how a person sees the wait is over.
+    expect(sendButton().className).toContain("bg-message-action");
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("run the tests");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("run the tests");
+  });
+
   it("sending on a paused workspace wakes it first and then starts the turn, in that order", async () => {
     const { api, started } = fixtureApi([{ ...workspace, phase: "napping" }]);
     const calls: string[] = [];
@@ -588,10 +606,12 @@ describe("composer while the workspace is not live", () => {
     expect(sendButton().disabled).toBe(true);
   });
 
-  it("a workspace on a computer that is not answering holds the send with that computer's own sentence and sends nothing", async () => {
+  /** The composer on a workspace whose computer went quiet, by the road the places list takes: the row for its
+   * computer stops answering while the record still says running. */
+  async function onSilentComputer() {
     const onPlace: WorkspaceView = { ...workspace, kind: "place", machineId: "place:p_oldlaptop" };
-    const { api, started } = fixtureApi([onPlace]);
-    await setup(api);
+    const fixture = fixtureApi([onPlace]);
+    await setup(fixture.api);
     act(() =>
       useStore.setState({
         places: [
@@ -600,33 +620,83 @@ describe("composer while the workspace is not live", () => {
         ],
       }),
     );
-    const sentence = absentComputer("old-laptop", 38 * 60_000).sentence;
+    return fixture;
+  }
+
+  it("a workspace on a computer that is not answering keeps its box open and holds the send alone", async () => {
+    const { started } = await onSilentComputer();
+    const held = composerHeldLine("old-laptop");
     // The standing refusal slot, not a toast: the person reads it where they are typing, and it stays there.
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(sentence));
-    expect(sentence).toBe("old-laptop is not answering; it connects on its own when it is on");
-    expect(isEditable(composerEditor())).toBe(false);
-    const send = screen.getByRole("button", { name: sentence }) as HTMLButtonElement;
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(held));
+    expect(held).toBe("held until old-laptop answers");
+    // The box takes the words the wait is for. The line above it promises the send goes when the machine answers,
+    // and a box that ate every keystroke made that promise a lie for five testers.
+    expect(isEditable(composerEditor())).toBe(true);
+    await typeInto(composerEditor(), "list the files in this repo");
+    expect(draft()).toBe("list the files in this repo");
+    // The send is the one thing held, in the tier every held send wears, and it says the same line.
+    const send = screen.getByRole("button", { name: held }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
-    expect(send.getAttribute("title")).toBe(sentence);
+    expect(send.className).toContain("border-input");
+    expect(send.className).toContain("bg-popover");
+    expect(send.className).not.toContain("bg-message-action");
+    expect(send.getAttribute("title")).toBe(held);
     // Not the state table's words, and no machine id where a person reads.
     expect(screen.queryByText(sendRefusal("unreachable")!)).toBeNull();
     expect(screen.getByRole("status").textContent).not.toContain("place:");
-    // Enter with a draft in the box starts nothing, so no refusal comes back from the runtime at all.
-    await typeInto(composerEditor(), "list the files in this repo");
+    // Enter leaves the words where they were typed and starts nothing, so no refusal comes back from the runtime.
     await press(composerEditor(), "Enter");
     expect(started).toHaveLength(0);
+    expect(draft()).toBe("list the files in this repo");
     expect(useStore.getState().toast).toBeNull();
     // The slot stands at two lines and the sentence wraps in it. At the smallest window with the right panel open
-    // the slot is 296 px and the sentence is 430 px, so a slot that cut would drop the half that says what happens
-    // next, which is the half the person needs. Measured at 1024 by 700 with the panel open: the slot's own class
-    // is what holds, since jsdom lays nothing out.
+    // the slot is 296 px, so a slot that cut would drop the half that says what happens next, which is the half the
+    // person needs. Measured at 1024 by 700 with the panel open: the slot's own class is what holds, since jsdom
+    // lays nothing out.
     const box = slot()!;
     expect(box.className).toContain("h-9");
     expect(box.className).not.toContain("h-5");
     const said = screen.getByRole("status");
     expect(said.className).not.toContain("truncate");
     expect(said.className).toContain("text-pretty");
-    expect(said.textContent).toBe(sentence);
+    expect(said.textContent).toBe(held);
+  });
+
+  it("the message a held composer holds goes on the person's own send once the computer answers, never before", async () => {
+    const { started } = await onSilentComputer();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(composerHeldLine("old-laptop")));
+    await typeInto(composerEditor(), "run the tests");
+    act(() =>
+      useStore.setState({
+        places: [
+          { id: "here", kind: "computer", name: "this-mac", default: false, present: true },
+          { id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: true, lastSeenAt: new Date().toISOString(), workspaceId: WS },
+        ],
+      }),
+    );
+    // The computer answers. The words are still the person's: nothing leaves the box until they send it.
+    await waitFor(() => expect(sendButton().disabled).toBe(false));
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("run the tests");
+    await press(composerEditor(), "Enter");
+    await waitFor(() => expect(started).toHaveLength(1));
+    expect(started[0]?.prompt).toBe("run the tests");
+  });
+
+  it("a workspace whose machine stopped answering the probe holds the same way, named after where it runs", async () => {
+    const { api, emit, started } = fixtureApi([workspace]);
+    await setup(api);
+    await waitFor(() => expect(isEditable(composerEditor())).toBe(true));
+    // No places row for a fork at a provider, so the sentence names the fork's own where word rather than falling
+    // back to the machine id, which names nothing to the person reading it.
+    emit({ type: "workspace.status", status: { ...workspace, phase: "running", machineState: "running", reach: { state: "unreachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 } });
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(composerHeldLine("a provider")));
+    expect(isEditable(composerEditor())).toBe(true);
+    await typeInto(composerEditor(), "check the disk");
+    await press(composerEditor(), "Enter");
+    expect(started).toHaveLength(0);
+    expect(draft()).toBe("check the disk");
+    expect(screen.getByRole("status").textContent).not.toContain("m1");
   });
 
   it("the slot is laid out at one height with or without a line, so the composer does not move when a refusal lands", async () => {
@@ -752,8 +822,11 @@ function expectHeld(words: string): void {
   expect(sendControl().getAttribute("aria-label")).toBe(words);
   expect(sendControl().getAttribute("title")).toBe(words);
   expect(sendControl().disabled).toBe(true);
-  // Held is the primary at the app's held weight, not a fainter blue: the same disabled:opacity-64 ui/button.tsx gives.
-  expect(sendControl().className).toContain("disabled:opacity-64");
+  // Held is the tier ui/button.tsx gives a primary that cannot be pressed, not a fainter blue: five testers read a
+  // lit arrow over a box that refused them as a screen saying it was ready to send.
+  expect(sendControl().className).toContain("border-input");
+  expect(sendControl().className).toContain("bg-popover");
+  expect(sendControl().className).not.toContain("bg-message-action");
   expect(sendControl().className).not.toContain("disabled:opacity-30");
 }
 

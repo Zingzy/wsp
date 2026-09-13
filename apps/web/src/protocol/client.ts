@@ -30,6 +30,7 @@ import {
   InitSetup,
   type InitRoad,
   PlaceDoorView,
+  PlaceSpend,
   PlaceStageEvent,
   PlaceView,
   placeAddSheetWord,
@@ -525,6 +526,10 @@ export interface Api {
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
    * so fixtures without a usage chart need not fake it; without it the chart starts with the next tick. */
   costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
+  /** What each place has cost since the first of the month and what it burns now, one row per place anything was
+   * metered on. Optional so fixtures without the settings table need not fake it; without it the table says no
+   * money at all rather than guessing at one. */
+  spend?(): Promise<PlaceSpend[]>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
   /** Snapshots the workspace's disk as a project golden; the runtime refuses a machine that is not first-life. Optional
@@ -727,6 +732,8 @@ export function makeApi(c: ProtocolClient): Api {
     snapshotStorage: async () => (await c.request<{ storage: SnapshotStorage | null }>("snapshots.storage")).storage,
     // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
+    // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
+    spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),
     listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),

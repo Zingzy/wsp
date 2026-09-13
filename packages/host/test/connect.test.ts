@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PAIR_CODE_REFUSAL } from "@wsp/protocol";
+import { EXIT_CODES, PAIR_CODE_REFUSAL } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { connectCommand, disconnectCommand, hostsCommand, type ConnectDeps } from "../src/connect.js";
 import { cli, type CliIO } from "../src/cli.js";
@@ -268,7 +268,7 @@ describe("a verb against a connected host", () => {
     // Between the verb's own words the flag still aims the line: this thread is on no host, and the answer is the
     // one that host gives rather than a usage dump from a line that never read the flag.
     const err: string[] = [];
-    expect(await cli(["thread", "--host", "box", "read", "th_none"], io([], err), undefined, env)).toBe(1);
+    expect(await cli(["thread", "--host", "box", "read", "th_none"], io([], err), undefined, env)).toBe(EXIT_CODES.usage);
     expect(err).toEqual(["wsp thread read: no thread th_none"]);
   });
 

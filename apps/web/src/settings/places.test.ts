@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { placeMachineId, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, placeIsFull, placeName, placeOf, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
+import { NOTHING_HELD, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -102,6 +102,16 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
   it("says a provider's rate, that it naps to nothing, and which image is there", () => {
     expect(whereCaption(ascii, copy("box", 1))).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
     expect(whereCaption(ascii, undefined)).toBe("$0.018/hr while awake · naps to $0 · builds your image there first, about 4 min");
+  });
+
+  it("quotes the rate it is given, which is the picked size's, and the row's own when it is given none", () => {
+    expect(whereCaption(ascii, copy("box", 1), 0.08)).toBe("$0.08/hr while awake · naps to $0 · your image is there, v1");
+    expect(whereCaption(ascii, copy("box", 1), undefined)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
+  });
+
+  it("says why this computer is not a row to pick, and what to do about it", () => {
+    expect(WHERE_PICK_WORDS.nowhereYet).toBe("this Mac is already a workspace, the only one it can be");
+    expect(WHERE_PICK_WORDS.addOne).toBe("Add a computer you own or connect a provider, and workspaces can be created there.");
   });
 
   it("reads a copy by the word it names its place with, the id or the name alike", () => {

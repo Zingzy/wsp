@@ -4,13 +4,13 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
-import { useStatus, useWorkspace } from "../protocol/store.js";
+import { usePlaces, useStatus, useWorkspace } from "../protocol/store.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
 export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
@@ -59,10 +59,10 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: the
  * computer that is not answering first, since nothing else on the row is known while it is, then a thread of this
  * workspace stopped on a question, then what the runtime is doing to the machine's daemon, then a drop with
- * memory near full, then a daemon that is not there at all, then a nap whose vault was refused. Written once
- * because two surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA,
- * the counts beside it keep the whisper. The vault comes last of them: the others are what a person is waiting on
- * now, and this one holds until the next nap. */
+ * memory near full, then a daemon that is not there at all. Written once because two surfaces draw them and both
+ * have to tell them from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper.
+ * Every one of them is something a person is waiting on now; a note on a step already taken (a nap that saved no
+ * backup) is not here, since this slot is the row's state and its spend. */
 export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "absent" | "outOfMemory">): string[] {
   return [
     absent?.line,
@@ -70,7 +70,6 @@ export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMe
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
-    vaultStaleLine(project.status ?? project.workspace) ?? undefined,
   ].filter((line): line is string => line !== undefined);
 }
 
@@ -87,11 +86,11 @@ export interface WorkspaceMetaInput {
 }
 
 /** The workspace row's third line, one string in one order: what it cost today, the edge note, the nap countdown
- * last. The cost always leads, an honest zero before the meter's first tick, so no row draws
- * a blank line. The row cuts it at its own cap; nothing here decides what to leave out. What the runtime is doing
- * to the machine's daemon, a drop with memory near full, or a daemon that is not there at all takes the whole line
- * while it lasts, and a computer that is not answering takes it over all of them: it is the one thing on the row a
- * person may be waiting on, and it reads in the ink prose gets. A
+ * last. The cost leads once the meter has ticked; before that the row says nothing about spend rather than a
+ * $0.00 it changes into a real figure a second later. The row cuts it at its own cap; nothing here decides what to
+ * leave out. What the runtime is doing to the machine's daemon, a drop with memory near full, or a daemon that is
+ * not there at all takes the whole line while it lasts, and a computer that is not answering takes it over all of
+ * them: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
  * machine wsp does not drive spends nothing and naps never, so its line says so in one word. */
 export function workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
   const [sentence] = metaSentences({ project, absent, outOfMemory });
@@ -105,18 +104,17 @@ export function workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs }:
  * Rate row rather than crowding out what a person is waiting on. */
 function costLine({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? 0), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
+  return [accruedTodayLabel(cost?.accruedUsd ?? null), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
     .filter((part): part is string => part !== null)
     .join(" · ");
 }
 
 /** What the machine costs, as the row's line and the Spaces header both lead with: free for a machine wsp does not
- * pay for, else what it cost today with the rate while it bills. */
-function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string {
+ * pay for, else what it cost today with the rate while it bills, and nothing at all before the meter has ticked. */
+function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string | null {
   if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? 0), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
+  const parts = [accruedTodayLabel(cost?.accruedUsd ?? null), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null].filter((part): part is string => part !== null);
+  return parts.length === 0 ? null : parts.join(" · ");
 }
 
 /** What the machine is, the row's second line and one of the Spaces header's: the size its status carries in the
@@ -142,9 +140,11 @@ export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "wor
   return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
 }
 
-/** What a workspace has cost since the meter's midnight, in cents; the sidebar row and the switcher card read the one rule. */
+/** What a workspace has cost since the meter's midnight, in the one shape every spend figure reads in; the sidebar
+ * row and the switcher card read the one rule. Null before the meter's first tick: a row that paints $0.00 and
+ * changes it a second later has told the person something that was never true. */
 export function accruedTodayLabel(accruedUsd: number | null): string | null {
-  return accruedUsd === null ? null : `$${accruedUsd.toFixed(2)} today`;
+  return accruedUsd === null ? null : `${fmtCost(accruedUsd)} today`;
 }
 
 /** The awake rate as every sidebar surface prints it, to the tenth of a cent; null before the meter's first tick. */
@@ -154,8 +154,8 @@ export const rateLabel = (rateUsdPerHour: number | null): string | null => (rate
  * screen is where a person waits on them: what the runtime is doing to the daemon, a drop with memory near full,
  * then a daemon that is not there at all. Then what the machine is, what it costs, and when it naps. A line nothing
  * is known for is left out rather than drawn half: no size yet means no machine line, as no nap scheduled means no
- * nap line. The cost line leads with the same honest zero the row's does and carries the rate only while the machine
- * bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
+ * nap line. The cost line waits for the meter's first tick as the row's does and carries the rate only while the
+ * machine bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
 export function spaceHeaderLines({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
   const nap = kindWords(workspaceKind(project.workspace)).driven ? idleCountdownLabel(project.status, nowMs) : null;
   const lines: (string | null)[] = [...metaSentences({ project, absent, outOfMemory }), machineLine(project), spendLine({ project, cost }), nap === NO_NAP_SCHEDULED ? null : nap];
@@ -199,8 +199,20 @@ export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "work
 export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const at = placeOf(places, project.workspace);
   if (at === undefined) return whereWord(project);
-  if (at === places[0]) return THIS_COMPUTER_WORD;
-  return `${placeName(at)} · ${PLACE_KIND_WORDS[at.kind]}`;
+  const name = nameOfPlace(places, at);
+  return at === places[0] ? name : `${name} · ${PLACE_KIND_WORDS[at.kind]}`;
+}
+
+/** What one row of the places list is called inside a sentence: the computer the host runs on says so in the words
+ * a sentence says it in, and every other row carries the name it reported. */
+const nameOfPlace = (places: readonly PlaceView[], at: PlaceView): string => (at === places[0] ? THIS_COMPUTER_WORD : placeName(at));
+
+/** The same name with nothing after it, for a sentence that has to call the computer something and has no room to
+ * say what kind of row it is: a person waiting on a machine is waiting on the name their own list shows, never on
+ * a machine id or on the kind's word. */
+export function computerName(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
+  const at = placeOf(places, project.workspace);
+  return at === undefined ? whereWord(project) : nameOfPlace(places, at);
 }
 
 /** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the
@@ -211,6 +223,15 @@ export function useWhereWord(workspaceId: string): string {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   return workspace === null ? workspaceId : whereWord({ workspace, status });
+}
+
+/** The computer's name off the store for the same kind of surface, so the sentence a composer holds names the
+ * machine the row beside it names. */
+export function useComputerName(workspaceId: string): string {
+  const places = usePlaces();
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  return workspace === null ? workspaceId : computerName(places, { workspace, status });
 }
 
 /** The words a thread row's meta line carries after the agent's mark, in the order it draws them. A thread a

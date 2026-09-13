@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { createServer, type Server } from "node:http";
-import { EventUnion, computerOffline, sendRefusal, workspaceState, workspaceWord, type WorkspaceStatus } from "@wsp/protocol";
+import { EventUnion, PLACES_TICKET_REFUSAL, THREAD_OPS, computerOffline, sendRefusal, workspaceState, workspaceWord, type PlaceView, type WorkspaceStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { roadFailed } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
@@ -60,6 +60,15 @@ afterEach(async () => {
 });
 
 type Cost = EventUnion & { type: "workspace.cost" };
+
+/** The places a spend read is folded onto: the computer the host runs on, a provider nothing here is metered on,
+ * and the provider this runtime forks at, which is the word it stamps its records with. The stamped one is last on
+ * purpose, so a fold that fell back to the first provider row instead of reading the stamp would be seen.  */
+const PLACES: PlaceView[] = [
+  { id: "here", kind: "computer", name: "this-mac", default: true },
+  { id: "box", kind: "provider", name: "box", default: false },
+  { id: "default", kind: "provider", name: "default", default: false },
+];
 
 /** The clock jumps an hour in the tests below: the idle window must not nap the workspace behind the test. */
 const idle = { defaultWindowMs: 24 * 3_600_000 };
@@ -893,7 +902,7 @@ describe("status.history", () => {
     expect(after.at(-1)).toMatchObject({ phase: "running", awakeMs: 2 * TICK_MS });
   });
 
-  it("forgets a deleted workspace's history, in memory and in the store", async () => {
+  it("hands a deleted workspace's chart to nobody and keeps what it spent on the place that billed for it", async () => {
     const backend = stubBackend();
     const { store, deletes } = countingStore();
     const rt = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
@@ -901,13 +910,105 @@ describe("status.history", () => {
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
-    await until(() => costs.length >= 1);
+    await until(() => costs.length >= 2);
+    const spent = (await rt.status.spend(PLACES))[0]!.monthUsd;
+    expect(spent).toBeGreaterThan(0);
     await rt.workspaces.delete(ws.id);
     stop();
+    // The pane is gone with the workspace and there is no record left to read a caller's right to the series off.
     expect(await rt.status.history(ws.id)).toEqual([]);
-    await until(() => deletes() >= 1);
+    // The month keeps it, and nothing is burning now: the delete ended the stretch wherever it stood.
+    await until(async () => (await rt.status.spend(PLACES))[0]?.rateUsdPerHour === 0);
+    expect((await rt.status.spend(PLACES))[0]).toMatchObject({ place: "default", monthUsd: spent, rateUsdPerHour: 0 });
+    expect(deletes()).toBe(0);
+
     const fresh = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
     expect(await fresh.status.history(ws.id)).toEqual([]);
+    expect(await fresh.status.spend(PLACES)).toEqual([{ place: "default", monthUsd: spent, rateUsdPerHour: 0 }]);
+  });
+
+  it("drops a deleted workspace's document once its last tick falls out of the month, so the store holds one month of them", async () => {
+    const backend = stubBackend();
+    const { store, deletes } = countingStore();
+    const fc = fakeClock(Date.parse("2026-09-13T09:00:00.000Z"));
+    const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
+    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    first.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = first.status.watch();
+    await tickCost(fc, costs);
+    await first.workspaces.delete(ws.id);
+    stop();
+    await until(async () => (await first.status.spend(PLACES)).length === 1);
+
+    // A host started the next month reads a series that ended in the one before it and lets it go.
+    const later = fakeClock(Date.parse("2026-10-02T09:00:00.000Z"));
+    const second = createRuntime({ backend, store, adapters: {}, clock: later.clock, status: ticking, idle });
+    expect(await second.status.spend(PLACES)).toEqual([]);
+    await until(() => deletes() >= 1);
+  });
+
+  it("totals each place over the workspaces metered on it, and burns only for the ones still awake", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock();
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    const alpha = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const beta = await rt.workspaces.create({ golden: "snap_g", name: "beta" });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = rt.status.watch();
+    for (let i = 0; i < 3; i++) await tickCost(fc, costs);
+    const rate = costs[0]!.rateUsdPerHour;
+    const both = await rt.status.spend(PLACES);
+    // One row for the place both forks stand on, and the computer the host runs on is not on it: nothing was
+    // metered there, and a row with no meter is not a row that cost nothing.
+    // One row, and it is the provider the records name rather than the first provider on the list.
+    expect(both).toHaveLength(1);
+    expect(both[0]!.place).toBe("default");
+    expect(both[0]!.rateUsdPerHour).toBeCloseTo(2 * rate, 10);
+    const alone = (await rt.status.history(alpha.id)).at(-1)!.accruedUsd + (await rt.status.history(beta.id)).at(-1)!.accruedUsd;
+    expect(both[0]!.monthUsd).toBeCloseTo(alone, 10);
+
+    // A nap lands no tick of its own; the next one on the timer is where the rate it left reads.
+    await rt.workspaces.nap(beta.id);
+    await tickCost(fc, costs);
+    const napped = await rt.status.spend(PLACES);
+    expect(napped[0]!.rateUsdPerHour).toBeCloseTo(rate, 10);
+    // What a place took before a nap is still what it took: the total holds where the meter stopped.
+    expect(napped[0]!.monthUsd).toBeGreaterThanOrEqual(both[0]!.monthUsd);
+    stop();
+  });
+
+  it("counts a month from its first day: a series that ran out in the month before is on no total of this one", async () => {
+    const backend = stubBackend();
+    const fc = fakeClock(Date.parse("2026-09-15T09:00:00.000Z"));
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const costs: Cost[] = [];
+    rt.events.on("workspace.cost", e => costs.push(e as Cost));
+    const stop = rt.status.watch();
+    for (let i = 0; i < 3; i++) await tickCost(fc, costs);
+    expect((await rt.status.spend(PLACES))[0]!.monthUsd).toBeGreaterThan(0);
+    // The same series read a month later: every tick of it is behind that month's first day, so it owes nothing.
+    expect((await rt.status.spend(PLACES, Date.parse("2026-10-15T09:00:00.000Z")))[0]!.monthUsd).toBe(0);
+    stop();
+  });
+
+  it("is refused on a socket let in on a ticket, as the places list it feeds is", async () => {
+    const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
+    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
+    const host = await WsClient.connect(srv.port, { token: "secret" });
+    const own = await host.request("cost.spend");
+    expect(own).toMatchObject({ ok: true });
+    // This host holds no places of its own, so there is no row to put a total on.
+    expect(own["places"]).toEqual([]);
+    const { ticket } = (await host.request("ticket.issue", { purpose: "relay" })) as { ticket: string };
+    host.close();
+    const relayed = await WsClient.connect(srv.port, { ticket });
+    expect(await relayed.request("cost.spend")).toMatchObject({ ok: false, error: PLACES_TICKET_REFUSAL });
+    relayed.close();
+    expect(THREAD_OPS).not.toContain("cost.spend");
   });
 });
 

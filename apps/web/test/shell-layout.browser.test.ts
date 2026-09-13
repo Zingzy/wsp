@@ -41,8 +41,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser, ConsoleMessage, Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, NO_REBUILD_NEEDED, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contrastRatio, DEFAULT_THEME, dotColour, effectiveOpacity, FREE_WORD, INK_FLOOR, PROVIDER_UNREACHED_LINE, sendRefusal, SIDE_INK, stillWorkingLine, THEME_PRESETS, themeInk, themeScheme, type Rgb } from "@wsp/protocol";
 import { WAKE_AND_SEND_LABEL } from "../src/components/chat/ComposerPrimaryActions";
+import { goneRoadRefusal } from "../src/actions/format";
 import { LOCKUP_OPTICAL_CENTRE } from "../src/brand/optical";
 import { SPACE_SLIDE_MS } from "../src/sidebar/SpaceSlide";
 import { textContrast } from "./contrast";
@@ -611,9 +612,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         expect(rows.workspaces[0]!.meta).toBe("$0.29 today · $0.110/hr · naps in 15m");
         expect(rows.workspaces[0]!.title).toBe(rows.workspaces[0]!.meta);
         if (width === 240) expect(rows.workspaces[0]!.metaClipped).toBe(true);
-        // The rows without a tick lead with an honest zero: no second line is ever blank.
-        expect(rows.workspaces[1]!.meta).toBe("$0.00 today");
-        expect(rows.workspaces[2]!.meta).toBe("$0.00 today");
+        // A row whose meter has not ticked says nothing about spend rather than a zero it would change.
+        expect(rows.workspaces[1]!.meta).toBe("");
+        expect(rows.workspaces[2]!.meta).toBe("");
         expect(Math.round(live.metaRight)).toBe(Math.round(live.slotRight));
         // No import or export glyph anywhere; a live row's glyphs are its chevron and plus, a gone row's forget and rebuild.
         expect(rows.trips).toBe(0);
@@ -731,7 +732,7 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         const moved = await readSpaces();
         expect(moved.icons.map(icon => icon.current)).toEqual([false, true, false]);
         expect(moved.state).toBe("Paused");
-        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB", "$0.00 today"]);
+        expect(moved.lines.map(line => line.text)).toEqual(["2 vCPU · 4 GB"]);
         expect(moved.barBox.height).toBe(read.barBox.height);
         await page!.locator("[data-space-icon][aria-label=api]").click();
         await page!.waitForFunction(() => document.querySelector("[data-space-header] [data-space-name]")?.textContent === "api");
@@ -1434,9 +1435,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       box: Box;
       text: string;
       /** The line's paint, or null when the slot is empty. */
-      line: { mono: boolean; background: string; border: string; icons: number } | null;
+      line: { mono: boolean; background: string; border: string; icons: number; ink: string } | null;
       panels: number;
-      send: { label: string | null; title: string | null; box: Box | null };
+      send: { label: string | null; title: string | null; box: Box | null; fill: string; ink: string; border: string; opacity: string };
       editable: boolean;
       placeholder: string;
     }
@@ -1445,17 +1446,29 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       await page!.waitForSelector("[data-composer-refusal]");
       // The transcript is fetched after mount; the line for a lingering turn exists only once it is in.
       await page!.waitForSelector("text=loading transcript", { state: "detached" });
+      // The send fades between its held tier and its accent over 150 ms, so a computed style read at mount catches
+      // the fade rather than either tier.
+      await page!.waitForTimeout(400);
       const read = await page!.locator("[data-chat-composer]").evaluate(el => {
         const line = el.querySelector<HTMLElement>("[data-composer-refusal] [role=status]");
         const s = line === null ? null : getComputedStyle(line);
         const send = el.querySelector<HTMLButtonElement>("[data-chat-composer-actions] button[type=submit]");
+        const sendStyle = send === null ? null : getComputedStyle(send);
         const editor = el.querySelector<HTMLElement>("[data-testid=composer-editor]");
         const b = send?.getBoundingClientRect();
         return {
           text: el.querySelector("[data-composer-refusal]")?.textContent ?? "",
-          line: s === null || line === null ? null : { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length },
+          line: s === null || line === null ? null : { mono: /mono/i.test(s.fontFamily), background: s.backgroundColor, border: `${s.borderTopWidth} ${s.borderLeftWidth}`, icons: line.getElementsByTagName("svg").length, ink: s.color },
           panels: el.querySelectorAll("[data-composer-banner-surface]").length,
-          send: { label: send?.getAttribute("aria-label") ?? null, title: send?.getAttribute("title") ?? null, box: b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height } },
+          send: {
+            label: send?.getAttribute("aria-label") ?? null,
+            title: send?.getAttribute("title") ?? null,
+            box: b === undefined ? null : { x: b.x, y: b.y, width: b.width, height: b.height },
+            fill: sendStyle?.backgroundColor ?? "",
+            ink: sendStyle?.color ?? "",
+            border: `${sendStyle?.borderTopWidth} ${sendStyle?.borderTopColor}`,
+            opacity: sendStyle?.opacity ?? "",
+          },
           editable: editor?.getAttribute("contenteditable") !== "false",
           placeholder: editor?.getAttribute("aria-placeholder") ?? el.querySelector("[data-placeholder]")?.textContent ?? "",
         };
@@ -1488,9 +1501,22 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       expect(paused.shell).toEqual(idle.shell);
       expect(gone.text).toBe(sendRefusal("gone"));
       expect(working.text).toBe(stillWorkingLine());
+      // A send held for a reason is not the accent faded: it wears the held tier, a hairline and the popover fill
+      // with the arrow in the ink the line above the box is written in, in the slot the live send stands in. Five
+      // testers read a lit arrow over a box that refused them as a screen saying it was ready to send.
+      expect(gone.send.box).toEqual(idle.send.box);
+      expect(gone.send.fill).not.toBe(idle.send.fill);
+      expect(gone.send.ink).toBe(gone.line!.ink);
+      expect(gone.send.border.startsWith("1px ")).toBe(true);
+      expect(gone.send.border).not.toBe(idle.send.border);
+      // Not a third of itself and not two thirds: the tier changed, the paint did not thin.
+      expect(gone.send.opacity).toBe("1");
+      // The live send keeps the accent, which is how a person sees the wait is over: one loud thing, and it is this.
+      expect(idle.send.fill).not.toBe("rgba(0, 0, 0, 0)");
+      expect(paused.send.fill).toBe(idle.send.fill);
       for (const state of [gone, working]) {
         // The words in mono, painted on nothing: no fill, no border, no icon, no panel anywhere in the composer.
-        expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0 });
+        expect(state.line).toEqual({ mono: true, background: "rgba(0, 0, 0, 0)", border: "0px 0px", icons: 0, ink: expect.any(String) });
         expect(state.panels).toBe(0);
         // The slot and the box sit where they sit for the idle composer: the line moves nothing.
         expect(state.slot).toEqual(idle.slot);
@@ -1899,7 +1925,12 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
       // The refusal rides the tooltip skin: hovering a dimmed row shows it.
       await page!.locator("[data-context-menu] [role=menuitem][aria-disabled=true]").first().hover();
       await page!.waitForSelector("[data-slot=tooltip-popup]");
-      expect(await page!.locator("[data-slot=tooltip-popup]").textContent()).toBe(NO_REBUILD_NEEDED);
+      const rebuildTip = await page!.locator("[data-slot=tooltip-popup]").textContent();
+      expect(rebuildTip).toBe(goneRoadRefusal("running", "rebuild"));
+      // The word this row shows, and the one moment every state promises the rebuild at: a running workspace and an
+      // unreachable one told a person two different things about when it arrives.
+      expect(rebuildTip).toContain("This one is running");
+      expect(rebuildTip).toContain("once a workspace is gone");
       const tipPath = join(SHOTS_DIR, `sidebar-context-menu-refusal-${theme}.png`);
       await page!.screenshot({ path: tipPath, clip: { x: 0, y: 0, width: 640, height: 520 } });
       console.info(`sidebar context menu refusal screenshot: ${tipPath}`);

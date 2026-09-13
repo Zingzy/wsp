@@ -2,6 +2,8 @@
 // The new-workspace dialog in a real Chromium, both themes: the size rows
 // share one height with each other, read in the muted mono voice the Where
 // caption uses, carry no border or fill of their own, and the rates read at AA;
+// at 1280 by 800 the card hangs 160 px down and grows to hold all three of them
+// with its footer under the last;
 // and with nothing to fork yet, the Create keycap is held as the outline with
 // its reason in the caption under Where. Photographed in each state and theme.
 // Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
@@ -49,7 +51,7 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     await page!.goto(`${base}?theme=${theme}`);
     await page!.waitForSelector(SIZE_ROWS);
     const rows = await styles(SIZE_ROWS);
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(new Set(rows.map(r => r.height)).size).toBe(1);
     expect(new Set(rows.map(r => r.color)).size).toBe(1);
     for (const r of rows) {
@@ -60,8 +62,8 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     // The same muted voice as the caption over them.
     const [caption] = await styles("[data-k=where-caption]");
     expect(rows[0]!.color).toBe(caption!.color);
-    expect(await page!.locator(`${SIZE_ROWS} [role=radio]`).evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["true", "false"]);
-    expect(await page!.locator(SIZE_ROWS).allTextContents()).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr"]);
+    expect(await page!.locator(`${SIZE_ROWS} [role=radio]`).evaluateAll(els => els.map(el => el.getAttribute("aria-checked")))).toEqual(["true", "false", "false"]);
+    expect(await page!.locator(SIZE_ROWS).allTextContents()).toEqual(["2 vCPU · 4 GB$0.11/hr", "2 vCPU · 8 GB$0.15/hr", "4 vCPU · 16 GB$0.29/hr"]);
     const ratios = await textContrast(page!, `${SIZE_ROWS} > span`);
     console.info(`${theme}: size rows read at ${ratios.map(r => r.toFixed(2)).join(", ")} to 1`);
     for (const ratio of ratios) expect(ratio).toBeGreaterThanOrEqual(4.5);
@@ -83,6 +85,41 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
     expect(box.height).toBeGreaterThan(16);
     expect(await caption.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
     await page!.locator("[role=dialog]").screenshot({ path: join(SHOTS, `new-workspace-room-${theme}.png`) });
+  });
+
+  it("at 1280 by 800 the card hangs 160 px from the top and grows to hold all three sizes, the footer under the last of them and nothing scrolling inside", async () => {
+    const desktop = await browser!.newPage({ viewport: { width: 1280, height: 800 } });
+    try {
+      await desktop.goto(`${base}?theme=dark`);
+      await desktop.waitForSelector(SIZE_ROWS);
+      const box = (selector: string) =>
+        desktop.locator(selector).evaluate(el => {
+          const r = el.getBoundingClientRect();
+          return { top: Math.round(r.top), bottom: Math.round(r.bottom) };
+        });
+      const popup = await box("[data-slot=dialog-popup]");
+      const rows = await desktop
+        .locator(SIZE_ROWS)
+        .evaluateAll(els => els.map(el => ({ top: Math.round(el.getBoundingClientRect().top), bottom: Math.round(el.getBoundingClientRect().bottom), height: Math.round(el.getBoundingClientRect().height) })));
+      const footer = await box("[data-slot=dialog-footer]");
+      console.info(`1280 by 800: the card stands from ${popup.top} to ${popup.bottom}, its rows at ${rows.map(r => r.top).join(", ")}, the footer at ${footer.top}`);
+      expect(popup.top).toBe(160);
+      expect(rows).toHaveLength(3);
+      for (const row of rows) expect(row.height).toBe(36);
+      // Every row is on the screen, the footer is under the last of them, and the card ends inside the window.
+      expect(rows.at(-1)!.bottom).toBeLessThanOrEqual(800);
+      expect(footer.top).toBeGreaterThanOrEqual(rows.at(-1)!.bottom);
+      expect(popup.bottom).toBeLessThanOrEqual(800);
+      expect(await desktop.locator("[data-slot=scroll-area-viewport]").evaluate(el => el.scrollHeight - el.clientHeight)).toBe(0);
+      await desktop.screenshot({ path: join(SHOTS, "new-workspace-1280-sizes.png") });
+      // And the caption over them prices the row that is ticked, not the provider's default.
+      expect(await desktop.locator("[data-k=where-caption]").textContent()).toBe("$0.11/hr while awake · naps to $0 · your image is there, v1");
+      await desktop.locator("[data-size='4x16']").click();
+      expect(await desktop.locator("[data-k=where-caption]").textContent()).toBe("$0.29/hr while awake · naps to $0 · your image is there, v1");
+      await desktop.screenshot({ path: join(SHOTS, "new-workspace-1280-size-picked.png") });
+    } finally {
+      await desktop.close();
+    }
   });
 
   it("at a phone's width the held keycap takes the same width as the live one, which the footer stacks full width", async () => {

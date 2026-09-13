@@ -6,8 +6,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { installFakeLayout } from "./fake-layout.js";
-import type { EventUnion, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
-import { QUESTION_TOOL, pickedOptionId, questionOptions } from "@wsp/protocol";
+import type { EventUnion, HarnessCatalog, SessionEvent, SessionView, WorkspaceView } from "@wsp/protocol";
+import { LIST_PRICE_WORD, QUESTION_TOOL, THIS_COMPUTER, pickedOptionId, questionOptions, whoPaysLines } from "@wsp/protocol";
 import { useStore } from "../src/protocol/store.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
 import { ChatView } from "../src/components/chat/ChatView.js";
@@ -29,6 +29,10 @@ beforeAll(async () => {
 afterAll(() => restoreLayout());
 
 const WS = CHAT_WS;
+
+/** The agent's own model table as the composer's menu reads it: enough of one for the foot's two sentences. */
+const CATALOG: HarnessCatalog = { harness: "claude", label: "Claude Code", source: "table", version: null, images: false, steers: false, renames: false, models: [{ value: "opus", label: "Opus" }], efforts: [], contextWindows: [], permissionModes: [] };
+
 const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
 const T0 = CHAT_T0;
 
@@ -129,7 +133,8 @@ describe("ChatView", () => {
     const footer = screen.getByTestId("settled-footer");
     expect(footer.textContent).toContain("completed");
     expect(footer.textContent).toContain("Worked for 900ms");
-    expect(footer.textContent).toContain("$0.0010");
+    // Every spend figure a person reads is in cents, whatever its size: a tenth of one reads $0.00, not $0.0010.
+    expect(footer.textContent).toContain("$0.00");
   });
 
   it("renders the live fixture stream: grouped tool calls, collapsed thinking, highlighted code", async () => {
@@ -174,6 +179,55 @@ describe("ChatView", () => {
     const footer = screen.getByTestId("settled-footer");
     expect(footer.textContent).toContain("Worked for 10s");
     expect(footer.textContent).toContain("$0.02");
+  });
+
+  it("draws a fenced block in the side the page is drawing, and follows it when the computer's side changes", async () => {
+    // index.html opens on the dark side and the preference flips it after the first paint. A side read once while
+    // the transcript mounted stays wrong for as long as nothing else repaints, and a block highlighted for the
+    // other side draws its line in the ink the box's own ground is.
+    document.documentElement.classList.add("dark");
+    try {
+      const { api, emit } = fixtureApi([workspace]);
+      await setup(api);
+      for (const e of FIXTURE) emit(e);
+      const shiki = () => document.querySelector(".chat-markdown-shiki .shiki")?.className ?? "";
+      await waitFor(() => expect(shiki()).toContain("pierre-dark"));
+      await act(async () => { document.documentElement.classList.remove("dark"); });
+      await waitFor(() => expect(shiki()).toContain("pierre-light"));
+      expect(document.querySelector(".chat-markdown-shiki .line")?.textContent).toContain("const port: number = 3000;");
+    } finally {
+      document.documentElement.classList.remove("dark");
+    }
+  });
+
+  it("says a figure on this computer is a list price, and carries the model menu's own sentence on it", async () => {
+    const here: WorkspaceView = { ...workspace, id: "ws_here", name: "this computer", kind: "local", provider: undefined };
+    const { api } = fixtureApi([here], { ws_here: settledTurn("ws_here", "add a health route", "Added GET /health.") });
+    await setup(api, "ws_here");
+    const figureNow = () => [...screen.getByTestId("settled-footer").querySelectorAll("span")].find(el => el.textContent?.includes(LIST_PRICE_WORD));
+
+    // The word rides the figure from the first paint, off the workspace record alone: the catalog is not in the
+    // store yet here, and a figure that stood bare and gained its word a moment later would be the change this
+    // ticket took off the sidebar's cost line.
+    const bare = await waitFor(() => {
+      const found = figureNow();
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(bare.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
+    expect(bare.getAttribute("title")).toBeNull();
+
+    // The model menu's own foot rides the title once the catalog that holds the agent's name has arrived, since
+    // nobody opens that menu before sending.
+    act(() => useStore.setState({ harnesses: [CATALOG] }));
+    const figure = await waitFor(() => {
+      const found = figureNow();
+      expect(found?.getAttribute("title")).not.toBeNull();
+      return found!;
+    });
+    expect(figure.textContent).toContain(`$0.00 ${LIST_PRICE_WORD}`);
+    expect(figure.getAttribute("title")).toBe(whoPaysLines(CATALOG, THIS_COMPUTER).join(" "));
+    expect(figure.getAttribute("title")).toContain("costs this wsp nothing");
   });
 
   it("shows the working row while a turn runs and an error when it exits without a result", async () => {
@@ -748,6 +802,9 @@ describe("the threads a thread opened", () => {
     const link = opened[0]!.querySelector<HTMLAnchorElement>("a")!;
     expect(link.textContent).toBe("benchmark the new index");
     expect(link.getAttribute("href")).toBe(`${window.location.origin}${window.location.pathname}#w/ws_bench/t/thr_bench`);
+    // Clicking it walks down the tree the same way the child's own header walks up it.
+    fireEvent.click(link);
+    await waitFor(() => expect([useStore.getState().selectedId, useStore.getState().selectedThreadId]).toEqual(["ws_bench", "thr_bench"]));
   });
 
   it("leaves the transcript alone on a thread that opened none", async () => {
@@ -776,6 +833,31 @@ describe("the threads a thread opened", () => {
       if (part.getAttribute("aria-hidden") === "true") continue;
       expect(part.className).toContain("whitespace-nowrap");
     }
+  });
+
+  it("a send whose turn dies before it announces itself draws the words above the line that answered them", async () => {
+    const settled = settledTurn(WS, "add a health route", "Added GET /health.");
+    const { api, emit } = fixtureApi([workspace], { [WS]: settled });
+    const handle: { current: ChatThreadHandle | null } = { current: null };
+    useStore.getState().bind(api);
+    await waitFor(() => expect(useStore.getState().workspaces.length).toBeGreaterThan(0));
+    render(<ChatView workspaceId={WS}>{thread => { handle.current = thread; return null; }}</ChatView>);
+    await screen.findByText("Added GET /health.");
+    sendFrom(handle.current, "have another look");
+    await screen.findByText("have another look");
+    // The harness launched, answered nothing and exited: a reply and a plain end, under a turn no start opened. The
+    // words this view stood in with are already on screen, so the line lands above them unless the row is placed.
+    const dead = { workspaceId: WS, sessionId: `sess_${WS}`, turnId: "turn_dead" };
+    emit({ type: "session.done", ...dead, at: T0 + 120_000, result: { status: "failed", error: "claude answered with no output and no usage after 48ms", durationMs: 48, costUsd: 0 } });
+    emit({ type: "session.end", ...dead, at: T0 + 120_050, exitCode: 1, sawResult: true });
+    // The row draws the sentence with its first letter raised, as the shipped runtime error rows do.
+    const line = await screen.findByText(/answered with no output and no usage after 48ms/i);
+    const words = screen.getByText("have another look");
+    const rows = [...document.querySelectorAll("[data-timeline-row-id]")];
+    const at = (node: Element) => rows.findIndex(row => row.contains(node));
+    expect(at(words)).toBeGreaterThanOrEqual(0);
+    expect(at(words)).toBe(at(line) - 1);
+    expect(screen.getAllByText("have another look")).toHaveLength(1);
   });
 
   it("says nothing about a total on a thread that opened none, and leaves its own figure unqualified", async () => {

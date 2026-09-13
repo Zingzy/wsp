@@ -751,6 +751,36 @@ describe("default shortcuts", () => {
     }
   });
 
+  it("a held Next thread over a list of threads names the workspace its walk is in and says the listed ones are not in it", async () => {
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
+    const onWorker = [1, 2, 3, 4].map(n => session(`s${n}`, "ws_b", `worker job ${n}`, { threadId: `thr_${n}` }));
+    await mountShell(onWorker);
+    const restore = asDesktopShell();
+    try {
+      // api is on screen and has no thread of its own; the four under the palette's own list all run on worker.
+      useStore.getState().select("ws_a");
+      await settle();
+      mod("k");
+      await waitFor(() => expect(palette()).not.toBeNull());
+      for (const row of onWorker) expect(inPalette().getByText(row.prompt!)).toBeTruthy();
+      // Both directions, since neither can step. "No threads to walk" over four listed threads is what stopped a
+      // tester believing the app about its own state.
+      expect(inPalette().queryByText("No threads to walk")).toBeNull();
+      expect(inPalette().getAllByText("Nothing to step to on api; a walk stays inside one workspace")).toHaveLength(2);
+      // And the walk does hold them once the workspace they run on is the one on screen.
+      mod("k");
+      await waitFor(() => expect(palette()).toBeNull());
+      useStore.getState().select("ws_b");
+      await settle();
+      mod("k");
+      await waitFor(() => expect(palette()).not.toBeNull());
+      expect(inPalette().queryByText(/Nothing to step to/)).toBeNull();
+      expect(chordOn("Next thread")).toBe("⌃Tab");
+    } finally {
+      restore();
+    }
+  });
+
   it("lists the thread walk with the chord of the body it is in: the Tab pair in Spaces, no chord in the list", async () => {
     const sessions = [session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })];
     await mountShell(sessions);

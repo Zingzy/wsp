@@ -13,9 +13,6 @@ export interface SidebarInput {
   readonly sessions?: Readonly<Record<string, ReadonlyArray<SessionView>>>;
 }
 
-/** Machines that are up (and billing) lead, then the paused, then the gone; inside a group the latest turn or creation is on top. */
-const LIST_RANK: Record<WorkspaceState, number> = { running: 0, waking: 0, unreachable: 0, pausing: 1, paused: 1, gone: 2 };
-
 export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapshot[] {
   return input.workspaces
     .map(workspace => {
@@ -23,7 +20,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
       const phase = status?.phase ?? workspace.phase;
       const state = workspaceStateOf({ phase }, status);
       const threads = foldThreads(input.sessions?.[workspace.id] ?? []);
-      const project: SidebarProjectSnapshot = {
+      return {
         id: workspace.id,
         projectKey: workspace.id,
         displayName: workspace.name,
@@ -39,21 +36,20 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         state,
         indicator: indicatorFor(state),
         threads: threads.map(thread => deriveThread(thread, workspace)),
-      };
-      return { rank: LIST_RANK[state], activityMs: lastActivityMs(workspace, threads), project };
+      } satisfies SidebarProjectSnapshot;
     })
-    .sort((a, b) => a.rank - b.rank || b.activityMs - a.activityMs || a.project.id.localeCompare(b.project.id))
-    .map(row => row.project);
+    .sort(byCreation);
 }
+
+/** A list a person picks rows out of by position may not reshuffle while they reach for one, so nothing about what
+ * a machine is doing sorts it and recency lives in the palette's Recent list instead. Two workspaces stamped the
+ * same millisecond fall to their ids, since the record they arrive in is a map with no order of its own. */
+const byCreation = (a: SidebarProjectSnapshot, b: SidebarProjectSnapshot): number =>
+  Date.parse(a.workspace.createdAt) - Date.parse(b.workspace.createdAt) || a.id.localeCompare(b.id);
 
 /** The workspace ids as the sidebar draws them, top to bottom: the one order every "first" or "next" workspace reads. */
 export function sidebarWorkspaceOrder(input: SidebarInput): string[] {
   return deriveSidebarProjects(input).map(project => project.id);
-}
-
-/** The latest turn start or end in the workspace, or its creation while it has none. */
-function lastActivityMs(workspace: Pick<WorkspaceView, "createdAt">, threads: ReadonlyArray<ThreadView>): number {
-  return Math.max(Date.parse(workspace.createdAt), ...threads.flatMap(t => [t.startedAt ?? 0, t.endedAt ?? 0]));
 }
 
 export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {

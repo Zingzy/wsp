@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { FREE_WORD, NO_LINGER_LINE, NO_NODE_LINE, OVER_SSH, THIS_COMPUTER, THREAD_ARCHIVE_MS, absentComputer, awayMsOf, kindWords, machineLacksShort, wakeAskingAgainLine, workspaceState, type ReachState, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../src/adapt/index.js";
 import { RequestError } from "../src/protocol/client.js";
-import { threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
+import { openedBy, threadTree, threadsOpenedBy, workspaceOf } from "../src/sidebar/threadTree.js";
 import { explainCreateRefusal } from "../src/protocol/store.js";
 import {
   foldArchivedThreads,
@@ -172,15 +172,15 @@ describe("workspace row labels", () => {
   };
   const tick = (accruedUsd: number, rateUsdPerHour = 0.11) => ({ rateUsdPerHour, accruedUsd });
 
-  it("the meta line: what it cost today first, in cents, then the edge note and the nap countdown last, the hourly rate left to the pane; the cost leads before the first tick too, as an honest zero", () => {
+  it("the meta line: what it cost today first, in cents, then the edge note and the nap countdown last, the hourly rate left to the pane; before the meter's first tick the line says nothing about spend rather than a zero it would change", () => {
     const meta = (over: Partial<WorkspaceStatus>, cost: ReturnType<typeof tick> | null) => workspaceMetaLine({ project: project(over), cost, outOfMemory: undefined, nowMs: now });
     expect(meta({ idleAt: now + 14.5 * 60_000, reach: { state: "slow" } }, tick(0.0037))).toBe("$0.00 today · edge slow · naps in 14m");
     expect(meta({ idleAt: now + 14.5 * 60_000 }, tick(0.29))).toBe("$0.29 today · naps in 14m");
     expect(meta({ reach: { state: "unreachable" } }, tick(1.235))).toBe("$1.24 today · active");
     expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" }, idleAt: now + 60_000 }, tick(0.18, 0))).toBe("$0.18 today");
     expect(meta({ machineState: "gone", reach: { state: "gone" }, idleAt: now + 60_000 }, tick(0.18))).toBe("$0.18 today");
-    expect(meta({}, null)).toBe("$0.00 today · active");
-    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("$0.00 today");
+    expect(meta({}, null)).toBe("active");
+    expect(meta({ phase: "napping", machineState: "paused", reach: { state: "napping" } }, null)).toBe("");
     // The rate is the pane's row, not this line's: the spend and the countdown are what fit the row's 30 characters.
     expect(meta({}, tick(0.5, 0.15))).toBe("$0.50 today · active");
   });
@@ -219,25 +219,24 @@ describe("workspace row labels", () => {
     expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000, daemonNote: "updating the helper" }), cost: tick(0.5), outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
     expect(workspaceMetaLine({ project: project({ idleAt: now + 60_000 }), cost: tick(0.5), outOfMemory: { used: 3.59 * GiB, total: 3.94 * GiB, load1: 6.4 }, nowMs: now })).toBe("out of memory, 3.6 of 3.9 GB");
     // Before a status arrives the record's own note is the line; a status without one says nothing about the helper.
-    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today");
+    expect(workspaceMetaLine({ project: { ...project({}), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("");
     expect(workspaceMetaLine({ project: { ...project({}, { daemonNote: "updating the helper" }), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("updating the helper");
-    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("$0.00 today · active");
+    expect(workspaceMetaLine({ project: project({}, { daemonNote: "updating the helper" }), cost: null, outOfMemory: undefined, nowMs: now })).toBe("active");
   });
 
-  it("a nap that could not store a vault says the machine's files are not backed up, on the row and in the Spaces header", () => {
+  it("a nap that could not store a backup leaves the row and the Spaces header on what the workspace spent", () => {
     const refused = { vaultedAt: "2026-09-08T07:10:04.444Z", vaultRefused: "the export was 646 MB, over the 200 MB cap" };
     const napped = { phase: "napping" as const, machineState: "paused" as const, reach: { state: "napping" as const } };
     const line = (over: Partial<WorkspaceStatus>) => workspaceMetaLine({ project: project(over), cost: tick(0.18, 0), outOfMemory: undefined, nowMs: now });
-    expect(line({ ...napped, ...refused })).toBe("no backup since 2026-09-08");
-    // A vault the last nap stored leaves the row's figures alone.
+    // A note on a step already taken is not this slot's: the row says the state and the spend, and the verdict
+    // reads on the pane's own backup line, where the machine's own words ride the title.
+    expect(line({ ...napped, ...refused })).toBe("$0.18 today");
     expect(line({ ...napped, vaultedAt: refused.vaultedAt })).toBe("$0.18 today");
-    // Before a status arrives the record's own fact is the line, as the daemon note is.
-    expect(workspaceMetaLine({ project: { ...project(napped, refused), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("no backup since 2026-09-08");
-    // What the runtime is doing to the daemon leads: that is what a person is waiting on, this holds until the next nap.
+    expect(workspaceMetaLine({ project: { ...project(napped, refused), status: null }, cost: null, outOfMemory: undefined, nowMs: now })).toBe("");
+    expect(metaSentences({ project: project({ ...napped, ...refused }), outOfMemory: undefined })).toEqual([]);
+    // What the runtime is doing to the daemon still leads: that is what a person is waiting on.
     expect(line({ ...napped, ...refused, daemonNote: "updating the helper" })).toBe("updating the helper");
-    // The header says it under what the machine is, since the header draws every sentence.
     expect(spaceHeaderLines({ project: project({ ...napped, ...refused }), cost: tick(0.18, 0), outOfMemory: undefined, nowMs: now })).toEqual([
-      "no backup since 2026-09-08",
       "2 vCPU · 4 GB",
       "$0.18 today",
     ]);
@@ -276,7 +275,8 @@ describe("workspace row labels", () => {
     expect(header({ size: { cpu: 10, memMb: 16384 } }, { kind: "local" })).toEqual(["10 cores · 16 GB", FREE_WORD]);
     // A fork's header is untouched: the size, the spend with its rate, the countdown when one is set.
     expect(header({ idleAt: now + 14.5 * 60_000 }, {}, tick(0.29))).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr", "naps in 14m"]);
-    expect(header({})).toEqual(["2 vCPU · 4 GB", "$0.00 today · $0.110/hr"]);
+    // Before the meter's first tick the header says what the machine costs by the hour and nothing about spend.
+    expect(header({})).toEqual(["2 vCPU · 4 GB", "$0.110/hr"]);
     // What the runtime is doing to the daemon still leads on both kinds: it is the one thing there a person waits on.
     expect(header({ daemonNote: "updating the helper" }, { kind: "local" })).toEqual(["updating the helper", "2 cores · 4 GB", FREE_WORD]);
   });
@@ -562,6 +562,16 @@ describe("the tree a thread's own threads make", () => {
     expect(threadsOpenedBy([mac, bench], "other")).toEqual([]);
     expect(workspaceOf([mac, bench], { workspaceId: "bench" })?.id).toBe("bench");
     expect(workspaceOf([mac, bench], { workspaceId: "nowhere" })).toBeUndefined();
+  });
+
+  it("answers the thread that opened one, with the workspace that one runs on, and nothing where there is none to reach", () => {
+    const mac = project("mac", [thread("lead", "mac", null)]);
+    const bench = project("bench", [thread("far", "bench", "lead")]);
+    const opener = openedBy([mac, bench], { parentThreadId: "lead" });
+    expect([opener?.thread.id, opener?.runs.id]).toEqual(["lead", "mac"]);
+    expect(openedBy([mac, bench], { parentThreadId: null })).toBeUndefined();
+    // An opener on a workspace this window was never given is one no click could reach, so it is not named either.
+    expect(openedBy([bench], { parentThreadId: "lead" })).toBeUndefined();
   });
 });
 

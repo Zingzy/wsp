@@ -413,7 +413,7 @@ describe("local workspace", () => {
       },
     };
     const landed = await rt.projects.import({ workspaceId: ws.id, source: folder, dest: folder, bundler });
-    expect(landed).toEqual({ dest: folder, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [] });
+    expect(landed).toEqual({ dest: folder, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [], project: { name: "spoo", dest: folder, importedAt: expect.any(String), size: 900 } });
     expect(calls).toEqual(["plan"]);
     const stages = events.filter((e): e is ProjectImportEvent => e.type === "project.import");
     expect(stages.map(e => [e.stage, e.message])).toEqual([

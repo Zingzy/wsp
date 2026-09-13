@@ -3,9 +3,10 @@
 // transplanted components accept. apps/web imports @wsp/protocol only; nothing
 // here touches React, the store or a socket.
 export * from "./view-model.js";
-export { deriveSession, summarizeOutput, commandFirstLine, type SessionModel, type DeriveSessionOptions } from "./session.js";
+export { deriveSession, isPromptOpen, summarizeOutput, commandFirstLine, type SessionModel, type DeriveSessionOptions } from "./session.js";
 export {
   deriveMessagesTimelineRows,
+  entryTurnId,
   summarizeToolGroup,
   toolGroupAction,
   toolGroupSummaryKind,

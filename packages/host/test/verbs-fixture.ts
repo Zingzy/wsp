@@ -3,7 +3,8 @@
 // scripted harness that answers every prompt, one whose turn never ends, and
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
-import type { AdapterEvent, PermissionAsk, SessionRenameWrite, TurnResult } from "@wsp/protocol";
+import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
+import type { AdapterEvent, PermissionAsk, PermissionOutcome, SessionRenameWrite, TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
 import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
@@ -57,6 +58,19 @@ export function captured(): Captured {
  * keeps a person's name for a session, as Claude Code's and Codex's do, and answers what that store made of it:
  * written, no such session, or the machine's own line for a write it refused. */
 export const CUT_LINE = "stopped after 15m 00s with no output for 10m";
+
+/** The task that makes a scripted agent stop on a permission question instead of replying, for a case about a thread
+ * that needs the person: the turn raises this one prompt and ends when somebody answers it. */
+export const ASKS = "ask before running";
+export const SCRIPTED_ASK: PermissionAsk = {
+  askId: "ask_scripted",
+  toolName: "Bash",
+  input: JSON.stringify({ command: "wc -l < /etc/hosts" }),
+  options: [
+    { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
+    { id: PERMISSION_DENY, label: "Deny", effect: "deny" },
+  ],
+};
 export function scriptedAgent(reply: (prompt: string) => string, names?: (title: string) => SessionRenameWrite) {
   const starts: HarnessStartOptions[] = [];
   const renames: { sessionId: string; title: string }[] = [];
@@ -79,6 +93,27 @@ export function scriptedAgent(reply: (prompt: string) => string, names?: (title:
     start: o => {
       starts.push(o);
       const sessionId = o.resume ?? randomUUID();
+      if (o.prompt === ASKS) {
+        let settle!: (r: TurnResult) => void;
+        const waiting = new Promise<TurnResult>(r => (settle = r));
+        queueMicrotask(() => {
+          o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" });
+          o.onEvent({ type: "permission.ask", sessionId, ask: SCRIPTED_ASK });
+        });
+        return {
+          localId: sessionId,
+          finished: waiting,
+          interrupt: async () => {},
+          answer: async (askId: string, picked: { optionId: string; outcome: PermissionOutcome }) => {
+            const answered: TurnResult = { status: "completed", text: `re: ${picked.outcome}` };
+            o.onEvent({ type: "permission.close", sessionId, askId, outcome: picked.outcome, optionId: picked.optionId });
+            o.onEvent({ type: "turn.done", sessionId, result: answered });
+            o.onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            settle(answered);
+            return "answered" as const;
+          },
+        };
+      }
       const cut = o.prompt === "cut";
       const text = cut ? "" : reply(o.prompt);
       const result: TurnResult = cut ? { status: "failed", error: CUT_LINE } : text === "" ? { status: "failed", error: "the harness died" } : { status: "completed", text };
@@ -161,7 +196,9 @@ export function heldAgent(steers: boolean) {
   const starts: HarnessStartOptions[] = [];
   const steered: string[] = [];
   const interrupted: string[] = [];
-  const turns: { sessionId: string; onEvent: HarnessStartOptions["onEvent"]; finish: (r: TurnResult) => void }[] = [];
+  const turns: { sessionId: string; onEvent: HarnessStartOptions["onEvent"]; finish: (r: TurnResult) => void; open: Map<string, PermissionAsk> }[] = [];
+  /** Every prompt this agent was asked to answer, in order, as the adapter's control channel takes it. */
+  const answers: { askId: string; optionId: string; outcome: PermissionOutcome }[] = [];
   const end = (t: (typeof turns)[number], result: TurnResult): void => {
     t.onEvent({ type: "turn.done", sessionId: t.sessionId, result });
     t.onEvent({ type: "session.end", sessionId: t.sessionId, exitCode: 0, sawResult: true });
@@ -176,7 +213,7 @@ export function heldAgent(steers: boolean) {
       const sessionId = o.resume ?? randomUUID();
       let finish!: (r: TurnResult) => void;
       const finished = new Promise<TurnResult>(r => (finish = r));
-      const turn = { sessionId, onEvent: o.onEvent, finish };
+      const turn = { sessionId, onEvent: o.onEvent, finish, open: new Map<string, PermissionAsk>() };
       turns.push(turn);
       queueMicrotask(() => o.onEvent({ type: "session.start", sessionId, model: "claude-sonnet-4-5" }));
       return {
@@ -185,6 +222,12 @@ export function heldAgent(steers: boolean) {
         interrupt: async () => {
           interrupted.push(sessionId);
           setImmediate(() => end(turn, { status: "interrupted" }));
+        },
+        answer: async (askId: string, picked: { optionId: string; outcome: PermissionOutcome }) => {
+          if (!turn.open.delete(askId)) return "gone" as const;
+          answers.push({ askId, optionId: picked.optionId, outcome: picked.outcome });
+          o.onEvent({ type: "permission.close", sessionId, askId, outcome: picked.outcome, optionId: picked.optionId });
+          return "answered" as const;
         },
         ...(steers
           ? {
@@ -205,9 +248,10 @@ export function heldAgent(steers: boolean) {
   /** Raises a permission prompt on a running turn, as a CLI's control channel does, and leaves the turn stopped on it. */
   const ask = (turn: number, raised: PermissionAsk): void => {
     const t = turns[turn]!;
+    t.open.set(raised.askId, raised);
     t.onEvent({ type: "permission.ask", sessionId: t.sessionId, ask: raised });
   };
-  return { adapter, starts, envs, steered, interrupted, release, ask };
+  return { adapter, starts, envs, steered, interrupted, release, ask, answers };
 }
 
 /** One scripted tool call: the name and input the harness reports for it, and what it answered when it answered

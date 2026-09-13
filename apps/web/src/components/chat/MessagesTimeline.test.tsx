@@ -795,6 +795,64 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("live-activity-focus");
   });
 
+  const promptEntry = (id: string, turnId: string, outcome: "allowed" | null): TimelineEntry => ({
+    id,
+    kind: "permission",
+    createdAt: MESSAGE_CREATED_AT,
+    permission: {
+      askId: `ask-${id}`,
+      turnId,
+      sessionId: "session-1",
+      toolName: "Write",
+      input: JSON.stringify({ file_path: "/tmp/hello.txt", content: "banana" }),
+      options: [{ id: "allow", label: "Allow", effect: "allow" }],
+      createdAt: MESSAGE_CREATED_AT,
+      outcome,
+      optionId: outcome === null ? null : "allow",
+    },
+  });
+
+  it.each([
+    ["answered", "Working for", "allowed" as const],
+    ["open", "Waiting for you", null],
+  ])("counts the time under an %s prompt as %s", (_state, lead, outcome) => {
+    const turnId = "turn-asking";
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        turns={[buildTurn(turnId, "running", MESSAGE_CREATED_AT, null)]}
+        timelineEntries={[promptEntry("entry-permission", turnId, outcome)]}
+      />,
+    );
+
+    // The elapsed count says what the thread is doing: an open prompt is time the person has kept it waiting,
+    // and the turn is stopped on the question rather than working.
+    expect(markup).toContain(lead);
+    expect(markup).not.toContain(lead === "Working for" ? "Waiting for you" : "Working for");
+  });
+
+  it("counts a working turn as working while an older turn's prompt is still drawn open", () => {
+    // A host that restarted while a prompt stood open leaves that prompt in the transcript with no outcome on it:
+    // the runtime cuts the row short at load and records nothing that closes the question. The row's own word reads
+    // the latest turn and says Working, so the counter has to read that turn's prompts and no others.
+    const settled = "turn-cut";
+    const running = "turn-now";
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        isWorking
+        activeTurnStartedAt={MESSAGE_CREATED_AT}
+        turns={[buildTurn(settled, "completed", MESSAGE_CREATED_AT, MESSAGE_CREATED_AT), buildTurn(running, "running", MESSAGE_CREATED_AT, null)]}
+        timelineEntries={[promptEntry("entry-cut", settled, null)]}
+      />,
+    );
+
+    expect(markup).toContain("Working for");
+    expect(markup).not.toContain("Waiting for you");
+  });
+
   it("scopes a live row failure to the tool named by the row", () => {
     const turnId = "turn-live";
     const markup = renderToStaticMarkup(

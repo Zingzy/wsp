@@ -9,7 +9,7 @@
 // to megabytes.
 import { z } from "zod";
 import { NEWER_TURN_LINE, notifyBody, notifyReply, toolActivityLine, turnEndLine } from "./format.js";
-import type { SessionEvent, TurnResult } from "./index.js";
+import type { SessionEvent, SessionPermissionEvent, TurnResult } from "./index.js";
 
 /** Who a row of a read is: the message that opened or steered a turn, the agent's own words, one tool call, or the
  * turn's own end as the chat's footer states it. */
@@ -157,4 +157,24 @@ export function threadReplyRows(events: ReadonlyArray<SessionEvent>, threadId: s
   const rows = [message(body === reply ? "agent" : "turn", latest.at, body)];
   // The note carries no clock: it is not a row the runtime recorded, it is what the transcript says about now.
   return latest.running ? [...rows, message("turn", undefined, NEWER_TURN_LINE)] : rows;
+}
+
+/** Which of the prompts a turn holds open the thread is waiting on: the oldest still open, since that is the one the
+ * harness stopped at. The runtime leads a row's `asking` with it and a client answering off the transcript picks the
+ * same one, so a listing and the line that answers never name two different questions. */
+export function leadAsk<T>(open: Iterable<T>): T | undefined {
+  return [...open][0];
+}
+
+/** The permission prompt this thread has open and nobody has answered, read off the transcript alone, by the rule
+ * above; nothing where the thread is waiting on nobody. A client answering a prompt it did not watch arrive reads it
+ * here, so the rule that a close ends a prompt is written once. */
+export function openAsk(events: ReadonlyArray<SessionEvent>, threadId: string): SessionPermissionEvent | undefined {
+  const open = new Map<string, SessionPermissionEvent>();
+  for (const e of events) {
+    if (e.threadId !== threadId) continue;
+    if (e.type === "session.permission") open.set(e.askId, e);
+    if (e.type === "session.permission.closed") open.delete(e.askId);
+  }
+  return leadAsk(open.values());
 }

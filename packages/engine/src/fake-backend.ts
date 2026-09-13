@@ -8,13 +8,15 @@
 //
 // get() answers for an id it never minted, which is the one thing a fixture
 // needs: a state file naming fk_c0ffee gets a running machine rather than a
-// refusal, and one naming fk_c0ffee.paused gets a machine asleep.
+// refusal. What state that machine comes up in is the records file's to say,
+// and a harness seeds it before the host reads the state file; a machine no
+// records name is running, since a stand-in nobody seeded holds nothing asleep.
 //
-// Two things a caller may wire, and without either this is what it has always
-// been. A file it keeps its machines and its snapshots in, so a second process
-// on the same state file reads the fleet the first one holds rather than an
-// empty one, and so a harness can seed the snapshots a fixture's image says the
-// account is paying for. And a guest: a folder on the caller's own computer
+// Two things a caller may wire. A file it keeps its machines and its snapshots
+// in, so a second process on the same state file reads the fleet the first one
+// holds rather than an empty one, and so a harness can seed the state each
+// machine comes up in and the snapshots a fixture's image says the account is
+// paying for. And a guest: a folder on the caller's own computer
 // standing in for each machine's disk, with a daemon rooted there, which is
 // what gives a fixture's fork a terminal, a process list and live readings.
 // Without a guest the machine lands no bytes, the daemon deploy never starts
@@ -74,14 +76,6 @@ export const FAKE_NO_GUEST = "this is a stand-in provider for testing: its machi
 
 const id = (prefix: string): string => `${prefix}_${randomBytes(6).toString("hex")}`;
 
-/** The suffix a machine id wears to come up asleep. A fixture is a file and the state a caller wires no records
- * file for is held for one process only, so the id is the one place a state can be written down where both the
- * record and the provider read it; without it every napping workspace in a fixture would hydrate awake, since the
- * provider's word wins. */
-export const FAKE_PAUSED_SUFFIX = ".paused";
-
-const stateOf = (machineId: string): MachineState => (machineId.endsWith(FAKE_PAUSED_SUFFIX) ? "paused" : "running");
-
 /** A folder on the caller's own computer standing in for a machine's disk, and the road to a port on it. The
  * caller wires this because the daemon that serves those ports is not the engine's to start: nothing here knows
  * how to run one, and a stand-in that started one would be a provider with a guest on the person's computer
@@ -93,6 +87,14 @@ export interface FakeGuest {
   tokenPath(machineId: string): string;
   /** The route to one port on this machine, with whatever serves it running by the time this answers. */
   reach(machineId: string, port: number): Promise<PreviewReach>;
+  /** Optional: how a command written for a Linux guest runs on the computer holding this folder, after the guest
+   * has answered for the folders and the commands that guest has and this computer does not. Without one the line
+   * runs as it was written, in the machine's own folder, which is what printed "sethostname: Operation not
+   * permitted" at every tester who forked a machine and "ls: /root" at every one who paused it. */
+  shell?(machineId: string, cmd: string): { cmd: string; cwd: string; env: Record<string, string> };
+  /** Optional: one file's bytes at a path of the guest's. A guest with one makes this a machine bytes can land on,
+   * which is what writes a fork's own context onto it instead of the line saying no signed URL was minted. */
+  putBytes?(machineId: string, path: string, bytes: Uint8Array): Promise<void>;
 }
 
 /** What this stand-in holds: every machine it has been asked for, and every snapshot the account carries. A
@@ -156,6 +158,7 @@ class FakeMachine implements Machine {
   readonly streamUrl = undefined;
   readonly previewUrl?: (port: number) => Promise<PreviewReach>;
   readonly daemonTokenPath?: string;
+  readonly putBytes?: (path: string, bytes: Uint8Array) => Promise<void>;
 
   constructor(
     readonly id: string,
@@ -168,6 +171,7 @@ class FakeMachine implements Machine {
     if (guest !== undefined) {
       this.previewUrl = port => guest.reach(id, port);
       this.daemonTokenPath = guest.tokenPath(id);
+      if (guest.putBytes !== undefined) this.putBytes = (path, bytes) => guest.putBytes!(id, path, bytes);
     }
   }
 
@@ -179,12 +183,13 @@ class FakeMachine implements Machine {
    * names this stand-in where none is. */
   private shell(cmd: string, opts: { timeoutMs?: number; onLine?: (line: string) => void }): Promise<ExecResult> {
     if (this.guest === undefined) throw new Error(FAKE_NO_GUEST);
-    const cwd = this.guest.folder(this.id);
-    mkdirSync(cwd, { recursive: true });
-    // The folder is the machine's home as well as where its commands start, so a script writing under the home it
-    // was given stays inside it. A guest path written absolutely still lands on the computer running this, where
-    // its own permissions answer, which is why the folder a caller names is a throwaway one.
-    return runChild("bash", ["-c", cmd], { cwd, env: { ...process.env, HOME: cwd }, ...opts });
+    const at = this.guest.folder(this.id);
+    // The guest's own answer where it has one, so a line written for a Linux machine runs against that machine's
+    // stand-in folder rather than against the root of the computer holding it. Without one the folder is the home
+    // and the line runs as it was written.
+    const run = this.guest.shell?.(this.id, cmd) ?? { cmd, cwd: at, env: { HOME: at } };
+    mkdirSync(run.cwd, { recursive: true });
+    return runChild("bash", ["-c", run.cmd], { cwd: run.cwd, env: { ...process.env, ...run.env }, ...opts });
   }
 
   async exec(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult> {
@@ -293,7 +298,10 @@ export class FakeBackend implements MachineBackend {
     const held = this.records.read();
     const known = held.machines[machineId];
     const machine = known ?? {
-      state: stateOf(machineId),
+      // Running, because the records are where a fixture says one sleeps: an id read for the word was a second
+      // place the same fact lived, and it printed in the MACHINE column of the table the fixture's own STATE
+      // column sat beside.
+      state: "running" as MachineState,
       shape: { cpu: spec.cpu ?? this.size.cpu, memMb: spec.memMb ?? this.size.memMb, diskGb: spec.diskGb ?? 20, createdAt: new Date().toISOString() },
       labels: spec.labels ?? {},
     };

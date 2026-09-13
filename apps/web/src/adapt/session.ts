@@ -332,9 +332,17 @@ export function deriveSession(events: ReadonlyArray<SessionEvent>, options: Deri
       }
       case "session.end": {
         // An end for a turn nothing here opened is the runtime's word that a send never became a turn, sent so a wait
-        // on the thread is answered; it is not a turn and opens none. An end whose turn a delta or a done opened above
-        // still settles that turn.
-        if (turn === null || (event.turnId !== undefined && event.turnId !== turn.summary.turnId)) continue;
+        // on the thread is answered; it opens no turn, since the reply, the read and the wait all fold these rows and
+        // would take it for the thread's latest. It still ends the turn it interrupted, a thread running one turn at a
+        // time, and where it says why, that sentence is the only account that send will ever have, so it stands as a
+        // row of its own rather than nowhere.
+        if (turn === null || (event.turnId !== undefined && event.turnId !== turn.summary.turnId)) {
+          if (turn !== null && turn.summary.state === "running") endRunningTurn(turn, at);
+          if (event.reason !== undefined) {
+            push(workEntry({ id: `refusal:${event.turnId ?? event.sessionId}`, turnId: event.turnId ?? null, createdAt: at, label: event.reason, tone: "error", sourceActivityKind: "runtime.error" }, at));
+          }
+          continue;
+        }
         const t = turn;
         if (t.summary.state !== "running") continue;
         if (t.reply !== null) {
@@ -536,6 +544,13 @@ function turnState(status: TurnResult["status"]): TurnState {
 
 function compactLines(text: string): string[] {
   return text.split(/\r?\n/).map(line => line.replace(/\s+/g, " ").trim()).filter(line => line.length > 0);
+}
+
+/** Whether a prompt is one nobody has answered. Written once because three surfaces ask it and each of them says
+ * something different when it is true: the prompt row offers its options, the thread's row and header say the
+ * thread needs the person, and the elapsed count says the thread is waiting rather than working. */
+export function isPromptOpen(permission: Pick<PermissionPrompt, "outcome">): boolean {
+  return permission.outcome === null;
 }
 
 /** The line a row shows for a command: its first non-empty line, whole; the row's width cuts it. */

@@ -45,6 +45,11 @@ export const labRoot = (env = process.env, platform = process.platform) => {
  * it without being told where it is. */
 export const labHome = (name, env = process.env, platform = process.platform) => join(labRoot(env, platform), name);
 
+/** Where a stopped lab's log lands when the start was told no folder: one folder beside the homes, never the one
+ * the start happened to be run from. All nine logs of a round landed in a folder nobody was reading, because that
+ * is where the shell that started them stood. A lab named "logs" would collide with it, which no persona is. */
+export const labLogs = (env = process.env, platform = process.platform) => join(labRoot(env, platform), "logs");
+
 /** The variables an agent reads a key from, each declared once on its own sign-in row in the catalog: what a lab
  * looks for and hands the host, so an agent added to the catalog tomorrow is signed in here without this file
  * learning its name. */
@@ -194,11 +199,18 @@ function parseEnv(path) {
   }
 }
 
+/** This lab's own .wsp, made readable by nobody else: the keys that sign its turns in sit in it, and so does the
+ * stand-in's folder, so whichever of the two is written first is what decides the folder's mode. */
+export const wspHome = home => {
+  const dir = join(home, ".wsp");
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return dir;
+};
+
 /** Writes those keys where this lab's own verbs read one: the .env beside its state, readable by nobody else.
  * Never into the lab's record or its log, which are written to be read and pasted. */
 export function writeKeys(home, keys) {
-  const path = join(home, ".wsp", ".env");
-  mkdirSync(join(home, ".wsp"), { recursive: true, mode: 0o700 });
+  const path = join(wspHome(home), ".env");
   writeFileSync(
     path,
     `${Object.entries(keys)
@@ -210,15 +222,18 @@ export function writeKeys(home, keys) {
 }
 
 /** Where the stand-in a lab serves its forks through keeps its own machines, and what it holds before the host
- * comes up: the snapshots this fixture's image says the account is paying for. Inside the lab's home, so its
- * records and every machine's folder go when the lab does, and so a tester's command on a fork runs in a folder of
- * the lab's and nowhere near the person's own. */
-export const standInRoot = home => join(home, "stand-in");
+ * comes up: every machine the fixture names, in the state that fixture says it sleeps or runs in, and the
+ * snapshots its image says the account is paying for. Under the lab's .wsp, so its records and every machine's
+ * folder go when the lab does, so a tester's command on a fork runs in a folder of the lab's and nowhere near the
+ * person's own, and so the app's own folder picker never offers it: a tester opened Import and was shown a folder
+ * called stand-in in what the app told them was their home. */
+export const standInRoot = home => join(home, ".wsp", "stand-in");
 
-export function writeStandIn(home, snapshots) {
+export function writeStandIn(home, held) {
+  wspHome(home);
   const path = standInRecordsPath(standInRoot(home));
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify({ machines: {}, snapshots }, null, 2)}\n`);
+  writeFileSync(path, `${JSON.stringify(held, null, 2)}\n`);
   return path;
 }
 

@@ -8,7 +8,7 @@
 // refusal prints the runtime's words with replace as the one follow-up.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SESSIONS_NOTE, secretsNote, type EventUnion, type HostFolder, type HostFolderListing, type ProjectAgent, type ProjectImportEvent, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { SESSIONS_NOTE, secretsNote, type EventUnion, type HostFolder, type HostFolderListing, type ProjectAgent, type ProjectImportEvent, type ProjectPlan, type WorkspaceProject, type WorkspaceView } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { ImportProjectDialog } from "../src/sidebar/ImportProjectDialog.js";
@@ -17,6 +17,9 @@ import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
 const workspace: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
+
+/** The project the host answers an import with: what it kept on the record, which the pane's list then holds. */
+const landed = (dest: string, size: number): WorkspaceProject => ({ name: "proj", dest, importedAt: "2026-09-12T10:00:00.000Z", size });
 
 const PLAN: ProjectPlan = {
   source: "/private/var/proj",
@@ -100,7 +103,7 @@ function fakeApi(plan: ProjectPlan = PLAN) {
     listSessions: vi.fn(async () => []),
     getGolden: async () => undefined,
     planProject: vi.fn(async (_source: string) => plan),
-    importProject: vi.fn(async () => ({ dest: plan.source, files: 11, bytes: 2_900, parts: 1, cut: [] as string[], rewritten: [".git/config"], agents: [] })),
+    importProject: vi.fn(async () => ({ dest: plan.source, files: 11, bytes: 2_900, parts: 1, cut: [] as string[], rewritten: [".git/config"], agents: [], project: landed(plan.source, 2_900) })),
     subscribe: vi.fn((fn: (e: EventUnion) => void) => {
       listeners.add(fn);
       return () => listeners.delete(fn);
@@ -138,6 +141,9 @@ const repoMarks = (root: HTMLElement): boolean[] =>
 const crumbs = (root: HTMLElement): string[] => Array.from(root.querySelectorAll<HTMLElement>("[data-folder-crumb]")).map(el => el.textContent ?? "");
 const folderRow = (root: HTMLElement, path: string): HTMLElement => root.querySelector<HTMLElement>(`[data-folder="${path}"]`)!;
 const usePicked = (root: HTMLElement): boolean => fireEvent.click(within(root).getByRole("button", { name: "Use this folder" }));
+/** How many of the summary's rows stand as a bar, which is every row until a folder has been read. */
+const bars = (root: HTMLElement): number => root.querySelectorAll("[data-k=summary] [data-slot=skeleton]").length;
+const importKey = (root: HTMLElement): HTMLButtonElement => within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement;
 
 async function readFolder(root: HTMLElement, path = "/var/proj"): Promise<void> {
   const input = within(root).getByLabelText("Folder on this Mac") as HTMLInputElement;
@@ -154,16 +160,26 @@ describe("import project dialog", () => {
     const root = await dialog();
     expect(within(root).getByText("Import a project")).toBeDefined();
     expect(within(root).getByText("Into api, at the same path.")).toBeDefined();
+    // Five rows of bars, not five blanks: each says a fact is on its way once a folder is read.
     for (const k of ["repository", "files", "caches", "skipped", "dest"]) expect(value(root, k)).toBe("");
+    expect(bars(root)).toBe(5);
     expect(root.querySelectorAll("[data-step]")).toHaveLength(0);
     expect(progress(root)).toEqual({ line: "", percent: null });
     expect(root.querySelector("[data-k=secrets]")).toBeNull();
     const importButton = within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement;
     expect(importButton.disabled).toBe(true);
-    // The accent sits on Import alone; Cancel is a bordered neutral key.
-    expect(importButton.className).toContain("bg-primary");
+    // Import waits on a folder, so it is held: the outline, with its reason on the screen beside the key that reads one.
+    expect(importButton.hasAttribute("data-held")).toBe(true);
+    expect(importButton.className).not.toContain("bg-primary");
+    // The reason stands under the field it waits on, never on a hover a disabled key cannot take anyway.
+    expect(importButton.title).toBe("");
+    expect(value(root, "folder-path-refusal")).toBe("type the folder's path first");
+    expect(root.querySelector<HTMLElement>('[data-k="folder-path-refusal"] [data-k="waiting"]')!.className).toContain("text-muted-foreground");
+    expect(value(root, "foot-note")).toBe("\u21b5 reads the folder");
     expect(within(root).getByRole("button", { name: "Cancel" }).className).not.toContain("bg-primary");
     expect(within(root).queryByRole("button", { name: /folder/ })).toBeNull();
+    // And why there is no chooser to look for, since the desktop app has one here.
+    expect(value(root, "no-chooser")).toBe("A browser tab cannot open a chooser: type the path, or walk to the folder below.");
   });
 
   it("in a browser tab a folder browser follows the field: a row goes into its folder, a crumb comes back out, the repository is marked, and Use this folder is what reads the plan", async () => {
@@ -443,7 +459,7 @@ describe("import project dialog", () => {
     await readFolder(root);
     fireEvent.click(within(root).getByRole("checkbox", { name: /\.env/ }));
     let finish!: () => void;
-    api.importProject.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ dest: "/private/var/proj", files: 11, bytes: 2_900, parts: 1, cut: ["keys/id_ed25519"], rewritten: [".git/config"], agents: [] }); }));
+    api.importProject.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ dest: "/private/var/proj", files: 11, bytes: 2_900, parts: 1, cut: ["keys/id_ed25519"], rewritten: [".git/config"], agents: [], project: landed("/private/var/proj", 2_900) }); }));
     fireEvent.click(within(root).getByRole("button", { name: "Import" }));
     expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_a", source: "/var/proj", dest: "/private/var/proj", carry: [".env"], rewrite: [".git/config"] });
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
@@ -509,7 +525,8 @@ describe("import project dialog", () => {
     const input = within(root).getByLabelText("Folder on this Mac");
     // The one field the composer's folder picker draws, so the slot stands at its two lines before anything is said.
     expect(root.querySelector('[data-k="folder-path"]')).toBe(input);
-    expect(value(root, "folder-path-refusal")).toBe("");
+    // The slot stands at its two lines before anything is said, holding the reason Import waits.
+    expect(value(root, "folder-path-refusal")).toBe("type the folder's path first");
     fireEvent.change(input, { target: { value: "/var/proj" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(within(root).getByRole("status").textContent).toBe("Reading the folder.");
@@ -520,9 +537,9 @@ describe("import project dialog", () => {
     expect(value(root, "files")).toBe("");
     expect((within(root).getByRole("button", { name: "Import" }) as HTMLButtonElement).disabled).toBe(true);
 
-    // Editing the path away drops the refusal with the plan it was about.
+    // Editing the path away drops the refusal with the plan it was about, and the slot is the reason's again.
     fireEvent.change(input, { target: { value: "/var/other" } });
-    expect(value(root, "folder-path-refusal")).toBe("");
+    expect(value(root, "folder-path-refusal")).toBe("type the folder's path first");
     expect(input.getAttribute("aria-invalid")).toBeNull();
   });
 
@@ -547,6 +564,9 @@ describe("import project dialog", () => {
     const root = await dialog();
     expect(within(root).queryByLabelText("Folder on this Mac")).toBeNull();
     expect(root.querySelector("input")).toBeNull();
+    // The chooser is right there, so neither the sentence about not having one nor the key that reads a typed path.
+    expect(root.querySelector("[data-k=no-chooser]")).toBeNull();
+    expect(root.querySelector("[data-k=foot-note]")).toBeNull();
     expect(value(root, "path")).toBe("/Users/you/code/project");
     fireEvent.click(within(root).getByRole("button", { name: "Choose folder" }));
     await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/me/code/proj"));
@@ -559,6 +579,82 @@ describe("import project dialog", () => {
     await waitFor(() => expect(pickFolder).toHaveBeenCalledTimes(2));
     expect(api.planProject).toHaveBeenCalledTimes(1);
     expect(folder.textContent).toBe("/Users/me/code/proj");
+  });
+
+  it("reads the path a moment after the typing stops, into the summary and the browser under it, and only the last one typed", async () => {
+    const { api } = fakeApi();
+    const { hostFolders } = fakeFolders();
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await waitFor(() => expect(browseRows(root)).toEqual(["code", "notes"]));
+    const input = within(root).getByLabelText("Folder on this Mac");
+    fireEvent.change(input, { target: { value: "/Users/dev" } });
+    fireEvent.change(input, { target: { value: "/Users/dev/code" } });
+    // Nothing is read while the letters are still arriving.
+    expect(api.planProject).not.toHaveBeenCalled();
+    expect(bars(root)).toBe(5);
+    await waitFor(() => expect(value(root, "files")).toBe("12 files · 3 KB"), { timeout: 3_000 });
+    expect(api.planProject.mock.calls).toEqual([["/Users/dev/code"]]);
+    expect(bars(root)).toBe(0);
+    // The browser under the field is about the same folder, so the crumbs and the field cannot disagree.
+    await waitFor(() => expect(crumbs(root)).toEqual(["/Users/dev", "code"]));
+    expect(browseRows(root)).toEqual(["spoo"]);
+    expect(importKey(root).hasAttribute("data-held")).toBe(false);
+    expect(importKey(root).className).toContain("bg-primary");
+    // The reason the key was waiting goes with the wait; the slot is the refusals' again.
+    expect(value(root, "folder-path-refusal")).toBe("");
+  });
+
+  it("keeps the field and the list live while the folder is read, so a pause mid-path never eats a letter", async () => {
+    const { api } = fakeApi();
+    const { hostFolders } = fakeFolders();
+    let settle!: (plan: ProjectPlan) => void;
+    api.planProject.mockImplementationOnce(() => new Promise<ProjectPlan>(resolve => { settle = resolve; }));
+    useStore.getState().bind({ ...api, hostFolders });
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await waitFor(() => expect(browseRows(root)).toEqual(["code", "notes"]));
+    const input = within(root).getByLabelText("Folder on this Mac") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "/Users/dev/code" } });
+    await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/dev/code"), { timeout: 3_000 });
+    expect(within(root).getByRole("status").textContent).toBe("Reading the folder.");
+    // The read is still out, and the person is still typing into a field that takes it.
+    expect(input.disabled).toBe(false);
+    expect(folderRow(root, "/Users/dev/notes").hasAttribute("disabled")).toBe(false);
+    expect((within(root).getByRole("button", { name: "Use this folder" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "/Users/dev/code/spoo" } });
+    expect(input.value).toBe("/Users/dev/code/spoo");
+    await act(async () => settle(PLAN));
+    await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/dev/code/spoo"), { timeout: 3_000 });
+  });
+
+  it("does not read a path the folder it has already read starts with, since that is a parent on the way in; Enter reads it anyway", async () => {
+    const { api } = fakeApi();
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    const input = within(root).getByLabelText("Folder on this Mac");
+    fireEvent.change(input, { target: { value: "/var/proj/api" } });
+    await waitFor(() => expect(api.planProject.mock.calls).toEqual([["/var/proj/api"]]), { timeout: 3_000 });
+    // Backspacing towards a shorter path is the person shaping the one they mean, not an ask to walk its parent.
+    fireEvent.change(input, { target: { value: "/var/proj" } });
+    await new Promise(r => setTimeout(r, 900));
+    expect(api.planProject.mock.calls).toEqual([["/var/proj/api"]]);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(api.planProject.mock.calls).toEqual([["/var/proj/api"], ["/var/proj"]]));
+  });
+
+  it("puts the project the host answers with on the workspace, so its list holds the folder as soon as the import returns", async () => {
+    const { api } = fakeApi();
+    useStore.getState().bind(api);
+    render(<ImportProjectDialog workspace={workspace} onClose={() => {}} />);
+    const root = await dialog();
+    await readFolder(root);
+    expect(useStore.getState().workspaces[0]!.projects).toBeUndefined();
+    fireEvent.click(within(root).getByRole("button", { name: "Import" }));
+    await waitFor(() => expect(within(root).getByRole("button", { name: "Done" })).toBeDefined());
+    expect(useStore.getState().workspaces[0]!.projects).toEqual([landed("/private/var/proj", 2_900)]);
   });
 
   it("a folder handed in opens already read", async () => {

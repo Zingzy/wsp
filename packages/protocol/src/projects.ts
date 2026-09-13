@@ -16,6 +16,14 @@ export function workspaceProjects(view: Pick<WorkspaceView, "projects">): Worksp
   return view.projects ?? [];
 }
 
+/** The projects a workspace holds once one has landed: the same folder imported again is the one project, at what
+ * the last import made of it, and a new folder goes on the end, where the newest import belongs. The runtime keeps
+ * the record by this rule and a client applies it to the project the host answers with, so a list a person is
+ * looking at never grows a second row for the folder they just imported. */
+export function withProject(projects: readonly WorkspaceProject[], landed: WorkspaceProject): WorkspaceProject[] {
+  return [...projects.filter(p => p.dest !== landed.dest), landed];
+}
+
 /** Why a project a caller named is not on the workspace, with the ones that are. */
 export function noProjectLine(name: string, projects: readonly WorkspaceProject[]): string {
   const held = projects.length === 0 ? "it has no projects" : `its projects are ${projects.map(p => p.name).join(", ")}`;

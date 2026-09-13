@@ -10,8 +10,10 @@ import { cn } from "../../lib/utils";
 
 /** The keycap bevel: a 1 px light along the inside of the top edge, turned to a 1 px shade while pressed. */
 const KEYCAP_BEVEL = "not-disabled:inset-shadow-[0_1px_--theme(--color-white/16%)] [:active,[data-pressed]]:inset-shadow-[0_1px_--theme(--color-black/8%)]";
-/** The secondary's body: the input hairline, the popover fill (a translucent tint of it in dark) and a 1 px shade under the bottom edge in light. */
-const OUTLINE_SURFACE = "border-input bg-popover not-dark:bg-clip-padding shadow-xs/5 not-disabled:not-active:not-data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] dark:bg-input/32 [:disabled,:active,[data-pressed]]:shadow-none";
+/** The hairline and fill a held primary takes in place of its own: read from here by a control that is drawn by hand rather than by this file, so the held look has one home. */
+const HELD_SURFACE = "border-input bg-popover dark:bg-input/32";
+/** The secondary's body: the held hairline and fill, no bevel, and a 1 px shade under the bottom edge in light. */
+const OUTLINE_SURFACE = `${HELD_SURFACE} not-dark:bg-clip-padding shadow-xs/5 not-disabled:not-active:not-data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] [:disabled,:active,[data-pressed]]:shadow-none`;
 /** The outline's faint dark-theme edge light, on the border pixel rather than inside it. */
 const OUTLINE_DARK_EDGE = "dark:not-disabled:before:shadow-[0_-1px_--theme(--color-white/2%)] dark:not-disabled:not-active:not-data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)]";
 
@@ -100,4 +102,4 @@ function Button({ className, variant, size, held = false, render, ...props }: Bu
 /** The orange confirm tier on an outline button: the one look for an action after which something does not come back. */
 const WARN_BUTTON = "border-warning/50 text-warning-foreground [:hover,[data-pressed]]:border-warning [:hover,[data-pressed]]:bg-warning/8";
 
-export { Button, BUTTON_GLYPH_INSET, buttonVariants, WARN_BUTTON };
+export { Button, BUTTON_GLYPH_INSET, buttonVariants, HELD_SURFACE, WARN_BUTTON };

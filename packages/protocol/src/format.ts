@@ -154,9 +154,16 @@ export function sizeFromWord(word: string): WorkspaceSize | undefined {
   return cpu > 0 && memMb > 0 ? { cpu, memMb } : undefined;
 }
 
+/** The row a size names among the ones offered, with whatever that row carries beside the shape, or nothing where
+ * the provider offers no such size. The one match, so a picker reading a size's rate and a refusal reading whether
+ * it is offered cannot disagree about which row a size is. */
+export function sizeOffer<T extends WorkspaceSize>(sizes: readonly T[], size: WorkspaceSize): T | undefined {
+  return sizes.find(s => s.cpu === size.cpu && s.memMb === size.memMb);
+}
+
 /** Whether a size is one the provider offers; the golden's own size is taken without this check. */
 export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize): boolean {
-  return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
+  return sizeOffer(sizes, size) !== undefined;
 }
 
 /** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
@@ -243,10 +250,20 @@ export function fmtElapsed(ms: number): string {
   return seconds < 60 ? `${seconds}s` : fmtDuration(seconds * 1_000);
 }
 
-/** A turn's cost in dollars: cents, or four places under a cent so a short turn does not read as free. */
+/** Every spend figure a person reads, in one shape: cents, whatever the size. Three figures in one thread used to
+ * read $0.51, $0.22 and $0.0000, and a reader cannot tell at a glance that the third is the smallest of them. A
+ * turn under a cent reads $0.00, which is what it costs to the cent. */
 export function fmtCost(usd: number): string {
-  return usd < 0.01 ? `$${usd.toFixed(4)}` : `$${usd.toFixed(2)}`;
+  return `$${usd.toFixed(2)}`;
 }
+
+/** The word beside a figure nobody is billed for: what the agent's own table lists for the tokens a turn spent, on
+ * a computer whose turns run on the person's own sign-in. The composer's model menu says the whole of it in
+ * whoPaysLines; this is the word the figure itself carries, where a person meets the figure long before the menu. */
+export const LIST_PRICE_WORD = "list price";
+
+/** A spend figure with the word that says what it is, where the surface has one to give it. */
+const spendFigure = (usd: number, word: string | undefined): string => (word === undefined ? fmtCost(usd) : `${fmtCost(usd)} ${word}`);
 
 /** How much of the reply a finished line carries: `tail`, its last line, which is what a person reads in a sidebar
  * row and what a wait answers with; `whole`, the final message entire, which is what a thread woken by the line acts
@@ -297,18 +314,18 @@ export function openedSpendPart(costUsd: number): string {
 
 /** The turn's own cost where a second figure stands beside it. The two count different things, one turn against
  * whole threads, so where both are shown each says which spend it is and neither can be read as the other. */
-export function turnSpendPart(costUsd: number): string {
-  return `${fmtCost(costUsd)} this turn`;
+export function turnSpendPart(costUsd: number, word?: string): string {
+  return `${spendFigure(costUsd, word)} this turn`;
 }
 
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
  * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
  * last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null): string[] {
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
   const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
   if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
-  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd) : fmtCost(turn.costUsd));
+  if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd, spendWord) : spendFigure(turn.costUsd, spendWord));
   if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
 }
@@ -1275,11 +1292,32 @@ export function storeUnreadLine(store: string, why: string): string {
   return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
-/** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
- * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
-export function vaultKeptLine(why: string): string {
-  return `the nap kept what was saved before it; ${why}`;
+/** The verdict when a nap could not store a fresh backup, said once with whatever the machine answered on the
+ * line's title: the machine's own words name folders and commands nobody asked for, and a person reading this
+ * needs to know where their files stand. The second clause is what is true of this workspace: an earlier nap's
+ * backup is what a rebuild would restore, older than the files the person left, and a workspace whose naps have
+ * never stored one has nothing off the machine at all. */
+export function vaultKeptLine(w: Pick<WorkspaceView, "vaultedAt">): string {
+  return `the nap saved no backup; ${w.vaultedAt === undefined ? "nothing is saved off the machine" : "what was saved before is kept"}`;
 }
+
+/** The verdict when a guest refused the hostname the fork asked for. Naming a fork is cosmetic, so the create goes
+ * on and the workspace answers to the name the machine booted with; the guest's own refusal rides the title. */
+export const HOSTNAME_KEPT = "hostname not set; the workspace keeps the machine's own name";
+
+/** The same step where the guest took the name, in the one form the creation log's lines are written in: lower
+ * case, no full stop, the workspace and never the machine's own id. */
+export function hostnameSetLine(host: string): string {
+  return `hostname set to ${host}`;
+}
+
+/** The creation log's line for the fork itself, in the words the app says a workspace and a computer in. */
+export function startingLine(name: string, where: string): string {
+  return `starting ${name} on ${where}`;
+}
+
+/** The last line of a create, as the word table ends it. */
+export const CREATE_READY = "ready";
 
 /** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the
  * time of day is noise on a row about thirty characters wide. */
@@ -2394,6 +2432,14 @@ export function undrivenRefusal(name: string, machine: string, action: string): 
   return `${name} is ${machine}, which wsp does not run; it cannot ${action}`;
 }
 
+/** The one sentence a forget on a workspace wsp does not run the machine of is refused with. Such a machine is
+ * never gone, so the sentence about a machine still standing at a provider says two impossible things on it: there
+ * is no provider to pause it at, and the road that takes the record away is the delete, which asks a provider for
+ * nothing either. */
+export function forgetUndrivenRefusal(name: string, machine: string): string {
+  return `${name} runs on ${machine}, which is not at a provider; run wsp delete ${name}`;
+}
+
 /** The one sentence a workspace on a machine wsp does run refuses a verb with when the provider under it has no
  * road for that verb: the machine is wsp's to move, so the refusal names the provider's limit rather than telling a
  * person their fork is their own computer. Each verb reads its own capability, so what is missing is that verb's
@@ -2930,13 +2976,45 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
- * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
- * carries that, and a row that said it twice was a row that said it in two wordings. The count is what the caller
- * reads off the workspace list, never off the row: a row carries at most the one workspace its join recorded, so
- * this computer's own workspace and a provider's forks are on neither. */
-export function placeWorkspacesCell(view: PlaceView, count: number): string {
-  return view.docker === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
+/** The Workspaces cell of that table: how many stand on the computer, what it has cost this month where somebody
+ * is charging for them, and the one thing about the computer that changes what a person may put there. Whether it
+ * is answering is not one of them: the state slot beside its name carries that, and a row that said it twice was a
+ * row that said it in two wordings. The count is what the caller reads off the workspace list, never off the row:
+ * a row carries at most the one workspace its join recorded, so this computer's own workspace and a provider's
+ * forks are on neither. */
+export function placeWorkspacesCell(view: PlaceView, count: number, monthUsd?: number): string {
+  const { count: n, note } = placeWorkspacesParts(view, count, monthUsd);
+  return note === undefined ? n : `${n} · ${note}`;
+}
+
+/** The same cell in its two parts, for a table that draws them in two inks: the count a person is counting, and
+ * the note behind it, which is the mock's muted clause. A line that is one string (the command line's row, a
+ * title) reads placeWorkspacesCell instead; both are this one rule. */
+export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: number): { count: string; note?: string } {
+  const n = `${count}`;
+  // Only a provider bills: a computer of the person's own runs their workspaces for nothing, whatever it runs them on.
+  if (view.kind === "provider") return monthUsd === undefined ? { count: n } : { count: n, note: spentThisMonth(monthUsd) };
+  return view.docker === true ? { count: n } : { count: n, note: AGENTS_ONLY };
+}
+
+/** What a computer that holds no Docker of its own runs: the person's agents, and no workspace but the one it is. */
+export const AGENTS_ONLY = "agents only";
+
+/** What a place has taken since the first of the month, the clause every surface that says it says. */
+export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this month`;
+
+/** The Spend row of a place's detail: the month behind it, what it burns right now and how many workspaces that is
+ * across. A row burning nothing says so with the rate rather than dropping the clause, since a $0.00/hr that is
+ * measured and a figure left out read differently. */
+export function placeSpendLine(spend: { monthUsd: number; rateUsdPerHour: number }, workspaces: number): string {
+  return `${spentThisMonth(spend.monthUsd)} · ${fmtRate(spend.rateUsdPerHour)} now across ${plural(workspaces, "workspace")}`;
+}
+
+/** The foot under the places table: what the providers that have taken something this month took, together, and how
+ * many of them that is. A provider that took nothing is not in the count, whether nothing was ever metered on it or
+ * its workspaces have all been asleep since last month: a count of two where one charged reads as two bills. */
+export function placesSpendFoot(monthUsd: number, providers: number): string {
+  return `${spentThisMonth(monthUsd)} across ${plural(providers, "provider")}`;
 }
 
 /** The one line that takes wsp off a computer it is typed on. */
