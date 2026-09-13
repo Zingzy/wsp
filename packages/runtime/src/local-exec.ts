@@ -43,12 +43,19 @@ import { EXEC_CHUNK_BYTES, psCpuSeconds, RUN_STOP_MS, shellQuote, TURN_IDLE_MS, 
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 
+/** One reading of the work a turn's process group has done, in the ticks the activity clock counts, or undefined
+ * when this computer cannot answer for the group. */
+export type GroupWorkReader = (pgid: number, then: (ticks: number | undefined) => void) => void;
+
 export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
   root: string;
   /** The folder a run's script, log, pid and exit code live in. One folder per state file, so two hosts on this
    * computer never sweep each other's turns. */
   runDir: string;
+  /** How the turn's tree is read; ps is the road on this computer. A test hands in a reader that answers off the
+   * clock the rule measures against, since what a real tree is given on a loaded box is not what the rule is. */
+  readWork?: GroupWorkReader;
 }
 
 /** How often the log is read and the limits are read against the clock; the cloud road polls its guest the same way,
@@ -109,7 +116,7 @@ function cpuTicks(time: string): number {
  * node hands only five errnos to a spawn's async error path and throws the rest (EPERM where ps is out of reach,
  * ENOMEM on a full box) straight out of execFile, so both roads answer with no reading, and a turn whose tree
  * cannot be read is left on its stream alone. */
-function readGroupWork(pgid: number, then: (ticks: number | undefined) => void): void {
+const readGroupWork: GroupWorkReader = (pgid, then) => {
   const sum = (stdout: string): number => {
     let ticks = 0;
     for (const row of stdout.split("\n")) {
@@ -123,7 +130,7 @@ function readGroupWork(pgid: number, then: (ticks: number | undefined) => void):
   } catch {
     then(undefined);
   }
-}
+};
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -280,6 +287,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
   const now = opts.now ?? Date.now;
   const pollMs = opts.pollMs ?? POLL_MS;
   const runDir = opts.runDir;
+  const readWork = opts.readWork ?? readGroupWork;
   /** A handle this factory could have minted, and nothing else: the shape is read here, by the one predicate both
    * the attach road and the sweep read, so nothing that turned up in the run folder reaches a signal on the
    * strength of being there. */
@@ -359,7 +367,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         const pid = leader();
         if (pid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
           reading = true;
-          readGroupWork(pid, ticks => {
+          readWork(pid, ticks => {
             reading = false;
             if (ticks !== undefined) activity.read(ticks, at);
           });
