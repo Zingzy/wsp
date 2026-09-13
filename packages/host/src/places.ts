@@ -40,6 +40,7 @@ import {
   fmtSize,
   placeDaemonPaths,
   workFolderIn,
+  hostKeyKeptNote,
   hostKeyRefusal,
   isLoopback,
   joinAddressOf,
@@ -266,11 +267,29 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
     if (hostUrls.length === 0) throw new Error(ADD_LOOPBACK_REFUSAL);
     stage("connect", "running");
     const backend = deps.backend ?? new SshBackend();
-    const { machine, login, hostKey } = await backend.adopt(reach);
+    // The dial writes the box's key into this computer's own known_hosts on its way in, whether or not the login
+    // that follows it stands, so the step is ticked off what the client holds afterwards and not off the login's
+    // outcome: this is the one thing the add does to the computer the person is sitting at, and since the refusal
+    // no longer carries ssh's own note about it, a failed login has nothing else that would say so. The file is
+    // the client's own answer rather than the default the plan line names, so a config that points it elsewhere is
+    // read out. A dial that never got far enough to exchange a key leaves the step where it was: nothing was written.
+    const sayKey = async (key: string | undefined): Promise<void> => {
+      if (key === undefined) return;
+      stage("host-key", "done", hostKeyKeptNote(key, await backend.knownHostsFile(reach).catch(() => undefined)));
+    };
+    let adopted: Awaited<ReturnType<SshBackend["adopt"]>>;
+    try {
+      adopted = await backend.adopt(reach);
+    } catch (e) {
+      await sayKey(await backend.keyFor(reach).catch(() => undefined));
+      throw e;
+    }
+    const { machine, login, hostKey } = adopted;
     const name = req.name?.trim() !== undefined && req.name.trim() !== "" ? req.name.trim() : sshMachineName(reach);
     const at = placeDaemonPaths(login.HOME);
     const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls, codeFile: `${at.wsp}/join-code`, name });
     stage("connect", "done", await osSaid(machine));
+    await sayKey(hostKey);
     stage("wsp", "running");
     await deployDaemon(machine, {
       place,

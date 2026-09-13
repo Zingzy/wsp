@@ -468,15 +468,26 @@ exit 0
 `;
 }
 
+/** The first file the bundle would carry that this computer has not got, named in the words the asset table gives
+ * it; nothing when every one is there. Read off disk and nothing else, so a run can ask before it boots anything
+ * what the deploy will ask for after the machine is billing. */
+export function missingBundleFile(daemonDir = assetDir("daemon"), cliDir = assetDir("cli")): string | undefined {
+  for (const target of GUEST_DAEMON_TARGETS) {
+    const from = daemonBinaryIn(daemonDir, target.triple);
+    if (!existsSync(from)) return `${assetName("daemon")} missing: ${from}`;
+  }
+  const cliProof = join(cliDir, assetProof("cli"));
+  return existsSync(cliProof) ? undefined : `${assetName("cli")} missing: ${cliProof}`;
+}
+
 /** Lay out an installable copy of the daemon for one place: the static binary for each chip a guest can be, the
  * wsp command, and the browser shim. Nothing in it is built on the machine. */
 export async function stageDaemonBundle(stageDir: string, place: DaemonPlace, daemonDir = assetDir("daemon"), cliDir = assetDir("cli")): Promise<void> {
-  // Read before anything is copied: an asset folder that was never built is named here, in the words the asset
-  // table gives it, rather than as a raw copy failure halfway through a bundle.
+  // Read before anything is copied, rather than as a raw copy failure halfway through a bundle. A run that boots a
+  // machine asks the same question before the confirm, so nothing bills while this is what stops the deploy.
+  const missing = missingBundleFile(daemonDir, cliDir);
+  if (missing !== undefined) throw new Error(missing);
   const binaries = GUEST_DAEMON_TARGETS.map(target => ({ target, from: daemonBinaryIn(daemonDir, target.triple) }));
-  for (const { from } of binaries) if (!existsSync(from)) throw new Error(`${assetName("daemon")} missing: ${from}`);
-  const cliProof = join(cliDir, assetProof("cli"));
-  if (!existsSync(cliProof)) throw new Error(`${assetName("cli")} missing: ${cliProof}`);
   mkdirSync(stageDir, { recursive: true });
   // Both chips' binaries: the host does not know the guest's before the bundle lands, and the deploy keeps one.
   for (const { target, from } of binaries) {

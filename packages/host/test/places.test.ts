@@ -700,7 +700,10 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
         return { exitCode: 0, stdout: `${[...lines, "DAEMON_UP"].join("\n")}\n`, stderr: "" };
       },
     };
-    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, hostKey: "ssh-ed25519 SHA256:abc" }) };
+    const backend = {
+      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, hostKey: "ssh-ed25519 SHA256:abc" }),
+      knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
+    };
     const stages: string[] = [];
     const installed = await placeInstaller({ backend: backend as never, ...assets(root) })(
       { address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] },
@@ -713,9 +716,44 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     expect(printed).toEqual([WSP_READY_LINE, PLACE_JOINED_LINE]);
     expect(ran.join("\n")).not.toContain("NODE_VERSION");
     // Every step reaches done in order, off those two lines: the bundle landing is running from the connect until
-    // WSP_READY, the join from then until PLACE_JOINED.
-    expect(stages).toEqual(["connect running", "connect done (Linux 6.8.0)", "wsp running", "wsp done", "service running", "service done"]);
+    // WSP_READY, the join from then until PLACE_JOINED. The dial's own write to this computer's known_hosts is a
+    // step of its own, right after the connect, carrying the key it kept.
+    expect(stages).toEqual(["connect running", "connect done (Linux 6.8.0)", "host-key done (ssh-ed25519 SHA256:abc)", "wsp running", "wsp done", "service running", "service done"]);
     expect(stages.some(line => line.startsWith("node"))).toBe(false);
+  });
+
+  it("ticks the known_hosts step on a login ssh would not take, since the dial wrote the key before it was refused", async () => {
+    const root = tmp("install-refused");
+    const backend = {
+      adopt: async () => Promise.reject(new Error("maya@box: Permission denied (publickey).")),
+      keyFor: async () => "ssh-ed25519 SHA256:abc",
+      // This computer's config points the file somewhere other than the default the plan line names, so the step
+      // says which file was written rather than leaving a person to read the default as the truth.
+      knownHostsFile: async () => "/Users/lena/.ssh/known_hosts_work",
+    };
+    const stages: string[] = [];
+    const install = placeInstaller({ backend: backend as never, ...assets(root) });
+    await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`))).rejects.toThrow(
+      "Permission denied (publickey).",
+    );
+    // The plan said the add would write this computer's known_hosts, and it did: the step says so with the key it
+    // kept, which is the whole of what a person can check. Nothing else on a failed screen would say it now that
+    // the refusal no longer carries ssh's own note.
+    expect(stages).toEqual(["connect running", "host-key done (ssh-ed25519 SHA256:abc in /Users/lena/.ssh/known_hosts_work)"]);
+  });
+
+  it("leaves the known_hosts step alone where the dial never got far enough to exchange a key", async () => {
+    const root = tmp("install-nokey");
+    const backend = {
+      adopt: async () => Promise.reject(new Error("ssh: connect to host box port 22: Connection refused")),
+      keyFor: async () => undefined,
+      knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
+    };
+    const stages: string[] = [];
+    const install = placeInstaller({ backend: backend as never, ...assets(root) });
+    await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`))).rejects.toThrow("Connection refused");
+    // Nothing was written, so nothing says it was: the line stands waiting, which is what happened.
+    expect(stages).toEqual(["connect running"]);
   });
 });
 

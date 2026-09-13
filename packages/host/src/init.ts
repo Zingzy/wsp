@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
 import { planGoldenRecipe, planImport, type BuildContext } from "./image-recipe.js";
 import {
@@ -136,6 +136,10 @@ export interface InitOptions {
   statePath: string;
   /** This computer's home directory, where the ticked paths are read from at build time. */
   home: string;
+  /** The first file this computer has not got that the build would put on the machine, or nothing when every one
+   * is there. Wired by whoever wires the deploy that carries them, so a run that installs no daemon of its own
+   * checks for none; read before the confirm, so nothing boots for a file the deploy was always going to ask for. */
+  bundleFile?: () => string | undefined;
   /** Reads Keychain-held logins chosen as copy; the real one raises macOS's consent dialog. */
   secrets: SecretReader;
   platform: Platform;
@@ -211,7 +215,9 @@ interface Earlier {
 export const GOLDEN_NAME = "default";
 const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What ends a builder this run could not: a record its dead holder left is stale to the next start, which stops it. */
-const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
+/** What to do about a machine this computer could not get the provider to kill, whichever road left it: the stop
+ * on a signal and the failure that rolled back both end on it, so a person reads one answer for one machine. */
+export const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
 /** The stage a wait on the account's machine cap belongs to: the machine is what there is no room for. */
 const CAP_WAIT_STAGE = "creating";
 const dim = (s: string): string => styleText("dim", s);
@@ -249,6 +255,13 @@ export interface StageStep {
 export interface StageView {
   steps: StageStep[];
   failure?: string;
+  /** What became of the machine the failure ended, where one existed: every rollback in the engine kills the
+   * builder on its way out, and the failed frame it sends carries the ids the provider would not take. A failure
+   * before the first stage ran had no machine, so nothing here, and the stop line says nothing was booted. */
+  machine?: "gone" | "left";
+  /** The machines that rollback could not remove, by the ids the failed frame named them with: they bill until
+   * something takes them, so the line that says so names them the way the stop on a signal does. */
+  left?: string[];
 }
 
 export interface StageFrame {
@@ -293,6 +306,10 @@ export const SEAL_STEPS: readonly StageWords[] = [
   { stage: "sealed", start: GOLDEN_STAGE_WORDS.sealed, end: "Sealed", fail: "Seal failed" },
 ];
 
+/** The stages the seal runs, as a set: the one home for the question, since a seal's own failure answers for the
+ * builder in its own words and the machine its rollback leaves is the smoke fork, not the one being billed for. */
+export const SEAL_STAGES: ReadonlySet<string> = new Set<string>(SEAL_STEPS.map(w => w.stage));
+
 const LAST_STAGE = new Set<string>(["ready", "sealed"]);
 /** Cells the step row keeps for its clock: room for a build past an hour ("61m 44s"). */
 const CLOCK_CELLS = 7;
@@ -302,6 +319,8 @@ const CLOCK_CELLS = 7;
 export function reduceStages(frames: readonly StageFrame[], words: readonly StageWords[] = PREPARE_STEPS): StageView {
   const steps: StageStep[] = [];
   let failure: string | undefined;
+  let machine: StageView["machine"];
+  let left: string[] | undefined;
   let current: StageStep | undefined;
   let since: number | undefined;
   const close = (at: number | undefined): void => {
@@ -316,6 +335,7 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
     if (f.name !== GOLDEN_NAME) continue;
     if (f.stage === "failed") {
       failure = f.detail ?? "no detail given";
+      const already = steps.length;
       // With nothing running the failure lands on the stage about to run: the first the frames never named.
       let failing = current;
       if (failing === undefined) {
@@ -326,6 +346,9 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
         }
       }
       if (failing !== undefined) failing.state = "failed";
+      // A stage already behind this one means the create answered, so a machine existed and the rollback took it.
+      machine = already === 0 || failing === undefined || SEAL_STAGES.has(failing.stage) ? undefined : (f.left?.length ?? 0) > 0 ? "left" : "gone";
+      left = machine === "left" ? [...f.left!] : undefined;
       current = undefined;
       continue;
     }
@@ -357,7 +380,7 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
     }
     step.state = "current";
   }
-  return failure !== undefined ? { steps, failure } : { steps };
+  return { steps, ...(failure !== undefined ? { failure } : {}), ...(machine !== undefined ? { machine } : {}), ...(left !== undefined ? { left } : {}) };
 }
 
 /** One stage as one line: the glyph, the label padded so details line up, the latest detail,
@@ -1078,6 +1101,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     cancel(`Nothing was booted. The rows and their sizes are listed in ${path}; shrink or remove the largest on this computer and run wsp init again. The recipe is kept.`, out);
     return { code: 1 };
   }
+  // Every file the build will put on the machine, read off this computer before the confirm names a price: the
+  // deploy asks for them once the builder is up and billing, and a run that cannot install the daemon it boots a
+  // machine for should not boot one. The failed frame is the run's own, so the stage a client draws carries the
+  // reason and nothing reads as having run.
+  const missing = opts.bundleFile?.();
+  if (missing !== undefined) {
+    // The fault once, then the fix, as the two refusals above it read; a client watching has one line for the
+    // stage that refused, so that one carries both.
+    log.error(missing, out);
+    io.json?.({ event: "stage", stage: "failed", detail: buildNeedsFileLine(missing) });
+    cancel(BUILD_NEEDS_FILE_FIX, out);
+    return { code: 1 };
+  }
   let recipe = planned.recipe;
   // Beside a host already serving this state file, everything from here is that host's: it owns the state, the
   // provider and the machines, so this run ends at the confirm and the build goes through its init job. The
@@ -1364,9 +1400,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const message = e instanceof Error ? e.message : String(e);
     runLog.note(`failed: ${message}`);
     if (view.failure === undefined) log.error(message, out);
-    // A failed frame means a machine existed and prepare killed it; without one the create itself refused.
     log.step(logLine(), out);
-    outro(`${view.failure !== undefined ? "That machine is gone." : "Nothing was booted."} Run wsp init again to start over; the recipe is kept.`, out);
+    // The machine's fate is the frames', not this run's guess: the engine's rollback says whether the kill landed.
+    const became = view.machine === undefined ? "Nothing was booted." : view.machine === "gone" ? MACHINE_GONE_LINE : `The machine did not stop (${(view.left ?? []).join(", ")}); ${SWEEP}`;
+    outro(`${became} Run wsp init again to start over; the recipe is kept.`, out);
     return { code: 1 };
   } finally {
     io.signals.off("SIGINT", onInt);

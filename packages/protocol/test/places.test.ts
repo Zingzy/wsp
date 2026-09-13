@@ -7,6 +7,7 @@ import {
   EventUnion,
   GUEST_DAEMON_DIR,
   GUEST_WSP_BIN,
+  KNOWN_HOSTS,
   PLACE_ADD_WORDS,
   PLACE_LINK_NONCE_BYTES,
   PLACE_PORT_OFFSET,
@@ -147,6 +148,17 @@ describe("the steps of an install on a computer over ssh", () => {
     expect(placeAddSheetWord("join", "done")).toBe("connected to this Mac");
     // What one line of the sheet's list holds at 12 px mono beside a check: a longer word is cut from the right.
     for (const step of PlaceAddStep.options) for (const state of ["running", "done"] as const) expect(placeAddSheetWord(step, state).length).toBeLessThanOrEqual(51);
+  });
+
+  it("names the one thing the add does to the computer the person is sitting at, before Add is pressed, and names the file by the path they would type", () => {
+    // Every other step is about the box; this one is about this computer, and a list that leaves it out tells a
+    // person who reads before they click that nothing here touches their own machine.
+    expect(PlaceAddStep.options).toContain("host-key");
+    expect(placeAddSheetWord("host-key", "running")).toContain(KNOWN_HOSTS);
+    expect(placeAddSheetWord("host-key", "running")).toBe("keeps the box's host key in ~/.ssh/known_hosts here");
+    expect(PLACE_ADD_WORDS["host-key"]).toContain(KNOWN_HOSTS);
+    // It belongs where it happens: the dial that connects is what writes the file.
+    expect(PlaceAddStep.options.indexOf("host-key")).toBe(PlaceAddStep.options.indexOf("connect") + 1);
   });
 });
 

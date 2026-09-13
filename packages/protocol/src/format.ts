@@ -1152,6 +1152,17 @@ export function backgroundTasksLine(running: number): string {
   return `ended with ${plural(running, "background task")} running`;
 }
 
+/** What a launch that woke a machine and then died before its agent said a word answers with. The wake was this
+ * launch's and nothing else ran there, so the machine goes back where the launch found it rather than billing out
+ * an idle window for work that never happened. */
+export const workspaceAsleepAgainLine = (name: string): string => `${name} is asleep again`;
+
+/** The same launch on a machine it did not wake, or one another thread is working on: nothing is touched, so the
+ * line says what that costs by naming when the idle window takes it. Whole minutes, since nothing turns on the
+ * seconds and a countdown a person reads once need not move. */
+export const workspaceStaysAwakeLine = (name: string, napsInMs?: number): string =>
+  `${name} stays awake${napsInMs === undefined ? "" : ` · naps in ${fmtUptime(napsInMs)}`}`;
+
 /** The reason a status carries when the runtime's idle policy napped a workspace, with the one reading of it back
  * beside it: the runtime stamps the nap through `of` and the app's paused line takes the window out through
  * `windowIn`, so the words and their parse are one thing and a rewording moves both at once. */
@@ -1886,6 +1897,16 @@ export const NETWORK_LOST_LINE = "This computer lost its network";
 /** The failures a provider client raises when the network is gone rather than when the provider refused. */
 const OFFLINE_FAILURE = /^fetch failed$|\b(ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETDOWN|ENETUNREACH|EHOSTUNREACH)\b/;
 
+/** What to do about a file the build would put on the machine and this computer has not got, which is read before
+ * the confirm so nothing is booted and nothing bills for a file the deploy was always going to ask for. The file
+ * itself is no part of this: a terminal says it once above this line, the way every other refusal there names the
+ * fault and then the fix. A shipped install carries every one, so the fix names the install first and the
+ * checkout's own build after it. */
+export const BUILD_NEEDS_FILE_FIX = "Nothing was booted. An installed wsp carries it; a checkout builds the command and places the daemon binaries with packages/wspx/scripts/daemon-binary.mjs.";
+
+/** The same refusal with the file in front of it, for the one line a client has to draw a stage that failed. */
+export const buildNeedsFileLine = (missing: string): string => `${missing}. ${BUILD_NEEDS_FILE_FIX}`;
+
 /** The sentence a stopped build shows for what happened: this computer's own word when every part of the error is
  * the network going away, else the error's parts said once. A run that failed the same way twice reports it twice;
  * the person reads one reason, not a list. */
@@ -1893,6 +1914,15 @@ export function initStoppedLine(error: string): string {
   const parts = [...new Set(error.split(";").map(p => p.trim()).filter(p => p !== ""))];
   if (parts.length === 0) return error;
   return parts.every(p => OFFLINE_FAILURE.test(p)) ? NETWORK_LOST_LINE : parts.join("; ");
+}
+
+/** The sentence a build that stopped on its own ends on: what stopped it, then what became of the machine it had
+ * booted, in the same words a stop the person asked for uses. A build that never booted one says nothing of a
+ * machine: the stage it refused at already says nothing was booted. */
+export function initFailedLine(error: string, machine?: "gone" | "left"): string {
+  const said = initStoppedLine(error);
+  if (machine === undefined) return said;
+  return `${said} ${machine === "gone" ? MACHINE_GONE_LINE : STOP_LEFT_MACHINE_LINE}`;
 }
 
 /** Whether the job's phase is one it ends on. */
@@ -2245,6 +2275,20 @@ export function agentsWord(agents: { spawn: boolean; maxMachines: number } | und
 /** What a listing and the workspace card say about a workspace's switch, one line either way. */
 export function agentsLine(agents: { spawn: boolean; maxMachines: number; maxDepth: number } | undefined): string {
   return agents?.spawn !== true ? "agents may not spawn" : `agents may spawn: up to ${agents.maxMachines} ${agents.maxMachines === 1 ? "workspace" : "workspaces"}`;
+}
+
+/** Where the ssh client on this computer writes the key a machine first answered with under its own default
+ * config, in the words a person would type, since the file is theirs and nothing wsp owns. This is what a screen
+ * can name before anything is dialled, which is where a person reads what pressing Add will do; the file that was
+ * actually written is the client's own answer, and the step that writes it says which one it was. */
+export const KNOWN_HOSTS = "~/.ssh/known_hosts";
+
+/** What the step that wrote a machine's key into this computer's known_hosts says it left there: the fingerprint
+ * whole, so it can be checked against the machine's own, and the file the client answered with where that is not
+ * the one the plan line named. A person with UserKnownHostsFile pointed elsewhere reads the true path here rather
+ * than the default above it. */
+export function hostKeyKeptNote(hostKey: string, file?: string): string {
+  return file === undefined || file.endsWith(KNOWN_HOSTS.slice(1)) ? hostKey : `${hostKey} in ${file}`;
 }
 
 /** What a first dial says about the machine it reached: the host key it answered with, for the person to compare

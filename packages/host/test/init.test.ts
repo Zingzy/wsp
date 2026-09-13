@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
-import { ALREADY_APPLIED, folderName, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry } from "@wsp/catalog";
@@ -22,7 +22,7 @@ import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.j
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
-import { reduceStages, runInit, stageLine, summaryNote, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { reduceStages, runInit, stageLine, summaryNote, SWEEP, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, folderQuestion } from "../src/init-first.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
@@ -1898,8 +1898,61 @@ describe("wsp init, flags and no terminal", () => {
     expect(result.code).toBe(1);
     expect(f.text()).toContain("Insufficient credit");
     expect(f.text()).toContain("Nothing was booted. Run wsp init again");
-    expect(f.text()).not.toContain("That machine is gone");
     expect(f.backends[0]!.machines).toHaveLength(0);
+  });
+
+  it("a daemon binary this computer has not got refuses before the confirm: nothing boots, nothing bills, and the line names the file and the fix", async () => {
+    const missing = "wsp-daemon binary missing: /Users/z/wsp/packages/wspx/daemon/aarch64-unknown-linux-musl/wsp-daemon";
+    const f = fake({ yes: true, json: true });
+    f.opts.bundleFile = () => missing;
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const out = f.text();
+    // The file names the fault, the cancel carries the fix, and the reason is said once; the price was never
+    // named and no machine was made.
+    expect(out).toContain(missing);
+    expect(out).toContain(BUILD_NEEDS_FILE_FIX);
+    expect(out.split(missing)).toHaveLength(2);
+    expect(out).not.toContain("Boot a ");
+    expect(f.backends).toHaveLength(0);
+    // A client watching the run has one line for the stage that refused, so that one carries both halves.
+    expect(f.records).toContainEqual({ event: "stage", stage: "failed", detail: buildNeedsFileLine(missing) });
+  });
+
+  it("a stage that fails after the boot ends on the machine sentence a stop gives, and exits non-zero", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    // The builder went with the failure, and the run says so in the words a stop the person asked for uses.
+    expect(f.backends[0]!.machines[0]!.killed).toBe(true);
+    expect(f.text()).toContain(`${MACHINE_GONE_LINE} Run wsp init again to start over; the recipe is kept.`);
+  });
+
+  it("a stage failure whose rollback the provider refused names the machine still billing, as the stop on a signal does", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => (cmd.includes("claude.ai/install.sh") ? { exitCode: 1, stdout: "", stderr: "curl: (6) Could not resolve host" } : guestAnswer(cmd));
+      const made = backend.create.bind(backend);
+      backend.create = async spec => {
+        const machine = await made(spec);
+        machine.kill = async () => Promise.reject(new Error("provider said no"));
+        return machine;
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    // The id is what somebody can act on, so the failure road prints it where the signal road already did.
+    expect(f.text()).toContain(`The machine did not stop (${f.backends[0]!.machines[0]!.id}); ${SWEEP}`);
+    expect(f.text()).not.toContain("nothing is billing");
   });
 
   it("over ssh the address is printed with the forward line instead of opening a browser", async () => {
@@ -2634,7 +2687,6 @@ describe("wsp init, flags and no terminal", () => {
 
 describe("wsp init, a signal during prepare", () => {
   const gone = () => Object.assign(new Error("gone"), { kind: "missing", status: 404 });
-  const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
 
   /** The tools stage hangs on its first install until the machine is deleted, as the provider fails a call on a machine that is gone;
    * the signal lands while that call is in flight. `onKill` sees the machine's kill before it runs. */
