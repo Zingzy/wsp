@@ -828,7 +828,7 @@ describe("a folder dragged from the desktop", () => {
     window.wsp = { droppedPath: file => `/Users/dev/${file.name}` };
     const api = fakeApi([API, WEB, MAC], [status(API), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]);
     api.planProject = vi.fn(async () => PLAN);
-    api.importProject = vi.fn(async (o: { dest: string }) => ({ dest: o.dest, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [] }));
+    api.importProject = vi.fn(async (o: { dest: string }) => ({ dest: o.dest, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [], project: { name: "dev", dest: o.dest, importedAt: "2026-09-12T10:00:00.000Z", size: 900 } }));
     await mount(api, "api");
     return api;
   }
@@ -883,6 +883,8 @@ describe("a folder dragged from the desktop", () => {
     await waitFor(() => expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_m", ...registerRequest("/Users/dev/spoo") }));
     expect(api.planProject).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(useStore.getState().toast).toBe(registeredLine("/Users/dev/spoo")));
+    // The folder is on the workspace as soon as the host answers, so the pane lists it with no refresh and no daemon.
+    expect(useStore.getState().workspaces.find(w => w.id === "ws_m")?.projects).toEqual([{ name: "dev", dest: "/Users/dev/spoo", importedAt: "2026-09-12T10:00:00.000Z", size: 900 }]);
     expect(screen.queryByRole("dialog")).toBeNull();
 
     act(() => void window.dispatchEvent(drag("dragenter", carrying)));

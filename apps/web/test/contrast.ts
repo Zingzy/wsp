@@ -41,6 +41,32 @@ export const textContrast = (page: Page, selector: string): Promise<number[]> =>
     }),
   );
 
+/** How far each element's own fill stands from what it sits on, per channel out of 255, translucent layers
+ * composited up to the first opaque one: what tells a quiet bar from the card under it, where there is no text to
+ * take a contrast ratio of. */
+export const fillDelta = (page: Page, selector: string): Promise<number[]> =>
+  page.locator(selector).evaluateAll(els =>
+    els.map(el => {
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      const parse = (c: string): number[] => {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = c;
+        ctx.fillRect(0, 0, 1, 1);
+        const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+        return [r!, g!, b!, a! / 255];
+      };
+      const over = (top: number[], under: number[]): number[] => [0, 1, 2].map(i => top[i]! * top[3]! + under[i]! * (1 - top[3]!));
+      const layers: number[][] = [];
+      for (let n: Element | null = el.parentElement; n !== null && layers.at(-1)?.[3] !== 1; n = n.parentElement) {
+        const c = parse(getComputedStyle(n).backgroundColor);
+        if (c[3]! > 0) layers.push(c);
+      }
+      const under = layers.reverse().reduce((below, top) => over(top, below), [255, 255, 255]);
+      const fill = over(parse(getComputedStyle(el).backgroundColor), under);
+      return Math.round(Math.max(...[0, 1, 2].map(i => Math.abs(fill[i]! - under[i]!))));
+    }),
+  );
+
 /** The oklch hue of each element's text colour, in degrees to a tenth: what tells two tones apart to the eye once
  * they share a lightness. */
 export const textHue = (page: Page, selector: string): Promise<number[]> =>

@@ -91,7 +91,7 @@ describe("consent", () => {
 
 describe("the landed line", () => {
   it("names the folder, its path on the machine and the workspace, then how many were left out and where the list is", () => {
-    const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"], agents: [] };
+    const result = { dest: "/Users/me/code/proj", files: 11, bytes: 2_900, parts: 1, cut: [], rewritten: [".git/config"], agents: [], project: { name: "proj", dest: "/Users/me/code/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 2_900 } };
     expect(landedLine(result, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine(result, "/Users/me/code/proj/", "api")).toBe("proj is at /Users/me/code/proj on api.");
     expect(landedLine({ ...result, cut: ["keys/id_ed25519", ".env"] }, "/Users/me/code/proj", "api")).toBe("proj is at /Users/me/code/proj on api; 2 files left out, listed above.");

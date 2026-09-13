@@ -154,9 +154,16 @@ export function sizeFromWord(word: string): WorkspaceSize | undefined {
   return cpu > 0 && memMb > 0 ? { cpu, memMb } : undefined;
 }
 
+/** The row a size names among the ones offered, with whatever that row carries beside the shape, or nothing where
+ * the provider offers no such size. The one match, so a picker reading a size's rate and a refusal reading whether
+ * it is offered cannot disagree about which row a size is. */
+export function sizeOffer<T extends WorkspaceSize>(sizes: readonly T[], size: WorkspaceSize): T | undefined {
+  return sizes.find(s => s.cpu === size.cpu && s.memMb === size.memMb);
+}
+
 /** Whether a size is one the provider offers; the golden's own size is taken without this check. */
 export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize): boolean {
-  return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
+  return sizeOffer(sizes, size) !== undefined;
 }
 
 /** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the

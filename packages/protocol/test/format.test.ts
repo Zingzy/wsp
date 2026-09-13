@@ -102,6 +102,7 @@ import {
   notifyLine,
   notifyTail,
   offeredSize,
+  sizeOffer,
   plural,
   PROVIDER_UNREACHED_LINE,
   providerAnswerLine,
@@ -914,6 +915,9 @@ describe("machine size words", () => {
     expect(offeredSize(offers, { cpu: 2, memMb: 8192 })).toBe(true);
     expect(offeredSize(offers, { cpu: 4, memMb: 8192 })).toBe(false);
     expect(offeredSize([], { cpu: 2, memMb: 4096 })).toBe(false);
+    // The same match answers with the row itself, which is where a picker reads the rate it quotes.
+    expect(sizeOffer(offers, { cpu: 2, memMb: 8192 })).toEqual({ cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 });
+    expect(sizeOffer(offers, { cpu: 4, memMb: 8192 })).toBeUndefined();
     expect(fmtRate(0.11)).toBe("$0.11/hr");
     expect(sizeRefusal("4x8", offers)).toBe("4x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
     expect(sizeRefusal("big", offers)).toBe("big is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");

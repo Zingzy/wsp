@@ -24,6 +24,9 @@ const SIZES = [
   { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
 ];
 
+/** What a keycap is drawn as, read the way ui/button.test.tsx reads it: the outline carries the input's hairline. */
+const isOutline = (button: HTMLElement): boolean => button.className.split(" ").includes("border-input") && !button.className.split(" ").includes("bg-primary");
+
 const dialogWith = (props: Partial<Parameters<typeof NewWorkspaceDialog>[0]> = {}) => (
   <NewWorkspaceDialog
     initialName="workspace-1"
@@ -99,14 +102,25 @@ describe("the Where control", () => {
     const dialog = await open({ copies: [COPY], sizes: SIZES, goldenSize: { cpu: 2, memMb: 4096 }, onCreate });
     expect(within(dialog).queryByRole("radiogroup", { name: "Size" })).toBeNull();
     fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
-    expect(caption(dialog)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
+    // The ticked row's rate, not the provider's default: the caption prices the workspace this dialog would make.
+    expect(caption(dialog)).toBe("$0.11/hr while awake · naps to $0 · your image is there, v1");
     const sizes = within(dialog).getByRole("radiogroup", { name: "Size" });
     const rows = within(sizes).getAllByRole("radio");
     expect(rows.map(r => r.closest("label")!.textContent)).toEqual(SIZES.map(size => `${fmtSize(size)}${fmtRate(size.rateUsdPerHour)}`));
     expect(rows.map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]);
     fireEvent.click(rows[1]!);
+    expect(caption(dialog)).toBe("$0.15/hr while awake · naps to $0 · your image is there, v1");
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
     expect(onCreate).toHaveBeenCalledWith("workspace-1", "box", { cpu: 2, memMb: 8192 });
+    vi.unstubAllGlobals();
+  });
+
+  it("quotes the row's own rate while no size is ticked, since none is priced yet", async () => {
+    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+    const dialog = await open({ copies: [COPY], sizes: SIZES, goldenSize: null });
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
+    expect(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "false"]);
+    expect(caption(dialog)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
     vi.unstubAllGlobals();
   });
 
@@ -147,15 +161,19 @@ describe("the Where control", () => {
 describe("with nowhere to put a workspace", () => {
   const NOWHERE = [HERE, { ...HETZNER, id: "p_9", name: "old-macbook", default: false, docker: false, forks: undefined }];
 
-  it("drops the control for two notes, makes Add a computer the loud one and holds Create beside it", async () => {
+  it("drops the control for two notes, the first of them why this computer is not on the list, and makes the one road forward the loud key", async () => {
     const onAddComputer = vi.fn();
     const dialog = await open({ places: NOWHERE, onAddComputer });
     expect(within(dialog).queryByRole("radiogroup", { name: "Where" })).toBeNull();
-    // What is missing, not what this computer already is: the sidebar beside the dialog may hold three workspaces.
-    expect(dialog.querySelector("[data-k=nowhere-here]")!.textContent).toBe("Nowhere to put a new workspace yet.");
+    // The answer to a person who has just read in Settings that this Mac is a computer where agents run.
+    expect(dialog.querySelector("[data-k=nowhere-here]")!.textContent).toBe("this Mac is already a workspace, the only one it can be");
     expect(dialog.querySelector("[data-k=nowhere-add]")!.textContent).toBe("Add a computer you own or connect a provider, and workspaces can be created there.");
     const add = within(dialog).getByRole("button", { name: "Add a computer" });
     expect(isHeld(add)).toBe(false);
+    // The one key that can be pressed here is the loud one: a held Create is drawn as the outline, so leaving this
+    // one outline too would give the dialog nothing to press first.
+    expect(isOutline(add)).toBe(false);
+    expect(within(dialog).getByRole("button", { name: "Cancel" }).className).not.toContain("bg-primary");
     expect(create(dialog).disabled).toBe(true);
     expect(isHeld(create(dialog))).toBe(true);
     expect(within(dialog).queryByRole("tooltip")).toBeNull();

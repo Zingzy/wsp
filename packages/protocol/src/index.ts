@@ -1419,9 +1419,10 @@ export const ProjectAgentResult = z.object({
 });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
- * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered, and
- * each named agent's outcome. */
-export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()), agents: z.array(ProjectAgentResult) });
+ * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered,
+ * each named agent's outcome, and the project the workspace now holds, so a client shows the folder in its list the
+ * moment the host answers rather than waiting for the machine to say anything about it. */
+export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()), agents: z.array(ProjectAgentResult), project: WorkspaceProject });
 export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
 /** The steps of one export in order; `failed` ends one that threw. */
 export const ProjectExportStage = z.enum(["packing", "downloading", "landing", "done", "failed"]);

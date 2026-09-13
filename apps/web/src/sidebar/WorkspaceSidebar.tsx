@@ -285,6 +285,7 @@ export function WorkspaceSidebar() {
     if (api?.importProject === undefined) return;
     try {
       const landed = await api.importProject({ workspaceId: project.id, ...registerRequest(source) });
+      useStore.getState().landProject(project.id, landed.project);
       useStore.setState({ toast: registeredLine(landed.dest) });
     } catch (e) {
       useStore.setState({ toast: `${project.displayName}: ${errorText(e)}` });

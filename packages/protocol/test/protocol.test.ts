@@ -1415,6 +1415,7 @@ describe("the project plan", () => {
         { agent: "opencode", files: 0, bytes: 0, outcome: "nothing" },
         { agent: "pi", files: 0, bytes: 0, outcome: "failed", error: "x already exists" },
       ],
+      project: { name: "proj", dest: "/root/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 2 },
     };
     expect(ProjectImportResult.parse(result)).toEqual(result);
     expect(ProjectImportResult.safeParse({ ...result, agents: [{ agent: "pi", files: 0, bytes: 0, outcome: "lost" }] }).success).toBe(false);
@@ -1451,7 +1452,7 @@ describe("the project export", () => {
     };
     expect(ProjectExportResult.parse(result)).toEqual(result);
     expect(ProjectExportResult.safeParse({ ...result, excluded: undefined }).success).toBe(false);
-    expect(ProjectImportResult.parse({ dest: "/root/p", files: 1, bytes: 1, parts: 1, cut: [], rewritten: [], agents: [{ agent: "codex", files: 1, bytes: 1, outcome: "transcript-only", skipped: 2 }] }).agents[0]).toMatchObject({ skipped: 2 });
+    expect(ProjectImportResult.parse({ dest: "/root/p", files: 1, bytes: 1, parts: 1, cut: [], rewritten: [], agents: [{ agent: "codex", files: 1, bytes: 1, outcome: "transcript-only", skipped: 2 }], project: { name: "p", dest: "/root/p", importedAt: "2026-09-12T10:00:00.000Z" } }).agents[0]).toMatchObject({ skipped: 2 });
   });
 });
 

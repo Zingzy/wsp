@@ -344,7 +344,7 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
         </ul>
       )}
       <div className="mt-2 flex items-center gap-1.5">
-        <Button size="xs" variant="outline" disabled={importAction.refusal !== null} title={importAction.refusal ?? importAction.hint ?? undefined} onClick={() => void runAction(importAction)}>
+        <Button size="xs" variant="outline" data-k="import-project" disabled={importAction.refusal !== null} title={importAction.refusal ?? importAction.hint ?? undefined} onClick={() => void runAction(importAction)}>
           Import a folder
         </Button>
         {images && (
