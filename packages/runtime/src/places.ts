@@ -30,6 +30,8 @@ import {
   placeNoLinkLine,
   placeStillInstalledLine,
   placeDialLine,
+  placeDialRoad,
+  sshRoadOf,
   placeNoDialLine,
   BackendFacts,
   type DaemonEvent,
@@ -922,19 +924,25 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const started = clockNow();
       const took = (): number => Math.max(0, Math.round(clockNow() - started));
       let dialled: PlaceDialled;
-      if (linked !== undefined) {
+      // Which road there is, off the one reading of it the app also draws its button from: a road here and no
+      // button there would be a press nobody could make, and a button there with no road here is one that answers
+      // only that there was nowhere to dial. Both halves are taken off that one reading rather than asked again.
+      const road = placeDialRoad({ present: linked !== undefined, road: held.road });
+      const link = road === "link" ? linked : undefined;
+      const ssh = road === "ssh" ? sshRoadOf(held.road) : undefined;
+      if (link !== undefined) {
         // The link's own heartbeat op: the cheapest frame that proves the computer at the other end is still
         // answering, rather than that this host is still holding a socket to it.
         try {
-          await bounded(linked.request("ping"), dialWaitMs, `ping on ${held.name}`);
+          await bounded(link.request("ping"), dialWaitMs, `ping on ${held.name}`);
           dialled = { at: stamp, answered: true, roundTripMs: took() };
         } catch (e) {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
         }
-      } else if (held.road?.ssh !== undefined && wiring.dial !== undefined) {
-        const login = { ssh: held.road.ssh, ...(held.road.keyPath !== undefined ? { keyPath: held.road.keyPath } : {}) };
+      } else if (ssh !== undefined && wiring.dial !== undefined) {
+        const login = { ssh, ...(held.road?.keyPath !== undefined ? { keyPath: held.road.keyPath } : {}) };
         try {
-          await bounded(wiring.dial(login), dialWaitMs, `ssh ${held.road.ssh}`);
+          await bounded(wiring.dial(login), dialWaitMs, `ssh ${ssh}`);
           dialled = { at: stamp, answered: true, roundTripMs: took() };
         } catch (e) {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
