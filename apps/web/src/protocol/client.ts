@@ -29,6 +29,7 @@ import {
   InitJob,
   InitSetup,
   type InitRoad,
+  PlaceDial,
   PlaceDoorView,
   PlaceSpend,
   PlaceStageEvent,
@@ -396,6 +397,10 @@ export interface Api {
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
   removePlace?(placeId: string): Promise<PlaceRemoved>;
+  /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
+   * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
+   * stands. A client without it draws no Try now rather than one that would ask nobody. */
+  dialPlace?(placeId: string): Promise<PlaceDial>;
   /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
    * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
    * computer once it has joined and rejects with the step's own sentence when the install stops. A client without
@@ -725,6 +730,9 @@ export function makeApi(c: ProtocolClient): Api {
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
+    // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
+    // reaches the table.
+    dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>

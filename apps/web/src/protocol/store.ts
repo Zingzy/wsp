@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -12,6 +12,7 @@ import { DisconnectedError, RequestError, type Api, type ConnStatus, type Protoc
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
+import { WHERE_WORDS } from "../settings/format.js";
 import { absenceOf, placeName, placeNamed } from "../settings/places.js";
 import { imageBuildFrame } from "../shell/creationLog.js";
 import { requestNewThread } from "../shell/shellRequests.js";
@@ -193,6 +194,9 @@ interface State {
   /** The same for Connect a provider, so a person who types it into the palette lands where the button leads. */
   openConnectProvider(): void;
   closeConnectProvider(): void;
+  /** Asks the host to dial one computer once and takes the row it answers with, so every surface reading that row
+   * says the same thing about it. Answers the whole of what came back for the slot that asked. */
+  dialPlace(placeId: string): Promise<PlaceDial>;
   applyEvent(e: ProtocolEvent): void;
   /** Rows come from the runtime (only it knows harness and final status); events say when to ask. */
   reloadSessions(workspaceId: string): Promise<void>;
@@ -654,6 +658,13 @@ export const useStore = create<State>((set, get) => {
     closeAddComputer() { set({ addComputerOpen: false }); },
     openConnectProvider() { set({ settingsOpen: true, connectProviderOpen: true }); },
     closeConnectProvider() { set({ connectProviderOpen: false }); },
+    async dialPlace(placeId) {
+      const api = get().api;
+      if (api?.dialPlace === undefined) throw new Error(WHERE_WORDS.cannotDial);
+      const answer = await api.dialPlace(placeId);
+      set(s => ({ places: s.places.map(p => (p.id === answer.place.id ? answer.place : p)) }));
+      return answer;
+    },
     applyWorkspace(workspace) {
       set(s => ({
         workspaces: s.workspaces.map(w => (w.id === workspace.id ? { ...w, ...workspace } : w)),

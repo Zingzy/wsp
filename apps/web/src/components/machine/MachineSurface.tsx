@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView, REPORTED_WORD, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, staleWord, useOutOfMemoryReading, useWorkspaceLive, type StaleWord } from "../../machine/live.js";
@@ -36,8 +36,10 @@ import { ForgetWorkspaceDialog } from "../ForgetWorkspaceDialog.js";
 import { ScrollArea } from "../ui/scroll-area.js";
 import { idleLabel, money, percentLabel } from "./format.js";
 import { TONE_TEXT } from "../../lib/tone.js";
+import { AbsentRoadNote } from "../../settings/AbsentRoad.js";
+import { WHERE_WORDS } from "../../settings/format.js";
 import { builtWhen } from "../../settings/image.js";
-import { THIS_COMPUTER_WORD } from "../../settings/places.js";
+import { THIS_COMPUTER_WORD, placeOf } from "../../settings/places.js";
 import { whereRuns } from "../../sidebar/workspaceRows.js";
 import { workspaceKindGlyph } from "../../workspaceKindGlyph.js";
 import { SnapshotStorageLine } from "./SnapshotStorageLine.js";
@@ -183,6 +185,28 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
   // is the surface with room for the command a person types on their own machine.
   const daemonLacks = (status ?? workspace).daemonRefusedAt?.why;
   const where = whereRuns(places, { workspace, status });
+  // The row this host holds for the computer under this workspace, where there is one: what it last said about
+  // itself is on that row, and a pane that printed pending was asking the machine while the row already knew.
+  const at = placeOf(places, workspace);
+  const awayMs = at === undefined ? null : awayMsOf(at, now);
+  // The road is read whether or not the computer is answering, so the Address row stands in both states and the
+  // three rows under it do not move 29 px the day a computer goes quiet. Only the sentence and the button below
+  // turn on the silence: there is nothing to say about reaching a computer that is answering.
+  const road = at === undefined ? null : absentRoad({ name: at.name, road: at.road, awayMs, dialled: at.dialled });
+  /** A fact the machine has stopped answering for, read off its row. Null where this host holds no row or the row
+   * never carried it, which is the one case a slot still says pending. The mark rides the OS row alone, since one
+   * reading of when the facts are from is what a person needs and four is noise. */
+  const known = (value: string | undefined, mark: number | null = null): string | null =>
+    absent === null || value === undefined || value === "" ? null : mark === null ? value : lastKnown(value, mark);
+  /** The one figure that grows while the computer is up, so it cannot stand beside the others unmarked: dated by
+   * the report it was read in, which can be hours older than the last frame this host saw. A row written before
+   * the report carried a stamp of its own has only the silence to date it by, and says so. */
+  const reportedAgoMs = at?.reportedAt === undefined ? NaN : now - Date.parse(at.reportedAt);
+  const uptimeKnown = (): string | null => {
+    if (absent === null || at?.uptimeMs === undefined) return null;
+    const figure = fmtUptime(at.uptimeMs);
+    return Number.isNaN(reportedAgoMs) ? lastKnown(figure, awayMs) : lastKnown(figure, reportedAgoMs, REPORTED_WORD);
+  };
   return (
     <Section label="Workspace">
       <div className="mt-1 divide-y divide-border/40">
@@ -217,18 +241,23 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
             </Row>
             {/* The system, the uptime and the folder are read over the daemon, so while the one this host started
                 is not running there is nothing coming and three rows reading pending are three rows waiting on
-                nothing. A computer this host only waits for keeps them: what it last reported is what is known
-                about it, and dropping the rows would take that away on top of the silence. */}
+                nothing. A computer this host only waits for keeps them, reading what it last reported: that is
+                what is known about it, and dropping the rows would take it away on top of the silence. */}
             {absent?.start === undefined ? (
               <>
+                {road === null || road.address === null ? null : (
+                  <Row label={WHERE_WORDS.address} k="address">
+                    {road.address}
+                  </Row>
+                )}
                 <Row label="OS" k="os">
-                  {facts?.os ?? "pending"}
+                  {facts?.os ?? known(at?.os, awayMs) ?? "pending"}
                 </Row>
                 <Row label="Uptime" k="uptime">
-                  {facts === undefined ? "pending" : fmtUptime(facts.uptimeMs)}
+                  {facts === undefined ? (uptimeKnown() ?? "pending") : fmtUptime(facts.uptimeMs)}
                 </Row>
                 <Row label="Folder" k="folder">
-                  {facts?.folder ?? "pending"}
+                  {facts?.folder ?? known(at?.home) ?? "pending"}
                 </Row>
               </>
             ) : null}
@@ -255,6 +284,9 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
           {status.reason}
         </p>
       )}
+      {/* Under the state's own sentence, which says the computer is silent: this says where the app expects it and
+          offers the one thing left to try. */}
+      {at !== undefined && absent !== null ? <AbsentRoadNote place={at} now={now} /> : null}
       {vaultStale !== null && (
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground" data-k="vault-refused" title={vault.vaultRefused}>
           {vaultKeptLine(vault)}
