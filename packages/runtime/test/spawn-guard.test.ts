@@ -85,7 +85,7 @@ describe("agents spawning agents", () => {
     store = memoryStore();
     localWiring = {
       backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, ...o }),
+      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),

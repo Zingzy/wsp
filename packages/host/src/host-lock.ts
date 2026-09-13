@@ -82,6 +82,13 @@ export function hostTokenFor(statePath: string): string | undefined {
   }
 }
 
+/** Where the runs a turn on this computer leaves live, beside the lock and the token: the script, the log, the pid
+ * and the exit code of every turn this host launched here. One folder per state file, so a host that comes back
+ * finds its own turns still running and two hosts on this computer never sweep each other's. */
+export function hostRunDir(statePath: string): string {
+  return join(dirname(statePath), "runs");
+}
+
 /** Where a host nobody is watching writes what a terminal run would have shown, beside the lock and the token. */
 export function hostLogPath(statePath: string): string {
   return join(dirname(statePath), "host.log");

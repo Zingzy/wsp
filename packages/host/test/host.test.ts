@@ -20,6 +20,9 @@ import { VERSION } from "../src/version.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { closeStandInGuests, fakeGuestAt } from "../src/fake-guest.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
   version: string;
@@ -738,7 +741,7 @@ describe("host sweeps orphaned machines", () => {
 
     expect(backend.machines[0]!.killed).toBe(false);
     expect(lines).toEqual([
-      `reap: left alone ${kept.id}: your earlier builder from this setup, still first-life, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init, or it is stopped at six hours`,
+      `reap: left alone ${kept.id}: your earlier builder from this setup, still sealable, 0 s old, $0.11/h (about $0.00 so far); reuse it with wsp init, or it is stopped at six hours`,
     ]);
     expect(await store.get("builders", kept.id)).toMatchObject({ firstLife: true });
   });

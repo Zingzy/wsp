@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -50,7 +50,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_SHIM, MAC_ONLY, catalogEntry } from "@wsp/catalog";
+import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_HOME, LINUXBREW_SHIM, MAC_ONLY, catalogEntry } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
@@ -61,6 +61,10 @@ const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): Rec
   bring: true,
   ...over,
 });
+
+/** A plan's base rows as a reader reports them: the row's id and name, and the note built for the computer read. */
+const baseRows = (plan: { base: readonly { id: string; name: string; entry: Parameters<typeof baseNote>[0]; version?: string }[] }, platform: "darwin" | "linux" = "darwin"): [string, string, string][] =>
+  plan.base.map(b => [b.id, b.name, baseNote(b.entry, b.version, platform)]);
 
 const homebrewStep = (): string => toolInstallsFor([row({ rung: "tools", id: "tools/brew/gh", linux: "yes" })]).installs.find(i => i.id === "tools/homebrew")!.cmd;
 
@@ -788,10 +792,10 @@ describe("toolInstallsFor", () => {
     expect(cmd("tools/homebrew")).not.toContain("Brewfile");
     expect(cmd("tools/brew-toolchain/glibc")).toMatch(/brew install glibc'$/);
     expect(cmd("tools/brew-toolchain/gcc")).toMatch(/brew install gcc'$/);
-    expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*brew tap zingzy\/tap'$/);
-    expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install gh'$/);
+    expect(cmd("tools/brew-tap/zingzy/tap")).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew tap zingzy\/tap'$/);
+    expect(cmd("tools/brew/gh")).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install gh'$/);
     const shared = cmd("tools/brew-shared");
-    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'export HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
+    expect(shared).toMatch(/su -s \/bin\/bash linuxbrew -c 'cd \. 2>\/dev\/null \|\| cd \/home\/linuxbrew\nexport HOMEBREW_NO_AUTO_UPDATE=1 .*NONINTERACTIVE=1 HOMEBREW_CURL_RETRIES=1\n/);
     expect(shared).toContain(`brew deps --for-each '\\''gh'\\'' '\\''pipx'\\'' '\\''go'\\'' | sed`);
     // Homebrew's own toolchain is never in the shared set: it installed before, on request, and stays that way.
     expect(shared).toContain(`grep -vx -e '\\'''\\'' -e glibc -e gcc | sort | uniq -d`);
@@ -817,7 +821,7 @@ describe("toolInstallsFor", () => {
       { id: "tools/brew/mas", note: "no Linux bottle" },
       { id: "tools/go/junk", note: "no module to install from" },
     ]);
-    expect(t.base).toEqual([{ id: "tools/npm/pnpm", name: "pnpm", note: "pnpm is part of the base" }]);
+    expect(baseRows(t)).toEqual([["tools/npm/pnpm", "pnpm", "pnpm is part of the base"]]);
     expect(t.brewfile).toBe(['tap "zingzy/tap"', 'brew "gh"', ""].join("\n"));
   });
 
@@ -867,19 +871,22 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/brew/docker-compose", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/python@3.14", linux: "yes" }),
     ], table);
-    expect(t.base).toEqual([
-      { id: "tools/brew/jq", name: "jq", note: "jq is part of the base" },
-      { id: "tools/npm/pnpm", name: "pnpm", note: "pnpm is part of the base" },
-      { id: "tools/brew/python@3.12", name: "Python 3.12", note: "Python 3.12 is part of the base" },
-      { id: "tools/brew/node", name: "Node 22 with npm", note: "Node 22 is part of the base; this Mac runs Node 24" },
-      { id: "tools/brew/python", name: "Python 3.12", note: "Python 3.12 is part of the base; this Mac runs Python 3.14" },
-      { id: "tools/brew/uv", name: "uv", note: "uv is part of the base" },
-      { id: "tools/cargo/ripgrep", name: "ripgrep", note: "ripgrep is part of the base" },
-      { id: "tools/brew/docker-compose", name: "Docker engine and compose", note: "Docker engine and compose is part of the base" },
+    expect(baseRows(t)).toEqual([
+      ["tools/brew/jq", "jq", "jq is part of the base"],
+      ["tools/npm/pnpm", "pnpm", "pnpm is part of the base"],
+      ["tools/brew/python@3.12", "Python 3.12", "Python 3.12 is part of the base"],
+      ["tools/brew/node", "Node 22 with npm", "Node 22 is part of the base; this Mac runs Node 24"],
+      ["tools/brew/python", "Python 3.12", "Python 3.12 is part of the base; this Mac runs Python 3.14"],
+      ["tools/brew/uv", "uv", "uv is part of the base"],
+      ["tools/cargo/ripgrep", "ripgrep", "ripgrep is part of the base"],
+      ["tools/brew/docker-compose", "Docker engine and compose", "Docker engine and compose is part of the base"],
     ]);
+    // The plan names no computer: it carries the floor row and the version read here, so the same rows read as a
+    // Linux computer's when that is what was read.
+    expect(baseRows(t, "linux").map(r => r[2])).toContain("Node 22 is part of the base; this computer runs Node 24");
     // A row with no table entry and no version says the base row alone; a versioned row on the floor's major does too.
-    expect(toolInstallsFor([row({ rung: "tools", id: "tools/brew/node", linux: "yes" })]).base[0]!.note).toBe("Node 22 with npm is part of the base");
-    expect(toolInstallsFor([row({ rung: "tools", id: "tools/npm/node", label: "node", version: "22.20.0" })]).base[0]!.note).toBe("Node 22 with npm is part of the base");
+    expect(baseRows(toolInstallsFor([row({ rung: "tools", id: "tools/brew/node", linux: "yes" })]))[0]![2]).toBe("Node 22 with npm is part of the base");
+    expect(baseRows(toolInstallsFor([row({ rung: "tools", id: "tools/npm/node", label: "node", version: "22.20.0" })]))[0]![2]).toBe("Node 22 with npm is part of the base");
     expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/python@3.14"]);
     expect(t.skipped).toEqual([]);
     expect(t.brewfile).toBe('brew "python@3.14"\n');
@@ -897,8 +904,8 @@ describe("toolInstallsFor", () => {
 
   it("the housekeeping after the loop is autoremove then a full cleanup, each as linuxbrew with the tools PATH", () => {
     expect(BREW_HOUSEKEEPING).toHaveLength(2);
-    expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c '.*brew autoremove'$/);
-    expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c '.*brew cleanup -s --prune=all'$/);
+    expect(BREW_HOUSEKEEPING[0]).toMatch(/^export PATH=\/root\/\.local\/bin:.*\nsu -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew autoremove'$/);
+    expect(BREW_HOUSEKEEPING[1]).toMatch(/\nsu -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*brew cleanup -s --prune=all'$/);
   });
 
   it("puts the one brew a PATH reaches in the directory Homebrew's own line prepends, and Homebrew's brew where no PATH goes", () => {
@@ -916,7 +923,10 @@ describe("toolInstallsFor", () => {
     expect(cmd).toContain(`chmod 0755 ${BREW}`);
     // Written after the chown, so the file root runs with root's own rights is not the linuxbrew user's to rewrite.
     expect(cmd.indexOf(`> ${BREW}`)).toBeGreaterThan(cmd.indexOf("chown -R linuxbrew:linuxbrew"));
-    expect(LINUXBREW_SHIM).toContain(`su -s /bin/bash linuxbrew -c 'exec "$0" "$@"' -- ${BREW_REAL}`);
+    // A person's own brew reads the folder they are in; one linuxbrew cannot read (root's home on some images)
+    // would stop Homebrew before it starts, so the shim moves off it and only off it.
+    expect(LINUXBREW_SHIM).toContain(`su -s /bin/bash linuxbrew -c 'cd . 2>/dev/null || cd ${LINUXBREW_HOME}
+exec "$0" "$@"' -- ${BREW_REAL}`);
   });
 
   it("costs a line and not the step when the upstream branch will not fetch: the shim still lands", () => {
@@ -1106,7 +1116,7 @@ describe("catalog rows", () => {
 
   it("a catalog tool the floor carries is the base's, an id the catalog does not know is skipped, and a row this computer has keeps its own road at the laptop's version", () => {
     const t = toolInstallsFor([catalog("git"), catalog("nothing", { label: "nothing" }), row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler", version: "4.1.0" })]);
-    expect(t.base).toEqual([{ id: "tools/catalog/git", name: "git", note: "git is part of the base" }]);
+    expect(baseRows(t)).toEqual([["tools/catalog/git", "git", "git is part of the base"]]);
     expect(t.skipped).toEqual([{ id: "tools/catalog/nothing", note: "not in the catalog" }]);
     expect(t.installs.map(i => [i.id, i.manager, i.note])).toEqual([["tools/npm/wrangler", "npm", undefined]]);
     expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g wrangler@4\.1\.0$/);

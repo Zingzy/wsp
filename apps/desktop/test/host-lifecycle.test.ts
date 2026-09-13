@@ -334,14 +334,15 @@ describe("statePathIn", () => {
   beforeEach(() => {
     home = mkdtempSync(join(tmpdir(), "wsp-desktop-home-"));
     cwd = mkdtempSync(join(tmpdir(), "wsp-desktop-cwd-"));
-    writeFileSync(join(cwd, ".env"), "SOLARI_API_KEY=slr_live_fake\n");
+    // What makes a folder a checkout of wsp: its own root package.json naming the workspace.
+    writeFileSync(join(cwd, "package.json"), `${JSON.stringify({ name: "wsp", private: true })}\n`);
   });
   afterEach(() => {
     rmSync(home, { recursive: true, force: true });
     rmSync(cwd, { recursive: true, force: true });
   });
 
-  it("shares the checkout's state with wspx when a development run is launched from a folder holding a .env", () => {
+  it("shares the checkout's state with wspx when a development run is launched from a checkout of wsp", () => {
     expect(statePathIn(home, { packaged: false, cwd })).toBe(join(cwd, ".wsp", "state.json"));
   });
 
@@ -349,7 +350,7 @@ describe("statePathIn", () => {
     expect(statePathIn(home, { packaged: true, cwd })).toBe(join(home, "state.json"));
   });
 
-  it("lets WSP_HOME win over the launch folder's .env, packaged or not, which is what the locate doc says", () => {
+  it("lets WSP_HOME win over the launch folder, packaged or not, which is what the locate doc says", () => {
     for (const packaged of [true, false]) expect(statePathIn(home, { packaged, cwd, env: home })).toBe(join(home, "state.json"));
   });
 
@@ -357,7 +358,7 @@ describe("statePathIn", () => {
     expect(statePathIn(home, { packaged: false, cwd, env: "" })).toBe(join(cwd, ".wsp", "state.json"));
   });
 
-  it("takes the home when the launch folder holds no .env, packaged or not", () => {
+  it("takes the home when the launch folder is no checkout, packaged or not", () => {
     const bare = mkdtempSync(join(tmpdir(), "wsp-desktop-bare-"));
     for (const packaged of [true, false]) expect(statePathIn(home, { packaged, cwd: bare })).toBe(join(home, "state.json"));
     rmSync(bare, { recursive: true, force: true });

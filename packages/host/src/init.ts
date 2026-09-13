@@ -114,6 +114,9 @@ export interface InitOptions {
   importFolder?: string;
   /** --no-local: the workspace step's tick off, so a run that asks nothing leaves this computer alone. */
   noLocal?: boolean;
+  /** --rebuild: seal the next version from a fresh machine rather than from the image plus the changes. The
+   * question a run at a terminal is asked, for a run that asks nothing; the recipe road takes it too. */
+  rebuild?: boolean;
   /** Reads this computer, telling onRung how many rows each rung found as it finishes. */
   collect(onRung: (rung: Rung, rows: number) => void): Promise<Manifest>;
   /** Reads this computer against the catalog and the agents' session histories for the recipe the screens start
@@ -203,7 +206,7 @@ export interface InitResult {
 
 /** What an earlier run left on the account for this recipe. */
 interface Earlier {
-  /** The first-life builder of this setup carrying this recipe, when there is one. */
+  /** The builder of this setup carrying this recipe that can still be sealed, when there is one. */
   attach?: GoldenBuilderView;
   /** This setup's builders that cannot be attached to; the boot question offers to stop them first. */
   stop: GoldenBuilderView[];
@@ -988,7 +991,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   } else {
     // A run that asks nothing answers every screen with the word it would have opened on, read from the screens' own defaults.
     answers = defaultAnswers(manifest, brew);
-    for (const [id, choice] of signInItems(manifest, brew, opts.platform).initial) {
+    for (const [id, choice] of signInItems(manifest, brew, opts.platform, opts.home).initial) {
       answers.choices.set(id, choice);
       if (choice === "copy") answers.ticks.add(id);
       else answers.ticks.delete(id);
@@ -1151,7 +1154,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (b.foreignOwner !== undefined) return "not this setup's builder";
     if (b.heldBy !== undefined) return `in use by another wsp process (pid ${b.heldBy.pid})`;
     if (b.building === true) return "its setup never finished";
-    if (b.firstLife !== true) return "cannot be sealed after a restart";
+    if (b.sealable !== true) return "cannot be sealed after a restart";
     const changes = b.recipe !== undefined && imp.recipe !== undefined ? recipeChanges(b.recipe, imp.recipe, manifest) : [];
     if (changes.length === 0) return "built from a different recipe";
     const named = changes.slice(0, 4);
@@ -1163,13 +1166,13 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (attach !== undefined) lines.push(`${describeBuilder(attach)}; reusable by this run once the others are stopped`);
     log.warn(["A builder from an earlier wsp init is still running on the account:", ...lines].join("\n"), out);
   };
-  // An earlier run's builder is attached to when it is still first-life, this setup's, and carries this
+  // An earlier run's builder is attached to when a seal can still be taken from it, this setup's, and carries this
   // recipe. Another of this setup's is stopped by its recorded id once the person says so; one another
   // live process holds or another setup owns is never touched from here.
   const earlierBuilder = async (): Promise<Earlier | "blocked"> => {
     const earlier = await rt.golden.builders();
     // A builder kept since a save is the golden's own machine: the update's, never an attach target or a blocker.
-    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.firstLife === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.sealed === undefined && b.recipeHash === imp.recipeHash);
+    const attach = earlier.find(b => b.name === GOLDEN_NAME && b.sealable === true && b.foreignOwner === undefined && b.heldBy === undefined && b.building !== true && b.sealed === undefined && b.recipeHash === imp.recipeHash);
     const blocking = earlier.filter(b => b !== attach && b.sealed === undefined);
     const pids = blocking.flatMap(b => (b.heldBy !== undefined ? [b.heldBy.pid] : []));
     if (pids.length > 0 || blocking.some(b => b.foreignOwner !== undefined)) {
@@ -1231,9 +1234,10 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const question = bootQuestion(recipe, opts.pricing);
   const ready = readyLine(manifest, ticks, choices, uploadBytes, brew, buildTakes(lastBuild), customRows(catalogRecipe));
   const { attach, stop } = earlier;
-  // A golden built from a recipe takes the delta instead of a rebuild, unless the person picks the rebuild; a
-  // builder already carrying this recipe is attached to instead, since the update would bill beside it.
-  const current = attach === undefined ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
+  // A golden built from a recipe takes the delta instead of a rebuild, unless the person picks the rebuild or asked
+  // for one on the command line; a builder already carrying this recipe is attached to instead, since the update
+  // would bill beside it.
+  const current = attach === undefined && opts.rebuild !== true ? await rt.golden.recipe(GOLDEN_NAME) : undefined;
   if (current !== undefined) {
     const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, lastBuild, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
     if (road !== "rebuild") {
@@ -1348,7 +1352,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const line =
       e instanceof PrepareStoppedError && e.builderId !== undefined
         ? e.kept
-          ? `${opening} Your earlier builder ${attach?.name ?? GOLDEN_NAME} was not stopped: it has a first life worth keeping. ${builderStaysLine(e.builderId, opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize), attachCommand)}`
+          ? `${opening} Your earlier builder ${attach?.name ?? GOLDEN_NAME} was not stopped: it still has a seal in it. ${builderStaysLine(e.builderId, opts.pricing.rateUsdPerHour(attach?.size ?? opts.pricing.defaultSize), attachCommand)}`
           : e.left === undefined
             ? `${opening} ${MACHINE_GONE_LINE}`
             : `${opening} The machine did not stop (${e.left}); ${SWEEP}`

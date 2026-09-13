@@ -878,16 +878,19 @@ describe("serveRuntime init door (the host's init job, read and driven from the 
     expect((await c.request("init.answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }))["job"]).toEqual(JOB);
     expect((await c.request("init.step", { at: 2 }))["job"]).toMatchObject({ step: 2 });
     expect((await c.request("init.retry", { tool: "gh" }))["job"]).toEqual(JOB);
-    expect((await c.request("init.build", { firstWorkspace: "first" }))["job"]).toMatchObject({ phase: "building" });
+    expect((await c.request("init.build", { firstWorkspace: "first", rebuild: true }))["job"]).toMatchObject({ phase: "building" });
     expect((await c.request("init.signInCode", { tool: "gcloud", code: "4/0Afake" }))["job"]).toMatchObject({ phase: "signing-in" });
     expect((await c.request("init.cancel"))["job"]).toMatchObject({ phase: "cancelled" });
+    // The door is the one home for what the build op takes: naming the whole object here is what makes a field the
+    // server spreads in and the door never declared a type error rather than a field nothing checks.
+    const built: Parameters<InitDoor["build"]>[0] = { firstWorkspace: "first", rebuild: true };
     expect(calls).toEqual([
       ["keys", { provider: "box", key: "ascii_live_fake", rows: { "logins/claude": "sk-ant-x" } }],
       ["start", { road: "agent", harness: "claude" }],
       ["answer", { screen: "tools", ticks: ["gh"], answers: { "logins/gh": "machine" } }],
       ["step", { at: 2 }],
       ["retry", { tool: "gh" }],
-      ["build", { firstWorkspace: "first" }],
+      ["build", built],
       ["signInCode", { tool: "gcloud", code: "4/0Afake" }],
       ["cancel"],
     ]);

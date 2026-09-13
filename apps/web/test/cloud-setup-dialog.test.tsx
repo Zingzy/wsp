@@ -1149,8 +1149,11 @@ describe("the cloud setup sheet", () => {
       ],
       progress: { done: 1, total: 3 },
     };
+    // The fold draws a cross, so the count leaves it out: one answer, read by the glyph and by the fraction.
+    expect(sealing.progress).toEqual(initStageCount(initBuildRows(sealing.rows).rows));
     const { api, dialog } = await open({ setup: { ...HELD, job: sealing } });
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    expect(k(dialog, "count").textContent).toBe("1 of 3");
     const gh = dialog.querySelector<HTMLElement>('[data-row="sign-in/gh"]')!;
     expect(gh.querySelector("[data-k=state]")!.textContent).toBe("not signed in");
     // The stage the run-out folds into wears the failed glyph beside not signed in, open or folded, never a tick.
@@ -1192,13 +1195,14 @@ describe("the cloud setup sheet", () => {
         { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "Sign in to GitHub CLI", ...initSignInOutcome("not-signed-in", "linux"), detail: "no sign-in within 16m" },
         { id: "stage/snapshotting", kind: "stage", label: GOLDEN_STAGE_WORDS.snapshotting, state: INIT_ROW_STATES.running },
       ],
-      progress: { done: 2, total: 3 },
+      progress: { done: 1, total: 3 },
     };
+    expect(sealing.progress).toEqual(initStageCount(initBuildRows(sealing.rows).rows));
     const { api, dialog } = await open({ setup: { ...HELD, job: sealing } });
     await waitFor(() => expect(k(dialog, "build")).toBeDefined());
     // Every sign-in is over, so the screen is the list with them folded, not the slide that waits on the person.
     expect(k(dialog, "title").textContent).toBe(CLOUD_SETUP_WORDS.build.headline);
-    expect(k(dialog, "count").textContent).toBe("2 of 3");
+    expect(k(dialog, "count").textContent, "the ready stage alone; the fold wears a cross and is no part of the done").toBe("1 of 3");
     const codex = dialog.querySelector<HTMLElement>('[data-row="sign-in/codex"]')!;
     expect(codex.querySelector("[data-k=state]")!.textContent).toBe("copied from this computer");
     expect(codex.querySelector("[data-k=retry]"), "a copy is over, so there is nothing to run again").toBeNull();

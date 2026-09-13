@@ -51,7 +51,7 @@ async function served(sampler: ReturnType<typeof fakeSampler>): Promise<string> 
   root = mkdtempSync(join(tmpdir(), "wsp-serve-sys-"));
   const local: LocalWiring = {
     backend: new LocalBackend({ root }),
-    execStream: o => localExecStream({ root: root!, ...o }),
+    execStream: o => localExecStream({ root: root!, runDir: join(root!, "runs"), ...o }),
     home: () => join(root!, ".claude"),
     homeDir: root,
     env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),

@@ -26,6 +26,9 @@ import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { guestAnswer, stubBackend, type StubBackend } from "./stub-backend.js";
 import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNREACHED_LINE, bornDeadAgent, captured, doneOnlyAgent, execGuest, exportGuest, heldAgent, launchedScript, launchedScripts, projectBundler, scriptedAgent, stuckAgent, toolingAgent, type Captured } from "./verbs-fixture.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 // A path the process may not read is refused here and not by chmod: these tests run as root, which reads anything.
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
@@ -793,6 +796,9 @@ describe("wsp verbs over the host", () => {
     const init = commandPage("init", COMMANDS_FOR_HELP["init"]!).replace(/\s+/g, " ");
     expect(init).not.toMatch(/(three|five|six) screens/);
     expect(init).toContain("one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build");
+    // The road a run that asks nothing takes is a question the screens ask a person; the flag is how the answer is given.
+    expect(init).toContain("--rebuild");
+    expect(init).toContain("seal the next version from a fresh machine rather than from your image plus the changes");
   });
 
   it("every line of wsp --help fits 100 columns", () => {

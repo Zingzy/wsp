@@ -29,6 +29,9 @@ import {
 import { setDefaultHost, stateIgnoredLine, writeHost } from "../src/hosts.js";
 import type { HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 function quietIO(lines: string[] = [], errors: string[] = []): CliIO {

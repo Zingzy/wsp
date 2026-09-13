@@ -40,6 +40,9 @@ import { ADDED_GROUP, BASE_GROUP, CATALOG_GROUP, FLOOR_LINE, HERE_GROUP, PROJECT
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { HOME, claudeLine, fakeHost } from "./recipe-fixture.js";
 
+/** The screens read this computer for whose login a copy would carry; a home with nothing in it names none. */
+const HOME_HERE = "/home/nobody";
+
 const KEY = { up: "\x1b[A", down: "\x1b[B", left: "\x1b[D", right: "\x1b[C", space: " ", enter: "\r", esc: "\x1b", ctrlC: "\x03" };
 const row = (r: Partial<Recipe["rows"][number]> & { id: string }): Recipe["rows"][number] => ({ kind: "tool", on: true, source: { kind: "popular", sessions: 0, images: 0 }, ...r });
 /** A few catalog entries, in the catalog's own order. */
@@ -145,7 +148,7 @@ describe("the sign-ins screen", () => {
   const words = (s: { items: { id: string; choices?: readonly { value: string }[] }[] }, id: string): string[] => s.items.find(i => i.id === id)!.choices!.map(c => c.value);
 
   it("the agents first, then the developer CLIs, then the MCP servers; every row has its choice and nothing has a bare tick", () => {
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin");
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", HOME_HERE);
     expect([...new Set(s.items.map(i => i.group))]).toEqual([AGENT_LOGINS, CLI_LOGINS]);
     expect(s.items.filter(i => i.group === AGENT_LOGINS).map(i => i.label)).toEqual(["Claude Code login", "Codex login", "Hermes Agent login", "Hermes Agent API keys"]);
     expect(s.items.filter(i => i.group === CLI_LOGINS).map(i => i.label)).toEqual(["GitHub CLI login", "kubectl config", "1Password CLI"]);
@@ -170,11 +173,11 @@ describe("the sign-ins screen", () => {
 
   it("a saved answer is where the row starts, and an answer the row cannot take falls back to its first", () => {
     const saved: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "gh" ? { ...r, signIn: "copy" as const } : r)) };
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved), new Map(), "darwin");
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), saved), new Map(), "darwin", HOME_HERE);
     expect(s.initial.get("logins/gh")).toBe("copy");
     const key: Recipe = { ...recipe, rows: recipe.rows.map(r => (r.id === "hermes" ? { ...r, signIn: "key" as const } : r)) };
     // Hermes takes no API key, so the row opens on the first word it does take.
-    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key), new Map(), "darwin").initial.get("logins/hermes")).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents(laptop), key), new Map(), "darwin", HOME_HERE).initial.get("logins/hermes")).toBe("copy");
   });
 
   it("an MCP server with auth is a row under its own group, named by the config it sits in, copy or skip", () => {
@@ -182,7 +185,7 @@ describe("the sign-ins screen", () => {
     const notes: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/notes", label: "notes", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "bring", detail: "stdio: npx notes-mcp; carries no secret" };
     const remote: ManifestEntry = { rung: "agents", id: "agents/mcp/mcp-remote", label: "mcp-remote sign-ins", group: "MCP sign-ins", paths: ["~/.mcp-auth"], bytes: 1800, default: "bring", consent: true, detail: "browser sign-ins saved by mcp-remote for remote servers: 1 token (1 KB)" };
     const locked: ManifestEntry = { rung: "agents", id: "agents/mcp/claude/mac", label: "mac", group: "Claude Code MCP servers", paths: [], bytes: 0, default: "skip", reason: "command is macOS-only, will not run", consent: true, detail: "stdio: /Applications/x; carries a secret: env A (4 B)" };
-    const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe), new Map(), "darwin");
+    const s = signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, notes, remote, locked] }), recipe), new Map(), "darwin", HOME_HERE);
     expect(s.items.filter(i => i.group === MCP_LOGINS).map(i => [i.label, i.why])).toEqual([
       ["github", "in Claude Code's config"],
       ["mcp-remote sign-ins", "sign-ins mcp-remote saved for Claude Code"],
@@ -193,20 +196,45 @@ describe("the sign-ins screen", () => {
     // A server carrying a secret stays off the machine until the person says copy; one the catalog locked out cannot move at all.
     expect(s.initial.get(github.id)).toBe("skip");
     expect(words(s, locked.id)).toEqual(["skip"]);
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe), new Map(), "darwin").initial.get(github.id)).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, { ...github, choice: "copy" }] }), recipe), new Map(), "darwin", HOME_HERE).initial.get(github.id)).toBe("copy");
     const off = { ...recipe, rows: recipe.rows.map(r => (r.id === "claude" ? { ...r, on: false } : r)) };
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off), new Map(), "darwin").items.map(i => i.id)).not.toContain(github.id);
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [...FIXTURE.entries, github, remote] }), off), new Map(), "darwin", HOME_HERE).items.map(i => i.id)).not.toContain(github.id);
   });
 
   it("a login whose command is not coming is listed with the reason and skip alone", () => {
     const off = { ...recipe, rows: recipe.rows.filter(r => r.id !== "kubectl") };
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), off), new Map(), "darwin");
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), off), new Map(), "darwin", HOME_HERE);
     expect(s.items.find(i => i.id === "logins/kube")).toMatchObject({ why: "kubectl is not coming", detail: ["kubectl is not coming: its tool row is unticked; copy or sign in ticks it", "~/.kube/config"] });
     expect(s.initial.get("logins/kube")).toBe("skip");
   });
 
+  it("the gh row names the login a copy would carry, so two logins on this computer are not a guess at the screen", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-pick-gh-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, ".config", "gh"), { recursive: true });
+    writeFileSync(join(dir, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n    user: Zingzy\n");
+    const gh = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir).items.find(i => i.id === "logins/gh")!;
+    expect(gh.choices!.find(c => c.value === "copy")!.label).toBe("copy from this Mac · Zingzy");
+    expect(gh.detail).toContain("signed in here as Zingzy; other stays on this computer");
+    // Nothing to pick between: the row says which login it is without naming anyone it leaves.
+    writeFileSync(join(dir, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        Zingzy:\n    user: Zingzy\n");
+    const one = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir).items.find(i => i.id === "logins/gh")!;
+    expect(one.detail).toContain("signed in here as Zingzy");
+    // Two logins and none marked in use: there is nothing to pick between, so the copy is not offered at all and
+    // the row says why. A saved copy answer has no choice to land on and falls to the sign-in on the machine.
+    writeFileSync(join(dir, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n");
+    const screen = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir);
+    const neither = screen.items.find(i => i.id === "logins/gh")!;
+    expect(neither.choices!.map(c => c.value)).toEqual(["machine", "skip"]);
+    expect(neither.detail).toContain("the file names no login in use here; sign in on the machine");
+    expect(screen.initial.get("logins/gh")).toBe("machine");
+    // A row with no per-account item answers as it always did: the copy names the computer and nothing else.
+    const kube = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir).items.find(i => i.id === "logins/kube")!;
+    expect(kube.choices!.find(c => c.value === "copy")!.label).toBe("copy from this Mac");
+  });
+
   it("a group header counts how its rows answered, in the choice order", () => {
-    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin");
+    const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", HOME_HERE);
     const agents = s.items.filter(i => i.group === AGENT_LOGINS);
     expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  2 sign in  0 API key  0 skip");
   });

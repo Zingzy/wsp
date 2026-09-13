@@ -13,7 +13,6 @@ import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, t
 import {
   HARNESS_ADAPTERS,
   createRuntime,
-  endLocalRuns,
   goldenHead,
   hostIdentity,
   jsonFileStore,
@@ -54,7 +53,7 @@ import { buildBesideHost } from "./init-beside.js";
 import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
 import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
-import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
+import { addressLines, dialAddress, hostLogPath, hostRunDir, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
 import { startOnce } from "./start-once.js";
 import {
@@ -83,7 +82,7 @@ import { connectCommand, disconnectCommand, hostsCommand } from "./connect.js";
 import { stopRecordedConnector } from "./connector.js";
 import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, startRelay } from "./relay-link.js";
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
-import { currentHome, currentHomePointer, homeNamed, realState, servingHome } from "./serving-home.js";
+import { currentHome, currentHomePointer, defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
 import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
@@ -390,10 +389,26 @@ export function goldenRecipe(
   };
 }
 
-/** The state a `.env` beside the code marks: a dev checkout shares its `.wsp` state with wspx. One spelling of the
- * rule, since the bin and the desktop both apply it. */
+/** The name this repository's own root package.json carries. The marker has to be something only a checkout has:
+ * a `.env` is not, since wsp writes the person's provider keys into their own wsp home, and that home then read as
+ * a checkout whose state nothing had ever written. */
+const CHECKOUT_PACKAGE = "wsp";
+
+/** Whether this folder is a checkout of wsp: its own root package.json names the workspace. A worktree of the
+ * repository carries the same file and is one too. */
+function isDevCheckout(cwd: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8"));
+    return (parsed as { name?: unknown } | null)?.name === CHECKOUT_PACKAGE;
+  } catch {
+    return false;
+  }
+}
+
+/** The state a checkout of wsp marks: it shares its `.wsp` state with wspx. One spelling of the rule, since the bin
+ * and the desktop both apply it. */
 export function devCheckoutState(cwd: string): string | undefined {
-  return existsSync(join(cwd, ".env")) ? join(cwd, ".wsp", "state.json") : undefined;
+  return isDevCheckout(cwd) ? join(cwd, ".wsp", "state.json") : undefined;
 }
 
 /** Which state a line runs against, and what a person should be told about the choice. */
@@ -404,11 +419,11 @@ export interface StatePick {
 }
 
 const passedOverLine = (chosen: string, by: string, cwd: string, dev: string): string =>
-  `this runs against ${chosen}, named by ${by}; the .env in ${cwd} marks ${dev}, which this run does not use.`;
+  `this runs against ${chosen}, named by ${by}; the checkout in ${cwd} marks ${dev}, which this run does not use.`;
 
 /** The state file a run works on. A state the person chose wins: --state first, then WSP_HOME, since a state
- * somebody named is never taken off them by a file they did not name, and the choice is said out loud when a .env
- * beside the code named another. A .env marks a dev checkout only when nothing else names a state, and anywhere
+ * somebody named is never taken off them by a file they did not name, and the choice is said out loud when a
+ * checkout named another. A checkout marks its own state only when nothing else names one, and anywhere
  * else it is the home whose host is serving, so a line typed with no flags on a computer whose host runs under a
  * moved home reaches that host rather than a state file nothing serves. */
 export function statePick(flag?: string, cwd: string = process.cwd(), env: Readonly<Record<string, string | undefined>> = process.env): StatePick {
@@ -449,7 +464,12 @@ export type LocalDaemonStart = (opts: LocalDaemonOptions) => Promise<LocalDaemon
  * gives an agent reach it here too. The adapters strip their own agent-session variables from it, as they do on a
  * fork. The person's home and the folder work starts in are two facts: the stores are theirs, so a sign-in they
  * made is the one a turn uses, and the work folder is the workspace's own. */
-export function localWiring(home = homedir(), env: Readonly<Record<string, string | undefined>> = process.env, startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts))): LocalWiring {
+export function localWiring(
+  home = homedir(),
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts)),
+  runDir: string = hostRunDir(join(defaultHomeIn(home), "state.json")),
+): LocalWiring {
   const root = localWorkFolder(home);
   // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
   // a home of its own: that home holds this host's files, and a turn started under it finds no sign-in at all.
@@ -464,7 +484,7 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
   );
   return {
     backend,
-    execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), ...o }, waiting),
+    execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), runDir, ...o }, waiting),
     home: id => agentHome(person, id, env),
     homeDir: home,
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
@@ -493,9 +513,9 @@ export function localWiring(home = homedir(), env: Readonly<Record<string, strin
       shutting = true;
       const started = daemon.held();
       daemon.forget();
-      // A turn here leads a process group of its own, so it no longer goes with the terminal's Ctrl-C: this host is
-      // the only thing that knows where its turns are, and nothing can re-open one once it is gone.
-      await endLocalRuns();
+      // The turns running here are not ended: each leads a process group of its own and reads its own log off this
+      // computer, so the host that comes next re-opens them and their replies still land. What this host holds open
+      // is the daemon, and that is what closing it frees.
       await started?.then(d => d.close(), () => {});
     },
   };
@@ -690,7 +710,7 @@ export function makeRuntime(
       ...(agents?.at !== undefined ? { reach: hostReach(agents.at, agents.advertise, () => publicHostname(statePath)) } : {}),
       wspMcp: mcpServerCommand(agents?.run ?? runningWsp()),
     },
-    local: localWiring(),
+    local: localWiring(homedir(), process.env, undefined, hostRunDir(statePath)),
     ssh: sshWiring(),
     placeLinks: placeWiring(statePath, env, agents?.advertise),
     store: jsonFileStore(statePath),
@@ -806,25 +826,23 @@ export interface StopProcess {
   exit(code: number): void;
 }
 
-/** Every way a host is told to go ends the same: the lock removed and this computer's turns ended. A turn leads a
- * process group of its own, so no signal arriving here reaches it and the close is what ends it, through the one
- * ender the wiring's own close calls. A hangup is one of these signals for that reason, and none of them is left to
- * node's default exit, which runs no close at all: a second signal, with a close still in flight, ends the turns
- * itself without their stop grace and exits at once, so a close that hangs can neither trap the terminal nor leave
- * a harness running on this computer. */
+/** Every way a host is told to go ends the same: the lock removed and what this host holds open freed. The turns
+ * running on this computer are not among them; each leads a process group of its own, so no signal arriving here
+ * reaches one, and the host that comes next re-opens it. A hangup is one of these signals for that reason, and none
+ * of them is left to node's default exit, which runs no close at all: a second signal, with a close still in
+ * flight, exits at once, so a close that hangs cannot trap the terminal. */
 export function stopOnSignals(handle: HostHandle, io: CliIO, self: StopProcess = process): void {
   let stopping: Promise<void> | undefined;
   const stop = (sig: (typeof STOP_SIGNALS)[number]): void => {
     if (stopping !== undefined) {
-      void endLocalRuns(0).then(() => self.exit(exitCodeOf(sig)));
+      self.exit(exitCodeOf(sig));
       return;
     }
     stopping = handle.close().then(
       () => self.exit(0),
       (e: unknown) => {
         io.error(`host close failed: ${e instanceof Error ? e.message : String(e)}`);
-        // A close that failed may not have reached the turns; where it did, the set is empty and this ends nothing.
-        void endLocalRuns(0).then(() => self.exit(1));
+        self.exit(1);
       },
     );
   };
@@ -933,18 +951,19 @@ function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion)
 
 /** wsp init's flags that only mean something on the golden road, each with how it was given: the local road refuses
  * them rather than take them and do nothing. One row per flag, beside the table that parses them. */
-const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string }) => boolean][] = [
+const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; rebuild?: boolean }) => boolean][] = [
   ["--recipe", f => f.recipe !== undefined],
   ["--project", f => f.project !== undefined],
   ["--first-workspace", f => f.firstWorkspace !== undefined],
   ["--import", f => f.importFolder !== undefined],
   ["--on", f => f.on !== undefined],
+  ["--rebuild", f => f.rebuild === true],
 ];
 
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
  * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
-async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
+async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; rebuild?: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
     unattended: !interactive,
@@ -956,7 +975,7 @@ async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolea
     output: screen.output,
   });
   const fork = typeof step === "symbol" ? undefined : step.fork;
-  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), appUrl: beside.appUrl });
+  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.rebuild === true ? { rebuild: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), appUrl: beside.appUrl });
 }
 
 /** How a line that says this computer forks nothing offers the way out of it: the variable the row a key typed here
@@ -969,7 +988,7 @@ function orSetTheKey(env: ProviderEnv): string {
 async function init(
   io: CliIO,
   opts: SharedOpts,
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; rebuild?: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
   await adoptLoginPath(line => io.log(line));
@@ -1037,6 +1056,7 @@ async function init(
         ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
         ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
         ...(flags.noLocal ? { noLocal: true } : {}),
+        ...(flags.rebuild === true ? { rebuild: true } : {}),
         collect: collectThisComputer,
         recipe: (onHistory, onProject, onHistoryProgress) =>
           computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
@@ -1517,6 +1537,7 @@ interface SharedFlags {
   "first-workspace"?: string;
   import?: string;
   on?: string;
+  rebuild?: boolean;
   "no-local"?: boolean;
   local?: boolean;
   service?: boolean;
@@ -1692,7 +1713,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   init: {
     page: "front",
-    usage: "wsp init [--on <place>] [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]",
+    usage: "wsp init [--on <place>] [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--rebuild] [--no-local] [--yes] [--non-interactive] [--json]",
     about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and makes this computer your workspace instead",
     json: true,
     host: "refused",
@@ -1704,6 +1725,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         nonInteractive: values["non-interactive"] === true || values.json === true,
         json: values.json === true,
         noLocal: values["no-local"] === true,
+        ...(values.rebuild === true ? { rebuild: true } : {}),
         ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
         ...(values.project !== undefined ? { project: values.project } : {}),
         ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
@@ -1922,6 +1944,7 @@ export const SHARED_OPTIONS: Options = {
   "first-workspace": { type: "string" },
   import: { type: "string" },
   on: { type: "string" },
+  rebuild: { type: "boolean" },
   "no-local": { type: "boolean" },
   local: { type: "boolean" },
   service: { type: "boolean" },
@@ -2037,7 +2060,7 @@ export interface SharedFlag {
 }
 
 export const SHARED_FLAGS: readonly SharedFlag[] = [
-  { name: "state", on: SHARED_WORDS, says: `the state file: this word first, else WSP_HOME's state.json, else ./.wsp/state.json when the current directory has a .env, else state.json in the home the running host serves` },
+  { name: "state", on: SHARED_WORDS, says: `the state file: this word first, else WSP_HOME's state.json, else ./.wsp/state.json when the current directory is a checkout of wsp, else state.json in the home the running host serves` },
   { name: "port", on: ["up"], says: `the app port (default ${DEFAULT_PORT}); the runtime websocket port follows ${WS_PORT_OFFSET} above it` },
   { name: "ws-port", on: ["up"], says: `the runtime websocket port on its own (default ${DEFAULT_WS_PORT}); --port alone moves both` },
   { name: "listen", on: ["up"], says: `the address to bind (default ${LOOPBACK}, this computer alone). On any other address the page is served without the host token and every client pairs for a device token of its own` },
@@ -2061,6 +2084,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "on", on: ["init"], says: "the place the image is built on, by the name wsp places lists, a computer you joined included; the default place without it" },
   { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
   { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
+  { name: "rebuild", on: ["init"], says: "seal the next version from a fresh machine rather than from your image plus the changes, which is the question a run at a terminal is asked; without it a run that asks nothing takes whichever road the changes call for" },
   { name: "no-local", on: ["init"], says: "leave this computer alone; the workspace step ticks it by default, since a workspace here forks nothing and bills nothing" },
   { name: "non-interactive", on: ["init"], says: "ask nothing, but still run the sign-ins on the machine: each prints the page to open on this computer, the code when the flow shows one, and the command that opens it, then waits for you" },
   { name: "local", on: ["doctor"], says: "prove a thread on this computer and its reply instead of a forked machine, which needs no provider key, forks nothing and bills nothing" },

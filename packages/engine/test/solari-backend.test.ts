@@ -26,6 +26,8 @@ describe("SolariBackend", () => {
       containers: false,
       callbackRelay: true,
       diskSnapshots: true,
+      // The provider answers 502 on a machine that was resumed, so a copy comes from a first life alone.
+      snapshotsAnyLife: false,
       snapshotListing: true,
       templates: true,
       // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.
