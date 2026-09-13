@@ -934,18 +934,19 @@ function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion)
 
 /** wsp init's flags that only mean something on the golden road, each with how it was given: the local road refuses
  * them rather than take them and do nothing. One row per flag, beside the table that parses them. */
-const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string }) => boolean][] = [
+const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; rebuild?: boolean }) => boolean][] = [
   ["--recipe", f => f.recipe !== undefined],
   ["--project", f => f.project !== undefined],
   ["--first-workspace", f => f.firstWorkspace !== undefined],
   ["--import", f => f.importFolder !== undefined],
   ["--on", f => f.on !== undefined],
+  ["--rebuild", f => f.rebuild === true],
 ];
 
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
  * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
-async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
+async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; rebuild?: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
     unattended: !interactive,
@@ -957,7 +958,7 @@ async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolea
     output: screen.output,
   });
   const fork = typeof step === "symbol" ? undefined : step.fork;
-  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), appUrl: beside.appUrl });
+  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.rebuild === true ? { rebuild: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), appUrl: beside.appUrl });
 }
 
 /** How a line that says this computer forks nothing offers the way out of it: the variable the row a key typed here
@@ -970,7 +971,7 @@ function orSetTheKey(env: ProviderEnv): string {
 async function init(
   io: CliIO,
   opts: SharedOpts,
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; rebuild?: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
   await adoptLoginPath(line => io.log(line));
@@ -1038,6 +1039,7 @@ async function init(
         ...(flags.firstWorkspace !== undefined ? { firstWorkspace: flags.firstWorkspace } : {}),
         ...(flags.importFolder !== undefined ? { importFolder: resolve(flags.importFolder) } : {}),
         ...(flags.noLocal ? { noLocal: true } : {}),
+        ...(flags.rebuild === true ? { rebuild: true } : {}),
         collect: collectThisComputer,
         recipe: (onHistory, onProject, onHistoryProgress) =>
           computeRecipe(nodeHost(), { threadAgents: THREAD_AGENTS, onHistory, onProject, onHistoryProgress, cache: historyCache(opts.statePath), ...(project !== undefined ? { folders: [project] } : {}) }),
@@ -1456,6 +1458,7 @@ interface SharedFlags {
   "first-workspace"?: string;
   import?: string;
   on?: string;
+  rebuild?: boolean;
   "no-local"?: boolean;
   local?: boolean;
   service?: boolean;
@@ -1630,7 +1633,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   init: {
     page: "front",
-    usage: "wsp init [--on <place>] [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]",
+    usage: "wsp init [--on <place>] [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--rebuild] [--no-local] [--yes] [--non-interactive] [--json]",
     about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and makes this computer your workspace instead",
     json: true,
     host: "refused",
@@ -1642,6 +1645,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         nonInteractive: values["non-interactive"] === true || values.json === true,
         json: values.json === true,
         noLocal: values["no-local"] === true,
+        ...(values.rebuild === true ? { rebuild: true } : {}),
         ...(values.recipe !== undefined ? { recipe: values.recipe } : {}),
         ...(values.project !== undefined ? { project: values.project } : {}),
         ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
@@ -1860,6 +1864,7 @@ export const SHARED_OPTIONS: Options = {
   "first-workspace": { type: "string" },
   import: { type: "string" },
   on: { type: "string" },
+  rebuild: { type: "boolean" },
   "no-local": { type: "boolean" },
   local: { type: "boolean" },
   service: { type: "boolean" },
@@ -1997,6 +2002,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "on", on: ["init"], says: "the place the image is built on, by the name wsp places lists, a computer you joined included; the default place without it" },
   { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
   { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
+  { name: "rebuild", on: ["init"], says: "seal the next version from a fresh machine rather than from your image plus the changes, which is the question a run at a terminal is asked; without it a run that asks nothing takes whichever road the changes call for" },
   { name: "no-local", on: ["init"], says: "leave this computer alone; the workspace step ticks it by default, since a workspace here forks nothing and bills nothing" },
   { name: "non-interactive", on: ["init"], says: "ask nothing, but still run the sign-ins on the machine: each prints the page to open on this computer, the code when the flow shows one, and the command that opens it, then waits for you" },
   { name: "local", on: ["doctor"], says: "prove a thread on this computer and its reply instead of a forked machine, which needs no provider key, forks nothing and bills nothing" },

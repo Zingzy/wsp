@@ -175,6 +175,8 @@ describe("BoxBackend declarations", () => {
       containers: true,
       callbackRelay: true,
       diskSnapshots: true,
+      // A box's named snapshot is the disk as it stands, so one that stopped and booted again saves the same.
+      snapshotsAnyLife: true,
       snapshotListing: true,
       templates: true,
       kept: false,

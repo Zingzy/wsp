@@ -2755,7 +2755,7 @@ describe("runtime golden builders", () => {
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipe });
     const own = await rt.golden.prepare({ name: "mine" });
     const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
-    expect((await rt.golden.builders()).sort(byId).map(b => [b.id, b.firstLife])).toEqual([[kept.id, true], [paused.id, false], [own.id, true]]);
+    expect((await rt.golden.builders()).sort(byId).map(b => [b.id, b.sealable])).toEqual([[kept.id, true], [paused.id, false], [own.id, true]]);
 
     expect(await rt.reap()).toEqual({ reaped: [{ id: paused.id, builder: true, reason: "recorded" }], spared: [] });
     expect(backend.machines.map(m => m.killed)).toEqual([false, true, false]);
@@ -3029,7 +3029,7 @@ describe("runtime golden builders", () => {
     expect(await backend.machines[0]!.state()).toBe("running");
     expect(await rt.reap()).toEqual({ reaped: [{ id: expired.id, builder: true, reason: "expired", ageMs: expect.any(Number) }], spared: [] });
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
-    expect((await rt.golden.builders()).map(b => [b.id, b.firstLife])).toEqual([[kept.id, true]]);
+    expect((await rt.golden.builders()).map(b => [b.id, b.sealable])).toEqual([[kept.id, true]]);
     expect(await store.list("builders")).toHaveLength(1);
     // This process's own builder is never aged out by the sweep: a person may be working on it.
     const own = await rt.golden.prepare({ name: "mine" });
@@ -4213,11 +4213,11 @@ describe("runtime golden import", () => {
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true });
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true, recipeHash: "h1" })]);
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true, recipeHash: "h1" })]);
     const frames: string[] = [];
     second.events.on("golden.stage", e => { if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`); });
     const again = await second.golden.prepare();
-    expect(again).toMatchObject({ id: b.id, firstLife: true, recipeHash: "h1" });
+    expect(again).toMatchObject({ id: b.id, sealable: true, recipeHash: "h1" });
     expect(backend.machines).toHaveLength(1);
     expect(frames).toEqual(SKIPPED);
     expect(await second.reap()).toEqual({ reaped: [], spared: [] });
@@ -4236,18 +4236,43 @@ describe("runtime golden import", () => {
     backend.machines[0]!.paused = true;
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: false })]);
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: false })]);
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: false });
     const fresh = await second.golden.prepare();
     expect(fresh.id).not.toBe(b.id);
     expect(backend.machines).toHaveLength(2);
 
-    // Resumed from outside wsp: the provider reports it running again, the record still says not first-life.
+    // Resumed from outside wsp: the provider reports it running again, and this provider takes no seal from a machine that was.
     backend.machines[0]!.paused = false;
     const third = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect((await third.golden.builders()).map(x => [x.id, x.firstLife])).toEqual([[b.id, false], [fresh.id, true]]);
+    expect((await third.golden.builders()).map(x => [x.id, x.sealable])).toEqual([[b.id, false], [fresh.id, true]]);
     expect(await third.reap()).toEqual({ reaped: [{ id: b.id, builder: true, reason: "recorded" }], spared: [] });
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
+  });
+
+  it("which life a seal may be taken from is the place's rule: a builder that woke is still sealable where a copy is the disk as it stands, and the sweep leaves it", async () => {
+    // Solari refuses a resumed machine with a 502 and consumes the builder; a container's commit and a box's named
+    // snapshot read the disk as it stands, so a builder that napped and woke there still has a seal in it.
+    const backend = stubBackend();
+    backend.capabilities.snapshotsAnyLife = true;
+    backend.execImpl = dfOk;
+    const store = memoryStore();
+    const first = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    const b = await first.golden.prepare();
+    backend.machines[0]!.paused = true;
+
+    const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
+    // The record keeps the machine's own first life; the view carries the place's answer about it.
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true })]);
+    expect(await store.get("builders", b.id)).toMatchObject({ firstLife: false });
+    expect(await second.reap()).toEqual({ reaped: [], spared: [] });
+    expect(backend.machines.map(m => m.killed)).toEqual([false]);
+    // And it is attached to rather than left for a fresh machine: the stages it carries are not run again.
+    backend.machines[0]!.paused = false;
+    const again = await second.golden.prepare();
+    expect(again.id).toBe(b.id);
+    expect(backend.machines).toHaveLength(1);
+    expect((await second.golden.seal(b.id)).version.smoke).toEqual({ cmd: "codex --version", exitCode: 0 });
   });
 
   it("the digest behind the recipe hash is recorded on the builder and read back on its view, in this process and the next", async () => {
@@ -4330,7 +4355,7 @@ describe("runtime golden import", () => {
     const fresh = await second.golden.prepare();
     expect(fresh.id).not.toBe(b.id);
     expect(backend.machines).toHaveLength(2);
-    expect((await second.golden.builders()).map(x => [x.id, x.firstLife, x.recipeHash])).toEqual([[b.id, true, "h1"], [fresh.id, true, "h9"]]);
+    expect((await second.golden.builders()).map(x => [x.id, x.sealable, x.recipeHash])).toEqual([[b.id, true, "h1"], [fresh.id, true, "h9"]]);
     expect(await second.reap()).toEqual({ reaped: [], spared: [] });
     expect(backend.machines.some(m => m.killed)).toBe(false);
   });
@@ -4345,7 +4370,7 @@ describe("runtime golden import", () => {
     await store.put("owner", "id", { id: "h_other" });
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true, foreignOwner: mine })]);
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true, foreignOwner: mine })]);
     const fresh = await second.golden.prepare();
     expect(fresh.id).not.toBe(b.id);
     expect(backend.machines[1]!.spec.labels).toMatchObject({ "wsp-owner": "h_other" });
@@ -4372,7 +4397,7 @@ describe("runtime golden import", () => {
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
     const view = await second.golden.builders();
-    expect(view).toEqual([expect.objectContaining({ id: b.id, firstLife: true })]);
+    expect(view).toEqual([expect.objectContaining({ id: b.id, sealable: true })]);
     expect(view[0]).not.toHaveProperty("foreignOwner");
     expect((await second.golden.prepare()).id).toBe(b.id);
     expect(backend.machines).toHaveLength(1);
@@ -4438,7 +4463,7 @@ describe("runtime golden import", () => {
     await store.put("builders", b.id, older);
 
     const second = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: false })]);
+    expect(await second.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: false })]);
     await second.golden.prepare();
     expect(backend.machines).toHaveLength(2);
     expect(await second.reap()).toEqual({ reaped: [{ id: b.id, builder: true, reason: "recorded" }], spared: [] });
@@ -4462,7 +4487,7 @@ describe("runtime golden import", () => {
 
     await heldBy(otherPid, new Date().toISOString());
     const c = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect(await c.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true, heldBy: expect.objectContaining({ pid: otherPid }) })]);
+    expect(await c.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true, heldBy: expect.objectContaining({ pid: otherPid }) })]);
     expect((await c.golden.prepare()).id).not.toBe(b.id);
     backend.machines[0]!.spec.labels!["createdAt"] = new Date(Date.now() - BUILDER_IDLE_MS - 60_000).toISOString();
     expect(await c.reap()).toEqual({ reaped: [], spared: [] });
@@ -4503,7 +4528,7 @@ describe("runtime golden import", () => {
     m.shape.createdAt = new Date(Date.parse(m.shape.createdAt!) + 306_000).toISOString();
     const c = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
     const view = (await c.golden.builders())[0]!;
-    expect(view).toMatchObject({ id: b.id, firstLife: true });
+    expect(view).toMatchObject({ id: b.id, sealable: true });
     expect(view).not.toHaveProperty("suspect");
     expect((await c.golden.prepare()).id).toBe(b.id);
     expect(backend.machines).toHaveLength(1);
@@ -4735,7 +4760,7 @@ describe("runtime golden import", () => {
     await store.put("builders", b.id, { ...(await store.get("builders", b.id)) as object, createdAt: "yesterday" });
 
     const c = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
-    expect(await c.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true })]);
+    expect(await c.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true })]);
     expect(await c.reap()).toEqual({ reaped: [{ id: b.id, builder: true, reason: "expired" }], spared: [] });
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await store.list("builders")).toEqual([]);
@@ -4815,7 +4840,7 @@ describe("runtime golden import", () => {
 
     const later = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(importOf()) });
     const view = await later.golden.builders();
-    expect(view).toEqual([expect.objectContaining({ id: m.id, building: true, firstLife: true })]);
+    expect(view).toEqual([expect.objectContaining({ id: m.id, building: true, sealable: true })]);
     expect(view[0]).not.toHaveProperty("heldBy");
     await expect(later.golden.seal(m.id)).rejects.toThrow("still being prepared");
     expect((await later.golden.prepare()).id).not.toBe(m.id);
@@ -4978,7 +5003,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, sealed: { at: sealedAt, version: 1 }, import: { recipeHash: "h1" } });
     expect(await store.get("golden-recipes", copyKey("default", "default@v1"))).toEqual(snapshot("h1", [".zshrc"]));
     expect(await rt.golden.recipe()).toEqual(snapshot("h1", [".zshrc"]));
-    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true, sealed: { at: sealedAt, version: 1 } })]);
+    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true, sealed: { at: sealedAt, version: 1 } })]);
     expect(await rt.reap()).toEqual({ reaped: [], spared: [] });
     expect(backend.machines[0]!.killed).toBe(false);
   });
@@ -4997,7 +5022,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(frames.at(-1)).toBe("failed:the snapshot failed 3 times: the provider answered 502 Failed to snapshot sandbox (request req_1) while the builder read running");
     expect(backend.machines.map(m => m.killed)).toEqual([false]);
     expect(await rt.golden.get()).toBeUndefined();
-    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id, firstLife: true })]);
+    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id, sealable: true })]);
     expect(await store.get("builders", b.id)).toMatchObject({ firstLife: true, import: { recipeHash: "h1" } });
     await rt.close();
     backend.beforeSnapshot = undefined;

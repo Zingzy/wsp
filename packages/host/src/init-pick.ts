@@ -9,8 +9,9 @@
 import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { LOGIN_CHOICES, withProject, type LoginChoice, type Manifest, type ManifestEntry, type Platform, type ProjectScan, floorApplies } from "@wsp/collect";
-import { estimateDisk, isMcpRow, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, customRows, fmtBytes, initShownScreens, initStepCounter, thisComputer, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { estimateDisk, isMcpRow, NO_ACTIVE_LOGIN, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
+import { CLOUD_SETUP_WORDS, copyNamesLogin, customRows, fmtBytes, initShownScreens, initStepCounter, loginsHereLine, thisComputer, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { copiedLogin } from "./init-import.js";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
 import { agentName, applyRecipe, comingRows, defaultAnswers, initialChoice, isTickable, loginEntryId, loginShown, loginTool, rowsHere } from "./init-recipe.js";
@@ -194,7 +195,7 @@ export function signInGroupLine(items: readonly SelectItem[], a: RungAnswer): st
  * The agents' own logins first, then the developer CLIs, then the MCP servers the agents' configs carry auth for.
  * A row whose command is not coming, or that the catalog locked out, is here with its reason and skip as its only
  * answer, so nothing on the screen is silent. */
-export function signInItems(manifest: Manifest, brew: BrewTable, platform: Platform): SignInScreen {
+export function signInItems(manifest: Manifest, brew: BrewTable, platform: Platform, home: string): SignInScreen {
   const coming = comingRows(manifest);
   const shown = manifest.entries.filter(e => (e.rung === "logins" && loginShown(e, manifest, coming)) || mcpShown(e, manifest, coming));
   const items: SelectItem[] = [];
@@ -219,7 +220,14 @@ export function signInItems(manifest: Manifest, brew: BrewTable, platform: Platf
       only(e.id, e.label, group, `${tool.bin} is not coming`, [tool.why ?? "", where]);
       continue;
     }
-    const choices = choicesFor(e, s, platform);
+    // A tool signed in as one account at a time copies the login it is in use as here; the answer and the detail
+    // both name it, so nobody has to guess which of two logins the machine would come up under. With none in use
+    // here a copy would land a file the machine holds no token for, so the answer is not offered and the detail
+    // says why; the sign-in on the machine and the skip are what such a row is left with.
+    const login = copiedLogin(e, platform, home);
+    const choices = choicesFor(e, s, platform)
+      .filter(c => c.value !== "copy" || login === undefined || login.carries !== undefined)
+      .map(c => (c.value === "copy" && login?.carries !== undefined ? { ...c, label: copyNamesLogin(c.label, login.carries) } : c));
     const choice = initialChoice(e);
     initial.set(e.id, choices.some(c => c.value === choice) ? choice : (choices[0]?.value as LoginChoice));
     items.push({
@@ -228,7 +236,7 @@ export function signInItems(manifest: Manifest, brew: BrewTable, platform: Platf
       group,
       why: where,
       choices,
-      detail: [hasLogin(s) ? loginWords(s) : (s.kind !== "shell" ? (s.note ?? "") : ""), asksThePerson(s) ? CLOUD_SETUP_WORDS.screen.asksYou : "", e.detail ?? "", where],
+      detail: [hasLogin(s) ? loginWords(s) : (s.kind !== "shell" ? (s.note ?? "") : ""), asksThePerson(s) ? CLOUD_SETUP_WORDS.screen.asksYou : "", login === undefined ? "" : login.carries === undefined ? NO_ACTIVE_LOGIN : loginsHereLine(login.carries, login.left), e.detail ?? "", where],
     });
   }
   for (const e of mcp) {
@@ -389,7 +397,7 @@ function screenRows(o: PickOptions, recipe: Recipe): ScreenRows {
     agents: agentRows(recipe),
     tools: recipeTable(recipe, CATALOG_TOOLS),
     also: alsoItems(o.scan ?? [], recipe, o.platform, row => buildLine(o.manifest, row, o.brew)),
-    logins: signInItems(applyRecipe(o.manifest, recipe), o.brew, o.platform),
+    logins: signInItems(applyRecipe(o.manifest, recipe), o.brew, o.platform, o.home),
     wsp: wspToolsItems(recipe, o.home),
   };
 }

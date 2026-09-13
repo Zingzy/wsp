@@ -288,6 +288,8 @@ describe("the document's base line", () => {
     const doc = renderMachineContext({ probe: probeOf({ versions: [{ name: "node", version: "22.23.2" }, { name: "python3", version: "3.12.13" }, { name: "docker compose", version: "2.29.2" }] }), facts: FACTS });
     expect(doc).toContain("- On every wsp machine: node 22.23.2, python3 3.12.13, docker compose 2.29.2.");
     expect(renderMachineContext({ probe: probeOf(), facts: FACTS })).not.toContain("On every wsp machine");
+    // The prefix a guest reads is the one the install put it at: the line says it from the same constant.
+    expect(renderMachineContext({ probe: probeOf({ has: new Set(["brew"]) }), facts: FACTS })).toContain("- Homebrew is at /home/linuxbrew/.linuxbrew.");
   });
 });
 

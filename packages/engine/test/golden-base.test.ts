@@ -4,9 +4,9 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BASE_FLOOR, CURL_NET, NODE_RELEASES, ROAD_STEPS, UV_INSTALL } from "@wsp/catalog";
+import { APT_INDEX, BASE_FLOOR, CURL_NET, NODE_RELEASES, ROAD_STEPS, UV_INSTALL, installAfter } from "@wsp/catalog";
 import { PRELUDE } from "../src/dotfiles-presets.js";
-import { BASE_VERSIONS_CMD, baseInstalls, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
+import { ALREADY_ON_MACHINE, BASE_VERSIONS_CMD, baseInstalls, carriedByImage, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
 import { TOOLS_PATH } from "../src/golden-import.js";
 import { FREE_KB_CMD, guardedRoad, reasonOf, roadLimitS } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
@@ -15,10 +15,13 @@ import type { GoldenStage } from "../src/golden.js";
 const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
 const mb = (n: number) => String(n * 1024);
 
-/** A guest that answers df from `free`, runs every script with `answer`, and records both. */
-function guest(answer: (script: string) => ExecResult | undefined, free: () => string = () => mb(3000)) {
+/** A guest that answers df from `free`, runs every script with `answer`, and records both. `onImage` is what the
+ * floor's version read prints before anything installs, which is the image as the provider ships it: bare unless a
+ * test says the image already carries something. */
+function guest(answer: (script: string) => ExecResult | undefined, free: () => string = () => mb(3000), onImage = "") {
   const ran: string[] = [];
   const cmds: string[] = [];
+  let reads = 0;
   const machine = {
     id: "m1",
     kind: "sandbox",
@@ -26,6 +29,7 @@ function guest(answer: (script: string) => ExecResult | undefined, free: () => s
     exec: async (cmd: string) => {
       cmds.push(cmd);
       if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${free()}\n`, stderr: "" };
+      if (cmd === BASE_VERSIONS_CMD && reads++ === 0) return { exitCode: 0, stdout: onImage, stderr: "" };
       return answer(cmd) ?? ok;
     },
     run: async (script: string) => {
@@ -245,7 +249,8 @@ describe("installBase", () => {
       ["base/rsync", "installed", 0],
     ]);
     expect(out.line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, docker 27.5.1 (400 MB), docker compose 2.29.2");
-    expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(1);
+    // Once against the image as it arrives, once after the floor ran: the first says what there is nothing to do for.
+    expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(2);
     expect(g.ran).toHaveLength(19);
   });
 
@@ -325,6 +330,45 @@ describe("installBase", () => {
     const out = await installBase(g.machine, () => {});
     expect(out.tools.find(t => t.id === "base/docker")).toMatchObject({ outcome: "failed", note: "E: Unable to locate package docker.io" });
     expect(out.line).toBe("node 22.23.2; Docker engine and compose failed (E: Unable to locate package docker.io)");
+  });
+
+  it("a floor row the provider's image already satisfies reads as on the machine and installs nothing; what waited on it still runs", async () => {
+    // The Box image ships systemd and Docker: apt-get install docker.io failed on every Box golden, and the row read
+    // failed while the tool was there. curl and git ride along to prove an apt row counts the same.
+    const onImage = ["VERSION docker: Docker version 27.5.1, build 9f9e405", "VERSION docker compose: Docker Compose version v2.29.2", "VERSION curl: curl 8.5.0", "VERSION git: git version 2.43.0", ""].join("\n");
+    const g = guest(script => (script.includes("VERSION node:") ? { exitCode: 0, stdout: VERSIONS_OUT, stderr: "" } : undefined), () => mb(3000), onImage);
+    const { stages, stage } = recorder();
+    const out = await installBase(g.machine, stage);
+    const row = (id: string) => out.tools.find(t => t.id === id);
+    expect(row("base/docker")).toEqual({ id: "base/docker", label: "Docker engine and compose", outcome: "installed", note: ALREADY_ON_MACHINE });
+    expect(row("base/curl")).toMatchObject({ outcome: "installed", note: ALREADY_ON_MACHINE });
+    expect(row("base/git")).toMatchObject({ outcome: "installed", note: ALREADY_ON_MACHINE });
+    // Nothing was typed for them, and the rows that waited on curl and on the index ran all the same.
+    expect(g.ran.some(script => script.includes("apt-get install -y -qq docker.io"))).toBe(false);
+    expect(g.ran.some(script => script.includes("apt-get install -y -qq git"))).toBe(false);
+    expect(row("base/node")).toMatchObject({ outcome: "installed" });
+    expect(g.ran.some(script => script.includes("nodejs.org/dist"))).toBe(true);
+    // The floor keeps its catalog order whether a row ran or the image had it, and the line says which were there.
+    expect(out.tools.map(t => t.id)).toEqual(["base/login-path", "base/apt-index", ...BASE_FLOOR.map(e => `base/${e.id}`)]);
+    // The words are true whichever road put the tool there: the provider's image, or an earlier run of this stage.
+    expect(out.line).toContain("already on the machine: curl, git, Docker engine and compose");
+    expect(stages.some(s => s.includes("Docker engine and compose ("))).toBe(false);
+  });
+
+  it("a floor row that pins a major runs when the image carries another, and the apt index is left out when no apt row needs it", async () => {
+    const older = ["VERSION node: v20.11.1", "VERSION npm: 10.2.4", "VERSION python3: Python 3.11.2", "VERSION uv: uv 0.12.9", ""].join("\n");
+    // Node 22 and Python 3.12 are what the floor promises: an image on another major is not a floor that is there.
+    expect([...carriedByImage(parseVersions(older))]).toEqual(["uv"]);
+    expect([...carriedByImage(parseVersions("VERSION node: v22.1.0\nVERSION npm: 10.9.4\n"))]).toEqual(["node"]);
+    // node promises npm too, so a node with no npm beside it is not the floor's row.
+    expect([...carriedByImage(parseVersions("VERSION node: v22.1.0\n"))]).toEqual([]);
+    // The index is read for the rows that wait on it; an image that carries every one of them is read for nothing.
+    const waitingOnApt = BASE_FLOOR.filter(e => installAfter(e) === APT_INDEX).map(e => e.id);
+    expect(baseInstalls(new Set(waitingOnApt)).some(t => t.id === "base/apt-index")).toBe(false);
+    expect(baseInstalls(new Set(waitingOnApt.slice(1))).some(t => t.id === "base/apt-index")).toBe(true);
+    // A row whose own dependency the image carries waits on nothing rather than on a step the plan no longer holds.
+    expect(baseInstalls(new Set(["curl"])).find(t => t.id === "base/node")).not.toHaveProperty("after");
+    expect(baseInstalls(new Set(["curl"])).find(t => t.id === "base/git")).toMatchObject({ after: "base/apt-index" });
   });
 
   it("an install that exits 0 without its command on PATH is a failure, not a version", async () => {
