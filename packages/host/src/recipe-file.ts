@@ -78,33 +78,36 @@ export const ownRowIdOf = (pkg: { manager: string; name: string }): string => to
 export const ownRowOf = (recipe: Pick<Recipe, "rows"> | undefined, pkg: { manager: string; name: string }): RecipeRow | undefined =>
   outsideRowsOf(recipe).find(r => r.id === ownRowIdOf(pkg));
 
+/** The recipe with no pin on any row: the ask alone, as the record keeps it beside the pins the seal read. */
+export function withoutPins(recipe: Recipe): Recipe {
+  return { ...recipe, rows: recipe.rows.map(r => { const { pin: _pin, ...rest } = r; return rest; }) };
+}
+
 /** The recipe with these pins written on the rows they name; every other row keeps what it had. */
 export function withPins(recipe: Recipe, pins: ReadonlyMap<string, ToolPin>): Recipe {
   if (pins.size === 0) return recipe;
   return { ...recipe, rows: recipe.rows.map(r => (pins.has(r.id) ? { ...r, pin: pins.get(r.id)! } : r)) };
 }
 
-/** This computer's recipe with a saved one's ticks, answers and pins written on, by id: a row the saved one lacks is
- * off and unanswered, and a saved catalog row this computer's recipe does not carry follows them as it was saved,
- * since its catalog road installs it anywhere. A saved row outside the catalog that this computer has no row of its
- * own for does not: only the computer that has the tool knows how it installs, so the caller says it was left out.
- * The added rows (`custom`) are the saved recipe's own: nothing on this computer decides them. */
+/** This computer's recipe with a saved one's ticks and answers written on, by id: a row the saved one lacks is off
+ * and unanswered, and a saved catalog row this computer's recipe does not carry follows them as it was saved, since
+ * its catalog road installs it anywhere. A saved row outside the catalog that this computer has no row of its own
+ * for does not: only the computer that has the tool knows how it installs, so the caller says it was left out. The
+ * added rows (`custom`) are the saved recipe's own: nothing on this computer decides them. The saved pins are what
+ * an earlier seal got and come along on no row: this cut reads its own. */
 export function withTicksOf(here: Recipe, saved: Recipe): Recipe {
   const rows = new Map(saved.rows.map(r => [r.id, r]));
   const ids = new Set(here.rows.map(r => r.id));
-  return withPins(
-    {
-      ...here,
-      ...(saved.custom !== undefined ? { custom: saved.custom } : {}),
-      rows: [
-        ...here.rows.map(r => {
-          const { signIn: _signIn, ...rest } = r;
-          const s = rows.get(r.id);
-          return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
-        }),
-        ...saved.rows.filter(r => !ids.has(r.id) && !outsideCatalog(r)),
-      ],
-    },
-    pinsOf(saved.rows),
-  );
+  return {
+    ...here,
+    ...(saved.custom !== undefined ? { custom: saved.custom } : {}),
+    rows: [
+      ...here.rows.map(r => {
+        const { signIn: _signIn, ...rest } = r;
+        const s = rows.get(r.id);
+        return { ...rest, on: s?.on === true, ...(s?.signIn === undefined ? {} : { signIn: s.signIn }) };
+      }),
+      ...saved.rows.filter(r => !ids.has(r.id) && !outsideCatalog(r)).map(r => { const { pin: _pin, ...rest } = r; return rest; }),
+    ],
+  };
 }

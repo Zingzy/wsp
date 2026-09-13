@@ -159,9 +159,9 @@ export function readSaved(out: string, note: (line: string) => void): Recipe | u
 }
 
 /** What a recipe already at this path carries that no rule on this computer decides: the rows an agent added, the
- * ticks on this computer's tools rows the catalog does not carry, and the pins the builds that ran from it recorded.
- * Both writers of that file, the recipe verb and the wizard, read it through readSaved, so neither writes over what
- * the other put there. */
+ * ticks on this computer's tools rows the catalog does not carry, and the pins the last seal recorded, which the
+ * file shows until the next seal writes its own. Both writers of that file, the recipe verb and the wizard, read it
+ * through readSaved, so neither writes over what the other put there. */
 export function carriedOver(out: string, log: (line: string) => void): { custom?: RecipeCustomRow[]; ticks: Map<string, boolean>; pins: Map<string, ToolPin> } {
   const saved = readSaved(out, log);
   return { ...(saved?.custom === undefined ? {} : { custom: saved.custom }), ticks: new Map(outsideRowsOf(saved).map(r => [r.id, r.on])), pins: pinsOf(saved?.rows) };

@@ -137,14 +137,14 @@ function loginItems(items: readonly SelectItem[], manifest: Manifest, saved: Rea
  * ring to draw. */
 export function diskOf(reading: Reading, recipe: Recipe, statePath: string, diskGb?: number): { fixed: number; total: number } | undefined {
   if (diskGb === undefined) return undefined;
-  const est = pickEstimate(manifestFor(reading, recipe, statePath), recipe, reading.brew);
+  const est = pickEstimate(manifestFor(reading, recipe), recipe, reading.brew);
   const total = diskGb * GIB;
   return { fixed: total - est.room + est.files, total };
 }
 
 /** The screens as they stand for these answers, in the terminal's order, less any with no row to pick. */
 export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): InitScreen[] {
-  const manifest = manifestFor(reading, a.recipe, at.statePath);
+  const manifest = manifestFor(reading, a.recipe);
   const { recipe, logins } = a;
   const agents = agentRows(recipe);
   const tools = recipeTable(recipe, CATALOG_TOOLS);

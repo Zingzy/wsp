@@ -710,14 +710,13 @@ export function makeRuntime(
 
 /** How a copy of the image is planned on this computer for a serving host: the same readers wsp init builds from,
  * the keys as they stand at the ask rather than at the start, and the daemon deploy every build made here gets. */
-function hostCopyRecipe(statePath: string): (image: SealedImage) => Promise<GoldenRecipe> {
+function hostCopyRecipe(): (image: SealedImage) => Promise<GoldenRecipe> {
   return image =>
     copyGoldenRecipe(image, {
       collect: () => collectThisComputer(() => {}),
       brew: () => readBrewTable(nodeHost()),
       home: homedir(),
       platform: hostPlatform(),
-      statePath,
       agentKeys: agentKeyEnvs(keysFound()),
       deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE),
     });
@@ -1196,7 +1195,7 @@ async function hostFor(
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
-      copyRecipe: hostCopyRecipe(opts.statePath),
+      copyRecipe: hostCopyRecipe(),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

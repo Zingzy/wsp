@@ -2646,14 +2646,35 @@ export function versionMovedLine(from: string | undefined, to: string | undefine
 /** The words for a tools row no road installs, where a road's own words would stand. */
 export const NO_ROAD_WORDS = "by no road";
 
-/** Why a tool installs differently now: the release it is fixed to moved, or the sum recorded for that release did. */
-export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined): string {
-  if (from === undefined) return `now fixed to release ${to!.tag}`;
-  if (to === undefined) return `no longer fixed to release ${from.tag}`;
-  return from.tag === to.tag ? `the checksum recorded for ${from.tag} changed` : `release ${from.tag} to ${to.tag}`;
+/** What a row marked latest does on every place: the words `wsp recipe`, `wsp image` and the seal's stage all use. */
+export const INSTALLS_LATEST = "installs latest";
+
+/** A pin beside its row, as `wsp recipe` shows it: the version, and for a road that fixes none that it installs
+ * latest wherever it is built. */
+export function pinWords(pin: ToolPin): string {
+  return pin.latest === true ? `${pin.tag}, ${INSTALLS_LATEST}` : pin.tag;
 }
 
-/** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
+/** The one line a stage says about what its installs read back: the rows fixed to what they installed, then, once,
+ * the rows whose road installs latest wherever the image is built, each with the version this build got and the
+ * road's own words. Nothing when no row read a version. */
+export function pinsReadLine(fixed: readonly { name: string; tag: string }[], latest: readonly { name: string; tag: string; words?: string }[]): string | undefined {
+  const parts = [
+    ...(fixed.length > 0 ? [`pinned: ${fixed.map(p => `${listedName(p.name)} ${p.tag}`).join(", ")}`] : []),
+    ...(latest.length > 0 ? [`${INSTALLS_LATEST} on every place: ${latest.map(p => `${listedName(p.name)} ${p.tag}${p.words === undefined ? "" : ` ${p.words}`}`).join(", ")}`] : []),
+  ];
+  return parts.length === 0 ? undefined : parts.join("; ");
+}
+
+/** One of the record's pins in one line, under `wsp image`: the row by name, what it installed, the checksum where the
+ * road recorded one, and for a road that fixes none that it installs latest, in the road's words. */
+export function sealedPinLine(name: string, pin: ToolPin, words?: string): string {
+  const sum = pin.sha256 === undefined ? [] : [`checksum ${shortSum(pin.sha256)}`];
+  const latest = pin.latest === true ? [`${INSTALLS_LATEST}${words === undefined ? "" : ` ${words}`}`] : [];
+  return [name, pin.tag, ...sum, ...latest].join(" · ");
+}
+
+/** Why a tool installs differently now when its road stands: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
 
 /** The detail of a tools row the catalog does not carry: it is on this computer, at the version this computer runs

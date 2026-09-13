@@ -47,7 +47,7 @@ const Fields = z.object({
   linux: Linux.optional(),
   /** Only on a tools row: the version the laptop runs, which the machine installs by pin. */
   version: z.string().min(1).optional(),
-  /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
+  /** Only on a row a copy is planned from: the version the record pinned, which the road installs at and checks where a sum was recorded. */
   pin: ToolPin.optional(),
   /** Credential-shaped: travels only when the person answers copy on this row, never on a bare tick. */
   consent: z.boolean().optional(),

@@ -490,6 +490,27 @@ describe("wsp verbs over the host", () => {
     expect(view.copies.map(c => c.place)).toEqual(["default"]);
   });
 
+  it("wsp image lists what each row installed at the seal under the copies, by the catalog's name, with the checksum where a road recorded one and the latest mark in the road's words", async () => {
+    const pins = [
+      { id: "claude", tag: "2.1.3", latest: true as const, road: "script" },
+      { id: "gh", tag: "v2.86.0", sha256: "b".repeat(64), road: "release" },
+      { id: "wrangler", tag: "4.1.0", road: "npm" },
+      { id: "tools/brew/zingzy/tap/diskbloom", tag: "0.1.0", latest: true as const, road: "brew" },
+    ];
+    await store.put("images", "default", { ...RECORD(3), pins });
+    const listed = await run("image");
+    expect(listed.code).toBe(0);
+    const lines = listed.io.lines.join("\n").split("\n");
+    expect(lines.slice(2)).toEqual([
+      "  Claude Code · 2.1.3 · installs latest by its own installer",
+      "  GitHub CLI · v2.86.0 · checksum bbbbbbbbbbbb",
+      "  Cloudflare Wrangler · 4.1.0",
+      "  zingzy/tap/diskbloom · 0.1.0 · installs latest with Homebrew",
+    ]);
+    const [view] = json((await run("image", "--json")).io) as [{ image: { pins: unknown } }];
+    expect(view.image.pins).toEqual(pins);
+  });
+
   it("wsp image build refuses in one line for a place this host has not got and a place that takes no copy; the place it forks on is a place like any other", async () => {
     // Three places over one host: the one it forks on, one more that could build, and this computer, which forks
     // nothing and copies no disk.

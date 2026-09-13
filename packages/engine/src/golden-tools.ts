@@ -7,7 +7,7 @@
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
 import { HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
-import { fmtBytes, listedName, nameList, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
+import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
@@ -22,6 +22,9 @@ export interface ToolResult {
   bytes?: number;
   /** The road a source install took, as its script reported: the release asset, or the module go installed. */
   road?: ToolRoad;
+  /** What the row installed, read back once it landed: the tag and sum a release printed, or the version its road's
+   * line printed, marked latest when the road installs the current one wherever it runs. */
+  pin?: ToolPin;
 }
 
 export interface ToolRoad {
@@ -74,22 +77,76 @@ export function reasonOf(res: ExecResult, timeoutS: number): string {
   return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
 }
 
-/** The pin an install recorded: the tag it fetched and the sum it read, when its road printed both. The one place a
- * result becomes a pin, for the recipe row that carries it and the digest tick the seal writes. */
-export function recordedPin(t: ToolResult): ToolPin | undefined {
-  return t.outcome === "installed" && t.road?.sha256 !== undefined && t.road.tag !== undefined ? { tag: t.road.tag, sha256: t.road.sha256 } : undefined;
+/** A result that read its pin back: what a tools or a harness stage says about one row once it is on the machine. */
+export interface Pinned {
+  id: string;
+  outcome: "installed" | "failed" | "skipped";
+  pin?: ToolPin;
 }
 
-/** The pins a tools stage recorded, by the row's id. */
-export function recordedPins(tools: readonly ToolResult[]): Map<string, ToolPin> {
-  return new Map(tools.flatMap((t): [string, ToolPin][] => { const pin = recordedPin(t); return pin === undefined ? [] : [[t.id, pin]]; }));
+/** The pin an install recorded, when it landed and read one back: what the digest tick the seal writes and the
+ * record's pins are made of. */
+export function recordedPin(t: Pinned): ToolPin | undefined {
+  return t.outcome === "installed" ? t.pin : undefined;
 }
 
-/** The digest with the pins the tools stage recorded written on its ticks, so the sealed version says which release
- * each row is fixed to and the recipe that carries the same pins reads as no change. */
-export function withRecordedPins(digest: RecipeDigest, tools: readonly ToolResult[]): RecipeDigest {
-  const pins = recordedPins(tools);
+/** The pins a stage recorded, by the row's id. */
+export function recordedPins(rows: readonly Pinned[]): Map<string, ToolPin> {
+  return new Map(rows.flatMap((t): [string, ToolPin][] => { const pin = recordedPin(t); return pin === undefined ? [] : [[t.id, pin]]; }));
+}
+
+/** The digest with the pins a stage recorded written on its ticks, so the sealed version says what each row installed
+ * and the record built from it carries the same. */
+export function withRecordedPins(digest: RecipeDigest, rows: readonly Pinned[]): RecipeDigest {
+  const pins = recordedPins(rows);
   return pins.size === 0 ? digest : { ...digest, ticks: digest.ticks.map(t => (pins.has(t.id) ? { ...t, pin: pins.get(t.id)! } : t)) };
+}
+
+/** The pin a row's read came to: the version its line printed, marked latest when the road installs the current
+ * one wherever it runs; nothing when the line printed nothing. */
+export function pinRead(version: string, fixed: boolean): ToolPin | undefined {
+  const tag = version.trim().split("\n")[0]?.trim() ?? "";
+  return tag === "" ? undefined : { tag, ...(fixed ? {} : { latest: true as const }) };
+}
+
+/** What a batched read prints ahead of each row's version: the marker, the row's place in the run, the version. */
+const VERSION_READ = "wsp-version";
+
+/** One run reads every installed row's version back on the tools PATH: a release's own line already said its tag
+ * and sum, so that stands; every other row with a read gets what its line printed, or nothing when it printed
+ * nothing or the run could not be made, which the stage says. Then one line names what was pinned and, once, the
+ * rows whose road installs latest on every place. */
+async function readPins(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void): Promise<void> {
+  const rows = results.flatMap(r => {
+    const tool = r.outcome === "installed" ? tools.find(t => t.id === r.id) : undefined;
+    return tool?.pin === undefined ? [] : [{ result: r, tool, pin: tool.pin }];
+  });
+  for (const row of rows) {
+    if (row.result.road?.tag !== undefined) row.result.pin = { tag: row.result.road.tag, ...(row.result.road.sha256 !== undefined ? { sha256: row.result.road.sha256 } : {}), ...(row.pin.fixed ? {} : { latest: true as const }) };
+  }
+  const reads = rows.filter(row => row.result.pin === undefined && row.pin.read !== undefined);
+  if (reads.length > 0) {
+    const cmd = [`export PATH=${TOOLS_PATH}`, ...reads.map((row, i) => `printf '${VERSION_READ} %s %s\\n' ${i} "$( ( ${row.pin.read} ) 2>/dev/null | head -n 1 )"`)].join("\n");
+    const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
+    if (res.exitCode !== 0) {
+      stage(`the versions could not be read back (${reasonOf(res, INLINE_EXEC_MS / 1000)}): ${nameList(reads.map(r => r.result.label))} record no pin`);
+    } else {
+      const printed = new Map(res.stdout.split("\n").flatMap(line => {
+        const words = line.trim().split(" ");
+        return words[0] === VERSION_READ && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
+      }));
+      for (const [i, row] of reads.entries()) {
+        const pin = pinRead(printed.get(String(i)) ?? "", row.pin.fixed);
+        if (pin !== undefined) row.result.pin = pin;
+      }
+    }
+  }
+  const pinned = rows.filter(row => row.result.pin !== undefined);
+  const line = pinsReadLine(
+    pinned.filter(row => row.result.pin!.latest !== true).map(row => ({ name: row.result.label, tag: row.result.pin!.tag })),
+    pinned.filter(row => row.result.pin!.latest === true).map(row => ({ name: row.result.label, tag: row.result.pin!.tag, words: row.pin.words })),
+  );
+  if (line !== undefined) stage(line);
 }
 
 /** The last WSP_ROAD line a road install printed, when it printed one. */
@@ -390,6 +447,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
   }
   await verifyCommands(machine, tools, out.tools, stage);
   await verifyChecks(machine, tools, out.tools, stage);
+  await readPins(machine, tools, out.tools, stage);
   const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
   stage(closing(summarize(out.tools, housekeeping), await sweepCaches(machine), await freeNote(machine)));
   return out;
