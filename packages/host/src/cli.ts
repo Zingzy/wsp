@@ -26,7 +26,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { authority, authRefusal, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { webDirFor } from "./assets.js";
@@ -47,7 +47,7 @@ import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
 import { scanTools } from "./scan.js";
 import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type PromptOptions } from "./init-layout.js";
-import { TAGLINE, opening } from "./init-opening.js";
+import { TAGLINE, builtOn, opening } from "./init-opening.js";
 import { runLocalInit } from "./init-local.js";
 import { askFirst } from "./init-first.js";
 import { buildBesideHost } from "./init-beside.js";
@@ -858,24 +858,27 @@ function initRefusal(lock: HostLock, statePath: string, why: string): string {
   return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) cannot take this build: ${why}. Take it down first (wsp down for a service, Ctrl-C in its terminal or kill ${lock.pid} for one started by hand), run wsp init again and start it again, or point --state at a different file.`;
 }
 
-/** A serving host whose provider forks nothing: its init job would refuse at the first stage, so the run says so
- * before it reads this computer. The provider is the host's, not this terminal's: it is the process that builds. */
-function noGoldenThroughHost(lock: HostLock, statePath: string): string {
-  return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) forks no machines, so there is no golden to build through it. Give that host a provider (its provider's key in the environment it starts with, or wsp up --provider) and run wsp init again.`;
+/** A serving host that can start no build: its init job would refuse at the first stage, so the run says so before
+ * it reads this computer, in the host's own sentence for why. The places are the host's, not this terminal's: it is
+ * the process that builds. */
+function noGoldenThroughHost(lock: HostLock, statePath: string, why: string): string {
+  return `wsp init: the wsp host serving ${statePath} (pid ${lock.pid}) can build no image: ${why}. Then run wsp init again.`;
 }
 
-/** What the run reads off the host serving this state before it asks anything: the door to build through, what that
- * host's provider charges for the builder, and where the app it already serves answers. */
+/** What the run reads off the host serving this state before it asks anything: the door to build through, the place
+ * the image is built on and what a builder there costs, and where the app it already serves answers. */
 interface BesideHost {
   client: HostClient;
+  place: string;
   pricing: InitPricing;
   appUrl: string;
 }
 
-/** Opens the door of the host serving this state, or refuses with the way back that needs no pid. The price and the
- * builder disk come from that host: it owns the provider, so a terminal that named none (or another) still asks the
- * person about the machine the build will really boot. Its default size is the one every build here boots. */
-async function besideHost(lock: HostLock, statePath: string): Promise<BesideHost> {
+/** Opens the door of the host serving this state, or refuses with the way back that needs no pid. The place, the price
+ * and the builder disk come from that host: it owns the places, so a terminal that named none (or another) still
+ * asks the person about the machine the build will really boot. `on` is the place --on named; absent, the host's
+ * default place. */
+async function besideHost(lock: HostLock, statePath: string, on?: string): Promise<BesideHost> {
   const refuse = (why: string): Error => Object.assign(new Error(initRefusal(lock, statePath, why)), { kind: "conflict" });
   let client: HostClient;
   try {
@@ -888,13 +891,14 @@ async function besideHost(lock: HostLock, statePath: string): Promise<BesideHost
     throw refuse(e instanceof Error ? e.message : String(e));
   }
   try {
-    const setup = InitSetup.parse((await client.request<{ setup: unknown }>("init.get")).setup);
+    const setup = InitSetup.parse((await client.request<{ setup: unknown }>("init.get", on === undefined ? {} : { on })).setup);
     const job = setup.job;
     if (job !== null && !initJobOver(job.phase)) throw refuse(`a setup is already running there (${job.phase})`);
-    if (setup.pricing === null) throw Object.assign(new Error(noGoldenThroughHost(lock, statePath)), { kind: "conflict" });
+    if (setup.pricing === null || setup.place === undefined) throw Object.assign(new Error(noGoldenThroughHost(lock, statePath, setup.buildRefusal ?? NO_BUILD_PLACE_LINE)), { kind: "conflict" });
     const price = setup.pricing;
     return {
       client,
+      place: setup.place.name,
       pricing: { rateUsdPerHour: () => price.rateUsdPerHour, defaultSize: price.size, ...(price.builderDiskGb !== undefined ? { builderDiskGb: price.builderDiskGb } : {}) },
       appUrl: `http://${authority(dialAddress(lock), lock.port)}`,
     };
@@ -932,17 +936,18 @@ function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion)
 
 /** wsp init's flags that only mean something on the golden road, each with how it was given: the local road refuses
  * them rather than take them and do nothing. One row per flag, beside the table that parses them. */
-const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string }) => boolean][] = [
+const GOLDEN_FLAGS: readonly [string, (flags: { recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string }) => boolean][] = [
   ["--recipe", f => f.recipe !== undefined],
   ["--project", f => f.project !== undefined],
   ["--first-workspace", f => f.firstWorkspace !== undefined],
   ["--import", f => f.importFolder !== undefined],
+  ["--on", f => f.on !== undefined],
 ];
 
 /** The build handed to the host serving this state: the workspace question is asked here, where the person is, and
  * everything from the first billed machine on happens in that host's job. Its own init job forks no workspace for
  * this computer, so the tick beside the question is not offered; wsp new <name> --on this computer is that road. */
-async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; firstWorkspace?: string; importFolder?: string }): Promise<number> {
+async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolean, flags: { yes: boolean; firstWorkspace?: string; importFolder?: string; on?: string }): Promise<number> {
   const step = await askFirst({
     interactive,
     unattended: !interactive,
@@ -954,7 +959,7 @@ async function handOffTo(beside: BesideHost, screen: InitIO, interactive: boolea
     output: screen.output,
   });
   const fork = typeof step === "symbol" ? undefined : step.fork;
-  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), appUrl: beside.appUrl });
+  return buildBesideHost({ client: beside.client, io: screen, ...(fork !== undefined ? { fork } : {}), ...(flags.yes ? { yes: true } : {}), ...(flags.on !== undefined ? { on: flags.on } : {}), appUrl: beside.appUrl });
 }
 
 /** How a line that says this computer forks nothing offers the way out of it: the variable the row a key typed here
@@ -967,11 +972,13 @@ function orSetTheKey(env: ProviderEnv): string {
 async function init(
   io: CliIO,
   opts: SharedOpts,
-  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; upCommand: string; forkCommand: string },
+  flags: { yes: boolean; nonInteractive: boolean; json: boolean; noLocal: boolean; recipe?: string; project?: string; firstWorkspace?: string; importFolder?: string; on?: string; upCommand: string; forkCommand: string },
 ): Promise<number> {
   if (flags.json && flags.yes) throw usageRefusal("wsp init: --json prints the sign-ins as they are handed to you, and --yes skips the sign-ins, so there would be nothing to print.", "Drop one of them.");
   await adoptLoginPath(line => io.log(line));
   const held = servingHost(opts.statePath);
+  // The places are the serving host's: a run with none serving builds on its own provider and knows no other place.
+  if (held === undefined && flags.on !== undefined) throw usageRefusal(`wsp init: --on names a place of the host serving ${opts.statePath}, and none is serving it.`, "Start it with wsp up and run wsp init --on again, or drop --on to build on this computer's provider.");
   const flag = projectFlag("init", flags.project);
   if (!flag.ok) throw usageRefusal(flag.message, "Give --project a folder that is already here, or drop the flag and let the run ask.");
   const project = flag.path;
@@ -986,10 +993,13 @@ async function init(
   // A host already serving this state file is the process that writes it and holds the provider, so this run asks
   // its screens and hands the build to that host. Read before the opening: a refusal here is the whole run, and it
   // reads better without a banner over it. Nothing is asked for a key: the host has the one that builds.
-  const beside = held === undefined ? undefined : await besideHost(held, opts.statePath);
+  const beside = held === undefined ? undefined : await besideHost(held, opts.statePath, flags.on);
   opening(screen, { command: "init", version: VERSION, yes: flags.yes, statePath: opts.statePath });
   const { keys, env: providerEnv } =
     beside !== undefined ? { keys: keysFound(), env: opts.providerEnv } : await loadKeys(say, keySources(opts.providerEnv), { anthropic: false, noSolari: "offer", checkSaved: true });
+  // The first screen names where the image is built: the host's place, or the provider this run itself forks on.
+  const builds = beside !== undefined ? beside.place : forksNoMachines(providerBackendFor(providerEnv).capabilities) ? undefined : wiredProviderId(providerEnv);
+  if (builds !== undefined) builtOn(screen, builds);
   // A provider with no size to boot a builder on has no image to build, so the run makes this computer the workspace
   // and serves the app on it. Every flag about the golden is about a road this run does not take.
   if (beside === undefined && forksNoMachines(providerBackendFor(providerEnv).capabilities)) {
@@ -1447,6 +1457,7 @@ interface SharedFlags {
   project?: string;
   "first-workspace"?: string;
   import?: string;
+  on?: string;
   "no-local"?: boolean;
   local?: boolean;
   service?: boolean;
@@ -1621,8 +1632,8 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   init: {
     page: "front",
-    usage: "wsp init [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]",
-    about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. With no provider key it seals nothing and makes this computer your workspace instead. Beside a host already serving this state file the screens are the same and the build runs in that host",
+    usage: "wsp init [--on <place>] [--recipe <path>] [--project <path>] [--first-workspace <name>] [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]",
+    about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and makes this computer your workspace instead",
     json: true,
     host: "refused",
     cliOnly: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
@@ -1637,6 +1648,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values.project !== undefined ? { project: values.project } : {}),
         ...(values["first-workspace"] !== undefined ? { firstWorkspace: values["first-workspace"] } : {}),
         ...(values.import !== undefined ? { importFolder: values.import } : {}),
+        ...(values.on !== undefined ? { on: values.on } : {}),
         upCommand: upCommandFor(opts, values),
         forkCommand: forkCommandFor(opts, values),
       }),
@@ -1849,6 +1861,7 @@ export const SHARED_OPTIONS: Options = {
   project: { type: "string" },
   "first-workspace": { type: "string" },
   import: { type: "string" },
+  on: { type: "string" },
   "no-local": { type: "boolean" },
   local: { type: "boolean" },
   service: { type: "boolean" },
@@ -1981,6 +1994,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "yes", on: ["init", "doctor"], says: "init: take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal. doctor: also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
+  { name: "on", on: ["init"], says: "the place the image is built on, by the name wsp places lists, a computer you joined included; the default place without it" },
   { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
   { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
   { name: "no-local", on: ["init"], says: "leave this computer alone; the workspace step ticks it by default, since a workspace here forks nothing and bills nothing" },

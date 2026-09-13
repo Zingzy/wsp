@@ -613,6 +613,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             case "workspaces.createLocal":
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.createLocal(msg.name, origin)) });
               return;
+            case "workspaces.landing":
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing(msg.on === undefined ? {} : { on: msg.on })) });
+              return;
             case "workspaces.createSsh": {
               const { id, op, address, origin: _sent, ...rest } = msg;
               void op;
@@ -927,7 +930,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, config: await terminalConfig().read(msg.scheme) });
               return;
             case "init.get":
-              send({ id: msg.id, ok: true, setup: await init().get() });
+              send({ id: msg.id, ok: true, setup: await init().get(msg.on === undefined ? {} : { on: msg.on }) });
               return;
             case "init.keys":
               send({ id: msg.id, ok: true, setup: await init().keys({ ...(msg.provider !== undefined ? { provider: msg.provider } : {}), ...(msg.key !== undefined ? { key: msg.key } : {}), ...(msg.rows !== undefined ? { rows: msg.rows } : {}) }) });
@@ -948,7 +951,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, job: await init().retry({ tool: msg.tool }) });
               return;
             case "init.build":
-              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}), ...(msg.yes !== undefined ? { yes: msg.yes } : {}) }) });
+              send({ id: msg.id, ok: true, job: await init().build({ ...(msg.firstWorkspace !== undefined ? { firstWorkspace: msg.firstWorkspace } : {}), ...(msg.importFolder !== undefined ? { importFolder: msg.importFolder } : {}), ...(msg.yes !== undefined ? { yes: msg.yes } : {}), ...(msg.on !== undefined ? { on: msg.on } : {}) }) });
               return;
             case "init.signInCode":
               send({ id: msg.id, ok: true, job: await init().signInCode({ tool: msg.tool, code: msg.code }) });

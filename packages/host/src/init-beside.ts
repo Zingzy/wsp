@@ -31,6 +31,8 @@ export interface BesideOptions {
   fork?: { name: string; folder?: string };
   /** wsp init --yes: the sign-ins on the machine are skipped there too, so the flag means the same on both roads. */
   yes?: boolean;
+  /** wsp init --on: the place the image is built on; absent, that host's default place. */
+  on?: string;
   /** Where the host serving this state answers, printed once the build is over. */
   appUrl?: string;
 }
@@ -132,6 +134,7 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       ...(o.fork !== undefined ? { firstWorkspace: o.fork.name } : {}),
       ...(o.fork?.folder !== undefined ? { importFolder: o.fork.folder } : {}),
       ...(o.yes === true ? { yes: true } : {}),
+      ...(o.on !== undefined ? { on: o.on } : {}),
     });
     return ended(o, await until(job => initJobOver(job.phase)));
   } finally {

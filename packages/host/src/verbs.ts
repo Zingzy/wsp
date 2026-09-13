@@ -96,7 +96,6 @@ import {
   fmtThreads,
   foldThreads,
   threadWordOf,
-  forksNoMachines,
   foreignFlagLine,
   forgetNotice,
   goldenHead,
@@ -125,7 +124,6 @@ import {
   type SessionAnswerOutcome,
   SessionAnswerResult,
   type SessionPermissionEvent,
-  NO_PROVIDER_LINE,
   notAFileLine,
   notAnImageLine,
   notifyLine,
@@ -199,6 +197,7 @@ import {
   workspaceProjects,
   HERE_PLACE_ID,
   isLocalWorkspace,
+  namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
   placeRunsOneWorkspaceFix,
@@ -749,19 +748,23 @@ async function imageView(client: HostClient): Promise<SealedImageView> {
 /** Builds this host's image at a place, streaming the build's lines as the runtime reports them: one line per stage,
  * the same words the creation log prints. The record is read back after it, so the copy is said in the words `wsp
  * image` says it in; every refusal is the host's. */
-export async function buildImageAt(client: HostClient, out: Out, place: string, force?: boolean): Promise<{ image: SealedImage; built: SealedImageBuilt }> {
+export async function buildImageAt(client: HostClient, out: Out, word: string, force?: boolean): Promise<{ image: SealedImage; built: SealedImageBuilt }> {
+  // The build's frames carry the place's id, whichever word the person typed for it, and the lines read its name. A
+  // word the list does not hold goes to the host as typed: the host is the one judge of what it names.
+  const listed = (await client.request<{ places: PlaceView[] }>("places.list")).places.find(p => namesPlace(p, word));
+  const place = listed ?? { id: word, name: word };
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(
-    f => f.type === "golden.stage" && (f as unknown as GoldenStageEvent).place === place,
+    f => f.type === "golden.stage" && (f as unknown as GoldenStageEvent).place === place.id,
     f => {
       const e = f as unknown as GoldenStageEvent;
       const words = e.stage === "failed" ? "Failed" : GOLDEN_STAGE_WORDS[e.stage];
-      out.stream(`${[`${place}: ${words}`, ...(e.detail !== undefined ? [e.detail] : [])].join(" · ")}\n`);
+      out.stream(`${[`${place.name}: ${words}`, ...(e.detail !== undefined ? [e.detail] : [])].join(" · ")}\n`);
     },
   );
   try {
-    const { build } = await client.request<{ build: unknown }>("image.build", { place, ...(force === true ? { force } : {}) });
+    const { build } = await client.request<{ build: unknown }>("image.build", { place: place.id, ...(force === true ? { force } : {}) });
     const view = await imageView(client);
     if (view.image === null) throw new Error(NO_SEALED_IMAGE);
     return { image: view.image, built: SealedImageBuilt.parse(build) };
@@ -1041,31 +1044,22 @@ function projectNamed(workspace: WorkspaceView, name: string | undefined): strin
   return name;
 }
 
-/** What the host's provider offers, read from the host rather than from a key: the one place a verb learns what this
- * computer can fork. */
-async function capabilitiesOf(client: HostClient): Promise<Capabilities> {
-  return (await client.request<{ capabilities: Capabilities }>("capabilities.get")).capabilities;
-}
-
-/** The same, read first by every road that would mint a machine, since a host whose provider offers no size mints
- * none: the one sentence naming what to do stands in place of a stage line for a machine nobody will get, and in
- * place of a missing golden or a missing project golden, each of which would otherwise name a road that cannot be
- * taken here (wsp init seals nothing without a provider, and no workspace on such a host can be snapshotted). */
-async function forkable(client: HostClient): Promise<Capabilities> {
-  const capabilities = await capabilitiesOf(client);
-  if (forksNoMachines(capabilities)) throw new Error(NO_PROVIDER_LINE);
-  return capabilities;
+/** What the place a fork would land on offers, read from the host ahead of every road that would mint a machine: the
+ * host gates the landing place, so a place that forks nothing is refused in one sentence before any stage is
+ * streamed, and before a missing golden or a missing project golden could name a road that cannot be taken. */
+async function forkable(client: HostClient, on?: string): Promise<Capabilities> {
+  return (await client.request<{ capabilities: Capabilities }>("workspaces.landing", on === undefined ? {} : { on })).capabilities;
 }
 
 /** Forks the golden's head into a new workspace, the way the app's create does, with the stages streamed as they land. */
 export async function createFromHead(client: HostClient, out: Out, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string): Promise<WorkspaceCreateResult> {
-  // A fork that names a place is held to what that computer offers, which only the host can read; the check here
-  // is what this host's own provider can do, so it stands only where the fork lands there.
-  if (on === undefined) await forkable(client);
+  // The landing is read once, here, ahead of the golden: a place that forks nothing is the refusal, not a missing
+  // golden, and the create below takes the answer rather than asking again.
+  const landing = await forkable(client, on);
   const { manifest } = await client.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
   const head = goldenHead(manifest);
   if (head === undefined) throw new Error("no golden yet; run wsp init");
-  return create(client, out, head.snapshotId, name, size, agents, on);
+  return create(client, out, head.snapshotId, name, size, agents, on, landing);
 }
 
 /** What a --spawn line asks for, the one reading of it: nothing when nobody named a switch, so a workspace made
@@ -1096,12 +1090,6 @@ function countAsked(flagName: string, word: string | number, least: number): num
 
 /** The size a --size word names, read but not checked: on a joined computer what is on offer is that computer's to
  * say, and the host refuses a size it does not offer with the same sentence this one would have. */
-function sizeWordOnly(word: string): WorkspaceSize {
-  const size = sizeFromWord(word);
-  if (size === undefined) throw usageRefusal(`--size takes a word like 2x4, and got ${JSON.stringify(word)}.`, "Write it as <cpu>x<memGb>.");
-  return size;
-}
-
 /** The size a --size word names, checked against what the host's provider offers before anything is minted. */
 function sizeChosen(capabilities: Capabilities, word: string): WorkspaceSize {
   const size = sizeFromWord(word);
@@ -1109,9 +1097,9 @@ function sizeChosen(capabilities: Capabilities, word: string): WorkspaceSize {
   return size;
 }
 
-/** The project golden a person names: by snapshot id, else the newest whose project carries that name. */
+/** The project golden a person names: by snapshot id, else the newest whose project carries that name. The caller
+ * has read the landing before asking, so a host that forks nothing refuses there and never reaches this. */
 export async function projectGoldenOf(client: HostClient, ref: string): Promise<ProjectGolden> {
-  await forkable(client);
   const { projectGoldens } = await client.request<{ projectGoldens: ProjectGolden[] }>("projectGoldens.list");
   const byId = projectGoldens.find(g => g.snapshotId === ref);
   if (byId !== undefined) return byId;
@@ -1138,13 +1126,13 @@ export function projectGoldenLine(g: ProjectGolden): string {
   return `project golden ${g.snapshotId}: ${version} plus ${carried}, taken from ${g.workspaceName}\nfork it with: wsp new <name> --from ${goldenForkName(g)}`;
 }
 
-/** `size` is the --size word; absent, the workspace takes the golden's size. */
-export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string): Promise<WorkspaceCreateResult> {
-  // Read before a frame is followed, so a host that mints nothing says so once and streams no stage for a machine
-  // that will never exist. A fork on a joined computer is that computer's to size and to refuse, so the host is
-  // left to answer for it.
-  const chosen = size === undefined ? undefined : on === undefined ? sizeChosen(await forkable(client), size) : sizeWordOnly(size);
-  if (size === undefined && on === undefined) await forkable(client);
+/** `size` is the --size word; absent, the workspace takes the golden's size. `landing` is what the place the fork
+ * lands on offers when the caller has read it already, so one create asks the host once. */
+export async function create(client: HostClient, out: Out, golden: string, name: string, size?: string, agents?: Partial<WorkspaceAgents>, on?: string, landing?: Capabilities): Promise<WorkspaceCreateResult> {
+  // Read before a frame is followed, so a place that mints nothing says so once and streams no stage for a machine
+  // that will never exist; the size is held to what the landing place offers.
+  const capabilities = landing ?? (await forkable(client, on));
+  const chosen = size === undefined ? undefined : sizeChosen(capabilities, size);
   const pushed = pushedFrames(client);
   await client.events();
   pushed.follow(
@@ -1181,7 +1169,7 @@ export async function createLocalWorkspace(client: HostClient, out: Out, name?: 
  * there are. One reading, so the verb and the tool answer an unknown place alike. */
 export async function placeNamed(client: HostClient, word: string): Promise<PlaceView> {
   const places = (await client.request<{ places: PlaceView[] }>("places.list")).places;
-  const found = places.find(p => p.name === word || p.id === word);
+  const found = places.find(p => namesPlace(p, word));
   if (found === undefined) throw usageRefusal(noSuchPlaceRefusal(word, places.map(p => p.name)), "Run wsp places.");
   return found;
 }
@@ -2480,7 +2468,10 @@ export const VERBS: readonly Verb[] = [
         }
       }
       if (from === undefined) await createFromHead(client, ctx.out, name, size, agents, on);
-      else await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents, on);
+      else {
+        const landing = await forkable(client, on);
+        await create(client, ctx.out, (await projectGoldenOf(client, from)).snapshotId, name, size, agents, on, landing);
+      }
       return 0;
     },
     tool: tool({
@@ -2504,7 +2495,8 @@ export const VERBS: readonly Verb[] = [
           if (place.takesForks !== true) return asJson(await onPlaceItself(client, QUIET, place, name, { from, size: word, agents }));
         }
         if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on));
-        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents, on));
+        const landing = await forkable(client, on);
+        return asJson(await create(client, QUIET, (await projectGoldenOf(client, from)).snapshotId, name, word, agents, on, landing));
       },
     }),
   },
@@ -2735,7 +2727,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing. Refused in one line for a place this host does not hold, for the place this host forks on, whose copy is what wsp init builds, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
+        "Builds this host's image at a place from the record alone: a builder is forked there with the recipe the image was sealed from and every sign-in set to skip, the sign-ins the seal held are landed on it out of the vault, and the copy is sealed and recorded under that place at the record's hash. Nothing signs in again and no Keychain is read. A place that already holds a copy built from this record is answered with that copy and `built` false, so asking twice costs nothing. Refused in one line for a place this host does not hold, for a place that takes no copy at all, and for a record sealed without the recipe it was built from. A record holding no sign-ins is refused too, since every copy of it would ask for them again; `force` builds it anyway.",
       input: { place: z.string().describe("the place to build the copy at, by the name wsp places lists"), force: z.boolean().optional().describe("build even where the record holds no sign-ins, so the copy asks for every one of them again") },
       output: { copy: SealedImageCopy, built: z.boolean() },
       call: async ({ place, force }, deps) => {

@@ -146,12 +146,12 @@ describe("the build wsp init hands to the host serving the state", () => {
   it("starts the terminal road, asks for the build, prints every row as it lands and ends on the golden that host recorded", async () => {
     const f = await serving();
     const client = await dialHost(f.statePath);
-    const run = buildBesideHost({ client, io: f.io, fork: { name: "beside", folder: "/Users/maya/spoo" }, yes: true, appUrl: "http://127.0.0.1:4400" });
+    const run = buildBesideHost({ client, io: f.io, fork: { name: "beside", folder: "/Users/maya/spoo" }, yes: true, on: "spoo", appUrl: "http://127.0.0.1:4400" });
     await until(() => f.door.calls.some(c => c.op === "start"));
     expect(f.door.calls[0]).toEqual({ op: "start", args: { road: "terminal" } });
     f.door.push({ phase: "answering" });
     await until(() => f.door.calls.some(c => c.op === "build"));
-    expect(f.door.calls[1]).toEqual({ op: "build", args: { firstWorkspace: "beside", importFolder: "/Users/maya/spoo", yes: true } });
+    expect(f.door.calls[1]).toEqual({ op: "build", args: { firstWorkspace: "beside", importFolder: "/Users/maya/spoo", yes: true, on: "spoo" } });
 
     f.door.push({ phase: "building", rows: [stage("stage/creating", "Machine created", INIT_ROW_STATES.running)] });
     f.door.push({ phase: "building", rows: [stage("stage/creating", "Machine created", INIT_ROW_STATES.slot)] });

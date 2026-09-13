@@ -8,8 +8,8 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
+import { runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -123,10 +123,10 @@ describe("wsp verbs over the host", () => {
   const RECORD = (bytes: number) => ({ name: "default", version: 1, hash: "a".repeat(64), recipeHash: "rh", logins: [{ name: "codex", state: "copied" as const }], sealedAt: "2026-09-12T00:00:00.000Z", sealedFrom: "h1", vault: { sha256: "b".repeat(64), bytes, paths: 2, takenAt: "2026-09-12T00:00:00.000Z" } });
 
   /** The host again on the same state file, over a runtime with these adapters; the verbs still see no key. */
-  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends): Promise<void> {
+  async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend, store: over, adapters, local: localWiring(join(dir, "user")), ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -344,6 +344,17 @@ describe("wsp verbs over the host", () => {
     }
   });
 
+  it("new without --on is gated on the place the fork lands on, not on the provider this host forks on: a host whose own provider forks nothing names the place that does", async () => {
+    const none = new NoProviderBackend();
+    const elsewhere = stubBackend();
+    await restartHost({}, memoryStore(), { wired: "none", backend: p => (p === "none" ? none : p === "elsewhere" ? elsewhere : undefined), list: () => ["none", "elsewhere"] }, none);
+    const bare = await run("new", "alpha");
+    expect(bare.code).toBe(1);
+    expect(bare.io.errors).toEqual([`wsp new: ${placeForksNothingPickLine("none", ["elsewhere"])}`]);
+    expect([bare.io.lines, bare.io.streamed]).toEqual([[], ""]);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
   it("new refuses in one line when there is no golden", async () => {
     await restartHost({}, memoryStore());
     const { code, io } = await run("new", "alpha");
@@ -460,7 +471,7 @@ describe("wsp verbs over the host", () => {
     expect(view.copies.map(c => c.place)).toEqual(["default"]);
   });
 
-  it("wsp image build refuses in one line for a place this host has not got, the place it forks on, and a place that takes no copy", async () => {
+  it("wsp image build refuses in one line for a place this host has not got and a place that takes no copy; the place it forks on is a place like any other", async () => {
     // Three places over one host: the one it forks on, one more that could build, and this computer, which forks
     // nothing and copies no disk.
     const elsewhere = stubBackend();
@@ -475,9 +486,11 @@ describe("wsp verbs over the host", () => {
     expect(nowhere.code).toBe(1);
     expect(nowhere.io.errors.join("")).toContain("no place named nowhere");
 
+    // The provider this host forks on takes a copy build too; this record was backfilled off its own golden and
+    // carries no recipe, so the build stops at the record and boots nothing.
     const wired = await run("image", "build", "default");
     expect(wired.code).toBe(1);
-    expect(wired.io.errors.join("")).toContain("is the place this host forks on");
+    expect(wired.io.errors.join("")).toContain("was sealed before the image record kept the recipe");
 
     const cannot = await run("image", "build", "here");
     expect(cannot.code).toBe(1);

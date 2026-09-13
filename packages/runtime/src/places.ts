@@ -22,6 +22,7 @@ import {
   forkRoom,
   placeLinkTranscript,
   absentComputer,
+  namesPlace,
   noSuchPlaceRefusal,
   placeHoldsForksRefusal,
   placeForksNowhereLine,
@@ -287,6 +288,10 @@ export interface PlaceDoor {
 /** The one refusal for a runtime served without places wired, so the ops answer plainly rather than pretending
  * this host holds none. */
 export const NO_PLACE_DOOR = "this runtime holds no places; the host that serves the app wires them";
+
+/** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
+ * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
+export class PlaceForksNowhereError extends Error {}
 
 /** What an install answers once the computer has dialled in: which stream of steps it was, the place it became,
  * and the key its ssh answered with. */
@@ -770,7 +775,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const name = record?.name ?? placeId;
       if (record === undefined || !record.report.runsWorkspaces) {
         backends.delete(placeId);
-        throw new Error(placeForksNowhereLine(name, record?.report.workspacesBlocked));
+        throw new PlaceForksNowhereError(placeForksNowhereLine(name, record?.report.workspacesBlocked));
       }
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -834,7 +839,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     async placeFor(word) {
       const all = await records();
-      const found = all.find(r => r.id === word || r.name === word);
+      const found = all.find(r => namesPlace(r, word));
       if (found !== undefined) return { placeId: found.id };
       const here = wiring.here().name;
       const providers = providerIds();

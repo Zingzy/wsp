@@ -5,7 +5,7 @@
 // plain line with the version and that same state line.
 import { styleText } from "node:util";
 import { intro, log } from "@clack/prompts";
-import { stateFileLine } from "@wsp/protocol";
+import { imageBuiltOnLine, stateFileLine } from "@wsp/protocol";
 import type { InitIO } from "./init.js";
 import { colourDepth, grey, muted } from "./init-layout.js";
 
@@ -42,4 +42,11 @@ export function opening(io: Pick<InitIO, "output" | "isTTY" | "env">, o: { comma
   io.output.write(`\n${wordmark(depth >= 8).join("\n")}\n\n`);
   intro(`${styleText("inverse", ` ${o.command} `)}  ${styleText("dim", `${TAGLINE}  ${o.version}`)}`, out);
   log.message(muted(stateFileLine(o.statePath), depth), out);
+}
+
+/** The line under the opening that names the place the image is built on, in the state line's own weight. */
+export function builtOn(io: Pick<InitIO, "output" | "isTTY" | "env">, place: string): void {
+  const out = { output: io.output };
+  const line = imageBuiltOnLine(place);
+  log.message(io.isTTY ? muted(line, colourDepth(io.isTTY, io.env)) : line, out);
 }
