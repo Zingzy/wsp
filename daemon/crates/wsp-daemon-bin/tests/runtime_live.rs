@@ -310,6 +310,50 @@ async fn answers_exec_with_stdout_stderr_and_the_exit_code() {
 }
 
 #[tokio::test]
+async fn an_exec_runs_behind_the_workspaces_seccomp_filter_with_the_inits_capabilities() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    const FENCE_LINES: &str = "grep -E '^(Seccomp|Seccomp_filters|CapBnd|CapEff|CapPrm|CapInh|CapAmb):'";
+    let (code, out, err) = w.exec(&id, &format!("{FENCE_LINES} /proc/1/status; echo --; {FENCE_LINES} /proc/$$/status")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{out}");
+    let (init, shell) = out.split_once("--\n").unwrap();
+    eprintln!("the init's status:\n{init}the exec'd shell's status:\n{shell}");
+    assert!(shell.contains("Seccomp:\t2\n"), "the exec'd shell runs unfenced: {shell}");
+    assert!(shell.contains("Seccomp_filters:\t1\n"), "{shell}");
+    assert!(!shell.contains("CapEff:\t000001ffffffffff\n"), "the exec'd shell kept the box's capabilities: {shell}");
+    assert_eq!(shell, init, "an exec'd process runs as the init does");
+    w.close().await;
+}
+
+#[tokio::test]
+async fn an_exec_against_a_filter_with_a_notify_action_is_refused_and_the_workspace_still_answers() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The bundle's config.json is what every exec reads its filter from; a rule with the notify action is added to
+    // it while the workspace runs, and the original is put back before the next exec.
+    let config = root().join("run").join(&id).join("config.json");
+    let kept = fs::read_to_string(&config).unwrap();
+    let mut bundle: Value = serde_json::from_str(&kept).unwrap();
+    bundle["linux"]["seccomp"]["syscalls"].as_array_mut().unwrap().push(json!({ "names": ["getcwd"], "action": "SCMP_ACT_NOTIFY" }));
+    fs::write(&config, bundle.to_string()).unwrap();
+    let refused = w.ask("machine.exec", json!({ "machineId": id, "cmd": "echo unfenced", "timeoutMs": 10_000 })).await;
+    fs::write(&config, &kept).unwrap();
+    assert_eq!(
+        refused,
+        json!({ "id": 1, "ok": false, "error": "runtime exec: the workspace's seccomp filter has a rule whose action is notify, and an exec serves no listener for it, so the command did not run" })
+    );
+    let (code, out, _) = w.exec(&id, "echo fenced; grep Seccomp: /proc/$$/status").await;
+    assert_eq!((code, out.as_str()), (0, "fenced\nSeccomp:\t2\n"));
+    w.close().await;
+}
+
+#[tokio::test]
 async fn pauses_and_resumes_with_the_freezer() {
     if !live() {
         return;

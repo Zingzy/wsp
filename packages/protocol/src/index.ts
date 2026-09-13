@@ -3114,6 +3114,7 @@ const DAEMON_CONTENTS = [
   "ad9341f55ebc6a724a35b9febb11f7ca5cf5133a90d7a631bf39cf9a496657ac",
   "cebb929363226a20c057702cfe24235fa2f24749c70355539f5bab4b3bcfd3da",
   "bbdd3b1dc7fb73b04d5986128d099e11a723d777bd1a3c7cddd14819f1ee8cfc",
+  "35236ee3220f12db35f3307812b2d2ea8c8762f8910e656d9d57a44bb599b0e3",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3174,7 +3175,9 @@ const DAEMON_CONTENTS = [
  * names no shared library; a binary that did was installed once and its container init called address zero.
  * Version 27 answers machine.snapshot with a job and machine.snapshotJob with how far it has got, so a layer that
  * takes minutes to write waits on no one frame; the layer is a plain tar, the shape carries the bytes the workspace
- * wrote, and a snapshot's failure is the job's own refusal. */
+ * wrote, and a snapshot's failure is the job's own refusal. Version 28 runs every exec behind the workspace's
+ * seccomp filter: a process an exec started ran with none while the init ran behind one, and now loads the same
+ * filter before its command, or the exec is refused. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
