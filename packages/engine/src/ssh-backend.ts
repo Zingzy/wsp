@@ -194,9 +194,15 @@ export type SshLocalRun = (file: string, args: readonly string[], timeoutMs: num
 
 const localRun: SshLocalRun = (file, args, timeoutMs) => runChild(file, args, { env: process.env, timeoutMs });
 
-/** How long each of those reads is given. Neither opens a connection, so this only bounds a client sitting on a
- * config it cannot read. */
+/** How long each of the reads that only ask the client is given. Neither opens a connection, so this only bounds a
+ * client sitting on a config it cannot read. */
 const SSH_LOCAL_READ_MS = 5_000;
+
+/** The one read that does leave this computer: how long it waits on the machine's ssh port, told to the tool in its
+ * own seconds, and the bound the child itself is held to past that. It is asked as a record is made and never on a
+ * status tick, so what it costs is paid once by a person who is watching. */
+const SSH_KEYSCAN_S = 5;
+const SSH_KEYSCAN_MS = 10_000;
 
 /** The name the client writes this machine's key under and looks it up by, out of its own answers for the dial: the
  * alias where the person set one, else the host the address resolves to, with the port in brackets where it is not
@@ -235,10 +241,10 @@ function sshFingerprint(blob: string): string {
  * known by, so that is the one the identity stands on and the answer does not turn on which line was written first.
  * A signature name is no key type (an rsa-sha2 signature is made by an ssh-rsa key). Only a line whose second word
  * is a type this client prefers is read, which is what leaves out the comment lines ssh-keygen prints and the
- * marker lines for an authority or a revoked key: neither has a key type where an entry has one. A machine the
- * client trusts through an authority rather than by a key of its own is therefore left with no identity at all,
- * on a cold dial as on a warm one: the authority's key is not the machine's, and standing a record on it would
- * make every machine that authority signed the same machine. */
+ * marker lines for an authority or a revoked key: neither has a key type where an entry has one. The authority's
+ * key is not the machine's, and standing a record on it would make every machine that authority signed the same
+ * machine, so a client that holds only such a line for a machine is asked nothing more here and the machine's own
+ * key is read off the machine instead. */
 export function hostKeyFound(found: string, algorithms: string): string | undefined {
   const preferred = algorithms.split(",").map(name => name.replace(/^rsa-sha2-\d+$/, "ssh-rsa"));
   let best: { rank: number; key: string } | undefined;
@@ -251,10 +257,41 @@ export function hostKeyFound(found: string, algorithms: string): string | undefi
   return best?.key;
 }
 
-/** The key the client holds for this machine, read on this computer with nothing dialled: `ssh -G` answers where
- * the client looks and what it prefers there with the person's own config applied, and `ssh-keygen -F` reads the
- * entry out, hashed or not. This is the road that survives a warm master: the accept-new policy wrote the entry as
- * the first dial was made, so the answer is there whether this dial exchanged a key or rode an open connection. */
+/** The word a known_hosts line starts with where its key signs for machines rather than being one machine's own. */
+const CERT_AUTHORITY = "@cert-authority";
+
+/** Whether the client knows this machine only through an authority: it holds lines for the machine and every one
+ * of them names a signing key, so the machine's own key is nowhere in the client's own files. The machine still
+ * has one, and the certificate it answers a dial with is that key signed, which is why the road below asks the
+ * machine for it rather than leaving the record with no identity. */
+function trustedByAuthority(found: string): boolean {
+  const lines = found.split("\n").map(line => line.trim()).filter(line => line !== "" && !line.startsWith("#"));
+  return lines.length > 0 && lines.every(line => line.startsWith(`${CERT_AUTHORITY} `));
+}
+
+/** The keys the machine itself offers, in the same `name type key` lines a known_hosts entry carries: one dial of
+ * its ssh port with no login and nothing installed. Only the road above calls it, and only for a machine the
+ * client trusts through an authority. What comes back stands on no trust of its own: it is read as an identity,
+ * which is what tells two records of one machine apart, and never as a key a dial is checked against, which stays
+ * the client's own job through the authority it already holds.
+ *
+ * Nothing is asked where the client would reach the machine through a jump or a command of the person's, since
+ * this road dials the resolved name itself and cannot take either: the name would resolve on this network rather
+ * than on the far side of the jump, and whatever answered there would be recorded as that machine's identity. */
+async function offeredHostKeys(values: Record<string, string>, run: SshLocalRun): Promise<string> {
+  const host = values["hostname"] ?? "";
+  if (host === "" || (values["proxyjump"] ?? "") !== "" || (values["proxycommand"] ?? "") !== "") return "";
+  const port = Number(values["port"]) || SSH_DEFAULT_PORT;
+  const read = await run("ssh-keyscan", ["-T", String(SSH_KEYSCAN_S), "-p", String(port), host], SSH_KEYSCAN_MS);
+  return read.exitCode === 0 ? read.stdout : "";
+}
+
+/** The key this machine is known by, as one string whoever asks. `ssh -G` answers where the client looks and what
+ * it prefers there with the person's own config applied, and `ssh-keygen -F` reads the entry out, hashed or not.
+ * That much is read on this computer with nothing dialled, which is the road that survives a warm master: the
+ * accept-new policy wrote the entry as the first dial was made, so the answer is there whether this dial exchanged
+ * a key or rode an open connection. A machine the client trusts through an authority has no entry of its own to
+ * read, and only then is the machine itself asked which key its certificate signs. */
 export async function knownHostKey(reach: SshReach, run: SshLocalRun = localRun): Promise<string | undefined> {
   const config = await run("ssh", ["-G", ...sshDialArgs(reach), `${reach.user}@${reach.host}`], SSH_LOCAL_READ_MS);
   if (config.exitCode !== 0) return undefined;
@@ -266,7 +303,10 @@ export async function knownHostKey(reach: SshReach, run: SshLocalRun = localRun)
     const read = await run("ssh-keygen", ["-F", target, "-f", file], SSH_LOCAL_READ_MS);
     if (read.exitCode === 0) found += read.stdout;
   }
-  return hostKeyFound(found, values["hostkeyalgorithms"] ?? "");
+  const algorithms = values["hostkeyalgorithms"] ?? "";
+  const held = hostKeyFound(found, algorithms);
+  if (held !== undefined || !trustedByAuthority(found)) return held;
+  return hostKeyFound(await offeredHostKeys(values, run), algorithms);
 }
 
 /** The file accept-new writes a machine's key into on this computer, off the same `ssh -G` the key is read
@@ -530,7 +570,7 @@ export class SshMachine implements Machine {
 export interface SshBackendOptions {
   /** How a script reaches a machine; the ssh client on this computer unless a test hands its own. */
   transport?: SshTransport;
-  /** How the key a machine holds is read; the client's own known_hosts entry for it unless a test hands its own. */
+  /** How the key a machine holds is read; the one road above unless a test hands its own. */
   hostKey?: SshHostKeyReader;
   /** Which file on this computer that entry was written into; the client's own answer unless a test hands its own. */
   knownHosts?: (reach: SshReach) => Promise<string | undefined>;

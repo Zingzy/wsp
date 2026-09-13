@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -59,9 +59,9 @@ export interface DaemonPlace {
    * the script never names it. Only the deploy reads this: a rotation later takes whichever road the machine
    * carries bytes on, which is the machine's own question and answered by hasByteRoad. */
   tokenRoad: "script" | "bytes";
-  /** What must hold on the machine before anything is installed on it; empty where wsp built the machine and
-   * already knows. Each line ends the deploy itself when it refuses, since the exit status of a guard behind ||
-   * is not what set -e acts on. */
+  /** The whole of what this place asks of a machine before anything is installed on it, what keeps its daemon up
+   * included; empty where wsp built the machine and already knows, which is every fork. Each line ends the script
+   * itself when it refuses, since the exit status of a guard behind || is not what set -e acts on. */
   preflight: readonly string[];
   /** Where a run's script, streams and exit code live on this machine. */
   runDir: string;
@@ -168,8 +168,6 @@ export function daemonSupervisorScript(place: DaemonPlace = CONTAINER_PLACE, pre
  * only lasting process is its own boot gets a script that loop-restarts the daemon. Each reads the place it is
  * given, so the same module serves a fork's root unit and the unit under somebody's own login. */
 export interface DaemonSupervision {
-  /** What the machine must be able to do, asked with the rest of the place's preflight. */
-  requires: readonly string[];
   /** The lines that leave the daemon running, the old one stopped first. */
   start: (place: DaemonPlace, previewHostSuffix?: string) => string[];
   /** The lines that wait for it and answer DAEMON_UP or DAEMON_DOWN. */
@@ -183,11 +181,6 @@ export interface DaemonSupervision {
  * 2026-09-08): the redirect this replaced truncated the file on every deploy, and an appended one under
  * Restart=always with no start limit has no end. */
 export const SYSTEMD: DaemonSupervision = {
-  // An unsupervised daemon is what this deploy exists to stop shipping, so a machine with no service manager says
-  // so here rather than starting one nothing would restart. It ends the script itself: a marker followed by
-  // `false` leaves the refusal resting on the shell honouring `set -e` for the last command of an `||` list,
-  // which is the deploy's most expensive line to be wrong about, since what follows it installs.
-  requires: ["command -v systemctl >/dev/null || { echo NO_SYSTEMD; exit 1; }"],
   start: (place, previewHostSuffix) => [
     stopDaemonScript(place),
     `cat > ${sh(place, place.unitPath)} <<'WSP_UNIT'\n${daemonUnit(place, previewHostSuffix)}WSP_UNIT`,
@@ -212,11 +205,18 @@ export const SYSTEMD: DaemonSupervision = {
   log: (place, lines) => `journalctl ${place.scope === "user" ? "--user " : ""}-u ${DAEMON_UNIT} -n ${lines} --no-pager`,
 };
 
+/** What a machine must already have for the module above to keep a daemon on it: the one systemd predicate in the
+ * tree, asked on the preflight road by every place whose machine wsp did not build. An unsupervised daemon is what
+ * this deploy exists to stop shipping, so a machine with no service manager says so before a byte of wsp's lands on
+ * it rather than as the install reaches for one. It ends the script itself and echoes the whole sentence: what the
+ * machine has not got is a line a person reads on a row, and a refusal resting on the shell honouring `set -e` for
+ * the last command of an `||` list would be one flag from going on. */
+export const NEEDS_SYSTEMD = `if ! command -v systemctl >/dev/null 2>&1; then echo ${shellQuote(NO_SYSTEMD_LINE)}; exit 1; fi`;
+
 /** The daemon under a script the machine's own boot runs, for a machine whose only process that outlives an exec
  * is its PID 1. Nothing here asks a service manager anything, and nothing reads a socket table: a container image
  * ships neither ss nor curl. */
 export const BOOT_SCRIPT: DaemonSupervision = {
-  requires: [],
   start: (place, previewHostSuffix) => [
     `cat > ${GUEST_SUPERVISOR_PATH} <<'WSP_SUPERVISOR'\n${daemonSupervisorScript(place, previewHostSuffix)}WSP_SUPERVISOR`,
     `chmod 0755 ${GUEST_SUPERVISOR_PATH}`,
@@ -251,7 +251,6 @@ export const BOOT_SCRIPT: DaemonSupervision = {
  * The wsp the join runs is the one in the bundle, on the node the computer carries, which the preflight asked for
  * before a byte landed. */
 export const JOINED: DaemonSupervision = {
-  requires: [],
   start: place => {
     const join = joinOf(place);
     return [
@@ -351,6 +350,8 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     quotePaths: true,
     tokenRoad: "bytes",
     preflight: [
+      // What holds the daemon up here is that login's own systemd, which a machine somebody owns may not have.
+      NEEDS_SYSTEMD,
       // The daemon is one static file and asks nothing of the machine; the wsp command beside it, which every turn's
       // agent drives this host through, still runs on node.
       `if ! command -v node >/dev/null 2>&1 || [ "$(${NODE_MAJOR} 2>/dev/null || echo 0)" -lt ${WSP_COMMAND_NODE_MAJOR} ]; then echo ${shellQuote(NO_NODE_LINE)}; exit 1; fi`,
@@ -651,9 +652,6 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
   const profileDir = posix.dirname(place.profileFile);
   return [
     "set -e",
-    // An unsupervised daemon is what this deploy exists to stop shipping, and what a machine must be able to do to
-    // avoid being one is its supervision's to ask.
-    ...place.supervise.requires,
     // Armed before the first line that writes: what this deploy leaves on a machine somebody owns has to go when
     // it dies halfway as surely as when it finishes.
     ...(place.onExit === undefined || place.onExit.length === 0 ? [] : [`trap "${place.onExit.join("; ")}" EXIT`]),

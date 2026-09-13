@@ -10,10 +10,10 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, sshDaemonPaths } from "@wsp/protocol";
+import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
 import { bundledDaemonName, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
@@ -88,10 +88,13 @@ describe("what keeps the daemon running is a module, not a question the deploy a
     expect(guestPlace("systemd")).toBe(CLOUD_PLACE);
     expect(guestPlace("entrypoint")).toBe(CONTAINER_PLACE);
 
-    // And nothing a place writes names a supervisor or a kind: the place answers, the script does not ask.
+    // And nothing a place writes names a supervisor or a kind: the place answers, the script does not ask. The
+    // sentences a refusing check echoes are left out of the read: those are words for a person about what their
+    // machine has not got, and naming the thing is the whole of what they say.
+    const asking = (script: string): string => MACHINE_LACKS_LINES.reduce((text, said) => text.split(said).join(""), script);
     for (const place of [CLOUD_PLACE, CONTAINER_PLACE, sshDaemonPlace(LOGIN)]) {
       for (const script of [deployScript(place, "aabbcc"), removeDaemonScript(place), preflightScript(place)]) {
-        for (const word of ["entrypoint", "systemd ", "supervisor ===", '"cloud"', '"ssh"']) expect(script, word).not.toContain(word);
+        for (const word of ["entrypoint", "systemd ", "supervisor ===", '"cloud"', '"ssh"']) expect(asking(script), word).not.toContain(word);
       }
     }
   });
@@ -291,6 +294,33 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(guest.ran.some(r => r.includes(PREFLIGHT_OK_LINE))).toBe(false);
   });
 
+  it("asks a machine for the service manager its daemon would be held up by, on the road that asks before anything lands", async () => {
+    // One systemd predicate in the tree, asked by every place standing on a machine wsp did not build: the
+    // workspace over ssh and the computer joined over it, whose own join installs a unit under that same manager.
+    const joined = joinedPlace(LOGIN, { hostUrls: ["http://192.168.1.20:4400"], codeFile: "/home/maya/.wsp/join-code", name: "box" });
+    for (const place of [sshDaemonPlace(LOGIN), joined]) {
+      const ask = preflightScript(place);
+      expect(ask, place.kind).toContain(NEEDS_SYSTEMD);
+      expect(ask, place.kind).toContain(machineLacksShort(NO_SYSTEMD_LINE));
+      expect(deployScript(place, "aabbcc"), place.kind).not.toContain("command -v systemctl");
+    }
+    // A fork is asked none of it: wsp built that machine and knows what is on it, and a refusal recorded there is
+    // one nothing would offer again, since a machine wsp made answers no read of what it is.
+    expect(CLOUD_PLACE.preflight).toEqual([]);
+    expect(CONTAINER_PLACE.preflight).toEqual([]);
+    // What holds the daemon up is asked first: a machine nothing there would restart a daemon on cannot take one
+    // whatever else it carries, so that is the sentence a person is given rather than the second thing it lacks.
+    const lines = preflightScript(sshDaemonPlace(LOGIN)).split("\n");
+    expect(lines.findIndex(l => l.includes("command -v systemctl"))).toBeLessThan(lines.findIndex(l => l.includes("command -v node")));
+    // A machine that refuses says the whole sentence and had nothing put on it: no write, no run but the ask.
+    const place = sshDaemonPlace(LOGIN);
+    const refused = fakeMachine({ preflight: { exitCode: 1, stdout: `${NO_SYSTEMD_LINE}\n` } });
+    const said = await deployDaemon(refused.machine, { place, daemonDir: emptyBundle(), cliDir: emptyCli() }).catch((e: unknown) => e);
+    expect(machineLacksLine(said)).toBe(NO_SYSTEMD_LINE);
+    expect(refused.wrote).toEqual([]);
+    expect(refused.ran).toEqual([preflightScript(place)]);
+  });
+
   it("marks the machine's own refusal apart from a check that never reached the machine", async () => {
     const place = sshDaemonPlace(LOGIN);
     // The refusing line echoes its sentence and exits 1, so the words are the machine's own and are marked as
@@ -316,7 +346,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(NO_LINGER_LINE).toContain("loginctl enable-linger");
     // Asked only where the machine can answer: a machine with no loginctl is not refused for lacking one.
     expect(line).toContain("command -v loginctl");
-    // A fork's own systemd is the machine's, so nothing there asks about a login, and its place asks nothing at all.
+    // A fork's own systemd is the machine's, so nothing there asks about a login.
     expect(preflightScript(CLOUD_PLACE)).not.toContain("Linger");
     expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("Linger");
   });
