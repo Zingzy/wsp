@@ -5,7 +5,7 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, doorPortHeldLine, imageCopyStaysLine, placeAddSheetWord, placeNoDialLine, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -254,6 +254,29 @@ describe("the Add a computer sheet", () => {
     await waitFor(() => expect(screen.getByText(doorPortHeldLine(4420))).toBeTruthy());
     expect(fake.issued).toBe(0);
   });
+
+  it("says on both roads how a computer that is nowhere near this network reaches it, and what a closed lid does", async () => {
+    const fake = fakeApi();
+    useStore.setState({ api: fake.api, places: [here] });
+    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
+    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.waiting)).toBeTruthy());
+    const said = (): string => document.querySelector("[data-k='description']")?.textContent ?? "";
+    // The app road: the network first, then the half a box somewhere else needs, with the sign-in named.
+    expect(said()).toBe(`${PLACES_WORDS.sheet.description} ${PLACES_WORDS.sheet.whileAsleep}`);
+    expect(said()).toContain(PLACE_CONNECTS);
+    // The one line the whole sheet is opened for, said on this road before the road is even chosen, and in the
+    // sentence the sheet hands a screen reader rather than a second paragraph that would take its place.
+    expect(said()).toContain(PLACES_WORDS.sheet.whileAsleep);
+    fireEvent.keyDown(document.querySelector("[data-segment='app']")!, { key: "ArrowRight" });
+    await waitFor(() => expect(document.querySelector("[data-k='login-field']")).toBeTruthy());
+    // The ssh road: a box in somebody else's rack reaches this Mac the same two ways, in its own sentence.
+    expect(said()).toBe(
+      `The app logs in over ssh as your terminal would, installs wsp on the box, and the box connects to this Mac over your network, or from outside it once you sign in. ${PLACES_WORDS.sheet.whileAsleep}`,
+    );
+    expect(said()).toContain(PLACE_CONNECTS);
+    // One description on this road too, and the only one the popup is described by.
+    expect(document.querySelectorAll("[data-slot='sheet-description']").length).toBe(1);
+  });
 });
 
 describe("what the places cost this month", () => {
@@ -415,6 +438,10 @@ describe("a computer's own row", () => {
     expect(document.querySelector("[data-place-row='p_1']")?.getAttribute("aria-expanded")).toBe("true");
   });
 
+  /** A client that can dial, so a button drawn beside a row is held for the row's own reason and never the app's. */
+  const dialling = (): { api: Api } =>
+    fakeApi({ dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 12 }, line: "vps answered in 12 ms.", place: { ...laptop, id: placeId } }) } as Partial<Api>);
+
   /** One row of the open detail, its value alone: the row's own element holds the label first. */
   const detailValue = (k: string): string | undefined => document.querySelector(`[data-k='place-detail'] [data-k='${k}']`)?.lastElementChild?.textContent ?? undefined;
 
@@ -444,7 +471,7 @@ describe("a computer's own row", () => {
     expect(detailValue("answered")).toBeUndefined();
     expect(detailValue("address")).toBeUndefined();
     expect(detail.querySelector("[data-k='dialled']")).toBeNull();
-    expect(detail.querySelector("[data-k='try-now']")).toBeNull();
+    expect(detail.querySelector("[data-k='dial']")).toBeNull();
     // The rows it does carry are still there, so the guard took the road reading and nothing beside it.
     expect(detailValue("workspaces")).toBe("none");
   });
@@ -474,7 +501,7 @@ describe("a computer's own row", () => {
     render(<WhereAgentsRun now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
     expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(said);
-    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='try-now']")!);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='dial']")!);
     await waitFor(() => expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(line));
   });
 
@@ -484,7 +511,7 @@ describe("a computer's own row", () => {
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
-    expect(screen.getByText("wsp, your image and its workspace come off old-macbook, which is otherwise left as it is. The workspace's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
+    expect(screen.getByText("wsp and its workspace come off old-macbook, which is otherwise left as it is. The workspace's record and 2 threads leave this Mac. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
   });
 
   it("hands a computer that is offline the one line to run on it by hand, and names what that line takes off", () => {
@@ -506,13 +533,51 @@ describe("a computer's own row", () => {
     expect(screen.queryByText(PLACES_WORDS.remove.leaveTakes)).toBeNull();
   });
 
+  it("offers no dial where there is no road to dial over, and words the button for the road there is", () => {
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said: "ssh: Connection refused" } };
+    const said = placeNoDialLine("old-macbook");
+    const byCode: PlaceView = { ...laptop, road: { from: "192.168.1.34" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
+    useStore.setState({ api: dialling().api, places: [here, byCode, vps], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    // It joined by typing a code and is not answering: the sentence is the whole answer, and a button whose only
+    // reply is that same sentence is not drawn beside it.
+    expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(said);
+    expect(document.querySelector("[data-k='place-detail'] [data-k='dial']")).toBeNull();
+    // A box wsp logs in to has a road, and the button says which one it would take.
+    fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
+    expect(document.querySelector("[data-k='place-detail'] [data-k='dial']")?.textContent).toBe("Try over ssh");
+  });
+
+  it("dials a computer that is holding its link over the link, and says so on the button", () => {
+    useStore.setState({ api: dialling().api, places: [here, { ...laptop, present: true }], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    expect(document.querySelector("[data-k='place-detail'] [data-k='dial']")?.textContent).toBe("Try now");
+  });
+
+  it("says the same thing about the copy of the image as the sheet that added the computer said", () => {
+    const holding: PlaceView = { ...laptop, runsWorkspaces: true, engine: "docker" };
+    useStore.setState({ places: [here, holding], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
+    // Both sentences of the dialog, against the note the Add sheet shows before any of this: the copy stays, and
+    // neither screen says the other one takes it off.
+    const dialog = document.querySelector("[data-remove-place-dialog]")!;
+    expect(dialog.textContent).toContain(imageCopyStaysLine());
+    expect(PLACES_WORDS.remove.leaveTakes).toContain(imageCopyStaysLine());
+    expect(PLACE_INSTALL.imageCopy("4.2 GB")).toContain(imageCopyStaysLine());
+    expect(dialog.textContent).not.toContain("your image come off");
+  });
+
   it("says nothing of a record leaving for a computer that holds none, and takes it out on the host's own road", async () => {
     const removed: string[] = [];
     useStore.setState({ places: [here, laptop], workspaces: [], sessions: {}, api: { subscribe: () => () => {}, removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [], dropped: [] }) } as unknown as Api });
     render(<WhereAgentsRun now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
-    expect(screen.getByText("wsp and your image come off old-macbook, which is otherwise left as it is. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
+    expect(screen.getByText("wsp comes off old-macbook, which is otherwise left as it is. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
     fireEvent.click(document.querySelector("[data-k='remove-confirm']")!);
     await waitFor(() => expect(removed).toEqual(["p_1"]));
   });
@@ -574,21 +639,21 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='plan']")?.previousElementSibling?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.note);
   });
 
-  it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, Docker and the opener", async () => {
+  it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, the image and the opener", async () => {
     await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], projects: [] }) } as unknown as Partial<Api>);
     const lines = plan().map(([word]) => word ?? "");
     expect(lines[1]).toBe(`installing wsp under ~/.wsp${PLACE_INSTALL.weight}`);
     expect(lines[2]).toBe("starting the agent as a user service");
-    await waitFor(() => expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image (4.2 GB) is copied into Docker there the first time a workspace is created. Remove takes all of it off again."));
+    await waitFor(() => expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image (4.2 GB) is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is."));
     expect(document.querySelector("[data-k='opener-note']")?.textContent).toBe(PLACE_INSTALL.openerLine);
     // The one word Lena could not read on the way out is on neither screen now.
     expect(document.body.textContent).not.toContain("shim");
     expect(document.body.textContent).not.toContain("systemd");
   });
 
-  it("says the Docker sentence without a figure on a wsp that has built no image yet, rather than one it guessed", async () => {
+  it("says the image sentence without a figure on a wsp that has built no image yet, rather than one it guessed", async () => {
     await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: null, copies: [], projects: [] }) } as unknown as Partial<Api>);
-    expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is copied into Docker there the first time a workspace is created. Remove takes all of it off again.");
+    expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
   });
 
   it("fills the same four lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
@@ -627,7 +692,8 @@ describe("the ssh road of the sheet", () => {
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='title']")?.textContent).toBe("hetzner joined"));
-    expect(document.querySelector("[data-k='description']")?.textContent).toBe(ADD_COMPUTER_WORDS.runsWorkspaces);
+    // The joined screen says what that box is, and the lid line rides every road's sentence including this one.
+    expect(document.querySelector("[data-k='description']")?.textContent).toBe(`${ADD_COMPUTER_WORDS.runsWorkspaces} ${PLACES_WORDS.sheet.whileAsleep}`);
     expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
   });
 

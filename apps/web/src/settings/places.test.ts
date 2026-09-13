@@ -39,22 +39,28 @@ describe("the remove sentence", () => {
   it("names what comes off a computer that holds workspaces, and what leaves this Mac", () => {
     expect(removeTitle(hetzner)).toBe("Remove hetzner?");
     expect(removeSentence(hetzner, { workspaces: [{ name: "spoo-fix", state: "Running", threads: 2 }] }, 4.2 * 1024 ** 3)).toBe(
-      "wsp, your image (4.2 GB) and its workspace come off hetzner, which is otherwise left as it is. The workspace's record and 2 threads leave this Mac.",
+      "wsp and its workspace come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The workspace's record and 2 threads leave this Mac.",
     );
   });
 
   it("says workspaces and records in the plural above one", () => {
     expect(removeSentence(hetzner, { workspaces: [{ name: "a", state: "Running", threads: 2 }, { name: "b", state: "Running", threads: 1 }] }, 4.2 * 1024 ** 3)).toBe(
-      "wsp, your image (4.2 GB) and its 2 workspaces come off hetzner, which is otherwise left as it is. The workspaces' records and 3 threads leave this Mac.",
+      "wsp and its 2 workspaces come off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is. The workspaces' records and 3 threads leave this Mac.",
     );
   });
 
   it("drops the second sentence for a computer that holds none", () => {
-    expect(removeSentence(hetzner, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp and your image (4.2 GB) come off hetzner, which is otherwise left as it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image (4.2 GB) stays where it is.");
   });
 
   it("leaves the size out where nothing has measured the image", () => {
-    expect(removeSentence(hetzner, NOTHING_HELD)).toBe("wsp and your image come off hetzner, which is otherwise left as it is.");
+    expect(removeSentence(hetzner, NOTHING_HELD)).toBe("wsp comes off hetzner, which is otherwise left as it is, and the copy of your image stays where it is.");
+  });
+
+  it("says nothing of an image on a computer that runs no workspaces, since none was ever built there", () => {
+    // What Remove promises about four gigabytes of somebody's disk is what the sweep does: it walks wsp's own
+    // folder and the unit, and never the store a copy of the image would sit in.
+    expect(removeSentence({ ...hetzner, runsWorkspaces: false, engine: "none" }, NOTHING_HELD, 4.2 * 1024 ** 3)).toBe("wsp comes off hetzner, which is otherwise left as it is.");
   });
 
   it("says a provider's workspaces are deleted there and its key forgotten here", () => {
@@ -65,7 +71,7 @@ describe("the remove sentence", () => {
 
   it("adds when an offline computer is swept", () => {
     expect(removeSentence(laptop, NOTHING_HELD)).toBe(
-      "wsp and your image come off old-macbook, which is otherwise left as it is. It is offline; what is on it is swept the next time it connects.",
+      "wsp comes off old-macbook, which is otherwise left as it is. It is offline; what is on it is swept the next time it connects.",
     );
   });
 });
