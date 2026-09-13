@@ -19,6 +19,7 @@ import {
   MachinePromoteReply,
   MachineReachReply,
   MachineShapeReply,
+  MachineSnapshotJobReply,
   MachineSnapshotReply,
   MachineSnapshotsReply,
   MachineStateReply,
@@ -47,6 +48,7 @@ import type {
   MachineState,
   PreviewReach,
   RunOptions,
+  SnapshotOptions,
   SnapshotRow,
   TemplateRow,
 } from "./machine.js";
@@ -64,6 +66,16 @@ export interface MachineLink {
 
 /** How much longer than the frame's own timeout the client waits for the answer to come back over the link. */
 export const LINK_MARGIN_MS = 5_000;
+
+/** How often a snapshot job is asked after. A layer of a built workspace takes minutes to write on a small box, so
+ * the snapshot is a job the far side names at once, and each ask is one short frame of its own; a person watching
+ * the stage reads the bytes at this pace. */
+export const SNAPSHOT_POLL_MS = 1_000;
+
+/** How long a job may read running with its bytes standing still before the ask is given up with a reason. The
+ * bytes stand still by design while the far side unpacks the layer it has written (46 s for 5 GB, measured), so this
+ * is minutes, not the poll's pace; a tar on a stalled disk or a thaw that hangs is what it ends. */
+export const SNAPSHOT_STALL_MS = 10 * 60_000;
 
 /** What every call on a place that is not connected rejects with. Nothing is wrong with the machine: the computer
  * holding it dials this host on its own whenever it is on, and the record waits rather than being called gone. */
@@ -99,6 +111,8 @@ export class LinkMachine implements Machine {
   constructor(
     private readonly link: MachineLink,
     handle: MachineHandle,
+    private readonly snapshotPollMs = SNAPSHOT_POLL_MS,
+    private readonly snapshotStallMs = SNAPSHOT_STALL_MS,
   ) {
     this.id = handle.id;
     this.kind = handle.kind;
@@ -130,8 +144,23 @@ export class LinkMachine implements Machine {
     return execDetached(this, script, opts);
   }
 
-  snapshot(name: string, life: MachineLife): Promise<string> {
-    return this.ask(MachineSnapshotReply, "machine.snapshot", { name, life }).then(r => r.snapshotId);
+  /** The far side names the job at once and is asked after it until it reads done; a job that failed is refused
+   * with its reason on the ask that finds it so, a link that dropped fails the ask in flight, and a job whose bytes
+   * stand still past the stall bound is given up with the count it stopped at. */
+  async snapshot(name: string, life: MachineLife, opts?: SnapshotOptions): Promise<string> {
+    const { job } = await this.ask(MachineSnapshotReply, "machine.snapshot", { name, life });
+    let advanced = { bytes: -1, at: Date.now() };
+    for (;;) {
+      const read = await askLink(this.link, MachineSnapshotJobReply, "machine.snapshotJob", { job });
+      opts?.onProgress?.({ bytes: read.bytes, ...(read.total !== undefined ? { total: read.total } : {}) });
+      if (read.state === "done") {
+        if (read.snapshotId === undefined) throw new Error(`the snapshot job ${job} on ${this.id} read done without a snapshot id`);
+        return read.snapshotId;
+      }
+      if (read.bytes !== advanced.bytes) advanced = { bytes: read.bytes, at: Date.now() };
+      else if (Date.now() - advanced.at >= this.snapshotStallMs) throw new Error(`the snapshot job ${job} on ${this.id} has written nothing past ${read.bytes} bytes for ${Math.round(this.snapshotStallMs / 60_000)} minutes; given up`);
+      await new Promise(r => setTimeout(r, this.snapshotPollMs));
+    }
   }
 
   pause(): Promise<void> {

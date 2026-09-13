@@ -4,6 +4,7 @@
 // status check, the global config that carries over, how it keys project
 // state to a path, and whether it is on by default with the evidence behind
 // that. The wizard's tables read from here; nothing here runs a command.
+import { agentOfRow, packageOf, toolRowPrefix } from "@wsp/protocol";
 import { CODEX_CONFIG_FILE, CODEX_HOOKS } from "./codex-hooks.js";
 import { CLAUDE_CONTEXT, CODEX_CONTEXT, GEMINI_CONTEXT, HERMES_CONTEXT, OPENCODE_CONTEXT, PI_CONTEXT, type AgentContext } from "./context.js";
 import { CLAUDE_HOOKS, CLAUDE_SETTINGS_FILE, type HookCarry } from "./hooks.js";
@@ -11,7 +12,7 @@ import { GCLOUD, KUBECTL } from "./linux-casks.js";
 import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./mcp.js";
 import { APT_INDEX, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
-import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
+import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
 import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
@@ -282,7 +283,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     name: "Hermes Agent",
     context: HERMES_CONTEXT,
     skills: "~/.hermes/skills",
-    installRoad: { road: "script", script: HERMES_INSTALL },
+    installRoad: { road: "script", script: HERMES_INSTALL, version: HERMES.tag },
     signIn: SIGN_IN_ROWS.hermes,
     configPaths: ["~/.hermes/config.yaml", "~/.hermes/SOUL.md", "~/.hermes/memories", "~/.hermes/skills", "~/.hermes/cron", "~/.hermes/hooks"],
     projectState: [
@@ -358,13 +359,13 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "mise", name: "mise", bin: "mise", ...github(119660224, "jdx/mise"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" } },
   { ...tool, id: "git-delta", name: "git-delta", bin: "delta", ...github(7151152, "dandavison/delta"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" } },
   { ...tool, id: "shellcheck", name: "ShellCheck", bin: "shellcheck", ...apt(19442688, "shellcheck"), signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 4, images: 0, road: "unmeasured" } },
-  { ...tool, id: "swift", name: "Swift 6.3", bin: "swift", installRoad: { road: "script", script: SWIFT_INSTALL }, after: APT_INDEX, brings: [{ bin: "swiftc", version: "swiftc --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 3562135552) },
+  { ...tool, id: "swift", name: "Swift 6.3", bin: "swift", installRoad: { road: "script", script: SWIFT_INSTALL, version: SWIFT.version }, after: APT_INDEX, brings: [{ bin: "swiftc", version: "swiftc --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 3562135552) },
   { ...tool, id: "elixir", name: "Elixir 1.14 with Erlang", bin: "elixir", ...apt(33395712, "elixir"), covers: ["erlang"], brings: [{ bin: "mix", version: "mix --version" }, { bin: "erl", version: "erl +V" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" } },
   // The first bazel --version fetches Bazel itself into ~/.cache/bazelisk; the du counts bazelisk and that Bazel.
   { ...tool, id: "bazel", name: "Bazel via bazelisk", bin: "bazel", installRoad: { road: "release", repo: "bazelbuild/bazelisk", go: "github.com/bazelbuild/bazelisk" }, covers: ["bazelisk"], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 1, road: "unmeasured" }, size: measured("du", 72921088) },
   { ...tool, id: "llvm", name: "clang, clang-format, clang-tidy", bin: "clang", ...apt(750848000, "clang", "clang-format", "clang-tidy"), covers: ["llvm"], brings: [{ bin: "clang-format", version: "clang-format --version" }, { bin: "clang-tidy", version: "clang-tidy --version" }], signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 2, road: "unmeasured" } },
   // The du counts the global, Chromium with its headless shell and ffmpeg under ~/.cache/ms-playwright, and the browser's Debian packages.
-  { ...tool, id: "playwright", name: "Chromium for Playwright", bin: "playwright", installRoad: { road: "script", script: PLAYWRIGHT_INSTALL }, after: "node", covers: ["chromium"], depends: { npm: ["playwright", "@playwright/test", "playwright-core"] }, signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("du", 1015808000) },
+  { ...tool, id: "playwright", name: "Chromium for Playwright", bin: "playwright", installRoad: { road: "script", script: PLAYWRIGHT_INSTALL, version: PLAYWRIGHT.version }, after: "node", covers: ["chromium"], depends: { npm: ["playwright", "@playwright/test", "playwright-core"] }, signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("du", 1015808000) },
 ];
 
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
@@ -403,6 +404,18 @@ const roadNames = (road: InstallRoad): readonly string[] => roadModule(road).nam
 /** The catalog tool that installs this package by this road (a formula by brew, a global by npm), or nothing. */
 export function catalogToolByRoad(road: RoadName, pkg: string): ToolEntry | undefined {
   return CATALOG_TOOLS.find(e => e.installRoad.road === road && roadNames(e.installRoad).includes(pkg));
+}
+
+/** Every tools row's id starts with the rung and a manager: `tools/<manager>/<package>`. */
+const TOOLS_PREFIX = toolRowPrefix("").slice(0, -1);
+
+/** The id a recipe row is known by on every computer: an agents row its agent, a tools row the catalog tool its
+ * package names, when the catalog carries it; nothing for an MCP server's row, a tools row outside the catalog and
+ * every other rung. The one rule the record's pins, the recipe file and the collector's rows are keyed by. */
+export function catalogIdOfRow(e: { id: string }): string | undefined {
+  const agent = agentOfRow(e);
+  if (agent !== undefined) return agent;
+  return e.id.startsWith(TOOLS_PREFIX) ? catalogToolFor(packageOf(e))?.id : undefined;
 }
 
 /** The catalog tool a project's dependency stands for, by the road the project installs it by: only a row that names

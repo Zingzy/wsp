@@ -2,9 +2,8 @@
 // The recipe diff: what a golden was built from (the digest its seal wrote)
 // against the recipe now, as rows to apply on top and rows the recipe stopped
 // asking for. Pure; golden.ts runs the result on a fork or on the kept builder.
-import { ROAD_MODULES } from "@wsp/catalog";
-import { INSTALLER_MOVED_LINE, listedName, MCP_ID_PREFIX, NO_ROAD_WORDS, pinMovedLine, roadMovedLine, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
-import { isRoad } from "./tool-sizes.js";
+import { ROAD_MODULES, isRoad } from "@wsp/catalog";
+import { INSTALLER_MOVED_LINE, listedName, MCP_ID_PREFIX, NO_ROAD_WORDS, roadMovedLine, versionMovedLine, type GoldenChange, type GoldenRetired, type LoginChoice, type RecipeDigest } from "@wsp/protocol";
 
 type Tick = RecipeDigest["ticks"][number];
 type DigestFile = RecipeDigest["files"][number];
@@ -26,7 +25,7 @@ export interface ToolChange {
   /** Versions, when the row carries one; a changed version is a reinstall. */
   from?: string;
   to?: string;
-  /** Why the row installs differently under the same version: its road, its pin or its install lines moved. */
+  /** Why the row installs differently under the same version: its road or its install lines moved. */
   why?: string;
 }
 
@@ -58,13 +57,12 @@ const byRung = (ticks: readonly Tick[], rung: string): Map<string, Tick> => new 
 const fileKey = (f: DigestFile): string => `${f.id}\0${f.dest}`;
 const roadWords = (name: string | undefined): string => (isRoad(name) ? ROAD_MODULES[name].words : NO_ROAD_WORDS);
 
-/** Why a ticked tool installs differently now, its version aside: the road moved, the release it is fixed to moved,
- * or the lines the road runs did. A tick sealed before the digest carried a road says nothing of it, so nothing
- * moves on its account alone. */
+/** Why a ticked tool installs differently now, its version aside: the road moved, or the lines the road runs did. A
+ * tick sealed before the digest carried a road says nothing of it, so nothing moves on its account alone. A pin is
+ * what a build recorded, not what the recipe asks, so one moving is no change to apply. */
 export function toolMove(was: Tick, now: Tick): string | undefined {
   if (was.road === undefined) return undefined;
   if (was.road !== now.road) return roadMovedLine(roadWords(was.road), roadWords(now.road));
-  if (was.pin?.tag !== now.pin?.tag || was.pin?.sha256 !== now.pin?.sha256) return pinMovedLine(was.pin, now.pin);
   if (was.installer !== now.installer) return INSTALLER_MOVED_LINE;
   return undefined;
 }

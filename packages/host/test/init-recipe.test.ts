@@ -19,11 +19,9 @@ import {
   isTickable,
   loadRecipe,
   loginTool,
-  readSavedManifest,
   recipeChanges,
   recipePath,
   saveRecipe,
-  withSavedPins,
   tickLoginTools,
   withoutAgentTools,
   withCatalogAgents,
@@ -401,49 +399,33 @@ describe("the small recipe", () => {
     expect(swallowed.skipped).toEqual([]);
   });
 
-  it("a recorded pin rides the small recipe onto the tools row of the catalog id it names, the bare row and this computer's own alike, and survives withTicksOf and the file", () => {
+  it("a pin on the small recipe is what the last seal got and lands on no row: the image's own cut reads latest again; the file keeps it for wsp recipe, and a saved recipe's ticks come across without it", () => {
     const pin = { tag: "v2.86.0", sha256: "b".repeat(64) };
-    const pinned: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "gh" ? { ...r, pin } : r)) };
-    expect(applyRecipe(FIXTURE, pinned).entries.find(e => e.id === "tools/brew/gh")).toMatchObject({ bring: true, pin });
+    const pinned: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => (r.id === "gh" ? { ...r, pin, signIn: "copy" as const } : r)) };
+    expect(applyRecipe(FIXTURE, pinned).entries.find(e => e.id === "tools/brew/gh")).toMatchObject({ bring: true });
+    expect(applyRecipe(FIXTURE, pinned).entries.find(e => e.id === "tools/brew/gh")).not.toHaveProperty("pin");
     const bare = applyRecipe({ entries: [] }, pinned);
-    expect(bare.entries.find(e => e.id === "tools/catalog/gh")).toMatchObject({ bring: true, pin });
-    expect(bare.entries.find(e => e.id === "tools/catalog/agent-browser")).not.toHaveProperty("pin");
+    expect(bare.entries.find(e => e.id === "tools/catalog/gh")).toMatchObject({ bring: true });
+    expect(bare.entries.find(e => e.id === "tools/catalog/gh")).not.toHaveProperty("pin");
     expect(parseManifest(bare)).toEqual(bare);
-    // A recipe without one leaves the row as this computer has it.
-    expect(applyRecipe(FIXTURE, RECIPE).entries.find(e => e.id === "tools/brew/gh")).not.toHaveProperty("pin");
     const here: Recipe = { ...RECIPE, rows: RECIPE.rows.map(r => { const { pin: _pin, signIn: _signIn, ...rest } = r; return { ...rest, on: false }; }) };
-    expect(withTicksOf(here, pinned).rows.find(r => r.id === "gh")).toMatchObject({ on: true, signIn: "copy", pin });
-    expect(withTicksOf(here, pinned).rows.find(r => r.id === "yq")).not.toHaveProperty("pin");
+    expect(withTicksOf(here, pinned).rows.find(r => r.id === "gh")).toMatchObject({ on: true, signIn: "copy" });
+    expect(withTicksOf(here, pinned).rows.find(r => r.id === "gh")).not.toHaveProperty("pin");
+    // A saved catalog row this computer has no row for follows as it was saved, its pin left behind too.
+    const saved: Recipe = { ...pinned, rows: [...pinned.rows, { id: "wrangler", kind: "tool", on: true, source: { kind: "popular", sessions: 1, images: 1 }, pin: { tag: "4.1.0" } }] };
+    expect(withTicksOf(here, saved).rows.find(r => r.id === "wrangler")).toEqual({ id: "wrangler", kind: "tool", on: true, source: { kind: "popular", sessions: 1, images: 1 } });
     dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
     const path = join(dir, "recipe.json");
     writeFileSync(path, JSON.stringify(pinned));
     expect(loadRecipe(path).rows.find(r => r.id === "gh")?.pin).toEqual(pin);
   });
 
-  it("the saved manifest's pins come back onto this computer's rows by id, for the rows no small recipe carries; a row with its own pin keeps it, and a missing or broken file gives nothing", () => {
-    const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
-    const tap: ManifestEntry = { rung: "tools", id: "tools/brew/zingzy/tap/diskbloom", label: "diskbloom", paths: [], bytes: 0, default: "bring", linux: "unknown" };
-    const gh: ManifestEntry = { rung: "tools", id: "tools/brew/gh", label: "gh", paths: [], bytes: 0, default: "bring" };
-    const saved: Manifest = { entries: [{ ...tap, bring: true, pin }, { ...gh, bring: true, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } }] };
-    const fed = withSavedPins({ entries: [tap, { ...gh, pin: { tag: "v2.87.0", sha256: "c".repeat(64) } }] }, saved);
-    expect(fed.entries.find(e => e.id === tap.id)).toEqual({ ...tap, pin });
-    expect(fed.entries.find(e => e.id === gh.id)?.pin).toEqual({ tag: "v2.87.0", sha256: "c".repeat(64) });
-    expect(withSavedPins({ entries: [tap] }, undefined)).toEqual({ entries: [tap] });
-    expect(withSavedPins({ entries: [tap] }, { entries: [gh] })).toEqual({ entries: [tap] });
-    dir = mkdtempSync(join(tmpdir(), "wsp-recipe-"));
-    const path = recipePath(join(dir, "state.json"));
-    expect(readSavedManifest(path)).toBeUndefined();
-    writeFileSync(path, "{");
-    expect(readSavedManifest(path)).toBeUndefined();
-    saveRecipe(path, saved, new Set([tap.id]));
-    expect(readSavedManifest(path)?.entries.find(e => e.id === tap.id)?.pin).toEqual(pin);
-  });
-
-  it("recipeChanges says why a tool installs differently when more than its version moved: the road in the roads' words, the pin by release, the lines otherwise; a tick sealed without a road says nothing", () => {
+  it("recipeChanges says why a tool installs differently when more than its version moved: the road in the roads' words, the lines otherwise; a pin alone and a tick sealed without a road say nothing", () => {
     const manifest: Manifest = { entries: [{ rung: "tools", id: "tools/catalog/rust", label: "Rust", paths: [], bytes: 0, default: "skip" }] };
     const at = (t: Partial<RecipeDigest["ticks"][number]>): RecipeDigest => ({ ticks: [{ id: "tools/catalog/rust", ...t }], files: [] });
     expect(recipeChanges(at({ road: "brew", installer: "a" }), at({ road: "script", installer: "b" }), manifest)).toEqual(["Rust: now by its own installer, was with Homebrew"]);
-    expect(recipeChanges(at({ road: "release", installer: "a", pin: { tag: "v1", sha256: "x" } }), at({ road: "release", installer: "a", pin: { tag: "v2", sha256: "y" } }), manifest)).toEqual(["Rust: release v1 to v2"]);
+    expect(recipeChanges(at({ road: "release", installer: "a", pin: { tag: "v1", sha256: "x" } }), at({ road: "release", installer: "a", pin: { tag: "v2", sha256: "y" } }), manifest)).toEqual([]);
+    expect(recipeChanges(at({ road: "release", installer: "a", pin: { tag: "v1", sha256: "x" } }), at({ road: "release", installer: "a" }), manifest)).toEqual([]);
     expect(recipeChanges(at({ road: "release", installer: "a" }), at({ road: "release", installer: "b" }), manifest)).toEqual(["Rust: its install lines changed"]);
     expect(recipeChanges(at({ version: "1", road: "release", installer: "a" }), at({ version: "2", road: "release", installer: "b" }), manifest)).toEqual(["Rust now 2"]);
     expect(recipeChanges(at({}), at({ road: "script", installer: "b" }), manifest)).toEqual([]);
@@ -556,12 +538,12 @@ describe("the small recipe", () => {
     expect(withOutsideRows(RECIPE, { entries: [TAP] }, new Map()).rows.at(-1)).toEqual({ id: TAP.id, kind: "tool", on: false, source: here });
   });
 
-  it("applyRecipe ticks such a row from the recipe's row under its own id and puts that row's pin on it; a recipe without the row leaves it off and unpinned", () => {
+  it("applyRecipe ticks such a row from the recipe's row under its own id and carries no pin onto it; a recipe without the row leaves it off", () => {
     const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
     const manifest: Manifest = { entries: [...FIXTURE.entries, TAP] };
     const on: Recipe = { ...RECIPE, rows: [...RECIPE.rows, { id: TAP.id, kind: "tool", on: true, source: here, pin }, { id: "tools/npm/tsx", kind: "tool", on: true, source: here }] };
     const applied = applyRecipe(manifest, on);
-    expect(applied.entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: true, pin });
+    expect(applied.entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: true });
     expect(applied.entries.find(e => e.id === "tools/npm/tsx")).toMatchObject({ bring: true });
     expect(applied.entries.filter(e => e.rung === "tools" && initialTicks(e)).map(e => e.id)).toEqual(["tools/brew/gh", "tools/npm/tsx", TAP.id, "tools/catalog/agent-browser"]);
     expect(parseManifest(applied)).toEqual(applied);
@@ -569,14 +551,14 @@ describe("the small recipe", () => {
     expect(off.entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: false });
     expect(off.entries.find(e => e.id === "tools/npm/tsx")).toMatchObject({ bring: false });
     // A row the recipe ticks off stays off, whatever its default says.
-    expect(applyRecipe(manifest, { ...on, rows: on.rows.map(r => (r.id === TAP.id ? { ...r, on: false } : r)) }).entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: false, pin });
+    expect(applyRecipe(manifest, { ...on, rows: on.rows.map(r => (r.id === TAP.id ? { ...r, on: false } : r)) }).entries.find(e => e.id === TAP.id)).toEqual({ ...TAP, bring: false });
   });
 
-  it("withTicksOf writes a saved tick and pin onto this computer's row outside the catalog, and drops a saved row outside the catalog this computer has no row for, where a catalog row is kept", () => {
+  it("withTicksOf writes a saved tick onto this computer's row outside the catalog without the saved pin, and drops a saved row outside the catalog this computer has no row for, where a catalog row is kept", () => {
     const pin = { tag: "v0.1.0", sha256: "a".repeat(64) };
     const mine: Recipe = { ...RECIPE, rows: [{ id: TAP.id, kind: "tool", on: false, source: here }] };
     const saved: Recipe = { ...RECIPE, rows: [{ id: TAP.id, kind: "tool", on: true, source: here, pin }, { id: "tools/brew/elsewhere", kind: "tool", on: true, source: here }, { id: "gh", kind: "tool", on: true, source: here }] };
     const out = withTicksOf(mine, saved);
-    expect(out.rows).toEqual([{ id: TAP.id, kind: "tool", on: true, source: here, pin }, { id: "gh", kind: "tool", on: true, source: here }]);
+    expect(out.rows).toEqual([{ id: TAP.id, kind: "tool", on: true, source: here }, { id: "gh", kind: "tool", on: true, source: here }]);
   });
 });

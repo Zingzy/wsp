@@ -106,11 +106,27 @@ describe("image vault", () => {
   });
 
   it("the hash is one rule: stable, moved by the recipe, moved by the vault, and a record with no vault is its own", () => {
-    expect(imageHash("r1", "v1")).toBe(imageHash("r1", "v1"));
-    expect(imageHash("r1", "v1")).not.toBe(imageHash("r2", "v1"));
-    expect(imageHash("r1", "v1")).not.toBe(imageHash("r1", "v2"));
-    expect(imageHash("r1", undefined)).not.toBe(imageHash("r1", "0".repeat(64)));
-    expect(imageHash("r1", undefined)).toHaveLength(64);
+    expect(imageHash("r1", "v1", [])).toBe(imageHash("r1", "v1", []));
+    expect(imageHash("r1", "v1", [])).not.toBe(imageHash("r2", "v1", []));
+    expect(imageHash("r1", "v1", [])).not.toBe(imageHash("r1", "v2", []));
+    expect(imageHash("r1", undefined, [])).not.toBe(imageHash("r1", "0".repeat(64), []));
+    expect(imageHash("r1", undefined, [])).toHaveLength(64);
+  });
+
+  it("the hash moves with a pin: a version, a checksum or a row pinned anew each move it, the order of the pins does not, and a row that installs latest counts by its mark and not by what one seal got", () => {
+    const gh = { id: "tools/catalog/gh", tag: "v2.86.0", sha256: "b".repeat(64) };
+    const wrangler = { id: "tools/npm/wrangler", tag: "4.1.0" };
+    const base = imageHash("r1", "v1", [gh, wrangler]);
+    expect(base).toBe(imageHash("r1", "v1", [wrangler, gh]));
+    expect(base).not.toBe(imageHash("r1", "v1", []));
+    expect(base).not.toBe(imageHash("r1", "v1", [gh]));
+    expect(base).not.toBe(imageHash("r1", "v1", [gh, { ...wrangler, tag: "4.2.0" }]));
+    expect(base).not.toBe(imageHash("r1", "v1", [{ ...gh, sha256: "c".repeat(64) }, wrangler]));
+    // Two seals of a row that installs latest got different versions of it; the image is the same image.
+    const tmux = { id: "tools/catalog/tmux", tag: "3.3a-3", latest: true as const };
+    expect(imageHash("r1", "v1", [tmux])).toBe(imageHash("r1", "v1", [{ ...tmux, tag: "3.4-1" }]));
+    // Such a row is still a pinned row: a record that never read it is another image.
+    expect(imageHash("r1", "v1", [tmux])).not.toBe(imageHash("r1", "v1", []));
   });
 
   it("every login the pack copies onto a machine lands under some catalog row's state on the machine", () => {

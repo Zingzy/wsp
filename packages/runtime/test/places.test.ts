@@ -1010,6 +1010,8 @@ interface ForkingPlace {
   asked: Record<string, number>;
   /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
   daemonAnswersAfter: number;
+  /** How long a snapshot job there reads running before it reads done; the layer takes time to write. */
+  snapshotTakesMs: number;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
   holdResumes(): () => void;
 }
@@ -1071,6 +1073,7 @@ function forks(
     ops: [],
     asked: {},
     daemonAnswersAfter: 1,
+    snapshotTakesMs: 0,
     holdResumes: () => {
       held = [];
       return () => {
@@ -1080,6 +1083,7 @@ function forks(
     },
   };
   let made = 0;
+  const jobs = new Map<string, { name: string; started: number }>();
   // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
   let state: "running" | "paused" = "running";
   client.ws.on("message", raw => {
@@ -1125,9 +1129,18 @@ function forks(
         return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
       case "machine.previewUrl":
         return say({ reach: { url: "http://127.0.0.1:49155", token: "", expiresAt: 1 } });
+      // A snapshot is a job there: named at once, asked after until the layer is written.
       case "machine.snapshot":
         seen.snapshots.push(String(frame["name"]));
-        return say({ snapshotId: `sha256:${String(frame["name"])}` });
+        jobs.set(`job-${seen.snapshots.length}`, { name: String(frame["name"]), started: Date.now() });
+        return say({ job: `job-${seen.snapshots.length}` });
+      case "machine.snapshotJob": {
+        const job = jobs.get(String(frame["job"]));
+        if (job === undefined) return void client.ws.send(JSON.stringify({ id, ok: false, error: `no such snapshot job: ${String(frame["job"])}`, kind: "missing", status: 404 }));
+        const elapsed = Date.now() - job.started;
+        if (elapsed < seen.snapshotTakesMs) return say({ state: "running", bytes: Math.floor((elapsed / seen.snapshotTakesMs) * 5_000_000), total: 5_000_000 });
+        return say({ state: "done", bytes: 5_000_000, total: 5_000_000, snapshotId: `sha256:${job.name}` });
+      }
       case "machine.pause":
         seen.paused++;
         state = "paused";
@@ -1394,6 +1407,34 @@ describe("a fork on a computer you joined", () => {
     expect(place.snapshots[0]).toContain("proj");
     expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
     expect(backend.snapshots).toEqual([]);
+  });
+
+  it("a snapshot there that outlasts the link's frame bound completes: the job is asked after a frame at a time, and every frame answers inside the bound", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    // A frame bound far under the job: the old road, one frame waiting on the whole layer, failed here.
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey), placeFrameWaitMs: 300 });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    place.snapshotTakesMs = 1_500;
+    await store.put("project-goldens", "snap_p", {
+      snapshotId: "snap_p",
+      golden: "snap_g",
+      projects: [{ name: "proj", dest: "/root/proj", importedAt: "2026-09-12T00:00:00.000Z", size: 20 }],
+      workspaceId: "ws_older",
+      workspaceName: "older",
+      createdAt: "2026-09-12T00:00:00.000Z",
+    });
+    const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
+    const started = Date.now();
+    const golden = await runtime.workspaces.snapshot(made.id);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
+    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
+    expect(place.asked["machine.snapshot"]).toBe(1);
+    expect(place.asked["machine.snapshotJob"]).toBeGreaterThanOrEqual(2);
   });
 
   it("says the computer is not connected rather than asking the provider anything, and reads it again when it is back", async () => {

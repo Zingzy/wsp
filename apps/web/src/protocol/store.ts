@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -867,9 +867,20 @@ export const useStore = create<State>((set, get) => {
         case "session.permission":
         case "session.permission.closed":
           // The row the sidebar reads carries what the thread is waiting on, so a prompt opening or closing is a row
-          // that changed: every workspace's rows are read here, not only the open thread's.
-          void get().reloadSessions(e.workspaceId);
+          // that changed: every workspace's rows are read here, not only the open thread's. Every workspace and not
+          // only this one, since a thread waiting behind this one carries the same question and may run anywhere.
+          for (const id of Object.keys(get().sessions)) void get().reloadSessions(id);
           return;
+        case "session.delta": {
+          // A call that follows another thread to the end of its turn is what puts a thread behind a question it
+          // never asked, so the row moves when such a call opens, with no prompt of its own in sight. A call
+          // answering moves it back, but only where a row here is already behind something: every other turn writes
+          // hundreds of results that change no row at all.
+          const opens = e.kind === "tool_use" && e.toolName !== undefined && threadsFollowed({ toolName: e.toolName, input: e.text }) !== undefined;
+          const closes = e.kind === "tool_result" && (get().sessions[e.workspaceId] ?? []).some(row => row.waitingOn !== undefined);
+          if (opens || closes) void get().reloadSessions(e.workspaceId);
+          return;
+        }
         case "session.notify":
           if (e.notify === NOTIFY_ME) set({ toast: e.text });
           return;

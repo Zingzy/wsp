@@ -280,17 +280,11 @@ impl Store {
         Ok(chains)
     }
 
-    /// A snapshot of a workspace: the layer `write` produces as a tar, committed, and the record naming it over the
-    /// chain the workspace booted from. `from` is what that workspace was made from.
-    pub fn record_snapshot(
-        &self,
-        name: &str,
-        workspace: &str,
-        from: &str,
-        base: &Chain,
-        write: impl FnOnce(&mut dyn Write) -> io::Result<()>,
-    ) -> Result<Snapshot, Error> {
-        let committed = self.commit_layer(write)?;
+    /// A snapshot of a workspace: the layer `commit_blob` took from it, unpacked here, and the record naming it over
+    /// the chain the workspace booted from. `from` is what that workspace was made from. Two calls, since the
+    /// workspace is held still only while its layer is read and runs again while the layer unpacks.
+    pub fn record_snapshot(&self, name: &str, workspace: &str, from: &str, base: &Chain, committed: &Committed) -> Result<Snapshot, Error> {
+        self.unpack(&Descriptor { digest: committed.digest.clone(), size: committed.bytes, media_type: fetch::LAYER_TAR.to_owned() })?;
         let created_at = now_iso();
         let mut layers = base.layers.clone();
         layers.push(committed.digest.clone());
@@ -301,7 +295,7 @@ impl Store {
             workspace: workspace.to_owned(),
             from: from.to_owned(),
             chain: Chain { config: base.config.clone(), layers },
-            layer: committed.digest,
+            layer: committed.digest.clone(),
             layer_bytes: committed.bytes,
             created_at,
         };
@@ -368,16 +362,14 @@ impl Store {
         Ok(None)
     }
 
-    /// The tar `write` produces, gzipped and hashed into a blob and unpacked beside it: one layer, as a fetched one
-    /// lands. A layer already in the store under that digest is left as it is.
-    pub fn commit_layer(&self, write: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> Result<Committed, Error> {
+    /// The tar `write` produces, hashed into a blob as it is: a layer's bytes, not yet unpacked; `record_snapshot`
+    /// unpacks it. A blob already in the store under that digest is left as it is.
+    pub fn commit_blob(&self, write: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> Result<Committed, Error> {
         let partial = self.layout.committing(&random_word());
         let file = File::create(&partial).map_err(io_at(&partial))?;
         let mut hashing = Hashing { inner: file, hasher: Sha256::new(), bytes: 0 };
         let committed = (|| -> io::Result<Committed> {
-            let mut gz = flate2::write::GzEncoder::new(&mut hashing, flate2::Compression::default());
-            write(&mut gz)?;
-            gz.finish()?;
+            write(&mut hashing)?;
             hashing.inner.sync_all()?;
             Ok(Committed { digest: Digest::from_hash(hashing.hasher.finalize_reset().as_slice()), bytes: hashing.bytes })
         })();
@@ -394,7 +386,6 @@ impl Store {
         } else {
             fs::rename(&partial, &done).map_err(io_at(&done))?;
         }
-        self.unpack(&Descriptor { digest: committed.digest.clone(), size: committed.bytes, media_type: fetch::LAYER_GZIP.to_owned() })?;
         Ok(committed)
     }
 
@@ -674,6 +665,31 @@ mod tests {
         assert_eq!(file_word("ubuntu:24.04"), "ubuntu:24.04");
         assert_eq!(file_word("ghcr.io/org/app:v2"), "ghcr.io%2Forg%2Fapp:v2");
         assert_eq!(file_word("a%2Fb"), "a%252Fb");
+    }
+
+    #[test]
+    fn a_committed_blob_is_unpacked_and_recorded_by_the_snapshot_and_not_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
+        let word = dir.path().join("word");
+        fs::write(&word, b"hello").unwrap();
+        let committed = store
+            .commit_blob(|out| {
+                let mut tar = tar::Builder::new(out);
+                tar.append_path_with_name(&word, "etc/word")?;
+                tar.finish()
+            })
+            .unwrap();
+        assert!(store.has_blob(&committed.digest));
+        assert_eq!(committed.bytes, fs::metadata(store.layout.blob(&committed.digest)).unwrap().len());
+        // The blob is on disk and nothing is unpacked yet: the workspace it came from is free to run meanwhile.
+        assert_eq!(store.unpacked(&committed.digest), None);
+        let base = Chain { config: Digest::of(b"config"), layers: vec![Digest::of(b"base")] };
+        let snapshot = store.record_snapshot("v1", "wsp-x", "ubuntu:24.04", &base, &committed).unwrap();
+        assert_eq!(fs::read(store.unpacked(&committed.digest).unwrap().join("etc/word")).unwrap(), b"hello");
+        assert_eq!((&snapshot.layer, snapshot.layer_bytes), (&committed.digest, committed.bytes));
+        assert_eq!(snapshot.chain.layers, vec![Digest::of(b"base"), committed.digest.clone()]);
+        assert_eq!(store.snapshot(&snapshot.id).unwrap(), Some(snapshot));
     }
 
     #[test]

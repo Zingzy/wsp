@@ -28,6 +28,7 @@ import {
   internalToolResult,
   subagentTaskLine,
   subagentAskerLine,
+  waitingAskerLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -120,7 +121,10 @@ import {
   thisComputer,
   SUM_SHOWN,
   pinMismatchLine,
-  pinMovedLine,
+  pinWords,
+  pinsReadLine,
+  sealedPinLine,
+  INSTALLS_LATEST,
   roadMovedLine,
   shortSum,
   sizeFromWord,
@@ -152,6 +156,7 @@ import {
   turnSpendPart,
   turnSettledLine,
   turnSettledParts,
+  waitedOnYouPart,
   refusedTurn,
   signInRefusalLine,
   upgradeSealFailedGoneLine,
@@ -570,6 +575,20 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
     expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
+  });
+
+  it("counts work in Worked for: the minutes a turn stood on a question come off it, and are said where they are most of it", () => {
+    // The harness reports wall time from launch to result, prompts included; the person's minutes are not the turn's.
+    expect(turnSettledParts({ durationMs: 215_000, waitedMs: 211_000, costUsd: 0.05 })).toEqual(["Worked for 4.0s", "waited on you 3m 31s", "$0.05"]);
+    // A wait that is not most of the turn is taken off all the same; the turn has nothing to explain.
+    expect(turnSettledParts({ durationMs: 72_000, waitedMs: 12_000 })).toEqual(["Worked for 1m"]);
+    // A turn nothing of it waited on reads exactly as it did before.
+    expect(turnSettledParts({ durationMs: 72_000, waitedMs: null })).toEqual(["Worked for 1m 12s"]);
+    // A harness whose figure is shorter than the wait the runtime clocked cannot make a turn work negative time.
+    expect(turnSettledParts({ durationMs: 1_000, waitedMs: 60_000 })).toEqual(["Worked for 1ms", "waited on you 1.0s"]);
+    expect(waitedOnYouPart(211_000)).toBe("waited on you 3m 31s");
+    // The line a thread's end sends counts the same minutes the footer does; two readings of one turn cannot differ.
+    expect(notifyLine("thr_abcd1234", { status: "completed", durationMs: 215_000, waitedMs: 211_000, costUsd: 0.05, text: "done" })).toBe("thread thr_abcd finished (completed, 4.0s, $0.05): done");
   });
 
   it("says what the threads a thread opened spent beside its own figure, and says what each figure counts, so neither reads as the other", () => {
@@ -1429,16 +1448,28 @@ describe("a pinned release that moved", () => {
     expect(pinMismatchLine("google-cloud-cli-575.0.0-linux-x86_64.tar.gz", "575.0.0", "b".repeat(12), "c".repeat(12)).length).toBeLessThan(160);
   });
 
-  it("why a tool installs differently now: the road in the roads' words, the release by tag, the sum when the tag stands, the lines otherwise", () => {
+  it("why a tool installs differently now: the road in the roads' words, the lines otherwise", () => {
     expect(roadMovedLine("with Homebrew", "by its own installer")).toBe("now by its own installer, was with Homebrew");
-    const v1 = { tag: "v2.86.0", sha256: "b".repeat(64) };
-    const v2 = { tag: "v2.87.0", sha256: "c".repeat(64) };
-    expect(pinMovedLine(v1, v2)).toBe("release v2.86.0 to v2.87.0");
-    expect(pinMovedLine(v1, { ...v1, sha256: "c".repeat(64) })).toBe("the checksum recorded for v2.86.0 changed");
-    expect(pinMovedLine(undefined, v1)).toBe("now fixed to release v2.86.0");
-    expect(pinMovedLine(v1, undefined)).toBe("no longer fixed to release v2.86.0");
     expect(INSTALLER_MOVED_LINE).toBe("its install lines changed");
     expect(roadMovedLine("with Homebrew", NO_ROAD_WORDS)).toBe("now by no road, was with Homebrew");
+  });
+
+  it("a pin in words: the version alone where a copy gets it, with the latest mark where the road installs the current one on every place", () => {
+    expect(INSTALLS_LATEST).toBe("installs latest");
+    expect(pinWords({ tag: "v2.86.0", sha256: "b".repeat(64) })).toBe("v2.86.0");
+    expect(pinWords({ tag: "3.3a-3", latest: true })).toBe("3.3a-3, installs latest");
+    // The record's line: the row by name, the version, the checksum where the road hashed one, the latest mark in the road's words.
+    expect(sealedPinLine("GitHub CLI", { tag: "v2.86.0", sha256: "b".repeat(64) })).toBe("GitHub CLI · v2.86.0 · checksum bbbbbbbbbbbb");
+    expect(sealedPinLine("tmux", { tag: "3.3a-3", latest: true }, "by apt")).toBe("tmux · 3.3a-3 · installs latest by apt");
+    expect(sealedPinLine("Claude Code", { tag: "2.1.3", latest: true })).toBe("Claude Code · 2.1.3 · installs latest");
+    expect(sealedPinLine("wrangler", { tag: "4.1.0" })).toBe("wrangler · 4.1.0");
+    // The stage's one line: the pinned rows, then once the rows that install latest with the version this build got; nothing when nothing was read.
+    expect(pinsReadLine([{ name: "wrangler", tag: "4.1.0" }, { name: "GitHub CLI", tag: "v2.86.0" }], [{ name: "tmux", tag: "3.3a-3", words: "by apt" }, { name: "Go", tag: "1.22.1", words: "with Homebrew" }])).toBe(
+      "pinned: wrangler 4.1.0, GitHub CLI v2.86.0; installs latest on every place: tmux 3.3a-3 by apt, Go 1.22.1 with Homebrew",
+    );
+    expect(pinsReadLine([], [{ name: "Claude Code", tag: "2.1.3" }])).toBe("installs latest on every place: Claude Code 2.1.3");
+    expect(pinsReadLine([{ name: "a, b", tag: "1" }], [])).toBe('pinned: "a, b" 1');
+    expect(pinsReadLine([], [])).toBeUndefined();
   });
 });
 
@@ -1800,6 +1831,9 @@ describe("the words a relayed permission prompt shows", () => {
     expect(subagentTaskLine(JSON.stringify({ description: "count alpha files", prompt: "run ls" }))).toBe("count alpha files");
     expect(subagentTaskLine(JSON.stringify({ prompt: "run ls" }))).toBeUndefined();
     expect(subagentAskerLine("count alpha files")).toBe("count alpha files asks");
+    // A prompt drawn in a thread that did not raise it names the thread that did, in the row grammar's two parts
+    // under a middle dot, so it reads as one line of the same family as the asker line above it.
+    expect(waitingAskerLine("read the file")).toBe("read the file asks · this thread waits on the answer");
   });
 
   it("has one deny line, the person's own, and it points the agent at no other access mode", () => {

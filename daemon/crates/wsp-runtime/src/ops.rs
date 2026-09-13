@@ -13,7 +13,8 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use base64::Engine;
@@ -24,9 +25,9 @@ use wsp_frames::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
     MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineRoads,
-    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState,
-    MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId,
-    SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, WorkspaceSize,
+    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
+    MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PauseMode, PlaceCapacity, PlaceImage,
+    PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
@@ -180,8 +181,12 @@ pub struct Ops {
     engines: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
     /// One pull, commit or sweep at a time, and a create from the resolve of its chain to the record that holds
     /// it: two pulls of one image would append to the same partial blob, and a sweep between a resolve and the
-    /// record would take a layer the boot is about to mount.
-    pulls: Mutex<()>,
+    /// record would take a layer the boot is about to mount. Shared with the snapshot jobs, which outlive the frame
+    /// that started them.
+    pulls: Arc<Mutex<()>>,
+    /// Every snapshot job this daemon started, by the name its reply carried, running or finished: the host asks
+    /// after a job until it reads done or failed, and a finished job costs a few words to keep.
+    jobs: std::sync::Mutex<BTreeMap<String, Arc<SnapshotJob>>>,
     facts: BoxFacts,
     swept: Swept,
     stopped: Vec<String>,
@@ -213,7 +218,8 @@ impl Ops {
             runtime,
             net: Arc::new(net),
             engines: Mutex::new(BTreeMap::new()),
-            pulls: Mutex::new(()),
+            pulls: Arc::new(Mutex::new(())),
+            jobs: std::sync::Mutex::new(BTreeMap::new()),
             facts: BoxFacts::read(),
             swept,
             stopped,
@@ -368,8 +374,17 @@ impl Ops {
             MachineOp::State { machine_id } => body(MachineStateReply { state: self.state_of(&self.record(&machine_id)?) }),
             MachineOp::Describe { machine_id } => {
                 let record = self.record(&machine_id)?;
+                let upper = self.layout.upper(&record.id);
+                // Off the runtime thread: a workspace after a build holds hundreds of thousands of files.
+                let used_bytes = tokio::task::spawn_blocking(move || snapshot::upper_bytes(&upper).ok()).await.ok().flatten();
                 body(MachineShapeReply {
-                    shape: MachineShape { cpu: record.cpu, mem_mb: record.mem_mb, disk_gb: None, created_at: Some(record.created_at) },
+                    shape: MachineShape {
+                        cpu: record.cpu,
+                        mem_mb: record.mem_mb,
+                        disk_gb: None,
+                        created_at: Some(record.created_at),
+                        used_bytes,
+                    },
                 })
             }
             MachineOp::Metrics { machine_id } => {
@@ -416,9 +431,9 @@ impl Ops {
             // changes nothing here, as it changes nothing for the Docker backend.
             MachineOp::Snapshot { machine_id, name, life: _ } => {
                 let record = self.record(&machine_id)?;
-                let snapshot = self.snapshot(&record, &name).await?;
-                body(MachineSnapshotReply { snapshot_id: snapshot.id.to_string() })
+                body(MachineSnapshotReply { job: self.start_snapshot(record, name) })
             }
+            MachineOp::SnapshotJob { job } => body(self.snapshot_job(&job)?),
             MachineOp::DeleteSnapshot { snapshot_id } => {
                 let id = Digest::parse(&snapshot_id).map_err(|_| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
                 if !self.remove_and_sweep(move |store| store.remove_snapshot(&id)).await? {
@@ -712,28 +727,45 @@ impl Ops {
             .collect()
     }
 
-    /// The upper directory committed to the store as a layer under the name, over the chain the workspace booted
-    /// from. A running workspace is held still by the freezer while the layer is read; one already frozen or
-    /// stopped is read as it is.
-    async fn snapshot(&self, record: &Workspace, name: &str) -> Result<Snapshot, OpError> {
-        let _one_at_a_time = self.pulls.lock().await;
-        let cgroup = self.layout.cgroup_dir(&record.id);
-        let hold = runtime::alive(&record.init) && !freeze::frozen(&cgroup)?;
-        if hold {
-            freeze::freeze(cgroup.clone()).await?;
-        }
+    /// The snapshot as a job: named at once, run on a task of its own, read back through `snapshot_job`. A layer
+    /// of a built workspace takes minutes to write on a small box, longer than any one frame over a link may wait.
+    fn start_snapshot(&self, record: Workspace, name: String) -> String {
+        let id = store::random_word();
+        let job = Arc::new(SnapshotJob::default());
+        self.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), Arc::clone(&job));
+        let pulls = Arc::clone(&self.pulls);
         let store = Arc::clone(&self.store);
-        let upper = self.layout.upper(&record.id);
-        let (name, workspace, from, base) = (name.to_owned(), record.id.clone(), record.image.clone(), record.chain.clone());
-        let committed = tokio::task::spawn_blocking(move || {
-            store.record_snapshot(&name, &workspace, &from, &base, |out| snapshot::write_layer(&upper, out))
-        })
-        .await
-        .map_err(|e| OpError::plain(e.to_string()));
-        if hold {
-            freeze::thaw(cgroup).await?;
+        let layout = Layout::new(self.layout.root());
+        tokio::spawn(async move {
+            let outcome = commit_snapshot(pulls, store, &layout, record, name, &job).await;
+            *job.state.lock().unwrap_or_else(|e| e.into_inner()) = match outcome {
+                Ok(snapshot) => JobState::Done(snapshot),
+                Err(e) => JobState::Failed(e.message),
+            };
+        });
+        id
+    }
+
+    /// One reading of a snapshot job; a job that failed is the refusal it failed with, every time it is asked.
+    fn snapshot_job(&self, id: &str) -> Result<MachineSnapshotJobReply, OpError> {
+        let job = self
+            .jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .cloned()
+            .ok_or_else(|| OpError::missing(format!("no such snapshot job: {id}")))?;
+        // The state first: a job read done after its bytes were read would hand back a count short of the layer.
+        let state = job.state.lock().unwrap_or_else(|e| e.into_inner());
+        let bytes = job.written.load(Ordering::Relaxed);
+        let total = job.total.get().copied();
+        match &*state {
+            JobState::Running => Ok(MachineSnapshotJobReply { state: SnapshotJobState::Running, bytes, total, snapshot_id: None }),
+            JobState::Done(snapshot) => {
+                Ok(MachineSnapshotJobReply { state: SnapshotJobState::Done, bytes, total, snapshot_id: Some(snapshot.id.to_string()) })
+            }
+            JobState::Failed(message) => Err(OpError::plain(message.clone())),
         }
-        Ok(committed??)
     }
 
     /// A record dropped and the store swept of what no record names and no workspace holds, both under the store
@@ -869,6 +901,62 @@ impl Ops {
     fn records(&self) -> Result<Vec<Workspace>, OpError> {
         records_under(&self.layout)
     }
+}
+
+/// A snapshot in flight or finished: the layer's bytes written so far, the upper directory's bytes once counted,
+/// and how it ended.
+#[derive(Default)]
+struct SnapshotJob {
+    written: AtomicU64,
+    total: OnceLock<u64>,
+    state: std::sync::Mutex<JobState>,
+}
+
+#[derive(Default)]
+enum JobState {
+    #[default]
+    Running,
+    Done(Snapshot),
+    Failed(String),
+}
+
+/// The upper directory committed to the store as a layer under the name, over the chain the workspace booted from,
+/// under the store lock as every commit is. A running workspace is held still by the freezer only while its size
+/// is counted and its layer is read into the blob, and thawed however that read ends; it runs again while the blob
+/// unpacks and the record is written. One already frozen or stopped is read as it is. A freeze that does not settle
+/// is undone by the freezer itself, so nothing here is left frozen behind a failure.
+async fn commit_snapshot(
+    pulls: Arc<Mutex<()>>,
+    store: Arc<Store>,
+    layout: &Layout,
+    record: Workspace,
+    name: String,
+    job: &Arc<SnapshotJob>,
+) -> Result<Snapshot, OpError> {
+    let _one_at_a_time = pulls.lock().await;
+    let cgroup = layout.cgroup_dir(&record.id);
+    let hold = runtime::alive(&record.init) && !freeze::frozen(&cgroup)?;
+    if hold {
+        freeze::freeze(cgroup.clone()).await?;
+    }
+    let upper = layout.upper(&record.id);
+    let progress = Arc::clone(job);
+    let reading = Arc::clone(&store);
+    let committed = tokio::task::spawn_blocking(move || {
+        let total = snapshot::upper_bytes(&upper).map_err(|source| store::Error::Io { path: upper.clone(), source })?;
+        let _ = progress.total.set(total);
+        reading.commit_blob(|out| snapshot::write_layer(&upper, out, &progress.written))
+    })
+    .await
+    .map_err(|e| OpError::plain(e.to_string()));
+    if hold {
+        freeze::thaw(cgroup).await?;
+    }
+    let committed = committed??;
+    tokio::task::spawn_blocking(move || store.record_snapshot(&name, &record.id, &record.image, &record.chain, &committed))
+        .await
+        .map_err(|e| OpError::plain(e.to_string()))?
+        .map_err(OpError::from)
 }
 
 /// The join of a container's published port to the workspace's loopback, made off the proxy's own task once the
@@ -1171,6 +1259,7 @@ mod tests {
             ("machine.promoteSnapshot", "snapshotId", "snapshot"),
             ("machine.getTemplate", "templateId", "template"),
             ("machine.deleteTemplate", "templateId", "template"),
+            ("machine.snapshotJob", "job", "snapshot job"),
         ] {
             let reply: Value = serde_json::from_str(
                 &ops.answer(Some(RequestId::from(6)), &serde_json::json!({ "id": 6, "op": op, field: "nothing", "name": "x" })).await,
@@ -1182,6 +1271,38 @@ mod tests {
                 "{op}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn a_snapshot_job_that_failed_is_its_refusal_on_every_ask_and_a_running_one_reads_its_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let failed = Arc::new(SnapshotJob::default());
+        *failed.state.lock().unwrap() =
+            JobState::Failed("/var/lib/wsp/layers/blobs/sha256/commit-x.partial: No space left on device".into());
+        let running = Arc::new(SnapshotJob::default());
+        running.written.store(1_520_442_115, Ordering::Relaxed);
+        let _ = running.total.set(5_284_823_040);
+        ops.jobs.lock().unwrap().insert("failed".into(), failed);
+        ops.jobs.lock().unwrap().insert("running".into(), running);
+        for _ in 0..2 {
+            let reply: Value = serde_json::from_str(
+                &ops.answer(Some(RequestId::from(8)), &serde_json::json!({ "id": 8, "op": "machine.snapshotJob", "job": "failed" })).await,
+            )
+            .unwrap();
+            assert_eq!(
+                reply,
+                serde_json::json!({ "id": 8, "ok": false, "error": "/var/lib/wsp/layers/blobs/sha256/commit-x.partial: No space left on device" })
+            );
+        }
+        let reply: Value = serde_json::from_str(
+            &ops.answer(Some(RequestId::from(9)), &serde_json::json!({ "id": 9, "op": "machine.snapshotJob", "job": "running" })).await,
+        )
+        .unwrap();
+        assert_eq!(
+            reply,
+            serde_json::json!({ "id": 9, "ok": true, "state": "running", "bytes": 1_520_442_115u64, "total": 5_284_823_040u64 })
+        );
     }
 
     #[test]

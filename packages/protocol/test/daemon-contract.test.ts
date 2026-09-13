@@ -53,6 +53,7 @@ import {
   MachinePromoteReply,
   MachineReachReply,
   MachineShapeReply,
+  MachineSnapshotJobReply,
   MachineSnapshotReply,
   MachineSnapshotsReply,
   MachineStateReply,
@@ -337,10 +338,18 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   },
   MachineExecReply: { schema: MachineExecReply, samples: [{ result: { exitCode: 7, stdout: "out\n", stderr: "err\n" } }, { result: { exitCode: 124, stdout: "", stderr: "" } }] },
   MachineStateReply: { schema: MachineStateReply, samples: [{ state: "starting" }, { state: "running" }, { state: "paused" }, { state: "gone" }] },
-  MachineShapeReply: { schema: MachineShapeReply, samples: [{ shape: { cpu: 2, memMb: 1024, diskGb: 20, createdAt: "2026-09-12T13:00:00.000Z" } }, { shape: {} }] },
+  MachineShapeReply: { schema: MachineShapeReply, samples: [{ shape: { cpu: 2, memMb: 1024, diskGb: 20, createdAt: "2026-09-12T13:00:00.000Z", usedBytes: 5284823040 } }, { shape: {} }] },
   MachineAnswersReply: { schema: MachineAnswersReply, samples: [{ answers: true }, { answers: false }] },
   MachineReachReply: { schema: MachineReachReply, samples: [{ reach: { url: "http://127.0.0.1:41234", token: "", expiresAt: 9007199254740991 } }] },
-  MachineSnapshotReply: { schema: MachineSnapshotReply, samples: [{ snapshotId: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1" }] },
+  MachineSnapshotReply: { schema: MachineSnapshotReply, samples: [{ job: "3f9a1c2b4d5e6f70" }] },
+  MachineSnapshotJobReply: {
+    schema: MachineSnapshotJobReply,
+    samples: [
+      { state: "running", bytes: 1520442115, total: 5284823040 },
+      { state: "running", bytes: 0 },
+      { state: "done", bytes: 5373952000, total: 5284823040, snapshotId: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1" },
+    ],
+  },
   MachineSnapshotsReply: {
     schema: MachineSnapshotsReply,
     samples: [

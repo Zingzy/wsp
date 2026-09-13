@@ -36,11 +36,16 @@ async fn set_frozen_off_thread(cgroup: PathBuf, want: bool, patience: Duration) 
     tokio::task::spawn_blocking(move || set_frozen(&cgroup, want, patience)).await.map_err(|e| io::Error::other(e.to_string()))?
 }
 
+/// A freeze that does not settle in time is written back off before it is called failed: the kernel would finish
+/// it a moment later and hold the workspace frozen behind a failure nobody thaws.
 fn set_frozen(cgroup: &Path, want: bool, patience: Duration) -> io::Result<()> {
     fs::write(cgroup.join("cgroup.freeze"), if want { "1" } else { "0" })?;
     let started = Instant::now();
     while frozen(cgroup)? != want {
         if started.elapsed() > patience {
+            if want {
+                let _ = fs::write(cgroup.join("cgroup.freeze"), "0");
+            }
             return Err(io::Error::other(format!(
                 "{} did not read frozen {} in {} s",
                 cgroup.display(),
@@ -125,7 +130,8 @@ mod tests {
         let waited = set_frozen_off_thread(dir.path().to_path_buf(), true, Duration::from_millis(300)).await;
         ticker.abort();
         assert!(waited.is_err());
-        assert_eq!(fs::read_to_string(dir.path().join("cgroup.freeze")).unwrap(), "1");
+        // The freeze it wrote is taken back, so a freeze that failed leaves nothing frozen behind it.
+        assert_eq!(fs::read_to_string(dir.path().join("cgroup.freeze")).unwrap(), "0");
         assert!(
             ticks.load(std::sync::atomic::Ordering::Relaxed) >= 20,
             "the runtime thread was held: {} ticks",

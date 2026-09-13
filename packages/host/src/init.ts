@@ -18,7 +18,7 @@ import { S_BAR, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, cancel, isCancel, lo
 import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, pinState, plural, recordedPins, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
+import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, plural, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
 import { planGoldenRecipe, planImport, type BuildContext } from "./image-recipe.js";
@@ -38,10 +38,8 @@ import {
   recipeChanges,
   recipePath,
   recipeWithAnswers,
-  pinsOf,
   withPins,
   withOutsideRows,
-  catalogIdOf,
   saveRecipe,
   saveSmallRecipe,
   smallRecipePath,
@@ -749,11 +747,9 @@ export function summaryNote(
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
   const { agents, tools, toolchain, servers } = buildCounts(manifest, ticks, brew, custom);
-  // A tool installed from its release is pinned per tag: recorded on the first install of a tag, checked while the tag stands.
   const roads = brewfileFor(bring, brew).roads;
-  const PIN_WORDS = { none: "checksum recorded on first install", same: "checksum checked against the first install", moved: "new release, checksum recorded" } as const;
-  const pinWords = [...new Set(roads.map(r => PIN_WORDS[pinState(r.pin, r.source)]))].join("; ");
-  const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${pinWords})`;
+  const RELEASE_PIN_WORDS = "tag and checksum recorded at the seal, checked on every copy";
+  const fromReleases = roads.length === 0 ? "" : `, ${roads.length} from ${roads.length === 1 ? "its" : "their"} GitHub release${roads.length === 1 ? "" : "s"} (${RELEASE_PIN_WORDS})`;
   const installs = [...agents, ...(tools > 0 ? [`${tools} tool${tools === 1 ? "" : "s"}${toolchain}${fromReleases}`] : []), ...(servers > 0 ? [`${servers} MCP server${servers === 1 ? "" : "s"}`] : [])];
   const est = estimateDisk(bring, upload, brew, custom);
   // The Disk line takes its weight's colour here too: the card is the last thing read before the confirm.
@@ -822,6 +818,8 @@ export interface Reading {
   /** The computer the collector read, which is what every screen calls it. */
   platform: Platform;
   catalogRecipe: Recipe;
+  /** The pins the last seal wrote on the recipe beside the state, by row id: shown until this run's seal writes its own. */
+  savedPins: ReadonlyMap<string, ToolPin>;
   brew: BrewTable;
   scanned: readonly ScanRow[];
   projectScan?: ProjectScan;
@@ -873,6 +871,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
   // This computer's own recipe is read even under a recipe file: the file's ticks and answers stand, the rows and
   // their sources are what is here, so a row about this computer (an agent's config) never follows another's.
   let catalogRecipe: Recipe;
+  let savedPins: ReadonlyMap<string, ToolPin> = new Map();
   const histories = spin(io.output, "Reading what your agents used", io.isTTY);
   let projectScan: ProjectScan | undefined;
   const startedHistories = Date.now();
@@ -895,10 +894,10 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
     // wrote into the recipe beside the state, and the ticks on this computer's own rows, from the same file this run
     // ends by writing. A file's tick on such a row this computer has no row for is said: nothing here installs it.
     const carried = carriedOver(smallRecipePath(opts.statePath), line => notes.push(line));
+    savedPins = carried.pins;
     const base = given === undefined ? applySets({ ...here, ...(carried.custom === undefined ? {} : { custom: carried.custom }) }, carried.ticks) : withTicksOf(here, given);
     if (opts.recipeFile !== undefined) for (const r of outsideRowsOf(given)) if (r.on && !here.rows.some(h => h.id === r.id)) notes.push(notHereLine(opts.platform, packageOf(r), opts.recipeFile));
-    // The pins this setup's builds recorded stand under the file's own: the file says what to install, the state what was installed.
-    catalogRecipe = withPins(base, new Map([...carried.pins, ...pinsOf(given?.rows)]));
+    catalogRecipe = base;
   } catch (e) {
     histories.stop();
     log.error(e instanceof Error ? e.message : String(e), out);
@@ -922,7 +921,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
     }
     spinner.stop();
   }
-  return { manifest, platform: opts.platform, catalogRecipe, brew, scanned, ...(projectScan !== undefined ? { projectScan } : {}), notes, source };
+  return { manifest, platform: opts.platform, catalogRecipe, savedPins, brew, scanned, ...(projectScan !== undefined ? { projectScan } : {}), notes, source };
 }
 
 /** What the sign-in stage runs with, for a sign-in run again later: the same relay flow, link and stop. */
@@ -957,7 +956,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const { brew, scanned, projectScan, notes, source } = computer;
   // The card counts what the collector found; the catalog's bare rows join the manifest after it.
   const found = manifest;
-  manifest = manifestFor(computer, catalogRecipe, opts.statePath);
+  manifest = manifestFor(computer, catalogRecipe);
   if (notes.length > 0) log.warn(notes.join("\n"), out);
   card("Found on this computer", detectionNote(found, source), io.output);
   // The folder named on the command line gets the card the wizard's own question leaves, so both paths say the same.
@@ -1032,9 +1031,17 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const path = recipePath(opts.statePath);
   // The small recipe beside it: the catalog ids with the ticks and answers as the screens left them, the form wsp init --recipe reads.
   const small = { path: smallRecipePath(opts.statePath), recipe: catalogRecipe };
-  // The pins this run's installs record, by the recipe row's id; written on the small recipe with each result, so the next run installs the same release.
-  const pins = new Map<string, ToolPin>();
+  // What the last seal recorded each row installed, by the recipe row's id, until this run's seal records its own.
+  const pins = new Map<string, ToolPin>(computer.savedPins);
   const smallRecipeNow = (): Recipe => withPins(recipeWithAnswers(small.recipe, choices), pins);
+  /** The record's pins onto the small recipe under each row's id there, after a seal: what wsp recipe shows. */
+  const recordPins = async (): Promise<void> => {
+    const record = (await rt.image.get(GOLDEN_NAME)).image;
+    if (record?.pins === undefined) return;
+    pins.clear();
+    for (const { id, road: _road, ...pin } of record.pins) pins.set(id, pin);
+    saveSmallRecipe(small.path, smallRecipeNow());
+  };
   let landed: ImportResult | undefined;
   /** What every build road here is planned against: this computer, its Homebrew, the Keychain values read below and
    * the keys the ticked agents run with. The rows change as the screens and the Keychain reads answer; the context
@@ -1044,15 +1051,6 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     onResult: (r: ImportResult) => {
       writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
       landed = r;
-      // The first install of a release tag pins its asset: the tag and the checksum the guest read go into both recipes for later installs of that tag.
-      const recorded = recordedPins(r.tools);
-      const stale = (e: ManifestEntry): boolean => recorded.has(e.id) && e.pin?.tag !== recorded.get(e.id)!.tag;
-      if (manifest.entries.some(stale)) {
-        for (const e of manifest.entries.filter(stale)) pins.set(catalogIdOf(e) ?? e.id, recorded.get(e.id)!);
-        manifest = { ...manifest, entries: manifest.entries.map(e => (stale(e) ? { ...e, pin: recorded.get(e.id)! } : e)) };
-        saveRecipe(path, manifest, ticks, choices);
-        saveSmallRecipe(small.path, smallRecipeNow());
-      }
     },
     // An attach reports no result, so the build's file stands; the retried write's outcome replaces the failure it recorded.
     onContext: (o: Pick<ImportResult, "context" | "contextFailure">) => {
@@ -1251,6 +1249,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const road = await updateRoad({ rt, current, imp, bring, rows: manifest.entries, importOf, lastBuild, interactive, yes: opts.yes, input: io.input, output: io.output, stream: (words, run) => streamStages(rt, io, words, run, runLog.note) });
     if (road !== "rebuild") {
       if (road === 0 && landed !== undefined) log.info(installsTally(landed, resultsPath).join("\n"), out);
+      if (road === 0) await recordPins();
       if (road === 0) await retentionOffer({ rt, interactive, yes: opts.yes, input: io.input, output: io.output });
       return { code: road };
     }
@@ -1545,6 +1544,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   const measured = buildTimes([prepared, view], new Date());
   if (measured !== undefined) noteOutcomes(resultsPath, { build: measured });
   const version = sealed.version.version;
+  await recordPins();
   const kept = keptBuilder(await rt.golden.builders(), version);
   log.success(
     [

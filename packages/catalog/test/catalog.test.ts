@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine } from "@wsp/protocol";
-import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -119,11 +119,69 @@ describe("catalog", () => {
     const release = roadModule({ road: "release", repo: "cli/cli", pin }).install({ road: "release", repo: "cli/cli", pin }, "gh") as string;
     expect(release).toContain("tag='v2.86.0'");
     expect(release).toContain(pinCheckLine("$asset", "$tag", pin.sha256));
-    expect(KUBECTL.install(undefined, pin)).toContain(pinCheckLine("kubectl", "$ver", pin.sha256));
-    expect(GCLOUD.install(undefined, pin)).toContain(pinCheckLine("$pkg", "$ver", pin.sha256));
-    expect(KUBECTL.install(undefined, undefined)).not.toContain('[ "$sum" =');
+    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin })).toContain(pinCheckLine("kubectl", "$ver", pin.sha256));
+    expect(GCLOUD.install({ road: "vendor", cask: GCLOUD, pin })).toContain(pinCheckLine("$pkg", "$ver", pin.sha256));
+    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL })).not.toContain('[ "$sum" =');
+    // The cask reads the one version rule: a row's version past the pin installs at the version, with no check.
+    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, version: "v1.38.0", pin })).toContain("ver='v1.38.0'");
+    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, version: "v1.38.0", pin })).not.toContain('[ "$sum" =');
+    expect(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin })).toContain("ver='v2.86.0'");
     // The words are the protocol's, so the reason line a person reads is the one the format test pins.
     expect(pinCheckLine("x", "y", "z")).toContain(pinMismatchLine("x", "y", "z", "${sum:0:12}"));
+  });
+
+  it("one rule says the version a road installs at, one says whether a copy gets it, and each module says how the installed version is read back in the form its own install takes", () => {
+    const pin = { tag: "4.1.0" };
+    // The row's version first, else the recorded pin while it stands, else the source's current one.
+    expect(versionOf({ road: "npm", package: "wrangler", version: "4.2.0", pin })).toBe("4.2.0");
+    expect(versionOf({ road: "npm", package: "wrangler", pin })).toBe("4.1.0");
+    expect(versionOf({ road: "npm", package: "wrangler", version: "4.1.0", pin })).toBe("4.1.0");
+    expect(versionOf({ road: "npm", package: "wrangler" })).toBeUndefined();
+    expect(versionOf({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } })).toBe("v2.86.0");
+    // A package road installs at the pin the way it installs at a row's version.
+    expect(ROAD_MODULES.npm.install({ road: "npm", package: "wrangler", pin }, "wrangler")).toBe("npm install -g wrangler@4.1.0");
+    expect(ROAD_MODULES.pnpm.install({ road: "pnpm", package: "wrangler", pin }, "wrangler")).toBe("pnpm add -g wrangler@4.1.0");
+    expect(ROAD_MODULES.uv.install({ road: "uv", package: "ruff", pin: { tag: "0.4.4" } }, "ruff")).toBe("uv tool install ruff==0.4.4");
+    expect(ROAD_MODULES.cargo.install({ road: "cargo", package: "bat", pin: { tag: "0.24.0" } }, "bat")).toBe("cargo install bat --version 0.24.0");
+    expect(ROAD_MODULES.go.install({ road: "go", module: "golang.org/x/tools/gopls", pin: { tag: "v0.16.2" } }, "gopls")).toBe("go install golang.org/x/tools/gopls@v0.16.2");
+    // A pin the row's version moved past does not stand: the row installs at its version, a first install again.
+    expect(ROAD_MODULES.npm.install({ road: "npm", package: "wrangler", version: "4.2.0", pin }, "wrangler")).toBe("npm install -g wrangler@4.2.0");
+    // Which roads fix a version on a copy: the ones that install at one, and a script whose own text fixes one.
+    expect(fixesVersion({ road: "npm", package: "wrangler" })).toBe(true);
+    expect(fixesVersion({ road: "release", repo: "cli/cli" })).toBe(true);
+    expect(fixesVersion({ road: "vendor", cask: KUBECTL })).toBe(true);
+    expect(fixesVersion({ road: "go", module: "x" })).toBe(true);
+    expect(fixesVersion({ road: "brew", formula: "go" })).toBe(false);
+    expect(fixesVersion({ road: "apt", packages: ["tmux"] })).toBe(false);
+    expect(fixesVersion({ road: "script", script: "x" })).toBe(false);
+    expect(fixesVersion({ road: "script", script: "x", version: "6.3.3" })).toBe(true);
+    for (const id of ["swift", "playwright", "hermes"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(true);
+    for (const id of ["claude", "rust", "yarn", "op"]) expect(fixesVersion(catalogEntry(id)!.installRoad), id).toBe(false);
+    // How each road reads the installed version back, each in the form its install takes: no v where the install takes none, the v where go wants it.
+    expect(ROAD_MODULES.npm.installed!({ road: "npm", package: "@openai/codex" }, "codex")).toBe(`node -p 'require(process.argv[1] + "/package.json").version' "$(npm root -g)/"'@openai/codex'`);
+    expect(ROAD_MODULES.pnpm.installed!({ road: "pnpm", package: "wrangler" }, "wrangler")).toContain("$(pnpm root -g)");
+    expect(ROAD_MODULES.bun.installed!({ road: "bun", package: "wrangler" }, "wrangler")).toBe(`bun pm ls -g 2>/dev/null | grep -oE "(^| )wrangler@[^[:space:]]+" | head -n 1 | sed 's/.*@//'`);
+    expect(ROAD_MODULES.uv.installed!({ road: "uv", package: "ruff" }, "ruff")).toBe(`uv tool list 2>/dev/null | awk -v p='ruff' '$1==p{sub(/^v/,"",$2); sub(/:$/,"",$2); print $2}'`);
+    expect(ROAD_MODULES.pipx.installed!({ road: "pipx", package: "black" }, "black")).toContain("pipx list --short");
+    expect(ROAD_MODULES.cargo.installed!({ road: "cargo", package: "bat" }, "bat")).toContain("cargo install --list");
+    expect(ROAD_MODULES.go.installed!({ road: "go", module: "golang.org/x/tools/gopls" }, "gopls")).toBe(`go version -m /root/go/bin/'gopls' 2>/dev/null | awk '$1=="mod"{print $3}'`);
+    expect(ROAD_MODULES.brew.installed!({ road: "brew", formula: "go" }, "go")).toContain("list --versions go");
+    expect(ROAD_MODULES.apt.installed!({ road: "apt", packages: ["clang", "clang-format"] }, "clang")).toBe("dpkg-query -W -f='${Version}\\n' 'clang' 2>/dev/null");
+    expect(ROAD_MODULES.script.installed!({ road: "script", script: "x" }, "claude")).toBe(`'claude' --version 2>/dev/null | head -n 1 | grep -oE '[0-9][^ ,()]*\\.[0-9][^ ,()]*' | head -n 1`);
+    // A release's and a vendor's own install line says the tag and sum; neither reads again.
+    expect(ROAD_MODULES.release.installed).toBeUndefined();
+    expect(ROAD_MODULES.vendor.installed).toBeUndefined();
+  });
+
+  it("one rule names the id a recipe row is known by on every computer: the catalog id where the catalog carries the tool, whatever manager this computer has it by; nothing for an MCP row, a row outside the catalog or another rung", () => {
+    expect(catalogIdOfRow({ id: "tools/npm/wrangler" })).toBe("wrangler");
+    expect(catalogIdOfRow({ id: "tools/catalog/wrangler" })).toBe("wrangler");
+    expect(catalogIdOfRow({ id: "tools/brew/gh" })).toBe("gh");
+    expect(catalogIdOfRow({ id: "agents/codex" })).toBe("codex");
+    expect(catalogIdOfRow({ id: "agents/mcp/claude/wsp" })).toBeUndefined();
+    expect(catalogIdOfRow({ id: "tools/brew/zingzy/tap/diskbloom" })).toBeUndefined();
+    expect(catalogIdOfRow({ id: "shell/zshrc" })).toBeUndefined();
+    expect(catalogIdOfRow({ id: "logins/gh" })).toBeUndefined();
   });
 
   it("proves every browser or device sign-in with a status check", () => {
@@ -232,8 +290,8 @@ describe("catalog", () => {
     expect(supabase).not.toContain("command -v go");
     expect(supabase).toContain(`echo "Error: the current release of "'supabase/cli'" has no Linux build" >&2`);
     expect(gh).not.toContain('[ "$sum" =');
-    expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install(undefined, undefined));
-    expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install(undefined, undefined));
+    expect(installLine(catalogEntry("gcloud")!)).toBe(GCLOUD.install({ road: "vendor", cask: GCLOUD }));
+    expect(installLine(catalogEntry("kubectl")!)).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL }));
     // The floor runs before Homebrew or the release machinery exist on the machine.
     for (const e of BASE_FLOOR) expect(["brew", "release", "vendor"], e.id).not.toContain(e.installRoad.road);
   });
@@ -308,11 +366,11 @@ describe("catalog", () => {
     expect(off({ road: "release" }, "spoo")).toEqual({ cmd: "rm -f /usr/local/bin/'spoo'" });
     // A vendor's download is the cask's own script, at the road's version when it names one, else the pinned or current one.
     const gcloud: InstallRoad = { road: "vendor", cask: GCLOUD, version: "575.0.0" };
-    expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install("575.0.0", undefined), { cmd: GCLOUD.uninstall }, "gcloud"]);
+    expect([line(gcloud), off(gcloud), ROAD_MODULES.vendor.bin!(gcloud)]).toEqual([GCLOUD.install(gcloud), { cmd: GCLOUD.uninstall }, "gcloud"]);
     const kubectl: InstallRoad = { road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } };
-    expect(line(kubectl)).toBe(KUBECTL.install(undefined, { tag: "v1.37.0", sha256: "c".repeat(64) }));
+    expect(line(kubectl)).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "c".repeat(64) } }));
     // A vendor pin whose version moved on is not the cask's to check: the cask gets none, so a first install records anew.
-    expect(line({ ...kubectl, version: "v1.38.0" })).toBe(KUBECTL.install("v1.38.0", undefined));
+    expect(line({ ...kubectl, version: "v1.38.0" })).toBe(KUBECTL.install({ road: "vendor", cask: KUBECTL, version: "v1.38.0" }));
     expect(line({ ...kubectl, version: "v1.38.0" })).not.toContain('[ "$sum" =');
     // apt rows wait on the one index read; purge takes what the package alone pulled in.
     const apt: InstallRoad = { road: "apt", packages: ["neovim"] };
@@ -412,7 +470,7 @@ describe("catalog", () => {
     const own = /\bcurl +-[A-Za-z]*[fsSL]\b/;
     const lines = [
       ...CATALOG.map(e => installLine(e)),
-      ...LINUX_CASKS.flatMap(c => [c.install(undefined, undefined), c.install("1.0.0", { tag: "1.0.0", sha256: "a".repeat(64) })]),
+      ...LINUX_CASKS.flatMap(c => [c.install({ road: "vendor", cask: c }), c.install({ road: "vendor", cask: c, version: "1.0.0", pin: { tag: "1.0.0", sha256: "a".repeat(64) } })]),
       ROAD_MODULES.release.install({ road: "release", repo: "cli/cli", go: "github.com/cli/cli/v2/cmd/gh" }, "gh"),
       ROAD_MODULES.release.install({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", pin: { tag: "v0.4.1", sha256: "b".repeat(64) } }, "spoo"),
       catalog.UV_INSTALL,

@@ -3,17 +3,17 @@
 // what a login defaults to, the recipe file (the same list with the person's
 // ticks, saved next to the state so golden v2 is a re-run of it), and the
 // golden recipe the ticked rows add up to.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { LOGIN_CHOICES, parseManifest, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths } from "@wsp/catalog";
+import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
+import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
 import { Recipe, type LoginChoice, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
 import type { Keys } from "./cli.js";
 import { GUEST_ENVS } from "./doctor.js";
 import { SIGN_IN_WORDS } from "./signin-words.js";
-import { outsideRow, pinsOf } from "./recipe-file.js";
+import { outsideRow } from "./recipe-file.js";
 import { FISH_FILE, SH_FILE } from "./init-secrets.js";
 export { loadRecipe, outsideCatalog, outsideRowsOf, pinsOf, saveSmallRecipe, smallRecipePath, withPins, withTicksOf } from "./recipe-file.js";
 
@@ -189,13 +189,6 @@ export function isLoginChoice(v: unknown): v is LoginChoice {
   return LOGIN_CHOICES.includes(v as LoginChoice);
 }
 
-/** The catalog id a collector row stands for: an agents row its agent, a tools row the tool its package names. */
-export function catalogIdOf(e: ManifestEntry): string | undefined {
-  if (e.rung === "agents" && !isMcpRow(e)) return agentName(e);
-  if (e.rung === "tools") return catalogToolFor(packageOf(e))?.id;
-  return undefined;
-}
-
 /** This computer's tools rows the catalog does not carry, as rows of the small recipe under the collector's own id,
  * so the file and the Also screen tick them like any other row and the build installs each by the road
  * the plan resolves for it: off until one ticks it, found here as its source. A tap itself, a row locked off with a
@@ -204,7 +197,7 @@ export function catalogIdOf(e: ManifestEntry): string | undefined {
 export function withOutsideRows(recipe: Recipe, manifest: Manifest, brew: BrewTable): Recipe {
   const named = new Set(recipe.rows.map(r => r.id));
   const rows = manifest.entries.flatMap((e): RecipeRow[] => {
-    if (e.rung !== "tools" || named.has(e.id) || catalogIdOf(e) !== undefined || isTap(e) || !isTickable(e) || rowRoad(e, brew) === undefined) return [];
+    if (e.rung !== "tools" || named.has(e.id) || catalogIdOfRow(e) !== undefined || isTap(e) || !isTickable(e) || rowRoad(e, brew) === undefined) return [];
     return [outsideRow(e.id, e.paths)];
   });
   return rows.length === 0 ? recipe : { ...recipe, rows: [...recipe.rows, ...rows] };
@@ -212,21 +205,19 @@ export function withOutsideRows(recipe: Recipe, manifest: Manifest, brew: BrewTa
 
 /** The collector's rows with the recipe's ticks written on: an agents or tools row is on when its catalog row is,
  * a tools row the catalog does not carry when the recipe's row under its own id is, off when the recipe has no such
- * row; an MCP row follows its agent; a saved sign-in answer lands on the login row it names; a recorded pin lands on
- * the tools row of the id it names, so the road installs that release and checks its sum. Every other row keeps its
- * default. A ticked catalog tool this computer has no row for gets a bare row, the floor's aside, so the build
- * installs it by its catalog road; the bare rows of an earlier pass are made anew, so an untick takes its row away. */
+ * row; an MCP row follows its agent; a saved sign-in answer lands on the login row it names. Every other row keeps
+ * its default. A ticked catalog tool this computer has no row for gets a bare row, the floor's aside, so the build
+ * installs it by its catalog road; the bare rows of an earlier pass are made anew, so an untick takes its row away.
+ * The recipe's pins are what the last seal recorded and land on no row: the image's own cut reads latest again. */
 export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
   const on = new Set(recipe.rows.filter(r => r.on).map(r => r.id));
   const answers = new Map<string, LoginChoice>(recipe.rows.flatMap(r => (r.signIn === undefined ? [] : [[`logins/${loginIdOf(r.id)}`, r.signIn]])));
-  const pins = pinsOf(recipe.rows);
-  const pinOf = (id: string | undefined): Pick<ManifestEntry, "pin"> => (id !== undefined && pins.has(id) ? { pin: pins.get(id)! } : {});
   const own = manifest.entries.filter(e => !e.id.startsWith(CATALOG_PREFIX));
-  const here = new Set(own.map(catalogIdOf));
+  const here = new Set(own.map(catalogIdOfRow));
   const bare = recipe.rows.flatMap((r): ManifestEntry[] => {
     const e = catalogEntry(r.id);
     if (!r.on || here.has(r.id) || e?.kind !== "tool" || e.floor) return [];
-    return [{ rung: "tools", id: `${CATALOG_PREFIX}${e.id}`, label: e.name, group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true, ...pinOf(e.id) }];
+    return [{ rung: "tools", id: `${CATALOG_PREFIX}${e.id}`, label: e.name, group: "Catalog", paths: [], bytes: 0, default: "skip", linux: "yes", bring: true }];
   });
   return {
     ...manifest,
@@ -236,11 +227,8 @@ export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
           const agent = parseMcpId(e.id)?.agent;
           return { ...e, bring: initialTicks(e) && (agent === undefined || catalogEntry(agent)?.kind !== "agent" || on.has(agent)) };
         }
-        const id = catalogIdOf(e);
-        if (id !== undefined || e.rung === "tools") {
-          const key = id ?? e.id;
-          return { ...e, bring: on.has(key), ...pinOf(key) };
-        }
+        const id = catalogIdOfRow(e);
+        if (id !== undefined || e.rung === "tools") return { ...e, bring: on.has(id ?? e.id) };
         const answer = e.rung === "logins" ? answers.get(e.id) : undefined;
         return answer === undefined ? e : { ...e, choice: answer };
       }),
@@ -251,38 +239,18 @@ export function applyRecipe(manifest: Manifest, recipe: Recipe): Manifest {
 
 /** The catalog ids this computer has a collector row for. */
 export function rowsHere(entries: readonly ManifestEntry[]): Set<string> {
-  return new Set(entries.flatMap(e => catalogIdOf(e) ?? []));
+  return new Set(entries.flatMap(e => catalogIdOfRow(e) ?? []));
 }
 
-/** The manifest a run reads the recipe against: the catalog's bare rows joined to this computer's, the pins the last
- * build saved carried, the recipe applied. The screens as data, the run itself and a copy's build read it here, so
- * a tick lands on the same rows wherever it was made. */
-export function manifestFor(reading: { manifest: Manifest }, recipe: Recipe, statePath: string): Manifest {
-  return applyRecipe(withCatalogAgents(withSavedPins(reading.manifest, readSavedManifest(recipePath(statePath)))), recipe);
+/** The manifest a run reads the recipe against: the catalog's bare rows joined to this computer's, the recipe
+ * applied. The screens as data, the run itself and a copy's build read it here, so a tick lands on the same rows
+ * wherever it was made. */
+export function manifestFor(reading: { manifest: Manifest }, recipe: Recipe): Manifest {
+  return applyRecipe(withCatalogAgents(reading.manifest), recipe);
 }
 
 export function recipePath(statePath: string): string {
   return join(dirname(statePath), "golden-recipe.json");
-}
-
-/** The manifest the last run saved at that path, or nothing when there is none or it does not parse: it is about to
- * be rewritten either way. */
-export function readSavedManifest(path: string): Manifest | undefined {
-  if (!existsSync(path)) return undefined;
-  try {
-    return parseManifest(JSON.parse(readFileSync(path, "utf8")));
-  } catch {
-    return undefined;
-  }
-}
-
-/** This computer's rows with the pins the saved manifest recorded on them, by id. The small recipe carries pins for
- * catalog ids only; a row outside the catalog (a tap formula on its release) has this manifest as the one home of
- * its pin, and the build stamps that pin on the sealed digest, so the fresh row has to carry it too or every re-run
- * reads the row as unpinned. A row that carries one already keeps it. */
-export function withSavedPins(manifest: Manifest, saved: Manifest | undefined): Manifest {
-  const pins = pinsOf(saved?.entries);
-  return pins.size === 0 ? manifest : { ...manifest, entries: manifest.entries.map(e => (e.pin === undefined && pins.has(e.id) ? { ...e, pin: pins.get(e.id)! } : e)) };
 }
 
 /** The small recipe with the login answers written on: a row whose login rows were answered carries the word they

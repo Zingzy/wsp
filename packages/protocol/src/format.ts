@@ -292,9 +292,10 @@ export function notifyTail(result: TurnResult): string | undefined {
 }
 
 /** The one line a thread's end sends to whoever its start named, and the one a wait on it prints: the thread's first
- * eight characters, the outcome word with the duration and cost the harness reported, then the reply at `length`. */
+ * eight characters, the outcome word with how long the turn worked and what it cost, then the reply at `length`. */
 export function notifyLine(threadId: string, result: TurnResult, length: NotifyLength = "tail"): string {
-  const facts = [result.status, ...(result.durationMs !== undefined ? [fmtDuration(result.durationMs)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
+  const clocked = turnWorkedMs(result);
+  const facts = [result.status, ...(clocked !== undefined ? [fmtDuration(clocked.worked)] : []), ...(result.costUsd !== undefined ? [fmtCost(result.costUsd)] : [])];
   const body = notifyBody(result, length);
   return `thread ${threadId.slice(0, 8)} finished (${facts.join(", ")})${body !== undefined ? `: ${body}` : ""}`;
 }
@@ -318,13 +319,34 @@ export function turnSpendPart(costUsd: number, word?: string): string {
   return `${spendFigure(costUsd, word)} this turn`;
 }
 
+/** The minutes a settled turn stood stopped on a question, said where they are most of what it took: the figure
+ * beside it counts work, and a turn that did four seconds of work in three and a half minutes has to say where the
+ * rest went or the two readings of the same turn cannot be reconciled. */
+export function waitedOnYouPart(waitedMs: number): string {
+  return `waited on you ${fmtDuration(waitedMs)}`;
+}
+
+/** How long a settled turn worked and how long of it went on the person: the harness clocks wall time from launch
+ * to result, prompts included, and this is the one place that splits it. Every reading of a turn's length takes
+ * this, so the chat footer and the line a thread's end sends can never say two different minutes about one turn. */
+export function turnWorkedMs(turn: { durationMs?: number | null; waitedMs?: number | null }): { worked: number; waited: number } | undefined {
+  if (typeof turn.durationMs !== "number") return undefined;
+  const waited = Math.min(typeof turn.waitedMs === "number" && turn.waitedMs > 0 ? turn.waitedMs : 0, turn.durationMs);
+  return { worked: turn.durationMs - waited, waited };
+}
+
 /** What a settled turn says beside its outcome word, in the order every client shows it: how long it worked, what
  * it cost, and what the threads it opened cost where it opened any. The app's chat footer and the command line's
- * last line read from this one list. */
-export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
+ * last line read from this one list. Worked for counts work: the spans the turn stood on a prompt nobody had
+ * answered come off it, and where they outweigh the work they are said in their own part. */
+export function turnSettledParts(turn: { durationMs?: number | null; costUsd?: number | null; waitedMs?: number | null }, openedCostUsd?: number | null, spendWord?: string): string[] {
   const opened = typeof openedCostUsd === "number" && openedCostUsd > 0;
   const parts: string[] = [];
-  if (typeof turn.durationMs === "number") parts.push(`Worked for ${fmtDuration(turn.durationMs)}`);
+  const clocked = turnWorkedMs(turn);
+  if (clocked !== undefined) {
+    parts.push(`Worked for ${fmtDuration(clocked.worked)}`);
+    if (clocked.waited > clocked.worked) parts.push(waitedOnYouPart(clocked.waited));
+  }
   if (typeof turn.costUsd === "number") parts.push(opened ? turnSpendPart(turn.costUsd, spendWord) : spendFigure(turn.costUsd, spendWord));
   if (opened) parts.push(openedSpendPart(openedCostUsd));
   return parts;
@@ -431,7 +453,7 @@ function toolField(input: ToolInput, name: string): string | undefined {
 }
 
 /** A tool a server lends the agent, whose name carries both: `mcp__<server>__<tool>` as every harness spells it. */
-function serverTool(toolName: string): { server: string; tool: string } | undefined {
+export function serverTool(toolName: string): { server: string; tool: string } | undefined {
   const parts = toolName.split("__");
   return parts.length >= 3 && parts[0] === "mcp" && parts[1] !== "" ? { server: parts[1]!, tool: parts.slice(2).join("__") } : undefined;
 }
@@ -765,6 +787,11 @@ export function subagentTaskLine(input: string): string | undefined {
 /** What a prompt raised inside a subagent's own run says above it, so a person answering knows which of them is
  * asking rather than reading one unowned question. */
 export const subagentAskerLine = (task: string): string => `${task} asks`;
+
+/** Who is asking, above a prompt drawn in a thread that did not raise it: the thread whose turn is stopped on the
+ * question, named, since the thread reading this one is only held up until somebody answers it. Two parts under the
+ * row grammar's middle dot, as every other line of facts on a row is joined. */
+export const waitingAskerLine = (title: string): string => `${title} asks · this thread waits on the answer`;
 
 /** A count with its noun, the noun pluralised by an s: the one rule every line that counts rows, sessions, calls,
  * threads or a plan's files reads, so none of them says "1 sessions". A noun that does not take an s is spelled by
@@ -1808,6 +1835,11 @@ export const initElapsedLine = (ms: number): string => (ms < 60_000 ? `${Math.ma
  * and the size when the builder's disk could be read. */
 export const snapshotStageLine = (bytes: number | undefined): string => `snapshotting${bytes === undefined ? "" : ` about ${fmtBytes(bytes)}`}, usually under a minute`;
 
+/** The snapshot stage's line while the layer is written: the bytes so far, over what the machine had written once
+ * the backend has counted it. The stage's own clock says how long it has taken. */
+export const snapshotProgressLine = (bytes: number, total: number | undefined): string =>
+  total === undefined ? `snapshotting, ${fmtBytes(bytes)} written` : `snapshotting, ${fmtBytes(bytes)} of about ${fmtBytes(total)} written`;
+
 /** The save stage's one line. */
 export const SAVING_IMAGE_LINE = "saving the image";
 
@@ -2706,14 +2738,35 @@ export function versionMovedLine(from: string | undefined, to: string | undefine
 /** The words for a tools row no road installs, where a road's own words would stand. */
 export const NO_ROAD_WORDS = "by no road";
 
-/** Why a tool installs differently now: the release it is fixed to moved, or the sum recorded for that release did. */
-export function pinMovedLine(from: ToolPin | undefined, to: ToolPin | undefined): string {
-  if (from === undefined) return `now fixed to release ${to!.tag}`;
-  if (to === undefined) return `no longer fixed to release ${from.tag}`;
-  return from.tag === to.tag ? `the checksum recorded for ${from.tag} changed` : `release ${from.tag} to ${to.tag}`;
+/** What a row marked latest does on every place: the words `wsp recipe`, `wsp image` and the seal's stage all use. */
+export const INSTALLS_LATEST = "installs latest";
+
+/** A pin beside its row, as `wsp recipe` shows it: the version, and for a road that fixes none that it installs
+ * latest wherever it is built. */
+export function pinWords(pin: ToolPin): string {
+  return pin.latest === true ? `${pin.tag}, ${INSTALLS_LATEST}` : pin.tag;
 }
 
-/** Why a tool installs differently now when its road and pin stand: the lines the road runs are not the golden's. */
+/** The one line a stage says about what its installs read back: the rows fixed to what they installed, then, once,
+ * the rows whose road installs latest wherever the image is built, each with the version this build got and the
+ * road's own words. Nothing when no row read a version. */
+export function pinsReadLine(fixed: readonly { name: string; tag: string }[], latest: readonly { name: string; tag: string; words?: string }[]): string | undefined {
+  const parts = [
+    ...(fixed.length > 0 ? [`pinned: ${fixed.map(p => `${listedName(p.name)} ${p.tag}`).join(", ")}`] : []),
+    ...(latest.length > 0 ? [`${INSTALLS_LATEST} on every place: ${latest.map(p => `${listedName(p.name)} ${p.tag}${p.words === undefined ? "" : ` ${p.words}`}`).join(", ")}`] : []),
+  ];
+  return parts.length === 0 ? undefined : parts.join("; ");
+}
+
+/** One of the record's pins in one line, under `wsp image`: the row by name, what it installed, the checksum where the
+ * road recorded one, and for a road that fixes none that it installs latest, in the road's words. */
+export function sealedPinLine(name: string, pin: ToolPin, words?: string): string {
+  const sum = pin.sha256 === undefined ? [] : [`checksum ${shortSum(pin.sha256)}`];
+  const latest = pin.latest === true ? [`${INSTALLS_LATEST}${words === undefined ? "" : ` ${words}`}`] : [];
+  return [name, pin.tag, ...sum, ...latest].join(" · ");
+}
+
+/** Why a tool installs differently now when its road stands: the lines the road runs are not the golden's. */
 export const INSTALLER_MOVED_LINE = "its install lines changed";
 
 /** The detail of a tools row the catalog does not carry: it is on this computer, at the version this computer runs

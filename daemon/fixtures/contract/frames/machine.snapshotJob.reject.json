@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "op": "machine.snapshotJob"
+  },
+  {
+    "id": 1,
+    "op": "machine.snapshotJob",
+    "job": 7
+  }
+]
