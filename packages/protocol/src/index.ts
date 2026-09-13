@@ -1196,10 +1196,13 @@ export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): 
  * because the host stages the file and the runtime builds the launch that runs it, and neither may import the
  * other's rule. */
 export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
-/** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder,
- * because the bin reads its own version through that file (`../package.json` from the bin) and announces it in
- * every MCP handshake; a client refuses a server that names none. */
-export const wspBinIn = (dir: string): string => `${dir}/wsp/dist/bin.js`;
+/** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder and
+ * its own assets beside those, because the bin reads its own version through that file (`../package.json` from the
+ * bin) and announces it in every MCP handshake; a client refuses a server that names none. Named as a folder
+ * rather than as the bin alone, since the daemon binary the bundle carries rides in that package's assets and the
+ * command reads it there the way an installed copy reads its own. */
+export const wspPackageIn = (dir: string): string => `${dir}/wsp`;
+export const wspBinIn = (dir: string): string => `${wspPackageIn(dir)}/dist/bin.js`;
 export const GUEST_WSP_BIN = wspBinIn(GUEST_DAEMON_DIR);
 
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
@@ -3188,6 +3191,7 @@ const DAEMON_CONTENTS = [
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
   "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
   "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
+  "aaffb63eebc43022365d0c34d2b4611a92d228f6917e5835d7fb468d1a1fdc8b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3264,7 +3268,11 @@ const DAEMON_CONTENTS = [
  * what the workspaces there hold of the computer. Version 33 answers a client on the computer itself the listing of
  * the workspaces it holds and one reading of any of them, both read-only and both on the road that dials in; the
  * reading carries the sizes as applied, the memory and processor time off the cgroup, the uptime, the process
- * count, the address and the two paths, where the metrics op before it read two of those and replied with none. */
+ * count, the address and the two paths, where the metrics op before it read two of those and replied with none.
+ * Version 34 carries the daemon binary in the bundle where the wsp command riding beside it reads one, under that
+ * command's own assets and one folder per chip, and writes the unit, the supervisor script and the AppArmor
+ * profile inside the arm for the chip the machine says it is: the binary a machine runs and the one a computer's
+ * own join looks for are one file, at one path, under one rule. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
