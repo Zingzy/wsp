@@ -35,7 +35,7 @@ describe("workspaceIndicator", () => {
 
 describe("threadIndicator", () => {
   it.each<[SessionView["status"], string, boolean]>([
-    ["running", "Working", true], ["completed", "Idle", false], ["interrupted", "Idle", false], ["failed", "Ended", false],
+    ["running", "Working", true], ["completed", "Idle", false], ["interrupted", "Idle", false], ["failed", "Failed", false],
   ])("%s -> %s", (st, label, pulse) => {
     expect(threadIndicator({ status: st, asking: undefined })).toEqual({ label, tone: "neutral", pulse });
   });
@@ -131,7 +131,7 @@ describe("deriveSidebarProjects", () => {
     expect(p!.threads.map(t => [t.id, t.threadId, t.title, t.status, t.startedAt, t.endedAt, t.indicator?.label])).toEqual([
       ["thr_a", "thr_a", "make me a simple server", "running", new Date(5_000).toISOString(), null, "Working"],
       ["thr_b", "thr_b", "unrelated", "completed", new Date(3_000).toISOString(), new Date(4_000).toISOString(), "Idle"],
-      ["s4", null, "before threads", "failed", new Date(6_000).toISOString(), new Date(7_000).toISOString(), "Ended"],
+      ["s4", null, "before threads", "failed", new Date(6_000).toISOString(), new Date(7_000).toISOString(), "Failed"],
     ]);
     // Provenance is the opening turn's: the thread the command line opened stays the command line's after a person's turn.
     expect(p!.threads.map(t => [t.harness, t.startedBy])).toEqual([["claude", "cli"], ["codex", "person"], ["claude", "person"]]);

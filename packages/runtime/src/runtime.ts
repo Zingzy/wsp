@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join, posix } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, guestEnv } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, catalogIdOfRow, guestEnv } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -192,8 +192,8 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { GUEST_WSP_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -2459,7 +2459,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** `launch` is carried only by a row the start road wrote before its turn reached the machine, and settles when the
    * turn's harness holds the row or the start gave it up: a send behind such a row waits on it, and the file never
    * takes the row, since a restart could re-open nothing from it. */
-  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void> }>();
+  const sessions = new Map<string, { view: SessionView; turnId: string; notify?: readonly string[]; turnToken?: string; scopeDeviceId?: string; handle?: SessionHandle; end?: (reason: string) => void; turnLive?: TurnLive; run?: string; pid?: number; launch?: Promise<void>; calls?: Map<string, { toolName: string; input: string }> }>();
   /** Every exec stream still running, so the machine going away ends it the way it ends a session. */
   const execs = new Set<{ workspaceId: string; end: (reason: string) => void }>();
   const indexFlushes = new Map<string, Promise<void>>();
@@ -2759,7 +2759,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return {
       name,
       version: head.version,
-      hash: imageHash(hash, undefined),
+      hash: imageHash(hash, undefined, []),
       recipeHash: hash,
       logins: head.logins ?? [],
       sealedAt: head.createdAt,
@@ -4930,6 +4930,40 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     return found;
   };
+  /** What a thread is called, by the one rule every listing reads it by: its own rows folded, so a thread named in
+   * another thread's row reads there exactly as it reads in the sidebar. */
+  const threadTitle = (threadId: string): string => {
+    const rows = [...sessions.values()].map(x => x.view).filter(v => v.threadId === threadId).sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
+    return foldThreads(rows)[0]?.title ?? threadWord(threadId);
+  };
+
+  /** The prompt each thread is stopped on, whole, by thread id. The row carries the lead as a line; a thread whose
+   * own call is waiting behind this one has to draw the question and answer it, so the question itself is kept here
+   * for as long as it stands open. */
+  const leadAsks = new Map<string, PermissionAsk>();
+
+  /** The thread one running turn's calls are stopped behind, when one of them is a wsp call that follows another
+   * thread to the end of its turn and that thread has an open prompt. A call that opened its own thread is behind
+   * the whole tree under the caller, so a chain of agents waiting on each other names the one question at the
+   * bottom of it: answering that is what moves any of them. */
+  const stoppedBehind = (s: { view: SessionView; calls?: Map<string, { toolName: string; input: string }> }): ThreadWaitingOn | undefined => {
+    const caller = s.view.threadId;
+    if (caller === undefined || s.calls === undefined) return undefined;
+    for (const call of s.calls.values()) {
+      const follows = threadsFollowed(call);
+      if (follows === undefined) continue;
+      const behind: string[] = "opened" in follows ? treeUnder(caller) : [...sessions.values()].map(x => x.view.threadId).filter((id): id is string => id !== undefined && follows.named.some(ref => id.startsWith(ref)));
+      for (const threadId of behind) {
+        const prompt = leadAsks.get(threadId);
+        if (prompt === undefined || threadId === caller) continue;
+        const asked = [...sessions.values()].find(x => x.view.threadId === threadId && x.view.status === "running");
+        if (asked === undefined) continue;
+        return { threadId, workspaceId: asked.view.workspaceId, sessionId: asked.view.id, title: threadTitle(threadId), prompt: { ...prompt, options: [...prompt.options] } };
+      }
+    }
+    return undefined;
+  };
+
   /** Stops every running turn on the tree under a thread, deepest first, and answers with the threads it stopped. */
   const stopUnder = async (threadId: string, caller: Caller | undefined): Promise<string[]> => {
     const stopped: string[] = [];
@@ -5026,6 +5060,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A prompt the turn was stopped on goes with it, on this road as on the harness's own exit: nothing can answer
     // one whose process is gone, and a settled row still carrying it would read as waiting on a person forever.
     delete s.view.asking;
+    if (s.view.threadId !== undefined) leadAsks.delete(s.view.threadId);
     if (reply === undefined && s.notify !== undefined) notifyEnd(s, s.notify, { status: "failed", error: cutLine(endedAt) });
     record({ type: "session.end", workspaceId: s.view.workspaceId, sessionId: s.view.claudeSessionId ?? s.view.id, turnId: s.turnId, threadId: s.view.threadId, exitCode: null, sawResult: reply !== undefined, reason });
   };
@@ -5111,18 +5146,41 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** The permission prompts of this turn nobody has answered. The harness is blocked on every one of them, so this
      * map is what the thread is waiting on, and it holds for as long as the turn lives. */
     const open = new Map<string, PermissionAsk>();
+    /** The tool calls of this turn the harness has not answered yet: what the agent is inside right now. A wsp call
+     * among them that follows another thread is what can leave this turn stopped on a question it never asked. */
+    const calls = new Map<string, { toolName: string; input: string }>();
     /** The harness's own answer road, once the turn is open; a prompt raised inside start() is answered through it
      * too, since it may stand for hours past the synchronous run that raised it. */
     let answerAsk: HarnessSession["answer"];
 
-    /** What the row says the thread is waiting on, and the turn's own reading of whether it is blocked on a person,
-     * by the protocol's one rule for which open prompt leads. Written on every open and close, so the sidebar, the
-     * command line and the turn's idle clock read one fact. */
+    /** The spans of this turn that went on a person rather than on work: closed ones added up, and the moment the
+     * span still running began. The harness counts wall time from launch to result, so these are what its figure has
+     * to give back before a reader is told how long the turn worked. */
+    let waited = 0;
+    let waitingSince: number | undefined;
+    /** What the turn has spent on the person by now, the open span included, so a result that lands under a prompt
+     * still standing counts the same as one that lands after it closed. */
+    const waitedSoFar = (): number => waited + (waitingSince === undefined ? 0 : clock.now() - waitingSince);
+
+    /** Everything that moves when a prompt of this turn opens or closes, by the protocol's one rule for which open
+     * prompt leads: what the row says the thread is waiting on, the question itself for a thread waiting behind
+     * this one, whether the turn is blocked on a person, and the clock on how long it has been. Written on every
+     * open and close, so the sidebar, the command line, the turn's idle clock and its settled figure read one fact. */
     const readsOpen = (): void => {
       const lead = leadAsk(open.values());
-      if (lead === undefined) delete view.asking;
-      else view.asking = askingLine(lead);
+      if (lead === undefined) {
+        delete view.asking;
+        leadAsks.delete(threadId);
+      } else {
+        view.asking = askingLine(lead);
+        leadAsks.set(threadId, lead);
+      }
       if (t.waiting !== undefined) t.waiting.on = open.size > 0;
+      if (open.size > 0) waitingSince ??= clock.now();
+      else if (waitingSince !== undefined) {
+        waited += clock.now() - waitingSince;
+        waitingSince = undefined;
+      }
       void persistSessions(workspaceId);
     };
 
@@ -5220,6 +5278,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           return;
         }
         case "turn.delta":
+          if (event.kind === "tool_use" && event.toolUseId !== undefined && event.toolName !== undefined) calls.set(event.toolUseId, { toolName: event.toolName, input: event.text });
+          else if (event.kind === "tool_result" && event.toolUseId !== undefined) calls.delete(event.toolUseId);
           if (replaying > 0) {
             replaying--;
             return;
@@ -5240,7 +5300,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             ...(event.cwd !== undefined ? { cwd: event.cwd } : {}),
           });
           return;
-        case "turn.done":
+        case "turn.done": {
           // A reply already written stands, and the gate comes before the status is taken: what the run says on the
           // way round again is the reply this turn already gave, and nothing later may overwrite it.
           if (replyRecorded) {
@@ -5252,16 +5312,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           // keep working past its result, and a row read as completed here lets a send start a second agent in the
           // same worktree. The result is held and applied at the exit below.
           turnLive.reply = event.result.status;
+          // The harness counts wall time from launch to result, prompts included, so the spans the turn stood on a
+          // person ride out with it and every reader takes them off one figure rather than guessing at them.
+          const onThePerson = waitedSoFar();
+          const result: TurnResult = onThePerson > 0 ? { ...event.result, waitedMs: onThePerson } : event.result;
           // The cause rides the row too, since a refused turn did none of the work: what a thread is read as having
           // run is decided off the rows, and the result itself lives only in the transcript.
-          if (event.result.refusal !== undefined) view.refusal = event.result.refusal;
+          if (result.refusal !== undefined) view.refusal = result.refusal;
           // So does what the turn cost, added to what the row's earlier turns cost: a resumed turn takes over the
           // row it resumes, and a listing has to answer what a thread spent without reading anyone's transcript.
-          if (event.result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + event.result.costUsd;
+          if (result.costUsd !== undefined) view.costUsd = (view.costUsd ?? 0) + result.costUsd;
           void persistSessions(workspaceId);
-          if (notify !== undefined) notifyEnd({ view, turnId }, notify, event.result);
-          record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result: event.result });
+          if (notify !== undefined) notifyEnd({ view, turnId }, notify, result);
+          record({ type: "session.done", workspaceId, sessionId, turnId, threadId, result });
           return;
+        }
         case "permission.ask": {
           const ask = { ...event.ask, options: named(event.ask) };
           // The turn stops here until an option comes back. Nothing else closes it: a person who was away for an
@@ -5362,7 +5427,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     // One row per turn, never two: the key the start road held this turn under goes as the harness's own takes over.
     if (turnId !== rowId) sessions.delete(turnId);
-    sessions.set(rowId, { view, turnId, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
+    sessions.set(rowId, { view, turnId, calls, ...(notify !== undefined ? { notify } : {}), ...(turnToken !== undefined ? { turnToken } : {}), ...(scopeDeviceId !== undefined ? { scopeDeviceId } : {}), handle, end, turnLive, ...(started.run !== undefined ? { run: started.run } : {}), ...(started.pid !== undefined ? { pid: started.pid } : {}) });
     void persistSessions(workspaceId);
     /** The turn's process is over: its status settles, its token stops naming anything, and the harness's own title
      * for the session is read again, since it writes one as the turn settles. */
@@ -5376,6 +5441,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
       if (!ended) view.status = status;
       view.endedAt ??= Date.now();
+      // The turn is over: its own calls follow nobody now, and nobody waiting behind it is waiting any more.
+      calls.clear();
+      leadAsks.delete(threadId);
       void persistSessions(workspaceId);
       void refreshTitle(view, true);
       if (t.imagesDir !== undefined) dropImages(entry, t.imagesDir);
@@ -5768,9 +5836,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A row with none blocks, so a thread is titled on the first listing that sees it.
       const asked = titleRows(rows).map(view => ({ first: view.harnessTitle === undefined, done: refreshTitle(view, false) }));
       await Promise.all(asked.filter(a => a.first).map(a => a.done));
-      // The turn's process rides the answer and never the row itself: it is this host's to know while the turn runs,
-      // and a pid written down outlives the process it named.
-      return held.map(s => ({ ...s.view, ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}) }));
+      // The turn's process and what its calls are stopped behind ride the answer and never the row itself: both are
+      // this host's to know while the turn runs, and a pid written down outlives the process it named while a wait
+      // written down outlives the question it was on.
+      return held.map(s => {
+        const behind = s.view.status === "running" ? stoppedBehind(s) : undefined;
+        return {
+          ...s.view,
+          ...(s.view.status === "running" && s.pid !== undefined ? { pid: s.pid } : {}),
+          ...(behind !== undefined ? { waitingOn: behind } : {}),
+        };
+      });
     },
 
     async history(workspaceId, origin) {
@@ -6154,13 +6230,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const digest = entry.builder.import?.recipeHash ?? "";
       const vault: SealedVault | undefined =
         result.vault === undefined ? undefined : { sha256: result.vault.sha256, bytes: result.vault.tar.length, paths: result.vault.paths, takenAt: result.version.createdAt };
-      hash = imageHash(digest, vault?.sha256);
+      const pins = recipePins(entry.builder.import?.recipe ?? { ticks: [] }, id => catalogIdOfRow({ id }) ?? id);
+      hash = imageHash(digest, vault?.sha256, pins);
       const image: SealedImage = {
         name,
         version: result.version.version,
         hash,
         recipeHash: digest,
         ...(recipe.source !== undefined ? { recipe: recipe.source } : {}),
+        pins,
         logins: result.version.logins ?? [],
         sealedAt: result.version.createdAt,
         sealedFrom: hostId,
@@ -6463,6 +6541,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (head === undefined) throw new Error(`no golden named "${name}" to update; wsp init builds one`);
       const at = backendAt(place);
       const stage = stageOf(name);
+      // The head's digest, whose pins the rows the delta leaves alone keep on the next version's record.
+      const previousRecipe = await copyRecipeOf(place, name, head.version);
       // Past its window a kept builder is never used, running or not: it is stopped here and the update forks; one
       // the pass could not stop is named so the person knows it still bills. Inside the window, it is suspended for
       // the update's length: the record loses `sealed` and gains `building` before the first exec, so neither the
@@ -6487,7 +6567,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         } else {
           stage("creating", `your builder from v${head.version}, kept since the save`);
           try {
-            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, previousBase: head.base, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), ...(head.leftBehind !== undefined ? { previousLeftBehind: head.leftBehind } : {}), onStage: stage });
+            const applied = await applyDelta(kept.builder.machine, o.delta, { setup: recipe.setup, previousSmoke: head.smoke.cmd, previousBase: head.base, ...(head.missingTools !== undefined ? { previousMissing: head.missingTools } : {}), ...(head.leftBehind !== undefined ? { previousLeftBehind: head.leftBehind } : {}), ...(previousRecipe !== undefined ? { previousRecipe } : {}), onStage: stage });
             const setupSha = nextSetupSha(head.setupSha, recipe.setup, o.delta.import);
             kept.record.import = applied.ledger;
             kept.record.setupSha = setupSha;
@@ -6522,6 +6602,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             head,
             delta: o.delta,
               setup: recipe.setup,
+              ...(previousRecipe !== undefined ? { previousRecipe } : {}),
               ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
               ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
               ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),

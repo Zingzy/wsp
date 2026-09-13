@@ -6,7 +6,7 @@
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
 import { shellQuote } from "@wsp/protocol";
-import { APT_ENV, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin } from "./roads.js";
+import { APT_ENV, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -39,6 +39,15 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   bin?(road: R): string | undefined;
   /** The road fixed to a version, for a road that pins one; absent for a road that installs what its source serves. */
   at?(road: R, version: string): R;
+  /** One bash line that prints the installed version, in the form `at` takes, on the tools PATH once the row is on
+   * the machine; nothing printed reads as unread. Absent for a road whose install line prints it itself. */
+  installed?(road: R, bin: string): string;
+}
+
+/** Whether a copy built from this road's pin gets the version the seal read: the road installs at one (`at`), or
+ * its script fixes one in its own text. Absent both, the road installs what its source serves on the day. */
+export function fixesVersion(road: InstallRoad): boolean {
+  return roadModule(road).at !== undefined || (road.road === "script" && road.version !== undefined);
 }
 
 // --- the network clock every road runs under -------------------------------------
@@ -61,6 +70,10 @@ export const CURL_NET = `curl() { command curl --connect-timeout ${NET_CONNECT_S
 
 const atVersion = <R extends { version?: string }>(r: R, version: string): R => ({ ...r, version });
 const pinned = (pkg: string, version: string | undefined, sep: string): string => (version === undefined ? pkg : `${pkg}${sep}${version}`);
+/** The version field of a Node global's package.json under the manager's global root. */
+const nodeGlobalVersion = (rootCmd: string, pkg: string): string => `node -p 'require(process.argv[1] + "/package.json").version' "$(${rootCmd})/"${shellQuote(pkg)}`;
+/** The second column of the line a listing prints for the package, with the leading v and a trailing colon off. */
+const listedVersion = (list: string, pkg: string): string => `${list} 2>/dev/null | awk -v p=${shellQuote(pkg)} '$1==p{sub(/^v/,"",$2); sub(/:$/,"",$2); print $2}'`;
 
 /** The pseudo step every apt row waits on: the index read once, before the first of them. */
 export const APT_INDEX = "apt-index";
@@ -116,6 +129,7 @@ const brew: RoadModule<Road<"brew">> = {
     return { cmd: `if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${r.formula}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${r.formula}`)}; else rm -f /usr/local/bin/${shellQuote(bin)}; fi` };
   },
   names: r => [r.formula],
+  installed: r => `${asLinuxbrew(`list --versions ${r.formula}`)} 2>/dev/null | awk '{print $2}'`,
 };
 
 // --- package managers ----------------------------------------------------------
@@ -124,39 +138,46 @@ const npm: RoadModule<Road<"npm">> = {
   words: "as an npm global",
   after: "node",
   fromRow: r => ({ road: "npm", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
-  install: r => `npm install -g ${r.ignoreScripts === true ? "--ignore-scripts " : ""}${pinned(r.package, r.version, "@")}`,
+  install: r => `npm install -g ${r.ignoreScripts === true ? "--ignore-scripts " : ""}${pinned(r.package, versionOf(r), "@")}`,
   uninstall: r => ({ cmd: `npm uninstall -g ${r.package}` }),
   names: r => [r.package],
   at: atVersion,
+  installed: r => nodeGlobalVersion("npm root -g", r.package),
 };
 
-/** pnpm and bun keep npm's global shape under their own verbs. */
+/** pnpm and bun keep npm's global shape under their own verbs; bun lists its globals as a tree and keeps no root command. */
 const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
-  install: r => `${road} add -g ${pinned(r.package, r.version, "@")}`,
+  install: r => `${road} add -g ${pinned(r.package, versionOf(r), "@")}`,
   uninstall: r => ({ cmd: `${road} remove -g ${r.package}` }),
   names: r => [r.package],
   at: atVersion,
+  installed: r => (road === "bun" ? `bun pm ls -g 2>/dev/null | grep -oE "(^| )${r.package}@[^[:space:]]+" | head -n 1 | sed 's/.*@//'` : nodeGlobalVersion("pnpm root -g", r.package)),
 });
 
 /** uv and pipx install a Python tool into its own environment, pinned the pip way. */
 const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
-  install: r => `${cmd} install ${pinned(r.package, r.version, "==")}`,
+  install: r => `${cmd} install ${pinned(r.package, versionOf(r), "==")}`,
   uninstall: r => ({ cmd: `${cmd} uninstall ${r.package}` }),
   names: r => [r.package],
   at: atVersion,
+  installed: r => listedVersion(road === "uv" ? "uv tool list" : "pipx list --short", r.package),
 });
 
 const cargo: RoadModule<Road<"cargo">> = {
   words: "with cargo",
   fromRow: r => ({ road: "cargo", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
-  install: r => (r.version === undefined ? `cargo install ${r.package}` : `cargo install ${r.package} --version ${r.version}`),
+  install: r => {
+    const version = versionOf(r);
+    return version === undefined ? `cargo install ${r.package}` : `cargo install ${r.package} --version ${version}`;
+  },
   uninstall: r => ({ cmd: `cargo uninstall ${r.package}` }),
   names: r => [r.package],
   at: atVersion,
+  installed: r => listedVersion("cargo install --list", r.package),
 };
 
 const GO_BIN = "/root/go/bin";
@@ -184,11 +205,13 @@ const go: RoadModule<Road<"go">> = {
     const mod = goModule(r);
     return mod === undefined ? { road: "go" } : { road: "go", module: mod.path, version: r.version ?? mod.version };
   },
-  install: r => (r.module === undefined ? { note: "no module to install from" } : `go install ${pinned(r.module, r.version, "@")}`),
+  install: r => (r.module === undefined ? { note: "no module to install from" } : `go install ${pinned(r.module, versionOf(r), "@")}`),
   uninstall: () => ({ note: `go has no uninstall; the binary stays in ${GO_BIN}` }),
   names: () => [],
   bin: r => (r.module === undefined ? undefined : goBinary(r.module)),
   at: atVersion,
+  // The module's version as the binary records it, with its v: what `go install path@version` takes.
+  installed: (_r, bin) => `go version -m ${GO_BIN}/${shellQuote(bin)} 2>/dev/null | awk '$1=="mod"{print $3}'`,
 };
 
 // --- releases ------------------------------------------------------------------
@@ -244,17 +267,15 @@ function releaseInstall(name: string, repo: string, tag: string | undefined, pin
   ].join("\n");
 }
 
-/** The tag a release install fetches: the row's version, else the pinned tag, else the current release. */
-const releaseTag = (r: Road<"release">): string | undefined => r.version ?? r.pin?.tag;
 const NO_RELEASE = "no GitHub release to install from";
 
 const release: RoadModule<Road<"release">> = {
   words: "from its release",
-  shown: r => (r.repo === undefined ? NO_RELEASE : `the ${releaseTag(r) ?? "latest"} release of github.com/${r.repo}`),
+  shown: r => (r.repo === undefined ? NO_RELEASE : `the ${versionOf(r) ?? "latest"} release of github.com/${r.repo}`),
   install: (r, bin) => {
     if (r.repo === undefined) return { note: NO_RELEASE };
     // Without a version the pinned tag stands, as a vendor install does; a first install with neither takes the current release.
-    return releaseInstall(bin, r.repo, releaseTag(r), standingPin(r)?.sha256, r.go);
+    return releaseInstall(bin, r.repo, versionOf(r), standingPin(r)?.sha256, r.go);
   },
   uninstall: (_r, bin) => ({ cmd: `rm -f /usr/local/bin/${shellQuote(bin)}` }),
   names: () => [],
@@ -264,7 +285,7 @@ const release: RoadModule<Road<"release">> = {
 const vendor: RoadModule<Road<"vendor">> = {
   words: "from its vendor's release",
   shown: r => r.cask.from,
-  install: r => r.cask.install(r.version, standingPin(r)),
+  install: r => r.cask.install(r),
   uninstall: r => ({ cmd: r.cask.uninstall }),
   names: () => [],
   bin: r => r.cask.bin,
@@ -280,6 +301,8 @@ const apt: RoadModule<Road<"apt">> = {
   install: r => `${APT_ENV}\napt-get install -y -qq ${r.packages.join(" ")}`,
   uninstall: r => ({ cmd: `${APT_ENV}\napt-get purge -y -qq ${r.packages.join(" ")} && apt-get autoremove -y -qq --purge` }),
   names: r => r.packages,
+  // The row's first package names it; Debian's version string, epoch and revision included, is what dpkg holds.
+  installed: r => `dpkg-query -W -f='\${Version}\\n' ${shellQuote(r.packages[0] ?? "")} 2>/dev/null`,
 };
 
 const script: RoadModule<Road<"script">> = {
@@ -287,6 +310,8 @@ const script: RoadModule<Road<"script">> = {
   install: r => r.script,
   uninstall: (_r, bin) => ({ note: `${bin} has no uninstaller; left on the machine` }),
   names: () => [],
+  // The command's own version line, cut to its version token: what a script leaves is whatever its vendor prints.
+  installed: (_r, bin) => `${shellQuote(bin)} --version 2>/dev/null | head -n 1 | grep -oE '[0-9][^ ,()]*\\.[0-9][^ ,()]*' | head -n 1`,
 };
 
 export const ROAD_MODULES: { readonly [K in RoadName]: RoadModule<Road<K>> } = {

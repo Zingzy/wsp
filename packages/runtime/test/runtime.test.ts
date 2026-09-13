@@ -1783,7 +1783,7 @@ describe("a turn the host comes back to", () => {
     await until(async () => (await rt2.sessions.list(workspaceId))[0]!.status === "failed");
     const [row] = await rt2.sessions.list(workspaceId);
     expect(row!.asking).toBeUndefined();
-    expect(threadWordOf(foldThreads([row!])[0]!)).toBe("Ended");
+    expect(threadWordOf(foldThreads([row!])[0]!)).toBe("Failed");
     await rt2.close();
   });
 

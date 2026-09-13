@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, pinStateOf, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -37,7 +37,7 @@ export interface RecipeEntry {
   linux?: string;
   /** The version the laptop runs (tools rows); the install pins it. */
   version?: string;
-  /** Only on a tools row installed from a release: the tag installed and its asset's sha256, recorded on the first install of that tag and checked while the tag stands. */
+  /** The version the row is to install at, as the record a copy is planned from pinned it: the road installs at its tag and checks its sum where one was recorded. */
   pin?: ToolPin;
   /** Credential-shaped: copied only when `choice` is copy, never on the tick alone. */
   consent?: boolean;
@@ -506,6 +506,24 @@ export interface ToolInstall {
   shown?: string;
   /** What the result says beside the install once it lands: a road no golden build has proven yet, a version the road could not pin. */
   note?: string;
+  /** How the row's pin is read once it is on the machine, and whether a copy gets the version read: absent for a step no recipe row stands behind. */
+  pin?: PinRead;
+}
+
+/** What a step says about its pin: the line that prints the installed version (absent for a road whose install line
+ * prints it itself), whether the road installs at that version on a copy or takes the current one wherever it runs,
+ * and the road's own words for the line that names a latest row. */
+export interface PinRead {
+  read?: string;
+  fixed: boolean;
+  words: string;
+}
+
+/** The pin read a road gives a step: its module's version line on the command it puts on PATH, whether it fixes one, and its words. */
+export function pinReadOf(road: InstallRoad, bin: string): PinRead {
+  const mod = roadModule(road);
+  const read = mod.installed?.(road, bin);
+  return { ...(read !== undefined ? { read } : {}), fixed: fixesVersion(road), words: mod.words };
 }
 
 export interface SkippedItem {
@@ -559,10 +577,6 @@ export interface ToolSource {
   repo: string;
   tag: string;
 }
-
-/** How a road install stands against the recipe's pin: nothing recorded yet, the same tag (checked), or a
- * tag the Mac's Homebrew has since moved to (a first install again, re-recorded). */
-export const pinState = (pin: ToolPin | undefined, source: ToolSource): "none" | "same" | "moved" => pinStateOf(source.tag, pin);
 
 /** What this Mac's Homebrew says about one installed formula. */
 export interface BrewFormula {
@@ -918,7 +932,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
     if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last });
-    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, the manager's step; a floor row is there already.
   const APT_STEP = `tools/${APT_INDEX}`;
@@ -938,7 +952,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
       return;
     }
     const after = afterDep(planned.after ?? ROAD_MODULES[planned.road.road].after, planned.road.road);
-    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}) });
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
   const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
@@ -1093,10 +1107,17 @@ export interface AgentInstaller {
   smoke: string;
   /** The lowest Node major its package's engines field accepts; absent when it declares none. */
   node?: number;
+  /** How the agent's installed version is read back and whether a copy gets it; absent for an installer outside the catalog. */
+  pin?: PinRead;
 }
 
 export interface AgentInstall extends AgentInstaller {
   id: string;
+}
+
+/** An agent's installer as the catalog gives it: its road's line, its version check, its Node floor and its pin read. */
+function agentInstaller(a: AgentEntry): AgentInstaller {
+  return { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}), pin: pinReadOf(a.installRoad, a.bin) };
 }
 
 /** The line a guest gets when no supported pinned major meets an agent's floor. */
@@ -1118,7 +1139,7 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
  * that tick it: https://aider.chat/docs/install.html, the uv tool line. */
 export function agentInstallers(agents: readonly AgentEntry[]): Record<string, AgentInstaller> {
   return {
-    ...Object.fromEntries(agents.map(a => [a.id, { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}) }])),
+    ...Object.fromEntries(agents.map(a => [a.id, agentInstaller(a)])),
     aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
   };
 }
@@ -1171,13 +1192,23 @@ export interface AgentsPlan {
   node?: NodeInstall;
 }
 
-/** The ticked agents with an installer, in recipe order, from the installers of `agents`, the catalog's by default. */
+/** The installer a row with a recorded pin gets: the catalog's road fixed to the pin's version where the road takes
+ * one, so a copy installs what the seal read; the catalog's own line where it does not, or where the pin is a
+ * latest mark. */
+function pinnedInstaller(a: AgentEntry, pin: ToolPin | undefined): AgentInstaller {
+  const at = pin === undefined || pin.latest === true ? undefined : roadModule(a.installRoad).at?.(a.installRoad, pin.tag);
+  return agentInstaller(at === undefined ? a : { ...a, installRoad: at });
+}
+
+/** The ticked agents with an installer, in recipe order, from the installers of `agents`, the catalog's by default;
+ * a row carrying a pin installs at it. */
 export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readonly AgentEntry[] = CATALOG_AGENTS, now: Date = new Date()): AgentsPlan {
   const table = agentInstallers(agents);
   const out: AgentsPlan = { installs: [], skipped: [] };
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "agents" || isMcpRow(e)) continue;
-    const installer = table[name(e)];
+    const entry = agents.find(a => a.id === name(e));
+    const installer = entry !== undefined ? pinnedInstaller(entry, e.pin) : table[name(e)];
     if (installer) out.installs.push({ id: e.id, ...installer });
     else out.skipped.push({ id: e.id, note: "no installer known" });
   }

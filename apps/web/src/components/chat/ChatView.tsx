@@ -128,6 +128,7 @@ export function ChatView({
             isWorking={view.running}
             machineWait={machineWait}
             activeTurnStartedAt={view.activeTurnStartedAt}
+            waitingOn={turnRows.at(-1)?.waitingOn ?? null}
             listRef={listRef}
             timelineEntries={view.entries}
             turns={view.turns}

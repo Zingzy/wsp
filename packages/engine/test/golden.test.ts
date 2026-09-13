@@ -1275,9 +1275,68 @@ describe("golden import stages", () => {
     expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'gh'; do`);
     expect(results[0]!.tools).toEqual([
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
-      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0 },
+      { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
     ]);
     expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
+  });
+
+  it("after the checks the stage reads every installed row's version back in one run: a package road's pin is what its line printed, a release keeps the tag and sum its own line said, a road that installs latest is marked so, and one line names them all", async () => {
+    const { backend, cmds, fetch } = backendFor([
+      ["repos/cli/cli/releases/latest", { exitCode: 0, stdout: `WSP_ROAD release gh_2.86.0_linux_amd64.tar.gz ${"b".repeat(64)} v2.86.0\n`, stderr: "" }],
+      ["wsp-version", { exitCode: 0, stdout: "wsp-version 0 4.1.0\nwsp-version 1 3.3a-3\n", stderr: "" }],
+    ]);
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/npm/wrangler", label: "wrangler", paths: [], bytes: 0, default: "bring", bring: true, version: "4.1.0" },
+      { rung: "tools", id: "tools/catalog/tmux", label: "tmux", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+      { rung: "tools", id: "tools/catalog/gh", label: "GitHub CLI", paths: [], bytes: 0, default: "skip", bring: true, linux: "yes" },
+    ]);
+    const recipe: RecipeDigest = { ticks: [{ id: "tools/catalog/gh", road: "release", installer: "k".repeat(64) }, { id: "tools/catalog/tmux", road: "apt", installer: "j".repeat(64) }, { id: "tools/npm/wrangler", version: "4.1.0", road: "npm", installer: "i".repeat(64) }], files: [] };
+    const { stages, onStage } = stageRecorder();
+    const results: ImportResult[] = [];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ tools: plan.installs, recipe, onResult: r => void results.push(r) }) });
+    // One run on the tools PATH, each row's own line in plan order; the release row is not in it, since its install already said its tag and sum.
+    const read = cmds.find(c => c.includes("wsp-version"))!;
+    expect(read).toMatch(/^export PATH=\/root\/\.local\/bin:/);
+    expect(read).toContain(`printf 'wsp-version %s %s\\n' 0 "$( ( node -p 'require(process.argv[1] + "/package.json").version' "$(npm root -g)/"'wrangler' ) 2>/dev/null | head -n 1 )"`);
+    expect(read).toContain("printf 'wsp-version %s %s\\n' 1 \"$( ( dpkg-query -W -f='${Version}\\n' 'tmux' 2>/dev/null ) 2>/dev/null | head -n 1 )\"");
+    expect(read).not.toContain("gh");
+    expect(Object.fromEntries(results[0]!.tools.map(t => [t.id, t.pin]))).toEqual({
+      "tools/npm/wrangler": { tag: "4.1.0" },
+      "tools/apt-index": undefined,
+      "tools/catalog/tmux": { tag: "3.3a-3", latest: true },
+      "tools/catalog/gh": { tag: "v2.86.0", sha256: "b".repeat(64) },
+    });
+    expect(stages).toContain("installing-tools:pinned: wrangler 4.1.0, GitHub CLI v2.86.0; installs latest on every place: tmux 3.3a-3 by apt");
+    expect(builder.import?.recipe?.ticks).toEqual([
+      { id: "tools/catalog/gh", road: "release", installer: "k".repeat(64), pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
+      { id: "tools/catalog/tmux", road: "apt", installer: "j".repeat(64), pin: { tag: "3.3a-3", latest: true } },
+      { id: "tools/npm/wrangler", version: "4.1.0", road: "npm", installer: "i".repeat(64), pin: { tag: "4.1.0" } },
+    ]);
+    // A read that printed nothing for a row records no pin for it, and a run that failed records none and says so.
+    const { backend: b2, fetch: f2 } = backendFor([["wsp-version", { exitCode: 0, stdout: "wsp-version 1 3.3a-3\n", stderr: "" }]]);
+    const quiet = await prepareBuilder({ backend: b2, setup: "true", fetch: f2, import: importOf({ tools: plan.installs, recipe }) });
+    expect(quiet.import?.recipe?.ticks.find(t => t.id === "tools/npm/wrangler")).not.toHaveProperty("pin");
+    expect(quiet.import?.recipe?.ticks.find(t => t.id === "tools/catalog/tmux")?.pin).toEqual({ tag: "3.3a-3", latest: true });
+    const { backend: b3, fetch: f3 } = backendFor([["wsp-version", { exitCode: 1, stdout: "", stderr: "bash: printf: broken" }]]);
+    const failed = stageRecorder();
+    const unread = await prepareBuilder({ backend: b3, setup: "true", fetch: f3, onStage: failed.onStage, import: importOf({ tools: plan.installs, recipe }) });
+    expect(unread.import?.recipe?.ticks.filter(t => t.pin !== undefined).map(t => t.id)).toEqual([]);
+    expect(failed.stages).toContain("installing-tools:the versions could not be read back (bash: printf: broken): wrangler, tmux record no pin");
+  });
+
+  it("the harness stage reads each installed agent's version back once its check passes, stamps the ledger, and its closing line names the pinned and the latest", async () => {
+    const { backend, fetch } = backendFor([
+      ["npm root -g", { exitCode: 0, stdout: "0.153.0\n", stderr: "" }],
+      ["'claude' --version", { exitCode: 0, stdout: "2.1.3\n", stderr: "" }],
+    ]);
+    const recipe: RecipeDigest = { ticks: [{ id: "agents/claude" }, { id: "agents/codex" }], files: [] };
+    const { stages, onStage } = stageRecorder();
+    const agents = [{ id: "agents/claude", ...AGENT_INSTALLERS["claude"]! }, { id: "agents/codex", ...AGENT_INSTALLERS["codex"]! }];
+    const builder = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ agents, recipe }) });
+    // The vendor's installer takes the current release, so its row is marked latest; the npm install names its version, so a copy gets the same.
+    expect(builder.import?.recipe?.ticks).toEqual([{ id: "agents/claude", pin: { tag: "2.1.3", latest: true } }, { id: "agents/codex", pin: { tag: "0.153.0" } }]);
+    const closing = stages.find(s => s.startsWith("installing-harness:Claude Code, Codex installed"))!;
+    expect(closing).toContain("; pinned: Codex 0.153.0; installs latest on every place: Claude Code 2.1.3 by its own installer; ");
   });
 
   it("the tools stage stamps the pin a release install recorded on the ledger's digest, so the sealed version says which release the row is fixed to", async () => {
@@ -2249,6 +2308,24 @@ describe("golden import stages", () => {
       expect(cmds[0]).toBe(FREE_KB_CMD);
       // Both agents are still on the image, but the recipe stopped asking for them, so their checks leave the smoke.
       expect(ledger).toEqual({ recipeHash: "h2", applied: ["applying-setup", "uploading-files", "installing-harness", "installing-tools", "installing-mcp"], smoke: "codex --version", recipe: SNAPSHOT });
+    });
+
+    it("a delta carries the head's pins onto the rows it leaves alone, and the rows it runs again record what they read now", async () => {
+      const { backend, fetch } = backendFor();
+      const machine = await backend.create({ kind: "sandbox", template: "base" });
+      const recipe: RecipeDigest = { ticks: [{ id: "tools/brew/jq", road: "brew", installer: "a" }, { id: "tools/catalog/gh", road: "release", installer: "k" }, { id: "agents/codex" }], files: [] };
+      const previous: RecipeDigest = { ticks: recipe.ticks.map(t => ({ ...t, pin: { tag: `was-${t.id}` } })), files: [] };
+      const delta = deltaOf({ import: importOf({ recipeHash: "h2", recipe, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq", pin: { read: "brew list --versions jq", fixed: false, words: "with Homebrew" } }], agents: [] }), retired: [], retiredOnImage: [] });
+      const { ledger } = await applyDelta(machine, delta, { setup: "true", previousSmoke: "true", previousBase: head.base, previousRecipe: previous, fetch });
+      // jq ran again and its read printed nothing, so it records no pin; gh and the agent did not run and keep the head's.
+      expect(ledger.recipe?.ticks).toEqual([
+        { id: "tools/brew/jq", road: "brew", installer: "a" },
+        { id: "tools/catalog/gh", road: "release", installer: "k", pin: { tag: "was-tools/catalog/gh" } },
+        { id: "agents/codex", pin: { tag: "was-agents/codex" } },
+      ]);
+      // Without the head's digest nothing is carried, as a version sealed before pins were read gives nothing to carry.
+      const bare = await applyDelta(await backend.create({ kind: "sandbox", template: "base" }), delta, { setup: "true", previousSmoke: "true", previousBase: head.base, fetch });
+      expect(bare.ledger.recipe?.ticks.every(t => t.pin === undefined)).toBe(true);
     });
 
     it("a delta that retires nothing goes straight to the stages", async () => {

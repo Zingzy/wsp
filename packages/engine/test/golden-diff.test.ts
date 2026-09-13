@@ -164,10 +164,11 @@ describe("a tool's road, pin and install lines", () => {
   const changed = (why: string): RecipeDiff => ({ ...EMPTY, tools: [{ id: ID, label: "gh", change: "changed", why }] });
 
   const cases: { name: string; from: RecipeDigest; to: RecipeDigest; diff: RecipeDiff }[] = [
-    { name: "a recipe whose recorded pin is not the sealed one reinstalls the row at its pin, and says which release moved", from: release({ pin: pin("v2.86.0") }), to: release({ pin: pin("v2.85.0") }), diff: changed("release v2.86.0 to v2.85.0") },
+    // A pin is what a build read back, never what the recipe asks: the sealed digest carries one and the plan none, and nothing moves.
+    { name: "a pin on the sealed side and none on the plan is no change", from: release({ pin: pin("v2.86.0") }), to: release(), diff: EMPTY },
     { name: "the same pin folds away", from: release({ pin: pin("v2.86.0") }), to: release({ pin: pin("v2.86.0") }), diff: EMPTY },
-    { name: "a recorded sum that changed under the same tag is a reinstall", from: release({ pin: pin("v2.86.0", "b") }), to: release({ pin: pin("v2.86.0", "c") }), diff: changed("the checksum recorded for v2.86.0 changed") },
-    { name: "a pin recorded where the sealed version had none fixes the row", from: release(), to: release({ pin: pin("v2.86.0") }), diff: changed("now fixed to release v2.86.0") },
+    { name: "a pin that differs alone, tag or sum, is no change", from: release({ pin: pin("v2.86.0", "b") }), to: release({ pin: pin("v2.85.0", "c") }), diff: EMPTY },
+    { name: "a latest mark on the sealed side is no change", from: release({ pin: { ...pin("v2.86.0"), latest: true } }), to: release(), diff: EMPTY },
     { name: "a road that moved is a changed row, in the roads' own words", from: gh({ road: "brew", installer: "a" }), to: gh({ road: "script", installer: "b" }), diff: changed("now by its own installer, was with Homebrew") },
     { name: "install lines that moved under the same road and pin are a changed row", from: release({ installer: "a" }), to: release({ installer: "b" }), diff: changed(INSTALLER_MOVED_LINE) },
     { name: "a version that moved is said by version, whatever moved with it", from: release({ version: "v2.86.0" }), to: release({ version: "v2.87.0", installer: "j" }), diff: { ...EMPTY, tools: [{ id: ID, label: "gh", change: "changed", from: "v2.86.0", to: "v2.87.0" }] } },
@@ -183,8 +184,8 @@ describe("a tool's road, pin and install lines", () => {
   });
 
   it("the words name the row and why, and the build line counts it as a tool updated", () => {
-    const d = diffRecipes(release({ pin: pin("v2.86.0") }), release({ pin: pin("v2.85.0") }));
-    expect(describeDiff(d)).toEqual(["update 1 tool: gh (release v2.86.0 to v2.85.0)"]);
+    const d = diffRecipes(release({ installer: "a" }), release({ installer: "b" }));
+    expect(describeDiff(d)).toEqual([`update 1 tool: gh (${INSTALLER_MOVED_LINE})`]);
     expect(changeCounts(d).filter(c => c.count > 0)).toEqual([{ count: 1, noun: "tool", word: "updated" }]);
     expect(isSmallDelta(d, () => 0)).toBe(true);
     expect(describeDiff(diffRecipes(gh({ road: "brew", installer: "a" }), gh({ road: "script", installer: "b" })))).toEqual(["update 1 tool: gh (now by its own installer, was with Homebrew)"]);

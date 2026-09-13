@@ -5,7 +5,7 @@
 // agents and tools screens are the same rows as a list.
 import { CATALOG, CATALOG_AGENTS, THREAD_AGENTS, type CatalogEntry, sizeBytes } from "@wsp/catalog";
 import { HEAVY_USED_FLOOR, USED_FLOOR, type ProjectScan, floorApplies, isHeavy, meetsUsedFloor } from "@wsp/collect";
-import { customRows, fmtBytes, plural, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { customRows, fmtBytes, pinWords, plural, type Recipe, type RecipeCustomRow, type RecipeRow, type ToolPin } from "@wsp/protocol";
 import { GREY, GUTTER, accent, grey } from "./init-layout.js";
 import type { Cell } from "./init-select.js";
 
@@ -48,6 +48,8 @@ export interface TableRow {
   heavy: boolean;
   /** Why wsp cannot drive this agent yet; absent on every other row. */
   note?: string;
+  /** What the last seal installed for this row, as the recipe file carries it; absent on a row no seal has read. */
+  pin?: ToolPin;
 }
 
 /** How many sessions of this agent the recipe read on this computer. */
@@ -110,6 +112,7 @@ export function recipeTable(recipe: Recipe, catalog: readonly CatalogEntry[] = C
       ...(size !== undefined ? { size } : {}),
       heavy: isHeavy(size),
       ...(e.kind === "agent" && !THREAD_AGENTS.some(id => id === e.id) ? { note: "installs, but wsp cannot run its threads yet" } : {}),
+      ...(r?.pin !== undefined ? { pin: r.pin } : {}),
     };
   });
   return GROUP_ORDER.flatMap(g => {
@@ -173,17 +176,21 @@ export function groupTotal(rows: readonly TableRow[]): string {
   return `${count}${GUTTER}${fmtBytes(bytes)}`;
 }
 
-/** The table as lines of text: the tick, the name, why it is here, and the size flush right, each column as wide as
- * its widest cell. The tick takes the accent when the row comes. */
+/** The pin column: what the last seal installed, in the protocol's words; empty on a row no seal has read. */
+export const pinText = (r: TableRow): string => (r.pin === undefined ? "" : pinWords(r.pin));
+
+/** The table as lines of text: the tick, the name, why it is here, the size flush right, and, once any row carries
+ * one, what the last seal installed; each column as wide as its widest cell. The tick takes the accent when the row comes. */
 export function tableLines(rows: readonly TableRow[], depth: number): string[] {
-  const cells = rows.map(r => ({ row: r, why: whyCell(r, depth), size: sizeCell(r, depth) }));
+  const cells = rows.map(r => ({ row: r, why: whyCell(r, depth), size: sizeCell(r, depth), pin: pinText(r) }));
   const width = (of: (c: (typeof cells)[number]) => string): number => Math.max(0, ...cells.map(of).map(t => t.length));
   const name = width(c => c.row.name);
   const why = width(c => c.why.text);
   const size = width(c => c.size.text);
+  const pinned = cells.some(c => c.pin !== "");
   const paint = (c: Cell, padded: string): string => c.paint?.(padded) ?? padded;
   return cells.map(c => {
     const tick = c.row.on ? (depth > 1 ? accent(TICK_ON) : TICK_ON) : TICK_OFF;
-    return [tick, c.row.name.padEnd(name), paint(c.why, c.why.text.padEnd(why)), paint(c.size, c.size.text.padStart(size))].join(GUTTER).trimEnd();
+    return [tick, c.row.name.padEnd(name), paint(c.why, c.why.text.padEnd(why)), paint(c.size, c.size.text.padStart(size)), ...(pinned ? [c.pin] : [])].join(GUTTER).trimEnd();
   });
 }

@@ -923,7 +923,7 @@ describe("catalog rows", () => {
     expect(cmd("tools/catalog/gh")).toContain("name='gh'");
     expect(cmd("tools/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
     expect(cmd("tools/catalog/ffmpeg")).toMatch(/\napt-get install -y -qq ffmpeg$/);
-    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install(undefined, undefined)}`);
+    expect(cmd("tools/catalog/kubectl")).toBe(`${PATH_LINE}\n${KUBECTL.install({ road: "vendor", cask: KUBECTL })}`);
     expect(t.installs.some(i => i.id === "tools/homebrew")).toBe(false);
     expect(t.skipped).toEqual([]);
     expect(t.base).toEqual([]);
@@ -997,7 +997,7 @@ describe("catalog rows", () => {
     expect(gh).toContain("'https://api.github.com/repos/cli/cli/releases/tags/v2.86.0'");
     expect(gh).not.toContain("releases/latest");
     expect(gh).toContain(`[ "$sum" = '${"d".repeat(64)}' ]`);
-    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install(undefined, { tag: "v1.37.0", sha256: "e".repeat(64) })}`);
+    expect(t.installs.find(i => i.id === "tools/catalog/kubectl")!.cmd).toBe(`${PATH_LINE}\n${KUBECTL.install({ road: "vendor", cask: KUBECTL, pin: { tag: "v1.37.0", sha256: "e".repeat(64) } })}`);
   });
 });
 
@@ -1015,13 +1015,13 @@ describe("tap formulae on the release road", () => {
     // A first run of the same row: the same road and lines, no pin yet.
     const first = recipeDigest([tap()], [], [], table);
     expect(first.ticks[0]).toEqual({ id, version: "v0.1.0", road: "release", installer: pinned.installer });
-    // The seal stamps what the install recorded; the recipe that then carries it is no change, and the words say nothing.
-    const sealed = withRecordedPins(first, [{ id, label: "diskbloom", outcome: "installed", road: { kind: "release", from: "diskbloom_0.1.0_linux_amd64.tar.gz", sha256: pin.sha256, tag: "v0.1.0" } }]);
+    // The seal stamps what the install read back; the recipe that then carries it is no change, and the words say nothing.
+    const sealed = withRecordedPins(first, [{ id, outcome: "installed", pin }]);
     expect(sealed.ticks[0]).toEqual(pinned);
     expect(isEmptyDiff(diffRecipes(sealed, recipeDigest([tap({ pin })], [], [], table)))).toBe(true);
     expect(describeDiff(diffRecipes(sealed, recipeDigest([tap({ pin })], [], [], table)))).toEqual([]);
-    // Only a pin the person really dropped, the Mac's tag standing, is said as one.
-    expect(describeDiff(diffRecipes(sealed, first))).toEqual(["update 1 tool: diskbloom (no longer fixed to release v0.1.0)"]);
+    // A pin is what a build recorded, not what the recipe asks: the same row with none is no change either.
+    expect(describeDiff(diffRecipes(sealed, first))).toEqual([]);
     // The Mac's tap moving on is a move, both releases named: the tick installs at the new tag, no pin standing yet.
     const moved: BrewTable = new Map([["zingzy/tap/diskbloom", { ...table.get("zingzy/tap/diskbloom")!, source: { repo: "Zingzy/diskbloom", tag: "v0.2.0" } }]]);
     expect(recipeDigest([tap({ pin })], [], [], moved).ticks[0]).toEqual({ id, version: "v0.2.0", road: "release", installer: expect.stringMatching(/^[0-9a-f]{64}$/) });
@@ -1087,7 +1087,10 @@ describe("agentInstallsFor", () => {
       if (a.install !== GOLDEN_SETUP) expect(a.install, name).toMatch(/@\d|==\d|--branch v?\d|releases\/download\/\d/);
     }
     expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
-    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version" });
+    // The vendor's installer takes the current release, so its pin reads the command's own version and marks it latest.
+    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", pin: { read: expect.stringContaining("'claude' --version"), fixed: false, words: "by its own installer" } });
+    expect(AGENT_INSTALLERS["codex"]!.pin).toEqual({ read: expect.stringContaining("npm root -g"), fixed: true, words: "as an npm global" });
+    expect(AGENT_INSTALLERS["hermes"]!.pin).toEqual({ read: expect.stringContaining("'hermes' --version"), fixed: true, words: "by its own installer" });
     // Engines floors as the registry states them at the pinned versions.
     expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.node]))).toEqual({ claude: undefined, codex: 16, gemini: 20, opencode: undefined, aider: undefined, pi: 22, hermes: undefined });
   });
