@@ -177,14 +177,26 @@ pub(crate) fn take_update_part(part: &Path, seq: u64, bytes: &[u8], upload_id: &
     if let Some(parent) = part.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    let mut file =
-        std::fs::OpenOptions::new().append(true).create(true).open(part).map_err(|e| format!("{}: {e}", part.display()))?;
+    let mut file = std::fs::OpenOptions::new().append(true).create(true).open(part).map_err(|e| format!("{}: {e}", part.display()))?;
     std::io::Write::write_all(&mut file, bytes).map_err(|e| format!("{}: {e}", part.display()))
 }
 
 /// Lowercase hex sha256 of some bytes, as the host spells the one it names on the frame.
 fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The file this daemon was execed from, which is the file its unit starts. Linux answers /proc/self/exe with the
+/// path and " (deleted)" after it once the inode the process runs has been unlinked, which is what a rename over
+/// that path leaves behind: an update that landed and whose daemon has not restarted yet reads its own path that
+/// way, and writing to it would make a second file nothing starts.
+pub(crate) fn running_daemon(said: std::io::Result<PathBuf>) -> Result<PathBuf, String> {
+    let exe = said.map_err(|e| format!("this daemon cannot say which file it runs from: {e}"))?;
+    let text = exe.to_string_lossy();
+    Ok(match text.strip_suffix(" (deleted)") {
+        Some(path) => PathBuf::from(path),
+        None => exe,
+    })
 }
 
 /// The landed binary moved over the one this process runs from, and where the one it replaced was kept. The bytes
@@ -335,6 +347,17 @@ mod tests {
         assert!(!part.exists());
         let mode: u32 = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&exe).unwrap().permissions());
         assert_eq!(mode & 0o777, 0o755);
+    }
+
+    #[test]
+    fn the_binary_this_daemon_runs_is_its_own_path_with_the_kernels_deleted_mark_taken_off() {
+        assert_eq!(running_daemon(Ok(PathBuf::from("/h/.wsp/daemon/wsp-daemon"))).unwrap(), PathBuf::from("/h/.wsp/daemon/wsp-daemon"));
+        // What /proc/self/exe reads once an update has renamed a new binary over the running one's path.
+        assert_eq!(
+            running_daemon(Ok(PathBuf::from("/h/.wsp/daemon/wsp-daemon (deleted)"))).unwrap(),
+            PathBuf::from("/h/.wsp/daemon/wsp-daemon")
+        );
+        assert!(running_daemon(Err(std::io::Error::other("no /proc"))).unwrap_err().contains("which file it runs from"));
     }
 
     #[test]

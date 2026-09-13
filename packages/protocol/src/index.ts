@@ -3183,6 +3183,7 @@ const DAEMON_CONTENTS = [
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
   "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
   "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
+  "2b8619328a3533b0644bdc52b5ae1e71a8d92f5825ef87873b9675a1579f2342",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3259,7 +3260,12 @@ const DAEMON_CONTENTS = [
  * what the workspaces there hold of the computer. Version 33 answers a client on the computer itself the listing of
  * the workspaces it holds and one reading of any of them, both read-only and both on the road that dials in; the
  * reading carries the sizes as applied, the memory and processor time off the cgroup, the uptime, the process
- * count, the address and the two paths, where the metrics op before it read two of those and replied with none. */
+ * count, the address and the two paths, where the metrics op before it read two of those and replied with none.
+ * Version 34 takes the daemon its host deploys over the link it already holds, where a computer once kept whatever
+ * daemon it joined on: the parts of the binary arrive under one upload id with the sha256 of the whole, the last is
+ * checked against it, moved over the file the unit starts with the old one kept beside it, and answered, and the
+ * agent then ends so its supervisor starts what landed. Nothing is swept, so the workspaces' records stay on the
+ * box and the daemon that comes up reads them again. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

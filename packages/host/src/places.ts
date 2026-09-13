@@ -63,7 +63,7 @@ import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
-import { DAEMON_BIN, daemonBinaryIn, daemonTargetHere, guestDaemonTarget, noGuestDaemonLine } from "./daemon-binary.js";
+import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
 import { createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
@@ -431,14 +431,19 @@ export const placeUpdateFailedLine = (name: string, said: string): string => `${
  * a command line.
  */
 export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } = {}): PlaceUpdater {
-  return async req => {
-    const target = daemonTargetHere(req.report.platform, req.report.arch);
-    if (target === undefined) throw new Error(placeNoChipLine(req.name, req.report.platform, req.report.arch));
+  /** The binary this wsp holds for one target, refused by the file's own name where this command carries none. */
+  const binaryFor = (target: DaemonTarget): Uint8Array => {
     const bin = daemonBinaryIn(deps.daemonDir ?? assetDir("daemon"), target.triple);
     if (!existsSync(bin)) throw new Error(`${assetName("daemon")} missing: ${bin}`);
-    const bytes = new Uint8Array(readFileSync(bin));
-    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    return new Uint8Array(readFileSync(bin));
+  };
+  return async req => {
     if (req.link !== undefined) {
+      // The chip the report carries, which is the same link this is about to send on, so the two cannot disagree.
+      const target = daemonTargetFor(req.report.platform, req.report.arch);
+      if (target === undefined) throw new Error(placeNoChipLine(req.name, req.report.platform, req.report.arch));
+      const bytes = binaryFor(target);
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
       const uploadId = randomBytes(8).toString("hex");
       const parts = Math.max(1, Math.ceil(bytes.length / MACHINE_PUT_PART_BYTES));
       let at = "";
@@ -463,8 +468,7 @@ export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } 
     const said = arch === undefined ? undefined : guestDaemonTarget(arch);
     if (said === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
     const landing = `${placeDaemonPaths(login.HOME).putDir}/${DAEMON_BIN}`;
-    const fresh = new Uint8Array(readFileSync(daemonBinaryIn(deps.daemonDir ?? assetDir("daemon"), said.triple)));
-    await landBytes(machine, landing, fresh);
+    await landBytes(machine, landing, binaryFor(said));
     const res = await machine.run(placeUpdateScript(login.HOME, landing), { deadlineMs: 180_000 });
     const printed = res.stdout.split("\n").map(line => line.trim()).filter(line => line !== "");
     const landed = printed.find(line => line.startsWith(PLACE_UPDATED_LINE));
@@ -599,7 +603,7 @@ export const UPDATE_FLAGS_REFUSAL =
  * from the ssh one without asking. */
 export function updatedLines(answer: { name: string; from: number; to: number; road: string; at: string; note?: string }): string[] {
   return [
-    `${answer.name}: daemon ${answer.from} to ${answer.to}, over the ${answer.road}`,
+    `${answer.name}: daemon ${answer.from} to ${answer.to}, over the ${answer.road === "ssh" ? "ssh road" : "link"}`,
     `its binary      ${answer.at}`,
     ...(answer.note === undefined ? [] : [answer.note]),
   ];

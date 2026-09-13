@@ -1332,10 +1332,15 @@ mod tests {
 
     /// One workspace on disk as a daemon that stopped left it: its record under the run directory, its upper
     /// directory (what a nap boots from), and the chain it mounts.
+    ///
+    /// No rootfs directory, and that is the whole of what makes this runnable by anyone: the open unmounts the
+    /// rootfs of every record whose init is gone, and umount2 resolves the path before it checks the capability,
+    /// so a path that is not there answers ENOENT to any login while one that is answers EPERM to a login that is
+    /// not root. A mounted rootfs is a thing a boot makes, not a thing a record carries, and none of what this
+    /// proves reads it.
     fn left_on_disk(root: &Path, id: &str, chain: &Chain) {
         let layout = Layout::new(root);
         fs::create_dir_all(layout.upper(id)).unwrap();
-        fs::create_dir_all(layout.rootfs(id)).unwrap();
         let record = Workspace {
             id: id.to_owned(),
             hostname: id.to_owned(),

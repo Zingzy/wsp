@@ -16,7 +16,13 @@ import {
   PlaceJoinReply,
   PlaceJoinRequest,
   PlaceReport,
+  DAEMON_VERSION,
   joinAddressOf,
+  placeBehindLine,
+  placeCurrentLine,
+  placeDaemonBehind,
+  placeNoChipLine,
+  placeUpdateLine,
   placeAddSheetWord,
   sentPairCode,
   shownPairCode,
@@ -314,5 +320,32 @@ describe("which row of the places list a workspace stands on", () => {
   it("places nothing it cannot: a computer that has been removed, and a fork on a list with no provider at all", () => {
     expect(workspacePlaceId({ kind: "place", machineId: "place:p_gone" }, places)).toBeUndefined();
     expect(workspacePlaceId({ kind: "cloud", machineId: "fk_1" }, [here])).toBeUndefined();
+  });
+});
+
+describe("the one word a row says about the daemon a place runs", () => {
+  it("names both versions when this wsp deploys a newer daemon than the computer runs", () => {
+    expect(placeDaemonBehind({ daemonVersion: 27 })).toBe(`daemon 27, host ${DAEMON_VERSION}`);
+    expect(placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 1 })).toBe(`daemon ${DAEMON_VERSION - 1}, host ${DAEMON_VERSION}`);
+  });
+
+  it("says nothing of a computer that is level, one that is ahead, or one that has never reported", () => {
+    expect(placeDaemonBehind({ daemonVersion: DAEMON_VERSION })).toBeUndefined();
+    // A computer running a daemon from a newer host than this one is not behind, and a row that said so would send
+    // a person to move it backwards.
+    expect(placeDaemonBehind({ daemonVersion: DAEMON_VERSION + 1 })).toBeUndefined();
+    expect(placeDaemonBehind({})).toBeUndefined();
+  });
+
+  it("answers the word with the line that moves it, which is the flag on the verb that joins a computer", () => {
+    expect(placeUpdateLine("spoo")).toBe("wsp add spoo --update");
+    expect(placeBehindLine("spoo", placeDaemonBehind({ daemonVersion: 27 })!)).toBe(
+      `spoo is behind: daemon 27, host ${DAEMON_VERSION}; wsp add spoo --update puts this wsp's daemon on it`,
+    );
+  });
+
+  it("refuses a place already on this daemon and one whose chip this wsp builds none for, each naming what it read", () => {
+    expect(placeCurrentLine("spoo", DAEMON_VERSION)).toBe(`spoo already runs daemon ${DAEMON_VERSION}, which is the one this wsp deploys`);
+    expect(placeNoChipLine("spoo", "linux", "riscv64")).toBe("spoo says it is linux riscv64, and this wsp carries no daemon built for it");
   });
 });

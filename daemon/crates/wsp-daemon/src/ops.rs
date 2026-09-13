@@ -252,9 +252,9 @@ async fn place_update(ctx: &Arc<Ctx>, id: Option<RequestId>, frame: &Value) -> O
     }
     // Its own path rather than the unit's: the binary a unit starts is the file this process was execed from, and
     // reading it here needs neither the unit's name nor the manager that holds it.
-    let exe = match std::env::current_exe() {
+    let exe = match crate::place::running_daemon(std::env::current_exe()) {
         Ok(exe) => exe,
-        Err(e) => return Outgoing::Text(fail(id, format!("this daemon cannot say which file it runs from: {e}"))),
+        Err(e) => return Outgoing::Text(fail(id, e)),
     };
     let landed = fs::blocking(move || crate::place::install_daemon(&exe, &part, &sha256, &upload_id).map_err(OpError::plain)).await;
     match landed {
@@ -697,10 +697,10 @@ mod tests {
         let mut options = Options::new(b._token.path());
         options.home = Some(home.path().to_path_buf());
         let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        // Never the sha of what this sends: the exe a landing moves over is this test binary's own, so a part that
+        // matched would replace the runner under itself. The landing is proved in place.rs against a temp file.
         let sha = "0".repeat(64);
-        let part = |seq: u64, last: bool, data: &str| {
-            json!({"id": 9, "op": "place.update", "uploadId": "u1", "seq": seq, "last": last, "data": data, "sha256": sha})
-        };
+        let part = |seq: u64, last: bool, data: &str| json!({"id": 9, "op": "place.update", "uploadId": "u1", "seq": seq, "last": last, "data": data, "sha256": sha});
         let said = |out: &Outgoing| serde_json::from_str::<Value>(out.text()).unwrap();
 
         // A part that is not the first with nothing landed drops the upload and says which part.
@@ -718,11 +718,16 @@ mod tests {
         let wrong = handle(&link, &ctx, &part(1, true, "AAAA").to_string()).await;
         assert!(matches!(wrong, Outgoing::Text(_)), "a binary the host did not name ended the daemon");
         assert_eq!(said(&wrong)["ok"], json!(false));
-        assert!(said(&wrong)["error"].as_str().unwrap().starts_with(&format!("the update u1 landed as sha256 ")), "{}", said(&wrong));
+        assert!(said(&wrong)["error"].as_str().unwrap().starts_with("the update u1 landed as sha256 "), "{}", said(&wrong));
         assert!(!crate::place::update_part(home.path(), "u1").exists(), "the dropped upload stays on disk");
 
         // A frame the schema refuses is a bad request, never a landing.
-        let bad = handle(&link, &ctx, &json!({"id": 9, "op": "place.update", "uploadId": "../x", "seq": 0, "last": true, "data": "", "sha256": sha}).to_string()).await;
+        let bad = handle(
+            &link,
+            &ctx,
+            &json!({"id": 9, "op": "place.update", "uploadId": "../x", "seq": 0, "last": true, "data": "", "sha256": sha}).to_string(),
+        )
+        .await;
         assert_eq!(said(&bad)["code"], json!("bad-request"));
     }
 
