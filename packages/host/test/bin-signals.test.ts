@@ -102,19 +102,39 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
 });
 
 /** A host of this computer's own making: the wiring every `wsp up` wires, one turn running on it, and the signals
- * that stop it. A turn leads a process group of its own, so nothing but this host knows where it is. */
-const hostScript = (home: string, pidFile: string): string => `
+ * that stop it. The turn leads a process group of its own and reads its own log off this computer, so nothing the
+ * host holds is what keeps it alive. */
+const hostScript = (home: string, runDir: string, pidFile: string, runFile: string, gate: string): string => `
+import { writeFileSync } from "node:fs";
 import { localWiring, stopOnSignals } from ${JSON.stringify(DIST)};
-const wiring = localWiring(${JSON.stringify(home)});
-wiring.execStream()("sleep 300 & echo $! > ${pidFile}; sleep 300", { env: {} });
+const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(runDir)});
+const stream = wiring.execStream()("echo $$ > ${pidFile}; echo first; while [ ! -f ${gate} ]; do sleep 0.05; done; echo second; sleep 300", { env: { PATH: process.env.PATH } });
+writeFileSync(${JSON.stringify(runFile)}, stream.run + "\\n");
 stopOnSignals({ close: () => wiring.close() }, { error: line => console.error(line) });
 console.log("serving");
 setInterval(() => {}, 60_000);
 `;
 
+/** The reader a host that comes next opens, in a process of its own: it never launched the run and re-opens it by
+ * the handle the first host wrote down, which is what the runtime does for every row it finds running. */
+const nextHostScript = (home: string, runDir: string, run: string): string => `
+import { localWiring } from ${JSON.stringify(DIST)};
+const wiring = localWiring(${JSON.stringify(home)}, process.env, undefined, ${JSON.stringify(runDir)});
+const stream = await wiring.execStream().attach(${JSON.stringify(run)}, { input: false });
+if (stream === "gone") { console.log("GONE"); process.exit(0); }
+for await (const line of stream.lines) {
+  console.log("LINE " + line);
+  if (line === "second") break;
+}
+stream.kill();
+await stream.exited;
+process.exit(0);
+`;
+
 describeWithBin("a hangup on a host running a turn on this computer", () => {
   let home: string;
   let host: ChildProcess | undefined;
+  let next: ChildProcess | undefined;
   /** The harness this turn stands for, so a red run leaves nothing of it on this Mac. */
   let harness: number | undefined;
 
@@ -122,14 +142,17 @@ describeWithBin("a hangup on a host running a turn on this computer", () => {
     home = mkdtempSync(join(tmpdir(), "wsp-hangup-"));
   });
   afterEach(async () => {
-    if (host !== undefined && host.exitCode === null && host.signalCode === null) {
-      host.kill("SIGKILL");
-      await exited(host);
+    for (const child of [host, next]) {
+      if (child !== undefined && child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGKILL");
+        await exited(child);
+      }
     }
     host = undefined;
+    next = undefined;
     if (harness !== undefined) {
       try {
-        process.kill(harness, "SIGKILL");
+        process.kill(-harness, "SIGKILL");
       } catch {
         harness = undefined;
       }
@@ -138,10 +161,13 @@ describeWithBin("a hangup on a host running a turn on this computer", () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it("ends the turn and everything it started before the host goes, the way a closing terminal delivers it", async () => {
+  it("leaves the turn running and its reply lands in the host that comes next", async () => {
     const pidFile = join(home, "harness.pid");
+    const runFile = join(home, "run");
+    const gate = join(home, "gate");
+    const runDir = join(home, "runs");
     const script = join(home, "host.mjs");
-    writeFileSync(script, hostScript(home, pidFile));
+    writeFileSync(script, hostScript(home, runDir, pidFile, runFile, gate));
     const output: string[] = [];
     // Its own process group, so the hangup this test delivers reaches the host and nothing else on this computer.
     host = spawn(process.execPath, [script], { cwd: home, stdio: ["ignore", "pipe", "pipe"], detached: true });
@@ -151,13 +177,27 @@ describeWithBin("a hangup on a host running a turn on this computer", () => {
     await vi.waitFor(() => expect(existsSync(pidFile)).toBe(true), { timeout: 10_000 });
     harness = Number(readFileSync(pidFile, "utf8").trim());
     expect(harness).toBeGreaterThan(0);
-    expect(() => process.kill(harness!, 0)).not.toThrow();
+    const run = readFileSync(runFile, "utf8").trim();
+    expect(run.startsWith(runDir)).toBe(true);
 
     host.kill("SIGHUP");
     const end = await exited(host);
-
-    // Read before the exit code, so a host that took node's default action names what it left behind.
-    expect(() => process.kill(harness!, 0), "the turn's harness outlived the hangup").toThrow();
     expect(end, output.join("")).toEqual({ code: 0, signal: null });
-  }, 30_000);
+
+    // The turn is still working with no host on this computer at all: this is the promise the wait sentence makes.
+    expect(() => process.kill(harness!, 0), "the turn went with the host that started it").not.toThrow();
+
+    // The host that comes next re-opens the run by its handle and reads the whole log, the line printed before it
+    // existed and the one printed after.
+    const nextScript = join(home, "next.mjs");
+    writeFileSync(nextScript, nextHostScript(home, runDir, run));
+    const read: string[] = [];
+    next = spawn(process.execPath, [nextScript], { cwd: home, stdio: ["ignore", "pipe", "pipe"], detached: true });
+    next.stdout?.on("data", (chunk: Buffer) => read.push(chunk.toString()));
+    next.stderr?.on("data", (chunk: Buffer) => read.push(chunk.toString()));
+    await vi.waitFor(() => expect(read.join("")).toContain("LINE first"), { timeout: 15_000 });
+    writeFileSync(gate, "go\n");
+    await vi.waitFor(() => expect(read.join("")).toContain("LINE second"), { timeout: 15_000 });
+    await exited(next);
+  }, 60_000);
 });

@@ -9,6 +9,9 @@ import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const PAGE = `<!doctype html>
 <html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
@@ -192,7 +195,7 @@ describe("wsp up", () => {
     expect("WSP_LOGIN_PROBE" in wiring.env()).toBe(false);
   });
 
-  it("closing the wiring ends the turns running on this computer and what those turns started", async () => {
+  it("closing the wiring leaves the turns running on this computer, with the run the next host re-opens them by", async () => {
     const wiring = localWiring(home);
     // Launched off the wiring alone, with no workspace record loaded: the road makes the folder the turn starts in.
     const pidFile = join(home, "child.pid");
@@ -203,7 +206,12 @@ describe("wsp up", () => {
 
     await wiring.close!();
 
-    expect(await stream.exited).not.toBe(0);
+    // The turn and its whole tree outlive the host: what the close frees is what this host was holding open.
+    expect(() => process.kill(child, 0)).not.toThrow();
+    expect(stream.run).toBeDefined();
+    expect(await localWiring(home).execStream().attach!(stream.run!, { input: false })).not.toBe("gone");
+    stream.kill();
+    await stream.exited;
     await vi.waitFor(() => expect(() => process.kill(child, 0)).toThrow(), { timeout: 5_000 });
   }, 15_000);
 

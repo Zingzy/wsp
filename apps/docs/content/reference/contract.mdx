@@ -35,7 +35,7 @@ A workspace is named by its name, or by its id when two share a name. A thread i
 
 ## Where the state lives
 
-Every verb takes `--state <path>`, the state file the host serves. The default is `~/.wsp/state.json`, or `./.wsp/state.json` in a checkout with a `.env`. The MCP server and the command line refuse a host of another version in one line; restart it with `wsp up`.
+Every verb takes `--state <path>`, the state file the host serves. The default is `~/.wsp/state.json`, or `./.wsp/state.json` in a checkout of wsp itself, which its own root `package.json` names. The MCP server and the command line refuse a host of another version in one line; restart it with `wsp up`.
 
 ## Turns, replies and processes
 

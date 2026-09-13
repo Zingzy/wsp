@@ -82,6 +82,13 @@ export function hostTokenFor(statePath: string): string | undefined {
   }
 }
 
+/** Where the runs a turn on this computer leaves live, beside the lock and the token: the script, the log, the pid
+ * and the exit code of every turn this host launched here. One folder per state file, so a host that comes back
+ * finds its own turns still running and two hosts on this computer never sweep each other's. */
+export function hostRunDir(statePath: string): string {
+  return join(dirname(statePath), "runs");
+}
+
 /** Where a host nobody is watching writes what a terminal run would have shown, beside the lock and the token. */
 export function hostLogPath(statePath: string): string {
   return join(dirname(statePath), "host.log");
@@ -98,9 +105,15 @@ export function addressLines(statePath: string, at: { port: number; wsPort: numb
   return [
     `app         http://${authority(bound, at.port)}`,
     `runtime ws  ws://${authority(bound, at.wsPort)} (token: ${hostTokenPath(statePath)})`,
-    `state       ${statePath}`,
+    stateLine(statePath),
     ...(publicHostname !== undefined ? [publicAddressLine(publicHostname)] : []),
   ];
+}
+
+/** The one line naming the state a run works on, wherever a summary names it: the host's own start lines, wsp
+ * status and the relay link all read it here, so a person comparing two readings compares the same spelling. */
+export function stateLine(statePath: string): string {
+  return `state       ${statePath}`;
 }
 
 /** The one line naming where this host answers from anywhere: printed at start when the relay already had a name

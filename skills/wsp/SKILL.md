@@ -62,7 +62,7 @@ Expect: that agent lists the wsp tools once it has restarted, `run` answers with
 
 ## Verbs and tools
 
-The command line and the MCP server call the same functions. Every verb takes `--json` (one JSON object per line, frames first, the last line the result; see the contract below) and `--state <path>` (the state file the host serves; default `~/.wsp/state.json`, or `./.wsp/state.json` in a checkout with a `.env`). A workspace is named by its name, or by its id when two share a name. A thread is named by its id or by a prefix that picks exactly one. Each tool's inputs are in the parentheses after its name; a flag on the command line is the input of the same name on the tool, `--add-check` being `add_check`, and a repeatable flag is an array.
+The command line and the MCP server call the same functions. Every verb takes `--json` (one JSON object per line, frames first, the last line the result; see the contract below) and `--state <path>` (the state file the host serves; default `~/.wsp/state.json`, or `./.wsp/state.json` in a checkout of wsp itself). A workspace is named by its name, or by its id when two share a name. A thread is named by its id or by a prefix that picks exactly one. Each tool's inputs are in the parentheses after its name; a flag on the command line is the input of the same name on the tool, `--add-check` being `add_check`, and a repeatable flag is an array.
 
 | command line | MCP tool | what it does |
 |---|---|---|

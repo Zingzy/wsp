@@ -11,6 +11,9 @@ import { GUEST_WSP_BIN, standInMachinePath } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { closeStandInGuests, fakeGuestAt, fakeNoPortLine, guestPath, inGuestRoot } from "../src/fake-guest.js";
 import { onPath, thisComputersPath } from "../src/mcp-install.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 describe("a stand-in machine's guest", () => {
   const made: string[] = [];
