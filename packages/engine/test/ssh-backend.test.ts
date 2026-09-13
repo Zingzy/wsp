@@ -46,6 +46,7 @@ describe("ssh backend", () => {
       containers: false,
       callbackRelay: false,
       diskSnapshots: false,
+      snapshotsAnyLife: false,
       snapshotListing: false,
       templates: false,
       kept: true,

@@ -95,6 +95,9 @@ describe("provider modules", () => {
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
     expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    // Which life a copy may be taken from is each provider's own row: Solari refuses a machine that was resumed, a
+    // container's commit and a box's named snapshot read the disk as it stands.
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ docker: true, box: true, solari: false, fake: true, none: false, local: false, ssh: false });
     // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
     // read, and which give a machine a new size, the fact the resize reads. Each verb has its own row here, so a
     // provider added tomorrow answers for every road rather than being read off a neighbour's flag.

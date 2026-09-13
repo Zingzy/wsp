@@ -446,7 +446,7 @@ export class InitJobs implements InitDoor {
     return this.view()!;
   }
 
-  async build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string }): Promise<InitJob> {
+  async build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string; rebuild?: boolean }): Promise<InitJob> {
     const s = this.answering();
     const saved = this.deps.saved();
     // The place the image is built on is what builds, not the key a road once named: a joined computer whose daemon
@@ -483,6 +483,7 @@ export class InitJobs implements InitDoor {
       // that said it wants no waiting gets none. The app never says it; its person is there to finish them.
       yes: o.yes === true,
       nonInteractive: true,
+      ...(o.rebuild === true ? { rebuild: true } : {}),
       recipeFile: path,
       reading: { ...reading, catalogRecipe: recipe },
       noLocal: true,

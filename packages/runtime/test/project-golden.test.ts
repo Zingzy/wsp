@@ -102,7 +102,7 @@ describe("a project golden", () => {
 
   it("a woken workspace on a provider whose snapshots copy the disk from any life is snapshotted: the backend saw firstLife false and nothing in the runtime refused", async () => {
     const { rt, advance, backend } = await setup();
-    backend.snapshotsAnyLife = true;
+    backend.capabilities.snapshotsAnyLife = true;
     const ws = await loaded(rt, advance);
     await rt.workspaces.nap(ws.id);
     await rt.workspaces.wake(ws.id);
@@ -117,7 +117,7 @@ describe("a project golden", () => {
     // A container provider's shape: a commit of the filesystem from any life, and a fork that boots cold with the
     // agents started again.
     backend.capabilities.liveCloneForks = false;
-    backend.snapshotsAnyLife = true;
+    backend.capabilities.snapshotsAnyLife = true;
     const ws = await loaded(rt, advance);
     await rt.workspaces.nap(ws.id);
     await rt.workspaces.wake(ws.id);

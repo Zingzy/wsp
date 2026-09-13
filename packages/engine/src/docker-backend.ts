@@ -454,6 +454,7 @@ export class DockerBackend implements MachineBackend {
       // so a sign-in a guest opens reaches the person's browser. A daemon on another box needs a forward first.
       callbackRelay: this.onThisComputer,
       diskSnapshots: true, // a commit of the container's filesystem, whatever the container has done since it booted
+      snapshotsAnyLife: true, // a commit reads the layers, which a freeze or a stop and a start leave as they were
       snapshotListing: true,
       templates: true,
       kept: false, // a fork wsp made and can rebuild: a turn that wrecks its disk costs nothing else

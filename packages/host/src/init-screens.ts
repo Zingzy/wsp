@@ -149,7 +149,7 @@ export function screensOf(reading: Reading, a: ScreenAnswers, at: ScreensAt): In
   const agents = agentRows(recipe);
   const tools = recipeTable(recipe, CATALOG_TOOLS);
   const scan = reading.scanned;
-  const signIns = signInItems(manifest, reading.brew, reading.platform);
+  const signIns = signInItems(manifest, reading.brew, reading.platform, at.home);
   const wsp = wspToolsItems(recipe, at.home);
   const answers = Object.fromEntries([...signIns.initial].map(([id, choice]): [string, string] => [id, logins.get(id) ?? choice]));
   return initShownScreens([
