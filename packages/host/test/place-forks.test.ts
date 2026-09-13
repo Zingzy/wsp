@@ -84,20 +84,34 @@ describe("wsp new --on", () => {
     expect(made.place).toBeUndefined();
   });
 
-  it("sends the place on the create frame when the place forks, so the host decides where the machine lands", async () => {
-    const sent: Record<string, unknown>[] = [];
-    const client = {
+  /** A host as the create road sees it: the place list, the golden's head, the landing at srv with the one size it
+   * offers, and every frame the road sends in order. */
+  const hostOf = (sent: Record<string, unknown>[]): Parameters<typeof createFromHead>[0] =>
+    ({
       request: async (op: string, params?: Record<string, unknown>) => {
         if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, runsWorkspaces: true, present: true, takesForks: true }] };
         if (op === "golden.get") return { manifest: { name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_head" }] } };
         sent.push({ op, ...params });
+        if (op === "workspaces.landing") return { place: "p_1", name: "srv", capabilities: { sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }] } };
         return { workspace: { id: "ws_1", name: "x", machineId: "m1", phase: "running", kind: "cloud", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z" } };
       },
       events: async () => {},
       onFrame: () => () => {},
-    } as unknown as Parameters<typeof createFromHead>[0];
-    await createFromHead(client, { emit: () => {}, stream: () => {} }, "x", undefined, undefined, "srv");
-    expect(sent).toEqual([{ op: "workspaces.create", golden: "snap_head", name: "x", on: "srv" }]);
+    }) as unknown as Parameters<typeof createFromHead>[0];
+
+  it("asks the host once where the fork lands and sends the place on the create frame, so the host decides where the machine lands", async () => {
+    const sent: Record<string, unknown>[] = [];
+    await createFromHead(hostOf(sent), { emit: () => {}, stream: () => {} }, "x", undefined, undefined, "srv");
+    expect(sent).toEqual([
+      { op: "workspaces.landing", on: "srv" },
+      { op: "workspaces.create", golden: "snap_head", name: "x", on: "srv" },
+    ]);
+  });
+
+  it("holds --size to what the landing place offers, off that one read, and sends no create for a size it does not", async () => {
+    const sent: Record<string, unknown>[] = [];
+    await expect(createFromHead(hostOf(sent), { emit: () => {}, stream: () => {} }, "x", "4x8", undefined, "srv")).rejects.toThrow("4x8 is not a size this provider offers; the sizes are 2x4");
+    expect(sent).toEqual([{ op: "workspaces.landing", on: "srv" }]);
   });
 
   it("refuses the words that pick an image or a size on a place that forks nothing", async () => {

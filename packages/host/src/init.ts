@@ -180,6 +180,9 @@ export interface InitOptions {
   /** This computer as already read by the caller, so the run reads it once: the init job reads for its screens and
    * hands the same reading to the build, with the recipe as the screens answered it. */
   reading?: Reading;
+  /** The place the builder is made at and the seal filed under, a joined computer or a provider by the name or id
+   * wsp places lists; absent is the provider the runtime forks on. */
+  place?: string;
   /** Where the build goes when a host on this computer already serves the state file: this run asks its screens,
    * writes the recipe and asks for the spend, then hands over and prints what comes back. Its answer is this run's
    * exit code. Nothing after the confirm runs here: a second runtime on one state file is what the host lock
@@ -1340,7 +1343,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   try {
     for (let attempt = 0; ; attempt++) {
       try {
-        builder = await rt.golden.prepare({ name: GOLDEN_NAME, signal: halt.signal });
+        builder = await rt.golden.prepare({ name: GOLDEN_NAME, signal: halt.signal, ...(opts.place !== undefined ? { place: opts.place } : {}) });
         break;
       } catch (e) {
         if (halt.signal.aborted || !isCapRefusal(e) || attempt + 1 >= retry.attempts) throw e;

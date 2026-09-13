@@ -218,13 +218,16 @@ so it is reachable with no port open to the world.
 ## wsp init
 
 ```text
-usage: wsp init [--recipe <path>] [--project <path>] [--first-workspace <name>]
-       [--import <folder>] [--no-local] [--yes] [--non-interactive] [--json]
+usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
+       [--first-workspace <name>] [--import <folder>] [--no-local] [--yes]
+       [--non-interactive] [--json]
   seal this computer into your image, one screen at a time: Agents, Tools, Also
   on this computer, Sign-ins, wsp for your agents on this computer, each shown
-  when it has a row to pick, then Build. With no provider key it seals nothing
-  and makes this computer your workspace instead. Beside a host already serving
-  this state file the screens are the same and the build runs in that host
+  when it has a row to pick, then Build. Beside a host already serving this
+  state file the screens are the same and the build runs in that host, on the
+  place --on names or its default place, a computer you joined included. With
+  no host serving and no provider key it seals nothing and makes this computer
+  your workspace instead
 
   --state              the state file: this word first, else WSP_HOME's
                        state.json, else ./.wsp/state.json when the current
@@ -246,6 +249,9 @@ usage: wsp init [--recipe <path>] [--project <path>] [--first-workspace <name>]
                        writes it) and go straight to the sign-ins
   --project            the project folder you are bringing first; its own files
                        say what it needs, and those rows are ticked first
+  --on                 the place the image is built on, by the name wsp places
+                       lists, a computer you joined included; the default place
+                       without it
   --first-workspace    fork the first workspace under this name once the image
                        seals, without asking (default first)
   --import             import this folder's project onto that first workspace,

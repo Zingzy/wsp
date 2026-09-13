@@ -11,9 +11,9 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowOver, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowOver, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
-import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "@wsp/runtime";
+import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
@@ -100,7 +100,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -122,7 +122,8 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
       return `written ${prompt.length}`;
     });
   // The provider the runtime forks on: the stub, or one a case hands over to stand for a host set up for none.
-  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir), hostId: "box:h1" });
+  const places = over.places?.(backend);
+  const rt = createRuntime({ backend: over.provider ?? backend, store, adapters: { claude: claude.adapter, ...over.adapters }, local: localWiring(dir), hostId: "box:h1", ...(places !== undefined ? { places } : {}) });
   runtimes.push(rt);
   let link = scriptedLink({ signedIn: true, hold: false, missing: false });
   const relay: Fake["relay"] = { hooks: [], closed: 0 };
@@ -236,7 +237,9 @@ describe("the init job, manual road", () => {
       keyProvider: "solari",
       home: f.home,
       agents: [{ id: "claude", name: "Claude Code", configured: false, takesTools: true }],
-      pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number, builderDiskGb: BUILDER_DISK_GB },
+      // Priced at the place the build boots on, off that place's own backend: the stub caps no builder disk.
+      pricing: { size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: expect.closeTo(0.11, 5) as unknown as number },
+      place: { id: "default", name: "default" },
       job: null,
     });
   });
@@ -1013,7 +1016,7 @@ describe("the init job, manual road", () => {
     const f = fake({ env: {}, provider: new NoProviderBackend() });
     await f.jobs.start({ road: "manual" });
     await f.settled();
-    await expect(f.jobs.build({})).rejects.toThrow(/forks no machines/);
+    await expect(f.jobs.build({})).rejects.toThrow(NO_BUILD_PLACE_LINE);
   });
 
   it("Save puts the key to the provider first: a refused key is not written, nothing is wired, and the refusal carries the provider's own word", async () => {
@@ -1332,9 +1335,45 @@ describe("the init job, terminal road", () => {
     const none = fake({ env: {}, provider: new NoProviderBackend() });
     saveSmallRecipe(smallRecipePath(none.statePath), RECIPE);
     expect((await none.jobs.get()).pricing).toBeNull();
+    expect((await none.jobs.get()).buildRefusal).toBe(NO_BUILD_PLACE_LINE);
     await none.jobs.start({ road: "terminal" });
     await none.settled();
-    await expect(none.jobs.build({})).rejects.toThrow(/forks no machines/);
+    await expect(none.jobs.build({})).rejects.toThrow(NO_BUILD_PLACE_LINE);
     expect(none.backend.machines).toEqual([]);
+  });
+
+  it("with no default place that builds, the setup carries the runtime's own refusal and prices nothing: two providers that fork and none the default is a question, never the no-place sentence", async () => {
+    const none = new NoProviderBackend();
+    const solari = stubBackend();
+    const box = stubBackend();
+    const f = fake({ provider: none, places: () => ({ wired: "none", backend: p => (p === "none" ? none : p === "solari" ? solari : p === "box" ? box : undefined), list: () => ["none", "solari", "box"] }) });
+    const setup = await f.jobs.get();
+    expect([setup.pricing, setup.place, setup.buildRefusal]).toEqual([null, undefined, buildPlaceAskLine(["solari", "box"])]);
+    await expect(f.jobs.get({ on: "none" })).rejects.toThrow(/none forks no machines/);
+    expect((await f.jobs.get({ on: "box" })).place).toEqual({ id: "box", name: "box" });
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    await f.jobs.start({ road: "terminal" });
+    await f.settled();
+    await expect(f.jobs.build({})).rejects.toThrow(buildPlaceAskLine(["solari", "box"]));
+    expect([solari.machines, box.machines]).toEqual([[], []]);
+  });
+
+  it("the build lands on the place --on names and is priced there: that place's own backend makes the builder and the record names it", async () => {
+    const box = stubBackend();
+    const f = fake({ places: wired => { box.execImpl = wired.execImpl; return { wired: "solari", backend: p => (p === "solari" ? wired : p === "box" ? box : undefined), list: () => ["solari", "box"] }; } });
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    const setup = await f.jobs.get({ on: "box" });
+    expect(setup.place).toEqual({ id: "box", name: "box" });
+    expect(setup.pricing).toMatchObject({ size: box.pricing.defaultSize });
+    await expect(f.jobs.get({ on: "nowhere" })).rejects.toThrow(/no place named nowhere/);
+    await f.jobs.start({ road: "terminal" });
+    await f.settled();
+    await f.jobs.build({ on: "box" });
+    await f.settled();
+    expect(f.jobs.view()!.phase).toBe("done");
+    expect(box.machines.length).toBeGreaterThan(0);
+    expect(f.backend.machines).toEqual([]);
+    expect((await f.rt.image.get()).image).toMatchObject({ version: 1, place: "box" });
+    expect(goldenHead(await f.rt.golden.get())?.version).toBe(1);
   });
 });
