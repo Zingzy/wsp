@@ -34,7 +34,7 @@ export { runBin } from "./entry.js";
 export { type ProviderEnv } from "./providers.js";
 export { shimPath } from "./shim.js";
 export { agentsHere, type AgentHere } from "./agents-here.js";
-export { installEach, mcpServerSpec, runningWsp, type InstallReport, type RunningWsp } from "./mcp-install.js";
+export { installEach, mcpServerSpec, runningWsp, thisComputersPath, type InstallReport, type RunningWsp } from "./mcp-install.js";
 export { dialAddress, hostTokenFor, servingHost, type HostLock } from "./host-lock.js";
 export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./places.js";
 export { SERVING_HOME_SH, currentHome, currentHomePointer, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
