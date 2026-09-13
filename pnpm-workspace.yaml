@@ -6,7 +6,6 @@ allowBuilds:
   electron: true
   electron-winstaller: false
   esbuild: true
-  node-pty: true
   workerd: true
 patchedDependencies:
   "@legendapp/list@3.3.5": patches/@legendapp__list@3.3.5.patch

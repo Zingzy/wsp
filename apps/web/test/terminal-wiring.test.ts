@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Production wiring: every running workspace in the store gets a
 // WorkspaceTerminals in the registry, linked through the host's relay.
-import { rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { fakeProcTree } from "../../../packages/daemon/test/fake-proc.js";
 import { startOldDaemon, type OldDaemon } from "../../../packages/daemon/test/old-daemon.js";
 import { DAEMON_VERSION, type DaemonLinkStatus, type WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -79,7 +77,6 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
 
 let relay: RelayHarness | undefined;
 let oldDaemon: OldDaemon | undefined;
-let procRoot: string | undefined;
 let unwire: (() => void) | undefined;
 
 beforeEach(async () => {
@@ -87,12 +84,9 @@ beforeEach(async () => {
   resetLive();
   resetProcs();
   relay = await startRelayHarness({
-    daemonOptions: {
-      sysSource: async () => ({ cpu: { idle: 0, total: 0 }, load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } }),
-      sysIntervalMs: 20,
-      procRoot: (procRoot = fakeProcTree([{ pid: 1, comm: "init" }, { pid: 2, ppid: 1, comm: "node" }])),
-      procIntervalMs: 20,
-    },
+    procs: [{ pid: 1, comm: "init" }, { pid: 2, ppid: 1, comm: "node" }],
+    sys: { load1: 0.1, memTotalKb: 8_000, memAvailableKb: 6_000 },
+    daemonArgs: { sysIntervalMs: 20, procIntervalMs: 20 },
   });
 });
 afterEach(async () => {
@@ -102,8 +96,6 @@ afterEach(async () => {
   relay = undefined;
   await oldDaemon?.close();
   oldDaemon = undefined;
-  if (procRoot) rmSync(procRoot, { recursive: true, force: true });
-  procRoot = undefined;
 });
 
 describe("wireTerminals", () => {
@@ -117,7 +109,8 @@ describe("wireTerminals", () => {
     // The live link asked for sys.watch: samples land in the workspace's live store, none for the napping one.
     await until(() => getLive("ws_run").snapshot().samples.length > 0);
     expect(getLive("ws_run").snapshot().reach).toBe("live");
-    expect(getLive("ws_run").snapshot().samples[0]).toMatchObject({ type: "sys.sample", load1: 0.1, mem: { used: 1, total: 2 }, disk: { used: 3, total: 4 } });
+    // The numbers are the fake machine's own: its loadavg and its meminfo, in the bytes the daemon reports.
+    expect(getLive("ws_run").snapshot().samples[0]).toMatchObject({ type: "sys.sample", load1: 0.1, mem: { used: 2_000 * 1024, total: 8_000 * 1024 } });
     expect(getLive("ws_nap").snapshot()).toEqual({ samples: [], reach: "unreachable", unavailable: null });
     // Processes stream only while a pane holds a watch; the hold outlives the socket and asks again when it is back.
     expect(getProcs("ws_run").snapshot()).toEqual({ snapshot: null, reach: "live", unavailable: null });
@@ -130,7 +123,7 @@ describe("wireTerminals", () => {
     expect(napping!.status()).toBe("opening");
 
     const tab = await getTerminals("ws_run")!.open({ shell: "/bin/sh" });
-    expect(relay!.daemon.ptys.list().map(p => p.id)).toEqual([tab.ptyId]);
+    expect((await relay!.ptys()).map(p => p.id)).toEqual([tab.ptyId]);
 
     // napped: the socket goes away, the model (and its tabs) stays for the wake, so it keeps the word of a link
     // that was up and is coming back rather than one nothing has ever been open on.

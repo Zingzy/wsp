@@ -14,19 +14,17 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import type { DaemonEvent } from "@wsp/protocol";
 import { LinkBackend, OWNER_LABEL, type ExecResult, type Machine, type MachineSpec } from "@wsp/engine";
 import { connectDaemon } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, placePair, testPlaceFile } from "../../daemon/test/fake-place-host.js";
-import { spawnDaemon, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { daemonBin, spawnDaemon, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { deployDaemon } from "../src/doctor.js";
 import { linkOver } from "./machine-link.js";
 
 const RUNTIME_LIVE = process.env["WSP_RUNTIME_LIVE"] === "1";
-const RUNTIME_BIN = process.env["WSP_DAEMON_BIN"] ?? fileURLToPath(new URL("../../../daemon/target/release/wsp-daemon", import.meta.url));
 /** This run's own label, so two suites on one box never list or kill each other's workspaces. */
 const LIVE_OWNER = `live-665-${process.pid}`;
 const CGROUPS = "/sys/fs/cgroup/wsp";
@@ -81,7 +79,7 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     root = ownDir("wsp-runtime-root-");
     const tokenPath = join(home, "token");
     writeFileSync(tokenPath, "link-token\n");
-    daemon = await spawnDaemon(RUNTIME_BIN, { host: "127.0.0.1", port: 0, tokenPath, kind: "place", root: home, home, placeFile: file, rootsPath: join(home, "roots"), runtimeRoot: root }, { startMs: 20_000 });
+    daemon = await spawnDaemon(daemonBin(), { host: "127.0.0.1", port: 0, tokenPath, kind: "place", root: home, home, placeFile: file, rootsPath: join(home, "roots"), runtimeRoot: root }, { startMs: 20_000 });
     const socket = await host.socket;
     backend = await LinkBackend.open(linkOver(socket as unknown as WebSocket));
     expect(backend.capabilities.pauseMode).toBe("disk");

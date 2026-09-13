@@ -3337,19 +3337,22 @@ async function helloOf(port: number): Promise<number> {
   }
 }
 
-/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox. */
+/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox and its fake machine. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
-  const { startDaemon } = await import("@wsp/daemon");
+  const { fakeProcTree } = await import("../../daemon/test/fake-proc.js");
+  const { daemonUnderTest } = await import("../../daemon/test/harness.js");
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
-  const daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, inboxQuietMs: 100, inboxPollMs: 25, portsSource: async () => [], portsIntervalMs: 25 });
+  const procRoot = fakeProcTree([]);
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
   try {
     return await fn(daemon.port);
   } finally {
     await daemon.close();
     rmSync(inboxDir, { recursive: true, force: true });
+    rmSync(procRoot, { recursive: true, force: true });
   }
 }
 

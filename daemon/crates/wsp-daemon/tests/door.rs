@@ -842,6 +842,22 @@ async fn a_cwd_that_is_not_a_directory_refuses_the_create_and_names_it() {
 }
 
 #[tokio::test]
+async fn starts_in_the_cwd_the_request_names() {
+    let d = start(None).await;
+    let mut c = authed(&d).await;
+    let asked = d.root.path().join("elsewhere");
+    std::fs::create_dir(&asked).unwrap();
+    // Wide, so a long temporary path is one line on the wire rather than a wrapped one.
+    let created = c.request("pty.create", json!({ "cols": 200, "rows": 24, "shell": "bash", "cwd": asked.to_str().unwrap() })).await;
+    let pty_id = created["ptyId"].as_str().unwrap().to_owned();
+    assert_eq!(c.request("pty.attach", json!({ "ptyId": pty_id })).await["ok"], true);
+    assert_eq!(c.request("pty.write", json!({ "ptyId": pty_id, "data": "echo CWD=$(pwd -P)\n" })).await["ok"], true);
+    // The physical path: a temporary folder sits under a symlink on darwin, and the name the request gave is the other one.
+    let want = format!("CWD={}\r", std::fs::canonicalize(&asked).unwrap().display());
+    assert!(c.wait_text(&want, WAIT).await, "{:?}", c.pty_text());
+}
+
+#[tokio::test]
 async fn starts_in_the_home_directory_not_wherever_the_daemon_runs() {
     let d = start(None).await;
     let mut c = authed(&d).await;

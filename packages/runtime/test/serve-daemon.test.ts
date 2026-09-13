@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The daemon channel over the runtime's own socket: a real in-process daemon
+// The daemon channel over the runtime's own socket: a real daemon binary
 // behind a stub machine whose route names it, driven through WsClient the way
 // a page drives the host.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
+
 import { LocalBackend } from "@wsp/engine";
+import { fakeProcTree } from "../../daemon/test/fake-proc.js";
+import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
@@ -28,15 +30,17 @@ const noDaemonGuest = (_m: unknown, cmd: string) => (cmd.includes(DAEMON_TOKEN_P
 
 let srv: RuntimeServer | undefined;
 let rt: Runtime | undefined;
-let daemon: DaemonHandle | undefined;
+let daemon: DaemonUnderTest | undefined;
 let proxy: TcpProxy | undefined;
 let door: RefusingDoor | undefined;
 let inboxDir: string | undefined;
+let procRoot: string | undefined;
 let localRoot: string | undefined;
 
-async function startTestDaemon(token = DAEMON_TOKEN): Promise<DaemonHandle> {
+async function startTestDaemon(token = DAEMON_TOKEN): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-serve-daemon-"));
-  return startDaemon({ port: 0, token, inboxDir, rootsPath: rootsPathIn(inboxDir), portsSource: async () => [], portsIntervalMs: 1000 });
+  procRoot = fakeProcTree([]);
+  return daemonUnderTest({ host: "127.0.0.1", port: 0, token, inbox: inboxDir, rootsPath: rootsPathIn(inboxDir), procRoot, portsIntervalMs: 1000 });
 }
 
 /** A served runtime whose one workspace's machine reaches `url`; the reply is the workspace id. */
@@ -68,6 +72,8 @@ afterEach(async () => {
   daemon = undefined;
   if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
   inboxDir = undefined;
+  if (procRoot) rmSync(procRoot, { recursive: true, force: true });
+  procRoot = undefined;
   if (localRoot) rmSync(localRoot, { recursive: true, force: true });
   localRoot = undefined;
 });
@@ -127,7 +133,11 @@ describe("daemon.open", () => {
     // The host carried the refusal rather than raising one of its own: ok at this level, the daemon's answer inside.
     const refused = await c.request("daemon.send", { channel: first, frame: { op: "fs.list", path: 7 } });
     expect(refused.ok).toBe(true);
-    expect(refused["reply"]).toMatchObject({ ok: false, error: "path must be a string", code: "bad-request" });
+    // The sentence is the daemon's own; what this pins is that the host carried one with its code.
+    const reply = refused["reply"] as Record<string, unknown>;
+    expect(reply).toMatchObject({ ok: false, code: "bad-request" });
+    expect(typeof reply["error"]).toBe("string");
+    expect(reply["error"]).not.toBe("");
     c.close();
   }, 20_000);
 

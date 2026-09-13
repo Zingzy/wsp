@@ -604,7 +604,7 @@ describe("event replay wire fields", () => {
   });
 });
 
-describe("daemon wire types (one home for the ops from @wsp/daemon)", () => {
+describe("daemon wire types (one home for the ops the daemon answers)", () => {
   it("parses requests, responses, and push events", () => {
     const reqs = [
       { id: 1, op: "pty.create", cols: 80, rows: 24, shell: "bash" },

@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { FS_READ_CAP_BYTES, GIT_DIFF_CAP_BYTES, rootsPathIn } from "@wsp/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { listDir } from "../src/fs-ops.js";
 import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 
 const TOKEN = "fs-token";
@@ -63,11 +62,9 @@ function buildRepo(): void {
   writeFileSync(join(outside, "secret.txt"), "secret\n");
   symlinkSync(outside, join(repo, "escape"));
   symlinkSync(join(repo, "docs.md"), join(repo, "docs-link.md"));
-  mkdirSync(join(deep, "wide"), { recursive: true });
-  mkdirSync(join(deep, "src"));
+  mkdirSync(join(deep, "src"), { recursive: true });
   writeFileSync(join(deep, "package.json"), "{}\n");
   writeFileSync(join(deep, "src", "index.ts"), "export {};\n");
-  for (let i = 0; i < 12; i++) writeFileSync(join(deep, "wide", `f${String(i).padStart(2, "0")}.txt`), "x\n");
   writeFileSync(join(root, "big.bin"), Buffer.alloc(FS_READ_CAP_BYTES + 10, 7));
   writeFileSync(join(root, "multibyte.txt"), "héllo wörld\n");
 
@@ -209,27 +206,6 @@ describe("fs.list", () => {
     expect(await c.request("fs.list", { path: "repo/docs.md" })).toMatchObject({ ok: false, code: "not-a-directory" });
     expect(await c.request("fs.list", { path: "repo/nope" })).toMatchObject({ ok: false, code: "not-found" });
     expect(await c.request("fs.list", { path: 7 })).toMatchObject({ ok: false, code: "bad-request" });
-  });
-});
-
-describe("listDir entry cap", () => {
-  it("is spent per directory: a wide sibling never cuts the top level", async () => {
-    const top = await listDir(deep, { maxEntries: 5 });
-    expect(top.entries.map(e => e.name)).toEqual(["src", "wide", "package.json"]);
-    expect(top).toMatchObject({ truncated: false, total: 3 });
-    const wide = await listDir(join(deep, "wide"), { maxEntries: 5 });
-    expect(wide.entries.map(e => e.name)).toEqual(["f00.txt", "f01.txt", "f02.txt", "f03.txt", "f04.txt"]);
-    expect(wide).toMatchObject({ truncated: true, total: 12 });
-    const full = await listDir(join(deep, "wide"));
-    expect(full).toMatchObject({ truncated: false, total: 12 });
-    expect(full.entries).toHaveLength(12);
-  });
-
-  it("counts entries after the gitignore filter", async () => {
-    const res = await listDir(repo, { gitignore: true, maxEntries: 2 });
-    expect(res.entries).toHaveLength(2);
-    expect(res.total).toBe(8);
-    expect(res.truncated).toBe(true);
   });
 });
 
