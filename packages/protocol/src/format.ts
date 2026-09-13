@@ -3169,6 +3169,20 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
 /** The one line that takes wsp off a computer it is typed on. */
 export const PLACE_LEAVE_LINE = "wsp leave";
 
+/** What becomes of the copy of the image on a computer of the person's own when wsp comes off it, in the words
+ * every screen that mentions it says. The copy sits in that computer's own workspace store, which placeOwnedPaths
+ * does not name, so neither the sweep the host asks for over the link nor wsp leave at the terminal takes it: the
+ * sheet that adds a computer, the dialog that removes one and the line that dialog hands over all say it stays.
+ * The size is the copy's where the host knows it; a screen that does not know it says the clause without a figure
+ * rather than one it is guessing. */
+export const imageCopyStaysLine = (size?: string): string => `the copy of your image${size === undefined ? "" : ` (${size})`} stays where it is`;
+
+/** How a computer of the person's own reaches this Mac, in the one clause both roads of the Add sheet say it in.
+ * The computer opens the connection, never this host: at an address on the network, or at the name the door hands
+ * it beside those addresses once this host is signed in, which is what a computer somewhere else has to go by.
+ * Connects, not dials, and no name for the road between: neither is a word somebody meets on their first day. */
+export const PLACE_CONNECTS = "connects to this Mac over your network, or from outside it once you sign in";
+
 /** Everything wsp puts on a computer it is installed on, named once. The Add sheet writes its lines and the note
  * under them from this list and the Remove dialog writes its sentence from the same, so what a person is told
  * before they press Add is what they are told on the way out. Nothing here is called a shim: a person reads what
@@ -3192,10 +3206,11 @@ export const PLACE_INSTALL = {
   },
   /** What that command does, as its own sentence for a screen that lists what lands rather than what comes off. */
   openerLine: "Sign-in pages started on that computer open in your browser here.",
-  /** What Docker on that computer ends up holding, and when. The size is the image's own, where this host has
-   * built one; a host with none yet says the sentence without a figure rather than a figure it is guessing. */
+  /** What a computer that runs workspaces ends up holding of the image, when it lands and what becomes of it. The
+   * size is the image's own, where this host has built one; a host with none yet says the sentence without a
+   * figure rather than a figure it is guessing. */
   imageCopy: (size: string | undefined): string =>
-    `Your image${size === undefined ? "" : ` (${size})`} is copied into Docker there the first time a workspace is created. Remove takes all of it off again.`,
+    `Your image${size === undefined ? "" : ` (${size})`} is built there the first time a workspace is created on it. When wsp comes off, ${imageCopyStaysLine()}.`,
 } as const;
 
 /** The words of the Settings section for where a person's agents run, and of the sheet that adds a computer. */
@@ -3206,7 +3221,11 @@ export const PLACES_WORDS = {
   connectProvider: "Connect a provider",
   sheet: {
     title: "Add a computer",
-    description: "A computer you own runs threads for your wsp. It connects to this Mac over your network. You open nothing on it.",
+    description: `A computer you own runs threads for your wsp. It ${PLACE_CONNECTS}. You open nothing on it.`,
+    /** The one line both roads say, because it is the reason a person adds a computer at all: a turn already
+     * running there is that computer's own and its daemon holds it while this host sleeps, and only the start of
+     * the next one needs this host awake. */
+    whileAsleep: "Threads there keep running while this Mac sleeps; new ones start when it wakes.",
     appRoad: 'On that computer, open wsp and press "This Mac joins another wsp". Type these.',
     address: "Address",
     code: "Code",
@@ -3234,8 +3253,10 @@ export const PLACES_WORDS = {
      * agent's. */
     leaveLine: PLACE_LEAVE_LINE,
     /** What that line takes and what it leaves, off the one list a sweep reads (placeOwnedPaths), which names the
-     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. */
-    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and so do any copies of your image in Docker there.`,
+     * files under wsp's folder and never the folder itself, and the unit the manager holds the agent up with. What
+     * it leaves is that list read the other way: the work folder is not on it, and neither is the workspace store
+     * the copy of the image sits in. */
+    leaveTakes: `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
   },
 } as const;
 

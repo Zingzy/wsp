@@ -3032,6 +3032,7 @@ const DAEMON_CONTENTS = [
   "9ff538bbfca0ac4e03ca8c822afd47b630dd21cec17ec929192ddc6ae6f10ce6",
   "14b4b9c0ccad20d544fa123841592c6438f735405f97a88957dafe4c39f47e8b",
   "ad9341f55ebc6a724a35b9febb11f7ca5cf5133a90d7a631bf39cf9a496657ac",
+  "cebb929363226a20c057702cfe24235fa2f24749c70355539f5bab4b3bcfd3da",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3087,7 +3088,9 @@ const DAEMON_CONTENTS = [
  * where the box takes it, so what a deploy leaves for a workspace to isolate under changed. Version 25 serves a
  * fenced engine socket into a workspace that asked for one: a proxy over the box's own Docker or podman socket that
  * labels every create with the workspace, filters every listing by it, refuses what would reach the box, and joins
- * a container's published port to the workspace's loopback; a create names the socket with the new engine field. */
+ * a container's published port to the workspace's loopback; a create names the socket with the new engine field.
+ * Version 26 stops a build whose libseccomp is not linked statically, so the Linux daemon is one static binary that
+ * names no shared library; a binary that did was installed once and its container init called address zero. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4183,7 +4186,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

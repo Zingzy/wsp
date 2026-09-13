@@ -18,7 +18,7 @@
 // into a shell: a tester who wrote their own wrapper instead ran every verb
 // against the person's own state file and keys.
 import { CATALOG_AGENTS, hasLogin } from "@wsp/catalog";
-import { MCP_SERVER_NAME, shellQuote, standInRecordsPath } from "@wsp/protocol";
+import { MCP_SERVER_NAME, shellQuote, standInRecordsPath, TURN_TOKEN_ENV } from "@wsp/protocol";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -240,11 +240,15 @@ export function writeStandIn(home, held) {
 /** What a turn lands in: the work folder of this home, with a small repository at every folder the fixture says a
  * project was imported into, and one called notes where it names none. A turn starts in the project its workspace
  * has, so a fixture that names a folder nobody made leaves an agent in a folder that is not there, and a folder
- * of the person's own leaves it inside their repository. */
-export function writeWorkFolder(home, folders = []) {
+ * of the person's own leaves it inside their repository.
+ *
+ * The repositories the fixture says its person already keeps are made too, where that person keeps them, which is
+ * the top of their home and not the work folder: wsp has imported none of them, and a tester told to point the app
+ * at one of their own repositories walked up from the work folder and found nothing there to point it at. */
+export function writeWorkFolder(home, folders = [], repos = []) {
   const work = join(home, "wsp-work");
   mkdirSync(work, { recursive: true });
-  const dests = folders.length > 0 ? folders : [join(work, "notes")];
+  const dests = [...(folders.length > 0 ? folders : [join(work, "notes")]), ...repos];
   for (const dest of dests) smallRepo(dest);
   return { work, repos: dests };
 }
@@ -266,17 +270,53 @@ function smallRepo(dest) {
   }
 }
 
+/** The pty wrapper, by its own path: a shell started with nothing in its environment has only the path this lab
+ * hands it to find a command on, and that path leads with the lab's own bin. This is the BSD spelling, where the
+ * file to keep comes before the command; the one on a Linux box takes -c and would read this line as a file name.
+ * A lab is a Mac's, since what it serves is the app a person runs on their own computer. */
+const PTY = "/usr/bin/script -q /dev/null";
+
+/** The shell a tester runs this lab's verbs from: nothing of their own in it, and this lab's wsp first on the
+ * path, so `wsp doctor` is this lab's doctor with no wrapper to write and nothing to paste.
+ *
+ * Under a pty, because a pipe is not a terminal: wsp prints a reply once when one screen holds both its streams
+ * and twice when it cannot tell, and a tester whose shell had no tty read the doubling as the product repeating
+ * itself. script is what gives a shell one here; the typescript it would keep goes nowhere. */
+export const labShell = facts => `env -i HOME=${shellQuote(facts.home)} PATH=${shellQuote(facts.env.PATH)} TERM=xterm-256color ${PTY} /bin/sh`;
+
 /** The line a lab's own wsp runs: the child's environment word for word, nothing of the tester's, and the lab's
- * home as the folder it runs in, so no .env beside a checkout is read and no state file but this lab's is found. */
+ * home as the folder it runs in, so no .env beside a checkout is read and no state file but this lab's is found.
+ *
+ * One variable of the caller's crosses that wipe, the token a turn's launch carries. It is the one thing that says
+ * which thread is asking, so without it every tool call an agent in a thread makes arrives as the person: a thread
+ * told to notify the one that opened it notified nobody, and no thread a thread opened could be told from one a
+ * person opened. Empty where the caller is not a turn, which is every tester's own shell. */
 export const labLine = facts =>
   `cd ${shellQuote(facts.home)} && exec env -i ${Object.entries(facts.env)
     .map(([name, value]) => `${name}=${shellQuote(value)}`)
-    .join(" ")} ${shellQuote(facts.node)} ${shellQuote(facts.bin)} "$@"`;
+    .join(" ")} ${TURN_TOKEN_ENV}="\${${TURN_TOKEN_ENV}:-}" ${shellQuote(facts.node)} ${shellQuote(facts.bin)} "$@"`;
 
-/** The wsp a tester's shell finds on its path: a script in the lab's home running that line. A printed shell
- * function was not used by the one tester it was written for, who wrote their own wrapper and ran every verb on
- * the person's own state file, keys and provider. */
-export const shimText = facts => `#!/bin/sh\n# This lab's wsp: every verb against this lab's host and nothing else.\n${labLine(facts)}\n`;
+/** What this lab's wsp answers a shell that is not this lab's, with the one line to paste under it. A tester given
+ * the shell to paste wrote a wrapper around the command instead, ran it from their own shell, and met this
+ * computer's own host with none of the lab's machines in it; nothing in the answer said so. */
+export const notThisLabsShell = (home, shell) =>
+  `wsp here belongs to the lab at ${home}, and this shell is not that lab's, so its verbs would read your own state file, your own keys and the .env beside whichever checkout you are standing in. Paste this line and run every verb in the shell it opens:\n${shell}`;
+
+/** The wsp a tester's shell finds on its path: a script in the lab's home running that line, and the refusal above
+ * for a shell that is not this lab's. A printed shell function was not used by the one tester it was written for,
+ * who wrote their own wrapper and ran every verb on the person's own state file, keys and provider. The home of a
+ * stand-in machine is under the lab's, which is what a turn on a fork shells out from. */
+export const shimText = facts =>
+  [
+    "#!/bin/sh",
+    "# This lab's wsp: every verb against this lab's host and nothing else.",
+    `case "$HOME" in`,
+    `${shellQuote(facts.home)}|${shellQuote(`${facts.home}/`)}*) ;;`,
+    `*) printf '%s\\n' ${shellQuote(notThisLabsShell(facts.home, labShell(facts)))} >&2; exit 2 ;;`,
+    "esac",
+    labLine(facts),
+    "",
+  ].join("\n");
 
 /** Writes that script and answers the folder to put on a tester's path. */
 export function writeShim(home, facts) {
