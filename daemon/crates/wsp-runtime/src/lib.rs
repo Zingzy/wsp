@@ -8,6 +8,8 @@
 #[cfg(target_os = "linux")]
 pub mod bundle;
 pub mod doctor;
+#[cfg(target_os = "linux")]
+pub mod engine;
 pub mod fetch;
 #[cfg(target_os = "linux")]
 pub mod freeze;

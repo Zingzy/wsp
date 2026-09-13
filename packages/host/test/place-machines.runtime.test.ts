@@ -8,6 +8,7 @@
 // workspace and reads its hello back through the forward, which takes apt, nodejs.org and npm from inside. The
 // snapshot and pause cases are the store's: a fork from a snapshot, a template, and the nap that stops a workspace
 // and the wake that boots its saved layer on the same address and forward.
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
@@ -357,6 +358,43 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect(await exec(machine, ANSWER_ON_7070)).toMatchObject({ exitCode: 0, stderr: "" });
     expect(await readLine(port)).toBe("hello from inside");
   }, 120_000);
+
+  it("a workspace made with engine gets the box's engine through a fenced socket that sees its own containers alone, and one made without has no socket", async () => {
+    // containers is the doctor's reading of this box; where it has no engine the daemon refuses the create, which
+    // is the other half of the flag, and this case has nothing to run against.
+    const docker = ["/usr/bin/docker", "/usr/local/bin/docker"].find(p => existsSync(p));
+    if (!backend.capabilities.containers || docker === undefined) {
+      console.log(`no container engine on this box (containers ${backend.capabilities.containers}); the engine case stands aside`);
+      await expect(create({ kind: "sandbox", engine: true })).rejects.toThrow(/container engine/);
+      return;
+    }
+    const rss = (): number => Number(/VmRSS:\s+(\d+)/.exec(readFileSync(`/proc/${daemon.pid}/status`, "utf8"))?.[1]);
+    const before = rss();
+    const machine = await create({ kind: "sandbox", engine: true });
+    times["daemon VmRSS kB added by an engine workspace, socket served and idle"] = rss() - before;
+    // The client is landed through the byte road, which is not the fence's cost: the next reading starts after it.
+    await machine.putBytes!("/usr/local/bin/docker", readFileSync(docker), { timeoutMs: 120_000 });
+    expect(await exec(machine, "chmod +x /usr/local/bin/docker; mkdir -p /root/demo /root/.wsp; echo /root/demo > /root/.wsp/roots; readlink -f /var/run/docker.sock")).toMatchObject({ exitCode: 0, stdout: "/run/wsp/docker.sock\n" });
+    const landed = rss();
+    const name = `wsp-live-${process.pid}-inside`;
+    expect(await exec(machine, `docker run -d --name ${name} -p 18081:80 nginx:alpine 2>&1`)).toMatchObject({ exitCode: 0 });
+    const inside = await exec(machine, "docker ps --format '{{.Names}}'");
+    expect(inside.stdout.trim().split("\n")).toEqual([name]);
+    // The box lists it under the workspace's label; the workspace's socket lists nothing of the box's.
+    expect(execFileSync("docker", ["ps", "--filter", `label=wsp.workspace=${machine.id}`, "--format", "{{.Names}}"]).toString().trim()).toBe(name);
+    const answered = await exec(machine, "exec 3<>/dev/tcp/127.0.0.1/18081; printf 'HEAD / HTTP/1.0\\r\\n\\r\\n' >&3; timeout 5 cat <&3");
+    expect(answered.stdout).toContain("HTTP/1.1 200 OK");
+    const refused = await exec(machine, "docker run --rm -v /:/host alpine true 2>&1");
+    expect(refused.exitCode).not.toBe(0);
+    expect(refused.stdout).toContain("a bind mount's source must sit under a project folder of this workspace (/root/demo), and / does not");
+    times["daemon VmRSS kB added by one container up through the fence, its port joined"] = rss() - landed;
+    const plain = await create({ kind: "sandbox" });
+    expect((await exec(plain, "ls /var/run/docker.sock /run/wsp 2>&1")).exitCode).not.toBe(0);
+    // The kill takes the workspace's containers with it.
+    await machine.kill();
+    made.splice(made.indexOf(machine), 1);
+    expect(execFileSync("docker", ["ps", "-a", "--filter", `label=wsp.workspace=${machine.id}`, "-q"]).toString().trim()).toBe("");
+  }, 240_000);
 
   it("holds a memory cap: 700 MB touched under a 512 MB cap exits 137", async () => {
     const machine = await create({ kind: "sandbox", memMb: 512 });

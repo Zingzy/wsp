@@ -389,12 +389,17 @@ impl Route {
 /// Runs the work on a thread that has entered the network namespace, so this process's own threads never leave
 /// theirs. A namespace is a thread's, and the thread ends with the work.
 pub fn inside(ns: fs::File, work: impl FnOnce(&mut Route) -> Result<(), Error> + Send + 'static) -> Result<(), Error> {
+    inside_with(ns, move || work(&mut Route::open()?))
+}
+
+/// The same, for work that answers something: a socket bound inside stays in that namespace whichever thread
+/// serves it afterwards.
+pub fn inside_with<T: Send + 'static>(ns: fs::File, work: impl FnOnce() -> Result<T, Error> + Send + 'static) -> Result<T, Error> {
     let handle = std::thread::Builder::new()
         .name("wsp-netns".into())
-        .spawn(move || -> Result<(), Error> {
+        .spawn(move || -> Result<T, Error> {
             setns(&ns, CloneFlags::CLONE_NEWNET).map_err(nix_at("entering the workspace's network namespace"))?;
-            let mut route = Route::open()?;
-            work(&mut route)
+            work()
         })
         .map_err(at("starting the namespace thread"))?;
     handle.join().map_err(|_| Error { what: "the namespace thread".into(), source: io::Error::other("ended without an answer") })?
@@ -631,6 +636,10 @@ pub struct Net {
     /// One turn at a time on the kernel's tables and links, since a block is picked by reading what is there.
     turn: Mutex<()>,
     listeners: Mutex<BTreeMap<String, BTreeMap<u16, Listener>>>,
+    /// Listeners on a workspace's own loopback, inside its namespace, each dialing a port on the box's loopback: how
+    /// its containers' published ports are reached at the port it asked for. Keyed by the port inside; not recorded,
+    /// since a wake and a daemon restart read them off the engine again.
+    inward: Mutex<BTreeMap<String, BTreeMap<u16, Listener>>>,
 }
 
 impl Net {
@@ -638,7 +647,7 @@ impl Net {
     /// alias names a workspace dir under this root that is not running goes, and once no workspace link is left on
     /// the box the rules go too. Not root: nothing here was made, so nothing is touched.
     pub fn open(layout: Layout, running: &[String]) -> Result<(Net, Swept), Error> {
-        let net = Net { layout, turn: Mutex::new(()), listeners: Mutex::new(BTreeMap::new()) };
+        let net = Net { layout, turn: Mutex::new(()), listeners: Mutex::new(BTreeMap::new()), inward: Mutex::new(BTreeMap::new()) };
         let mut swept = Swept::default();
         if !is_root() {
             return Ok((net, swept));
@@ -784,6 +793,7 @@ impl Net {
     async fn take_down(&self, id: &str, keep_record: bool) -> Result<(), Error> {
         let _turn = self.turn.lock().await;
         self.listeners.lock().await.remove(id);
+        self.inward.lock().await.remove(id);
         // The listeners' tasks end at the next turn of the runtime; taking it here means none is bound when this
         // returns.
         tokio::task::yield_now().await;
@@ -827,6 +837,38 @@ impl Net {
         bundle::write_json(&self.layout.net(id), &network)?;
         self.hold(id, port, bound, SocketAddrV4::new(network.address, port)).await;
         Ok(box_port)
+    }
+
+    /// A listener on the workspace's loopback at `inside`, in the namespace of the init `pid`, dialing the box's
+    /// loopback at `box_port`: the workspace reaches a container's published port at the port it asked for. One
+    /// already held on that port inside is replaced.
+    pub async fn forward_inward(&self, id: &str, pid: i32, inside_port: u16, box_port: u16) -> Result<(), Error> {
+        if let Some(held) = self.inward.lock().await.get_mut(id) {
+            held.remove(&inside_port);
+        }
+        // The replaced listener's task ends at the next turn of the runtime, and its port with it.
+        tokio::task::yield_now().await;
+        let ns_path = format!("/proc/{pid}/ns/net");
+        let bound = tokio::task::spawn_blocking(move || -> Result<std::net::TcpListener, Error> {
+            let ns = fs::File::open(&ns_path).map_err(at(ns_path.clone()))?;
+            inside_with(ns, move || {
+                let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, inside_port))
+                    .map_err(at(format!("binding 127.0.0.1:{inside_port} inside the workspace")))?;
+                listener.set_nonblocking(true).map_err(at("a listener inside the workspace"))?;
+                Ok(listener)
+            })
+        })
+        .await
+        .map_err(|e| Error { what: "the namespace task".into(), source: io::Error::other(e.to_string()) })??;
+        let listener = TcpListener::from_std(bound).map_err(at("a listener inside the workspace"))?;
+        let task = tokio::spawn(serve(listener, SocketAddrV4::new(Ipv4Addr::LOCALHOST, box_port)));
+        self.inward.lock().await.entry(id.to_owned()).or_default().insert(inside_port, Listener { box_port, task });
+        Ok(())
+    }
+
+    /// The ports a workspace's loopback forwards to the box's, by the port inside.
+    pub async fn inward_ports(&self, id: &str) -> BTreeMap<u16, u16> {
+        self.inward.lock().await.get(id).map(|m| m.iter().map(|(inside, l)| (*inside, l.box_port)).collect()).unwrap_or_default()
     }
 
     async fn hold(&self, id: &str, port: u16, bound: TcpListener, target: SocketAddrV4) {
@@ -938,7 +980,12 @@ mod tests {
 
     #[test]
     fn an_alias_names_a_workspace_under_this_root_alone() {
-        let net = Net { layout: Layout::new(Path::new("/var/lib/wsp")), turn: Mutex::new(()), listeners: Mutex::new(BTreeMap::new()) };
+        let net = Net {
+            layout: Layout::new(Path::new("/var/lib/wsp")),
+            turn: Mutex::new(()),
+            listeners: Mutex::new(BTreeMap::new()),
+            inward: Mutex::new(BTreeMap::new()),
+        };
         assert_eq!(net.workspace_of("/var/lib/wsp/run/wsp-a"), Some("wsp-a".to_owned()));
         assert_eq!(net.workspace_of("/tmp/other/run/wsp-a"), None);
         assert_eq!(net.workspace_of("wsp-a"), None);

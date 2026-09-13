@@ -1362,3 +1362,153 @@ fn sha256_hex(bytes: &[u8]) -> String {
     let digest = wsp_runtime::fetch::Digest::of(bytes);
     digest.hex().to_owned()
 }
+
+/// A file of the box's landed in the workspace through the byte road, in parts, and made executable.
+async fn put_file(w: &World, id: &str, from: &Path, to: &str) {
+    let bytes = fs::read(from).unwrap();
+    let part_size = 4 * 1024 * 1024;
+    let parts = bytes.chunks(part_size).collect::<Vec<_>>();
+    let upload = format!("u{}", to.bytes().map(u64::from).sum::<u64>());
+    for (seq, part) in parts.iter().enumerate() {
+        w.ok(
+            "machine.putBytes",
+            json!({ "machineId": id, "path": to, "uploadId": upload, "seq": seq, "last": seq + 1 == parts.len(), "data": base64_of(part), "timeoutMs": 120_000 }),
+        )
+        .await;
+    }
+    let (code, _, err) = w.exec(id, &format!("chmod +x '{to}'")).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+}
+
+/// The box's own docker client and its compose plugin, where the box has them.
+fn box_docker() -> Option<(PathBuf, PathBuf)> {
+    let docker = ["/usr/bin/docker", "/usr/local/bin/docker"].into_iter().map(PathBuf::from).find(|p| p.exists())?;
+    let compose = [
+        "/usr/libexec/docker/cli-plugins/docker-compose",
+        "/usr/lib/docker/cli-plugins/docker-compose",
+        "/usr/local/lib/docker/cli-plugins/docker-compose",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .find(|p| p.exists())?;
+    Some((docker, compose))
+}
+
+fn on_box(args: &[&str]) -> (i32, String) {
+    let out = std::process::Command::new("docker").args(args).output().unwrap();
+    (out.status.code().unwrap_or(-1), format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)))
+}
+
+fn show(title: &str, code: i64, out: &str, err: &str) {
+    eprintln!("== {title} (exit {code})\n{}{}", out, if err.is_empty() { String::new() } else { format!("[stderr] {err}") });
+}
+
+#[tokio::test]
+async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_containers_alone() {
+    if !live() {
+        return;
+    }
+    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
+        eprintln!("this box has no container engine with a socket; the engine case is skipped");
+        return;
+    };
+    let Some((docker, compose)) = box_docker() else {
+        eprintln!("this box has no docker client with a compose plugin to land inside; the engine case is skipped");
+        return;
+    };
+    let mut w = World::open().await;
+    let key = checkout_key();
+    // A container of the box's own, outside any workspace: the one the workspace must not see.
+    let outside = format!("wsp-live-outside-{key}");
+    on_box(&["rm", "-f", &outside]);
+    let (code, started) = on_box(&["run", "-d", "--name", &outside, "alpine", "sleep", "600"]);
+    assert_eq!(code, 0, "{started}");
+    let outside_id = started.trim().to_owned();
+    let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-665-engine-{key}") }))).await;
+    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
+    put_file(&w, &id, &compose, "/root/.docker/cli-plugins/docker-compose").await;
+    let (code, out, err) = w.exec(&id, "ls -la /var/run/docker.sock /run/wsp; readlink -f /var/run/docker.sock").await;
+    show("the socket inside the workspace made with --engine", code, &out, &err);
+    assert_eq!(code, 0);
+    let compose_file = "services:\n  db:\n    image: postgres:16-alpine\n    environment:\n      POSTGRES_PASSWORD: wsp\n  web:\n    image: nginx:alpine\n    ports:\n      - \"18080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n    depends_on: [db]\n";
+    let (code, _, err) = w
+        .exec(
+            &id,
+            &format!(
+                "mkdir -p /root/demo/html /root/.wsp && echo hello-from-workspace > /root/demo/html/index.html && printf '%s' '{compose_file}' > /root/demo/compose.yaml && echo /root/demo > /root/.wsp/roots && docker version --format 'client {{{{.Client.Version}}}} server {{{{.Server.Version}}}}'"
+            ),
+        )
+        .await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    let started = Instant::now();
+    let (code, out, err) = w.exec(&id, "cd /root/demo && docker compose -p wspdemo up -d 2>&1").await;
+    show("docker compose up -d, from inside", code, &out, &err);
+    eprintln!("compose up took {} ms", started.elapsed().as_millis());
+    assert_eq!(code, 0);
+    let (code, out, err) = w.exec(&id, "docker ps --format '{{.Names}}  {{.Image}}  {{.Ports}}'").await;
+    show("docker ps, from inside", code, &out, &err);
+    assert_eq!(code, 0);
+    assert!(out.contains("wspdemo-db-1") && out.contains("wspdemo-web-1"), "{out}");
+    assert!(!out.contains(&outside), "the box's own container shows inside: {out}");
+    let (_, on_the_box) = on_box(&["ps", "--format", "{{.Names}}  {{.Ports}}"]);
+    eprintln!("== docker ps, on the box\n{on_the_box}");
+    assert!(on_the_box.contains(&outside) && on_the_box.contains("wspdemo-web-1"), "{on_the_box}");
+    assert!(on_the_box.contains("127.0.0.1:"), "the published port sits on the box's loopback: {on_the_box}");
+    let (code, out, err) = w.exec(&id, "docker run --rm -v /:/host alpine ls /host 2>&1").await;
+    show("docker run -v /:/host, from inside", code, &out, &err);
+    assert_ne!(code, 0);
+    assert!(out.contains("a bind mount's source must sit under a project folder of this workspace (/root/demo), and / does not"), "{out}");
+    let (code, out, err) =
+        w.exec(&id, "exec 3<>/dev/tcp/127.0.0.1/18080; printf 'GET / HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n' >&3; timeout 5 cat <&3").await;
+    show("GET 127.0.0.1:18080 from inside (the published port)", code, &out, &err);
+    assert!(out.contains("hello-from-workspace"), "{out}");
+    let (code, out, err) = w
+        .exec(&id, &format!("docker inspect --type container --format '{{{{.Name}}}}' {outside_id} 2>&1; docker stop {outside} 2>&1"))
+        .await;
+    show("the box's own container, named from inside", code, &out, &err);
+    assert!(out.contains(&format!("No such container: {outside_id}")), "{out}");
+    let (_, still) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
+    assert_eq!(still.trim(), "running", "the box's container was touched from inside");
+    let (code, out, err) = w.exec(&id, "docker run -d --name wsp-live-left alpine sleep 600 2>&1").await;
+    show("a container left running when the workspace goes", code, &out, &err);
+    assert_eq!(code, 0);
+    // Cost: one docker ps through the fence against one straight at the engine, from the box, twenty each. Off the
+    // runtime thread, since the fence is served on it and the client waits on the fence.
+    let socket = root().join("run").join(&id).join("engine").join("docker.sock");
+    let time = |args: Vec<String>| {
+        tokio::task::spawn_blocking(move || {
+            let words: Vec<&str> = args.iter().map(String::as_str).collect();
+            let started = Instant::now();
+            for _ in 0..20 {
+                assert_eq!(on_box(&words).0, 0, "{words:?}");
+            }
+            started.elapsed().as_millis() / 20
+        })
+    };
+    let fenced = time(vec!["-H".into(), format!("unix://{}", socket.display()), "ps".into(), "-q".into()]).await.unwrap();
+    let straight = time(vec!["ps".into(), "-q".into()]).await.unwrap();
+    eprintln!("== cost: docker ps through the fence {fenced} ms, straight at the engine {straight} ms (mean of 20, from the box)");
+    let status = fs::read_to_string("/proc/self/status").unwrap();
+    eprintln!("== this process VmRSS with the proxy and forwards up: {}", status.lines().find(|l| l.starts_with("VmRSS")).unwrap_or(""));
+    let (code, out, err) = w.exec(&id, "cd /root/demo && docker compose -p wspdemo down -v 2>&1").await;
+    show("docker compose down -v, from inside", code, &out, &err);
+    assert_eq!(code, 0);
+    // A workspace made without the engine: no socket, and the client says so.
+    let plain = w.create(spec(json!({ "idempotencyKey": format!("live-665-noengine-{key}") }))).await;
+    put_file(&w, &plain, &docker, "/usr/local/bin/docker").await;
+    let (code, out, err) = w.exec(&plain, "ls -la /var/run/docker.sock /run/wsp 2>&1; docker ps 2>&1").await;
+    show("a workspace made without --engine: the socket and docker ps", code, &out, &err);
+    assert_ne!(code, 0);
+    assert!(out.contains("unix:///var/run/docker.sock") && out.contains("no such file or directory"), "{out}");
+    assert!(!root().join("run").join(&plain).join("engine").exists());
+    w.close().await;
+    let (_, left) = on_box(&["ps", "-a", "--filter", &format!("label={}={id}", wsp_runtime::engine::LABEL), "--format", "{{.Names}}"]);
+    let (_, networks) =
+        on_box(&["network", "ls", "--filter", &format!("label={}={id}", wsp_runtime::engine::LABEL), "--format", "{{.Name}}"]);
+    eprintln!("== after the kill, on the box: containers [{}] networks [{}]", left.trim(), networks.trim());
+    assert_eq!((left.trim(), networks.trim()), ("", ""), "the killed workspace left containers on the engine");
+    assert!(!socket.exists(), "the socket stays after the kill");
+    let (_, outside_still) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
+    assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
+    on_box(&["rm", "-f", &outside]);
+}
