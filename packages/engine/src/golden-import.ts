@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -106,6 +106,9 @@ export interface FilesPlan {
   files: PlannedFile[];
   secrets: PlannedSecret[];
   skipped: SkippedPath[];
+  /** The `~`-relative prefix moves this plan landed its files by, the caller's before the built-in macOS ones; the
+   * pack repoints a path written inside a copied file by the same list. */
+  rewrites: readonly [string, string][];
   /** The recipe's own byte estimate for what travels; the packed size is known only after packing. */
   bytes: number;
   /** Files that travel, counted per rung. */
@@ -137,6 +140,123 @@ const MAC_REWRITES: readonly [string, string][] = [
   ["Library/Application Support/", ".config/"],
   ["Library/Preferences/", ".config/"],
 ];
+
+/** A path character: every byte a path carries, to the first one that ends a word in a config file. */
+const PATH_CHAR = "[^\\s\"'`:;,)\\]}]";
+/** The Mac trees a spelled-out path begins under, off the catalog's table so a prefix added there is found here
+ * too: Homebrew's prefix, the tree every Mac home sits in, and the Mac-only trees, minus the ones already under
+ * Homebrew's prefix. The person's own home is added to these per file, since it is the plan's, not the platform's. */
+const MAC_TREES = [MAC_BREW, "/Users", ...MAC_ONLY.filter(p => !p.startsWith(`${MAC_BREW}/`)).map(p => p.slice(0, -1))];
+const escaped = (literal: string): string => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A path a copied file spells out, as the file writes one: the person's own home or one of the Mac trees, to the
+ * end of its run. The home is a tree of its own wherever it sits, since it is the plan's and not the platform's: a
+ * home under /Users is already one, a temporary one sits under /private/var and a Linux laptop's under /home, and a
+ * spelled-out home moves to the guest's home in every one of those cases. A word with no leading slash keeps the
+ * run going, so `Library/Application Support/x` is one path, while a second absolute path on the same line begins
+ * its own run. A run that something is already spelling a path or a host against is not one of these:
+ * `https://developer.apple.com/Library/x` is a URL, and `$HOME/Library/x` and `~/Library/x` are read against the
+ * machine's own home, not this computer's. A tree's own name ends at the run: `/Library.d` and a sibling of the
+ * home one character longer are neither. */
+const pathsIn = (home: string): RegExp =>
+  new RegExp(`(?<![\\w.~-])(?:${[escaped(home), ...MAC_TREES].join("|")})(?:/${PATH_CHAR}*(?: (?!/)${PATH_CHAR}+)*)?(?![\\w.-])`, "g");
+
+export interface ImagePathOptions {
+  /** This computer's home with every link in it resolved, as the plan read it. */
+  home: string;
+  /** The `~`-relative prefix moves the plan landed the copied files by (FilesPlan.rewrites); a path written inside
+   * one of those files follows the file. */
+  rewrites: readonly [string, string][];
+}
+
+/** Where a Mac path lands on the image, or nothing where the image has no such place. A Homebrew binary becomes its
+ * command alone: a tool arrives on the image by whichever road the catalog gives it (a release binary, apt, npm, uv,
+ * brew), so the name on PATH is the only spelling that holds for every road. The person's own home is asked first,
+ * since it is the most specific prefix and always has a place: a Mac's temporary home sits under /private/var,
+ * which is otherwise a tree with nothing behind it on the image. */
+export function imagePath(mac: string, opts: ImagePathOptions): string | undefined {
+  const { home, rewrites } = opts;
+  if (mac === home) return GUEST_HOME;
+  if (mac.startsWith(`${home}/`)) {
+    const rel = mac.slice(home.length + 1);
+    for (const [from, to] of rewrites) if (rel.startsWith(from)) return `${GUEST_HOME}/${to}${rel.slice(from.length)}`;
+    return `${GUEST_HOME}/${rel}`;
+  }
+  if (MAC_ONLY.some(prefix => mac.startsWith(prefix))) return undefined;
+  for (const dir of MAC_BIN_DIRS) if (mac.startsWith(dir) && !mac.slice(dir.length).includes("/")) return mac.slice(dir.length);
+  if (mac === MAC_BREW || mac.startsWith(`${MAC_BREW}/`)) return `${BREW_PREFIX}${mac.slice(MAC_BREW.length)}`;
+  return undefined;
+}
+
+export interface ImagePaths {
+  text: string;
+  /** What became of each Mac path met, once each in the order met, as the stage prints it. */
+  notes: string[];
+}
+
+/** A run ends at the first space in its last segment: a space is part of a directory name only where the path goes
+ * on into another directory, so `/opt/homebrew/bin/gh auth git-credential` is the binary and the words after it. */
+function pathRun(run: string): string {
+  const space = run.indexOf(" ", run.lastIndexOf("/"));
+  return space === -1 ? run : run.slice(0, space);
+}
+
+/** Files a line cannot leave without taking the syntax around it: a JSON object's key carries the comma that holds
+ * the object together, a TOML array and a plist element run over several lines, and a YAML key holds its block by
+ * indent. By name, and by parsing for a file that is JSON under another name. A git config, an rc file and an ssh
+ * config all read fine a line short. */
+const STRUCTURED_NAME = /\.(jsonc?|toml|ya?ml|plist)$/;
+function structuredFile(text: string, shown: string): boolean {
+  if (STRUCTURED_NAME.test(shown)) return true;
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** What begins a comment where a copied config carries one. One list for every file rather than a table per kind:
+ * a line this leaves as written is a line nothing was going to run, and the ruling is that a comment stays. */
+const COMMENT_MARKS = ["#", "//", ";"];
+const isComment = (line: string): boolean => COMMENT_MARKS.some(mark => line.trimStart().startsWith(mark));
+
+/** A copied file with its Mac paths repointed at the image. A path the image has no place for takes its line with
+ * it, so a shell does not run it and git does not call it; in a file a line cannot leave the path stays there and
+ * the note says so. A comment is left as written, whatever it names. */
+export function withImagePaths(text: string, shown: string, opts: ImagePathOptions): ImagePaths {
+  const structured = structuredFile(text, shown);
+  const macPath = pathsIn(opts.home);
+  const notes: string[] = [];
+  const note = (n: string): void => {
+    if (!notes.includes(n)) notes.push(n);
+  };
+  const kept: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (isComment(line)) {
+      kept.push(line);
+      continue;
+    }
+    const runs = [...line.matchAll(macPath)].map(m => ({ at: m.index, mac: pathRun(m[0]) }));
+    const strays = runs.filter(r => imagePath(r.mac, opts) === undefined);
+    if (strays.length > 0 && !structured) {
+      for (const r of strays) note(`${r.mac} out of ${shown}`);
+      continue;
+    }
+    for (const r of strays) note(`${r.mac} left in ${shown}`);
+    let out = "";
+    let from = 0;
+    for (const r of runs) {
+      const to = imagePath(r.mac, opts);
+      if (to === undefined) continue;
+      note(`${r.mac} now ${to}`);
+      out += line.slice(from, r.at) + to;
+      from = r.at + r.mac.length;
+    }
+    kept.push(out + line.slice(from));
+  }
+  return { text: kept.join(text.includes("\r\n") ? "\r\n" : "\n"), notes };
+}
 
 const SSH_PUBLIC = /^(config|authorized_keys|allowed_signers|environment|rc|.*\.pub)$/;
 
@@ -342,7 +462,7 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
     }
     return rel;
   };
-  const plan: FilesPlan = { files: [], secrets: [], skipped: [], bytes: 0, rungs: {} };
+  const plan: FilesPlan = { files: [], secrets: [], skipped: [], rewrites, bytes: 0, rungs: {} };
   for (const e of entries) {
     if (!ticked(e) || e.rung === "tools") continue;
     if (e.rung === "logins" && e.choice !== "copy") continue;

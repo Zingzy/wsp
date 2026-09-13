@@ -193,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -804,6 +804,8 @@ export interface RuntimeOptions {
   placeDialWaitMs?: number;
   /** The same for one machine frame on a place link with no bound of its own. */
   placeFrameWaitMs?: number;
+  /** The same for how long a frame that may be asked again waits on a computer's link to come back. */
+  placeRelinkWaitMs?: number;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
@@ -2361,6 +2363,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
       ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
       ...(opts.placeFrameWaitMs !== undefined ? { frameWaitMs: opts.placeFrameWaitMs } : {}),
+      ...(opts.placeRelinkWaitMs !== undefined ? { relinkWaitMs: opts.placeRelinkWaitMs } : {}),
       recording: {
         // Every one of these three reads the live records, so each waits on the one hydration every other road
         // waits on: a place that dials a host nothing has asked a verb of yet would otherwise find no records at all.
@@ -2420,6 +2423,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (e.type === "place.present") void image.keepCurrent(e.placeId);
       else if (e.type === "place.removed") copyRows.delete(e.placeId);
     });
+    // A build on that computer is making its requests over the link that just went: the ones that may be asked
+    // again are waiting on it, so the stage they are in says what it is waiting for and says its own line again
+    // once the computer opens a socket.
+    placeDoor.on(e => {
+      if (e.type !== "place.absent" && e.type !== "place.present") return;
+      const gone = e.type === "place.absent";
+      for (const at of stageAt.values()) {
+        if (at.place !== e.placeId) continue;
+        // The whole frame the stage last sent, with the wait standing in for its line while the gap lasts: the step
+        // a reader clocks and the machines a failure left behind are facts of that stage and outlive a socket.
+        const detail = gone ? placeDialBackLine(placeDoor!.nameOf(e.placeId)) : at.frame.detail;
+        bus.emit({ ...at.frame, type: "golden.stage", ...(detail !== undefined ? { detail } : {}), ...(at.named ? { place: at.place } : {}) });
+      }
+    });
     // A computer that dials back in is the moment a record nothing could be asked about can be read at last: only
     // the ones this host is holding by a stand-in go through the hydration they would have had at host start, and
     // a fork that was live through the blip is left exactly as it is. A laptop that slept and dialled again is the
@@ -2446,6 +2463,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the line all ask for the same copy: the second and every later ask joins the first and takes the copy it seals,
    * so one builder runs and this computer is read once. */
   const copyBuilds = new Map<string, Promise<SealedImageBuilt>>();
+  /** One build stage as its frame carries it, with nothing of the stream around it: what a gap in a link replays. */
+  interface StageFrame {
+    name: string;
+    stage: GoldenStage;
+    detail?: string;
+    step?: GoldenStep;
+    left?: string[];
+  }
+  /** The stage each build on a joined computer is in, by that computer and the image's name. A build there makes
+   * its requests over that computer's link, and a gap in it holds every one of them: the stage says so while it
+   * lasts and reads what it last read once the computer is back, rather than standing still under a line that is
+   * no longer true. */
+  const stageAt = new Map<string, { place: string; name: string; named: boolean; frame: StageFrame }>();
   /** What each place's row says about its copy: the stage while a build runs there, the reason after one stopped,
    * nothing once the copy stands. Written off the golden.stage frames naming the place, so a build reads the same on
    * the row whoever started it. */
@@ -3169,8 +3199,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * a tick.
    * The evidence is the kind's own read of what its machine is, so only a kind whose machines answer that read can
    * be offered again: one that cannot say what it is gives the same nothing whether it is up or dark. What makes
-   * that whole today is that the ssh place is the only one carrying preflight lines, so no other kind records a
-   * refusal at all; a check added to another place's preflight needs that kind to answer for itself here first. */
+   * that whole is that a place asks its machine for something only where wsp did not build that machine, and a
+   * machine that already existed is one that answers the read; a fork asks nothing, so it records no refusal for
+   * anything to re-offer. A check added to a place whose machines answer no such read would sit on its row for
+   * good, so that kind answers for itself here first. */
   const offerDaemonAgain = (entry: LiveWorkspace, polled: WorkspaceStatus): void => {
     if (entry.record.daemonRefusedAt === undefined || polled.facts === undefined) return;
     void syncDaemon(entry);
@@ -6071,8 +6103,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.delete(BUILDERS, id);
   };
 
-  const stageOf = (name: string, place?: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) =>
-    bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}), ...(left !== undefined && left.length > 0 ? { left: [...left] } : {}), ...(place !== undefined ? { place } : {}) });
+  /** The listener one build's stages ride out on. `on` is the computer the build runs on, which is what a gap in a
+   * link is matched against; `named` is whether the frames carry it, since only a copy's build is a thing that
+   * computer's row reports. */
+  const stageOf =
+    (name: string, on?: string, named = false) =>
+    (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) => {
+      const place = named ? on : undefined;
+      const frame: StageFrame = { name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}), ...(left !== undefined && left.length > 0 ? { left: [...left] } : {}) };
+      // The three words a build's stages end on; past one of them nothing of this build is asking that computer
+      // anything, so a gap in its link is no longer this build's to report.
+      if (on !== undefined) {
+        if (stage === "ready" || stage === "sealed" || stage === "failed") stageAt.delete(copyKey(on, name));
+        else stageAt.set(copyKey(on, name), { place: on, name, named, frame });
+      }
+      bus.emit({ ...frame, type: "golden.stage", ...(place !== undefined ? { place } : {}) });
+    };
   /** The backend a place id resolves to: a provider row, or a joined computer whose backend this host has heard. */
   const backendAt = (place: string): MachineBackend => {
     const at = places.backend(place) ?? placeDoor?.backendOf(place);
@@ -6276,7 +6322,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
           labels: { ...recipe.labels, [WSP_LABEL]: "1", [SMOKE_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
-          onStage: stageOf(name, copy !== undefined ? place : undefined),
+          onStage: stageOf(name, place, copy !== undefined),
           ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
           ...(opts.snapshotRetryMs !== undefined ? { snapshotRetryMs: opts.snapshotRetryMs } : {}),
           ...(logins !== undefined ? { logins } : {}),
@@ -6393,7 +6439,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (active.hash === imp?.recipeHash) return active.promise;
         throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
       }
-      const stage = stageOf(name, o?.copy === true ? place : undefined);
+      const stage = stageOf(name, place, o?.copy === true);
       const filed = filedAt(place);
       const run = claiming(`builder/${preparingKey}`, async b => {
         await refreshBuilders();
@@ -6540,7 +6586,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const head = goldenHead(prior);
       if (head === undefined) throw new Error(`no golden named "${name}" to update; wsp init builds one`);
       const at = backendAt(place);
-      const stage = stageOf(name);
+      const stage = stageOf(name, place);
       // The head's digest, whose pins the rows the delta leaves alone keep on the next version's record.
       const previousRecipe = await copyRecipeOf(place, name, head.version);
       // Past its window a kept builder is never used, running or not: it is stopped here and the update forks; one
@@ -6959,7 +7005,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const view = await golden.prepare({ name, place, copy: true, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
     const entry = builders.get(view.id);
     if (entry === undefined) throw new Error(`the builder ${view.id} prepared at ${where} left no record here; nothing was sealed`);
-    const stage = stageOf(name, place);
+    const stage = stageOf(name, place, true);
     try {
       // The person's sign-ins land before the seal and after everything the recipe installs, so the copy holds
       // what the builder at the wired place held and no sign-in is run here.

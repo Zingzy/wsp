@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { catalogToolFor, readsRowRoad } from "@wsp/catalog";
+import { MAC_BREW, catalogToolFor, readsRowRoad } from "@wsp/catalog";
 import { toolRowId } from "@wsp/protocol";
 import { linuxSupport } from "../brew-bottles.js";
 import { aptPackages } from "./apt.js";
@@ -143,7 +143,7 @@ type GlobalManager = {
 
 const NPM_LS = ["ls", "-g", "--depth=0", "--json"];
 /** Where another node once kept its globals; a laptop that moved to a new node still runs them from PATH. */
-const NPM_PREFIXES = ["/opt/homebrew", "/usr/local"];
+const NPM_PREFIXES = [MAC_BREW, "/usr/local"];
 
 /** npm's own prefix, then every other prefix on this laptop that holds globals; a name in both is the own prefix's. */
 async function npmGlobals(host: Host): Promise<Pkg[]> {

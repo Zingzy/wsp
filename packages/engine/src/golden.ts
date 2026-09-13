@@ -271,6 +271,9 @@ export interface PackedFiles {
   cut: CutNames[];
   /** Commands the rc files call that the image does not have, once each; the pack defined each as a silent no-op. */
   silenced: string[];
+  /** What became of each Mac path the copied files carried, once each: repointed at the image, or out of the file
+   * where the image has no such place. */
+  macPaths: string[];
   /** The skips a fork should know about, stamped on the sealed version: a hook whose script did not travel. */
   leftBehind?: GoldenLeftBehind[];
 }
@@ -473,7 +476,8 @@ export async function applyGoldenImport(machine: Machine, opts: ApplyImportOptio
       else delete ledger.leftBehind;
       const notes = packed.skipped.map(s => `${s.path} (${s.note})`);
       const silenced = packed.silenced.length > 0 ? `; silenced in the shell: ${packed.silenced.join(", ")}` : "";
-      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}${silenced}`);
+      const macPaths = packed.macPaths.length > 0 ? `; Mac paths: ${packed.macPaths.join(", ")}` : "";
+      stage("applying-setup", `${fmtBytes(packed.bytes)} packed${notes.length > 0 ? `; skipped ${notes.join(", ")}` : ""}${silenced}${macPaths}`);
       if (packed.silenced.length > 0) ledger.silenced = packed.silenced;
       else delete ledger.silenced;
       mark("applying-setup");
@@ -877,8 +881,9 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
         });
   // A snapshot that failed changed nothing on the builder, so every failure here is typed as one that leaves it:
   // the provider's 502 is asked again while it still reads the builder running, and any other failure (a job the
-  // far side failed, a link that dropped) is said once with the builder's state beside it. Only a resumed machine's
-  // refusal is another kind of failure, and it passes as itself.
+  // far side failed, a link that went under the frame naming the job, a link the wait for the job did not bring
+  // back) is said once with the builder's state beside it. Only a resumed machine's refusal is another kind of
+  // failure, and it passes as itself.
   const takeSnapshot = async (): Promise<string> => {
     for (let attempt = 1; ; attempt++) {
       try {

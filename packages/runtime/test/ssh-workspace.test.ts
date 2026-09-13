@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, parseSshMachineId } from "@wsp/engine";
 import { alreadyRecorded, machineWord, noMachineHomeLine, noSshDaemonLine, OVER_SSH, relayedRecordRefusal, relayedRefusal, sshHostKeyNotice, TURN_TOKEN_ENV, undrivenRefusal, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
+import { POLL_INTERVAL_MS } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
+import { fakeClock } from "./fake-clock.js";
 import { fakeSsh, FAKE_BOX_KEY, FAKE_OS, FAKE_UPTIME_S } from "./fake-ssh.js";
 import { stubBackend } from "./stub-backend.js";
 
@@ -65,6 +67,48 @@ describe("ssh workspace", () => {
     // The folder is that machine's own login home, not this computer's and not another machine's.
     const other = await rt.workspaces.createSsh("root@10.0.0.7");
     expect((await rt.status.list()).find(r => r.id === other.id)?.facts?.folder).toBe("/root");
+  });
+
+  it("a machine that did not answer what it is is left alone for a widening while, so a box that is off costs one dial and not one a tick", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fc = fakeClock();
+    // The box answers the read that records it and nothing after: a machine somebody switched off, where the dial
+    // itself is what costs, since the ssh client sits on its connect timeout before it gives up.
+    let off = true;
+    const { wiring, carried } = fakeSsh(script => (off && script === SSH_FACTS_SCRIPT ? { exitCode: 255, stdout: "", stderr: "ssh: connect to host box port 22: Connection timed out\n" } : {}));
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, ssh: wiring, clock: fc.clock });
+    try {
+      const dials = (): number => carried.filter(c => c.script === SSH_FACTS_SCRIPT).length;
+      const ws = await rt.workspaces.createSsh("dev@box");
+      const row = async () => (await rt.status.list()).find(r => r.id === ws.id);
+      // A machine with no daemon has no reach probe of its own, so this read is the only thing that dials it: the
+      // first one goes, and every read until the backoff runs out is skipped rather than spending the dial again.
+      expect((await row())?.facts).toBeUndefined();
+      expect(dials()).toBe(1);
+      for (const _ of [0, 1, 2]) await row();
+      expect(dials()).toBe(1);
+      // The row itself stands through all of it: what a machine cannot say is left off it, never the row.
+      expect((await row())?.machineState).toBe("running");
+      // One poll, then twice that, then twice again: a second dial at the first window, and none until the second.
+      fc.advance(POLL_INTERVAL_MS);
+      await row();
+      expect(dials()).toBe(2);
+      fc.advance(POLL_INTERVAL_MS);
+      await row();
+      expect(dials()).toBe(2);
+      fc.advance(POLL_INTERVAL_MS);
+      await row();
+      expect(dials()).toBe(3);
+      // Switched back on: the dial that answers fills the row in and the next read is due at once again.
+      off = false;
+      fc.advance(4 * POLL_INTERVAL_MS);
+      expect((await row())?.facts).toEqual({ os: FAKE_OS, uptimeMs: FAKE_UPTIME_S * 1_000, folder: "/home/dev" });
+      expect(dials()).toBe(4);
+      expect((await row())?.facts?.folder).toBe("/home/dev");
+      expect(dials()).toBe(5);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("the port and the key the person named ride the dial and the record", async () => {

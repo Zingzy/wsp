@@ -249,6 +249,19 @@ const ZOMBIE_PROBE_TIMEOUT_MS = 20_000;
 export const POLL_INTERVAL_MS = 15_000;
 const ZOMBIE_PROBE_CMD = "echo ok";
 
+/** The longest a machine that will not say what it is goes unasked. Far enough out that a machine parked off costs
+ * a dial an hour rather than one a tick, near enough that a person who turns it back on sees its row fill in while
+ * they are still looking at it. */
+const FACTS_BACKOFF_MAX_MS = 5 * 60_000;
+
+/** How long to leave a machine alone after a facts read that never reached it: one poll, then twice that, widening
+ * until it answers. The read is a dial of its own on a machine that already exists, and a machine that is off
+ * answers nothing until its client's connect timeout runs out, so a read on every tick spends that timeout every
+ * tick for as long as the machine stays off. */
+function factsBackoffMs(misses: number): number {
+  return Math.min(FACTS_BACKOFF_MAX_MS, POLL_INTERVAL_MS * 2 ** Math.max(0, misses - 1));
+}
+
 /** The total at a tick: the last tick's total plus the awake time since it at the rate that tick carried. A tick
  * lands at every event that opens or re-prices a stretch (a create, a wake, a size change), so that rate is the one
  * that held until this tick; only the first tick ever has none behind it, and its stretch ran at the size now. */
@@ -306,6 +319,9 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const probes = new Map<StatusReader, Map<string, Probes>>();
   /** Per workspace, the machine whose metrics 404 was logged while its guest still answered, so the line lands once per spell. */
   const doubted = new Map<string, string>();
+  /** Per workspace, the machine its facts were last dialled on, how many of those dials in a row never reached it,
+   * and the instant the next one is due. A replaced machine starts clean, and a machine that answers clears it. */
+  const factsDials = new Map<string, { machineId: string; misses: number; nextAt: number }>();
   /** The awake stretch a gone verdict closed, per workspace, until a record leaves gone and reopens it or a rebuild
    * or a nap makes it stale. A verdict the state read later unmakes was never true, and the machine under it went
    * on billing, so those hours belong to the stretch rather than to nothing. */
@@ -377,6 +393,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     suspects.delete(e.workspaceId);
     for (const book of probes.values()) book.delete(e.workspaceId);
     doubted.delete(e.workspaceId);
+    factsDials.delete(e.workspaceId);
   });
 
   // The stored series is as of the tick that last added a point, and a run of one rate is a straight line from
@@ -556,6 +573,24 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     return { state: provider, reach: { ...reach, state: "zombie" }, reason };
   };
 
+  /** What the machine says it is, or nothing where it did not say. A read that never reached the machine backs the
+   * next one off, since the one before it already cost whatever a dial to a machine that is not there costs, and a
+   * row shows the same pending whether the read was skipped or failed. Held here rather than beside the reach,
+   * because a machine with no daemon has no reach probe to learn it from: nothing dials it but this. */
+  const factsRead = async (r: StatusRecord, read: () => Promise<MachineFacts>): Promise<MachineFacts | undefined> => {
+    const held = factsDials.get(r.id);
+    const dialled = held?.machineId === r.machineId ? held : undefined;
+    if (dialled !== undefined && clock.now() < dialled.nextAt) return undefined;
+    const said = await read().catch(() => undefined);
+    if (said !== undefined) {
+      factsDials.delete(r.id);
+      return said;
+    }
+    const misses = (dialled?.misses ?? 0) + 1;
+    factsDials.set(r.id, { machineId: r.machineId, misses, nextAt: clock.now() + factsBackoffMs(misses) });
+    return undefined;
+  };
+
   const statusesOf = async (records: StatusRecord[], opts: StatusListOptions | undefined): Promise<WorkspaceStatus[]> => {
     const probe: ProbeOptions = { promptMs: opts?.promptMs ?? promptMs, timeoutMs: opts?.probeTimeoutMs ?? probeTimeoutMs };
     const reconcile = opts?.reconcile ?? "always";
@@ -569,7 +604,7 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
         void exec;
         void generation;
         // A machine that cannot say what it is this tick keeps its row; the facts are the one part left off it.
-        const said = facts === undefined ? undefined : await facts().catch(() => undefined);
+        const said = facts === undefined ? undefined : await factsRead(r, facts);
         const base = { ...view, size, rateUsdPerHour: r.rateUsdPerHour, ...(idleAt !== undefined ? { idleAt } : {}), ...(said !== undefined ? { facts: said } : {}) };
         const gone = (reason: string | undefined): WorkspaceStatus => ({ ...base, machineState: "gone", reach: { state: "gone" }, ...(reason !== undefined ? { reason } : {}) });
         const done = (state: MachineState, reach: WorkspaceStatus["reach"]): WorkspaceStatus =>
