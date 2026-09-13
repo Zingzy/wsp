@@ -185,15 +185,14 @@ describe("what wsp add prints with no argument", () => {
   });
 
   it("takes every provider the table says how to add, and nothing it names no way of adding", () => {
-    // Read off the table, never off an id: docker is added by its words and the row that holds no machine is no
-    // place to add at all.
-    expect(addableProviders()).toEqual(["docker", "box", "solari"]);
+    // Read off the table, never off an id: the row that holds no machine is no place to add at all.
+    expect(addableProviders()).toEqual(["box", "solari"]);
     // How a row is added is read off the row's own facts: a row that declares the variable it reads a key from is
     // opened by that key, and is not asked to say so twice.
-    expect(addedProviders().map(m => addedBy(m))).toEqual(["words", "key", "key"]);
-    expect(addedProviders().map(m => [m.id, m.keyEnv !== undefined])).toEqual([["docker", false], ["box", true], ["solari", true]]);
+    expect(addedProviders().map(m => addedBy(m))).toEqual(["key", "key"]);
+    expect(addedProviders().map(m => [m.id, m.keyEnv !== undefined])).toEqual([["box", true], ["solari", true]]);
     expect(addableProviders()).not.toContain("none");
-    expect(addRefusal("nonsense")).toContain("docker, box, solari");
+    expect(addRefusal("nonsense")).toContain("box, solari");
     expect(addRefusal("nonsense")).toContain("user@host");
     expect(addRefusal("nonsense")).toContain("wsp add with no argument");
   });
@@ -217,17 +216,6 @@ const opts = (home: string, env: Record<string, string | undefined> = {}): Param
 });
 
 describe("a provider as a place", () => {
-  it("sets this computer up for the provider and prints its place line, with the key read where the person keeps it", async () => {
-    const home = tmp("add-provider");
-    const io = captured();
-    // docker is added by its words alone, so nothing is put to a provider and nothing of a key is read.
-    expect(await addCommand(io, opts(home, {}), ["docker"], {}, systemPlaceDeps)).toBe(0);
-    expect(io.lines.join("\n")).toContain("place docker");
-    expect(readFileSync(join(home, ".env"), "utf8")).toContain("WSP_PROVIDER=docker");
-    // The key itself is never written here: it stays where the person keeps it, under its own row's variable.
-    expect(readFileSync(join(home, ".env"), "utf8")).not.toContain("API_KEY");
-  });
-
   it("puts the key to a provider that is opened by one, and writes nothing when it is refused", async () => {
     const home = tmp("add-provider-key");
     const put: MachineBackend[] = [];

@@ -43,9 +43,6 @@ export interface StubBackend extends MachineBackend {
   puts: { machine: string; path: string; body: Buffer }[];
   /** What a download URL serves for a guest path; absent, an empty archive. */
   downloads?: (path: string) => Buffer;
-  /** Where a process inside each machine dials the computer this host runs on; absent, the machines know no road
-   * back, as a VM at a provider does. Set before a machine is made. */
-  machineHostUrl?: (port: number) => string;
   /** What the computer answers a create with beside the machine, as a box that would not fork at the size asked for
    * does; absent, every create answers with the machine alone. Set before a machine is made. */
   createNotice?: string;
@@ -159,7 +156,6 @@ export function stubBackend(mark?: string): StubBackend {
         resumes: 0,
         shape: { cpu: spec.cpu ?? 2, memMb: spec.memMb ?? 4096, createdAt: new Date().toISOString() },
         snapshotLives: [],
-        ...(backend.machineHostUrl !== undefined ? { hostUrl: backend.machineHostUrl } : {}),
         ...(backend.createNotice !== undefined ? { notice: backend.createNotice } : {}),
         async exec(cmd: string): Promise<ExecResult> {
           if (m.killed) throw Object.assign(new Error("gone"), { kind: "missing", status: 404 });

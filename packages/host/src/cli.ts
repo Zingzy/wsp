@@ -570,8 +570,6 @@ export interface ServeAsked extends ListenAsked {
   advertise?: string;
   /** The machine provider this host forks on, as `--provider` named it. */
   provider?: string;
-  /** The Docker daemon this host dials, as `--docker-host` named it. */
-  dockerHost?: string;
   /** Whether a box linked to a relay runs its connector; false is `--no-relay`. */
   relay?: boolean;
 }
@@ -593,7 +591,6 @@ export const SERVE_FLAGS: readonly ServeFlag[] = [
   { name: "listen", option: { type: "string" }, words: a => ["--listen", a.address] },
   { name: "advertise", option: { type: "string" }, words: a => (a.advertise === undefined ? [] : ["--advertise", a.advertise]) },
   { name: "provider", option: { type: "string" }, words: a => (a.provider === undefined ? [] : ["--provider", a.provider]) },
-  { name: "docker-host", option: { type: "string" }, words: a => (a.dockerHost === undefined ? [] : ["--docker-host", a.dockerHost]) },
   { name: "no-relay", option: { type: "boolean" }, words: a => (a.relay === false ? ["--no-relay"] : []) },
 ];
 
@@ -616,16 +613,13 @@ export interface SharedOpts extends ServeAsked {
  * environment cannot send wsp host connect to one folder and --host to another. It is also what the provider words
  * stand in front of, so one run picks its folder and its provider out of the same environment. */
 export function optsFor(
-  values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "docker-host" | "no-relay">,
+  values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "no-relay">,
   env: Readonly<Record<string, string | undefined>> = process.env,
   note: (line: string) => void = () => {},
 ): SharedOpts {
   const asked = portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen });
   const advertise = advertiseWord(values.advertise);
-  const provider = {
-    ...(values.provider !== undefined ? { provider: values.provider } : {}),
-    ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
-  };
+  const provider = values.provider !== undefined ? { provider: values.provider } : {};
   return {
     ...asked,
     ...(advertise !== undefined ? { advertise } : {}),
@@ -1552,7 +1546,6 @@ interface SharedFlags {
   host?: string;
   "no-relay"?: boolean;
   provider?: string;
-  "docker-host"?: string;
 }
 
 /** What a word of the shared parse does with --host. `aimed`: the line runs against the host it names. `refused`:
@@ -1591,7 +1584,7 @@ function aimPick(opts: SharedOpts, values: SharedFlags): { statePath: string } &
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     page: "agent",
-    usage: "wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--docker-host <url>] [--no-relay] [--service]",
+    usage: "wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--no-relay] [--service]",
     about: "serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. Every other line starts a host for itself when none serves",
     json: false,
     host: "refused",
@@ -2068,7 +2061,6 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
   { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
-  { name: "docker-host", on: ["up", "init"], says: "the Docker daemon to dial, as DOCKER_HOST words it; this computer's own socket without it" },
   { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "awake", on: ["join"], says: "hold this computer out of idle sleep while it is joined, for as long as the agent runs" },

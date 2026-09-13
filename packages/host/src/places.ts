@@ -67,7 +67,7 @@ import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
-import { PROVIDER_ENV, addedBy, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { advertiseWord, pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
@@ -509,24 +509,21 @@ export function addedLines(place: PlaceView, hostKey: string | undefined): strin
   ];
 }
 
-/** A provider as a place: the words name it, this computer is set up for it, and a provider that is opened by a key
- * of the person's is put the one this computer already holds before anything is written. The key itself is read
- * under the variable that provider's row declares, off the same three layers every other road reads a key through,
- * and is never written here. */
+/** A provider as a place: the words name it, and the key that opens it is put to the provider before anything is
+ * written. The key is read under the variable that provider's row declares, off the same three layers every other
+ * road reads a key through, and is never written here. Every row a person can add declares one, which is what
+ * addedProviders answers with. */
 async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDeps): Promise<number> {
-  const module = addedProviders().find(m => m.id === id)!;
   const env: ProviderEnv = { ...(opts.providerEnv ?? process.env), [PROVIDER_ENV]: id };
   const backend = providerBackendFor(env);
-  if (addedBy(module) === "key") {
-    const check = await deps.checkKey(backend);
-    const said = keyCheckLine(check, true);
-    if (check.state === "refused" && said !== undefined) {
-      io.error(said);
-      return 1;
-    }
-    // A check nothing answered says nothing about the key: it is taken, and the first fork says its own piece.
-    if (said !== undefined) io.error(said);
+  const check = await deps.checkKey(backend);
+  const said = keyCheckLine(check, true);
+  if (check.state === "refused" && said !== undefined) {
+    io.error(said);
+    return 1;
   }
+  // A check nothing answered says nothing about the key: it is taken, and the first fork says its own piece.
+  if (said !== undefined) io.error(said);
   writeEnvFile(join(wspHome(opts.env), ".env"), { [PROVIDER_ENV]: id });
   const { pricing } = backend;
   io.log(providerPlaceLine(id, pricing.rateUsdPerHour(pricing.defaultSize)));

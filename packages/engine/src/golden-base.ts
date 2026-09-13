@@ -72,9 +72,9 @@ export function parseVersions(stdout: string): GoldenBaseTool[] {
 
 /** The floor rows the provider's image already satisfies, by entry id: every command the row promises answers with
  * a version, and where the row pins a major that version is on it. Their installs are not idempotent on an image
- * that ships the tool (apt-get install docker.io fails where the image's own Docker stands), and an install that
- * cannot make the row truer than it is has nothing to do. A row that pins a major still runs when the image's is
- * another: the floor promises that major. */
+ * that ships the tool (apt-get install fails where the image's own copy stands), and an install that cannot make
+ * the row truer than it is has nothing to do. A row that pins a major still runs when the image's is another: the
+ * floor promises that major. */
 export function carriedByImage(versions: readonly GoldenBaseTool[]): Set<string> {
   const read = new Map(versions.map(v => [v.name, v.version]));
   const out = new Set<string>();

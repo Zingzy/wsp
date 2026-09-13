@@ -43,7 +43,7 @@ Every refusal in wsp is one line on stderr that says what happened and, where th
 - The machine runs as root with home `/root` and no login shell, so `bash -c`, never `bash -lc`.
 - A 2 vCPU, 4 GB machine runs one build or one agent at a time. Two starve the daemon and the app reads the machine as not answering.
 - The root disk is 20 GB; wsp keeps 2 GB free and skips tool installs that would go under it.
-- Docker does not run on the current provider's guests. Services install natively.
+- Docker does not run on the current provider's guests, and it is not on the floor, so no image carries it unless you tick it. Services install natively.
 
 ## Sign-ins
 

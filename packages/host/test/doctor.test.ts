@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
-import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
+import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { bundledDaemonName, DAEMON_TARGETS, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, signInRefusalLine, type HarnessCatalogAnswer, type PlaceCapacity } from "@wsp/protocol";
@@ -25,6 +25,7 @@ import {
   daemonUnit,
   daemonSupervisorScript,
   DAEMON_LOG_PATH,
+  GUEST_SUPERVISOR_PATH,
   daemonPidPath,
   supervisorPidPath,
   deployDaemon,

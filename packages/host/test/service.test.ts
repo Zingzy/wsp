@@ -141,11 +141,10 @@ describe("one module per service manager", () => {
     expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "" })).toEqual({ PATH: "/usr/bin" });
     expect(serviceEnv({}).PATH).toContain("/usr/bin");
     // Every variable a provider is named in travels: the shell that installed the service is gone by the time it runs.
-    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "docker", WSP_DOCKER: "1", DOCKER_HOST: "tcp://10.0.0.4:2375" })).toEqual({
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "box", WSP_FAKE_AS: "solari" })).toEqual({
       PATH: "/usr/bin",
-      WSP_PROVIDER: "docker",
-      WSP_DOCKER: "1",
-      DOCKER_HOST: "tcp://10.0.0.4:2375",
+      WSP_PROVIDER: "box",
+      WSP_FAKE_AS: "solari",
     });
     expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "" })).toEqual({ PATH: "/usr/bin" });
   });
@@ -464,9 +463,9 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // A Solari key in the same shell is not what this service would read, so it is not what it is refused over.
     const boxWithSolari = { ...box, SOLARI_API_KEY: KEY };
     expect(keyOnlyInThisShell(sources(boxWithSolari), boxWithSolari)).toContain("BOX_API_KEY");
-    // Containers read no key at all: nothing is lost by starting without this shell, so there is no line.
-    const docker = { WSP_PROVIDER: "docker", SOLARI_API_KEY: KEY };
-    expect(keyOnlyInThisShell(sources(docker), docker)).toBeUndefined();
+    // A provider that reads no key loses nothing by starting without this shell, so there is no line.
+    const keyless = { WSP_PROVIDER: "fake", SOLARI_API_KEY: KEY };
+    expect(keyOnlyInThisShell(sources(keyless), keyless)).toBeUndefined();
   });
 
   it("keeps a keyless host up: nothing asks for a key, and no line says one went missing", async () => {
@@ -511,7 +510,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
 
   it("the unit runs the wsp up the person typed: every flag that shapes a serving host is in ExecStart, read back by the same parse", async () => {
     keyInFile();
-    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--ws-port", "4433", "--provider", "docker", "--docker-host", "tcp://10.0.0.4:2375", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
+    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--ws-port", "4433", "--provider", "box", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
     // Every flag of the table is in that line, so a row added to it and forgotten here fails rather than passing quietly.
     for (const flag of SERVE_FLAGS) expect(typed, `--${flag.name} is in the line this case types`).toContain(`--${flag.name}`);
     const asked = optsFor(parseArgs({ args: typed, options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
@@ -527,17 +526,16 @@ describe("wsp up --service, wsp down and wsp status", () => {
       "--ws-port", "4433",
       "--listen", "0.0.0.0",
       "--advertise", "http://10.0.0.9:4407",
-      "--provider", "docker",
-      "--docker-host", "tcp://10.0.0.4:2375",
+      "--provider", "box",
       "--no-relay",
     ]);
     // The words as the manager reads them, not only as argv: systemd takes one line, and each word is quoted there.
     expect(SERVICE_MANAGERS.systemd.text(fake.plans[0]!)).toContain(
-      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--ws-port' '4433' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'docker' '--docker-host' 'tcp://10.0.0.4:2375' '--no-relay'`,
+      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--ws-port' '4433' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'box' '--no-relay'`,
     );
     // The line in the unit is a line wsp reads: parsed again, it asks for exactly what the person asked for.
     const again = optsFor(parseArgs({ args: argv.slice(2), options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
-    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.dockerHost, o.relay];
+    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.relay];
     expect(serving(again)).toEqual(serving(asked));
     // Only a word the person typed is spelled back, read the one way everything reads it: spaces are no address,
     // and a trailing slash is not part of one. Without --advertise the unit carries none, and every kind of

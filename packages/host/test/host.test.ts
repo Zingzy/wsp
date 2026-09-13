@@ -207,7 +207,7 @@ describe("wsp cli", () => {
     };
     expect(scan.tick).toBe("used");
     for (const row of scan.tools) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
-    expect(scan.tools.filter(r => r.on).map(r => r.id).sort()).toEqual(["build-essential", "curl", "docker", "fd", "git", "jq", "node", "pnpm", "python", "ripgrep", "rsync", "sqlite3", "uv", "wget", "xz", "zip"]);
+    expect(scan.tools.filter(r => r.on).map(r => r.id).sort()).toEqual(["build-essential", "curl", "fd", "git", "jq", "node", "pnpm", "python", "ripgrep", "rsync", "sqlite3", "uv", "wget", "xz", "zip"]);
     expect(scan.agents.filter(r => r.on).map(r => r.id)).toEqual(["claude"]);
     expect(scan.commands).toEqual([{ name: "pulumi", calls: 2, sessions: 2 }]);
     expect(scan.signIns.map(r => [r.id, r.recommended.value])).toEqual([["claude", "machine"]]);
