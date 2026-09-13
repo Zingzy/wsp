@@ -451,7 +451,7 @@ describe("a computer joining a wsp", () => {
     const wrong = await fakeHost({ wrongKey: true });
     await expect(joinCommand(captured(), [wrong.url], { code: codeFor(wrong, "X") }, joinDepsFor(tmp("join-key"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
     const other = await fakeHost({ refuse: "this host takes no places while it is building your image" });
-    await expect(joinCommand(captured(), [other.url], { code: codeFor(other, "X") }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "Error" });
+    await expect(joinCommand(captured(), [other.url], { code: codeFor(other, "X") }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "host" });
   });
 
   it("refuses a second join on a computer that already belongs to a wsp", async () => {
@@ -1230,7 +1230,7 @@ describe("a join as the app's shell runs it", () => {
     const host = await fakeHost();
     const runner = fakeRunner();
     expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
-    const unitDir = join(home, ".config", "systemd", "user");
+    const unitDir = join(home, "etc-systemd-system");
     const written = readFileSync(join(unitDir, readdirSync(unitDir)[0]!), "utf8");
     expect(written).toContain(`ExecStart=${shellQuote(daemonBinaryHere())} '--host' '127.0.0.1'`);
     expect(written).toContain("'--kind' 'place'");
@@ -1317,11 +1317,14 @@ describe("the sweep a joined computer runs on itself", () => {
     const host = await fakeHost();
     const runner = fakeRunner();
     expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, runner.run))).toBe(0);
-    const unitDir = join(home, ".config", "systemd", "user");
+    const unitDir = join(home, "etc-systemd-system");
     const work = join(home, "wsp-work");
     mkdirSync(work, { recursive: true });
     writeFileSync(join(work, "a-thread-wrote-this"), "mine");
-    const removed = await leavePlace(home, runner.run, "linux");
+    // The sweep is given the manager the join wrote its unit with, so it looks under this test's home and not the machine's.
+    const manager = unitsUnder(home);
+    const { removed } = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
+    await stopPlaceService({ home, manager, run: runner.run, uid: 0 });
     expect(readdirSync(unitDir)).toEqual([]);
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
