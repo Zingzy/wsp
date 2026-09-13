@@ -1218,8 +1218,13 @@ export const isSessionEvent = (e: { type: string }): e is SessionEvent => SESSIO
  * up, so a change to a record a client already holds is never this event. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
-export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
+export const WorkspaceCreateStage = z.enum(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
 export type WorkspaceCreateStage = z.infer<typeof WorkspaceCreateStage>;
+/** Whether a line of a create's log is the step the create is waiting on, rather than a note on a step it already
+ * took. A surface with one line for the whole create shows the last of these, so a cosmetic step's verdict never
+ * stands where the create's state belongs. Takes the word a line carries, since the image build's own lines share
+ * that log and are steps like any other. */
+export const creationAwaits = (stage: string): boolean => stage !== "hostname-set";
 /** Progress of one create, from the first request to ready or failed: the id the workspace will carry, its name, one
  * plain sentence per stage, the time since the create began, and a notice when a step did something worth reading
  * (a kept builder was stopped to make room at the machine cap). */
@@ -1231,6 +1236,9 @@ export const WorkspaceCreatingEvent = z.object({
   message: z.string(),
   elapsedMs: z.number(),
   notice: z.string().optional(),
+  /** What the machine answered this step with, for the line's title: a guest's refusal is evidence a person may
+   * need and never a sentence written at them, so no surface draws it as one. */
+  detail: z.string().optional(),
   /** The thread this fork was asked for by, from the first stage: a create streams stages before the workspace has
    * a record, so the stream's tree rule reads who asked off the event rather than off a record that is not there
    * yet. Absent where a person asked for the machine. */
@@ -1408,9 +1416,10 @@ export const ProjectAgentResult = z.object({
 });
 export type ProjectAgentResult = z.infer<typeof ProjectAgentResult>;
 /** What landed: the path on the machine, the files and bytes extracted there, the upload parts, the secret-shaped
- * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered, and
- * each named agent's outcome. */
-export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()), agents: z.array(ProjectAgentResult) });
+ * paths that were cut because the import did not name them, the ones that landed rewritten as the plan offered,
+ * each named agent's outcome, and the project the workspace now holds, so a client shows the folder in its list the
+ * moment the host answers rather than waiting for the machine to say anything about it. */
+export const ProjectImportResult = z.object({ dest: z.string(), files: z.number(), bytes: z.number(), parts: z.number(), cut: z.array(z.string()), rewritten: z.array(z.string()), agents: z.array(ProjectAgentResult), project: WorkspaceProject });
 export type ProjectImportResult = z.infer<typeof ProjectImportResult>;
 /** The steps of one export in order; `failed` ends one that threw. */
 export const ProjectExportStage = z.enum(["packing", "downloading", "landing", "done", "failed"]);
@@ -4059,7 +4068,7 @@ export const WorkspaceCreateResult = z.object({ workspace: WorkspaceView, notice
 export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, type ThreadState } from "./thread-state.js";
-export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord } from "./workspace-state.js";
+export { type AbsentComputer, absentComputer, actionRefusal, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

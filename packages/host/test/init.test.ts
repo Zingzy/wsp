@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
-import { ALREADY_APPLIED, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { ALREADY_APPLIED, folderName, Recipe, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry } from "@wsp/catalog";
@@ -284,7 +284,7 @@ function fakeProjects(trail: string[], imports: Fake["imports"]): Pick<HostHandl
     importProject: async o => {
       trail.push(`import ${o.source} -> ${o.dest}`);
       imports.push({ workspaceId: o.workspaceId, source: o.source, dest: o.dest, ...(o.carry !== undefined ? { carry: o.carry } : {}), ...(o.rewrite !== undefined ? { rewrite: o.rewrite } : {}), ...(o.agents !== undefined ? { agents: o.agents } : {}) });
-      const result: ProjectImportResult = { dest: o.dest, files: 12, bytes: 3072, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [{ agent: "claude", files: 40, bytes: 9_400_000, outcome: "moved", sessions: 46, rows: 46 }] };
+      const result: ProjectImportResult = { dest: o.dest, files: 12, bytes: 3072, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [{ agent: "claude", files: 40, bytes: 9_400_000, outcome: "moved", sessions: 46, rows: 46 }], project: { name: folderName(o.dest), dest: o.dest, importedAt: "2026-09-12T10:00:00.000Z", size: 3072 } };
       return result;
     },
   };

@@ -154,9 +154,16 @@ export function sizeFromWord(word: string): WorkspaceSize | undefined {
   return cpu > 0 && memMb > 0 ? { cpu, memMb } : undefined;
 }
 
+/** The row a size names among the ones offered, with whatever that row carries beside the shape, or nothing where
+ * the provider offers no such size. The one match, so a picker reading a size's rate and a refusal reading whether
+ * it is offered cannot disagree about which row a size is. */
+export function sizeOffer<T extends WorkspaceSize>(sizes: readonly T[], size: WorkspaceSize): T | undefined {
+  return sizes.find(s => s.cpu === size.cpu && s.memMb === size.memMb);
+}
+
 /** Whether a size is one the provider offers; the golden's own size is taken without this check. */
 export function offeredSize(sizes: readonly WorkspaceSize[], size: WorkspaceSize): boolean {
-  return sizes.some(s => s.cpu === size.cpu && s.memMb === size.memMb);
+  return sizeOffer(sizes, size) !== undefined;
 }
 
 /** An awake rate in dollars an hour, at the fewest places that do not round the price: cents where cents are the
@@ -1372,11 +1379,32 @@ export function storeUnreadLine(store: string, why: string): string {
   return `could not read ${store} on the machine, so nothing from it travelled: ${why}`;
 }
 
-/** The napping status's line when the nap could not store a fresh vault and the previous one stands: a wake that has
- * to rebuild the machine restores older files than the person left, so they are told at the nap, not at the wake. */
-export function vaultKeptLine(why: string): string {
-  return `the nap kept what was saved before it; ${why}`;
+/** The verdict when a nap could not store a fresh backup, said once with whatever the machine answered on the
+ * line's title: the machine's own words name folders and commands nobody asked for, and a person reading this
+ * needs to know where their files stand. The second clause is what is true of this workspace: an earlier nap's
+ * backup is what a rebuild would restore, older than the files the person left, and a workspace whose naps have
+ * never stored one has nothing off the machine at all. */
+export function vaultKeptLine(w: Pick<WorkspaceView, "vaultedAt">): string {
+  return `the nap saved no backup; ${w.vaultedAt === undefined ? "nothing is saved off the machine" : "what was saved before is kept"}`;
 }
+
+/** The verdict when a guest refused the hostname the fork asked for. Naming a fork is cosmetic, so the create goes
+ * on and the workspace answers to the name the machine booted with; the guest's own refusal rides the title. */
+export const HOSTNAME_KEPT = "hostname not set; the workspace keeps the machine's own name";
+
+/** The same step where the guest took the name, in the one form the creation log's lines are written in: lower
+ * case, no full stop, the workspace and never the machine's own id. */
+export function hostnameSetLine(host: string): string {
+  return `hostname set to ${host}`;
+}
+
+/** The creation log's line for the fork itself, in the words the app says a workspace and a computer in. */
+export function startingLine(name: string, where: string): string {
+  return `starting ${name} on ${where}`;
+}
+
+/** The last line of a create, as the word table ends it. */
+export const CREATE_READY = "ready";
 
 /** The day of a stamp in UTC, which is as far as this fact goes: the vault that stands can be days old, and the
  * time of day is noise on a row about thirty characters wide. */

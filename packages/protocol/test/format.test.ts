@@ -102,6 +102,7 @@ import {
   notifyLine,
   notifyTail,
   offeredSize,
+  sizeOffer,
   plural,
   PROVIDER_UNREACHED_LINE,
   providerAnswerLine,
@@ -160,6 +161,10 @@ import {
   IMAGE_ALREADY_NEWEST,
   IMAGE_MOVE_CONFIRM,
   vaultKeptLine,
+  HOSTNAME_KEPT,
+  hostnameSetLine,
+  startingLine,
+  CREATE_READY,
   vaultStaleLine,
   vaultOverCapLine,
   importIntoLine,
@@ -970,6 +975,9 @@ describe("machine size words", () => {
     expect(offeredSize(offers, { cpu: 2, memMb: 8192 })).toBe(true);
     expect(offeredSize(offers, { cpu: 4, memMb: 8192 })).toBe(false);
     expect(offeredSize([], { cpu: 2, memMb: 4096 })).toBe(false);
+    // The same match answers with the row itself, which is where a picker reads the rate it quotes.
+    expect(sizeOffer(offers, { cpu: 2, memMb: 8192 })).toEqual({ cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 });
+    expect(sizeOffer(offers, { cpu: 4, memMb: 8192 })).toBeUndefined();
     expect(fmtRate(0.11)).toBe("$0.11/hr");
     expect(sizeRefusal("4x8", offers)).toBe("4x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
     expect(sizeRefusal("big", offers)).toBe("big is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
@@ -1162,9 +1170,15 @@ describe("the nap's words when its vault was not stored", () => {
     expect(vaultOverCapLine(6_000, 5_000)).toBe("the export was 6 KB, over the 5 KB cap");
   });
 
-  it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
-    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("the nap kept what was saved before it; the export was 761 MB, over the 200 MB cap");
-    expect(vaultKeptLine("fetch failed")).toBe("the nap kept what was saved before it; fetch failed");
+  it("the verdict says what the nap did and what stands, which is nothing where no nap ever stored one", () => {
+    expect(vaultKeptLine({ vaultedAt: "2026-09-08T07:10:04.444Z" })).toBe("the nap saved no backup; what was saved before is kept");
+    // A workspace whose first nap failed has no earlier backup to keep, and the row beside this one says "no
+    // backup" with no day: a line promising one kept would be the app inventing a file.
+    expect(vaultKeptLine({})).toBe("the nap saved no backup; nothing is saved off the machine");
+    // Whatever refused the export stays on the line's title: a shell's own words are evidence, not a sentence.
+    for (const why of [vaultOverCapLine(797_760_137, 209_715_200), "vault enumeration failed: ls: /root: No such file or directory"]) {
+      for (const w of [{ vaultedAt: "2026-09-08T07:10:04.444Z" }, {}]) expect(vaultKeptLine(w)).not.toContain(why);
+    }
   });
 
   it("vaultStaleLine is the one word every surface shows for a machine whose files are not backed up, short enough for the row, and nothing while the last nap stored a vault", () => {
@@ -1176,6 +1190,33 @@ describe("the nap's words when its vault was not stored", () => {
     expect(vaultStaleLine({ vaultRefused: refused })).toBe("no backup");
     expect(vaultStaleLine({ vaultedAt: "2026-09-08T07:10:04.444Z" })).toBeNull();
     expect(vaultStaleLine({})).toBeNull();
+  });
+});
+
+describe("a create's own words", () => {
+  it("the fork's line names the workspace and the computer it starts on, and nothing of the image it copies", () => {
+    expect(startingLine("spoo-fix", "hetzner")).toBe("starting spoo-fix on hetzner");
+    expect(startingLine("clone-test", "ascii")).toBe("starting clone-test on ascii");
+    for (const word of ["fork", "golden", "image", "machine"]) expect(startingLine("spoo-fix", "hetzner")).not.toContain(word);
+    // The row draws this line while a fork boots, and it holds thirty mono characters.
+    expect(startingLine("clone-test", "ascii").length).toBeLessThanOrEqual(30);
+  });
+
+  it("every line of the log is written one way: lower case, no full stop, no machine's id", () => {
+    const lines = [startingLine("clone-test", "box"), hostnameSetLine("clone-test"), HOSTNAME_KEPT, CREATE_READY];
+    for (const line of lines) {
+      expect(line[0]).toBe(line[0]!.toLowerCase());
+      expect(line.endsWith(".")).toBe(false);
+      expect(line).not.toMatch(/\bfk_/);
+    }
+    expect(hostnameSetLine("clone-test")).toBe("hostname set to clone-test");
+    expect(CREATE_READY).toBe("ready");
+  });
+
+  it("a refused hostname reads as what it means for the workspace, with no shell's words in it", () => {
+    expect(HOSTNAME_KEPT).toBe("hostname not set; the workspace keeps the machine's own name");
+    expect(HOSTNAME_KEPT).not.toContain("sethostname");
+    expect(HOSTNAME_KEPT).not.toContain("failed");
   });
 });
 

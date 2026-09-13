@@ -205,14 +205,25 @@ describe("ComposerPrimaryActions", () => {
     expect(renderSendButton()).not.toContain("title=");
   });
 
-  it("holds the send at the app's held weight and says why on hover, where an empty box only fades it", () => {
+  it("takes the accent off a send held for a reason and says why on hover, and gives the accent back when it can be pressed", () => {
     const held = renderSendButton("Connecting to wsp");
     expect(held).toContain('title="Connecting to wsp"');
-    expect(held).toContain("disabled:opacity-64");
-    expect(held).not.toContain("disabled:opacity-30");
-    // Nothing typed is not a hold: no reason to give, and the fainter weight it has always had.
-    expect(renderSendButton()).toContain("disabled:opacity-30");
-    expect(renderSendButton()).not.toContain("disabled:opacity-64");
+    expect(held).toMatch(/<button[^>]* disabled=""/);
+    // The held tier ui/button.tsx gives a primary that cannot be pressed, in the same slot: the window's one loud
+    // thing is not loud while it refuses the press, and no amount of blue at a lower opacity reads as held.
+    expect(held).toContain("border-input");
+    expect(held).toContain("bg-popover");
+    expect(held).toContain("dark:bg-input/32");
+    expect(held).toContain("text-muted-foreground");
+    expect(held).not.toContain("bg-message-action");
+    expect(held).not.toContain("disabled:opacity-64");
+    // Nothing typed is not a hold: no reason to give, and the accent at the fainter weight it has always had.
+    const empty = renderSendButton();
+    expect(empty).toContain("bg-message-action");
+    expect(empty).toContain("disabled:opacity-30");
+    expect(empty).not.toContain("border-input");
+    // A send that wakes the machine first is a send that can be pressed, so it keeps the accent too.
+    expect(renderSendButton(null, true)).toContain("bg-message-action");
   });
 
   it("offers Stop generation while a running turn is waiting for user input", () => {

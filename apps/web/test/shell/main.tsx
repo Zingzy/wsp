@@ -60,7 +60,7 @@
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -415,7 +415,7 @@ const importOps: Pick<Api, "planProject" | "importProject"> = {
     skipped: [],
     agents: [],
   }),
-  importProject: async o => ({ dest: o.dest, files: 412, bytes: 48_200_000, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [] }),
+  importProject: async o => ({ dest: o.dest, files: 412, bytes: 48_200_000, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [], project: { name: folderName(o.dest), dest: o.dest, importedAt: new Date().toISOString(), size: 48_200_000 } }),
 };
 const withImport = params.get("drop") === "1" || params.get("import") === "1" || params.get("panel") === "machine";
 

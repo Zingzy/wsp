@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -285,6 +285,7 @@ export function WorkspaceSidebar() {
     if (api?.importProject === undefined) return;
     try {
       const landed = await api.importProject({ workspaceId: project.id, ...registerRequest(source) });
+      useStore.getState().landProject(project.id, landed.project);
       useStore.setState({ toast: registeredLine(landed.dest) });
     } catch (e) {
       useStore.setState({ toast: `${project.displayName}: ${errorText(e)}` });
@@ -730,10 +731,11 @@ function ThreadGroupRow({ rowId, label, count, open, onToggle }: { rowId: string
   );
 }
 
-/** A workspace still being created: the spinner and the runtime's latest stage, wrapped rather than cut at the sidebar's width. */
+/** A workspace still being created: the spinner and the step the create is waiting on, wrapped rather than cut at
+ * the sidebar's width. A note on a step already taken stays in the log: this line is the create's state. */
 function CreationRow({ creation, active, onSelect }: { creation: Creation; active: boolean; onSelect: () => void }) {
   const failed = creation.failed !== null;
-  const line = failed ? creation.failed.title : creation.lines.at(-1)?.message ?? CREATION_ASKED;
+  const line = failed ? creation.failed.title : creation.lines.findLast(l => creationAwaits(l.stage))?.message ?? CREATION_ASKED;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton

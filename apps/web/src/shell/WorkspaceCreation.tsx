@@ -7,6 +7,7 @@ import { useEffect, useRef } from "react";
 import { CREATION_ASKED } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
 import { ScrollArea } from "../components/ui/scroll-area.js";
+import { APP_LOCALE, localZoneLabel } from "../lib/timestampFormat.js";
 import { cn } from "../lib/utils.js";
 import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
 
@@ -37,6 +38,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
             </ol>
           </ScrollArea>
         </div>
+        <p data-testid="creation-clock" className="mt-1.5 w-full text-right font-mono text-[11px] text-muted-foreground">{`clock in ${localZoneLabel()}`}</p>
         {creation.failed ? (
           <div className="mt-6 flex flex-col items-center gap-3 text-sm">
             <p>
@@ -65,7 +67,7 @@ function LogLine({ line, current }: { line: CreationLine; current: boolean }) {
       <time dateTime={line.at} className="shrink-0 text-muted-foreground/70">
         {clockLabel(line.at)}
       </time>
-      <span className="min-w-0 flex-1 break-words">
+      <span className="min-w-0 flex-1 break-words" title={line.detail}>
         {line.message}
         {line.notice !== undefined ? <span className="block text-muted-foreground">{line.notice}</span> : null}
       </span>
@@ -96,7 +98,7 @@ function Squiggle({ failed, className }: { failed: boolean; className?: string }
 
 function clockLabel(iso: string): string {
   const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(undefined, { hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString(APP_LOCALE, { hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function elapsedLabel(ms: number): string {

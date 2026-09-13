@@ -367,7 +367,7 @@ describe("wsp verbs over the host", () => {
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
-    expect(sent.io.streamed.endsWith("Ready.\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
+    expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
   it("run --title names the thread from the first second, in the agent's own launch and in the table", async () => {
@@ -3055,7 +3055,7 @@ describe("wsp verbs over the host", () => {
     const values = json(again.io) as [{ plan: unknown }, { imported: unknown }];
     expect(values).toHaveLength(2);
     expect(values[0]).toEqual({ plan: expect.objectContaining({ source: real, repo: false, files: 2, bytes: 39, excluded: [], agents: [], secrets: [expect.objectContaining({ path: ".env", bytes: 19 })] }) });
-    expect(values[1]).toEqual({ imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [] } });
+    expect(values[1]).toEqual({ imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 20 } } });
     expect(landings()[1]).toContain(`rm -rf '${real}'`);
   });
 
@@ -3066,7 +3066,7 @@ describe("wsp verbs over the host", () => {
     const kept = await run("import", "alpha", proj, "--keep", ".env", "--json");
     expect(kept.code).toBe(0);
     expect(kept.io.errors).toEqual([]);
-    expect(json(kept.io).at(-1)).toEqual({ imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [] } });
+    expect(json(kept.io).at(-1)).toEqual({ imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 39 } } });
     expect(landings()).toHaveLength(1);
     const bad = await run("import", "alpha", proj, "--cut", "src/index.ts", "--replace");
     expect(bad.code).toBe(3);
