@@ -3511,6 +3511,10 @@ export const placeNoDaemonPortLine = (name: string): string => `${name} is conne
  * the computer belongs to this wsp, and what is missing is a road from it to here. */
 export const placeNoLinkLine = (name: string): string => `${name} took the agent and has not dialled this host yet; check that it can reach this computer on the address it was given, and wsp places shows it the moment it does`;
 
+/** What a stage reads while the computer it is running on has no link: the requests behind it are held until that
+ * computer opens a socket again, and a stage with no line of its own reads as one that stopped. */
+export const placeDialBackLine = (name: string): string => `waiting for ${name} to dial back`;
+
 /** The refusal wsp add over ssh gets on a host that wired no installer: the road that puts the agent on a computer
  * is the host command's, so a runtime served without one holds no way onto a machine it has never met. */
 export const NO_PLACE_INSTALLER = "this host cannot install the agent on a computer over ssh; run wsp add with no argument for the line to type on that computer";
