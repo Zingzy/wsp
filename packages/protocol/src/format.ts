@@ -2387,10 +2387,17 @@ export const NO_NODE_LINE =
 export const NO_LINGER_LINE =
   "this login does not linger, so its services stop when you log out and the daemon would not outlive the connection; run loginctl enable-linger on it and deploy the daemon again";
 
+/** What a machine whose daemon would be held up by systemd, and which has none, is refused with. An unsupervised
+ * daemon is a daemon that goes with the first crash and never comes back from a reboot, and nothing on such a
+ * machine would put it up again. Said before anything is installed rather than as the install starts a service
+ * manager that is not there, so a machine that cannot take a daemon is left exactly as wsp found it. */
+export const NO_SYSTEMD_LINE =
+  "this machine runs no systemd, which is what starts the daemon here and brings it back after a reboot; deploy it on a machine that runs systemd";
+
 /** Every sentence a machine's own checks refuse with, in one place beside them. Read by the rule that keeps each
  * one's first clause short enough for a row, so a refusal added later takes that rule without anyone remembering
  * where it is checked. Nothing decides anything by searching this: which ending a throw is comes off its mark. */
-export const MACHINE_LACKS_LINES: readonly string[] = [NO_NODE_LINE, NO_LINGER_LINE];
+export const MACHINE_LACKS_LINES: readonly string[] = [NO_NODE_LINE, NO_LINGER_LINE, NO_SYSTEMD_LINE];
 
 /** The marks the checks a machine takes before a daemon is put on it end with, put on where the throw happens
  * rather than matched against text: a check added to a place's preflight is then one shell line and one sentence,

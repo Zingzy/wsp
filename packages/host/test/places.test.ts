@@ -11,11 +11,12 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PlaceReport, doorPortHeldLine, placeDaemonPaths, placeLinkTranscript, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import type { SshReach, SshTransport } from "@wsp/engine";
+import type { PlaceStaging } from "@wsp/runtime";
+import { SshBackend, SSH_READ_SCRIPT, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
-import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
+import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, PLACE_JOINED_LINE, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { placeLines } from "../src/verbs.js";
@@ -44,6 +45,10 @@ import {
   removeCommand,
   removeLines,
   twoPlacesLine,
+  stageLines,
+  UNSAID_CHIP_REFUSAL,
+  ADD_LOOPBACK_REFUSAL,
+  advertisedLoopbackRefusal,
 } from "../src/places.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
@@ -639,10 +644,11 @@ describe("dialling a box whose agent stopped calling home", () => {
 });
 
 describe("the install over ssh marks its steps off the lines the deploy prints", () => {
-  /** A daemon asset folder with a stand-in binary per guest target, and a wsp command as npm lays it out. */
-  function assets(root: string): { daemonDir: string; cliDir: string } {
+  /** A daemon asset folder with a stand-in binary per guest target named, and a wsp command as npm lays it out.
+   * Named none and it holds every target, which is a release; named one, it is a checkout that built that one. */
+  function assets(root: string, targets: readonly { triple: string }[] = GUEST_DAEMON_TARGETS): { daemonDir: string; cliDir: string } {
     const daemonDir = join(root, "daemon");
-    for (const target of GUEST_DAEMON_TARGETS) {
+    for (const target of targets) {
       mkdirSync(join(daemonDir, target.triple), { recursive: true });
       writeFileSync(daemonBinaryIn(daemonDir, target.triple), `#!/bin/sh\necho ${target.triple}\n`, { mode: 0o755 });
     }
@@ -652,6 +658,191 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     writeFileSync(join(cliDir, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "0.0.0" }));
     return { daemonDir, cliDir };
   }
+
+  /** A box that takes the deploy and answers the word it is told to say about its own chip, recording every script
+   * run on it and every file landed there. `arch` is what its `uname -m` answered on the read that adopted it. */
+  function fakeBox(arch: string | undefined): { backend: unknown; ran: string[]; landed: string[]; stages: string[]; stage: PlaceStaging } {
+    const ran: string[] = [];
+    const landed: string[] = [];
+    const stages: string[] = [];
+    const machine = {
+      id: "ssh://maya@box:22",
+      kind: "sandbox",
+      putBytes: async (path: string) => {
+        landed.push(path);
+      },
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      facts: async () => ({ os: "Ubuntu 24.04.4 LTS" }),
+      run: async (script: string, opts?: { onLine?: (line: string) => void }) => {
+        ran.push(script);
+        if (script.includes("PREFLIGHT_OK")) return { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" };
+        for (const line of [WSP_READY_LINE, PLACE_JOINED_LINE]) opts?.onLine?.(line);
+        return { exitCode: 0, stdout: `${WSP_READY_LINE}\n${PLACE_JOINED_LINE}\nDAEMON_UP\n`, stderr: "" };
+      },
+    };
+    const backend = {
+      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, ...(arch === undefined ? {} : { arch }) }),
+      knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
+    };
+    return { backend, ran, landed, stages, stage: (step, state, note) => stages.push(`${step} ${state}${note === undefined ? "" : ` (${note})`}`) };
+  }
+
+  const X86 = GUEST_DAEMON_TARGETS.find(t => t.uname === "x86_64")!;
+  const ARM = GUEST_DAEMON_TARGETS.find(t => t.uname === "aarch64")!;
+
+  it("sends the binary for the chip the box says it runs, on a host that holds that one alone", async () => {
+    // An x86 box joined from a checkout that built the x86 Linux daemon and nothing else. The arm binary is not
+    // there and is not wanted: what the box is sent is picked off the box's own word, not off this computer's chip.
+    const x86 = fakeBox("x86_64");
+    const install = placeInstaller({ backend: x86.backend as never, ...assets(tmp("chip-x86"), [X86]) });
+    expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, x86.stage)).toMatchObject({ name: "box" });
+    const deploy = x86.ran.find(script => script.includes("uname -m"))!;
+    expect(deploy).toContain(`x86_64) mv -f`);
+    expect(deploy).not.toContain("aarch64)");
+    // And the reverse, from a host holding the arm one alone: nothing here is this computer's chip either way.
+    const arm = fakeBox("aarch64");
+    const armInstall = placeInstaller({ backend: arm.backend as never, ...assets(tmp("chip-arm"), [ARM]) });
+    expect(await armInstall({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, arm.stage)).toMatchObject({ name: "box" });
+    const armDeploy = arm.ran.find(script => script.includes("uname -m"))!;
+    expect(armDeploy).toContain(`aarch64) mv -f`);
+    expect(armDeploy).not.toContain("x86_64)");
+  });
+
+  it("names the chip it picked on the install line, so a wrong one is read rather than worked out later", async () => {
+    const box = fakeBox("x86_64");
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("chip-line"), [X86]) })(
+      { address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] },
+      box.stage,
+    );
+    expect(box.stages).toContain("wsp running (x86_64)");
+    expect(stageLines({ type: "place.stage", addId: "a_1", step: "wsp", state: "running", note: "x86_64" })).toEqual(["    installing wsp: x86_64"]);
+  });
+
+  it("says where the box will dial back as its join starts, not after the twenty seconds it would wait", async () => {
+    const box = fakeBox("x86_64");
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("dial-line"), [X86]) })(
+      { address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://65.21.4.12:4720", "http://192.168.1.20:4720"] },
+      box.stage,
+    );
+    // The step the join runs under, said while it is running: the addresses in the order the box will try them.
+    expect(box.stages).toContain("service running (it dials this computer at http://65.21.4.12:4720, http://192.168.1.20:4720)");
+  });
+
+  it("refuses the advertised address by name where it is this computer's own loopback, rather than dropping it behind a card", async () => {
+    // The sighting's shape: a host started with a word naming its own loopback, on a computer that also answers on
+    // a card. The word cannot be dialled from that box, and the card may be one the box cannot route to either, so
+    // going on with the card is going on with an address the person did not choose.
+    const box = fakeBox("x86_64");
+    const install = placeInstaller({ backend: box.backend as never, advertise: "http://127.0.0.1:4720", ...assets(tmp("named-loopback"), [X86]) });
+    await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://127.0.0.1:4720", "http://100.129.175.77:4720"] }, box.stage)).rejects.toThrow(
+      advertisedLoopbackRefusal("http://127.0.0.1:4720"),
+    );
+    // Refused before the dial: nothing was landed and no step was even started.
+    expect(box.landed).toEqual([]);
+    expect(box.stages).toEqual([]);
+    // The box that is this computer under another name dials its own loopback and reaches this host, so the word
+    // holds there and nothing is refused.
+    const here = fakeBox("x86_64");
+    const hereInstall = placeInstaller({ backend: here.backend as never, advertise: "http://127.0.0.1:4720", ...assets(tmp("named-loopback-here"), [X86]) });
+    expect(await hereInstall({ address: `maya@localhost`, code: "7QK3M2VD", hostUrls: ["http://127.0.0.1:4720"] }, here.stage)).toMatchObject({ name: "localhost" });
+    // A host bound to this computer alone behind a relay carries a loopback address in that list too, and nobody
+    // typed that one: the install takes the relay and says nothing, which is what it always did.
+    const relayed = fakeBox("x86_64");
+    const relayedInstall = placeInstaller({ backend: relayed.backend as never, ...assets(tmp("relayed-loopback"), [X86]) });
+    expect(await relayedInstall({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://127.0.0.1:4720", "https://wsp-box.example.com"] }, relayed.stage)).toMatchObject({ name: "box" });
+    // A host that answers on its own loopback alone with no word is still the other refusal, which names the flags
+    // that fix it rather than a word the person never typed.
+    const alone = fakeBox("x86_64");
+    const aloneInstall = placeInstaller({ backend: alone.backend as never, ...assets(tmp("loopback-alone"), [X86]) });
+    await expect(aloneInstall({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://127.0.0.1:4720"] }, alone.stage)).rejects.toThrow(ADD_LOOPBACK_REFUSAL);
+  });
+
+  it("carries a box's own uname word from the ssh read through to the binary it is sent, with nothing faked between", async () => {
+    // Every other case here hands the installer an arch. This one answers the real read script over a transport,
+    // so the road from what the box printed to the chip arm in its deploy script is proved end to end.
+    const cases = [
+      { said: "x86_64", arm: "x86_64) mv -f", gone: "aarch64)" },
+      { said: "aarch64", arm: "aarch64) mv -f", gone: "x86_64)" },
+    ] as const;
+    for (const { said, arm, gone } of cases) {
+      const ran: string[] = [];
+      const transport: SshTransport = async (_reach, script, opts) => {
+        ran.push(script);
+        if (script === SSH_READ_SCRIPT) return { exitCode: 0, stdout: `home /home/maya\narch ${said}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" };
+        if (script.includes("PREFLIGHT_OK")) return { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" };
+        if (script.includes("WSP_BYTES_OK")) return { exitCode: 0, stdout: "WSP_BYTES_OK\n", stderr: "" };
+        for (const line of [WSP_READY_LINE, PLACE_JOINED_LINE]) opts.onLine?.(line);
+        return { exitCode: 0, stdout: `${WSP_READY_LINE}\n${PLACE_JOINED_LINE}\nDAEMON_UP\n`, stderr: "" };
+      };
+      const backend = new SshBackend({ transport, hostKey: async () => undefined, knownHosts: async () => undefined });
+      const target = GUEST_DAEMON_TARGETS.find(t => t.uname === said)!;
+      const install = placeInstaller({ backend, ...assets(tmp(`road-${said}`), [target]) });
+      expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toMatchObject({ name: "box" });
+      const deploy = ran.find(script => script.includes(`case "$(uname -m)" in`))!;
+      expect(deploy).toContain(arm);
+      expect(deploy).not.toContain(gone);
+    }
+  });
+
+  it("refuses a Mac's own chip word and a chip with no row of its own, off the same read", async () => {
+    // uname on a Mac says arm64, which names a row wsp builds for and no row a guest can be: the join installs a
+    // login's systemd unit, so a Mac reached over ssh is refused here rather than halfway through its deploy.
+    for (const said of ["arm64", "riscv64"]) {
+      const transport: SshTransport = async (_reach, script) =>
+        script === SSH_READ_SCRIPT
+          ? { exitCode: 0, stdout: `home /home/maya\narch ${said}\nuser maya\npath /usr/bin:/bin\ncpu 2\nmemkb 4194304\n`, stderr: "" }
+          : { exitCode: 0, stdout: "", stderr: "" };
+      const backend = new SshBackend({ transport, hostKey: async () => undefined, knownHosts: async () => undefined });
+      const install = placeInstaller({ backend, ...assets(tmp(`road-${said}`)) });
+      await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).rejects.toThrow(noGuestDaemonLine(said));
+    }
+  });
+
+  it("refuses a chip wsp builds no daemon for, and a box that would not say, before a byte of wsp's lands", async () => {
+    const odd = fakeBox("riscv64");
+    const install = placeInstaller({ backend: odd.backend as never, ...assets(tmp("chip-odd")) });
+    await expect(install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, odd.stage)).rejects.toThrow(noGuestDaemonLine("riscv64"));
+    expect(odd.landed).toEqual([]);
+    const quiet = fakeBox(undefined);
+    const quietInstall = placeInstaller({ backend: quiet.backend as never, ...assets(tmp("chip-quiet")) });
+    await expect(quietInstall({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, quiet.stage)).rejects.toThrow(UNSAID_CHIP_REFUSAL);
+    expect(quiet.landed).toEqual([]);
+  });
+
+  it("leaves the box-side join as the only thing that reads a place report, and carries no field the join dropped", async () => {
+    const box = fakeBox("x86_64");
+    await placeInstaller({ backend: box.backend as never, ...assets(tmp("one-reader"), [X86]) })(
+      { address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] },
+      box.stage,
+    );
+    // One command on the box builds or reads a report about it, and it is the join the person would run by hand.
+    const readers = box.ran.flatMap(script => script.split("\n").filter(line => / join '?https?:/.test(line)));
+    expect(readers).toHaveLength(1);
+    expect(readers[0]).toContain("--code-file '/home/maya/.wsp/join-code'");
+    // Nothing the deploy runs asks that box about docker: the field a report was once refused for is gone from the
+    // shape both sides read, so a deploy and a hand-run join cannot disagree about whether a report is valid.
+    expect(box.ran.join("\n")).not.toContain("docker");
+    expect(Object.keys(PlaceReport.shape)).not.toContain("docker");
+    expect(PlaceReport.safeParse({ ...placeReport({ name: "box", home: tmp("one-reader-home") }), dialed: "http://192.168.1.20:4400" }).success).toBe(true);
+  });
+
+  it("names the commands it was running when a deploy will not come up, so nobody reproduces them by hand first", async () => {
+    const root = tmp("deploy-said");
+    const machine = {
+      id: "ssh://maya@box:22",
+      kind: "sandbox",
+      putBytes: async () => {},
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      facts: async () => ({ os: "Ubuntu 24.04.4 LTS" }),
+      run: async (script: string) => (script.includes("PREFLIGHT_OK") ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" } : { exitCode: 1, stdout: `${WSP_READY_LINE}\n`, stderr: "zod: report.docker required" }),
+    };
+    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }) };
+    const install = placeInstaller({ backend: backend as never, ...assets(root, [X86]) });
+    const said = await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {}).catch((e: unknown) => (e as Error).message);
+    // The box's own last words, and then the join it was running, spelled as it ran there.
+    expect(said).toContain("report.docker required");
+    expect(said).toContain("join 'http://192.168.1.20:4400' --code-file '/home/maya/.wsp/join-code' --name 'box'");
+  });
 
   it("answers the login it used and the key file it was given, so a later dial of that box takes the same road", async () => {
     const root = tmp("install-road");
@@ -663,7 +854,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       facts: async () => ({ os: "Linux 6.8.0" }),
       run: async (script: string) => (script.includes("PREFLIGHT_OK") ? { exitCode: 0, stdout: "PREFLIGHT_OK\n", stderr: "" } : { exitCode: 0, stdout: "DAEMON_UP\n", stderr: "" }),
     };
-    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 } }) };
+    const backend = { adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64" }) };
     const install = placeInstaller({ backend: backend as never, ...assets(root) });
     // Without a key: the login alone, in the spelling a person would type back.
     expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, () => {})).toEqual({ name: "box", ssh: "maya@box" });
@@ -701,7 +892,7 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
       },
     };
     const backend = {
-      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, hostKey: "ssh-ed25519 SHA256:abc" }),
+      adopt: async () => ({ machine, login: { HOME: "/home/maya", PATH: "/usr/bin:/bin", USER: "maya" }, shape: { cpu: 2, memMb: 2048 }, arch: "x86_64", hostKey: "ssh-ed25519 SHA256:abc" }),
       knownHostsFile: async () => "/home/maya/.ssh/known_hosts",
     };
     const stages: string[] = [];
@@ -718,7 +909,17 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     // Every step reaches done in order, off those two lines: the bundle landing is running from the connect until
     // WSP_READY, the join from then until PLACE_JOINED. The dial's own write to this computer's known_hosts is a
     // step of its own, right after the connect, carrying the key it kept.
-    expect(stages).toEqual(["connect running", "connect done (Linux 6.8.0)", "host-key done (ssh-ed25519 SHA256:abc)", "wsp running", "wsp done", "service running", "service done"]);
+    expect(stages).toEqual([
+      "connect running",
+      "connect done (Linux 6.8.0)",
+      "host-key done (ssh-ed25519 SHA256:abc)",
+      // The chip the box said it runs, which is what picked the binary that landed, and the addresses it is about
+      // to dial: both read while the step they belong to is still running, so a wrong one is not a wait first.
+      "wsp running (x86_64)",
+      "wsp done (x86_64)",
+      "service running (it dials this computer at http://192.168.1.20:4400)",
+      "service done",
+    ]);
     expect(stages.some(line => line.startsWith("node"))).toBe(false);
   });
 

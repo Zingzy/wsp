@@ -685,7 +685,7 @@ export function makeRuntime(
     },
     local: localWiring(),
     ssh: sshWiring(),
-    placeLinks: placeWiring(statePath, env),
+    placeLinks: placeWiring(statePath, env, agents?.advertise),
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
@@ -1150,6 +1150,8 @@ async function hostFor(
     statePath: string;
     webDir?: string;
     openUrl?: UrlOpener;
+    /** The address the person named with --advertise, which leads the addresses a computer you own is told to dial. */
+    advertise?: string;
     /** Whether a linked box runs its connector; false is `wsp up --no-relay`, which serves without a tunnel. */
     relay?: boolean;
     /** Required here, not defaulted: the host's runtime and its init door must pick a provider out of one
@@ -1175,6 +1177,7 @@ async function hostFor(
       port: opts.port,
       wsPort: opts.wsPort,
       listen: address,
+      ...(opts.advertise !== undefined ? { advertise: opts.advertise } : {}),
       door: joined ? "open" : "closed",
       doorLine: line => io.log(line),
       webDir: opts.webDir ?? webDirFor(),

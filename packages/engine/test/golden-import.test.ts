@@ -34,6 +34,8 @@ import {
   secretKey,
   secretPath,
   withApiKeyHelper,
+  withImagePaths,
+  imagePath,
   SHELL_FRAMEWORKS,
   imageCommands,
   shellInstallFor,
@@ -48,7 +50,7 @@ import {
   type RecipeDigest,
   type RecipeEntry,
 } from "../src/golden-import.js";
-import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_SHIM, catalogEntry } from "@wsp/catalog";
+import { BREW, BREW_PREFIX, BREW_REAL, BREW_REPO, KUBECTL, LINUXBREW_SHIM, MAC_ONLY, catalogEntry } from "@wsp/catalog";
 import { shellQuote } from "@wsp/protocol";
 
 const row = (over: Partial<RecipeEntry> & Pick<RecipeEntry, "rung" | "id">): RecipeEntry => ({
@@ -389,6 +391,159 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(placeGhToken("github.com", "gho_x", "ghe.corp.example:\n    oauth_token: ghe_theirs\n    user: me\n")).toBe(
       "ghe.corp.example:\n    oauth_token: ghe_theirs\n    user: me\ngithub.com:\n    oauth_token: gho_x\n    git_protocol: https\n",
     );
+  });
+});
+
+describe("imagePath: where a Mac path lands on the image", () => {
+  const AT = { home: HOME, rewrites: [["Library/Application Support/", ".config/"], ["Library/Preferences/", ".config/"]] as [string, string][] };
+
+  it("names a Homebrew binary by its command alone, since the image installs it by whichever road the catalog gives it", () => {
+    expect(imagePath("/opt/homebrew/bin/gh", AT)).toBe("gh");
+    expect(imagePath("/opt/homebrew/sbin/nginx", AT)).toBe("nginx");
+  });
+
+  it("moves the rest of the Homebrew prefix, the bare prefix included, to the image's", () => {
+    expect(imagePath("/opt/homebrew", AT)).toBe(BREW_PREFIX);
+    expect(imagePath("/opt/homebrew/bin", AT)).toBe(`${BREW_PREFIX}/bin`);
+    expect(imagePath("/opt/homebrew/opt/fzf/shell/completion.zsh", AT)).toBe(`${BREW_PREFIX}/opt/fzf/shell/completion.zsh`);
+    expect(imagePath("/opt/homebrew/share/zsh/site-functions", AT)).toBe(`${BREW_PREFIX}/share/zsh/site-functions`);
+  });
+
+  it("moves the person's own home under the guest's, and the two Library directories where the copy already lands them", () => {
+    expect(imagePath(HOME, AT)).toBe("/root");
+    expect(imagePath(`${HOME}/.cargo/env`, AT)).toBe("/root/.cargo/env");
+    expect(imagePath(`${HOME}/Library/Application Support/io.foo/config`, AT)).toBe("/root/.config/io.foo/config");
+    expect(imagePath(`${HOME}/Library/Preferences/io.foo.plist`, AT)).toBe("/root/.config/io.foo.plist");
+  });
+
+  it("has no place for another home, an app bundle, the system trees, mounted media, or a Homebrew cask, which is a Mac application", () => {
+    expect(imagePath("/Users/someone-else/bin", AT)).toBeUndefined();
+    expect(imagePath("/Applications/Docker.app/Contents/Resources/bin", AT)).toBeUndefined();
+    expect(imagePath("/Library/TeX/texbin", AT)).toBeUndefined();
+    expect(imagePath("/System/Library/Frameworks", AT)).toBeUndefined();
+    expect(imagePath("/Volumes/backup/bin", AT)).toBeUndefined();
+    expect(imagePath("/private/var/folders/x/T/sock", AT)).toBeUndefined();
+    expect(imagePath("/opt/homebrew/Caskroom/ghostty/1.0/Ghostty.app", AT)).toBeUndefined();
+  });
+
+  it("leaves a path that only looks like one of them, and /usr/local, which the image writes into itself", () => {
+    expect(imagePath("/Libraries/foo", AT)).toBeUndefined();
+    expect(imagePath("/usr/local/bin/gh", AT)).toBeUndefined();
+  });
+
+  it("asks the person's own home before the Mac-only trees, since a Mac's temporary home sits inside one of them", () => {
+    // What mkdtempSync hands a test on macOS: a home under /private/var, which is otherwise a tree with no place.
+    const tmp = { home: "/private/var/folders/xx/T/wsp-import-home-IFSy2E", rewrites: [] as [string, string][] };
+    expect(imagePath(tmp.home, tmp)).toBe("/root");
+    expect(imagePath(`${tmp.home}/.codex/config.toml`, tmp)).toBe("/root/.codex/config.toml");
+    // Another path under the same tree still has no place.
+    expect(imagePath("/private/var/folders/xx/T/someone-else", tmp)).toBeUndefined();
+    // The line the Codex row carries on such a home: the table header keeps its home and the file keeps the line.
+    const toml = `[projects."${tmp.home}"]\ntrust_level = "trusted"\n`;
+    expect(withImagePaths(toml, ".codex/config.toml", tmp).text).toBe('[projects."/root"]\ntrust_level = "trusted"\n');
+  });
+
+  it("finds the person's home wherever this computer keeps it, not only where a Mac keeps one", () => {
+    // The four shapes a home takes on the computers this runs on: a Mac's own, a Mac's temporary one, a Linux
+    // laptop's, and a Linux temporary one. The guest home is /root from every one of them, so a spelled-out home
+    // moves the same way whichever computer the copy was made on.
+    for (const home of ["/Users/me", "/private/var/folders/xx/T/wsp-import-home-rrF1mM", "/home/me", "/tmp/wsp-import-home-rrF1mM"]) {
+      const at = { home, rewrites: [] as [string, string][] };
+      expect(imagePath(home, at)).toBe("/root");
+      expect(imagePath(`${home}/.codex/notify.py`, at)).toBe("/root/.codex/notify.py");
+      expect(withImagePaths(`[projects."${home}"]\ntrust_level = "trusted"\n`, ".codex/config.toml", at).text).toBe('[projects."/root"]\ntrust_level = "trusted"\n');
+    }
+  });
+
+  it("ends a tree's name at the run, so a sibling of the home one character longer is not the home", () => {
+    const at = { home: "/tmp/wsp-import-home-rrF1mM", rewrites: [] as [string, string][] };
+    expect(imagePath("/tmp/wsp-import-home-rrF1mM-other/f", at)).toBeUndefined();
+    expect(withImagePaths("x=/tmp/wsp-import-home-rrF1mM-other/f", ".zshrc", at).text).toBe("x=/tmp/wsp-import-home-rrF1mM-other/f");
+    expect(withImagePaths("x=/Library.d/thing", ".zshrc", AT).text).toBe("x=/Library.d/thing");
+  });
+
+  it("finds every tree the catalog's table names, so a prefix added there is met here too", () => {
+    for (const prefix of MAC_ONLY) {
+      expect(imagePath(`${prefix}thing/bin`, AT)).toBeUndefined();
+      expect(withImagePaths(`x=${prefix}thing/bin`, ".zshrc", AT).notes).toEqual([`${prefix}thing/bin out of .zshrc`]);
+    }
+  });
+});
+
+describe("withImagePaths: a copied file repointed at the image", () => {
+  const AT = { home: HOME, rewrites: [[".claude/", ".claude-cfg/"], ["Library/Application Support/", ".config/"]] as [string, string][] };
+
+  it("names gh by name in the credential helper the Mac's gh auth setup-git wrote", () => {
+    const mac = "[credential \"https://github.com\"]\n\thelper = \n\thelper = !/opt/homebrew/bin/gh auth git-credential\n";
+    const out = withImagePaths(mac, ".gitconfig", AT);
+    expect(out.text).toBe("[credential \"https://github.com\"]\n\thelper = \n\thelper = !gh auth git-credential\n");
+    expect(out.notes).toEqual(["/opt/homebrew/bin/gh now gh"]);
+  });
+
+  it("repoints the prefix and the home in an rc file and keeps every other byte", () => {
+    const rc = ['eval "$(/opt/homebrew/bin/brew shellenv)"', "fpath+=/opt/homebrew/share/zsh/site-functions", `. ${HOME}/.cargo/env`, "# done"].join("\n");
+    const out = withImagePaths(rc, ".zshrc", AT);
+    expect(out.text).toBe(['eval "$(brew shellenv)"', `fpath+=${BREW_PREFIX}/share/zsh/site-functions`, ". /root/.cargo/env", "# done"].join("\n"));
+    expect(out.notes).toEqual(["/opt/homebrew/bin/brew now brew", `/opt/homebrew/share/zsh/site-functions now ${BREW_PREFIX}/share/zsh/site-functions`, `${HOME}/.cargo/env now /root/.cargo/env`]);
+  });
+
+  it("takes the line of a path the image has no place for, and says which", () => {
+    const rc = ["export EDITOR=vim", 'export PATH="/Applications/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"', "source /Users/someone-else/shared.sh", "alias l=ls"].join("\n");
+    const out = withImagePaths(rc, ".zshrc", AT);
+    expect(out.text).toBe(["export EDITOR=vim", "alias l=ls"].join("\n"));
+    expect(out.notes).toEqual(["/Applications/Visual Studio Code.app/Contents/Resources/app/bin out of .zshrc", "/Users/someone-else/shared.sh out of .zshrc"]);
+  });
+
+  it("follows the move the plan landed the file by, so a home path names where the copy actually is", () => {
+    expect(imagePath(`${HOME}/.claude/skills`, AT)).toBe("/root/.claude-cfg/skills");
+  });
+
+  it("leaves such a path in a file written as JSON, where a line out is a file that no longer parses, and repoints the rest", () => {
+    const settings = `{\n  "hooks": { "Stop": "/Applications/Foo.app/bin/foo" },\n  "skills": "${HOME}/.claude/skills"\n}\n`;
+    const out = withImagePaths(settings, ".claude-cfg/settings.json", AT);
+    expect(out.text).toBe('{\n  "hooks": { "Stop": "/Applications/Foo.app/bin/foo" },\n  "skills": "/root/.claude-cfg/skills"\n}\n');
+    expect(out.notes).toEqual(["/Applications/Foo.app/bin/foo left in .claude-cfg/settings.json", `${HOME}/.claude/skills now /root/.claude-cfg/skills`]);
+  });
+
+  it("says nothing and changes nothing about a file with no Mac path in it", () => {
+    const text = "[user]\n\tname = Me\n\temail = me@example.com\n";
+    expect(withImagePaths(text, ".gitconfig", AT)).toEqual({ text, notes: [] });
+  });
+
+  it("leaves a run something else already spells a path or a host against: a URL, a $HOME path, a tilde path", () => {
+    const text = ['export DOCS="https://developer.apple.com/Library/archive/doc"', 'export X="$HOME/Library/Application Support/foo"', "source ~/Library/x.sh"].join("\n");
+    expect(withImagePaths(text, ".zshrc", AT)).toEqual({ text, notes: [] });
+  });
+
+  it("gives each absolute path on one line its own run, so a binary and the file it is handed both move", () => {
+    const out = withImagePaths(`command = /opt/homebrew/bin/node ${HOME}/.claude/hooks/x.js`, ".codex/config", AT);
+    expect(out.text).toBe("command = node /root/.claude-cfg/hooks/x.js");
+    expect(out.notes).toEqual(["/opt/homebrew/bin/node now node", `${HOME}/.claude/hooks/x.js now /root/.claude-cfg/hooks/x.js`]);
+  });
+
+  it("takes the line out of a git config, whose first byte is a section header and not an object", () => {
+    const cfg = ["[user]", "\tname = Me", "[difftool \"ksdiff\"]", "\tcmd = /Applications/Kaleidoscope.app/Contents/MacOS/ksdiff", ""].join("\n");
+    const out = withImagePaths(cfg, ".gitconfig", AT);
+    expect(out.text).toBe(["[user]", "\tname = Me", "[difftool \"ksdiff\"]", ""].join("\n"));
+    expect(out.notes).toEqual(["/Applications/Kaleidoscope.app/Contents/MacOS/ksdiff out of .gitconfig"]);
+  });
+
+  it("leaves the path where a line cannot leave the file: JSON, TOML, YAML, a plist", () => {
+    for (const name of [".claude-cfg/settings.json", ".codex/config.toml", ".hermes/config.yaml", ".config/io.foo.plist"]) {
+      const out = withImagePaths('notify = "/Applications/Foo.app/bin/foo"', name, AT);
+      expect(out.text).toBe('notify = "/Applications/Foo.app/bin/foo"');
+      expect(out.notes).toEqual([`/Applications/Foo.app/bin/foo left in ${name}`]);
+    }
+  });
+
+  it("leaves a comment as written, whatever path it names", () => {
+    const rc = [`# my dotfiles live in ${HOME}/dotfiles`, "  // borrowed from /Users/colleague/dotfiles", "; and see /Applications/Foo.app", "alias l=ls"].join("\n");
+    expect(withImagePaths(rc, ".zshrc", AT)).toEqual({ text: rc, notes: [] });
+  });
+
+  it("keeps the file's line endings", () => {
+    const out = withImagePaths("a=/opt/homebrew/bin/eza\r\nb=2\r\n", ".zshrc", AT);
+    expect(out.text).toBe("a=eza\r\nb=2\r\n");
   });
 });
 

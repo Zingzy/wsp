@@ -2,12 +2,12 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { homedir, platform } from "node:os";
+import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
-import { reachAddresses } from "./pairing.js";
+import { advertiseWord, reachAddresses } from "./pairing.js";
 import { accountHere, publicHostname } from "./relay-link.js";
 import { wspHome } from "./hosts.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
@@ -35,6 +35,10 @@ export interface HostOptions {
   /** The address both servers bind. Default LOOPBACK; anything else serves the page with no token inlined and asks
    * every JSON route for a paired device's token. */
   listen?: string;
+  /** The address the person named with --advertise. It leads the addresses a computer you own is told to dial,
+   * since somebody who names an address has said which one the other end can reach; what this computer answers on
+   * follows it, so a word that turns out to be wrong is not the only road back. */
+  advertise?: string;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
   /** Envs baked into a workspace created from the JSON route, given the golden version it forks. */
@@ -274,6 +278,19 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+/** Where a computer you own is told to dial this host, in the order its link tries them: the address the person
+ * named with --advertise first, since somebody who names one has said which one the other end can reach, and what
+ * this computer answers on after it, so a word that turns out to be wrong is not the only road back. The named word
+ * is read the one way an address a person types is read; a word that is no address is left out rather than handed
+ * to a box as one. A named address on this computer's own loopback is handed out here and refused by name at the
+ * install, which is the one road that knows whether the computer being joined is this one: filtering it here would
+ * drop it before anybody could be told it reaches nothing. */
+export function doorAddresses(bound: string, port: number, advertise?: string, interfaces?: ReturnType<typeof networkInterfaces>): string[] {
+  const named = joinAddressOf(advertiseWord(advertise) ?? "");
+  const own = reachAddresses(bound, interfaces).map(address => `http://${authority(address, port)}`);
+  return [...(named === undefined ? [] : [named]), ...own.filter(at => at !== named)];
+}
+
 export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const rt = opts.runtime;
   const authToken = opts.authToken ?? randomBytes(24).toString("base64url");
@@ -402,7 +419,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     const relay = publicHostname(opts.statePath ?? "");
     return {
       port: at,
-      addresses: reachAddresses(bound).map(address => `http://${authority(address, at)}`),
+      addresses: doorAddresses(bound, at, opts.advertise),
       ...(relay === undefined ? {} : { relay: relayUrlOf(relay) }),
     };
   };

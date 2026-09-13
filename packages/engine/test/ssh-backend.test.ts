@@ -3,9 +3,9 @@ import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { OS_READ, UPTIME_READ, readValues } from "../src/machine-facts.js";
+import { ARCH_READ, OS_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -253,6 +253,44 @@ describe("ssh backend", () => {
   });
 });
 
+describe("the chip a machine over ssh says it runs", () => {
+  /** A client that answers the adopt read with the chip word this case is about, and nothing else scripted. Every
+   * other line is what an Ubuntu box prints, so only the one answer under test differs between cases. */
+  const readsArch = (line: string): SshTransport => async (_reach, script) =>
+    script === SSH_READ_SCRIPT
+      ? { exitCode: 0, stdout: `home /home/dev\n${line}user dev\npath /usr/bin:/bin\ncpu 8\nmemkb 16384000\n`, stderr: "" }
+      : { exitCode: 0, stdout: "", stderr: "" };
+
+  it("asks for it on the read that adopts the machine, in the words uname itself prints", () => {
+    // One printf on the read that already runs, not a round trip of its own: the chip is wanted before anything is
+    // sent to the machine, which is the same moment the home and the login PATH are wanted.
+    expect(SSH_READ_SCRIPT).toContain(ARCH_READ);
+    expect(ARCH_READ).toContain("uname -m");
+  });
+
+  it("carries the word back whatever it is, since the table that knows the chips is not this one's", async () => {
+    // Every word a machine may print for itself rides through unread: Linux prints x86_64 or aarch64, a Mac prints
+    // arm64, and a board nobody builds for prints its own. Which of them wsp has a daemon for is decided against a
+    // table above this file, so nothing here turns an unknown word into nothing.
+    for (const said of ["x86_64", "aarch64", "arm64", "riscv64"]) {
+      expect(await readSshMachine(REACH, readsArch(`arch ${said}\n`))).toMatchObject({ arch: said });
+      expect(await new SshBackend({ transport: readsArch(`arch ${said}\n`), hostKey: async () => undefined, knownHosts: async () => undefined }).adopt(REACH)).toMatchObject({ arch: said });
+    }
+  });
+
+  it("answers none where the machine printed none, rather than a word this computer made up", async () => {
+    // A machine whose uname printed nothing leaves the key present and empty, and one on a shell that never ran the
+    // line leaves it absent. Neither is a chip, and the caller refuses rather than guessing at one.
+    for (const line of ["", "arch \n"]) {
+      expect(await readSshMachine(REACH, readsArch(line))).not.toHaveProperty("arch");
+      expect(await new SshBackend({ transport: readsArch(line), hostKey: async () => undefined, knownHosts: async () => undefined }).adopt(REACH)).not.toHaveProperty("arch");
+    }
+    expect(archOf({})).toBeUndefined();
+    expect(archOf({ arch: "" })).toBeUndefined();
+    expect(archOf({ arch: "x86_64" })).toBe("x86_64");
+  });
+});
+
 describe("what a machine over ssh says it is", () => {
   /** What an Ubuntu box prints for the facts script, as its own shell would. */
   const UBUNTU = "pretty Ubuntu 24.04.3 LTS\nmac \nkernel Linux 6.8.0-79-generic\nuptime 96521.42\nboot \nhome /home/dev\n";
@@ -414,5 +452,83 @@ describe("the key a machine over ssh is known by", () => {
     expect(hostKeyFound(FOUND, "ssh-dss")).toBeUndefined();
     const marked = FOUND.split("\n").map(line => (line.startsWith("#") ? line : `@revoked ${line}`)).join("\n");
     expect(hostKeyFound(marked, ALGORITHMS)).toBeUndefined();
+  });
+
+  /** What `ssh-keygen -F` prints for a machine whose key this client trusts through an authority: the marker line
+   * for the signing key and nothing of the machine's own, which is what a cold dial leaves behind as much as a
+   * warm one, since accept-new writes no entry for a certificate it could already check. Measured on OpenSSH 9.6
+   * against a local sshd holding a CA signed host certificate. */
+  const CA_FOUND = [
+    "# Host [10.0.0.5]:2222 found: line 1 CA",
+    "@cert-authority [10.0.0.5]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKfANGYQHGkxSRKmhym/quMT78KoIKc7giNRg8nHlfF9",
+    "",
+  ].join("\n");
+
+  /** The signing key the line above carries, as a fingerprint: what a record would stand on if the marker line were
+   * read as a machine's own, which would make every machine that authority signed one machine. */
+  const AUTHORITY_KEY = "ssh-ed25519 SHA256:IGh+ehqXAjwW77irxqOmwHmu3koeqPEHgvUh/f71i34";
+
+  /** What `ssh-keyscan -p 2222 10.0.0.5` answered: the machine's own key, which is the key its certificate signs. */
+  const OFFERED = "[10.0.0.5]:2222 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOqrJ12qHMroq65CsKPtn/r4PuMQCbWynvVaYYSkR73z\n";
+  const OFFERED_KEY = "ssh-ed25519 SHA256:VWJESUiByqqBIKEH1I0uAkXiG6HL1qBI3XJke8oNyMs";
+
+  it("a machine trusted through an authority is known by the key its certificate signs, read off the machine", async () => {
+    const asked: { file: string; args: readonly string[] }[] = [];
+    const run: SshLocalRun = async (file, args) => {
+      asked.push({ file, args });
+      if (file === "ssh") return { exitCode: 0, stdout: CONFIG, stderr: "" };
+      if (file === "ssh-keyscan") return { exitCode: 0, stdout: OFFERED, stderr: "# 10.0.0.5:2222 SSH-2.0-OpenSSH_9.6\n" };
+      const named = args[args.indexOf("-f") + 1];
+      return named === "/Users/dev/.ssh/known_hosts" ? { exitCode: 0, stdout: CA_FOUND, stderr: "" } : { exitCode: 255, stdout: "", stderr: `Cannot stat ${named}\n` };
+    };
+    expect(await knownHostKey(REACH, run)).toBe(OFFERED_KEY);
+    // The machine is asked at the host and port the client resolved for the dial, not at the word that was typed.
+    expect(asked.at(-1)).toEqual({ file: "ssh-keyscan", args: ["-T", "5", "-p", "2222", "10.0.0.5"] });
+    // The authority's own key is never the answer: every machine it signed would then be the same machine.
+    expect(await knownHostKey(REACH, run)).not.toBe(AUTHORITY_KEY);
+    // One machine, one identity, whichever of its addresses a record was made under: the client resolves both to
+    // the same host, and what the machine offers there is what both records stand on.
+    expect(await knownHostKey({ ...REACH, host: "box" }, run)).toBe(OFFERED_KEY);
+  });
+
+  it("only a machine the client knows by nothing else is asked, and a machine that answers nothing keeps no identity", async () => {
+    const scans: string[] = [];
+    const run = (found: string, offered: string): SshLocalRun => async (file, args) => {
+      if (file === "ssh") return { exitCode: 0, stdout: CONFIG, stderr: "" };
+      if (file === "ssh-keyscan") {
+        scans.push(args.join(" "));
+        return offered === "" ? { exitCode: 1, stdout: "", stderr: "" } : { exitCode: 0, stdout: offered, stderr: "" };
+      }
+      return args[args.indexOf("-f") + 1] === "/Users/dev/.ssh/known_hosts" ? { exitCode: 0, stdout: found, stderr: "" } : { exitCode: 255, stdout: "", stderr: "" };
+    };
+    // A client holding the machine's own entry beside the authority's line reads it there and dials nothing.
+    expect(await knownHostKey(REACH, run(`${CA_FOUND}${FOUND}`, OFFERED))).toBe(ED25519);
+    // A machine the client holds no line for at all is not one an authority stands behind: nothing is asked of it.
+    expect(await knownHostKey(REACH, run("", OFFERED))).toBeUndefined();
+    expect(scans).toEqual([]);
+    // The machine was asked and said nothing: the record goes without an identity rather than with a guess.
+    expect(await knownHostKey(REACH, run(CA_FOUND, ""))).toBeUndefined();
+    expect(scans).toHaveLength(1);
+  });
+
+  it("a machine the client reaches through a jump or a command of the person's is asked nothing, since this road cannot take either", async () => {
+    const scans: string[] = [];
+    const run = (proxy: string): SshLocalRun => async (file, args) => {
+      if (file === "ssh") return { exitCode: 0, stdout: `${CONFIG}\n${proxy}`, stderr: "" };
+      if (file === "ssh-keyscan") {
+        scans.push(args.join(" "));
+        return { exitCode: 0, stdout: OFFERED, stderr: "" };
+      }
+      return args[args.indexOf("-f") + 1] === "/Users/dev/.ssh/known_hosts" ? { exitCode: 0, stdout: CA_FOUND, stderr: "" } : { exitCode: 255, stdout: "", stderr: "" };
+    };
+    // The scan dials the resolved name itself, which on this network is some other machine or nothing at all, and
+    // whatever answered there would be written down as this machine's identity.
+    for (const proxy of ["proxyjump bastion.example.com", "proxycommand nc %h %p"]) {
+      expect(await knownHostKey(REACH, run(proxy)), proxy).toBeUndefined();
+    }
+    expect(scans).toEqual([]);
+    // ssh prints neither line where the person set neither, so the machine is asked as it was.
+    expect(await knownHostKey(REACH, run(""))).toBe(OFFERED_KEY);
+    expect(scans).toHaveLength(1);
   });
 });

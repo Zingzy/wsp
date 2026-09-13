@@ -11,7 +11,7 @@ import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { bundledDaemonName, DAEMON_TARGETS, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, signInRefusalLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, signInRefusalLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -32,12 +32,14 @@ import {
   stopDaemonScript,
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
+  deployFailureLine,
   GUEST_ENVS,
   claudeEnvs,
   CLOUD_PLACE,
   CONTAINER_PLACE,
   openShimScript,
   packBundle,
+  preflightScript,
   cleanOrphans,
   doctor,
   localDoctor,
@@ -485,6 +487,20 @@ describe("guest environment", () => {
   });
 });
 
+describe("what a deploy that would not come up says", () => {
+  it("names the commands it was running, as they ran, with the machine's own last words first", () => {
+    const said = deployFailureLine(CLOUD_PLACE, { stdout: "WSP_READY\n", stderr: "boom" }, ".preview.example.com");
+    expect(said.startsWith("daemon deploy failed: WSP_READY")).toBe(true);
+    // The unit printed is the unit that ran: the deploy states the dev server allowlist on it, and a near copy
+    // without that line would send the next person to read a file that does not match what is on the machine.
+    expect(said).toContain(`Environment=${VITE_ALLOWED_HOSTS_ENV}=.preview.example.com`);
+    expect(said).toContain(daemonUnit(CLOUD_PLACE, ".preview.example.com"));
+    // A fork's token is written by a line of its own and a box's is landed over the byte road; no start line has it.
+    expect(said).not.toContain("aabbcc");
+    expect(deployFailureLine(CLOUD_PLACE, { stdout: "", stderr: "" }, ".preview.example.com")).not.toContain("aabbcc");
+  });
+});
+
 describe("deployScript", () => {
   it("is valid bash (a live run died on '&;' once; bash -n guards the shape)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-deploy-script-"));
@@ -606,11 +622,13 @@ describe("deployScript", () => {
     expect(script).toContain(`ss -ltn | grep -q 7070 && echo DAEMON_UP || { ${daemonLogCommand()}; echo DAEMON_DOWN; }`);
   });
 
-  it("refuses a guest with no systemd rather than starting a daemon nothing would restart", () => {
+  it("asks nothing of a guest it built itself, and refuses no machine inside the deploy", () => {
+    // wsp built this image and knows what is on it, so a fork is asked nothing and the deploy refuses nothing:
+    // the systemd predicate is for a machine somebody already owns, and it is asked before anything lands there.
+    expect(CLOUD_PLACE.preflight).toEqual([]);
+    expect(preflightScript(CLOUD_PLACE)).not.toContain("command -v systemctl");
     const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
-    const check = lines.indexOf("command -v systemctl >/dev/null || { echo NO_SYSTEMD; exit 1; }");
-    expect(check).toBeGreaterThan(-1);
-    expect(check).toBeLessThan(lines.indexOf("mkdir -p /root/wsp-daemon /root/inbox"));
+    expect(lines.some(line => line.includes("command -v systemctl"))).toBe(false);
     expect(lines[0]).toBe("set -e");
   });
 
@@ -621,16 +639,16 @@ describe("deployScript", () => {
     return { status: ran.status, stdout: ran.stdout };
   };
 
-  it("a guest with no systemctl stops the deploy there, the guard's own exit and not the shell's", () => {
-    const lines = deployScript(CLOUD_PLACE, "aabbcc").split("\n");
-    const guard = lines.findIndex(line => line.includes("NO_SYSTEMD"));
+  it("a machine with no systemctl stops the ask there, the guard's own exit and not the shell's", () => {
+    const lines = preflightScript(sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" })).split("\n");
+    const guard = lines.findIndex(line => line.includes(machineLacksShort(NO_SYSTEMD_LINE)));
     expect(guard).toBeGreaterThan(-1);
     // An empty folder is the whole PATH the fragment is given; what the script itself exports is the guest's own.
     const empty = tmp("wsp-deploy-guard-");
     try {
       for (const fragment of [lines.slice(0, guard + 1), lines.slice(guard, guard + 1)]) {
         const ran = guardRuns(fragment, empty);
-        expect(ran.stdout).toContain("NO_SYSTEMD");
+        expect(ran.stdout).toContain(NO_SYSTEMD_LINE);
         expect(ran.stdout).not.toContain("WENT_ON");
         expect(ran.status).toBe(1);
       }
@@ -645,7 +663,7 @@ describe("deployScript", () => {
   it("a guest with no service manager gets a supervisor the machine's own boot runs", () => {
     const script = deployScript(CONTAINER_PLACE, "aabbcc");
     // Nothing refuses the guest here: the supervisor is what a machine without systemd is given instead.
-    expect(script).not.toContain("NO_SYSTEMD");
+    expect(preflightScript(CONTAINER_PLACE)).not.toContain("command -v systemctl");
     expect(script).not.toContain("systemctl daemon-reload");
     expect(script).not.toContain(DAEMON_UNIT_PATH);
     expect(script).toContain(`cat > ${GUEST_SUPERVISOR_PATH}`);
@@ -802,6 +820,7 @@ describe("deployDaemon", () => {
       const cliDir = fakeCliDir(dir);
       const out = await deployDaemon(machine, { token: "abc123", daemonDir, cliDir });
       expect(out).toEqual({ token: "abc123" });
+      // A fork is asked nothing, so nothing stands between the create and the deploy.
       expect(stub.execLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);
       // The deploy waits for the daemon to bind, past what one exec is allowed, so it is a run.
       expect(stub.runLog).toEqual([deployScript(CLOUD_PLACE, "abc123")]);

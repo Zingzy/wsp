@@ -72,9 +72,13 @@ fn pulls_the_image_from_the_test_registry_with_every_digest_verified() {
     assert_eq!(image.chain.config, w.layout.config_digest("ubuntu", "24.04"));
     assert_eq!(store.image(IMAGE).unwrap(), Some(image.clone()));
 
-    for digest in image.chain.layers.iter().chain(std::iter::once(&image.chain.config)) {
-        assert!(store.has_blob(digest), "{digest} landed");
+    assert!(store.has_blob(&image.chain.config), "the config is a blob, nothing unpacks it");
+    for digest in &image.chain.layers {
+        assert!(!store.has_blob(digest), "{digest} keeps one form, the tree: its blob went with the unpack");
     }
+    // The image's bytes are what the unpacked files hold, not the gzip the registry sent.
+    assert_eq!(image.layer_bytes, vec![20_000 + 300 + 16, 27]);
+    assert!(w.layout.blob_bytes(&w.base).len() as u64 != image.layer_bytes[0], "the registry's blob is another size");
     let base = store.unpacked(&w.base).expect("the base layer unpacked");
     assert_eq!(std::fs::metadata(base.join("bin/sh")).unwrap().permissions().mode() & 0o777, 0o755);
     assert_eq!(std::fs::read(base.join("bin/sh")).unwrap(), noise(20_000, 7));
@@ -120,9 +124,8 @@ fn refuses_a_corrupted_blob_by_name_and_keeps_nothing_of_it() {
     assert_eq!(store.image(IMAGE).unwrap(), None);
     let swept = store.sweep(&[]).unwrap();
     assert!(swept.partials.is_empty(), "no partial of the corrupt blob stays: {swept:?}");
-    let mut expected = vec![w.base.clone(), w.layout.config_digest("ubuntu", "24.04")];
-    expected.sort();
-    assert_eq!(swept.blobs, expected, "what landed before the corrupt blob is unreferenced and goes");
+    assert_eq!(swept.blobs, vec![w.layout.config_digest("ubuntu", "24.04")], "the config that landed before the corrupt blob goes");
+    assert_eq!(swept.unpacked, vec![w.base.clone()], "the layer that landed before it goes in its one form");
 }
 
 #[test]
@@ -165,21 +168,15 @@ fn reference_counts_follow_images_and_the_sweep_takes_what_nothing_names() {
     assert_eq!(store.references(&w.tools).unwrap(), 0);
     assert_eq!(store.references(&w.os_release).unwrap(), 1, "ubuntu still names the shared layer");
     let swept = store.sweep(&[]).unwrap();
-    let mut gone = vec![w.tools.clone(), tools.chain.config.clone()];
-    gone.sort();
-    assert_eq!(swept.blobs, gone);
+    assert_eq!(swept.blobs, vec![tools.chain.config.clone()]);
     assert_eq!(swept.unpacked, vec![w.tools.clone()]);
-    assert!(swept.bytes > 5_000, "{}", swept.bytes);
-    assert!(!store.has_blob(&w.tools));
+    assert_eq!(swept.bytes, 5_000 + w.layout.blob_bytes(&tools.chain.config).len() as u64, "the tree's bytes and the config's");
     assert_eq!(store.unpacked(&w.tools), None);
-    assert!(store.has_blob(&w.os_release), "the shared layer stays");
-    assert!(store.unpacked(&w.os_release).is_some());
+    assert!(store.unpacked(&w.os_release).is_some(), "the shared layer stays");
 
     assert!(store.remove_image(IMAGE).unwrap());
     let swept = store.sweep(&[]).unwrap();
-    let mut gone = vec![w.base.clone(), w.os_release.clone(), ubuntu.chain.config.clone()];
-    gone.sort();
-    assert_eq!(swept.blobs, gone);
+    assert_eq!(swept.blobs, vec![ubuntu.chain.config.clone()]);
     assert_eq!(swept.unpacked, vec![w.base.clone(), w.os_release.clone()].sorted());
     assert_eq!(store.images().unwrap(), vec![]);
 }
@@ -205,7 +202,7 @@ fn a_blob_cut_short_is_resumed_from_the_bytes_already_on_disk() {
 
     let pulled = store.pull(IMAGE, &from, &mut Client::new()).unwrap();
     assert!(pulled.fetched);
-    assert!(store.has_blob(&w.base));
+    assert!(store.unpacked(&w.base).is_some());
     let log = w.server.log();
     let base_blob: Vec<&String> = log.iter().filter(|l| l.starts_with(&format!("GET /cdn/{} ", w.base))).collect();
     assert_eq!(base_blob.len(), 2, "{log:#?}");
@@ -225,11 +222,11 @@ fn a_body_that_moved_no_byte_fails_by_name_and_the_next_pull_starts_it() {
     let err = store.pull(IMAGE, &from, &mut Client::new()).unwrap_err();
     assert!(matches!(&err, store::Error::Fetch(fetch::Error::Transport { .. })), "{err}");
     assert!(err.to_string().contains(&format!("/blobs/{}", w.base)), "{err}");
-    assert!(!store.has_blob(&w.base));
+    assert!(!store.has_blob(&w.base) && store.unpacked(&w.base).is_none());
     assert_eq!(w.server.log().iter().filter(|l| l.starts_with(&format!("GET /cdn/{} ", w.base))).count(), 1);
 
     assert!(store.pull(IMAGE, &from, &mut Client::new()).unwrap().fetched);
-    assert!(store.has_blob(&w.base));
+    assert!(store.unpacked(&w.base).is_some());
 }
 
 #[test]
@@ -308,7 +305,7 @@ fn a_body_that_stalls_is_resumed_where_it_moved_or_given_up_by_name() {
         }
         other => panic!("expected a transport error by name, got {other}"),
     }
-    assert!(!store.has_blob(&w.os_release));
+    assert!(!store.has_blob(&w.os_release) && store.unpacked(&w.os_release).is_none());
 }
 
 #[test]
