@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Which catalog answers the access pick for a workspace. Which mode a thread
-// starts at is a fact about the machine it runs on: a machine the person keeps
-// asks before a tool, a throwaway fork runs every tool. The host-wide table was
-// read against no machine, so it answers the models and the efforts for a
-// workspace whose own catalog is still on the way and answers no access at all,
-// and the composer draws no access button until the workspace has spoken.
+// starts at is a fact about the kind of workspace it runs on: this computer and
+// a fork wsp made run every action, a computer somebody owns asks first. The
+// host-wide table was read against no workspace, so it answers the models and
+// the efforts for a workspace whose own catalog is still on the way and answers
+// no access at all, and the composer draws no access button until the workspace
+// has spoken.
 import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { keptAccess, THIS_COMPUTER, type HarnessCatalog, type WorkspaceView } from "@wsp/protocol";
+import { workspaceAccess, type HarnessCatalog, type WorkspaceView } from "@wsp/protocol";
 import { harnessCatalog } from "@wsp/runtime";
 import { catalogIn, catalogsIn, useStore } from "../src/protocol/store.js";
 import { effectivePicks } from "../src/components/chat/composerPicks.js";
@@ -18,8 +19,12 @@ const WS = "ws_a";
 
 /** The runtime's own table, which is what the host answers before any machine has been asked. */
 const TABLE = harnessCatalog("claude")!;
-/** The same table as the runtime hands it out for a machine the person keeps. */
-const KEPT = keptAccess(TABLE, THIS_COMPUTER);
+/** The same table as the runtime hands it out for a workspace on this computer, and for one on a computer the
+ * person owns, where a thread asks before it acts. */
+const THIS_MAC = workspaceAccess(TABLE, "local");
+const OWN_BOX = workspaceAccess(TABLE, "ssh");
+/** And for a machine wsp forked, where the pick that asks nothing names no computer of theirs. */
+const FORK = workspaceAccess(TABLE, "cloud");
 
 interface Catalogs {
   harnesses: HarnessCatalog[];
@@ -44,12 +49,16 @@ describe("the access pick reads the workspace's own catalog and no other", () =>
     expect(catalogIn(store(), WS, "claude")?.efforts).toEqual(TABLE.efforts);
   });
 
-  it("reads Default first on a machine the person keeps", () => {
-    expect(access(store([KEPT]))).toBe("default");
+  it("reads Bypass on this computer, where the person asked for no prompts", () => {
+    expect(access(store([THIS_MAC]))).toBe("bypassPermissions");
+  });
+
+  it("reads Default on a computer the person owns and works on", () => {
+    expect(access(store([OWN_BOX]))).toBe("default");
   });
 
   it("reads what a fork's own catalog marks", () => {
-    expect(access(store([TABLE]))).toBe("bypassPermissions");
+    expect(access(store([FORK]))).toBe("bypassPermissions");
   });
 
   it("hands back one array per reading, so the composer's selector settles", () => {
@@ -80,16 +89,17 @@ const accessButton = () => document.querySelector<HTMLElement>('[data-composer-p
 describe("the composer's access button", () => {
   afterEach(() => act(() => useStore.setState({ harnesses: [], harnessesByWorkspace: {}, workspaces: [], sessions: {} })));
 
-  it("is not drawn at all until the workspace's catalog lands, and then reads the kept machine's Default", () => {
+  it("is not drawn at all until the workspace's catalog lands, and then reads what that workspace starts a thread at", () => {
     act(() => useStore.setState({ harnesses: [TABLE], harnessesByWorkspace: {}, workspaces: [WORKSPACE], sessions: {} }));
     const drawn = render(<ComposerOptionPickers workspaceId={WS} thread={handle} onPickAccess={() => {}} onOtherFolder={() => {}} />);
     // The model button is there, so the row is drawn and it is the access one alone that is missing.
     expect(document.querySelector('[data-composer-picker="model"]')).not.toBeNull();
     expect(accessButton()).toBeNull();
 
-    act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [KEPT] } }));
-    expect(accessButton()?.dataset["value"]).toBe("default");
-    expect(accessButton()?.textContent).toContain("Default");
+    act(() => useStore.setState({ harnessesByWorkspace: { [WS]: [THIS_MAC] } }));
+    expect(accessButton()?.dataset["value"]).toBe("bypassPermissions");
+    // The button wears the CLI's own short word; the machine it names is read in the menu.
+    expect(accessButton()?.textContent).toContain("Bypass");
     drawn.unmount();
   });
 });

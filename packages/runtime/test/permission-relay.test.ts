@@ -348,36 +348,36 @@ describe("the access a thread starts at", () => {
     return { rt: createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local: localWiring }), picks };
   };
 
-  it("on this computer the composer's access list marks the mode the harness asks in and names the machine on bypass", async () => {
+  it("on this computer the composer's access list marks the mode that asks nothing and names the machine on it", async () => {
     const { rt } = recording();
     const local = await rt.workspaces.createLocal("mac");
     const [claude] = await rt.harnesses.list(local.id);
     expect(claude!.keptMode).toBe("default");
-    expect(claude!.permissionModes.find(o => o.isDefault)?.value).toBe("default");
+    expect(claude!.permissionModes.find(o => o.isDefault)?.value).toBe("bypassPermissions");
     expect(claude!.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe(`Bypass on ${THIS_COMPUTER}`);
-    // Bypass is still one pick away, in the same list.
-    expect(claude!.permissionModes.map(o => o.value)).toContain("bypassPermissions");
+    // Every mode that asks is still one pick away, in the same list, in the same order.
+    expect(claude!.permissionModes.map(o => o.value)).toContain("default");
   });
 
-  it("a thread on this computer runs the asking mode, explicitly, and a send that names none keeps it", async () => {
+  it("a thread on this computer runs every action without asking, explicitly, and a send that names none keeps it", async () => {
     const { rt, picks } = recording();
     const local = await rt.workspaces.createLocal("mac");
     const first = await rt.sessions.start(local.id, { prompt: "one" });
     await first.finished;
-    expect(picks).toEqual(["default"]);
-    // The second turn resumes the thread and names no access; without the thread's own it would reach the adapter as
-    // nothing, which every adapter here reads as its own skip-everything flag.
+    expect(picks).toEqual(["bypassPermissions"]);
+    // The second turn resumes the thread and names no access; the mode is named rather than left out, so a thread
+    // whose person picked another one keeps it instead of falling to the adapter's own flag.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
-    expect(picks).toEqual(["default", "default"]);
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions"]);
     // A pick still wins over the thread's own.
     await (await rt.sessions.start(local.id, { prompt: "three", thread: first.view().threadId, permissionMode: "plan" })).finished;
-    expect(picks).toEqual(["default", "default", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "plan"]);
   });
 
   it("a resumed thread whose rows fell off the index cap reads its access off its own start event, not off the adapter's default", async () => {
     const { rt, picks } = recording();
     const local = await rt.workspaces.createLocal("mac");
-    const first = await rt.sessions.start(local.id, { prompt: "one" });
+    const first = await rt.sessions.start(local.id, { prompt: "one", permissionMode: "default" });
     await first.finished;
     expect(picks).toEqual(["default"]);
     // The start row carries the access, which is what survives the cap: the index keeps 200 rows per workspace and
@@ -396,7 +396,7 @@ describe("the access a thread starts at", () => {
     const resumed = await after.rt.sessions.start(local.id, { prompt: "two", resume: harnessSession });
     await resumed.finished;
     // Without the fallback this reached the adapter as nothing, which every adapter here reads as its own
-    // skip-everything flag, on the person's own computer.
+    // skip-everything flag, and a thread its person had put in a narrower mode would have run without asking.
     expect(after.picks).toEqual(["default"]);
     await after.rt.close();
   });
@@ -405,21 +405,21 @@ describe("the access a thread starts at", () => {
     const { rt, picks } = recording();
     const local = await rt.workspaces.createLocal("mac");
     await (await rt.sessions.start(local.id, { prompt: "one" })).finished;
-    expect(picks).toEqual(["default"]);
+    expect(picks).toEqual(["bypassPermissions"]);
 
     // The pick as the composer keeps it: on the host's own record, per workspace, so the next thread reads it
-    // whichever client or CLI opens it.
-    await rt.preferences.set({ access: { [local.id]: "bypassPermissions" } });
+    // whichever client or CLI opens it. A person who wants to be asked here says so once.
+    await rt.preferences.set({ access: { [local.id]: "default" } });
     await (await rt.sessions.start(local.id, { prompt: "two" })).finished;
-    expect(picks).toEqual(["default", "bypassPermissions"]);
+    expect(picks).toEqual(["bypassPermissions", "default"]);
 
     // A pick in one workspace says nothing about another's: that one still starts at what its catalog marks.
     const other = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
     await (await rt.sessions.start(other.id, { prompt: "three" })).finished;
-    expect(picks).toEqual(["default", "bypassPermissions", "bypassPermissions"]);
+    expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions"]);
     await rt.preferences.set({ access: { [local.id]: "plan" } });
     await (await rt.sessions.start(local.id, { prompt: "four" })).finished;
-    expect(picks).toEqual(["default", "bypassPermissions", "bypassPermissions", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions", "plan"]);
   });
 
   it("a pick this harness does not take is dropped, not a refusal: the send runs the harness's own default", async () => {
@@ -430,14 +430,14 @@ describe("the access a thread starts at", () => {
     await rt.preferences.set({ access: { [local.id]: "read-only" } });
     const first = await rt.sessions.start(local.id, { prompt: "one" });
     await first.finished;
-    expect(picks).toEqual(["default"]);
-    // It drops to what the list marks, which on a kept machine is the mode that asks: never to something wider.
-    expect(first.view().permissionMode).toBe("default");
+    expect(picks).toEqual(["bypassPermissions"]);
+    // It drops to what the list marks for this kind of workspace, never to whatever the binary would run without a flag.
+    expect(first.view().permissionMode).toBe("bypassPermissions");
     // The pick stands on the record for the harness it belongs to; nothing rewrites the person's record on a read.
     expect((await rt.preferences.get()).access).toEqual({ [local.id]: "read-only" });
     // A resume on that thread is read the same way rather than refused.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
-    expect(picks).toEqual(["default", "default"]);
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions"]);
   });
 
   it("a start that names an access still wins over the pick, and a resumed thread keeps its own", async () => {
@@ -445,12 +445,12 @@ describe("the access a thread starts at", () => {
     const local = await rt.workspaces.createLocal("mac");
     const first = await rt.sessions.start(local.id, { prompt: "one" });
     await first.finished;
-    await rt.preferences.set({ access: { [local.id]: "bypassPermissions" } });
+    await rt.preferences.set({ access: { [local.id]: "acceptEdits" } });
     // The thread opened before the pick keeps the access its own turns ran at; the pick is what a new thread reads.
     await (await rt.sessions.start(local.id, { prompt: "two", thread: first.view().threadId })).finished;
     // A start that names one wins over both.
     await (await rt.sessions.start(local.id, { prompt: "three", permissionMode: "plan" })).finished;
-    expect(picks).toEqual(["default", "default", "plan"]);
+    expect(picks).toEqual(["bypassPermissions", "bypassPermissions", "plan"]);
   });
 
   it("a throwaway machine's list and its threads are unchanged: bypass is the default and carries no machine's name", async () => {
@@ -533,11 +533,11 @@ describe("an access picked while a turn runs", () => {
   it("reaches the turn in front of the person, and the row carries the mode its later turns resume at", async () => {
     const { rt, turns, picks } = held("set");
     const { handle, workspaceId } = await running(rt, turns);
-    expect(handle.view().permissionMode).toBe("default");
-    expect(await rt.sessions.access(handle.id, "bypassPermissions")).toEqual({ outcome: "set" });
-    expect(turns[0]!.modes).toEqual(["bypassPermissions"]);
-    // The row is what a resume reads its access off, so a turn moved mid-flight must not leave it saying the old one.
     expect(handle.view().permissionMode).toBe("bypassPermissions");
+    expect(await rt.sessions.access(handle.id, "acceptEdits")).toEqual({ outcome: "set" });
+    expect(turns[0]!.modes).toEqual(["acceptEdits"]);
+    // The row is what a resume reads its access off, so a turn moved mid-flight must not leave it saying the old one.
+    expect(handle.view().permissionMode).toBe("acceptEdits");
 
     turns[0]!.reply();
     await handle.finished;
@@ -545,14 +545,14 @@ describe("an access picked while a turn runs", () => {
     await vi.waitFor(() => expect(turns).toHaveLength(2));
     turns[1]!.reply();
     await next.finished;
-    expect(picks).toEqual(["default", "bypassPermissions"]);
+    expect(picks).toEqual(["bypassPermissions", "acceptEdits"]);
   });
 
   it("a harness that takes no mode change mid-turn answers unsupported and the turn keeps the access it started at", async () => {
     const { rt, turns } = held(null);
     const { handle } = await running(rt, turns);
     expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
-    expect(handle.view().permissionMode).toBe("default");
+    expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
   });
@@ -562,7 +562,7 @@ describe("an access picked while a turn runs", () => {
     const { handle } = await running(rt, turns);
     expect(await rt.sessions.access(handle.id, "plan")).toEqual({ outcome: "unsupported" });
     expect(turns[0]!.modes).toEqual(["plan"]);
-    expect(handle.view().permissionMode).toBe("default");
+    expect(handle.view().permissionMode).toBe("bypassPermissions");
     turns[0]!.reply();
     await handle.finished;
   });

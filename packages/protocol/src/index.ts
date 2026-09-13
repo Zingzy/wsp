@@ -222,7 +222,8 @@ export const Capabilities = z.object({
   sizes: z.array(MachineSizeOffer),
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
-   * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
+   * rebuild and nothing else. Whether the access picker names the machine on the pick that asks nothing reads this;
+   * what a thread with no access word runs at is the kind's own row, read through workspaceAccess. */
   kept: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
@@ -848,15 +849,15 @@ export const HarnessCatalog = z.object({
    * harness added to the table names its own. Absent where the harness offers no model of its own, and the title
    * question runs on whatever the CLI would run without one. */
   smallModel: z.string().optional(),
-  /** The access a thread on a kept machine starts at: the mode whose tools reach the person as a prompt where this
-   * CLI can ask one (Claude Code's default over its control stream), else the narrowest mode that still lets a turn
-   * work, for a CLI with no road to ask (codex exec runs non-interactively, so its sandbox is the whole answer).
-   * The mode marked isDefault is what a throwaway machine runs instead, which is bypass on every row here. Absent
-   * on a harness whose CLI takes no access mode at all. */
+  /** The access a thread starts at on a kind whose row asks: the mode whose tools reach the person as a prompt where
+   * this CLI can ask one (Claude Code's default over its control stream), else the narrowest mode that still lets a
+   * turn work, for a CLI with no road to ask (codex exec runs non-interactively, so its sandbox is the whole
+   * answer). Which kinds those are is the kind table's, not this row's: workspaceAccess marks one of these two.
+   * Absent on a harness whose CLI takes no access mode at all. */
   keptMode: z.string().optional(),
-  /** This CLI's mode that runs every tool without asking anyone, as it spells it. A kept machine's picker names the
-   * machine on this one, since picking it hands that computer over for the turn. Absent on a harness whose CLI has
-   * no such mode. */
+  /** This CLI's mode that runs every tool without asking anyone, as it spells it, and what a thread starts at on
+   * every other kind. A picker on a machine the person owns names that machine on this one, since picking it hands
+   * that computer over for the turn. Absent on a harness whose CLI has no such mode. */
   bypassMode: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
@@ -882,25 +883,6 @@ export function noMcpServersLine(harness: string): string {
 export function mcpServersBlocked(servers: Readonly<Record<string, McpServerSpec>> | undefined, takes: true | undefined, harness: string): string | null {
   if (servers === undefined || Object.keys(servers).length === 0) return null;
   return takes === true ? null : noMcpServersLine(harness);
-}
-
-/** The catalog a kept machine's composer shows and its starts are checked against: the same lists, with the default
- * mark moved from what a throwaway machine runs to keptMode, and the row's own bypassMode named after the machine it
- * is about to touch, so the pick that skips the prompts says whose computer it skips them on. One pick away, in the
- * same list, in the same order. The CLI's own word for the mode stays as the row's short form, which is what the
- * picker's button says once it is picked: the long name is read in the menu and in every line about the pick, and a
- * button that carried it crushed the model's name beside it in a narrow window (measured 2026-09-09, 316 px of row at
- * a 1200 px viewport with the right panel open). A catalog with no keptMode (a CLI that takes no access mode) comes
- * back as it went in. `machine` is the machine in words, the one phrase every local surface uses.
- */
-export function keptAccess(catalog: HarnessCatalog, machine: string): HarnessCatalog {
-  if (catalog.keptMode === undefined) return catalog;
-  const permissionModes = catalog.permissionModes.map(({ isDefault: _throwaway, ...mode }) => ({
-    ...mode,
-    ...(mode.value === catalog.keptMode ? { isDefault: true } : {}),
-    ...(mode.value === catalog.bypassMode ? { label: `${mode.label} on ${machine}`, short: mode.label } : {}),
-  }));
-  return { ...catalog, permissionModes };
 }
 
 /** Whether a rename of one of this harness's sessions is kept in its own store, as far as this catalog knows. The
@@ -1027,8 +1009,9 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
   if (catalog !== undefined) checkedAgainst(catalog, picks, model);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
-  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a kept
-  // machine that turned the picker's Default into bypass behind the person's back.
+  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a
+  // machine the person owns that turned the picker's Default into bypass behind their back. The mark is on the
+  // catalog a workspace answered with, which workspaceAccess placed against that workspace's kind.
   const permissionMode = picks.permissionMode ?? (opensThread && catalog !== undefined ? markedDefault(catalog.permissionModes)?.value : undefined);
   return {
     ...(model !== undefined ? { model } : {}),
@@ -4348,7 +4331,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
