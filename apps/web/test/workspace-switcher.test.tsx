@@ -48,8 +48,9 @@ const session = (id: string, workspaceId: string, prompt: string, startedAt: num
   endedAt: startedAt + 60_000,
 });
 
-// Newest activity first inside the running group, so the sidebar order is ws_a, ws_b, ws_c whatever the ids sort to.
-const WORKSPACES = [view("ws_a", "api", "running", "2026-09-01T03:00:00Z"), view("ws_b", "web", "running", "2026-09-01T02:00:00Z"), view("ws_c", "old", "napping", "2026-09-01T01:00:00Z")];
+// Made in that order, so the sidebar draws them in it whatever the ids sort to, and the one turn any of them has
+// run sits on the middle row, where it moves nothing.
+const WORKSPACES = [view("ws_a", "api", "running", "2026-09-01T01:00:00Z"), view("ws_b", "web", "running", "2026-09-01T02:00:00Z"), view("ws_c", "old", "napping", "2026-09-01T03:00:00Z")];
 const SESSIONS = [session("s1", "ws_b", "Bump the lockfile and run the gate.", Date.parse("2026-09-01T02:30:00Z"))];
 
 function fakeApi(): Api {

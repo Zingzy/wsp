@@ -2,19 +2,19 @@
 // What a lab is made of, checked without a host, a build or a browser: the
 // fixtures a tester picks between, the provider and the environment each one
 // needs, the lines a lab prints, and the rules the driver reads a page with.
-import { FAKE_AS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GHOST_IS_NOT_A_CONTROL, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, attrWord, diffLines, findByWords, findField, parseArgs, typedField } from "./drive.mjs";
-import { FIXTURE_NAMES, fixtureCloud, fixtureFolders, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
-import { agentStoreRows, hostEnv, providerFor } from "./host.mjs";
-import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labRoot, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { GHOST_IS_NOT_A_CONTROL, OPEN_OVER_THE_PAGE, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, SEVERAL_READ, UNDER_AN_OPEN_MENU, attrWord, diffLines, findByWords, findField, openMenu, parseArgs, typedField, whyNotClicked, whyNotOne } from "./drive.mjs";
+import { FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
+import { DAEMON_BUILD, agentStoreRows, daemonBinaryHere, hostEnv, providerFor, whatIsNotBuilt } from "./host.mjs";
+import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labLogs, labRoot, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { A_MESSAGE, APP_UP, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE } from "./ready.mjs";
-import { homeOf, keptLog, labLines, parseArgs as parseLabArgs, pointerPath, stopLab, whyNotOursToRemove } from "./lab.mjs";
+import { NO_FINDER_CHOOSER, homeOf, keptLog, labLines, labShell, parseArgs as parseLabArgs, pointerPath, stopLab, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
@@ -79,6 +79,41 @@ describe("the fixtures a lab serves", () => {
         else expect([name, w.golden]).toEqual([name, ""]);
       }
     }
+  });
+
+  it("writes a spec on every workspace record, since a wake re-forks and reads the envs off it", () => {
+    // Without one the wake's re-fork reads r.spec.envs, raises a TypeError and the app puts it in front of the
+    // person as a toast; two testers met it, one on the first verb they typed.
+    for (const name of FIXTURE_NAMES) {
+      for (const w of Object.values(fixtureState(name).workspaces)) expect([name, w.id, w.spec]).toEqual([name, w.id, {}]);
+    }
+  });
+
+  it("names no machine with the suffix that tells the stand-in one sleeps, and seeds the state instead", () => {
+    for (const name of FIXTURE_NAMES) {
+      for (const w of Object.values(fixtureState(name).workspaces)) {
+        // The id is what `wsp workspaces` prints in the MACHINE column, and a tester read fk_slr_2.paused there
+        // beside a STATE column that said Running.
+        expect([name, w.machineId, w.machineId.endsWith(".paused")]).toEqual([name, w.machineId, false]);
+      }
+    }
+    const state = fixtureState("solari-only");
+    const machines = fixtureMachines(state);
+    const forks = Object.values(state.workspaces).filter(w => w.kind === "cloud");
+    expect(forks.length).toBeGreaterThan(0);
+    for (const w of forks) {
+      expect([w.name, machines[w.machineId].state]).toEqual([w.name, w.phase === "napping" ? "paused" : "running"]);
+      expect([w.name, machines[w.machineId].shape.cpu, machines[w.machineId].shape.memMb]).toEqual([w.name, w.size.cpu, w.size.memMb]);
+    }
+    // A local workspace is this computer and the stand-in holds none of it.
+    expect(Object.keys(machines)).toEqual(forks.map(w => w.machineId));
+    expect(fixtureFleet(state)).toEqual({ machines, snapshots: fixtureSnapshots(state) });
+  });
+
+  it("opens the trial persona's meter at nothing, since they have not pasted a key yet", () => {
+    // A sidebar reading $0.48 today on a machine they never made was read as the product billing them for it.
+    const points = fixtureState("ascii-only")["cost-histories"]["ws_api"].points;
+    expect(points.map(p => [p.awakeMs, p.accruedUsd])).toEqual([[0, 0]]);
   });
 
   it("gives every thread a transcript and every transcript a thread", () => {
@@ -191,7 +226,9 @@ describe("the fixtures a lab serves", () => {
   });
 
   it("opens every fork's meter with the hours it has been awake, so a rate has an amount beside it", () => {
-    for (const name of ["ascii-only", "solari-only", "both-providers", "orchestrator"]) {
+    // The trial persona is the one exception, and is checked on its own below: their machine has been awake for
+    // no time at all, so their meter opens at nothing.
+    for (const name of ["solari-only", "both-providers", "orchestrator"]) {
       const state = fixtureState(name);
       const meters = state["cost-histories"];
       for (const w of Object.values(state.workspaces).filter(w => w.kind === "cloud")) {
@@ -241,6 +278,43 @@ describe("the fixtures a lab serves", () => {
   });
 });
 
+
+describe("what a lab must find built before it will serve anything", () => {
+  const bin = "/repo/packages/wspx/daemon/aarch64-apple-darwin/wsp-daemon";
+
+  it("refuses to start without this computer's daemon binary, and names the command that builds it", async () => {
+    // A whole round of nine served hosts whose own daemon never started: no node build makes this binary, so a
+    // checkout that has built everything else still has none, and every tester met a computer answering nothing.
+    const said = await whatIsNotBuilt({ exists: path => path !== bin, daemon: async () => bin });
+    expect(said).toContain(bin);
+    expect(said).toContain(DAEMON_BUILD);
+    expect(said).toContain("cargo build --release");
+  });
+
+  it("says nothing when the app, the command and the daemon are all there", async () => {
+    expect(await whatIsNotBuilt({ exists: () => true, daemon: async () => bin })).toBeUndefined();
+  });
+
+  it("still names the app and the command first, since the daemon's path is read out of that command's build", async () => {
+    const said = await whatIsNotBuilt({ exists: () => false, daemon: async () => bin });
+    expect(said).toContain("the web app is not built");
+  });
+
+  it("says so plainly on a machine wsp builds no daemon for, where there is nothing to build", async () => {
+    expect(await whatIsNotBuilt({ exists: () => true, daemon: async () => undefined })).toContain("builds no daemon for");
+  });
+
+  it("reads that path off the built wsp command rather than spelling its target table a second time", async () => {
+    const load = async () => ({
+      daemonTargetHere: () => ({ triple: "aarch64-apple-darwin" }),
+      daemonBinaryIn: (dir, triple) => `${dir}/${triple}/wsp-daemon`,
+      workspaceAsset: kind => `/repo/packages/wspx/${kind}`,
+    });
+    expect(await daemonBinaryHere(load)).toBe(bin);
+    expect(await daemonBinaryHere(async () => ({ daemonTargetHere: () => undefined, daemonBinaryIn: () => "", workspaceAsset: () => "" }))).toBeUndefined();
+  });
+});
+
 describe("the provider a fixture's host runs under", () => {
   it("asks for the one that answers out of memory only where a fixture holds forks or a sealed image", () => {
     const by = Object.fromEntries(FIXTURE_NAMES.map(name => [name, providerFor(fixtureState(name))]));
@@ -266,6 +340,22 @@ describe("the provider a fixture's host runs under", () => {
 });
 
 describe("what the driver reads and aims at", () => {
+  /** A page that reads a word on nothing but its text, as many times as a case says, of which `hidden` are laid
+   * nowhere. Every locator answers the filter the driver asks for, and the filters asked are kept, since what a
+   * tester can see is the whole question here. */
+  const reading = ({ exact = 0, hidden = 0 }) => {
+    const filtered = [];
+    const guess = count => ({
+      count: async () => count,
+      first: () => ({}),
+      filter(only) {
+        filtered.push(only);
+        return guess(only?.visible === true ? count - hidden : count);
+      },
+    });
+    return { filtered, getByRole: () => guess(0), getByLabel: () => guess(0), getByPlaceholder: () => guess(0), getByText: (_word, opts) => guess(opts?.exact === true ? exact : 1), locator: () => guess(0) };
+  };
+
   /** What a case put on the document's own prototypes, taken off again whether it passed or not. */
   const undo = [];
   afterEach(() => {
@@ -372,24 +462,66 @@ describe("what the driver reads and aims at", () => {
 
   it("never takes a field's ghost as something to click, and still finds a field by it to type into", async () => {
     // A page where the only thing reading those words is a field's own example of what to type.
-    const reading = held => {
+    const ghosting = held => {
       const asked = [];
       const guess = how => {
         asked.push(how);
-        return { count: async () => (held === how ? 1 : 0), first: () => ({ how }) };
+        const one = { count: async () => (held === how ? 1 : 0), first: () => ({ how }), filter: () => one };
+        return one;
       };
       return { asked, getByRole: role => guess(`role:${role}`), getByLabel: () => guess("label"), getByPlaceholder: () => guess("placeholder"), getByText: () => guess("text") };
     };
-    const clicking = reading("placeholder");
+    const clicking = ghosting("placeholder");
     // A tester clicked the example path in the folder picker's field three times and wrote the picker off as
     // broken: an example is not a control, and a click that lands on one does nothing a person can see.
     expect(await findByWords(clicking, "~/code/spoo")).toBeUndefined();
     expect(clicking.asked).not.toContain("placeholder");
     // Typing is the one thing a ghost means, and that road still reads it.
-    expect(await findField(reading("placeholder"), "~/code/spoo")).toEqual({ how: "placeholder" });
+    expect(await findField(ghosting("placeholder"), "~/code/spoo")).toEqual({ how: "placeholder" });
     const said = GHOST_IS_NOT_A_CONTROL("~/code/spoo");
     expect(said).toContain("field's own example");
     expect(said).toContain("type");
+  });
+
+  it("says which when a word reads on more than one control, rather than pressing the first of them", async () => {
+    // Two controls read Remove, one in the row's menu and one in the row's own detail; the driver took the first
+    // and the click timed out with nothing on the screen to say why.
+    const said = await whyNotOne(reading({ exact: 2 }), "Remove");
+    expect(said).toBe(SEVERAL_READ("Remove", 2));
+    expect(said).toContain("say which");
+    expect(said).toContain("attr=");
+    // One control reading it is a word the driver can aim by, and a word aimed at an attribute already says which.
+    expect(await whyNotOne(reading({ exact: 1 }), "Remove")).toBeUndefined();
+    expect(await whyNotOne(reading({ exact: 2 }), "attr=row-id=ws:ws_api")).toBeUndefined();
+    // The loose reading is the last guess and several of it is the page drawing a line inside another line.
+    expect(await whyNotOne(reading({ exact: 0 }), "Remove")).toBeUndefined();
+  });
+
+  it("counts only what a tester can see, since a word by text reads an element the page laid nowhere", async () => {
+    // A word drawn once on the screen and once under a panel that is closed would otherwise be refused as two
+    // things to choose between while the page read lists one, and a tester would have nothing to say instead.
+    const page = reading({ exact: 2, hidden: 1 });
+    expect(await whyNotOne(page, "Remove")).toBeUndefined();
+    expect(page.filtered).toEqual([{ visible: true }, { visible: true }, { visible: true }, { visible: true }, { visible: true }]);
+  });
+
+  it("says a menu an earlier command left open is over the thing a click aimed at, and nothing when none is", async () => {
+    // The page keeps whatever the last command left open, which is what puts a menu over the next target.
+    const said = UNDER_AN_OPEN_MENU("Edit");
+    expect(said).toContain("menu");
+    expect(said).toContain("press Escape then click");
+    const page = open => ({ asked: [], locator(selector) { this.asked.push(selector); return { count: async () => open }; } });
+    const covered = page(1);
+    expect(await whyNotClicked(covered, "Edit")).toBe(said);
+    expect(covered.asked).toEqual([OPEN_OVER_THE_PAGE]);
+    // A click that would not land with nothing standing open is the driver's own failure and keeps its own words:
+    // a sentence guessed at a menu would send a tester chasing one nobody opened.
+    expect(await whyNotClicked(page(0), "Edit")).toBeUndefined();
+    expect(await openMenu(page(1))).toBe(true);
+    expect(await openMenu(page(0))).toBe(false);
+    // A dialog is the thing the tester opened, so it is not one of these: telling them to close it is telling
+    // them to leave the screen they are reading.
+    expect(OPEN_OVER_THE_PAGE).not.toContain("dialog");
   });
 
   it("aims a word at a data attribute only when it says so", () => {
@@ -420,7 +552,7 @@ describe("what a lab tells the tester who starts it", () => {
   it("says when the app it is serving was built, so a tester's run is pinned to a build and not only to a commit", () => {
     expect(labLines(facts)[1]).toContain("built 2026-09-12T09:05:00Z");
     // Where the log will be, on the screen the tester is reading, so nobody has to work it out at the stop.
-    expect(labLines(facts)[3]).toContain(join("/notes/priya", "priya-lab.log"));
+    expect(labLines(facts).find(line => line.startsWith("this lab's log"))).toContain(join("/notes/priya", "priya-lab.log"));
   });
 
   it("says where the app is, which build it is serving, and the shell whose wsp is this lab's", () => {
@@ -441,6 +573,28 @@ describe("what a lab tells the tester who starts it", () => {
     expect(shell).toContain(`PATH='${home}/bin:/usr/bin'`);
   });
 
+  it("says this computer's daemon is up and where its binary came from", () => {
+    const daemon = "/repo/packages/wspx/daemon/aarch64-apple-darwin/wsp-daemon";
+    expect(labLines({ ...facts, daemon, reach: "reachable" })[2]).toBe(`this computer's workspace reads reachable, its daemon out of ${daemon}`);
+    // A fixture of forks alone has no row here to read, and a word about a workspace it does not hold would be a
+    // word about nothing; the binary the forks' own daemons come out of is still named.
+    expect(labLines({ ...facts, daemon })[2]).toBe(`this fixture has no workspace on this computer; the daemon its machines run is at ${daemon}`);
+  });
+
+  it("says the app here takes a typed folder, since the Finder chooser is the desktop app's road", () => {
+    // A tester went looking for "Choose in Finder", found none and wrote the Import screen off as unfinished.
+    expect(labLines(facts)).toContain(NO_FINDER_CHOOSER);
+    expect(NO_FINDER_CHOOSER).toContain("browser");
+    expect(NO_FINDER_CHOOSER).toContain("desktop app");
+  });
+
+  it("gives the tester's shell a pty, so wsp prints its reply once rather than on both streams", () => {
+    // A pipe is not a terminal, so the command cannot tell that one screen holds both its streams and writes to
+    // both; a tester read the doubled reply as the product repeating itself.
+    expect(labShell(facts)).toContain("/usr/bin/script -q /dev/null /bin/sh");
+    expect(labShell(facts).indexOf("env -i")).toBeLessThan(labShell(facts).indexOf("script"));
+  });
+
   it("says the turn there has this lab's own wsp tools, since a tester's agent asks what it can reach", () => {
     expect(labLines(facts).join("\n")).toContain("this lab's own wsp tools");
   });
@@ -455,7 +609,9 @@ describe("what a lab tells the tester who starts it", () => {
     // Seven logs of one round of nine landed in two folders nobody was reading, because the stop reads the folder
     // a tester happens to be standing in and they stand wherever the shell left them.
     expect(keptLog("priya", undefined, { for: "/notes/priya" })).toBe("/notes/priya/priya-lab.log");
-    expect(keptLog("priya", undefined, undefined)).toBe(join(process.cwd(), "priya-lab.log"));
+    // Nothing in the record and nothing said: the lab root's own logs folder, never the folder the start happened
+    // to be run from. All nine logs of one round landed in the coordinator's working folder, unread.
+    expect(keptLog("priya", undefined, undefined)).toBe(join(labLogs(), "priya-lab.log"));
   });
 
   it("takes that folder at the start, since by the stop there is nobody to ask", () => {
@@ -628,14 +784,19 @@ describe("a lab's own home", () => {
     expect(copied.builtAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   });
 
-  it("hands the stand-in a folder of the lab's own, holding the snapshots the fixture's image says are at the provider", () => {
+  it("hands the stand-in a folder of the lab's own, under .wsp where the app's folder picker never lists it", () => {
     const home = throwaway();
-    const rows = fixtureSnapshots(fixtureState("solari-only"));
-    const path = writeStandIn(home, rows);
+    const state = fixtureState("solari-only", { home });
+    const fleet = fixtureFleet(state);
+    const path = writeStandIn(home, fleet);
+    // A tester opened Import, was shown a folder called stand-in in what the app had just told them was their
+    // home, and could not say what it was; nothing hidden is listed there.
+    expect(standInRoot(home)).toBe(join(home, ".wsp", "stand-in"));
     expect(path.startsWith(`${standInRoot(home)}/`)).toBe(true);
-    // A stand-in listing none answered "0 snapshots" on the line pricing the account's storage while the versions
-    // table above it showed two.
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ machines: {}, snapshots: rows });
+    // A stand-in listing no snapshot answered "0 snapshots" on the line pricing the account's storage while the
+    // versions table above it showed two, and one holding no machine woke every sleeping fork in the fixture.
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(fleet);
+    expect(Object.keys(fleet.machines).length).toBeGreaterThan(0);
   });
 
   it("keeps a lab's log and takes its home away even when no pid was written down, since the host may already be gone", async () => {
@@ -737,6 +898,18 @@ describe("the environment a fixture's host is started with", () => {
     expect(hostEnv({ home, state: forks })[FAKE_ROOT_ENV]).toBeUndefined();
     // A fixture of this computer's own machines runs under no stand-in at all.
     expect(hostEnv({ home, state: fixtureState("mac-only"), standIn: `${home}/stand-in` })[FAKE_ROOT_ENV]).toBeUndefined();
+  });
+
+  it("names the stand-in's records alone where no folder was asked for, so a seeded fleet starts no daemon", () => {
+    const forks = fixtureState("solari-only");
+    const records = `${home}/.wsp/stand-in/records.json`;
+    // The run that photographs screens seeds the fleet and drives none of it: its sleeping fork sleeps because the
+    // records say so, and no machine gets a folder, so nothing runs on any of them.
+    expect(hostEnv({ home, state: forks, records })[FAKE_RECORDS_ENV]).toBe(records);
+    // A folder carries its own records inside it, so the two are never both named.
+    expect(hostEnv({ home, state: forks, records, standIn: `${home}/.wsp/stand-in` })[FAKE_RECORDS_ENV]).toBeUndefined();
+    // A fixture of this computer's own machines runs under no stand-in at all, so there is no fleet to seed.
+    expect(hostEnv({ home, state: fixtureState("mac-only"), records })[FAKE_RECORDS_ENV]).toBeUndefined();
   });
 
   it("tells the stand-in which cloud it is standing in for, and only where a stand-in is serving", () => {

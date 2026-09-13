@@ -43,7 +43,7 @@ impl Digest {
         Digest::from_hash(Sha256::digest(bytes).as_slice())
     }
 
-    fn from_hash(hash: &[u8]) -> Digest {
+    pub(crate) fn from_hash(hash: &[u8]) -> Digest {
         let mut text = String::with_capacity(71);
         text.push_str("sha256:");
         for byte in hash {
@@ -189,6 +189,9 @@ impl Platform {
         Platform { os: "linux".to_owned(), architecture: architecture.to_owned() }
     }
 }
+
+/// The media type of a layer the store commits itself.
+pub const LAYER_GZIP: &str = "application/vnd.oci.image.layer.v1.tar+gzip";
 
 /// One blob a manifest names.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

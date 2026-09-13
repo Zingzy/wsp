@@ -8,10 +8,13 @@
 // provider by name.
 
 import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
-import { FAKE_AS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, standInRecordsPath } from "@wsp/protocol";
+import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, standInRecordsPath } from "@wsp/protocol";
 import type { PlaceBackends } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import { fakeGuestAt } from "./fake-guest.js";
+
+/** A word a harness set, or nothing where it set none: a variable set to nothing is a variable nobody set. */
+const named = (value: string | undefined): string | undefined => (value === undefined || value === "" ? undefined : value);
 
 /** The environment a provider is picked out of: the host's own, with whatever the command line's provider words put
  * in front of it and every registered row's key variable filled from the layers a key is read through. */
@@ -85,7 +88,7 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     // No way of being added, so `wsp add` takes neither the word nor a key for it: a provider that answers out of
     // memory is a harness's fixture and never a place somebody owns. It is still a place to show while it stands
     // in for a cloud, since that is the cloud its machines read as being at.
-    envNames: [PROVIDER_ENV, FAKE_AS_ENV, FAKE_ROOT_ENV],
+    envNames: [PROVIDER_ENV, FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV],
     // Named and never guessed: a provider that answers out of memory is what a harness serves a fixture state
     // through, so it is reached by asking for it by name and by nothing else. Two roads beyond a harness reach it,
     // both starting with the word typed: `wsp up --service` copies WSP_PROVIDER out of the installing shell into
@@ -94,17 +97,16 @@ export const PROVIDER_MODULES: readonly ProviderModule[] = [
     selects: env => env[PROVIDER_ENV] === "fake",
     // A fixture says which cloud it is standing in for, and its rows carry that word: a tester reading "fake" on
     // every row learns nothing about the provider the screen is meant to be showing them.
-    standsFor: env => {
-      const said = env[FAKE_AS_ENV];
-      return said !== undefined && said !== "" ? said : undefined;
-    },
+    standsFor: env => named(env[FAKE_AS_ENV]),
     // A folder for its machines where a harness named one: its records go there, so a second host on the same
-    // state file finds the fleet the first one holds, and each machine gets a folder with a daemon in it. Named
-    // nowhere else, and then this is the stand-in it has always been, holding its machines for one process.
+    // state file finds the fleet the first one holds, and each machine gets a folder with a daemon in it. A
+    // harness that seeds a fleet and drives none of it names the records file alone and its machines get no
+    // guest. Neither named, and this is the stand-in it has always been, holding its machines for one process.
     build: env => {
-      const root = env[FAKE_ROOT_ENV];
-      if (root === undefined || root === "") return new FakeBackend();
-      return new FakeBackend({ records: standInRecordsPath(root), guest: fakeGuestAt(root) });
+      const root = named(env[FAKE_ROOT_ENV]);
+      const records = root === undefined ? named(env[FAKE_RECORDS_ENV]) : standInRecordsPath(root);
+      if (records === undefined) return new FakeBackend();
+      return new FakeBackend({ records, ...(root === undefined ? {} : { guest: fakeGuestAt(root) }) });
     },
   },
   {
