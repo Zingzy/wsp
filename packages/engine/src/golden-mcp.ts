@@ -4,6 +4,7 @@
 // carries a definition: the plan names which servers stay, which come out and
 // why, and the prefixes that read differently on the machine. A script on the
 // guest edits the files in place and touches no server it was not told about.
+import { BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW } from "@wsp/catalog";
 import type { McpFormat, McpGuestResult } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
@@ -72,8 +73,6 @@ export interface McpResult {
   note?: string;
 }
 
-const GUEST_HOME = "/root";
-const LINUXBREW = "/home/linuxbrew/.linuxbrew/";
 /** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
 const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv|hand)\//;
 
@@ -123,8 +122,8 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
   return {
     agents,
     guestHome,
-    rewrites: [[`${opts.home}/`, `${guestHome}/`], ["/opt/homebrew/", LINUXBREW]],
-    binDirs: [`${opts.home}/.local/bin/`, "~/.local/bin/", ...(opts.binDirs ?? ["/opt/homebrew/bin/", "/opt/homebrew/sbin/"])],
+    rewrites: [[`${opts.home}/`, `${guestHome}/`], [`${MAC_BREW}/`, `${BREW_PREFIX}/`]],
+    binDirs: [`${opts.home}/.local/bin/`, "~/.local/bin/", ...(opts.binDirs ?? MAC_BIN_DIRS)],
     tools: rows.filter(e => e.rung === "tools" && BINARY_ROW.test(e.id)).map(e => ({ id: e.id, ticked: e.bring === true, ...(e.reason !== undefined ? { reason: e.reason } : {}) })),
   };
 }

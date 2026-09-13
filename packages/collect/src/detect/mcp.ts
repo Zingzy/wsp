@@ -6,7 +6,7 @@
 // it needs on Linux and which secret it carries. Token files are only stat'ed,
 // never read.
 import { createHash } from "node:crypto";
-import { MCP_AGENTS, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
+import { MAC_BIN_DIRS, MAC_ONLY, MCP_AGENTS, type McpAgent, type McpConfig, type McpServer, type McpTransport } from "@wsp/catalog";
 import { MCP_ID_PREFIX, fmtBytes } from "@wsp/protocol";
 import { type Host, expand, tilde } from "../host.js";
 import type { ManifestEntry } from "../manifest.js";
@@ -24,10 +24,8 @@ const MCP_REMOTE_STORE = `${MCP_AUTH}/mcp-remote-v1`;
 
 // --- what runs on Linux --------------------------------------------------------
 
-/** Absolute prefixes with no Linux equivalent. */
-const MAC_ONLY = ["/Applications/", "/System/", "/Library/", "/Volumes/", "/private/", "/opt/homebrew/Caskroom/"];
 /** Directories whose binaries the machine finds on its own PATH under the same name; the import's plan strips them too. */
-export const MCP_BIN_DIRS: readonly string[] = ["/opt/homebrew/bin/", "/opt/homebrew/sbin/", "/usr/local/bin/", "/usr/bin/", "/bin/"];
+export const MCP_BIN_DIRS: readonly string[] = [...MAC_BIN_DIRS, "/usr/local/bin/", "/usr/bin/", "/bin/"];
 
 function isMacOnly(p: string, home: string): boolean {
   const abs = p.startsWith("~/") ? `${home}${p.slice(1)}` : p;
