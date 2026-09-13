@@ -217,6 +217,8 @@ export interface PlaceDoorOptions {
   /** How long one dial of a computer gets before it is an answer of its own. The bound is the runtime's and not
    * the backend's: a road that hangs rather than refusing must still answer the person who pressed the button. */
   dialWaitMs?: number;
+  /** How long one machine frame waits for its answer when the caller named no bound of its own; tests shrink it. */
+  frameWaitMs?: number;
   /** How long between the writes of a linked place's last seen, so a link held for a day is not a write a second. */
   seenEveryMs?: number;
   now?: () => number;
@@ -429,7 +431,8 @@ interface Forward {
 }
 
 /** How long a machine frame waits for its answer when the caller named no bound of its own. A link that dies fails
- * every frame on it at once, so this is the backstop for a place that took the frame and went quiet. */
+ * every frame on it at once, so this is the backstop for a place that took the frame and went quiet. No frame does
+ * minutes of work: a snapshot is a job the place names at once and is asked after a frame at a time. */
 const LINK_FRAME_MS = 300_000;
 
 /** How long a place gets to say what its backend is, and how long the table asking what room it has left waits;
@@ -449,6 +452,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const clockNow = opts.now ?? Date.now;
   const seenEveryMs = opts.seenEveryMs ?? SEEN_EVERY_MS;
   const dialWaitMs = opts.dialWaitMs ?? DIAL_MS;
+  const frameWaitMs = opts.frameWaitMs ?? LINK_FRAME_MS;
   const live = new Map<string, Live>();
   /** The records as they stand, by id: `load` fills it and every write below keeps it, so the one road that must
    * answer without waiting (which backend a fork's record stands on) can. */
@@ -527,7 +531,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     request: async (op, params, o) => {
       const reach = live.get(placeId)?.reach;
       if (reach === undefined) throw new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
-      return bounded(reach.request(op, params), o?.timeoutMs ?? LINK_FRAME_MS, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
+      return bounded(reach.request(op, params), o?.timeoutMs ?? frameWaitMs, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
     },
     forward: placePort => door.forward(placeId, placePort),
   });

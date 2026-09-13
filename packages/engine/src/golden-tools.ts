@@ -113,9 +113,13 @@ export async function freeBytes(machine: Machine): Promise<FreeDisk> {
   return "bytes" in read ? { kind: "free", bytes: read.bytes } : { kind: "unknown", reason: read.reason };
 }
 
-/** What df says is used under /root, which is what a snapshot of the disk comes to; unknown when df could not be
- * read, and the line that wanted it says less. */
+/** What a snapshot of the disk comes to: what the backend says the machine has written since it booted, where it
+ * can read that off the disk itself, else what df says is used under /root. On a container df reads the box's
+ * whole disk, so a backend that knows the machine's own bytes is asked first. Unknown when neither answers, and
+ * the line that wanted it says less. */
 export async function usedBytes(machine: Machine): Promise<number | undefined> {
+  const shape = await machine.describe?.().catch(() => undefined);
+  if (shape?.usedBytes !== undefined) return shape.usedBytes;
   const read = await dfRootBytes(machine, "used").catch(() => undefined);
   return read !== undefined && "bytes" in read ? read.bytes : undefined;
 }

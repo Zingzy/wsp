@@ -2705,6 +2705,9 @@ export const MachineShape = z.object({
    * nothing else. */
   diskGb: z.number().optional(),
   createdAt: z.string().optional(),
+  /** What the machine has written since it booted, where the backend can read that off the disk itself rather than
+   * through df inside, which on a container reads the box's whole disk. */
+  usedBytes: z.number().int().nonnegative().optional(),
 });
 export type MachineShape = z.infer<typeof MachineShape>;
 
@@ -2849,6 +2852,8 @@ export const MachineLinkRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("machine.deleteTemplate"), templateId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional() }),
   z.object({ id: reqId, op: z.literal("machine.snapshot"), machineId: z.string(), name: z.string(), life: MachineLife }),
+  /** How far the snapshot job a machine.snapshot answered with has got; asked again until it reads done. */
+  z.object({ id: reqId, op: z.literal("machine.snapshotJob"), job: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.pause"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.resume"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.kill"), machineId: z.string() }),
@@ -2888,7 +2893,13 @@ export const MachineCapacityReply = PlaceCapacity;
 export const MachineHandleReply = z.object({ machine: MachineHandle });
 export const MachineListReply = z.object({ machines: z.array(MachineListRow) });
 export const MachineExecReply = z.object({ result: ExecResult });
-export const MachineSnapshotReply = z.object({ snapshotId: z.string() });
+/** A snapshot is a job on the far side: the reply names it, and machine.snapshotJob under that name says how far it
+ * has got, so no one frame waits on a layer that takes minutes to write. */
+export const MachineSnapshotReply = z.object({ job: z.string() });
+/** One reading of a snapshot job: the layer's bytes written so far, the bytes the machine had written since it booted
+ * once counted, and the snapshot's id once done. A job that failed is a refused frame carrying its reason. */
+export const MachineSnapshotJobReply = z.object({ state: z.enum(["running", "done"]), bytes: z.number().int().nonnegative(), total: z.number().int().nonnegative().optional(), snapshotId: z.string().optional() });
+export type MachineSnapshotJobReply = z.infer<typeof MachineSnapshotJobReply>;
 export const MachineStateReply = z.object({ state: MachineState });
 export const MachineShapeReply = z.object({ shape: MachineShape });
 export const MachineFactsReply = z.object({ facts: MachineFacts });
@@ -3033,6 +3044,7 @@ const DAEMON_CONTENTS = [
   "14b4b9c0ccad20d544fa123841592c6438f735405f97a88957dafe4c39f47e8b",
   "ad9341f55ebc6a724a35b9febb11f7ca5cf5133a90d7a631bf39cf9a496657ac",
   "cebb929363226a20c057702cfe24235fa2f24749c70355539f5bab4b3bcfd3da",
+  "bbdd3b1dc7fb73b04d5986128d099e11a723d777bd1a3c7cddd14819f1ee8cfc",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3090,7 +3102,10 @@ const DAEMON_CONTENTS = [
  * labels every create with the workspace, filters every listing by it, refuses what would reach the box, and joins
  * a container's published port to the workspace's loopback; a create names the socket with the new engine field.
  * Version 26 stops a build whose libseccomp is not linked statically, so the Linux daemon is one static binary that
- * names no shared library; a binary that did was installed once and its container init called address zero. */
+ * names no shared library; a binary that did was installed once and its container init called address zero.
+ * Version 27 answers machine.snapshot with a job and machine.snapshotJob with how far it has got, so a layer that
+ * takes minutes to write waits on no one frame; the layer is a plain tar, the shape carries the bytes the workspace
+ * wrote, and a snapshot's failure is the job's own refusal. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

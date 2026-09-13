@@ -1797,6 +1797,11 @@ export const initElapsedLine = (ms: number): string => (ms < 60_000 ? `${Math.ma
  * and the size when the builder's disk could be read. */
 export const snapshotStageLine = (bytes: number | undefined): string => `snapshotting${bytes === undefined ? "" : ` about ${fmtBytes(bytes)}`}, usually under a minute`;
 
+/** The snapshot stage's line while the layer is written: the bytes so far, over what the machine had written once
+ * the backend has counted it. The stage's own clock says how long it has taken. */
+export const snapshotProgressLine = (bytes: number, total: number | undefined): string =>
+  total === undefined ? `snapshotting, ${fmtBytes(bytes)} written` : `snapshotting, ${fmtBytes(bytes)} of about ${fmtBytes(total)} written`;
+
 /** The save stage's one line. */
 export const SAVING_IMAGE_LINE = "saving the image";
 

@@ -8,7 +8,7 @@
 
 import { createHash } from "node:crypto";
 import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
@@ -75,9 +75,12 @@ export class SnapshotFailedError extends Error {
 }
 
 const isSnapshotRefusal = (e: unknown): boolean => (e as { kind?: unknown }).kind === "snapshotUnavailable";
+/** The provider's answer as the failure line reports it. A refusal carries its status; a failure that came with none
+ * (a job the far side failed, a link that dropped) is reported as the provider's 500, since the provider's side is
+ * where it stopped. */
 const answerOf = (e: unknown): ProviderAnswer => {
   const { status, requestId } = e as { status?: number; requestId?: string };
-  return { status: status ?? 502, message: messageOf(e), ...(requestId !== undefined ? { requestId } : {}), at: new Date().toISOString() };
+  return { status: status ?? (isSnapshotRefusal(e) ? 502 : 500), message: messageOf(e), ...(requestId !== undefined ? { requestId } : {}), at: new Date().toISOString() };
 };
 /** What the provider says the machine is now, one read: a 404 reads as gone, any other failed read as unread with its reason. */
 const readState = async (machine: Machine): Promise<{ state: BuilderReading; readError?: string }> => {
@@ -862,17 +865,19 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
           // image vault is credential files and two secrets files, which that road can carry.
           ...(opts.backend.capabilities.signedUrls ? {} : { readRoad: "exec" as const }),
         });
-  // The 502 is asked again only while the provider still reads the builder running; one that reads otherwise is
-  // never snapshotted, so the seal stops at once and says what the provider said.
+  // A snapshot that failed changed nothing on the builder, so every failure here is typed as one that leaves it:
+  // the provider's 502 is asked again while it still reads the builder running, and any other failure (a job the
+  // far side failed, a link that dropped) is said once with the builder's state beside it. Only a resumed machine's
+  // refusal is another kind of failure, and it passes as itself.
   const takeSnapshot = async (): Promise<string> => {
     for (let attempt = 1; ; attempt++) {
       try {
-        return await builder.machine.snapshot(name, { firstLife: builder.firstLife });
+        return await builder.machine.snapshot(name, { firstLife: builder.firstLife }, { onProgress: p => stage("snapshotting", snapshotProgressLine(p.bytes, p.total)) });
       } catch (e) {
-        if (!isSnapshotRefusal(e)) throw e;
+        if (e instanceof NotFirstLifeError) throw e;
         const answer = answerOf(e);
         const read = await readState(builder.machine);
-        if (read.state !== "running" || attempt >= SNAPSHOT_ATTEMPTS) throw new SnapshotFailedError(builder.machine.id, attempt, answer, read.state, read.readError);
+        if (!isSnapshotRefusal(e) || read.state !== "running" || attempt >= SNAPSHOT_ATTEMPTS) throw new SnapshotFailedError(builder.machine.id, attempt, answer, read.state, read.readError);
         stage("snapshotting", snapshotAttemptLine(attempt, SNAPSHOT_ATTEMPTS, answer, read.state, retryMs));
         await new Promise(r => setTimeout(r, retryMs));
       }
