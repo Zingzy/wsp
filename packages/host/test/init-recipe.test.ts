@@ -55,16 +55,21 @@ describe("manifest ticks", () => {
 });
 
 describe("login choices", () => {
-  it("copy when the default is bring, sign in on the machine when it is skip or cannot be copied, and a saved choice wins", () => {
-    // The collector's default carries the catalog's word: a browser or device sign-in (gh, codex, the Claude OAuth credential) is skip, a key or a tool with no sign-in is bring.
-    expect(initialChoice(byId("logins/gh"))).toBe("machine");
-    expect(initialChoice(byId("logins/codex"))).toBe("machine");
+  it("copy when the default is bring, left to first use when it is skip or cannot be copied, and a saved choice wins", () => {
+    // The collector's default carries the catalog's word: a browser or device sign-in (gh, codex, the Claude OAuth
+    // credential) is skip, a key or a tool with no sign-in is bring. A row with nothing here to copy can only be
+    // signed in through a browser, which waits on the person, so it starts left to the first time it is needed.
+    expect(initialChoice(byId("logins/gh"))).toBe("later");
+    expect(initialChoice(byId("logins/codex"))).toBe("later");
     expect(initialChoice({ ...byId("logins/gh"), default: "bring" })).toBe("copy");
-    expect(initialChoice(byId("logins/claude"))).toBe("machine");
-    expect(initialChoice({ ...byId("logins/gh"), default: "skip", reason: "expires in hours" })).toBe("machine");
+    expect(initialChoice(byId("logins/claude"))).toBe("later");
+    expect(initialChoice({ ...byId("logins/gh"), default: "skip", reason: "expires in hours" })).toBe("later");
     expect(initialChoice({ ...byId("logins/gh"), choice: "skip" })).toBe("skip");
-    expect(initialChoice({ ...byId("logins/gh"), bring: false })).toBe("machine");
+    expect(initialChoice({ ...byId("logins/gh"), bring: false })).toBe("later");
     expect(initialChoice({ ...byId("logins/claude"), choice: "copy" })).toBe("copy");
+    // Signing in while the build runs is the opt-in, and a recipe that saved it is read back as that and not as the default.
+    expect(initialChoice({ ...byId("logins/gh"), choice: "machine" })).toBe("machine");
+    expect(initialChoice({ ...byId("logins/gh"), choice: "later" })).toBe("later");
   });
 
 });
@@ -311,7 +316,7 @@ describe("recipe file", () => {
     expect(back.entries.find(e => e.id === "shell/zshrc")).not.toHaveProperty("choice");
     // A re-run of the saved file preselects exactly what was ticked and chosen.
     expect(back.entries.filter(initialTicks).map(e => e.id)).toEqual(["identity/git-user", "shell/zshrc", "agents/claude", "logins/claude"]);
-    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy", "machine"]);
+    expect(back.entries.filter(e => e.rung === "logins").map(initialChoice)).toEqual(["machine", "copy", "later"]);
   });
 });
 
@@ -453,7 +458,7 @@ describe("the small recipe", () => {
     expect(added.find(e => e.id === "logins/hermes")).toEqual({ rung: "logins", id: "logins/hermes", label: "Hermes Agent login", group: "Agent logins", paths: [], bytes: 0, default: "skip" });
     // A bare row starts off and unticked; the recipe decides.
     expect(added.every(e => !initialTicks(e))).toBe(true);
-    expect(added.filter(e => e.rung === "logins").every(e => initialChoice(e) === "machine")).toBe(true);
+    expect(added.filter(e => e.rung === "logins").every(e => initialChoice(e) === "later")).toBe(true);
     // The found rows keep their place and their fields; a manifest with every agent gains nothing.
     expect(rows.slice(0, FIXTURE.entries.length)).toEqual(FIXTURE.entries);
     const full = withCatalogAgents({ entries: [...FIXTURE.entries, ...added] });

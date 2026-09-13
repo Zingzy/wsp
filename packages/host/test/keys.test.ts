@@ -25,11 +25,11 @@ const loadHeld = async (io: CliIO, sources: KeySources, ask?: { anthropic: boole
 const SOLARI = "slr_live_fake_solari_key";
 
 describe("help", () => {
-  it("--yes says a browser or device login, or one held in the Keychain, signs in on the machine, so macOS has nothing to ask either", () => {
+  it("--yes says a browser or device login, or one held in the Keychain, is left to first use, so macOS has nothing to ask and the build waits on nobody", () => {
     setup();
     // The sentence lives on the flag's own row, which is what wsp init --help prints, not on the front page.
     expect(SHARED_FLAGS.find(f => f.name === "yes")!.says).toContain(
-      "a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal",
+      "a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody",
     );
   });
 });

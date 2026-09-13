@@ -19,7 +19,7 @@ import type { Keys } from "./cli.js";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, plural, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
+import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, SIGN_IN_ANSWERS, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
 import { planGoldenRecipe, planImport, type BuildContext } from "./image-recipe.js";
 import {
@@ -46,11 +46,11 @@ import {
   tickLoginTools,
   withTicksOf,
   withoutAgentTools,
+  WITHOUT_A_COPY,
 } from "./init-recipe.js";
 import { alsoTitle } from "./init-also.js";
 import { TOOLS_TITLE, pickScreens, projectNote, signInItems, wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { PROJECT_GROUP } from "./init-table.js";
-import { SIGN_IN_WORDS } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
 import { applySets, carriedOver, historyLine, historyProgressLine } from "./recipe-command.js";
@@ -704,7 +704,7 @@ export function readyLine(
   const machine = manifest.entries.filter(e => e.rung === "logins" && choices.get(e.id) === "machine").length;
   return [
     `Ready to build. ${plural(agents.length, "agent")}, ${plural(tools, "tool")}, ${fmtBytes(est.total)} on the image.`,
-    `${plural(machine, "sign-in")} on the machine after the build.`,
+    `${plural(machine, "sign-in")} on the machine during the build.`,
     `The build takes ${takes}; a workspace naps when it is idle and stops billing.`,
   ].join(" ");
 }
@@ -726,11 +726,11 @@ export function summaryNote(
   builderDiskGb?: number,
 ): string[] {
   const perRung = RUNGS.map(rung => manifest.entries.filter(e => e.rung === rung)).filter(entries => entries.length > 0);
-  const answer = (e: ManifestEntry): string => { const c = choices.get(e.id); return isLoginChoice(c) ? SIGN_IN_WORDS[c].short : "skip"; };
+  const answer = (e: ManifestEntry): string => { const c = choices.get(e.id); return isLoginChoice(c) ? SIGN_IN_ANSWERS[c].short : "skip"; };
   // The sign-ins row counts the answers that bring something, as its screen's header does: a sign-in is chosen though nothing is ticked.
   const loginSpread = (entries: readonly ManifestEntry[]): string =>
     LOGIN_CHOICES.filter(c => c !== "skip")
-      .map(c => ({ n: entries.filter(e => answer(e) === SIGN_IN_WORDS[c].short).length, label: SIGN_IN_WORDS[c].short }))
+      .map(c => ({ n: entries.filter(e => answer(e) === SIGN_IN_ANSWERS[c].short).length, label: SIGN_IN_ANSWERS[c].short }))
       .filter(p => p.n > 0)
       .map(p => `${p.n} ${p.label}`)
       .join(", ");
@@ -745,7 +745,7 @@ export function summaryNote(
   const listed = manifest.entries.filter(e => e.rung === "logins" || (e.consent === true && answer(e) !== "skip"));
   // Lines are wrapped here to what the card leaves, so the card prints them as they are; the label keeps room for the widest answer.
   const inner = width - CARD_FRAME;
-  const labelRoom = inner - 2 - GUTTER.length - Math.max(...Object.values(SIGN_IN_WORDS).map(w => w.short.length));
+  const labelRoom = inner - 2 - GUTTER.length - Math.max(...Object.values(SIGN_IN_ANSWERS).map(w => w.short.length));
   const answered = new Map(table(listed.map(e => [`  ${ellipsize(e.label, labelRoom)}`, answer(e)])).map((line, i) => [listed[i]!.id, line]));
   const lines = perRung.flatMap((entries, i) => [rows[i]!, ...entries.flatMap(e => answered.get(e.id) ?? [])]);
   const bring = manifest.entries.filter(e => ticks.has(e.id)).map(e => ({ ...e, bring: true }));
@@ -1013,11 +1013,12 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       if (agent === undefined) continue;
       log.message(dim(`The wsp tools were not added to ${catalogEntry(agent)?.name ?? agent} here: a run taken as yes (${takenAs}) writes nothing on this computer. Run wsp mcp install --agent ${agent} to add them.`), { output: io.output, symbol: dim(S_BAR) });
     }
-    // Nobody is here to click macOS's consent dialog: a login the Keychain holds signs in on the machine
-    // unless a saved answer says copy, which is the person's own and keeps the recipe hash it was saved with.
+    // Nobody is here to click macOS's consent dialog, so a login the Keychain holds cannot be copied on this run and
+    // goes where such a row goes; a saved answer that says copy is the person's own, and keeps the recipe hash it was
+    // saved with.
     const defaulted = manifest.entries.filter(e => e.rung === "logins" && e.choice === undefined && answers.choices.get(e.id) === "copy").map(e => ({ ...e, choice: "copy" as const }));
     for (const s of keychainLogins(defaulted, opts.platform, opts.home)) {
-      answers.choices.set(s.id, "machine");
+      answers.choices.set(s.id, WITHOUT_A_COPY);
       answers.ticks.delete(s.id);
     }
     const added = tickLoginTools(manifest, answers.choices, answers.ticks, brew);
@@ -1223,12 +1224,14 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   if (read.dropped.length > 0) log.warn(read.dropped.map(d => `${label(d.id)}: ${d.left} (${d.reason}).`).join("\n"), out);
   const left = new Map(read.dropped.map(d => [d.id, read.dropped.filter(x => x.id === d.id).map(x => x.left).join("; ")]));
   if (read.refused.length > 0) {
-    // A sign-in on the machine is an answer, not a tick: the row leaves the ticks as the screens would have left it.
+    // The copy this row wanted cannot happen here, so it goes where such a row goes. That is an answer, not a tick:
+    // the row leaves the ticks as the screens would have left it.
     for (const r of read.refused) {
-      choices.set(r.id, "machine");
+      choices.set(r.id, WITHOUT_A_COPY);
       ticks.delete(r.id);
     }
-    log.warn(read.refused.map(r => `${label(r.id)}: ${r.command !== undefined ? `the ${r.service} helper failed` : "Keychain read failed"} (${r.reason}); changed to sign in on the machine.`).join("\n"), out);
+    const changedTo = SIGN_IN_ANSWERS[WITHOUT_A_COPY].label(opts.platform);
+    log.warn(read.refused.map(r => `${label(r.id)}: ${r.command !== undefined ? `the ${r.service} helper failed` : "Keychain read failed"} (${r.reason}); changed to ${changedTo}.`).join("\n"), out);
     saveRecipe(path, manifest, ticks, choices);
     saveSmallRecipe(small.path, smallRecipeNow());
     // The flipped rows change the recipe hash; the builder must carry the hash the saved recipe now has,

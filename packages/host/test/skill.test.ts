@@ -6,7 +6,7 @@ import { thisComputerLine } from "@wsp/protocol";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CATALOG_AGENTS, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { COORDINATOR_HANDOFF, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
+import { COORDINATOR_HANDOFF, LOGIN_CHOICES, NOTIFY_CALLER, SessionStartOutcome, backgroundTasksLine, notifyLine, stillWorkingLine } from "@wsp/protocol";
 import { INSTRUCTIONS, RULES_HEADING, SETUP_HEADING, SHELL_HEADING, SKILL_NAME, VERBS_HEADING, WSP_SKILL, agentsLine, instructionsOf } from "../src/skill.js";
 import { hasTool, CLI_VERBS, VERBS, toolName } from "../src/verbs.js";
 
@@ -151,7 +151,7 @@ describe("the wsp skill", () => {
     expect(setup).toContain("Hand that line to the person as it comes");
     expect(setup).toContain("SOLARI_API_KEY=");
     expect(setup).toContain("Do not ask them to paste a key into this conversation");
-    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", "--signin <id>=copy|machine|key|skip", "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp run first"]) expect(setup, step).toContain(step);
+    for (const step of ["wsp recipe scan", "wsp recipe --tick used", "--set <id>=on|off", "--add <id>=", `--signin <id>=${LOGIN_CHOICES.join("|")}`, "--project <folder>", "wsp new dev", "wsp snapshot first", "wsp run first"]) expect(setup, step).toContain(step);
     // Eight steps, since nothing in the walkthrough starts or restarts a host by hand any more.
     expect(setup.split("\n").filter(l => /^\d+\. /.test(l))).toHaveLength(8);
   });
