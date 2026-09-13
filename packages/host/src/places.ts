@@ -44,6 +44,10 @@ import {
   fmtDuration,
   fmtSize,
   placeDaemonPaths,
+  placeUpdateLine,
+  shellQuote,
+  placeNoChipLine,
+  MACHINE_PUT_PART_BYTES,
   workFolderIn,
   hostKeyKeptNote,
   hostKeyRefusal,
@@ -54,14 +58,14 @@ import {
   usageRefusal,
   wsUrlOf,
 } from "@wsp/protocol";
-import { SshBackend, checkProviderKey, keyCheckLine, keyFingerprint, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceWiring } from "@wsp/runtime";
+import { SshBackend, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
-import { daemonBinaryHere } from "./assets.js";
-import { guestDaemonTarget, noGuestDaemonLine } from "./daemon-binary.js";
+import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
+import { DAEMON_BIN, daemonBinaryIn, daemonTargetHere, guestDaemonTarget, noGuestDaemonLine } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
@@ -75,6 +79,7 @@ import {
   runFailureLine,
   serviceEnv,
   serviceManagerFor,
+  serviceTag,
   systemRunner,
   type ServiceAddress,
   type ServiceManager,
@@ -134,6 +139,7 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
     // being joined is somewhere else and so whether that word could ever be dialled from it.
     install: placeInstaller(advertise === undefined ? {} : { advertise }),
     dial: placeDialler(),
+    update: placeUpdater(),
     provider: () => {
       const module = providerModule(env);
       // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
@@ -239,13 +245,25 @@ export function removeLines(name: string, answer: { swept: readonly string[]; dr
   ];
 }
 
-/** The refusal for a name two places share: ids tell them apart, and the person picks one. */
-export const twoPlacesLine = (ref: string, ids: readonly string[]): string =>
-  `wsp remove ${ref}: this host holds ${ids.length} places by that name; name one by its id (${ids.join(", ")}).`;
+/** The refusal for a name two places share: ids tell them apart, and the person picks one. `typed` is the line the
+ * person wrote, since more than one word names a place and each says its own back. */
+export const twoPlacesLine = (typed: string, ids: readonly string[]): string =>
+  `${typed}: this host holds ${ids.length} places by that name; name one by its id (${ids.join(", ")}).`;
 
 /** The refusal for a word no place answers to. */
-export const noPlaceLine = (ref: string, names: readonly string[]): string =>
-  `wsp remove ${ref}: this host holds no place by that name or id.${names.length === 0 ? " wsp add prints the join line." : ` It holds ${names.join(", ")}.`}`;
+export const noPlaceLine = (typed: string, names: readonly string[]): string =>
+  `${typed}: this host holds no place by that name or id.${names.length === 0 ? " wsp add prints the join line." : ` It holds ${names.join(", ")}.`}`;
+
+/** The one place a word names among the computers joined to this host, or the refusal the line that typed it
+ * prints. Every word that names a place reads it, so none of them invents a second reading or a second refusal. */
+async function onePlace(client: HostClient, typed: string, ref: string): Promise<{ place: PlaceView } | { refusal: string }> {
+  const { places } = await client.request<{ places: PlaceView[] }>("places.list");
+  const joined = places.filter(p => p.kind === "computer" && p.joinedAt !== undefined);
+  const found = joined.filter(p => p.id === ref || p.name === ref);
+  if (found.length === 0) return { refusal: noPlaceLine(typed, joined.map(p => p.name)) };
+  if (found.length > 1) return { refusal: twoPlacesLine(typed, found.map(p => p.id)) };
+  return { place: found[0]! };
+}
 
 /** The line a join prints once the computer is in. */
 export const joinedLine = (name: string, url: string): string => `${name} joined the wsp at ${url}; it dials that host on its own from now on.`;
@@ -263,16 +281,20 @@ export interface AddFlags {
   name?: string;
   sshPort?: number;
   keyPath?: string;
+  /** The one word for a computer already in this wsp: put the daemon this host deploys on it. Every other flag on
+   * this verb is about a computer that is not in yet, so it goes beside none of them. */
+  update?: boolean;
 }
 
 /** The words a person gave beside the address, read by the one rule every ssh road on this command line reads
  * them by: a port that is a number and a key that is a path on this computer. */
-export function addFlags(name?: string, port?: string, keyPath?: string): AddFlags {
+export function addFlags(name?: string, port?: string, keyPath?: string, update?: boolean): AddFlags {
   const asked = sshAsked(name, port, keyPath);
   return {
     ...(asked.name !== undefined ? { name: asked.name } : {}),
     ...(asked.port !== undefined ? { sshPort: asked.port } : {}),
     ...(asked.keyPath !== undefined ? { keyPath: asked.keyPath } : {}),
+    ...(update === true ? { update: true } : {}),
   };
 }
 
@@ -355,6 +377,102 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
   };
 }
 
+/** The unit the join on that computer installed, named the way its own service manager names it: the role and the
+ * first eight hex of the place file's path. The host can name it without asking because both sides read one rule
+ * off one path, which is where every file wsp keeps on a place sits. */
+export const placeUnitName = (home: string): string => `wsp-place-${serviceTag(placeDaemonPaths(home).placeFile)}.service`;
+
+/** What a computer answers once the daemon the host sent is the one its unit runs, and what it says instead when
+ * the unit did not come back up. Read off stdout, as every other deploy's lines are. */
+export const PLACE_UPDATED_LINE = "PLACE_UPDATED";
+export const PLACE_UPDATE_DOWN_LINE = "PLACE_UPDATE_DOWN";
+/** What the box says when its own service manager holds no unit for this place: the update stops there rather than
+ * writing a binary nothing would start. */
+export const PLACE_NO_UNIT_LINE = "PLACE_NO_UNIT";
+
+/** The update over the ssh road, run on the computer itself once the binary has landed beside its files. The path
+ * the new binary is moved over is the one the unit itself names, read back out of systemd rather than worked out
+ * here: the join wrote that unit with whatever path the wsp on that computer resolved, and a second reading of that
+ * rule here would be a second copy of it. The old binary is kept beside the new one, as the coordinator kept it by
+ * hand. Nothing is swept: the workspaces' records stay on the box and the daemon that comes up reads them again. */
+export function placeUpdateScript(home: string, landed: string, unit = placeUnitName(home)): string {
+  const at = placeDaemonPaths(home);
+  const q = shellQuote;
+  return [
+    'export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"',
+    // systemd prints ExecStart as a record with the binary under path=; the first is the one it runs.
+    `exe="$(systemctl --user show -p ExecStart --value ${q(unit)} 2>/dev/null | sed -n 's/.*path=\\([^ ;]*\\).*/\\1/p' | head -n 1)"`,
+    `if [ -z "$exe" ]; then echo ${PLACE_NO_UNIT_LINE}; exit 1; fi`,
+    `cp -f "$exe" "$exe.old" 2>/dev/null || true`,
+    // A move, never a write into it: the file is running, and a kernel refuses a write to a mapped executable.
+    `mv -f ${q(landed)} "$exe"`,
+    'chmod 0755 "$exe"',
+    `systemctl --user restart ${q(unit)}`,
+    `rm -f ${q(at.portFile)}`,
+    `for _ in $(seq 80); do [ -s ${q(at.portFile)} ] && break; sleep 0.25; done`,
+    `if [ -s ${q(at.portFile)} ] && systemctl --user is-active --quiet ${q(unit)}; then echo ${PLACE_UPDATED_LINE} "$exe"; else journalctl --user -u ${q(unit)} -n 50 --no-pager; echo ${PLACE_UPDATE_DOWN_LINE}; fi`,
+  ].join("\n");
+}
+
+/** The refusal an update gets on a computer this host is holding no link to and was never installed over ssh: a
+ * computer joined by typing a code is reached over its link alone. */
+export const placeNoUpdateRoadLine = (name: string): string =>
+  `${name} is not connected and this wsp has no login for it, so there is no road to put a daemon on it; switch it on and run the line again`;
+
+/** What the box said when its update did not come back up, for the one sentence a person reads. */
+export const placeUpdateFailedLine = (name: string, said: string): string => `${name} took the daemon and its agent did not come back up: ${said}`;
+
+/** How the daemon this host deploys is put on a computer that is already a place, for the host that wires the
+ * runtime. Which binary is the computer's own word about its chip, never this computer's: the two are different
+ * computers as often as they are alike, and a binary for the wrong one starts and dies.
+ *
+ * Two roads, one rule about which: the link the place is holding, which carries the bytes as frames and ends in the
+ * agent restarting itself, and the ssh road the install used where there is no link. Neither carries the binary on
+ * a command line.
+ */
+export function placeUpdater(deps: { backend?: SshBackend; daemonDir?: string } = {}): PlaceUpdater {
+  return async req => {
+    const target = daemonTargetHere(req.report.platform, req.report.arch);
+    if (target === undefined) throw new Error(placeNoChipLine(req.name, req.report.platform, req.report.arch));
+    const bin = daemonBinaryIn(deps.daemonDir ?? assetDir("daemon"), target.triple);
+    if (!existsSync(bin)) throw new Error(`${assetName("daemon")} missing: ${bin}`);
+    const bytes = new Uint8Array(readFileSync(bin));
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (req.link !== undefined) {
+      const uploadId = randomBytes(8).toString("hex");
+      const parts = Math.max(1, Math.ceil(bytes.length / MACHINE_PUT_PART_BYTES));
+      let at = "";
+      for (let seq = 0; seq < parts; seq++) {
+        const part = bytes.subarray(seq * MACHINE_PUT_PART_BYTES, (seq + 1) * MACHINE_PUT_PART_BYTES);
+        const answer = await req.link.request("place.update", {
+          uploadId,
+          seq,
+          last: seq === parts - 1,
+          data: Buffer.from(part).toString("base64"),
+          sha256,
+        });
+        at = typeof answer["at"] === "string" ? answer["at"] : at;
+      }
+      return { road: "link", at };
+    }
+    if (req.ssh === undefined) throw new Error(placeNoUpdateRoadLine(req.name));
+    const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
+    const { machine, login, arch } = await (deps.backend ?? new SshBackend()).adopt(reach);
+    // The chip the box says now rather than the one the record kept, read before a byte is sent: a computer that
+    // was rebuilt on another chip since it joined takes the binary it can run or none at all.
+    const said = arch === undefined ? undefined : guestDaemonTarget(arch);
+    if (said === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
+    const landing = `${placeDaemonPaths(login.HOME).putDir}/${DAEMON_BIN}`;
+    const fresh = new Uint8Array(readFileSync(daemonBinaryIn(deps.daemonDir ?? assetDir("daemon"), said.triple)));
+    await landBytes(machine, landing, fresh);
+    const res = await machine.run(placeUpdateScript(login.HOME, landing), { deadlineMs: 180_000 });
+    const printed = res.stdout.split("\n").map(line => line.trim()).filter(line => line !== "");
+    const landed = printed.find(line => line.startsWith(PLACE_UPDATED_LINE));
+    if (landed === undefined) throw new Error(placeUpdateFailedLine(req.name, `${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`.trim()));
+    return { road: "ssh", at: landed.slice(PLACE_UPDATED_LINE.length).trim() };
+  };
+}
+
 /** One login over ssh and nothing else: the road the app's Try now takes on a computer whose agent has stopped
  * dialling in. It reads what that computer says about itself, which is one connection's worth of printf, and it
  * installs nothing and leaves nothing running. ssh's own refusal is what a person reads when it will not take.
@@ -416,8 +534,16 @@ function aimHere(word: string, opts: PlaceOpts): HostAim {
 
 export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], flags: AddFlags = {}, deps: PlaceDeps = systemDeps): Promise<number> {
   const [word] = args;
-  if (args.length > 1) throw usageRefusal("wsp add takes one provider or one address, or nothing at all.", "usage: wsp add\n       wsp add <provider>\n       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]");
+  if (args.length > 1) throw usageRefusal("wsp add takes one provider or one address, or nothing at all.", ADD_USAGE);
   const aim = aimHere("add", opts);
+  if (flags.update === true) {
+    if (word === undefined) throw usageRefusal("wsp add --update takes the place to move onto this wsp's daemon.", ADD_USAGE);
+    if (flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined) {
+      io.error(UPDATE_FLAGS_REFUSAL);
+      return 1;
+    }
+    return updatePlace(io, opts, aim, word, deps);
+  }
   const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined;
   if (word !== undefined && word.includes("@")) return addOverSsh(io, opts, aim, word, flags, deps);
   if (named) {
@@ -450,6 +576,48 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
     // Off the key file beside the state file this line is aimed at, which is the pair the host serving it signs
     // with: a door that would not open still prints a line naming the key that will answer once one does.
     for (const line of addLines(joinToken(code, hostKeyHere(opts.statePath)), expiresAt, deps.now(), urls, publicAt)) io.log(line);
+    return 0;
+  } finally {
+    client.close();
+  }
+}
+
+/** The whole of what this verb answers to, printed by every refusal it has about its own shape. */
+const ADD_USAGE = [
+  "usage: wsp add",
+  "       wsp add <provider>",
+  "       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+  "       wsp add <place> --update",
+].join("\n");
+
+/** The refusal for the update flag beside a flag about joining a computer that is not in yet. */
+export const UPDATE_FLAGS_REFUSAL =
+  "wsp add --update names a computer already in this wsp, so it takes none of the flags a join takes. Drop them, or drop --update to join a computer.";
+
+/** What the line prints once a place is on the daemon this host deploys, or once it has taken it and not yet come
+ * back on it. The versions either side and the road the binary took, so a person reading it can tell the link road
+ * from the ssh one without asking. */
+export function updatedLines(answer: { name: string; from: number; to: number; road: string; at: string; note?: string }): string[] {
+  return [
+    `${answer.name}: daemon ${answer.from} to ${answer.to}, over the ${answer.road}`,
+    `its binary      ${answer.at}`,
+    ...(answer.note === undefined ? [] : [answer.note]),
+  ];
+}
+
+/** One place moved onto this wsp's daemon. The work is the host's, over the socket this line opens, as the install
+ * is: the binary goes over the link that place is holding, or over the ssh road the install used when it holds
+ * none, and the workspaces on it are kept either way. */
+async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, deps: PlaceDeps): Promise<number> {
+  const client = await deps.dial(opts.statePath, { aim });
+  try {
+    const picked = await onePlace(client, placeUpdateLine(ref), ref);
+    if ("refusal" in picked) {
+      io.error(picked.refusal);
+      return 1;
+    }
+    const answer = await client.request<{ name: string; from: number; to: number; road: string; at: string; note?: string }>("places.update", { placeId: picked.place.id });
+    for (const line of updatedLines(answer)) io.log(line);
     return 0;
   } finally {
     client.close();
@@ -539,22 +707,17 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
   if (ref === undefined || args.length !== 1) throw usageRefusal("wsp remove takes one place.", "usage: wsp remove <place>");
   const aim = aimHere("remove", opts);
   const client = await deps.dial(opts.statePath, { aim });
+  const typed = `wsp remove ${ref}`;
   try {
-    const { places } = await client.request<{ places: PlaceView[] }>("places.list");
-    const joined = places.filter(p => p.kind === "computer" && p.joinedAt !== undefined);
-    const found = joined.filter(p => p.id === ref || p.name === ref);
-    if (found.length === 0) {
-      io.error(noPlaceLine(ref, joined.map(p => p.name)));
+    const picked = await onePlace(client, typed, ref);
+    if ("refusal" in picked) {
+      io.error(picked.refusal);
       return 1;
     }
-    if (found.length > 1) {
-      io.error(twoPlacesLine(ref, found.map(p => p.id)));
-      return 1;
-    }
-    const place = found[0]!;
+    const place = picked.place;
     const answer = await client.request<{ removed: boolean; swept: string[]; dropped: string[]; note?: string }>("places.remove", { placeId: place.id });
     if (!answer.removed) {
-      io.error(noPlaceLine(ref, joined.map(p => p.name)));
+      io.error(noPlaceLine(typed, []));
       return 1;
     }
     // The place's own name is what a join names the device it buys, so a device still wearing it is that computer's

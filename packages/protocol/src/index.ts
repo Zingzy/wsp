@@ -2733,6 +2733,29 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** Sweeps wsp off this computer and answers what it took, then the agent exits: the one op whose handler belongs
    * to the link a place opened and not to the daemon's own switch. */
   z.object({ id: reqId, op: z.literal("place.leave") }),
+  /** The daemon this host deploys, landed on the computer the link runs on and started in place of the one running
+   * there. The parts arrive as machine.putBytes's do, in seq order under one upload id on one socket; the part
+   * marked last is checked against sha256, moved over the binary the unit starts and answered, and then the agent
+   * ends so whatever supervises it starts the new one. Nothing on that computer is swept: the workspaces' records
+   * stay on its disk and the daemon that comes up reads them again.
+   *
+   * The other link op, and for the same reason: a binary is bytes and never a command line, since a command sits in
+   * a world readable /proc/<pid>/cmdline while it runs. */
+  z.object({
+    id: reqId,
+    op: z.literal("place.update"),
+    uploadId: z
+      .string()
+      .min(1)
+      .max(32)
+      .regex(/^[a-z0-9]+$/),
+    seq: z.number().int().min(0),
+    last: z.boolean(),
+    data: z.string(),
+    /** Lowercase hex sha256 of the whole binary, carried on every part and read on the last: a binary that landed
+     * short would otherwise be moved over the one the unit starts, and Restart=always would loop on it. */
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
@@ -3236,6 +3259,29 @@ export function daemonVersionOf(hello: { version?: number }): number {
   return hello.version ?? 1;
 }
 
+/** The one word a place's row says while this wsp deploys a newer daemon than that computer runs, and nothing
+ * while it is level or ahead or has never reported. Both sides of the figure are already on the wire: the place
+ * sends its own version in every report and this host's is the record above, so nothing is asked for it. Read by
+ * `wsp places`, by the places table and by the doctor, so the three cannot word it three ways. */
+export function placeDaemonBehind(place: { daemonVersion?: number }): string | undefined {
+  const version = place.daemonVersion;
+  return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
+}
+
+/** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
+ * is behind. */
+export const placeUpdateLine = (name: string): string => `wsp add ${name} --update`;
+
+/** What the doctor says about one place that is behind: the word above and the line that answers it. */
+export const placeBehindLine = (name: string, word: string): string => `${name} is behind: ${word}; ${placeUpdateLine(name)} puts this wsp's daemon on it`;
+
+/** The refusal an update gets on a place already running the daemon this wsp deploys. */
+export const placeCurrentLine = (name: string, version: number): string => `${name} already runs daemon ${version}, which is the one this wsp deploys`;
+
+/** The refusal an update gets where this wsp holds no daemon built for the chip that computer said it is. */
+export const placeNoChipLine = (name: string, platform: string, arch: string): string =>
+  `${name} says it is ${platform} ${arch}, and this wsp carries no daemon built for it`;
+
 export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
    * absolute directory every fs.* and git.* path must resolve inside, so a
@@ -3724,6 +3770,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Every place this host holds: this computer, the computers joined to it, and the provider it forks on.
    * Answers `{ places: PlaceView[] }`. */
   z.object({ id: reqId, op: z.literal("places.list") }),
+  /** Puts the daemon this host deploys on one place, over the link it holds or over the ssh road the install used,
+   * and waits for that computer to dial back running it. The workspaces on it are kept. Answers
+   * `{ name, from, to, road, at, note? }`. */
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),

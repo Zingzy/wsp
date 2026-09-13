@@ -4,7 +4,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, exec_timeout};
+use crate::validate::{bounded, exec_timeout, sha256_hex, upload_word};
 use crate::{FsReadEncoding, GitDiffScope, ProcSignal, RequestId};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
@@ -110,11 +110,23 @@ pub enum DaemonOp {
     },
     #[serde(rename = "place.leave")]
     PlaceLeave,
+    /// The daemon this host deploys, in parts under one upload id, and the restart the last part ends in. The other
+    /// link op: a binary travels as bytes and never as a command line.
+    #[serde(rename = "place.update", rename_all = "camelCase")]
+    PlaceUpdate {
+        #[serde(deserialize_with = "upload_word")]
+        upload_id: String,
+        seq: u64,
+        last: bool,
+        data: String,
+        #[serde(deserialize_with = "sha256_hex")]
+        sha256: String,
+    },
 }
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 27] = [
+pub const DAEMON_OPS: [&str; 28] = [
     "pty.create",
     "pty.attach",
     "pty.write",
@@ -142,4 +154,5 @@ pub const DAEMON_OPS: [&str; 27] = [
     "tunnel.close",
     "exec",
     "place.leave",
+    "place.update",
 ];

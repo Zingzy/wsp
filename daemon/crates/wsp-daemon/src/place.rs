@@ -8,8 +8,10 @@ use std::path::{Path, PathBuf};
 
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use sha2::{Digest as _, Sha256};
 use wsp_frames::{
-    numbers, place_owned_paths, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
+    numbers, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform,
+    WorkspaceSize,
 };
 use wsp_runtime::doctor::on_path;
 
@@ -158,6 +160,56 @@ pub(crate) fn sweep_place_home(home: &Path) -> Vec<String> {
     removed
 }
 
+/// Where the parts of an update are appended while they arrive: under the place's own put folder, named after the
+/// upload, so nothing half landed ever sits where the binary the unit starts does.
+pub(crate) fn update_part(home: &Path, upload_id: &str) -> PathBuf {
+    place_daemon_paths(home).put_dir.join(upload_id)
+}
+
+/// One part appended in seq order. Part zero is the one that may find nothing there and the only one that may:
+/// anything else is a gap, and the upload is dropped rather than becoming a file with a hole in it.
+pub(crate) fn take_update_part(part: &Path, seq: u64, bytes: &[u8], upload_id: &str) -> Result<(), String> {
+    let held = std::fs::metadata(part).is_ok();
+    if (seq == 0) == held {
+        let _ = std::fs::remove_file(part);
+        return Err(words::update_out_of_order(seq, upload_id));
+    }
+    if let Some(parent) = part.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    let mut file =
+        std::fs::OpenOptions::new().append(true).create(true).open(part).map_err(|e| format!("{}: {e}", part.display()))?;
+    std::io::Write::write_all(&mut file, bytes).map_err(|e| format!("{}: {e}", part.display()))
+}
+
+/// Lowercase hex sha256 of some bytes, as the host spells the one it names on the frame.
+fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The landed binary moved over the one this process runs from, and where the one it replaced was kept. The bytes
+/// are checked against the host's sha256 first and the whole of the move is a rename beside the binary, which is
+/// the one write a running executable takes: writing into it is refused while it is mapped, and a copy that failed
+/// halfway would leave the unit starting a truncated file forever under Restart=always.
+pub(crate) fn install_daemon(exe: &Path, part: &Path, sha256: &str, upload_id: &str) -> Result<(String, String), String> {
+    let landed = std::fs::read(part).map_err(|e| format!("{}: {e}", part.display()))?;
+    let held = sha256_hex(&landed);
+    if held != sha256 {
+        let _ = std::fs::remove_file(part);
+        return Err(words::update_bytes_differ(upload_id, sha256, &held));
+    }
+    let fresh = exe.with_extension("new");
+    let kept = exe.with_extension("old");
+    std::fs::write(&fresh, &landed).map_err(|e| format!("{}: {e}", fresh.display()))?;
+    std::fs::set_permissions(&fresh, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+        .map_err(|e| format!("{}: {e}", fresh.display()))?;
+    // The old binary kept beside the new one, so a box whose daemon will not come up still holds the one it ran.
+    std::fs::copy(exe, &kept).map_err(|e| format!("{}: {e}", kept.display()))?;
+    std::fs::rename(&fresh, exe).map_err(|e| format!("{}: {e}", exe.display()))?;
+    let _ = std::fs::remove_file(part);
+    Ok((exe.to_string_lossy().into_owned(), kept.to_string_lossy().into_owned()))
+}
+
 /// The home the place keeps its files under: --home, else HOME, else the root.
 pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
     given.map(Path::to_path_buf).or_else(|| std::env::var_os("HOME").map(PathBuf::from)).unwrap_or_else(|| PathBuf::from("/"))
@@ -167,7 +219,7 @@ pub(crate) fn place_home(given: Option<&Path>) -> PathBuf {
 mod tests {
     use super::*;
     use ed25519_dalek::pkcs8::{EncodePrivateKey, EncodePublicKey};
-    use wsp_frames::{place_daemon_paths, place_link_transcript, LinkRole};
+    use wsp_frames::{place_link_transcript, LinkRole};
 
     fn pair() -> (String, PlacePublicKey) {
         let mut seed = [0u8; 32];
@@ -250,6 +302,39 @@ mod tests {
         assert_eq!(bare.wsp, vec!["wsp"]);
         // The shape the host parses is the shape this serialises to.
         serde_json::from_value::<PlaceReport>(serde_json::to_value(&report).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn an_update_appends_its_parts_in_order_and_moves_the_whole_over_the_running_binary() {
+        let home = tempfile::tempdir().unwrap();
+        let part = update_part(home.path(), "u1");
+        assert_eq!(part, place_daemon_paths(home.path()).put_dir.join("u1"));
+        // A part that is not the first with nothing there, and a first part with something there, both drop it.
+        assert_eq!(take_update_part(&part, 1, b"x", "u1").unwrap_err(), words::update_out_of_order(1, "u1"));
+        take_update_part(&part, 0, b"new ", "u1").unwrap();
+        assert_eq!(take_update_part(&part, 0, b"x", "u1").unwrap_err(), words::update_out_of_order(0, "u1"));
+        take_update_part(&part, 0, b"new ", "u1").unwrap();
+        take_update_part(&part, 1, b"daemon", "u1").unwrap();
+        assert_eq!(std::fs::read(&part).unwrap(), b"new daemon");
+
+        let exe = home.path().join("wsp-daemon");
+        std::fs::write(&exe, b"old daemon").unwrap();
+        let wrong = "0".repeat(64);
+        let refused = install_daemon(&exe, &part, &wrong, "u1").unwrap_err();
+        assert_eq!(refused, words::update_bytes_differ("u1", &wrong, &sha256_hex(b"new daemon")));
+        assert_eq!(std::fs::read(&exe).unwrap(), b"old daemon", "a binary whose bytes differ was moved anyway");
+        assert!(!part.exists(), "the dropped upload stays on disk");
+
+        take_update_part(&part, 0, b"new daemon", "u1").unwrap();
+        let (at, kept) = install_daemon(&exe, &part, &sha256_hex(b"new daemon"), "u1").unwrap();
+        assert_eq!(at, exe.to_string_lossy());
+        assert_eq!(kept, exe.with_extension("old").to_string_lossy());
+        assert_eq!(std::fs::read(&exe).unwrap(), b"new daemon");
+        assert_eq!(std::fs::read(exe.with_extension("old")).unwrap(), b"old daemon");
+        assert!(!exe.with_extension("new").exists(), "the staged copy stays beside the binary");
+        assert!(!part.exists());
+        let mode: u32 = std::os::unix::fs::PermissionsExt::mode(&std::fs::metadata(&exe).unwrap().permissions());
+        assert_eq!(mode & 0o777, 0o755);
     }
 
     #[test]

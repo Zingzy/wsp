@@ -17,7 +17,7 @@ import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { FACT, WHERE_WORDS } from "./format.js";
-import { absentOf, isProviderPlace, placeCpuWord, placeName } from "./places.js";
+import { absentOf, isProviderPlace, placeCpuWord, placeName, placeStateWord } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
 /** The name column is the one that gives: it takes what the three fact columns and the menu leave, and cuts the
@@ -99,7 +99,7 @@ export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, a
             </span>
           ) : null}
           <span className={cn(FACT, "shrink-0")} data-k="place-state">
-            {absent?.away ?? ""}
+            {placeStateWord(place, absent)}
           </span>
           {trail}
         </span>

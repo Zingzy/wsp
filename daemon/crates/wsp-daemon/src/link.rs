@@ -155,7 +155,7 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
                 Outcome::Linked(ws) => {
                     let linked_at = Instant::now();
                     match link.hold(*ws, url).await {
-                        Ended::Leave => return,
+                        Ended::Leave | Ended::Restart => return,
                         Ended::Quiet => link.log(&words::link_quiet(url, seconds(link.quiet.as_millis() as u64))),
                         Ended::Peer => {}
                     }

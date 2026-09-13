@@ -1314,6 +1314,72 @@ mod tests {
         assert_eq!(template_id("My Golden/v2"), "wsp/my-golden-v2:template");
     }
 
+    /// One workspace on disk as a daemon that stopped left it: its record under the run directory, its upper
+    /// directory (what a nap boots from), and the chain it mounts.
+    fn left_on_disk(root: &Path, id: &str, chain: &Chain) {
+        let layout = Layout::new(root);
+        fs::create_dir_all(layout.upper(id)).unwrap();
+        fs::create_dir_all(layout.rootfs(id)).unwrap();
+        let record = Workspace {
+            id: id.to_owned(),
+            hostname: id.to_owned(),
+            image: "ubuntu:24.04".to_owned(),
+            chain: chain.clone(),
+            labels: BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]),
+            envs: BTreeMap::new(),
+            cpu: Some(1.0),
+            mem_mb: Some(1024),
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            // A pid nothing holds: the daemon came up after the box did, so the workspace reads stopped, which
+            // under a disk pause is a nap its upper directory is waiting to be woken from.
+            init: Init { pid: i32::MAX, started: 0, boot_id: String::new() },
+            engine: false,
+        };
+        fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
+    }
+
+    /// A layer unpacked in the store, as a pull left it; the tree is the form a fork mounts.
+    fn unpacked_layer(root: &Path, bytes: &[u8]) -> Digest {
+        let digest = Digest::of(bytes);
+        let tree = root.join("layers").join("unpacked").join(digest.hex());
+        fs::create_dir_all(&tree).unwrap();
+        fs::write(tree.join("marker"), bytes).unwrap();
+        digest
+    }
+
+    #[test]
+    fn a_daemon_that_comes_up_finds_the_workspaces_it_left_and_keeps_the_layers_their_forks_mount() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // The store is opened once so its directories are there before anything is written into them.
+        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
+        let config = unpacked_layer(root, b"config of the image these forked from");
+        let layer = unpacked_layer(root, b"the layer they mount");
+        let orphan = unpacked_layer(root, b"a layer no record names");
+        let chain = Chain { config: config.clone(), layers: vec![layer.clone()] };
+        left_on_disk(root, "wsp-one", &chain);
+        left_on_disk(root, "wsp-two", &chain);
+
+        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        // The records are there and the listing names both, with the size each was created at.
+        let listed = again.list(None).unwrap();
+        assert_eq!(listed.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["wsp-one", "wsp-two"]);
+        assert!(listed.iter().all(|row| row.state == MachineState::Paused && row.size == Some(WorkspaceSize { cpu: 1.0, mem_mb: 1024 })));
+
+        // The layers both forks mount are still unpacked under the store, so a wake has something to mount; the
+        // one no record names is what the sweep at the open took.
+        for digest in [&config, &layer] {
+            assert!(again.store.unpacked(digest).is_some(), "{} went with the sweep", digest.hex());
+        }
+        assert_eq!(again.swept_at_open().unpacked, vec![orphan.clone()]);
+        assert!(!root.join("layers").join("unpacked").join(orphan.hex()).exists());
+
+        // And the upper directory each nap is waiting to be woken from is where the record left it.
+        for id in ["wsp-one", "wsp-two"] {
+            assert!(Layout::new(root).upper(id).is_dir(), "{id} lost its upper directory");
+        }
+    }
+
     #[test]
     fn a_record_that_does_not_read_refuses_the_open_by_name() {
         let dir = tempfile::tempdir().unwrap();

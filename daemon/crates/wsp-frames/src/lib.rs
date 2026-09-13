@@ -37,7 +37,7 @@ pub use place_paths::{place_daemon_paths, place_owned_paths, PlaceDaemonPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
     GitStatusEntry, GitStatusReply, InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply,
-    ManifestRestartScriptReply, PlaceLeaveReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry,
+    ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry,
     PtyListReply, Reply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS};

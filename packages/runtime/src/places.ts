@@ -19,6 +19,8 @@ import {
   PLACE_KEY_REFUSAL,
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
+  DAEMON_VERSION,
+  placeCurrentLine,
   forkRoom,
   placeLinkTranscript,
   joinToken,
@@ -142,12 +144,45 @@ export interface PlaceWiring {
    * calling home. Nothing is installed and nothing is left running: it answers or it throws the road's own line.
    * Absent on a runtime served without the ssh road, where a computer that is not linked can only be waited for. */
   dial?: PlaceDialler;
+  /** How the daemon this host deploys is put on a computer that is already a place. The host wires it because the
+   * binary and the table of chips it is picked from are the host's, as the installer above is. */
+  update?: PlaceUpdater;
 }
 
 /** One dial of a computer over the login this host holds for it, with the key file the add was given where there
  * was one. Throws with the road's own sentence (ssh's line on the ssh road), which is what a person reads in place
  * of a wsp-shaped refusal. */
 export type PlaceDialler = (login: { ssh: string; keyPath?: string }) => Promise<void>;
+
+/** What one update is told: which computer, what it last said about itself (its chip picks the binary), the link
+ * this host is holding where it holds one, and the login it was installed over where the record holds one. Which
+ * of the two roads it takes is the updater's own reading, since only it knows what each can carry. */
+export interface PlaceUpdateRequest {
+  placeId: string;
+  name: string;
+  report: PlaceReport;
+  link?: DaemonReach;
+  ssh?: { ssh: string; keyPath?: string };
+}
+
+/** What an update answers: which road carried the binary and where it landed on that computer. */
+export interface PlaceUpdateLanded {
+  road: "link" | "ssh";
+  at: string;
+}
+
+/** How the daemon this host deploys is put on a computer already joined. Absent on a runtime served without it,
+ * where a place stays on the daemon it has. */
+export type PlaceUpdater = (req: PlaceUpdateRequest) => Promise<PlaceUpdateLanded>;
+
+/** What the door answers a person who asked for one: the versions either side of the move, the road it took, where
+ * it landed, and the sentence for a computer that had not dialled back on the new daemon before the wait ran out. */
+export interface PlaceUpdated extends PlaceUpdateLanded {
+  name: string;
+  from: number;
+  to: number;
+  note?: string;
+}
 
 /** What one install is told: where to log in, what to call the computer, the single-use code it spends on this
  * host, and the addresses that computer is to dial it at, in the order its link tries them. The addresses are the
@@ -218,6 +253,9 @@ export interface PlaceDoorOptions {
   copyBuild?: (placeId: string) => string | undefined;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
+  /** How long a computer that took an update has to dial back running it before the row is answered with what it
+   * still reads; tests shrink it. */
+  updateWaitMs?: number;
   /** How long one dial of a computer gets before it is an answer of its own. The bound is the runtime's and not
    * the backend's: a road that hangs rather than refusing must still answer the person who pressed the button. */
   dialWaitMs?: number;
@@ -295,6 +333,9 @@ export interface PlaceDoor {
   /** The home the place's login lands in, which every path a turn there is built from. */
   homeOf(placeId: string): Promise<string | undefined>;
   list(now: number): Promise<PlaceView[]>;
+  /** Puts the daemon this host deploys on one place and waits for it to dial back running it. Refuses in one
+   * sentence a place this host does not hold, one already on this daemon, and a runtime wired with no updater. */
+  update(placeId: string): Promise<PlaceUpdated>;
   remove(placeId: string): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
@@ -306,6 +347,14 @@ export interface PlaceDoor {
 /** The one refusal for a runtime served without places wired, so the ops answer plainly rather than pretending
  * this host holds none. */
 export const NO_PLACE_DOOR = "this runtime holds no places; the host that serves the app wires them";
+
+/** The refusal an update gets on a runtime wired with no road to put a daemon on a computer. */
+export const NO_PLACE_UPDATER = "this runtime carries no daemon to put on a computer; the host that serves the app wires one";
+
+/** What the answer says about a computer that took the daemon and had not come back on it before the wait ran out.
+ * Nothing has failed: the unit restarts it and the row moves on its next link. */
+export const placeUpdateSlowLine = (name: string, seconds: number): string =>
+  `${name} took the daemon and had not dialled back on it within ${seconds}s; its row reads the new version once it does`;
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -462,6 +511,14 @@ const DIAL_MS = 20_000;
  * that never arrives is a network between the two, which is what the sentence says. */
 const JOIN_WAIT_MS = 90_000;
 
+/** How long a computer that took an update has to come back up running it. The unit restarts the daemon within
+ * seconds and its link backs off from two, so a minute is the row reading the new version as the ticket asks
+ * rather than a wait a person sits through; a computer slower than that is answered with what it still reads and
+ * the reason. */
+const UPDATE_WAIT_MS = 60_000;
+/** How often the record is read while that wait runs. */
+const UPDATE_POLL_MS = 500;
+
 export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
@@ -515,6 +572,20 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
   };
+  /** The version the place reports once it has dialled back, or what it still reads when the wait runs out. The
+   * record is what a link writes its report onto, so this reads the one fact every other row reads. */
+  const untilDaemonVersion = async (placeId: string, from: number, waitMs: number): Promise<number> => {
+    const until = clockNow() + waitMs;
+    for (;;) {
+      const version = (await recordOf(placeId))?.report.daemonVersion ?? from;
+      if (version >= DAEMON_VERSION || clockNow() >= until) return version;
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, UPDATE_POLL_MS);
+        timer.unref?.();
+      });
+    }
+  };
+
   /** The one write of a place record: the store and the memory the sync roads read both move, so a backend answered
    * without a read is never answered off a record the store has moved past. */
   const keep = async (record: PlaceRecord): Promise<void> => {
@@ -1137,6 +1208,35 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           };
         }),
       ];
+    },
+
+    async update(placeId) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
+      const from = held.report.daemonVersion;
+      // Read before a byte is picked up: a place already on this daemon is told so rather than sent it again, and
+      // the row it is told about is the one the list prints.
+      if (from >= DAEMON_VERSION) throw new Error(placeCurrentLine(held.name, from));
+      if (wiring.update === undefined) throw new Error(NO_PLACE_UPDATER);
+      const link = live.get(placeId)?.reach;
+      const ssh = held.road?.ssh;
+      const landed = await wiring.update({
+        placeId,
+        name: held.name,
+        report: held.report,
+        ...(link === undefined ? {} : { link }),
+        ...(ssh === undefined ? {} : { ssh: { ssh, ...(held.road?.keyPath === undefined ? {} : { keyPath: held.road.keyPath }) } }),
+      });
+      // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
+      // about itself then is the only reading that proves the new daemon is the one running there.
+      const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
+      return {
+        ...landed,
+        name: held.name,
+        from,
+        to,
+        ...(to >= DAEMON_VERSION ? {} : { note: placeUpdateSlowLine(held.name, Math.round((opts.updateWaitMs ?? UPDATE_WAIT_MS) / 1000)) }),
+      };
     },
 
     async remove(placeId) {
