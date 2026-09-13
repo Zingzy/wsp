@@ -193,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { GUEST_WSP_BIN, agentsFrom, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, mcpServersBlocked, actionRefusal, buildsImages, copyIsCurrent, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, keptAccess, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, THIS_COMPUTER, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeWorkspaceGoneLine, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { PlaceAbsentError, PlaceBackend, isPlaceAbsent, parsePlaceMachineId, placeMachineId } from "@wsp/engine";
@@ -204,7 +204,7 @@ import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js"
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor } from "./devices.js";
-import { makePlaceDoor, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
+import { makePlaceDoor, PlaceForksNowhereError, type PlaceDoor, type PlaceRecord, type PlaceWiring } from "./places.js";
 import type { Store } from "./store.js";
 import { HARNESS_CATALOGS, catalogFromProbe, harnessCatalog, smallestModel } from "./harness-catalog.js";
 
@@ -495,7 +495,8 @@ export interface HostTerminalConfig {
  * host owns it (this computer's files, its Keychain, the sign-ins' terminal link are all the host's); the runtime
  * serves its ops and relays its events beside its own, as it does the host's forwards. */
 export interface InitDoor {
-  get(): Promise<InitSetup>;
+  /** The setup as the modal opens on it, priced at the place `on` names, else the default build place. */
+  get(o?: { on?: string }): Promise<InitSetup>;
   keys(keys: { provider?: string; key?: string; rows?: Record<string, string> }): Promise<InitSetup>;
   start(o: { road: InitRoad; harness?: string }): Promise<InitJob>;
   answer(o: { screen: InitScreenId; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
@@ -503,7 +504,8 @@ export interface InitDoor {
   /** Keeps a step's unsent ticks, picks and typed text on the job, so a sheet shut mid-step reopens on them. */
   draft(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   retry(o: { tool: string }): Promise<InitJob>;
-  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean }): Promise<InitJob>;
+  /** Starts the build at the place `on` names, else the default build place. */
+  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string }): Promise<InitJob>;
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
   signInCode(o: { tool: string; code: string }): Promise<InitJob>;
   cancel(): Promise<InitJob>;
@@ -1075,6 +1077,10 @@ export interface Runtime {
    * refuses one with the one sentence, and the lists that serve workspaces leave it out for that caller. */
   readonly workspaces: {
     create(opts: CreateWorkspaceOptions, origin?: Caller): Promise<CreatedWorkspace>;
+    /** Where a fork would land and what that place offers, gated as a create is: the place `on` names, else the
+     * default place; `place` is absent where the landing is the provider this host forks on. Read ahead of a create
+     * so the refusal for a place that forks nothing comes in one sentence before any stage is streamed. */
+    landing(o?: { on?: string }): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
     /** The one local workspace: this computer. Refused when this host wired no local backend, when one already
      * exists (one per host), and for a name another workspace holds. It forks nothing; the machine already exists. */
     createLocal(name?: string, origin?: Caller): Promise<WorkspaceView>;
@@ -1266,12 +1272,22 @@ export interface Runtime {
   };
   readonly golden: {
     build(opts: GoldenBuildRequest): Promise<{ manifest: GoldenManifest; version: GoldenVersion }>;
+    /** The manifest at the place the image's own seal stands: the versions wsp init built and updates there. */
     get(name?: string): Promise<GoldenManifest | undefined>;
+    /** Where an image build goes: the place `word` names, by the name or id wsp places lists, else the default place,
+     * else the one other place that runs workspaces. Answers the id its copies are filed under, the name a person
+     * reads and the backend a builder there is made on. Refused with the place's own reason where it runs none, with
+     * NO_BUILD_PLACE_LINE where no place here does, and with buildPlaceAskLine where more than one does and none is the
+     * default. */
+    buildPlace(word?: string): Promise<{ place: string; name: string; backend: MachineBackend }>;
     /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it.
      * Once `signal` aborts the call rejects with PrepareStoppedError: a machine this prepare made is killed by its
      * recorded id and its record dropped (a create still in flight is killed as it lands); a builder it attached to
-     * keeps its first life, its hold is released and its record stays reusable. */
-    prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal; recipe?: GoldenRecipe; place?: string }): Promise<GoldenBuilderView>;
+     * keeps its first life, its hold is released and its record stays reusable. `place` is where the builder is
+     * made, a joined computer or a provider by name or id; absent is the provider this host forks on. `copy` marks a
+     * copy's build, whose frames name the place; the image's own build names none, wherever it runs, which is how
+     * the app tells the two apart. */
+    prepare(opts?: { name?: string; kind?: MachineKind; signal?: AbortSignal; recipe?: GoldenRecipe; place?: string; copy?: boolean }): Promise<GoldenBuilderView>;
     /** Snapshot, smoke-fork, append a version. A builder built from a recipe is kept running for GRACE_MS after a
      * successful seal so one more change re-snapshots it; any other builder, and every failed or refused seal, consumes
      * it, except a snapshot the provider refused: that builder is left as it was and stays recorded for the next init
@@ -1323,9 +1339,10 @@ export interface Runtime {
     /** Prepares a builder at `place` from the recipe the host composes off the record (every login set to skip),
      * lands the record's vault on it and seals; the copy is recorded under that place at the record's hash. The
      * recipe is asked for only once every refusal has passed, so the host composes nothing for a build that cannot
-     * run. A place already holding a copy of this record is answered with that copy and builds nothing. Refused
-     * when the place is the wired one, when it builds no copy at all, when the record has no small recipe to build
-     * from, and, without `force`, when it holds no vault. Progress rides golden.stage frames carrying `place`. */
+     * run. A place already holding a copy of this record is answered with that copy and builds nothing. Any place
+     * wsp places lists takes it, a joined computer by name or id included. Refused when the place builds no copy at
+     * all, when the record has no small recipe to build from, and, without `force`, when it holds no vault. Progress
+     * rides golden.stage frames carrying the place's id. */
     build(o: { place: string; name?: string; recipe: (image: SealedImage) => GoldenRecipe | Promise<GoldenRecipe>; force?: boolean; signal?: AbortSignal }): Promise<SealedImageBuilt>;
   };
   /** Enriched status (machine state, daemon reach, size, rate) + cost ticker; its list leaves out the workspaces the
@@ -1906,7 +1923,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       backend: record => {
         if (record.place === undefined) return backend;
         const at = placeDoorOf().backendOf(record.place);
-        if (at === undefined) throw new Error(placeForksNowhereLine(placeDoorOf().nameOf(record.place)));
+        if (at === undefined) throw new PlaceForksNowhereError(placeForksNowhereLine(placeDoorOf().nameOf(record.place)));
         return at;
       },
       execStream: (entry, o, waiting) => machineExecStream(entry.machine, o, waiting),
@@ -3860,16 +3877,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** The create itself, one stage report per awaited step. The hostname is set inside the fork, before the daemon
    * is asked and before the workspace is listed or reachable, so no shell can open under the guest's boot name. */
+  /** Where a fork lands: the word the person typed, else the place a fork last landed on. This host's own provider is
+   * a place with no id, which is what every fork before joined computers existed stood on. */
+  const landingPlace = async (on: string | undefined): Promise<{ placeId?: string }> => (on === undefined ? ((await placeDoor?.defaultPlace()) ?? {}) : placeDoorOf().placeFor(on));
+
   const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport, spawned?: ThreadScope, landed?: () => void): Promise<CreatedWorkspace> => {
     const image = await imageOf(o.golden);
     const inherited = image.version?.size;
     // Where this fork lands: the word the person typed, else the place a fork last landed on. This host's own
     // provider is a place with no id, which is what every fork before joined computers existed stood on.
-    const { placeId } = o.on === undefined ? ((await placeDoor?.defaultPlace()) ?? {}) : await placeDoorOf().placeFor(o.on);
-    // The first fork on a joined computer is where this host learns what that computer forks with; every road after
-    // it reads the answer off the place's record.
-    if (placeId !== undefined) await placeDoorOf().forkingBackend(placeId);
-    const at = backendOfKind("cloud", placeId);
+    const { placeId } = await landingPlace(o.on);
+    const at = await landingBackend(placeId);
     const record: WorkspaceRecord = {
       id,
       name: o.name,
@@ -4061,6 +4079,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const workspaces: Runtime["workspaces"] = {
+    async landing(o) {
+      await ready();
+      const { placeId } = await landingPlace(o?.on);
+      const at = await landingBackend(placeId);
+      return { ...(placeId !== undefined ? { place: placeId } : {}), name: placeName(placeId ?? places.wired), capabilities: at.capabilities };
+    },
+
     async create(opts, origin) {
       await ready();
       const o = { ...opts, name: nameGiven(opts.name) };
@@ -5920,14 +5945,63 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   const stageOf = (name: string, place?: string) => (stage: GoldenStage, detail?: string, step?: GoldenStep, left?: readonly string[]) =>
     bus.emit({ type: "golden.stage", name, stage, ...(detail !== undefined ? { detail } : {}), ...(step !== undefined ? { step } : {}), ...(left !== undefined && left.length > 0 ? { left: [...left] } : {}), ...(place !== undefined ? { place } : {}) });
-  /** The place a golden road runs at, named on its frames only when it is not the wired one: a frame with no place
-   * is the image's own build, which is what every reader before places read. */
-  const placeOf = (place: string): string | undefined => (place === places.wired ? undefined : place);
-  /** The backend a place name resolves to, or the refusal naming the places this host has. */
+  /** The backend a place id resolves to: a provider row, or a joined computer whose backend this host has heard. */
   const backendAt = (place: string): MachineBackend => {
-    const at = places.backend(place);
+    const at = places.backend(place) ?? placeDoor?.backendOf(place);
     if (at === undefined) throw Object.assign(new Error(noSuchPlaceRefusal(place, places.list())), { kind: "missing" });
     return at;
+  };
+  /** The place a word names, as the golden roads key it: a provider's id, or the id a joined computer's copies are
+   * filed under, with the backend a builder there is made on. A joined computer's backend is asked of the computer
+   * the first time and read off its record after. This computer is never built into, so its own name is refused
+   * rather than read as the provider this host forks on, which a fork's road reads it as. */
+  const placeAt = async (word: string): Promise<{ place: string; at: MachineBackend }> => {
+    const own = places.backend(word);
+    if (own !== undefined) return { place: word, at: own };
+    if (placeDoor === undefined) return { place: word, at: backendAt(word) };
+    let placeId: string | undefined;
+    try {
+      ({ placeId } = await placeDoor.placeFor(word));
+    } catch (e) {
+      throw Object.assign(e instanceof Error ? e : new Error(String(e)), { kind: "missing" });
+    }
+    if (placeId === undefined) throw conflict(placeBuildsNoImageLine(word));
+    return { place: placeId, at: await placeDoor.forkingBackend(placeId) };
+  };
+  /** The backend a fork lands on, gated before any machine is asked for: a joined computer that forks nowhere refuses
+   * with its doctor's reason, and a place that forks nothing refuses with NO_PROVIDER_LINE when no place here runs
+   * workspaces, else naming the places that do, so nobody is sent to a provider they do not need. */
+  const landingBackend = async (placeId: string | undefined): Promise<MachineBackend> => {
+    // The first fork on a joined computer is where this host learns what that computer forks with; every road after
+    // it reads the answer off the place's record.
+    if (placeId !== undefined) await placeDoorOf().forkingBackend(placeId);
+    const at = backendOfKind("cloud", placeId);
+    if (!forksNoMachines(at.capabilities)) return at;
+    const running = (await buildPlaces()).map(r => r.name);
+    throw conflict(running.length === 0 ? NO_PROVIDER_LINE : placeForksNothingPickLine(placeName(placeId ?? places.wired), running));
+  };
+  const placeName = (place: string): string => placeDoor?.nameOf(place) ?? place;
+  /** What a builder record says about where it was made: its place, except the provider this host forks on, which
+   * records before places never named and which every reader takes an absent place to mean. */
+  const filedAt = (place: string): string | undefined => (place === places.wired ? undefined : place);
+  /** Where the image's own seal stands: the place the record names, or the provider this host forks on for a record
+   * sealed before places. The manifest there is the one wsp init built and updates. */
+  const imagePlace = async (name: string): Promise<string> => (await recordOf(name))?.place ?? places.wired;
+  /** Every place an image can be built at: the provider rows that fork, and the joined computers whose daemon runs
+   * workspaces, this computer left out since it is never forked into. */
+  const buildPlaces = async (): Promise<{ place: string; name: string; backend: MachineBackend }[]> => {
+    const rows: { place: string; name: string; backend: MachineBackend }[] = [];
+    for (const id of places.list()) {
+      const at = places.backend(id);
+      if (at !== undefined && !forksNoMachines(at.capabilities)) rows.push({ place: id, name: id, backend: at });
+    }
+    if (placeDoor === undefined) return rows;
+    for (const view of await placeDoor.list(clock.now())) {
+      if (view.kind !== "computer" || view.id === HERE_PLACE_ID || view.runsWorkspaces !== true) continue;
+      const at = await placeDoor.forkingBackend(view.id).catch(() => undefined);
+      if (at !== undefined) rows.push({ place: view.id, name: view.name, backend: at });
+    }
+    return rows;
   };
 
   /** The recipe a golden road builds from: the one the call names, else the one the runtime was wired with. A host
@@ -6007,13 +6081,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return entry;
   };
 
-  /** What the host owns after a seal. At the wired place the record is written afresh: the recipe hash the builder
-   * carried, the small recipe it was planned from, the logins the seal stamped and the vault it took, and their one
-   * hash. At any other place nothing of the record moves; only the copy is recorded, under the hash the record
-   * already has. Either way the version carries that hash, so a copy says for itself what it was built from. */
-  const recordSeal = async (place: string, name: string, entry: LiveBuilder, recipe: GoldenRecipe, result: SealResult): Promise<SealResult> => {
+  /** What the host owns after a seal. The image's own seal writes the record afresh, wherever it ran: the recipe hash
+   * the builder carried, the small recipe it was planned from, the logins the seal stamped, the vault it took, their
+   * one hash, and the place it stands at. A copy's seal moves nothing of the record; only the copy is recorded,
+   * under the hash the record already has. Either way the version carries that hash, so a copy says for itself what
+   * it was built from. */
+  const recordSeal = async (place: string, name: string, entry: LiveBuilder, recipe: GoldenRecipe, result: SealResult, copy: boolean): Promise<SealResult> => {
     let hash = (await recordOf(name))?.hash;
-    if (place === places.wired) {
+    if (!copy) {
       const digest = entry.builder.import?.recipeHash ?? "";
       const vault: SealedVault | undefined =
         result.vault === undefined ? undefined : { sha256: result.vault.sha256, bytes: result.vault.tar.length, paths: result.vault.paths, takenAt: result.version.createdAt };
@@ -6029,6 +6104,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         sealedFrom: hostId,
         ...(vault !== undefined ? { vault } : {}),
         ...(result.version.usedBytes !== undefined ? { usedBytes: result.version.usedBytes } : {}),
+        place,
       };
       if (result.vault !== undefined) await store.putBlob(IMAGE_VAULTS, vaultKey(name, result.version.version), result.vault.tar);
       await store.put(IMAGES, name, image);
@@ -6039,11 +6115,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   /** Snapshot, smoke fork, manifest. A kept builder stays recorded with the version it was saved as and its grace
-   * armed; every other road drops the record, so a machine that outlived its kills is exactly what reap sweeps. */
-  const sealEntry = async (entry: LiveBuilder, keep: boolean, logins?: GoldenLogin[]): Promise<SealResult> => {
+   * armed; every other road drops the record, so a machine that outlived its kills is exactly what reap sweeps.
+   * `copy` is a copy's seal: the record stays as it is and the frames name the place. */
+  const sealEntry = async (entry: LiveBuilder, keep: boolean, logins?: GoldenLogin[], copy = false): Promise<SealResult> => {
     const recipe = recipeOrThrow(entry.recipe);
     const name = entry.record.name;
-    // The place this builder was made at: a copy's build seals at that place and leaves the wired one alone.
+    // The place this builder was made at, where its seal is filed.
     const place = entry.record.place ?? places.wired;
     const prior = await copyOf(place, name);
     const at = backendAt(place);
@@ -6057,20 +6134,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
           labels: { ...recipe.labels, [WSP_LABEL]: "1", [SMOKE_LABEL]: "1", [OWNER_LABEL]: owner, [CREATED_AT_LABEL]: new Date().toISOString() },
           ...(prior !== undefined ? { manifest: prior } : {}),
-          onStage: stageOf(name, placeOf(place)),
+          onStage: stageOf(name, copy ? place : undefined),
           ...(opts.killConfirm !== undefined ? { killConfirm: opts.killConfirm } : {}),
           ...(opts.snapshotRetryMs !== undefined ? { snapshotRetryMs: opts.snapshotRetryMs } : {}),
           ...(logins !== undefined ? { logins } : {}),
-          // Only the wired place's seal reads the vault off its builder: a copy's builder was given the record's
+          // Only the image's own seal reads the vault off its builder: a copy's builder was given the record's
           // vault and re-exporting it there would record a second one for the same image.
-          ...(place === places.wired && recipe.vaultPaths !== undefined ? { vaultPaths: recipe.vaultPaths } : {}),
+          ...(!copy && recipe.vaultPaths !== undefined ? { vaultPaths: recipe.vaultPaths } : {}),
           keepBuilder: keep,
           name,
           hostId: templateHostId,
         }),
         at,
       );
-      const stamped = await recordSeal(place, name, entry, recipe, result);
+      const stamped = await recordSeal(place, name, entry, recipe, result, copy);
       await putCopy(place, name, stamped.manifest);
       const snapshot = entry.builder.import?.recipe;
       if (snapshot !== undefined) await putCopyRecipe(place, name, stamped.version.version, snapshot);
@@ -6096,13 +6173,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Deletes what a version's forks boot from. The template goes first: the provider refuses to delete a snapshot
    * while a template stands on it, and a template already gone is no failure. */
-  const dropImage = async (v: GoldenVersion): Promise<void> => {
+  const dropImage = async (v: GoldenVersion, at: MachineBackend = backend): Promise<void> => {
     if (v.templateId !== undefined) {
-      await templatesOf(backend)?.delete(v.templateId).catch((e: unknown) => {
+      await templatesOf(at)?.delete(v.templateId).catch((e: unknown) => {
         if (!isMissing(e)) throw e;
       });
     }
-    await backend.deleteSnapshot(v.snapshotId);
+    await at.deleteSnapshot(v.snapshotId);
   };
 
   const golden: Runtime["golden"] = {
@@ -6126,7 +6203,35 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     async get(name) {
       await ready();
-      return copyOf(places.wired, name ?? "default");
+      const key = name ?? "default";
+      return copyOf(await imagePlace(key), key);
+    },
+
+    async buildPlace(word) {
+      await ready();
+      const runs = (place: string, at: MachineBackend): { place: string; name: string; backend: MachineBackend } => {
+        const name = placeName(place);
+        if (forksNoMachines(at.capabilities)) throw Object.assign(new PlaceForksNowhereError(`${name} forks no machines, so your image cannot be built there`), { kind: "conflict" });
+        return { place, name, backend: at };
+      };
+      if (word !== undefined) {
+        const { place, at } = await placeAt(word);
+        return runs(place, at);
+      }
+      // The default place first, since it is where every fork that names none lands; where it runs no workspaces, the
+      // one other place that does. None at all and more than one are each their own refusal: the run does not guess.
+      const marked = (await placeDoor?.defaultPlace()) ?? {};
+      try {
+        return marked.placeId === undefined ? runs(places.wired, backendAt(places.wired)) : runs(marked.placeId, await placeDoor!.forkingBackend(marked.placeId));
+      } catch (e) {
+        // Only a place that runs no workspaces is passed over. A link down or a frame unanswered on the place the
+        // person marked is theirs to read, with that place's name in it, never a build sent somewhere else.
+        if (!(e instanceof PlaceForksNowhereError)) throw e;
+      }
+      const running = await buildPlaces();
+      if (running.length === 0) throw conflict(NO_BUILD_PLACE_LINE);
+      if (running.length > 1) throw conflict(buildPlaceAskLine(running.map(r => r.name)));
+      return running[0]!;
     },
 
     async prepare(o) {
@@ -6136,8 +6241,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const signal = o?.signal;
       const { deployDaemon, smoke, import: imp, ...size } = recipe;
       void smoke;
-      const place = o?.place ?? places.wired;
-      const at = backendAt(place);
+      const { place, at } = o?.place === undefined ? { place: places.wired, at: backendAt(places.wired) } : await placeAt(o.place);
       // Per place as well as per name: a copy building at one place and the image building at another are two
       // prepares of one golden, and neither is the other's to join.
       const preparingKey = copyKey(place, name);
@@ -6146,7 +6250,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         if (active.hash === imp?.recipeHash) return active.promise;
         throw new Error(`a builder named ${name} is still being prepared for a different recipe; wait for it to finish, then run again`);
       }
-      const stage = stageOf(name, placeOf(place));
+      const stage = stageOf(name, o?.copy === true ? place : undefined);
+      const filed = filedAt(place);
       const run = claiming(`builder/${preparingKey}`, async b => {
         await refreshBuilders();
         // A first-life builder carrying the same ticks is attached to instead of
@@ -6231,7 +6336,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           let builder: Builder;
           try {
             builder = await prepareBuilder({
-              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, placeOf(place)),
+              backend: recordingCreates(b, name, imp, p => (mine = p), { signal, began: c => (creating = c) }, filed),
               ...size,
               ...(o?.kind !== undefined ? { kind: o.kind } : {}),
               ...(deployDaemon !== undefined ? { deployDaemon } : {}),
@@ -6246,7 +6351,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           }
           // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
           if (stopping !== undefined) throw await stopping;
-          const entry = await settleBuilder(name, builder, mine, placeOf(place));
+          const entry = await settleBuilder(name, builder, mine, filed);
           entry.recipe = recipe;
           return builderView(entry.record, entry);
         };
@@ -6276,18 +6381,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async recipe(name) {
       await ready();
       const key = name ?? "default";
-      const manifest = await copyOf(places.wired, key);
+      const place = await imagePlace(key);
+      const manifest = await copyOf(place, key);
       if (manifest === undefined) return undefined;
-      return copyRecipeOf(places.wired, key, manifest.head);
+      return copyRecipeOf(place, key, manifest.head);
     },
 
     async upgrade(o) {
       await ready();
       const recipe = recipeOrThrow(o.recipe);
       const name = o.name ?? "default";
-      const prior = await copyOf(places.wired, name);
+      // The update lands where the image's own seal stands, on that place's backend.
+      const place = await imagePlace(name);
+      const prior = await copyOf(place, name);
       const head = goldenHead(prior);
       if (head === undefined) throw new Error(`no golden named "${name}" to update; wsp init builds one`);
+      const at = backendAt(place);
       const stage = stageOf(name);
       // Past its window a kept builder is never used, running or not: it is stopped here and the update forks; one
       // the pass could not stop is named so the person knows it still bills. Inside the window, it is suspended for
@@ -6297,7 +6406,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const swept = await expireGrace();
       for (const f of swept.failed) stage("creating", `an earlier kept builder ${f.id}: ${f.message}`);
       await refreshBuilders();
-      const kept = [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.name === name && x.record.sealed?.version === head.version && inWindow(x.record.sealed.at));
+      const kept = [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.name === name && (x.record.place ?? places.wired) === place && x.record.sealed?.version === head.version && inWindow(x.record.sealed.at));
       let entry: LiveBuilder | undefined;
       if (kept !== undefined) {
         graceTimers.get(kept.record.id)?.();
@@ -6308,7 +6417,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const alive = await kept.builder.machine.exec("true").then(r => r.exitCode === 0, () => false);
         if (!alive) {
           // A machine that does not answer may still bill: it is killed until the provider says gone, then forgotten.
-          await killUntilGone(backend, kept.builder.machine, opts.killConfirm);
+          await killUntilGone(at, kept.builder.machine, opts.killConfirm);
           await forgetBuilder(kept.record.id);
         } else {
           stage("creating", `your builder from v${head.version}, kept since the save`);
@@ -6325,7 +6434,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           } catch (e) {
             // Same road as a fresh builder that fails its stages: the machine goes, the golden stays as it was.
             let detail = e instanceof Error ? e.message : String(e);
-            await killUntilGone(backend, kept.builder.machine, opts.killConfirm).catch((k: unknown) => {
+            await killUntilGone(at, kept.builder.machine, opts.killConfirm).catch((k: unknown) => {
               detail += `; ${k instanceof Error ? k.message : String(k)}`;
             });
             await forgetBuilder(kept.record.id);
@@ -6337,27 +6446,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       }
       const road = entry !== undefined ? "builder" : "fork";
-      entry ??= await claiming(`builder/${name}`, async b => {
-        let placeholder: LiveBuilder | undefined;
-        let builder: Builder;
-        try {
-          builder = await upgradeBuilder({
-            backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p)),
+      entry ??= await claiming(
+        `builder/${name}`,
+        async b => {
+          let placeholder: LiveBuilder | undefined;
+          let builder: Builder;
+          try {
+            builder = await upgradeBuilder({
+              backend: recordingCreates(b, name, o.delta.import, p => (placeholder = p), undefined, filedAt(place)),
             head,
             delta: o.delta,
-            setup: recipe.setup,
-            ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
-            ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
-            ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
-            labels: builderLabels(recipe.labels),
-            onStage: stage,
-          });
-        } catch (e) {
-          if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
-          throw e;
-        }
-        return settleBuilder(name, builder, placeholder);
-      });
+              setup: recipe.setup,
+              ...(recipe.cpu !== undefined ? { cpu: recipe.cpu } : {}),
+              ...(recipe.memMb !== undefined ? { memMb: recipe.memMb } : {}),
+              ...(recipe.envs !== undefined ? { envs: recipe.envs } : {}),
+              labels: builderLabels(recipe.labels),
+              onStage: stage,
+            });
+          } catch (e) {
+            if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
+            throw e;
+          }
+          return settleBuilder(name, builder, placeholder, filedAt(place));
+        },
+        at,
+      );
       entry.recipe = recipe;
       // The update keeps the golden's disk, so what was signed in stays signed in: the caller passes the previous
       // version's outcomes, with the rows it re-imported as copies rewritten.
@@ -6377,15 +6490,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           if (road === "fork" && builderKept) {
             graceTimers.get(entry.record.id)?.();
             graceTimers.delete(entry.record.id);
-            await killUntilGone(backend, entry.builder.machine, opts.killConfirm);
+            await killUntilGone(at, entry.builder.machine, opts.killConfirm);
             await forgetBuilder(entry.record.id);
             builderKept = false;
           }
           try {
-            await dropImage(head);
+            await dropImage(head, at);
             manifest = { ...manifest, versions: manifest.versions.filter(v => v.version !== head.version) };
-            await putCopy(places.wired, name, manifest);
-            await dropCopyRecipe(places.wired, name, head.version);
+            await putCopy(place, name, manifest);
+            await dropCopyRecipe(place, name, head.version);
             previousDropped = true;
           } catch (e) {
             console.warn(`golden ${name} v${head.version} kept: its snapshot was not deleted (${e instanceof Error ? e.message : String(e)})`);
@@ -6592,7 +6705,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
     const copies: SealedImageCopy[] = [];
     for (const { place, head } of rows) {
-      const at = places.backend(place);
+      const at = places.backend(place) ?? placeDoor?.backendOf(place);
       const sizes = at === undefined ? new Map<string, number>() : await snapshotSizes(at, [head.snapshotId]);
       copies.push({
         place,
@@ -6634,31 +6747,31 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async build(o) {
       await ready();
       const name = o.name ?? "default";
-      const at = backendAt(o.place);
-      if (o.place === places.wired) throw conflict(`${o.place} is the place this host forks on, so its copy is what wsp init builds; name another place`);
-      if (!buildsImages(at.capabilities)) throw conflict(placeBuildsNoImageLine(o.place));
+      const { place, at } = await placeAt(o.place);
+      const where = placeName(place);
+      if (!buildsImages(at.capabilities)) throw conflict(placeBuildsNoImageLine(where));
       const record = await recordOf(name);
       if (record === undefined) throw conflict(`this host owns no image named ${name} yet; wsp init seals one`);
       if (record.recipe === undefined) throw conflict(`${name} v${record.version} was sealed before the image record kept the recipe it was built from, so no other place can build it; cut the next version`);
       if (record.vault === undefined && o.force !== true) {
-        throw conflict(`${name} v${record.version} holds no sign-ins, so a copy at ${o.place} would ask for every one of them again; cut the next version to hold them, or build it anyway with force`);
+        throw conflict(`${name} v${record.version} holds no sign-ins, so a copy at ${where} would ask for every one of them again; cut the next version to hold them, or build it anyway with force`);
       }
-      const held = goldenHead(await copyOf(o.place, name));
+      const held = goldenHead(await copyOf(place, name));
       // The same rule the line under Settings > Image reads, so a copy is never current in one place and stale in
       // the other. A place already standing on the record is answered with what it holds: the road that builds a
       // copy on first use asks this of every place a fork lands on, and a second ask must cost nothing.
       if (held !== undefined && copyIsCurrent(record, { hash: held.imageHash })) {
-        const standing = (await copiesOf(name)).find(c => c.place === o.place);
-        if (standing === undefined) throw new Error(`${o.place} holds ${name} v${held.version} and no copy of it was recorded there`);
+        const standing = (await copiesOf(name)).find(c => c.place === place);
+        if (standing === undefined) throw new Error(`${where} holds ${name} v${held.version} and no copy of it was recorded there`);
         return { copy: standing, built: false };
       }
       const tar = record.vault === undefined ? undefined : await store.getBlob(IMAGE_VAULTS, vaultKey(name, record.version));
       if (record.vault !== undefined && tar === undefined) throw conflict(`the vault of ${name} v${record.version} is not on this computer any more; cut the next version to take it again`);
       const recipe = await o.recipe(record);
-      const view = await golden.prepare({ name, place: o.place, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
+      const view = await golden.prepare({ name, place, copy: true, recipe, ...(o.signal !== undefined ? { signal: o.signal } : {}) });
       const entry = builders.get(view.id);
-      if (entry === undefined) throw new Error(`the builder ${view.id} prepared at ${o.place} left no record here; nothing was sealed`);
-      const stage = stageOf(name, o.place);
+      if (entry === undefined) throw new Error(`the builder ${view.id} prepared at ${where} left no record here; nothing was sealed`);
+      const stage = stageOf(name, place);
       try {
         // The person's sign-ins land before the seal and after everything the recipe installs, so the copy holds
         // what the builder at the wired place held and no sign-in is run here.
@@ -6672,9 +6785,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         stage("failed", e instanceof Error ? e.message : String(e));
         throw e;
       }
-      const sealed = await sealEntry(entry, false, record.logins);
-      const copy = (await copiesOf(name)).find(c => c.place === o.place);
-      if (copy === undefined) throw new Error(`${o.place} sealed ${name} v${sealed.version.version} and no copy of it was recorded there`);
+      const sealed = await sealEntry(entry, false, record.logins, true);
+      const copy = (await copiesOf(name)).find(c => c.place === place);
+      if (copy === undefined) throw new Error(`${where} sealed ${name} v${sealed.version.version} and no copy of it was recorded there`);
       return { copy, built: true };
     },
   };

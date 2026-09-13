@@ -19,6 +19,8 @@ import {
   THREAD_OPS,
   placeDaemonPaths,
   absentComputer,
+  placeBuildsNoImageLine,
+  placeForksNowhereLine,
   workspaceState,
   placeLinkTranscript,
   placeNoDaemonPortLine,
@@ -28,8 +30,8 @@ import {
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
-import { createRuntime, wiredPlace, type PlaceBackends, type Runtime } from "../src/runtime.js";
-import type { MachineBackend } from "@wsp/engine";
+import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { NoProviderBackend, type MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -1536,3 +1538,78 @@ function dialLocal(port: number, expectCut = false): Promise<string> {
     });
   });
 }
+
+describe("the image built through a computer you joined", () => {
+  const copyRecipe = (): GoldenRecipe => ({ setup: "true", smoke: "true" });
+
+  it("a copy build names the computer by its name or id, learns its backend from the computer itself, and is refused at the record rather than at the name", async () => {
+    const { hostKey } = await serving();
+    let place: ForkingPlace | undefined;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    await expect(runtime!.image.build({ place: "srv", recipe: copyRecipe })).rejects.toThrow(/owns no image named default/);
+    await expect(runtime!.image.build({ place: placeId, recipe: copyRecipe })).rejects.toThrow(/owns no image named default/);
+    // One frame taught this host what srv forks with; nothing was made there.
+    expect(place!.asked["machine.backend"]).toBe(1);
+    expect(place!.created).toEqual([]);
+    await expect(runtime!.image.build({ place: "nowhere", recipe: copyRecipe })).rejects.toThrow(/no place named nowhere; you have .*srv/);
+  });
+
+  it("the image is built on the joined computer when it is the default place, and when the provider this host forks on forks nothing", async () => {
+    const { hostKey } = await serving();
+    const marked = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(marked.client.ws);
+    await runtime!.places!.markUsed(marked.placeId);
+    const picked = await runtime!.golden.buildPlace();
+    expect([picked.place, picked.name]).toEqual([marked.placeId, "srv"]);
+    expect(picked.backend.capabilities.sizes.length).toBeGreaterThan(0);
+    // The provider a keyless host wires forks nothing and is the default: the one joined computer that runs
+    // workspaces is where the image goes, with nothing named.
+    await srv?.close();
+    await runtime?.close();
+    const none = new NoProviderBackend();
+    const keyless = newPlaceKeyPair();
+    runtime = createRuntime({ backend: none, store: memoryStore(), adapters: {}, places: wiredPlace("none", none), placeLinks: wiring(keyless) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const joined = await join(keyless, { code: await code(), name: "srv", answers: c => forks(c) });
+    sockets.push(joined.client.ws);
+    const only = await runtime.golden.buildPlace();
+    expect([only.place, only.name]).toEqual([joined.placeId, "srv"]);
+  });
+});
+
+describe("the image build and the computer whose doctor said no, or that does not answer", () => {
+  const BLOCKED = "this computer mounts cgroup v1 at /sys/fs/cgroup";
+  const copyRecipe = (): GoldenRecipe => ({ setup: "true", smoke: "true" });
+
+  it("a joined computer whose doctor said no is refused with the doctor's own sentence on every road that names it, and passed over for the provider that forks when it is the default", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false, workspacesBlocked: BLOCKED }), answers: c => forks(c) });
+    sockets.push(client.ws);
+    const reason = placeForksNowhereLine("srv", BLOCKED);
+    expect(reason).toBe("srv mounts cgroup v1 at /sys/fs/cgroup");
+    await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(reason);
+    await expect(runtime!.image.build({ place: "srv", recipe: copyRecipe })).rejects.toThrow(reason);
+    await expect(runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(reason);
+    await expect(runtime!.workspaces.landing({ on: "srv" })).rejects.toThrow(reason);
+    // Marked default, it runs no workspaces, so the one place that does is where the build goes.
+    await runtime!.places!.markUsed(placeId);
+    const picked = await runtime!.golden.buildPlace();
+    expect([picked.place, picked.name]).toEqual(["default", "default"]);
+  });
+
+  it("a default place that is not answering is the refusal the person reads, with its name in it, never a build sent to another place", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv" });
+    await runtime!.places!.markUsed(placeId);
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    await expect(runtime!.golden.buildPlace()).rejects.toThrow(absentComputer("srv", null).sentence);
+  });
+
+  it("this computer is never built into: naming it for a copy build or a build place is refused rather than read as the provider this host forks on", async () => {
+    await serving();
+    await expect(runtime!.image.build({ place: HERE.name, recipe: copyRecipe })).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
+    await expect(runtime!.golden.buildPlace(HERE.name)).rejects.toThrow(placeBuildsNoImageLine(HERE.name));
+  });
+});

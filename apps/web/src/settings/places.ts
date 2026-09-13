@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, daemonSilent, fmtBytes, fmtRate, hereWord, isLocalWorkspace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, daemonSilent, fmtBytes, fmtRate, hereWord, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -86,7 +86,7 @@ export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_CO
 /** Whether this row is the place a word names, read the one way every reader of a place word reads it: the id the
  * wire keys it by, or the name a person types. The image record's copies and the build's own frames both carry the
  * word rather than the id, so one predicate answers for both. */
-export const placeNamed = (place: PlaceView, word: string): boolean => word === place.id || word === place.name;
+export const placeNamed = (place: PlaceView, word: string): boolean => namesPlace(place, word);
 
 /** Whether workspaces of their own can stand on this row at all: a provider forks by definition, and a computer
  * does once it has said it runs Docker. A computer that runs agents alone holds the one workspace it already is,

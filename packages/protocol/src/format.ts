@@ -1499,6 +1499,21 @@ export const BLANK_NAME_REFUSAL = "a workspace name cannot be blank";
  * The provider module a keyless host wires says it, and so does the command line before it asks for anything. */
 export const NO_PROVIDER_LINE = "no machine provider is set up on this computer, so wsp forks no machines here; set SOLARI_API_KEY and run wsp init again to build your image";
 
+/** What an image build is refused with when no place this host holds runs workspaces: a joined computer whose doctor
+ * said yes is such a place, and so is a provider with a key. The init job and the command line beside it both say it. */
+export const NO_BUILD_PLACE_LINE = "no place here runs workspaces, so there is nowhere to build your image; join a computer that runs them with wsp add, or save a provider key";
+
+/** The same when the default place runs no workspaces and more than one other place does: the run does not guess. */
+export const buildPlaceAskLine = (names: readonly string[]): string => `${names.join(", ")} run workspaces and none of them is the default place; name the one to build your image on with --on`;
+
+/** What a fork is refused with when the place it would land on forks nothing while other places run workspaces: the
+ * places that do, so the sentence never sends a person to a provider they do not need. With none at all the
+ * refusal is NO_PROVIDER_LINE. */
+export const placeForksNothingPickLine = (place: string, names: readonly string[]): string => `${place} forks no machines; name a place that runs workspaces with --on: ${names.join(", ")}`;
+
+/** The line under wsp init's opening that names where the image is built, so the first screen says it. */
+export const imageBuiltOnLine = (place: string): string => `your image is built on ${place}`;
+
 /** Where a Solari key comes from, spelled once for the terminal's ask, the modal's guide and its link. */
 export const SOLARI_CONSOLE = "console.getsolari.com";
 

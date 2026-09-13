@@ -14,9 +14,9 @@ import { basename } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
-import { keyCheckLine, type BackendPricing, type KeyCheck } from "@wsp/engine";
+import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, forksNoMachines, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initStageCount, initStoppedAt, initStoppedLine, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
 import { agentKeysIn } from "./env-keys.js";
@@ -59,7 +59,8 @@ export interface InitJobDeps {
   /** Whether the provider takes this key, asked before it is saved: the provider module the key is being saved for
    * makes one cheap authenticated call, and a refusal is the person's to fix on the step that typed the key. */
   checkKey(key: string, provider?: string): Promise<KeyCheck>;
-  /** What the machine the build boots costs; the provider's own table, which needs no key to read. */
+  /** The provider's own table, which needs no key to read: the disk cap the screens draw before a build place is
+   * picked. The build itself is priced at the place it boots on. */
   pricing(): BackendPricing;
   agents(): Promise<AgentHere[]>;
   /** Writes the wsp tools into these agents' configs on this computer, the road wsp mcp install takes. */
@@ -261,26 +262,38 @@ export class InitJobs implements InitDoor {
     };
   }
 
-  async get(): Promise<InitSetup> {
-    const pricing = this.deps.pricing();
+  async get(o: { on?: string } = {}): Promise<InitSetup> {
     const agents = (await this.deps.agents()).filter(a => a.found).map(a => ({ id: a.id, name: a.name, configured: a.configured, takesTools: takesTools(a.id) }));
     const keyProvider = this.deps.keyProvider();
+    // Nothing to price where no build can start: the client reads the same one reading the build is gated on rather
+    // than a nought-core machine at nought an hour, and the runtime's sentence for it rides along, so the sheet and
+    // the command line say the right one. A place the ask named and this host cannot build at is that place's own
+    // refusal, not a null price.
+    let built: { place: string; name: string; backend: MachineBackend } | undefined;
+    let buildRefusal: string | undefined;
+    try {
+      built = await this.buildPlace(o.on);
+    } catch (e) {
+      if (o.on !== undefined) throw e;
+      buildRefusal = e instanceof Error ? e.message : String(e);
+    }
+    const pricing = built?.backend.pricing;
     return {
       keys: this.held(),
       ...(keyProvider !== undefined ? { keyProvider } : {}),
       home: this.deps.home,
       agents,
-      // Nothing to price where this host forks nothing: the client reads the same one reading the build is gated on
-      // rather than a nought-core machine at nought an hour.
-      pricing: this.forksNothing() ? null : { size: pricing.defaultSize, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize), ...(pricing.builderDiskGb !== undefined ? { builderDiskGb: pricing.builderDiskGb } : {}) },
+      pricing: pricing === undefined ? null : { size: pricing.defaultSize, rateUsdPerHour: pricing.rateUsdPerHour(pricing.defaultSize), ...(pricing.builderDiskGb !== undefined ? { builderDiskGb: pricing.builderDiskGb } : {}) },
+      ...(built !== undefined ? { place: { id: built.place, name: built.name } } : {}),
+      ...(buildRefusal !== undefined ? { buildRefusal } : {}),
       job: this.view(),
     };
   }
 
-  /** Whether this host's provider forks a machine at all, read off the runtime's own backend so a provider swapped
-   * in by a saved key counts at once; the one reading the price and the build's refusal both take. */
-  private forksNothing(): boolean {
-    return forksNoMachines(this.deps.rt.backend.capabilities);
+  /** Where the build boots and what a builder there costs, the runtime's one reading: the place named, else the
+   * default place. The same call gates the build and prices the screens, so they cannot disagree. */
+  private buildPlace(on?: string): Promise<{ place: string; name: string; backend: MachineBackend }> {
+    return this.deps.rt.golden.buildPlace(on);
   }
 
   /** Saves the provider key, and an agent's API key by the sign-in row that took it, under the variable the agent's
@@ -434,12 +447,13 @@ export class InitJobs implements InitDoor {
     return this.view()!;
   }
 
-  async build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean }): Promise<InitJob> {
+  async build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string }): Promise<InitJob> {
     const s = this.answering();
     const saved = this.deps.saved();
-    // The provider this host wired is what builds, not the key a road once named: a host forking containers on this
-    // box has no key and builds, and a host with no provider at all is refused before anything reads this computer.
-    if (this.forksNothing()) throw new Error("this host forks no machines, so there is no golden to build here: save a provider key on the key screen, or start the host again on a computer set up for a provider");
+    // The place the image is built on is what builds, not the key a road once named: a joined computer whose daemon
+    // runs workspaces builds with no key at all, and a host with no such place is refused before anything reads
+    // this computer.
+    const built = await this.buildPlace(o.on);
     const reading = s.reading!;
     const answers = s.answers!;
     const path = smallRecipePath(this.deps.statePath);
@@ -480,7 +494,8 @@ export class InitJobs implements InitDoor {
       signIns: ctx => {
         s.signIns = ctx;
       },
-      pricing: this.deps.pricing(),
+      place: built.place,
+      pricing: built.backend.pricing,
       statePath: this.deps.statePath,
       home: this.deps.home,
       secrets: this.deps.build.secrets,

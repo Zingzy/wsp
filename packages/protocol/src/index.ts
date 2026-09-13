@@ -153,9 +153,15 @@ export const InitSetup = z.object({
   /** This computer's home directory, so a field can show a real path of the person's as its example. */
   home: z.string(),
   agents: z.array(InitAgent),
-  /** What a machine costs on this host's provider, and the disk that provider gives a builder where it caps one;
-   * null where the host forks none, so there is no golden to build here and nothing to price. */
+  /** What a machine costs at the place the build boots on, and the disk that place gives a builder where it caps
+   * one; null where no place here runs workspaces, so there is no image to build and nothing to price. */
   pricing: z.object({ size: WorkspaceSize, rateUsdPerHour: z.number(), builderDiskGb: z.number().positive().optional() }).nullable(),
+  /** The place the build boots on: the one the ask named, else the default place; absent with `pricing` null. */
+  place: z.object({ id: z.string(), name: z.string() }).optional(),
+  /** Why no build can start here, in the runtime's one sentence for it: no place runs workspaces, or several do and
+   * none is the default. Present exactly when `pricing` is null, so the sheet and the command line read the same
+   * refusal. */
+  buildRefusal: z.string().optional(),
   job: InitJob.nullable(),
 });
 export type InitSetup = z.infer<typeof InitSetup>;
@@ -2112,6 +2118,9 @@ export const SealedImage = z.object({
   vault: SealedVault.optional(),
   /** The builder's disk in use at the snapshot, in bytes; absent on a version sealed before it was read. */
   usedBytes: z.number().int().nonnegative().optional(),
+  /** The place the image's own seal stands at, by the id its copies are filed under: a joined computer's id or a
+   * provider's. Absent on a record sealed before places, which stands at the provider the host forks on. */
+  place: z.string().optional(),
 });
 export type SealedImage = z.infer<typeof SealedImage>;
 
@@ -2920,6 +2929,10 @@ export const placeRunsOneWorkspaceFix = (workspace: string): string => `Use ${wo
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
 
+/** Whether a word names this place: the id the wire keys it by, or the name a person types. The one reading every
+ * road that takes a place word makes, so a list, a frame and a typed word cannot disagree about which place. */
+export const namesPlace = (place: { id: string; name: string }, word: string): boolean => word === place.id || word === place.name;
+
 /** What a build of the image at a place that cannot take one is refused with: a copy needs a builder forked there
  * and that builder's disk copied, and a computer somebody joined does neither. */
 export const placeBuildsNoImageLine = (place: string): string =>
@@ -3614,6 +3627,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */
   /** Makes this computer the host's one local workspace; the name defaults to this computer's own. */
   z.object({ id: reqId, op: z.literal("workspaces.createLocal"), name: z.string().optional() }),
+  /** Where a fork would land and what that place offers: the place `on` names, else the default place. Replies with
+   * { place?, name, capabilities }, `place` absent where the landing is the provider this host forks on. Refused
+   * before any machine is asked for where that place forks nothing: with NO_PROVIDER_LINE when no place here runs
+   * workspaces, else naming the places that do. The one gate a create runs, read ahead so the refusal comes in one
+   * sentence before any stage is streamed. */
+  z.object({ id: reqId, op: z.literal("workspaces.landing"), on: z.string().optional() }),
   /** Records a machine the person already has, reached over ssh at `address` (user@host), with the port and key
    * they named where those are not ssh's own. Forks nothing; refused when this host wired no ssh backend, when the
    * machine does not answer the dial, when a workspace already stands on it, or for a name another workspace holds.
@@ -3827,8 +3846,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * again on every ask so a saved change reaches the next terminal opened; `scheme` picks the theme of a
    * light:...,dark:... value and is dark when absent. */
   z.object({ id: reqId, op: z.literal("host.terminalConfig"), scheme: TerminalScheme.optional() }),
-  /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs. */
-  z.object({ id: reqId, op: z.literal("init.get") }),
+  /** Replies with { setup: InitSetup }: the cloud setup as the modal opens on it, the init job included when one runs.
+   * `on` prices the build at that place instead of the default one, by the name or id wsp places lists. */
+  z.object({ id: reqId, op: z.literal("init.get"), on: z.string().optional() }),
   /** Saves keys into the wsp home's .env on the computer running the host: the provider key, put to that provider
    * before anything is written and saved under the variable its own module reads, and an agent's API key by the
    * sign-in row it answers, saved under the variable that agent's sign-in declares. `provider` is the word
@@ -3853,8 +3873,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Runs a sign-in that ran out or failed again on the machine while the build goes on; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
-   * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none. */
-  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional() }),
+   * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none.
+   * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place. */
+  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional() }),
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine, as the person would at
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */
@@ -3941,6 +3962,7 @@ export const THREAD_OPS: readonly string[] = [
   // Read ahead of every fork for whether this host forks at all and at which sizes, so the refusal for a host that
   // mints nothing comes in one sentence before any stage is streamed; the wsp command asks it under any token.
   "capabilities.get",
+  "workspaces.landing",
   "workspaces.create",
   "workspaces.list",
   // Every verb a thread runs names its workspace as a person does, so the door that reads a name is open to the
