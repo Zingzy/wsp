@@ -46,11 +46,13 @@ import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } f
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
 import { scanTools } from "./scan.js";
-import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, wrap, type PromptOptions } from "./init-layout.js";
+import { colourDepth, confirmPrompt, isTTY, muted, passwordPrompt, widthOf, wrap, type PromptOptions } from "./init-layout.js";
 import { TAGLINE, builtOn, opening } from "./init-opening.js";
 import { runLocalInit } from "./init-local.js";
 import { askFirst } from "./init-first.js";
 import { buildBesideHost } from "./init-beside.js";
+import { hereAnswering, hereLines, openHere, type HereWatch } from "./place-here.js";
+import { watchBlock, watchOn, type Redraw, type WatchSignals } from "./watch.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { addressLines, dialAddress, hostLogPath, hostTokenPath, lockPathFor, servingHost, takeLock, type HostLock } from "./host-lock.js";
 import type { LocalDaemon, LocalDaemonOptions } from "./local-daemon.js";
@@ -141,6 +143,10 @@ export interface CliIO {
   error(line: string): void;
   /** Raw text on stderr, no newline added: a reply as it streams in. */
   stream?(text: string): void;
+  /** Where a list that refreshes where it stands redraws: raw writes to stdout and the width to count wrapped rows
+   * at, both off that one stream. Present only where stdout is a terminal, so a line that takes --watch reads its
+   * absence as there being nothing to redraw on. */
+  redraw?: Redraw;
   /** The same text, standing back from the reply it sits beside, as far as the stream's colours go; absent leaves it plain. */
   muted?(text: string): string;
   /** A yes-or-no question; resolves to "yes" or "no". */
@@ -200,6 +206,7 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     log: line => console.log(line),
     error: line => console.error(line),
     stream: text => process.stderr.write(text),
+    ...(isTTY(output) ? { redraw: { write: (text: string) => void output.write(text), columns: () => widthOf(output, Infinity) } } : {}),
     muted: text => muted(text, colourDepth(isTTY(process.stderr))),
     isTTY: screen,
     sameScreen: isTTY(output) && isTTY(process.stderr),
@@ -1243,6 +1250,12 @@ export interface ServiceDeps {
   dial(statePath: string, opts: DialOpts): Promise<HostClient>;
   /** Asks the pid the lock recorded to end, for a host a verb started and no terminal holds. */
   stop(pid: number): void;
+  /** The link to this computer's own daemon when it is joined to somebody else's wsp, and nothing when it is joined
+   * to none: opened off its own place file, with no host anywhere in the road. The caller closes it. */
+  here(home: string): Promise<HereWatch | undefined>;
+  /** Where a --watch's stop arrives. This process by default; a test hands in its own, since a real signal would
+   * take the test runner with it. */
+  signals?: WatchSignals;
 }
 
 /** What wsp down says for a host a verb brought up: the same shape the service's own stop line takes. */
@@ -1250,7 +1263,7 @@ export const verbHostStoppedLine = (pid: number, statePath: string): string => `
 
 export function systemService(): ServiceDeps {
   const os = platform();
-  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe, dial: dialHost, stop: pid => process.kill(pid, "SIGTERM") };
+  return { platform: os, manager: serviceManagerFor(os), run: systemRunner, waitMs: SERVICE_WAIT_MS, keys: keySources(), answers: httpProbe, dial: dialHost, stop: pid => process.kill(pid, "SIGTERM"), here: home => openHere(home) };
 }
 
 /** Which service this is: one per state file, under this person's home and this user. */
@@ -1399,12 +1412,17 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
   return 0;
 }
 
-export async function statusCommand(io: CliIO, opts: { statePath: string; state?: string } & HostPick, deps: ServiceDeps): Promise<number> {
+export async function statusCommand(io: CliIO, opts: { statePath: string; state?: string; watch?: boolean } & HostPick, deps: ServiceDeps): Promise<number> {
   // The one line that leaves this computer only when a person named a host: --host or WSP_HOST and nothing else.
   // A verb has a host to speak to whatever the line said, so it follows the fallbacks under those two, the default
   // alias among them; this line is the question whether the host here is serving, and an alias answering for a box
   // would hide the one thing it was run to learn.
   const aim = namedHost(opts);
+  // A watch follows the agent on the computer it is typed at. Neither a host aimed at from here nor the host
+  // serving here has one, so a --watch on either is refused rather than quietly printing one frame and stopping.
+  if (opts.watch === true && aim !== undefined) {
+    throw usageRefusal(`wsp status --watch reads the agent on the computer you are sitting at, and this line is aimed at the host on ${aimName(aim)}.`, `Run wsp status --watch in a terminal on that computer.`);
+  }
   if (aim !== undefined) {
     // The same note the verbs leave, in the same words: a line that named both a file here and a host over there
     // reads neither one from the other.
@@ -1425,11 +1443,61 @@ export async function statusCommand(io: CliIO, opts: { statePath: string; state?
     for (const line of hostThereLines(aimName(aim), aimAddress(aim), unreached)) io.log(line);
     return unreached === undefined ? 0 : 1;
   }
+  // A computer joined to somebody else's wsp runs no host and never will: what wsp is doing there is the agent it
+  // joined with, so that is what this line reads, and nothing about a host it would only ever say was not running.
+  // The refusal before the dial: a --watch with nowhere to redraw must not open a link to the daemon to say so.
+  const watching = opts.watch === true ? watchOn("wsp status", { json: false, redraw: io.redraw }) : undefined;
+  if (watching !== undefined && "refusal" in watching) throw watching.refusal;
+  const home = opts.home ?? homedir();
+  const joined = await deps.here(home);
+  if (joined !== undefined) return hereStatus(io, joined, watching?.redraw, () => deps.here(home), deps.signals);
+  if (opts.watch === true) {
+    throw usageRefusal("wsp status --watch reads the agent on a computer joined to somebody's wsp, and this computer is joined to none.", "Run wsp status without --watch for the host serving here, or wsp workspaces --watch to follow what it runs.");
+  }
   const reading = await serviceReading(deps.manager, serviceAddress(opts.statePath), deps.run, deps.platform);
   const lock = servingHost(opts.statePath);
   const host = lock === undefined ? undefined : { lock, answering: await deps.answers(lock) };
   for (const line of statusLines(opts.statePath, host, reading)) io.log(line);
   return host?.answering === true ? 0 : 1;
+}
+
+/** The rows for a computer joined as a place, printed once or redrawn where they stand until Ctrl-C. The link is
+ * the one `here` opened and it is held for every frame: the daemon's samplers stop with their last subscriber, so a
+ * watch that dialled again per frame would stop them, wait out the whole of the first sample's interval again and
+ * draw at a third of the rate every word about the flag promises. The frames come as the daemon pushes, with the
+ * tick under them as the floor. Closed on every road out, the refusal's included. */
+async function hereStatus(io: CliIO, first: HereWatch, redraw: Redraw | undefined, again: () => Promise<HereWatch | undefined>, signals?: WatchSignals): Promise<number> {
+  let held = first;
+  try {
+    if (redraw === undefined) {
+      const reading = held.reading();
+      for (const line of hereLines(reading)) io.log(line);
+      return hereAnswering(reading) ? 0 : 1;
+    }
+    // Nothing to hold means nothing to wait on, so a watch there would draw the same sentence for as long as
+    // somebody looked at it. The one thing a person watches for after a join is the agent coming up, so the open is
+    // tried again beside the frames rather than in them: a dial that takes its whole wait must not hold the tick.
+    let reopening: Promise<void> | undefined;
+    await watchBlock(
+      async () => {
+        if (!held.linked && reopening === undefined) {
+          reopening = again()
+            .then(next => {
+              if (next === undefined) return;
+              held.close();
+              held = next;
+            })
+            .catch(() => undefined)
+            .finally(() => (reopening = undefined));
+        }
+        return hereLines(held.reading());
+      },
+      { ...redraw, until: () => held.next(), ...(signals !== undefined ? { signals } : {}) },
+    );
+    return hereAnswering(held.reading()) ? 0 : 1;
+  } finally {
+    held.close();
+  }
 }
 
 /** The flags the shared parse reads; a command that answers on its own word (mcp, recipe) parses its own. */
@@ -1457,6 +1525,7 @@ interface SharedFlags {
   "ssh-port"?: string;
   "ssh-key"?: string;
   awake?: boolean;
+  watch?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1523,13 +1592,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   status: {
     page: "front",
-    usage: "wsp status",
-    about: "whether a host serves this state file, on which ports and what keeps it there, with a non-zero exit code when none does; --host reads a host on another computer instead",
+    usage: "wsp status [--watch]",
+    about: "whether a host serves this state file, on which ports and what keeps it there, with a non-zero exit code when none does; on a computer joined to somebody's wsp it reads the agent there instead, what that computer is doing and what is running on it, and --watch draws the same rows again every second. --host reads a host on another computer",
     json: false,
     host: "aimed",
-    cliOnly: "reads this computer's lock and service manager, or dials the host named beside it; a tool that answers at all is proof a host is up",
+    cliOnly: "reads this computer's lock and service manager, the agent on a computer that joined somebody's wsp, or dials the host named beside it; a tool that answers at all is proof a host is up",
     run: (io, opts, values) =>
-      statusCommand(io, { ...aimPick(opts, values), ...(values.state !== undefined ? { state: values.state } : {}) }, systemService()),
+      statusCommand(io, { ...aimPick(opts, values), ...(values.state !== undefined ? { state: values.state } : {}), ...(values.watch === true ? { watch: true } : {}) }, systemService()),
   },
   "host pair": {
     page: "host",
@@ -1861,6 +1930,7 @@ export const SHARED_OPTIONS: Options = {
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
   awake: { type: "boolean" },
+  watch: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },
@@ -1979,6 +2049,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "awake", on: ["join"], says: "hold this computer out of idle sleep while it is joined, for as long as the agent runs" },
+  { name: "watch", on: ["status"], says: "draw the same rows again every second where they stand, until Ctrl-C; it needs a terminal to redraw on, and reads nothing but this computer's own agent" },
   { name: "name", on: ["host connect", "host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
   { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },

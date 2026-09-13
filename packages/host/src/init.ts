@@ -8,7 +8,7 @@
 // Nothing leaves the disk before the confirm, and no question is ever asked on
 // the remote machine.
 import type { Readable, Writable } from "node:stream";
-import { stripVTControlCharacters, styleText } from "node:util";
+import { styleText } from "node:util";
 import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_CHOICES, MCP_REMOTE_ID, RUNGS, type HistoryProgress, type Manifest, type ManifestEntry, type Platform, type ProjectScan, type Rung } from "@wsp/collect";
 import { SnapshotFailedError, checkProviderKey, describeAge, keyCheckLine, type BackendPricing } from "@wsp/engine";
@@ -55,7 +55,7 @@ import type { ScanRow } from "./scan.js";
 import { installEach, installLines, mcpServerSpec, registeredLine } from "./mcp-install.js";
 import { applySets, carriedOver, historyLine, historyProgressLine } from "./recipe-command.js";
 import { outsideRowsOf } from "./recipe-file.js";
-import { CARD_FRAME, GUTTER, card, confirmPrompt, ellipsize, isTTY, plainLine, rowsOf, table, widthOf, wrap } from "./init-layout.js";
+import { CARD_FRAME, GUTTER, card, cells, confirmPrompt, ellipsize, isTTY, plainLine, rewind, rowsOf, table, widthOf, wrap } from "./init-layout.js";
 import { openRunLog, runLogPath } from "./init-log.js";
 import { secretsStage, type SecretOutcome } from "./init-secrets.js";
 import { buildTakes, buildTimes, readBuildTimes } from "./init-times.js";
@@ -393,9 +393,6 @@ export function stageLine(glyph: string, label: string, detail: string | undefin
   return `${glyph}  ${head}${text === "" ? "" : `${GUTTER}${dim(text)}`}${gap}${dim(duration)}`.trimEnd();
 }
 
-/** The cells a drawn row takes on screen: its text without the colour codes. */
-const cells = (row: string): number => stripVTControlCharacters(row).length;
-
 /** One line per step, redrawn as frames arrive: a spinner glyph on the current
  * step with its latest detail, the end label once it is done, the tail of
  * details kept under a failed step. Animation only on a terminal, where the
@@ -474,7 +471,7 @@ export class StageStream {
       return;
     }
     const block = this.lines(false, false);
-    this.emit(`${this.rewind()}${[...said, ...block].join("\n")}\n`);
+    this.emit(`${rewind(this.drawn, widthOf(this.output, Infinity))}${[...said, ...block].join("\n")}\n`);
     this.drawn = block.map(cells);
   }
 
@@ -566,19 +563,11 @@ export class StageStream {
     return out;
   }
 
-  /** Back to the block's first row and column, with everything from there cleared. */
-  private rewind(): string {
-    // A terminal narrowed under the block reflows every row wider than it now is onto more rows.
-    const columns = widthOf(this.output, Infinity);
-    const rows = this.drawn.reduce((n, w) => n + Math.max(1, Math.ceil(w / columns)), 0);
-    return rows > 0 ? `\x1b[${rows}A\x1b[G\x1b[J` : "";
-  }
-
   private draw(final = false, stopped = false): void {
     if (this.animate) {
       const lines = this.lines(final, stopped);
       // Before the first frame there is no block: a bare newline here would be a row the rewind never counts.
-      if (lines.length > 0) this.emit(`${this.rewind()}${lines.join("\n")}\n`);
+      if (lines.length > 0) this.emit(`${rewind(this.drawn, widthOf(this.output, Infinity))}${lines.join("\n")}\n`);
       this.drawn = lines.map(cells);
       return;
     }

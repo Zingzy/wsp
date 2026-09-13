@@ -229,6 +229,8 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
       answers: () => Promise.resolve(true),
       dial: () => Promise.reject(new Error("this fake service dials nothing")),
       stop: pid => stopped.push(pid),
+      // This computer is in no wsp of somebody else's, which is what every case in this file is about.
+      here: () => Promise.resolve(undefined),
       ...over,
     },
     manager,

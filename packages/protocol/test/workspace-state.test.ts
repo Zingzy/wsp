@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { actionRefusal, workspaceStateLine, whereWord, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
+import { actionRefusal, workspaceStateLine, whereWord, agentsKindRefusal, agentsMayDrive, computerOffline, deleteNotice, importDest, screenCommandLine, screenCommandTyped, screenCommandsOf, goneRefusal, isBilling, isLocalWorkspace, kindWords, MACHINE_WSP_FORKS, machineWord, needsRebuild, goneRoadRefusal, NOT_ON_THIS_KIND, OVER_SSH, providerCannotRefusal, reachShown, readingRoad, relayedRefusal, sendRefusal, servesReading, signInRefusalLine, signInRoad, stillWorkingLine, THIS_COMPUTER, undrivenRefusal, WORKSPACE_KIND_WORDS, workspaceKind, workspaceState, workspaceStateOf, workspaceWord, type ReachState, type SendBlock, type WorkspaceState } from "../src/index.js";
 
 describe("workspaceState", () => {
   it("phase alone: running, pausing, napping and waking each have one word", () => {
@@ -77,6 +77,16 @@ describe("workspaceState", () => {
     expect(actionRefusal("unreachable", "export")).toBe("Workspace is unreachable; exports open when the machine answers");
     expect(actionRefusal("gone", "import", "404")).toBe("Workspace machine is gone; rebuild it to import (404)");
     for (const state of ["running", "pausing", "paused", "waking", "unreachable", "gone"] as const) expect(actionRefusal(state, "send", "x")).toBe(sendRefusal(state, "x"));
+  });
+
+  it("goneRoadRefusal: one sentence for the rebuild wherever it is refused, saying the word the row shows", () => {
+    // The app's row and the command line both refuse through this, so a workspace cannot read as answering in the
+    // terminal while every pane on it reads that it is not.
+    expect(goneRoadRefusal("running", "rebuild")).toBe("This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
+    expect(goneRoadRefusal("paused", "rebuild")).toBe("This one is paused, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
+    expect(goneRoadRefusal("unreachable", "rebuild")).toBe("This one is not answering yet; the rebuild is offered once it is gone");
+    expect(goneRoadRefusal("unreachable", "forget")).toBe("This one is not answering yet; the forget is offered once it is gone");
+    expect(goneRoadRefusal("waking", "forget")).toBe("Only a workspace whose computer is gone can be forgotten; this one is waking");
   });
 
   it("needsRebuild: the rebuild is a road for a gone machine, a zombie, or one the provider would not resume", () => {
