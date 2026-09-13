@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One thread's row under its workspace, in the workspace row's grammar. Every
+// One thread's row under its workspace, in the workspace row's grammar, and
+// the row a send in flight stands as until the runtime writes its own. Every
 // row in the list is a thread, so no glyph leads it: the title takes the line
 // from the row's inset up to a fixed mono time column at the right edge; under
 // it the status dot, the agent's mark, and the words workspaceRows gives the
@@ -14,7 +15,8 @@
 import { Fragment, type MouseEvent } from "react";
 import { agentName } from "@wsp/catalog";
 import { THREAD_WORDS } from "../actions/format.js";
-import type { SidebarThreadSnapshot } from "../adapt/index.js";
+import { threadIndicator } from "../adapt/index.js";
+import type { Launch, SidebarThreadSnapshot } from "../adapt/index.js";
 import { HarnessMark } from "../components/chat/HarnessMark.js";
 import { SidebarMenuSubButton, SidebarMenuSubItem } from "../components/ui/sidebar.js";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip.js";
@@ -111,6 +113,38 @@ export function ThreadRow({
               </TooltipTrigger>
               <TooltipPopup side="top">{label}</TooltipPopup>
             </Tooltip>
+          </span>
+        </span>
+      </SidebarMenuSubButton>
+    </SidebarMenuSubItem>
+  );
+}
+
+/** What a send in flight wears: it is working by the fact of having been sent, read through the tables the
+ * runtime's own rows are read through, so the two rows cannot say different things about the same thread. */
+const LAUNCH_PILL = threadPill({ status: "running", asking: null, indicator: threadIndicator({ status: "running" }) });
+
+/** The send the runtime has written no row for yet, in the thread row's own grammar: the message as the title, the
+ * working dot with its word, the agent's mark, and nothing in the time slot, since no turn has started to count.
+ * Not a button: the thread it stands for has no id to select until the runtime answers, and the transcript the
+ * person is looking at is already this thread. */
+export function ThreadLaunchRow({ launch }: { launch: Launch }) {
+  return (
+    <SidebarMenuSubItem data-thread-item>
+      <SidebarMenuSubButton render={<div />} data-thread-launch className={cn(TWO_LINE_ROW_CLASS, "w-full")}>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 leading-tight">
+          <span className="flex items-center gap-2">
+            <span data-thread-title className="min-w-0 flex-1 truncate">
+              {launch.title}
+            </span>
+            <span className={cn(ROW_META_CLASS, "w-[3ch] shrink-0 text-right")} />
+          </span>
+          <span data-thread-meta className={cn(ROW_META_CLASS, "flex min-w-0 items-center gap-1.5")}>
+            <ThreadRowLeadingStatus status={LAUNCH_PILL} />
+            <span aria-hidden>·</span>
+            <span className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground">
+              <HarnessMark harness={launch.harness} label={agentName(launch.harness)} className="size-[13px]" />
+            </span>
           </span>
         </span>
       </SidebarMenuSubButton>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, daemonSilent, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeNoDialLine, workspacePlace, workspaceState } from "../src/index.js";
+import { PLACE_CONNECTS, PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, daemonSilent, imageCopyStaysLine, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeDialRoad, placeNoDialLine, placeOwnedPaths, workspacePlace, workspaceState } from "../src/index.js";
 
 describe("the one state of a computer that is not answering", () => {
   const now = Date.parse("2026-09-12T13:30:00.000Z");
@@ -147,6 +147,18 @@ describe("what one dial of a computer answers", () => {
   it("says there is no road at all on a computer that joined by typing a code", () => {
     expect(placeNoDialLine("old-laptop")).toContain("joined by typing a code");
   });
+
+  it("reads the road a dial would take, and none at all where the only thing left is to switch the computer on", () => {
+    // Holding its link: the frame rides the link, whatever else the row carries.
+    expect(placeDialRoad({ present: true })).toBe("link");
+    expect(placeDialRoad({ present: true, road: { ssh: "root@65.21.4.12" } })).toBe("link");
+    // Down, and installed over ssh: the login is the road, and the button says so rather than saying try now.
+    expect(placeDialRoad({ present: false, road: { ssh: "root@65.21.4.12" } })).toBe("ssh");
+    // Joined by typing a code: an address it dialled in from is no road back to it, and neither is an empty login.
+    expect(placeDialRoad({ present: false, road: { from: "192.168.1.34" } })).toBeUndefined();
+    expect(placeDialRoad({ present: false, road: { ssh: "" } })).toBeUndefined();
+    expect(placeDialRoad({})).toBeUndefined();
+  });
 });
 
 describe("what the two screens say wsp puts on a computer", () => {
@@ -154,9 +166,9 @@ describe("what the two screens say wsp puts on a computer", () => {
     expect(placeAddSheetWord("wsp", "running")).toBe("installing wsp under ~/.wsp");
     expect(PLACE_INSTALL.weight).toBe("about 40 MB");
     expect(placeAddSheetWord("service", "running")).toBe("starting the agent as a user service");
-    expect(PLACE_INSTALL.imageCopy("4.2 GB")).toBe("Your image (4.2 GB) is copied into Docker there the first time a workspace is created. Remove takes all of it off again.");
+    expect(PLACE_INSTALL.imageCopy("4.2 GB")).toBe("Your image (4.2 GB) is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
     // A host that has built no image yet says the sentence without a figure rather than one it guessed.
-    expect(PLACE_INSTALL.imageCopy(undefined)).toBe("Your image is copied into Docker there the first time a workspace is created. Remove takes all of it off again.");
+    expect(PLACE_INSTALL.imageCopy(undefined)).toBe("Your image is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
   });
 
   it("calls the command beside wsp's files what it does, on the way in and on the way out, and never a shim", () => {
@@ -170,7 +182,35 @@ describe("what the two screens say wsp puts on a computer", () => {
     // Every one of the three, in the sentence, off the list rather than spelled again beside it.
     for (const said of Object.values(PLACE_INSTALL.taken)) expect(PLACES_WORDS.remove.leaveTakes).toContain(said);
     expect(PLACES_WORDS.remove.leaveTakes).toBe(
-      `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and so do any copies of your image in Docker there.`,
+      `It takes off ${PLACE_INSTALL.taken.service}, ${PLACE_INSTALL.taken.files}, and ${PLACE_INSTALL.taken.opener}. Your work folder stays, and ${imageCopyStaysLine()}.`,
     );
+  });
+
+  it("tells a person the same thing about the copy of their image on the way in as on the way out", () => {
+    // placeOwnedPaths is what a sweep walks, at the terminal and over the link alike, and the workspace store the
+    // copy sits in is not on it: what neither road takes may not be promised on the way in.
+    expect(placeOwnedPaths("/home/maya").some(path => path.includes("var/lib"))).toBe(false);
+    for (const said of [PLACE_INSTALL.imageCopy("4.2 GB"), PLACES_WORDS.remove.leaveTakes]) {
+      expect(said).toContain(imageCopyStaysLine());
+      expect(said).not.toContain("Docker");
+    }
+  });
+});
+
+describe("what the sheet that adds a computer says about reaching it and about a closed lid", () => {
+  it("says how a computer that is not on this network reaches this Mac, in the clause both roads say it in", () => {
+    // The spec's own header sentence, carried on to the half a box in somebody else's rack needs: a sentence that
+    // stopped at the network told that person wsp was not for them. The sign-in is named in the words the Account
+    // row names it by, and no road between is given a noun.
+    expect(PLACE_CONNECTS).toBe("connects to this Mac over your network, or from outside it once you sign in");
+    expect(PLACES_WORDS.sheet.description).toBe(
+      "A computer you own runs threads for your wsp. It connects to this Mac over your network, or from outside it once you sign in. You open nothing on it.",
+    );
+    // Connects, never dials: a first-time person does not know what dialling a Mac is.
+    for (const said of [PLACES_WORDS.sheet.description, PLACES_WORDS.sheet.whileAsleep]) expect(said).not.toMatch(/dial/i);
+  });
+
+  it("answers what a closed lid does to work already running there, which is the whole reason for a second computer", () => {
+    expect(PLACES_WORDS.sheet.whileAsleep).toBe("Threads there keep running while this Mac sleeps; new ones start when it wakes.");
   });
 });

@@ -5,16 +5,17 @@
 import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, HOST_ASLEEP_SEND, PERSON_HOME_ENV, SEND_BLOCK_WORDS, WEB_DIR_ENV } from "@wsp/protocol";
 import { COMPOSER_STATE_WORDS } from "../src/composer-state-words.js";
 import { TRANSCRIPT_LOADING } from "../src/transcript-words.js";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GHOST_IS_NOT_A_CONTROL, OPEN_OVER_THE_PAGE, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, SEVERAL_READ, UNDER_AN_OPEN_MENU, attrWord, diffLines, findByWords, findField, openMenu, parseArgs, typedField, whyNotClicked, whyNotOne } from "./drive.mjs";
-import { FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
-import { DAEMON_BUILD, agentStoreRows, daemonBinaryHere, hostEnv, providerFor, whatIsNotBuilt } from "./host.mjs";
-import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labLogs, labRoot, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
+import { GHOST_IS_NOT_A_CONTROL, HELD, HELD_ON_THE_PAGE, whyHeld, OPEN_OVER_THE_PAGE, PRESS_NEEDS_FOCUS, READ_PAGE, SAID_ON_THE_PAGE, SEVERAL_READ, UNDER_AN_OPEN_MENU, attrWord, diffLines, findByWords, findField, openMenu, parseArgs, typedField, whyNotClicked, whyNotOne } from "./drive.mjs";
+import { FIXTURE_NAMES, fixtureCloud, fixtureFleet, fixtureFolders, fixtureMachines, fixtureRepos, fixtureSnapshots, fixtureState, threadId } from "./fixture-state.mjs";
+import { DAEMON_BUILD, agentStoreRows, daemonBinaryHere, hostArgv, hostEnv, hostPath, providerFor, whatIsNotBuilt } from "./host.mjs";
+import { AGENT_KEYS, binDir, builtAt, copyApp, folderHash, keysFound, labHome, labLogs, labRoot, labShell, notThisLabsShell, shimText, standInRoot, writeAgentHome, writeKeys, writeStandIn, writeWorkFolder } from "./lab-home.mjs";
 import { A_MESSAGE, APP_UP, NOT_READY_NAMES, PROMPT_ECHOES, READY_ON_THE_PAGE } from "./ready.mjs";
-import { NO_FINDER_CHOOSER, homeOf, keptLog, labLines, labShell, parseArgs as parseLabArgs, pointerPath, stopLab, whyNotOursToRemove } from "./lab.mjs";
+import { NO_FINDER_CHOOSER, PASTE_THIS, homeOf, keptLog, labLines, launchDiesLine, parseArgs as parseLabArgs, pointerPath, stopLab, whyALaunchDies, whyNotOursToRemove } from "./lab.mjs";
 
 describe("the fixtures a lab serves", () => {
   it("has one per kind of person the testers play", () => {
@@ -272,6 +273,33 @@ describe("the fixtures a lab serves", () => {
     }
   });
 
+  it("gives the persona with one Mac a repository of their own at the top of their home, which wsp imported nowhere", () => {
+    const lab = "/Users/Shared/wsp-lab/priya";
+    const repos = fixtureRepos("mac-only", { home: lab });
+    // A tester told to point the app at one of their own repositories walked up from the work folder and found the
+    // app, the bin folder and the work folder, with the one repository a folder further down inside it.
+    expect(repos).toEqual([`${lab}/spoo`]);
+    expect(fixtureFolders(fixtureState("mac-only", { home: lab }))).toEqual([]);
+    // It is the person's own work and not a project: nothing in the state says wsp ever imported it.
+    for (const name of FIXTURE_NAMES) {
+      for (const repo of fixtureRepos(name, { home: lab })) {
+        expect([name, repo.startsWith(`${lab}/`)]).toEqual([name, true]);
+        expect([name, fixtureFolders(fixtureState(name, { home: lab }))]).not.toContain(repo);
+      }
+    }
+  });
+
+  it("turns the switch on for the forks of a fixture whose image carries agents, so the column is not empty", () => {
+    // A tester read an empty AGENTS column on every row as an image that carries no agent at all.
+    const forks = Object.values(fixtureState("solari-only").workspaces);
+    expect(forks.map(w => w.agents)).toEqual([
+      { spawn: true, maxMachines: 2, maxDepth: 1 },
+      { spawn: true, maxMachines: 2, maxDepth: 1 },
+    ]);
+    // The switch is what lets a thread on one of these open another, which is the road the app draws a tree from.
+    expect(forks.every(w => w.agents.spawn)).toBe(true);
+  });
+
   it("names the fixture the screenshot run photographs as its default, and refuses one nobody wrote", () => {
     expect(JSON.stringify(fixtureState())).toBe(JSON.stringify(fixtureState("mac-in-use")));
     expect(() => fixtureState("mac-and-fridge")).toThrow(/no fixture is called mac-and-fridge/);
@@ -385,6 +413,63 @@ describe("what the driver reads and aims at", () => {
 
     const read = READ_PAGE();
     expect(read.text.split("\n")).toEqual(["WORKSPACES", "[Continue]", "controls with no words of their own:", "[New workspace]"]);
+  });
+
+  it("folds a control's own state into the text it diffs, since a radio's dot is not text", () => {
+    const laid = { configurable: true, value: () => ({ width: 20, height: 20 }) };
+    Object.defineProperty(Element.prototype, "getBoundingClientRect", laid);
+    Object.defineProperty(HTMLElement.prototype, "innerText", { configurable: true, get() { return this.textContent; } });
+    undo.push(() => {
+      delete Element.prototype.getBoundingClientRect;
+      delete HTMLElement.prototype.innerText;
+    });
+    // A tester clicked a radio and was told the page read the same: the answer to a click is a difference of the
+    // page's words, and picking one of two rows changes none of them.
+    document.body.innerHTML = `<label><button role="radio" aria-checked="true"></button><span>Choose what goes on the image\n</span></label>` + `<label><button role="radio" aria-checked="false"></button><span>Let an agent choose from your usage\n</span></label>` + `<button role="tab" aria-selected="true">Files\n</button><button aria-expanded="false">Sizes\n</button>`;
+    expect(READ_PAGE().text.split("\n")).toEqual([
+      "Choose what goes on the image (checked)",
+      "Let an agent choose from your usage (unchecked)",
+      "[Files] (selected)",
+      "[Sizes] (closed)",
+    ]);
+    // The words a tester reads are the label's where the control has none of its own, so the state lands on the
+    // line they would click, and one line cannot say two things.
+    document.body.innerHTML = `<label><input type="checkbox" checked><span>Keep the caches\n</span></label><label><input type="radio"><span>Keep the caches\n</span></label>`;
+    expect(READ_PAGE().text.split("\n")).toEqual(["Keep the caches", "Keep the caches"]);
+  });
+
+  it("says a held control is held rather than waiting out a click on it, with the reason the page writes", () => {
+    // Fifteen seconds on a held Create, answered with a timeout: a control the page is holding takes no click
+    // ever, so the wait is time a tester spends learning nothing.
+    document.body.innerHTML = `<form><h2>New workspace</h2><label>Name</label><input><span data-k="where-caption">build your image first</span><footer><button>Cancel</button><button disabled data-k="create">Create</button></footer></form>`;
+    const create = document.querySelector("[data-k=create]");
+    expect(HELD_ON_THE_PAGE(create)).toEqual({ why: "build your image first" });
+    // The reason a held control waits belongs in the slot under the field it waits on, so the words are the last
+    // ones above it that are nobody's control and nobody's label: not the dialog's title, not Cancel's word.
+    const said = HELD("Create", HELD_ON_THE_PAGE(create).why);
+    expect(said).toContain("is held");
+    expect(said).toContain("build your image first");
+    // A control the page is not holding is clicked, and one held with nothing said beside it still says so.
+    expect(HELD_ON_THE_PAGE(document.querySelector("footer button"))).toBeUndefined();
+    document.body.innerHTML = `<div><button aria-disabled="true">Save</button></div>`;
+    expect(HELD_ON_THE_PAGE(document.querySelector("button"))).toEqual({});
+    expect(HELD("Save", undefined)).toContain("writes no reason");
+  });
+
+  it("waits out an app still drawing itself before it calls a control held", async () => {
+    // The sidebar's own plus is held while the client has no host yet, and a click used to wait that out; a held
+    // answer that fired at once would read as a refusal on a control the page was about to hand over.
+    let reads = 0;
+    const letsGo = { count: async () => 1, evaluate: async () => (reads++ < 1 ? { why: "still connecting" } : undefined) };
+    // The grace here is longer than any this computer would use, since what the case reads is that the answer is
+    // asked for again at all: a case that leaned on the length would go red on a machine that paused between two.
+    expect(await whyHeld(letsGo, 60_000)).toBeUndefined();
+    expect(reads).toBe(2);
+    // One the page never hands over answers with what it says, once the grace is up.
+    const stays = { count: async () => 1, evaluate: async () => ({ why: "build your image first" }) };
+    expect(await whyHeld(stays, 0)).toEqual({ why: "build your image first" });
+    // A word aimed at an attribute nothing carries is the click's own refusal to make, not this one's.
+    expect(await whyHeld({ count: async () => 0, evaluate: async () => ({}) }, 0)).toBeUndefined();
   });
 
   it("reads a step at a time, and takes the break word as a break only where a verb would be", () => {
@@ -573,6 +658,58 @@ describe("what a lab tells the tester who starts it", () => {
     expect(shell).toContain(`PATH='${home}/bin:/usr/bin'`);
   });
 
+  it("prints the shell to paste alone at the foot, with nothing after it", () => {
+    const lines = labLines(facts);
+    // Two testers given this line among the others wrote their own wrapper around the command instead and spent
+    // their visits against another host. It is the last line, it is the shell itself, and the sentence over it is
+    // the only thing between it and the rest.
+    expect(lines.at(-1)).toBe(labShell(facts));
+    expect(lines.at(-2)).toBe(PASTE_THIS);
+    expect(lines.at(-3)).toBe("");
+    expect(PASTE_THIS).toContain("paste this line");
+  });
+
+  it("asks the stand-in for one launch before it says a lab is up, and stops the lab when that dies", () => {
+    const home = "/Users/Shared/wsp-lab/kai";
+    const asked = [];
+    const run = said => (bin, args, at) => {
+      asked.push([bin, args, at]);
+      return said;
+    };
+    const state = fixtureState("solari-only", { home });
+    // Every turn and every exec on a stand-in died inside the machine for a whole round, and no surface said what
+    // it was; the fork the probe asks is the one a tester would reach first.
+    const died = whyALaunchDies(home, state, run("bash: line 4: setsid: command not found"));
+    expect(died).toBe(launchDiesLine("api", "bash: line 4: setsid: command not found"));
+    expect(died).toContain("dies before the agent hears it");
+    expect(asked).toEqual([[`${home}/bin/wsp`, ["exec", "api", "--", "true"], home]]);
+    // A launch that lands says nothing, and a fixture with no fork has no stand-in to ask.
+    expect(whyALaunchDies(home, state, run(undefined))).toBeUndefined();
+    expect(whyALaunchDies(home, fixtureState("mac-only", { home }), run("never asked"))).toBeUndefined();
+  });
+
+  it("names the address a machine dials this host at, since without one no thread's tools act as that thread", () => {
+    const argv = hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, wsPort: 4124, advertise: "http://127.0.0.1:4123" });
+    // The machines a lab's forks stand on are this computer, so the address is its own loopback. Without one the
+    // runtime hands a turn no token: no opener on a thread a thread opened, no cap, no tree.
+    expect(argv.slice(-2)).toEqual(["--advertise", "http://127.0.0.1:4123"]);
+    expect(hostArgv({ statePath: "/lab/.wsp/state.json", port: 4123, wsPort: 4124 })).not.toContain("--advertise");
+  });
+
+  it("starts a host on this computer's own path, not the path the shell that started the lab was given", async () => {
+    // A harness that starts a lab puts wrappers of its own first on its path; a turn that ran one of those dialled
+    // back into that harness and never answered. The rule is the wsp command's own, read out of it.
+    const asked = [];
+    const path = await hostPath(async () => ({
+      thisComputersPath: said => {
+        asked.push(said);
+        return "/usr/bin:/bin";
+      },
+    }));
+    expect([path, asked]).toEqual(["/usr/bin:/bin", [process.env["PATH"]]]);
+    expect(hostEnv({ home: "/lab", state: { workspaces: {} }, path: "/usr/bin:/bin" }).PATH).toBe("/usr/bin:/bin");
+  });
+
   it("says this computer's daemon is up and where its binary came from", () => {
     const daemon = "/repo/packages/wspx/daemon/aarch64-apple-darwin/wsp-daemon";
     expect(labLines({ ...facts, daemon, reach: "reachable" })[2]).toBe(`this computer's workspace reads reachable, its daemon out of ${daemon}`);
@@ -718,6 +855,11 @@ describe("a lab's own home", () => {
     const bare = throwaway();
     expect(writeWorkFolder(bare).repos).toEqual([join(bare, "wsp-work", "notes")]);
     expect(statSync(join(bare, "wsp-work", "notes", "README.md")).isFile()).toBe(true);
+    // And the repositories that person already keeps are made where they keep them, at the top of their home: a
+    // tester told to import one of their own walked up from the work folder and found nothing to point the app at.
+    const own = throwaway();
+    expect(writeWorkFolder(own, [], fixtureRepos("mac-only", { home: own }))).toEqual({ work: join(own, "wsp-work"), repos: [join(own, "wsp-work", "notes"), join(own, "spoo")] });
+    expect(statSync(join(own, "spoo", ".git")).isDirectory()).toBe(true);
   });
 
   it("finds a lab it started under another root, so a stop from any shell reaches the pid that was recorded", () => {
@@ -763,6 +905,44 @@ describe("a lab's own home", () => {
     for (const [name, value] of Object.entries(env)) expect(text).toContain(`${name}='${value}'`);
     expect(text).toContain('"$@"');
     expect(binDir(home)).toBe(`${home}/bin`);
+  });
+
+  /** The shim as a shell really runs it: written where a lab writes it, and run with the environment a case names.
+   * The command it ends in is the caller's to pick, so a case can read what crossed the wipe. */
+  const runShim = (facts, env) => {
+    const path = join(facts.home, "wsp");
+    writeFileSync(path, shimText(facts));
+    const done = spawnSync("/bin/sh", [path], { env, encoding: "utf8" });
+    return { status: done.status, out: done.stdout, err: done.stderr };
+  };
+
+  it("refuses a shell that is not this lab's, and names the one line to paste instead", () => {
+    const home = throwaway();
+    const facts = { home, node: "/bin/echo", bin: "ran", env: { PATH: `${home}/bin:/usr/bin`, HOME: home } };
+    // A tester who ran this lab's command from his own shell met this computer's own host, with the lab's machines
+    // nowhere in it, and nothing in the answer said which host had answered.
+    const refused = runShim(facts, { HOME: tmpdir(), PATH: "/usr/bin:/bin" });
+    expect([refused.status, refused.out]).toEqual([2, ""]);
+    expect(refused.err.trim()).toBe(notThisLabsShell(home, labShell(facts)));
+    expect(refused.err).toContain(labShell(facts));
+    // This lab's own shell runs it, and so does the home of a stand-in machine, which is under the lab's own home
+    // and is what a turn on a fork shells out from.
+    expect(standInRoot(home).startsWith(`${home}/`)).toBe(true);
+    for (const at of [home, join(standInRoot(home), "fk_slr_1", "root")]) {
+      expect([at, runShim(facts, { HOME: at, PATH: "/usr/bin:/bin" }).status]).toEqual([at, 0]);
+    }
+  });
+
+  it("carries the turn's own token through, so a thread's tools act as that thread and not as the person", () => {
+    const home = throwaway();
+    const facts = { home, node: "/usr/bin/printenv", bin: "WSP_TURN", env: { PATH: `${home}/bin:/usr/bin`, HOME: home } };
+    // The token the launch puts in a turn's environment is the one thing that says which thread is asking. Wiped,
+    // every tool call arrives as the person: a thread opened by a thread drew as its sibling, with no opener.
+    expect(runShim(facts, { HOME: home, PATH: "/usr/bin:/bin", WSP_TURN: "9f8e7d6c" }).out.trim()).toBe("9f8e7d6c");
+    // A shell that is in no turn carries none, which is every tester's own.
+    expect(runShim(facts, { HOME: home, PATH: "/usr/bin:/bin" }).out.trim()).toBe("");
+    // One variable and no more: everything else a tester's shell holds is what the wipe is for.
+    expect(shimText(facts).match(/\$\{[A-Z_]+:-\}/g)).toEqual(["${WSP_TURN:-}"]);
   });
 
   it("refuses to start on an app it could not copy whole, since a build landing mid-copy serves a page nobody can name", () => {

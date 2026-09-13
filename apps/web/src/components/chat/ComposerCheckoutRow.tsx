@@ -17,10 +17,10 @@
 // agent's tool calls move it, is what the panes follow. The branch is read,
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type FolderMachine, type RepoStateWord } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
-import { FolderPathField, folderGhost, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
+import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonRoot, useDaemonWire } from "../../files/wire";
@@ -85,6 +85,32 @@ const BRANCH_NOTE = "The folder's branch as the workspace reports it. Nothing he
 /** The branch slot keeps the label's height while empty, so the row does not move when a branch arrives. */
 const branchSlotClass = cn(slotClass, "shrink-0 font-mono");
 
+/** The menu's floor: the rows ask for what they need and it grows to them, since the row that commits a person to a
+ * folder has to show which folder. Its ceiling is the composer's own width, which is measured rather than written,
+ * below. */
+const menuWidthClass = "min-w-72";
+
+/** How wide the menu may grow: the composer's own box, measured, since the popup is portalled out of the composer
+ * and can read nothing off it. A box the browser has not laid out leaves the menu uncapped rather than capping it
+ * at nothing. */
+function useComposerWidth(inside: RefObject<HTMLElement | null>): number | undefined {
+  const [width, setWidth] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    const box = inside.current?.closest<HTMLElement>("[data-chat-composer]") ?? null;
+    if (box === null) return;
+    const measure = (): void => setWidth(box.getBoundingClientRect().width || undefined);
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(box);
+    return () => watch.disconnect();
+  }, [inside]);
+  return width;
+}
+
+/** A row naming a folder: the word keeps its width and the path takes the rest, cut at its head like every other
+ * path here. */
+const folderRowClass = "flex min-w-0 flex-1 items-center gap-1";
+
 /** The folder's path as both forms of the row draw it. */
 function FolderPath({ path }: { path: string }) {
   return (
@@ -139,6 +165,8 @@ function FolderMenu({
     setOpen(false);
     return null;
   });
+  const trigger = useRef<HTMLButtonElement>(null);
+  const room = useComposerWidth(trigger);
   // Only a shell with a system chooser has this road; a browser tab walks the daemon's own levels below instead.
   const chooser = desktopBridge()?.pickFolder;
   const chooseFolder = async (): Promise<void> => {
@@ -159,6 +187,7 @@ function FolderMenu({
       }}
     >
       <MenuTrigger
+        ref={trigger}
         render={<Button type="button" variant="ghost" size="xs" />}
         className={cn(folderItemClass, "justify-start font-medium text-muted-foreground/70 hover:text-foreground/80")}
         aria-label={`Working folder: ${folder}`}
@@ -168,8 +197,8 @@ function FolderMenu({
         <FolderPath path={folder} />
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </MenuTrigger>
-      <MenuPopup align="start" side="top" className="w-72">
-        <FolderPathField id="composer-folder-path" label="Path" placeholder={folderGhost(roots[0] ?? folder)} hold={hold} className="px-2 pt-1.5" />
+      <MenuPopup align="start" side="top" className={menuWidthClass} style={room === undefined ? undefined : { maxWidth: room }}>
+        <FolderPathField id="composer-folder-path" label="Path" placeholder={FOLDER_GHOST_WITH_WALK} hold={hold} className="px-2 pt-1.5" />
         {chooser === undefined ? null : (
           <MenuItem closeOnClick={false} onClick={() => void chooseFolder()} data-composer-folder-choose="">
             <FolderSearchIcon />
@@ -194,14 +223,18 @@ function FolderMenu({
         ) : null}
         <MenuItem onClick={() => onPick(dir)} data-composer-folder-pick={dir}>
           <CheckIcon />
-          <span className="min-w-0 flex-1 truncate">
-            Work in <span className="font-mono">{dir}</span>
+          <span className={folderRowClass}>
+            <span className="shrink-0">Work in</span>
+            <FolderPath path={dir} />
           </span>
         </MenuItem>
         {parent !== null ? (
-          <MenuItem closeOnClick={false} onClick={() => setDir(parent)}>
+          <MenuItem closeOnClick={false} onClick={() => setDir(parent)} data-composer-folder-up={parent}>
             <ArrowLeftIcon />
-            <span className="min-w-0 flex-1 truncate">Up to <span className="font-mono">{parent}</span></span>
+            <span className={folderRowClass}>
+              <span className="shrink-0">Up to</span>
+              <FolderPath path={parent} />
+            </span>
           </MenuItem>
         ) : null}
         <MenuSeparator />

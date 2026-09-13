@@ -44,16 +44,21 @@ export function folderPathRefusal(code: DaemonErrorCode | undefined): FolderRefu
   return (code === undefined ? undefined : BY_CODE[code]) ?? FOLDER_PATH_WORDS.unread;
 }
 
-/** The ghost a folder field wears: a path under the home it is about, since a field on a workspace whose home is
- * /root must not suggest a Mac's. The one rule; the setup screen's folder field reads it too. */
-export const folderGhost = (home: string): string => `${home.endsWith("/") ? home.slice(0, -1) : home}/code/project`;
+/** The ghost a folder field wears. Never a path: a ghost shaped like one reads as the app naming a folder that is
+ * there, so the first person to meet it typed it back and was refused for a folder wsp had made up. The one over a
+ * list of folders names that road too, since walking is the other way to the same pick. */
+export const FOLDER_GHOST = "type a folder";
+export const FOLDER_GHOST_WITH_WALK = `${FOLDER_GHOST}, or walk below`;
 
 export interface FolderPick {
   readonly path: string;
-  /** The last path a read was started for, which is the folder everything beside the field is about; "" before the
-   * first one. A caller showing the folder somewhere else follows this rather than the text, so a browser and a
-   * summary are never about a path the field is still halfway through. */
+  /** The last path a read was started for; "" before the first one. This is the read's own mark: a caller compares
+   * a newly typed path against it to know whether that path has already been asked about. */
   readonly applied: string;
+  /** The last path a read answered for without refusing it, which is the folder anything drawn beside the field is
+   * about; "" until one is. A browser follows this rather than the text or `applied`: a path still being read is not
+   * yet known to be a folder, and walking to it moves the list under the hands of a person who is still typing. */
+  readonly settled: string;
   readonly refusal: FolderRefusal | null;
   readonly reading: boolean;
   /** What is in the field; "" both clears it and drops the refusal, which is how a picker reopens empty. */
@@ -64,11 +69,13 @@ export interface FolderPick {
 
 /** The typed path and what the last read of it said. `read` picks the folder and answers null, or answers the
  * halves it is refused with; a path that is not absolute is refused here, since a relative one would resolve
- * against a folder the person never typed. A refusal lands only while the field still holds the path it is about,
- * so a slow read cannot write its answer over a path typed after it. */
+ * against a folder the person never typed. An answer lands only while the field still holds the path it is about,
+ * so a slow read can neither write its refusal over a path typed after it nor move what is drawn beside the field
+ * to a folder the person has already typed past. */
 export function useFolderPick(read: (path: string) => Promise<FolderRefusal | null>): FolderPick {
   const [path, setPath] = useState("");
   const [applied, setApplied] = useState("");
+  const [settled, setSettled] = useState("");
   const [refusal, setRefusal] = useState<FolderRefusal | null>(null);
   const [reading, setReading] = useState(false);
   const shown = useRef("");
@@ -92,14 +99,16 @@ export function useFolderPick(read: (path: string) => Promise<FolderRefusal | nu
       setReading(true);
       try {
         const said = await read(folder);
-        if (shown.current === folder) setRefusal(said);
+        if (shown.current !== folder) return;
+        setRefusal(said);
+        if (said === null) setSettled(folder);
       } finally {
         setReading(false);
       }
     },
     [read],
   );
-  return { path, applied, refusal, reading, edit, submit };
+  return { path, applied, settled, refusal, reading, edit, submit };
 }
 
 /** The field, its label and the standing refusal slot under it. The keys are kept off whatever holds the field: a

@@ -116,7 +116,7 @@ const PLACES: PlaceView[] = [
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -802,6 +802,26 @@ describe("new thread", () => {
     fireEvent.click(within(line).getByRole("button", { name: /New thread/ }));
     expect(seen).toEqual(["ws_b"]);
     off();
+  });
+
+  it("a send in flight is a row of its own, so a workspace running the first message never reads that it has none", async () => {
+    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
+    const item = (row: HTMLElement) => row.closest<HTMLElement>('[data-sidebar="menu-item"]')!;
+    expect(within(item(rowOf("web"))).queryByText(/No threads yet/)).not.toBeNull();
+
+    // The transcript draws the sent message the moment it is sent; the runtime writes a row only once the agent
+    // announces itself, which is seconds later. The line and the row may not both be true at once.
+    act(() => useStore.setState({ launches: { ws_b: { requestId: "r1", title: "read the port list", harness: "claude" } } }));
+    expect(within(item(rowOf("web"))).queryByText(/No threads yet/)).toBeNull();
+    const launched = item(rowOf("web")).querySelector<HTMLElement>("[data-thread-launch]")!;
+    expect(launched.querySelector("[data-thread-title]")?.textContent).toBe("read the port list");
+    expect(launched.querySelector("[data-thread-meta]")?.textContent).toContain("Working");
+    // No time yet: nothing has started to count, and the slot stands at its width all the same.
+    expect(launched.querySelectorAll("[data-thread-title] ~ span")[0]?.textContent).toBe("");
+    expect(launched.querySelector('svg[data-harness-mark="claude"]')).not.toBeNull();
+
+    // The workspace that has its own rows keeps them; the send belongs to the workspace it was made on.
+    expect(item(rowOf("api")).querySelector("[data-thread-launch]")).toBeNull();
   });
 
   it("no row carries an import or export glyph, with or without the project ops; a live row's glyphs are its chevron and its plus", async () => {

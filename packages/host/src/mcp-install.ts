@@ -4,6 +4,7 @@
 // that runs this same wsp against this state file; the catalog entry's own
 // config module says where it goes and in what format.
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
 import { CATALOG_AGENTS, MCP_AGENTS, MCP_AGENT_IDS, type AgentEntry, type McpAgent, type Placed } from "@wsp/catalog";
 import { MCP_SERVER_NAME, mcpServerCommandLine, nextInsideAgentLine, type McpServerSpec } from "@wsp/protocol";
@@ -34,6 +35,18 @@ export interface RunningWsp {
 }
 
 export const runningWsp = (): RunningWsp => ({ execPath: process.execPath, execArgv: process.execArgv, argv: process.argv, version: VERSION, PATH: process.env.PATH });
+
+/** This computer's own path, without the folders the caller's launcher made for itself. A harness that starts a
+ * process puts wrappers of its own, under a temp folder, first on its path; those wrappers dial back into that
+ * harness, and one asked for its version by a stand-in machine's catalog probe never answered (measured 2026-09-13,
+ * two of them left running for nine minutes). A command a machine runs is one this computer has, not one this
+ * process happened to be handed. */
+export function thisComputersPath(PATH: string | undefined = process.env.PATH, temps: readonly string[] = [tmpdir(), "/tmp"]): string {
+  return (PATH ?? "")
+    .split(delimiter)
+    .filter(dir => dir !== "" && !temps.some(temp => dir === temp || dir.startsWith(`${temp}/`)))
+    .join(delimiter);
+}
 
 /** The command a shell would run from PATH: the first folder that holds one. */
 export function onPath(bin: string, PATH: string | undefined): string | undefined {

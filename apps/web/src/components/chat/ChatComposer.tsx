@@ -154,6 +154,8 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const [folderPicker, setFolderPicker] = useState(false);
   const openFolderPicker = useCallback(() => setFolderPicker(true), []);
   const { harness: harnessId, startOptions, catalog: harnessCatalog } = useComposerPicks(workspaceId, thread);
+  const launching = useStore(s => s.launching);
+  const launched = useStore(s => s.launched);
   const harnessCatalogs = useHarnessCatalogs(workspaceId);
   const setDraft = useComposerDraftStore(s => s.setDraft);
   const enqueue = useComposerDraftStore(s => s.enqueue);
@@ -353,6 +355,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
       setSending(true);
       hold(threadKey);
       appendUserTurn(prompt, requestId, images.map(recordOf));
+      // A send that names neither a thread nor a session to resume opens one the runtime has written no row for, so
+      // the sidebar is handed the same thread the transcript has until that row arrives.
+      if (into === undefined && resume === undefined) launching(workspaceId, { requestId, title: prompt, harness: harnessId });
       // The images leave the composer with the send and are kept under its request id, which is what the person's
       // row in the transcript is drawn from; a refused send hands them back rather than losing them.
       sendImagesAs(workspaceId, requestId);
@@ -374,12 +379,13 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
         )
         .catch((err: unknown) => {
           setSending(false);
+          launched(workspaceId, requestId);
           onRefused();
           restoreImages(workspaceId, requestId);
           appendLocalError(err instanceof Error ? err.message : String(err));
         });
     },
-    [api, appendLocalError, appendUserTurn, folderStart, hold, images, into, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
+    [api, appendLocalError, appendUserTurn, folderStart, harnessId, hold, images, into, launched, launching, restoreImages, resume, sendImagesAs, setSending, startOptions, threadKey, wake, wakesFirst, workspaceId],
   );
 
   const send = useCallback(() => {

@@ -89,6 +89,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
         working-directory: .
+      # Staged as the command stages it, which refuses a Linux binary that names a shared library: a static-pie
+      # binary loads none, so such a name is a call to address zero at its first use.
+      - name: The static binary staged
+        working-directory: .
+        run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
       # The wire suite as the contract: the same files that drive the node daemon in the ci gate drive this binary.
       - name: Wire suite against the binary
         working-directory: .

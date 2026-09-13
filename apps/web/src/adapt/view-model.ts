@@ -332,6 +332,17 @@ export interface SidebarThreadSnapshot {
   readonly costUsd: number | null;
 }
 
+/** A send whose thread the runtime has written no row for yet: what the sidebar draws in place of that row, so the
+ * thread whose message is in the transcript is in the list at the same moment. The message is the title, since it is
+ * the title the runtime writes when its row arrives. */
+export interface Launch {
+  /** The send's own id, which is what its refusal drops it by. */
+  readonly requestId: string;
+  readonly title: string;
+  /** The agent the send named, so the row wears the mark the runtime's row will wear. */
+  readonly harness: string;
+}
+
 /** One wsp workspace (a machine) as a sidebar project; its sessions are the threads. */
 export interface SidebarProjectSnapshot {
   readonly id: string;

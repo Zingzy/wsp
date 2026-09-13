@@ -8,9 +8,10 @@
 // are stood in by a plain open/closed context here and the picker's own
 // browsing and picking run for real.
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { cloneElement, createContext, useContext, useState, type ReactElement, type ReactNode } from "react";
+import { cloneElement, createContext, useContext, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { REPO_STATE_WORDS, type EventUnion, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { FOLDER_GHOST_WITH_WALK } from "../src/files/FolderPathField.js";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -31,10 +32,10 @@ vi.mock("../src/components/ui/menu.js", () => {
   };
   // Base UI dismisses the popup on an Escape that reaches it, which is the whole of what a field inside one must
   // not swallow, so the stand-in does the same.
-  const MenuPopup = ({ children }: { children: ReactNode }) => {
+  const MenuPopup = ({ children, className, style }: { children: ReactNode; className?: string; style?: CSSProperties }) => {
     const ctx = useContext(Ctx);
     return ctx.open ? (
-      <div role="menu" onKeyDown={e => (e.key === "Escape" ? ctx.set(false) : undefined)}>
+      <div role="menu" className={className} style={style} onKeyDown={e => (e.key === "Escape" ? ctx.set(false) : undefined)}>
         {children}
       </div>
     ) : null;
@@ -191,6 +192,11 @@ const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 
 const root = () => selectRoot(useRootStore.getState().byWorkspaceId, WS, [DAEMON_ROOT]);
 const menuEntry = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-entry="${path}"]`);
 const menuPick = (path: string) => document.querySelector<HTMLElement>(`[data-composer-folder-pick="${path}"]`);
+const menuUp = () => document.querySelector<HTMLElement>("[data-composer-folder-up]");
+/** The path inside a row that commits the person to a folder, which is the part that has to read whole at its tail. */
+const rowPath = (row: HTMLElement) => row.querySelector<HTMLElement>("[dir=ltr]")!.parentElement!;
+const menuPopup = () => document.querySelector<HTMLElement>("[role=menu]")!;
+const composerBox = () => document.querySelector<HTMLElement>("[data-chat-composer]")!;
 const menuRoots = () =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-composer-folder-root]")).map(el => [el.dataset["composerFolderRoot"], el.getAttribute("aria-checked")]);
 const pathField = () => document.querySelector<HTMLInputElement>('[data-k="folder-path"]');
@@ -226,7 +232,7 @@ describe("composer checkout row", () => {
     fireEvent.click(screen.getByRole("button", { name: "Working folder: /root" }));
     await waitFor(() => expect(menuEntry("/root/app")).not.toBeNull());
     expect(menuPick("/root")).not.toBeNull();
-    expect(screen.queryByText(/Up to/)).toBeNull();
+    expect(menuUp()).toBeNull();
     expect(menuRoots()).toEqual([]);
     fireEvent.click(menuEntry("/root/app")!);
     await waitFor(() => expect(menuEntry("/root/app/lib")).not.toBeNull());
@@ -367,7 +373,7 @@ describe("composer checkout row", () => {
     expect(menuRoots()).toEqual([["/root", "false"], [PROJECT_DEST, "true"]]);
     expect(menuPick(PROJECT_DEST)).not.toBeNull();
     // Up stops at the project root, which the daemon browses; its parent is outside every root.
-    expect(screen.queryByText(/Up to/)).toBeNull();
+    expect(menuUp()).toBeNull();
 
     // Home is still a root the picker offers, and switching back is one click.
     fireEvent.click(document.querySelector<HTMLElement>('[data-composer-folder-root="/root"]')!);
@@ -378,7 +384,7 @@ describe("composer checkout row", () => {
 
     fireEvent.click(menuEntry(`${PROJECT_DEST}/packages`)!);
     await waitFor(() => expect(menuEntry(`${PROJECT_DEST}/packages/web`)).not.toBeNull());
-    expect(screen.getByText(/Up to/).textContent).toBe(`Up to ${PROJECT_DEST}`);
+    expect(menuUp()?.dataset["composerFolderUp"]).toBe(PROJECT_DEST);
     // The listing is kept per folder, so coming back to the project root costs no second fs.list.
     expect(wire.calls.filter(([op]) => op === "fs.list").map(([, p]) => p["path"])).toEqual([PROJECT_DEST, "/root", `${PROJECT_DEST}/packages`]);
 
@@ -679,16 +685,40 @@ describe("composer checkout row", () => {
     expect(pathField()!.value).toBe("/root/app");
   });
 
-  it("wears the card field's own size and ghosts a path under the workspace's own home, not a Mac's", async () => {
+  it("wears the card field's own size and ghosts a hint, never a path a person could type back", async () => {
     provideDaemonHello(WS, { ...DAEMON_HELLO, root: "/root" });
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
     await setup(fixtureApi().api);
     await openPicker("/root");
-    // A workspace whose home is /root must not be told to type a Mac's path.
-    expect(pathField()!.placeholder).toBe("/root/code/project");
+    // A ghost shaped like a path reads as the app naming a folder that is there; the one that stood here was typed
+    // back and refused. It names the two roads instead and carries no path at all.
+    expect(pathField()!.placeholder).toBe(FOLDER_GHOST_WITH_WALK);
+    expect(pathField()!.placeholder).not.toContain("/");
     // The shipped compact size, so the typed path reads at the refusal's 12 px rather than the primitive's 14.
     expect(pathField()!.className.split(" ")).toEqual(expect.arrayContaining(["text-xs"]));
     expect(pathField()!.closest("[data-slot=input-control]")!.getAttribute("data-size")).toBe("compact");
+  });
+
+  it("shows which folder each committing row is about, cut at its head, in a menu that grows to the rows", async () => {
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
+    await setup(fixtureApi().api);
+    await openPicker("/root");
+    fireEvent.click(menuEntry("/root/app")!);
+    await waitFor(() => expect(menuUp()).not.toBeNull());
+
+    // Both rows name their folder whole, in the row's own slot; under a deep home the tail is what tells two
+    // folders apart, so the path is cut at its head exactly as the button above the box cuts it.
+    const pick = rowPath(menuPick("/root/app")!);
+    const up = rowPath(menuUp()!);
+    expect(pick.textContent).toBe("/root/app");
+    expect(up.textContent).toBe("/root");
+    for (const path of [pick, up]) expect(path.className.split(" ")).toEqual(expect.arrayContaining(FOLDER_PATH));
+
+    // The menu is no longer held at one width: it asks for what its rows need and grows to them up to the width of
+    // the composer it belongs to, which is where the ticket puts its ceiling. The fake layout gives every box 800 px,
+    // so that is what the composer measures here.
+    expect(menuPopup().style.maxWidth).toBe(`${composerBox().getBoundingClientRect().width}px`);
+    expect(menuPopup().className.split(" ")).toEqual(["min-w-72"]);
   });
 
   it("opens the picker again empty: a refusal from last time is not still standing", async () => {

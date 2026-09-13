@@ -76,7 +76,7 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
   const [arrived, setArrived] = useState<{ placeId: string; from: string } | null>(null);
   /** A computer the installer handed back, for the ssh road, which finishes on its own reply rather than an event. */
   const [installed, setInstalled] = useState<PlaceView | null>(null);
-  /** What this host's image weighs, for the note that says what lands in Docker on the box. A host that has built
+  /** What this host's image weighs, for the note that says what the box ends up holding. A host that has built
    * none yet leaves the figure out rather than guessing one. */
   const [imageBytes, setImageBytes] = useState<number | undefined>(undefined);
 
@@ -167,7 +167,11 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
   };
 
   const title = joined === undefined ? WORDS.title : WORDS.joinedTitle(joined.name);
-  const description = reported && joined !== undefined ? (joined.runsWorkspaces === true ? MINE.runsWorkspaces : WORDS.joinedDescription) : road === "app" ? WORDS.description : MINE.ssh.description;
+  // The road's own sentence, and after it on every road what a closed lid does to work already running there,
+  // which is the question this sheet is opened with. One description rather than a second paragraph beside it: the
+  // sheet names its description to a screen reader, and a second one would take that name off this sentence.
+  const said = reported && joined !== undefined ? (joined.runsWorkspaces === true ? MINE.runsWorkspaces : WORDS.joinedDescription) : road === "app" ? WORDS.description : MINE.ssh.description;
+  const description = `${said} ${WORDS.whileAsleep}`;
   const footNote = joined !== undefined ? undefined : stages !== null ? { word: MINE.ssh.running } : road === "app" ? { kbd: "esc", word: MINE.app.escCloses } : { kbd: "↵", word: MINE.ssh.adds };
   const sshHeld = login.trim() === "" ? MINE.ssh.loginFirst : api?.addComputerOverSsh === undefined ? MINE.ssh.noRoad : undefined;
   const sshTyping = joined === undefined && road === "ssh" && stages === null;
@@ -202,8 +206,9 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
           {/* The plan and the run are one list in one place, so Add fills the lines in under the hand rather than
               swapping them for another list. */}
           {road === "ssh" ? <RoadLines lines={planLines(stages ?? [])} k="plan" /> : null}
-          {/* What the lines above leave out, said before Add rather than on the way out: what Docker on the box
-              ends up holding, and what wsp leaves on that login's PATH beside its own files. */}
+          {/* What the lines above leave out, said before Add rather than on the way out: what the box ends up
+              holding of the image and what becomes of it, and what wsp leaves on that login's PATH beside its own
+              files. */}
           {road === "ssh" ? (
             <div className="flex flex-col gap-1.5">
               <p className="text-[13px] text-muted-foreground" data-k="image-note">

@@ -30,6 +30,8 @@ import {
   placeNoLinkLine,
   placeStillInstalledLine,
   placeDialLine,
+  placeDialRoad,
+  sshRoadOf,
   placeNoDialLine,
   BackendFacts,
   type DaemonEvent,
@@ -206,6 +208,10 @@ export interface PlaceDoorOptions {
   onDaemonEvent?: (placeId: string, event: DaemonEvent) => void;
   /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
   onStage?: (event: PlaceStageEvent) => void;
+  /** What a place's row says about its copy of the image while it is not standing: the stage of the build running
+   * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
+   * stands. */
+  copyBuild?: (placeId: string) => string | undefined;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
   /** How long one dial of a computer gets before it is an answer of its own. The bound is the runtime's and not
@@ -922,19 +928,25 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const started = clockNow();
       const took = (): number => Math.max(0, Math.round(clockNow() - started));
       let dialled: PlaceDialled;
-      if (linked !== undefined) {
+      // Which road there is, off the one reading of it the app also draws its button from: a road here and no
+      // button there would be a press nobody could make, and a button there with no road here is one that answers
+      // only that there was nowhere to dial. Both halves are taken off that one reading rather than asked again.
+      const road = placeDialRoad({ present: linked !== undefined, road: held.road });
+      const link = road === "link" ? linked : undefined;
+      const ssh = road === "ssh" ? sshRoadOf(held.road) : undefined;
+      if (link !== undefined) {
         // The link's own heartbeat op: the cheapest frame that proves the computer at the other end is still
         // answering, rather than that this host is still holding a socket to it.
         try {
-          await bounded(linked.request("ping"), dialWaitMs, `ping on ${held.name}`);
+          await bounded(link.request("ping"), dialWaitMs, `ping on ${held.name}`);
           dialled = { at: stamp, answered: true, roundTripMs: took() };
         } catch (e) {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
         }
-      } else if (held.road?.ssh !== undefined && wiring.dial !== undefined) {
-        const login = { ssh: held.road.ssh, ...(held.road.keyPath !== undefined ? { keyPath: held.road.keyPath } : {}) };
+      } else if (ssh !== undefined && wiring.dial !== undefined) {
+        const login = { ssh, ...(held.road?.keyPath !== undefined ? { keyPath: held.road.keyPath } : {}) };
         try {
-          await bounded(wiring.dial(login), dialWaitMs, `ssh ${held.road.ssh}`);
+          await bounded(wiring.dial(login), dialWaitMs, `ssh ${ssh}`);
           dialled = { at: stamp, answered: true, roundTripMs: took() };
         } catch (e) {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
@@ -1006,11 +1018,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         },
         ...held.map(r => {
           const forks = room.get(r.id);
-          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}) };
+          const build = opts.copyBuild?.(r.id);
+          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}), ...(build !== undefined ? { build } : {}) };
         }),
         ...providers.map(id => {
           const rate = providerRate(id);
-          return { id, kind: "provider" as const, name: id, default: marked === id, takesForks: true, ...(rate !== undefined ? { rateUsdPerHour: rate } : {}) };
+          const build = opts.copyBuild?.(id);
+          return { id, kind: "provider" as const, name: id, default: marked === id, takesForks: true, ...(rate !== undefined ? { rateUsdPerHour: rate } : {}), ...(build !== undefined ? { build } : {}) };
         }),
       ];
     },
