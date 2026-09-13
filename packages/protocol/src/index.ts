@@ -2992,6 +2992,25 @@ export const MachineSnapshotJobReply = z.object({ state: z.enum(["running", "don
 export type MachineSnapshotJobReply = z.infer<typeof MachineSnapshotJobReply>;
 export const MachineStateReply = z.object({ state: MachineState });
 export const MachineShapeReply = z.object({ shape: MachineShape });
+/** One workspace as the computer running it reads it, in one frame: the sizes its cgroup was written with, what it
+ * holds of them now, and where its processes, its files and its address are. Every figure is read at the moment of
+ * the ask rather than sampled, so a row drawn from it is true of that moment and of no moment since; a workspace
+ * that is not running carries the sizes and the paths and none of the live figures. cpuUsageUsec is the processor
+ * time the workspace has spent since it booted, so a rate is the difference between two readings. */
+export const MachineReading = z.object({
+  state: MachineState,
+  cpu: z.number().optional(),
+  memMb: z.number().optional(),
+  memBytes: z.number().int().nonnegative().optional(),
+  cpuUsageUsec: z.number().int().nonnegative().optional(),
+  uptimeMs: z.number().int().nonnegative().optional(),
+  procs: z.number().int().nonnegative().optional(),
+  address: z.string().optional(),
+  cgroup: z.string(),
+  upper: z.string(),
+});
+export type MachineReading = z.infer<typeof MachineReading>;
+export const MachineReadingReply = z.object({ reading: MachineReading });
 export const MachineFactsReply = z.object({ facts: MachineFacts });
 export const MachineAnswersReply = z.object({ answers: z.boolean() });
 /** The route on the place's own loopback; the host turns it into a route of its own with a forward. */
@@ -3140,6 +3159,7 @@ const DAEMON_CONTENTS = [
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
   "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
+  "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3213,7 +3233,10 @@ const DAEMON_CONTENTS = [
  * after a restart. Version 32 holds every workspace on a computer somebody keeps to a size that leaves that
  * computer a core and the smaller of half its memory and a gigabyte, a spec that names no size included: the
  * create answers the size it gave and one sentence saying so, the record holds that size, and the capacity says
- * what the workspaces there hold of the computer. */
+ * what the workspaces there hold of the computer. Version 33 answers a client on the computer itself the listing of
+ * the workspaces it holds and one reading of any of them, both read-only and both on the road that dials in; the
+ * reading carries the sizes as applied, the memory and processor time off the cgroup, the uptime, the process
+ * count, the address and the two paths, where the metrics op before it read two of those and replied with none. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 32;
+pub const DAEMON_VERSION: u32 = 33;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -41,6 +41,13 @@ pub const PORT_CMDLINE_CAP_BYTES: usize = 512;
 pub const PROC_CAP: usize = 1000;
 /// Linux pid_max ceiling; both proc ops refuse anything above it.
 pub const PID_MAX: u32 = 4_194_304;
+/// How often a daemon samples the computer it runs on for sys.watch and proc.watch, and so how long after the reply
+/// to a watch its first sample lands. The protocol's DAEMON_SAMPLER_INTERVAL_MS is the same figure, held so by the
+/// contract fixture.
+pub const SAMPLER_INTERVAL_MS: u64 = 2000;
+/// One tick of the stat files under /proc in milliseconds: the kernel reports those fields at 100 Hz whatever its
+/// own timer runs at, so a start time or a cpu count read there is turned into time with this.
+pub const STAT_TICK_MS: u64 = 10;
 /// The most one POST /open body may carry.
 pub const OPEN_BODY_CAP: usize = 8 * 1024;
 pub const OPEN_URL_MAX: usize = 8192;

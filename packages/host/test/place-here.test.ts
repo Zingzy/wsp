@@ -7,10 +7,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fmtUptime, placeDaemonPaths, type DaemonEvent, type PlaceFile, type ProcEntry } from "@wsp/protocol";
+import { fmtUptime, placeDaemonPaths, type DaemonEvent, type MachineReading, type MachineState, type PlaceFile, type ProcEntry } from "@wsp/protocol";
+import { NAME_LABEL, WORKSPACE_LABEL, WSP_LABEL } from "@wsp/engine";
 import type { DaemonReach } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { statusCommand, type CliIO, type ServiceDeps } from "../src/cli.js";
+import { workspaceLine } from "../src/verbs.js";
 import { hereAnswering, hereLines, openHere, readHere, type HereDeps, type HereReading } from "../src/place-here.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writePlaceFile } from "../src/place-report.js";
@@ -30,18 +32,31 @@ const PLACE: PlaceFile = {
 
 const PROC = (over: Partial<ProcEntry>): ProcEntry => ({ pid: 1, ppid: 0, user: "root", state: "S", comm: "init", cmdline: "/sbin/init", cpu: 0, rss: 1024, startedAt: 0, ...over });
 
+/** One workspace a fake daemon holds: the row its listing carries, and the reading it answers for it, or nothing
+ * where that workspace is to refuse the reading as one killed between the two asks does. */
+interface FakeBox {
+  id: string;
+  state: MachineState;
+  labels?: Record<string, string>;
+  reading?: MachineReading;
+}
+
 /** A daemon on the other end of one link: it answers both watches when the link says it is live, and `push` sends
- * whatever samples that connect is to carry. `watches` counts the ops asked for, so a reconnect that failed to ask
+ * whatever samples that connect is to carry. `asked` counts the ops asked for, so a reconnect that failed to ask
  * again would be a number here rather than a quiet screen. `refuse` rejects the dial; `quiet` is the worse case, a
- * port nothing listens on, where the reach redials for as long as it is held and `ready` never settles at all. */
+ * port nothing listens on, where the reach redials for as long as it is held and `ready` never settles at all.
+ * `boxes` is what it lists and reads for the workspaces it holds, `listRefusal` is a daemon that will not list them
+ * at all, which is every daemon a version behind this one, and `listHangs` is one that answers the samples and then
+ * never answers the listing. */
 function fakeDaemon(
   push: (send: (e: DaemonEvent) => void) => void,
-  opts: { refuse?: string; quiet?: boolean } = {},
-): { deps: HereDeps; dialled: { port: number; token: string }[]; closed: number; watches: string[]; turn: (live: boolean) => void } {
+  opts: { refuse?: string; quiet?: boolean; boxes?: () => FakeBox[]; listRefusal?: string; listHangs?: boolean } = {},
+): { deps: HereDeps; dialled: { port: number; token: string }[]; closed: number; asked: string[]; watches: string[]; turn: (live: boolean) => void } {
   const dialled: { port: number; token: string }[] = [];
-  const watches: string[] = [];
+  const asked: string[] = [];
   const state = { closed: 0 };
   let status: ((live: boolean) => void) | undefined;
+  const held = (): FakeBox[] => opts.boxes?.() ?? [];
   const deps: HereDeps = {
     answerMs: 50,
     dial: (port, token, onEvent, onLive) => {
@@ -49,8 +64,18 @@ function fakeDaemon(
       status = onLive;
       const reach: DaemonReach = {
         ready: opts.quiet === true ? new Promise<void>(() => {}) : opts.refuse === undefined ? Promise.resolve() : Promise.reject(new Error(opts.refuse)),
-        request: async op => {
-          watches.push(op);
+        request: async (op, params) => {
+          asked.push(op);
+          if (op === "machine.list") {
+            if (opts.listHangs === true) return await new Promise<Record<string, unknown>>(() => {});
+            if (opts.listRefusal !== undefined) throw new Error(opts.listRefusal);
+            return { machines: held().map(box => ({ id: box.id, state: box.state, labels: box.labels ?? {} })) };
+          }
+          if (op === "machine.metrics") {
+            const box = held().find(b => b.id === params?.["machineId"]);
+            if (box?.reading === undefined) throw new Error(`no such workspace: ${String(params?.["machineId"])}`);
+            return { reading: box.reading };
+          }
           // Both watches are asked for together; the samples follow the second, as a daemon's first tick does.
           if (op === "proc.watch") queueMicrotask(() => push(onEvent));
           return {};
@@ -69,13 +94,46 @@ function fakeDaemon(
   return {
     deps,
     dialled,
-    watches,
+    asked,
+    /** The two watches alone, in the order they were asked, which is what a reconnect is read by. */
+    get watches() {
+      return asked.filter(op => op.endsWith(".watch"));
+    },
     turn: live => status?.(live),
     get closed() {
       return state.closed;
     },
   };
 }
+
+/** The workspaces a computer holds, as the cases below read them: one running with every figure the kernel gives,
+ * one stopped with the sizes and paths it keeps, and one that went between the listing and its reading. */
+const BOXES: FakeBox[] = [
+  {
+    id: "wsp-busy",
+    state: "running",
+    labels: { [WSP_LABEL]: "1", [WORKSPACE_LABEL]: "ws_9f1c", [NAME_LABEL]: "alpha" },
+    reading: {
+      state: "running",
+      cpu: 2,
+      memMb: 2048,
+      memBytes: 700 * 1024 * 1024,
+      cpuUsageUsec: 2_460_000_000,
+      uptimeMs: 5_430_000,
+      procs: 37,
+      address: "10.65.0.6",
+      cgroup: "/sys/fs/cgroup/wsp/wsp-busy",
+      upper: "/var/lib/wsp/run/wsp-busy/upper",
+    },
+  },
+  {
+    id: "wsp-napping",
+    state: "paused",
+    labels: { [WSP_LABEL]: "1", [WORKSPACE_LABEL]: "ws_2b7d", [NAME_LABEL]: "beta" },
+    reading: { state: "paused", cpu: 1, memMb: 1024, address: "10.65.0.10", cgroup: "/sys/fs/cgroup/wsp/wsp-napping", upper: "/var/lib/wsp/run/wsp-napping/upper" },
+  },
+  { id: "wsp-went", state: "gone", labels: { [WSP_LABEL]: "1", [WORKSPACE_LABEL]: "ws_44ae", [NAME_LABEL]: "gamma" } },
+];
 
 const READINGS = (send: (e: DaemonEvent) => void): void => {
   send({ type: "sys.sample", cpu: 12.4, load1: 0.84, mem: { used: 5_368_709_120, total: 8_589_934_592 }, disk: { used: 23_622_320_128, total: 80_530_636_800 }, at: 1 });
@@ -112,6 +170,8 @@ describe("wsp status on a computer joined as a place", () => {
     const reading = await readHere(home, daemon.deps);
     expect(daemon.dialled).toEqual([{ port: 41234, token: "tok" }]);
     expect(daemon.watches).toEqual(["sys.watch", "proc.watch"]);
+    // The workspaces are read on the same link, off the two machine ops this daemon answers on the road in.
+    expect(daemon.asked).toContain("machine.list");
     expect(daemon.closed).toBe(1);
     expect(reading?.place.name).toBe("spoo");
     expect(reading?.sys?.load1).toBe(0.84);
@@ -193,8 +253,9 @@ describe("wsp status on a computer joined as a place", () => {
       const lines = hereLines(dropped, 1_603_000);
       expect(lines[1]).toBe(`wsp         stopped answering on port 41234 10m ago; its log is ${placeDaemonPaths(home).placeLog}`);
       // The UP column counts to the drop and not to now: a reading nothing sent is not one this line invents.
-      expect(lines[7]).toContain(fmtUptime(1_003_000));
-      expect(lines[7]).not.toContain(fmtUptime(1_603_000));
+      const busiest = lines.find(line => line.includes("node /root/.local/bin/wsp mcp"))!;
+      expect(busiest).toContain(fmtUptime(1_003_000));
+      expect(busiest).not.toContain(fmtUptime(1_603_000));
 
       // It comes back: the hook re-asks for the watches and the row answers again on the next sample.
       daemon.turn(true);
@@ -217,11 +278,120 @@ describe("wsp status on a computer joined as a place", () => {
       "memory      5 GB of 8 GB",
       "disk        22 GB of 75 GB",
     ]);
-    expect(io.lines[5]).toBe("processes   43 on this computer, busiest first:");
+    expect(io.lines[5]).toBe("workspaces  none on this computer");
+    expect(io.lines[6]).toBe("processes   43 on this computer, busiest first:");
     // Busiest first, whatever order the snapshot arrived in, and the command is the whole of what started it.
-    expect(io.lines[6]).toMatch(/^ {12}PID\s+USER\s+CPU\s+MEMORY\s+UP\s+COMMAND$/);
-    expect(io.lines[7]).toContain("node /root/.local/bin/wsp mcp");
-    expect(io.lines[8]).toContain("wsp-daemon --kind place");
+    expect(io.lines[7]).toMatch(/^ {12}PID\s+USER\s+CPU\s+MEMORY\s+UP\s+COMMAND$/);
+    expect(io.lines[8]).toContain("node /root/.local/bin/wsp mcp");
+    expect(io.lines[9]).toContain("wsp-daemon --kind place");
+  });
+
+  it("prints one row per workspace under the computer's own rows, off the listing and one reading each", async () => {
+    joined();
+    const io = captured();
+    const daemon = fakeDaemon(READINGS, { boxes: () => BOXES });
+    expect(await statusCommand(io, { statePath: join(home, "state.json"), home }, deps(daemon.deps))).toBe(0);
+    // One listing and one reading per workspace, on the link this line already holds.
+    expect(daemon.asked.filter(op => op === "machine.list")).toHaveLength(1);
+    expect(daemon.asked.filter(op => op === "machine.metrics")).toHaveLength(3);
+    expect(daemon.dialled).toHaveLength(1);
+    expect(io.lines[5]).toBe("workspaces  3 on this computer:");
+    expect(io.lines[6]).toMatch(/^ {12}WORKSPACE\s+ID\s+STATE\s+SIZE\s+MEMORY\s+CPU TIME\s+UP\s+PROCESSES\s+ADDRESS$/);
+    // The name and the record the host stamped on the machine, so this listing and wsp workspaces on that host name
+    // the same workspaces; then what it was given, what it holds of it, its processor time, its uptime and where it
+    // answers.
+    expect(io.lines[7]?.split(/\s{2,}/).filter(Boolean)).toEqual(["alpha", "ws_9f1c", "Running", "2\u00a0cores\u00a0·\u00a02\u00a0GB", "700 MB of 2 GB", "41m", "1h 30m", "37", "10.65.0.6"]);
+    // A workspace that is stopped keeps its sizes and its paths and has no live figures to give.
+    expect(io.lines[8]?.split(/\s{2,}/).filter(Boolean)).toEqual(["beta", "ws_2b7d", "Paused", "1\u00a0cores\u00a0·\u00a01\u00a0GB", "10.65.0.10"]);
+    // And one killed between the listing and its reading keeps the row the listing gave it.
+    expect(io.lines[9]?.split(/\s{2,}/).filter(Boolean)).toEqual(["gamma", "ws_44ae", "Gone"]);
+    // A machine wearing none of the host's marks is named by the id this computer knows it as.
+    const bare = hereLines({ place: PLACE, port: 41234, logPath: "/root/.wsp/place.log", boxes: [{ id: "wsp-bare", state: "running", labels: {} }] });
+    expect(bare.at(-1)?.split(/\s{2,}/).filter(Boolean)).toEqual(["wsp-bare", "Running"]);
+    expect(io.lines[10]).toBe("processes   43 on this computer, busiest first:");
+  });
+
+  it("names the workspaces as wsp workspaces on the host names them, so the two listings can be read against each other", async () => {
+    joined();
+    const io = captured();
+    expect(await statusCommand(io, { statePath: join(home, "state.json"), home }, deps(fakeDaemon(READINGS, { boxes: () => BOXES }).deps))).toBe(0);
+    const onTheBox = io.lines.slice(7, 10).map(line => line.split(/\s{2,}/).filter(Boolean).slice(0, 2));
+    // The same three workspaces as the host holds records for, listed by wsp workspaces on the computer running it.
+    const onTheHost = BOXES.map(box => ({
+      id: box.labels![WORKSPACE_LABEL]!,
+      name: box.labels![NAME_LABEL]!,
+      machineId: box.id,
+      phase: "running" as const,
+      kind: "cloud" as const,
+      golden: "",
+      createdAt: "2026-09-13T02:00:00.000Z",
+      place: "pl_1",
+      size: { cpu: 2, memMb: 2048 },
+      rateUsdPerHour: 0,
+      reach: { state: "reachable" as const },
+      machineState: "running" as const,
+    })).map(w => workspaceLine(w).slice(0, 2));
+    expect(onTheBox).toEqual(onTheHost);
+  });
+
+  it("says what it found where the listing never lands, rather than a row that reads as a computer holding none", async () => {
+    joined();
+    const io = captured();
+    // The samples land and the machine ops do not: the row before this fix was no row at all, which reads exactly
+    // like a computer that holds no workspaces.
+    const daemon = fakeDaemon(READINGS, { listHangs: true });
+    const started = Date.now();
+    expect(await statusCommand(io, { statePath: join(home, "state.json"), home }, deps(daemon.deps))).toBe(0);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(io.lines[5]).toBe("workspaces  this computer's wsp would not list them: nothing answered in 50ms");
+    expect(io.lines[6]).toBe("processes   43 on this computer, busiest first:");
+  });
+
+  it("keeps a workspace's row where its own reading comes back in a shape this refuses", async () => {
+    joined();
+    const io = captured();
+    // A daemon answering a reading with a field missing: the listing's row stands and its figures are the blanks
+    // a workspace that gave none has, since one unreadable reading is not the whole listing.
+    const bad: FakeBox[] = [{ ...BOXES[0]!, reading: { state: "running" } as unknown as FakeBox["reading"] }, BOXES[1]!];
+    expect(await statusCommand(io, { statePath: join(home, "state.json"), home }, deps(fakeDaemon(READINGS, { boxes: () => bad }).deps))).toBe(0);
+    expect(io.lines[5]).toBe("workspaces  2 on this computer:");
+    expect(io.lines[7]?.split(/\s{2,}/).filter(Boolean)).toEqual(["alpha", "ws_9f1c", "Running"]);
+    expect(io.lines[8]?.split(/\s{2,}/).filter(Boolean)).toEqual(["beta", "ws_2b7d", "Paused", "1\u00a0cores\u00a0·\u00a01\u00a0GB", "10.65.0.10"]);
+  });
+
+  it("says so in one sentence where the daemon would not list the workspaces at all", async () => {
+    joined();
+    const io = captured();
+    // A daemon a version behind this one refuses the listing on the road in; every other row still stands.
+    const daemon = fakeDaemon(READINGS, { listRefusal: "not on this road" });
+    expect(await statusCommand(io, { statePath: join(home, "state.json"), home }, deps(daemon.deps))).toBe(0);
+    expect(io.lines[5]).toBe("workspaces  this computer's wsp would not list them: not on this road");
+    expect(io.lines[6]).toBe("processes   43 on this computer, busiest first:");
+  });
+
+  it("the workspaces are read again while the watch runs, so a row follows what the computer is doing", async () => {
+    joined();
+    let send: ((e: DaemonEvent) => void) | undefined;
+    const boxes: FakeBox[] = [{ id: "wsp-busy", state: "running", reading: { state: "running", cpu: 2, memMb: 2048, memBytes: 700 * 1024 * 1024, cgroup: "/sys/fs/cgroup/wsp/wsp-busy", upper: "/var/lib/wsp/run/wsp-busy/upper" } }];
+    const daemon = fakeDaemon(out => {
+      send = out;
+      READINGS(out);
+    }, { boxes: () => boxes });
+    const held = (await openHere(home, daemon.deps))!;
+    try {
+      expect(held.reading().boxes?.[0]?.reading?.memBytes).toBe(700 * 1024 * 1024);
+      // The workspace grows, and the next sample of the computer's own is what the rows are read again on.
+      boxes[0]!.reading = { ...boxes[0]!.reading!, memBytes: 1_500 * 1024 * 1024 };
+      const pushed = held.next();
+      send!({ type: "sys.sample", cpu: 71.5, load1: 3.2, mem: { used: 7_000_000_000, total: 8_589_934_592 }, disk: { used: 23_622_320_128, total: 80_530_636_800 }, at: 2 });
+      await pushed;
+      await vi.waitFor(() => expect(held.reading().boxes?.[0]?.reading?.memBytes).toBe(1_500 * 1024 * 1024));
+      // Still the one link: nothing here dials a second time to read a workspace.
+      expect(daemon.dialled).toHaveLength(1);
+      expect(daemon.closed).toBe(0);
+    } finally {
+      held.close();
+    }
   });
 
   it("says the daemon never came up when it wrote no port, and exits 1 with the road back named", async () => {
