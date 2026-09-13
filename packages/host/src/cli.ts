@@ -160,6 +160,10 @@ export interface CliIO {
    * with no terminal is told to set instead, so a refusal in a service log names the key to put in a file rather
    * than saying it. */
   askSecret(question: string, variable?: string): Promise<string>;
+  /** One of a set of answers, typed while something else is running: the answer, or nothing when `until` settles
+   * first, which is the question being answered somewhere else or going with what asked it. Absent where nobody is
+   * at the keyboard, and a caller that reads it absent says the other road to answer on instead. */
+  answerKey?(accept: readonly string[], until: Promise<unknown>): Promise<string | undefined>;
 }
 
 export type { Keys } from "./env-keys.js";
@@ -206,7 +210,28 @@ export function terminalIO(input: Stream<Readable> = process.stdin, output: Stre
     sameScreen: isTTY(output) && isTTY(process.stderr),
     ask: q => (screen ? answered(confirmPrompt(split(q))).then(yes => (yes ? "yes" : "no")) : nobody(q)),
     askSecret: (q, variable) => (screen ? answered(passwordPrompt(split(q))) : noKey(q, variable)),
+    ...(screen ? { answerKey: (accept: readonly string[], until: Promise<unknown>) => readAnswerKey(input, accept, until) } : {}),
   };
+}
+
+/** One of a set of answers typed at the terminal while a turn streams beside it. The line is read as the terminal
+ * gives it, never in raw mode: a turn a person may be watching for an hour must keep the ctrl-c the terminal itself
+ * turns into a signal, and a raw read swallows it. A word outside the set is ignored and the question stands. */
+function readAnswerKey(input: Stream<Readable>, accept: readonly string[], until: Promise<unknown>): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const done = (value: string | undefined): void => {
+      input.off("data", onData);
+      input.pause();
+      resolve(value);
+    };
+    const onData = (chunk: Buffer | string): void => {
+      const typed = String(chunk).trim().toLowerCase();
+      if (accept.includes(typed)) done(typed);
+    };
+    input.on("data", onData);
+    input.resume();
+    void until.then(() => done(undefined));
+  });
 }
 
 /** What an init under --json speaks through: stdout carries the objects alone, so every line the run says goes to
