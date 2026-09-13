@@ -2306,6 +2306,9 @@ export const PlaceView = z.object({
   /** What the last dial of this computer got. Kept on the row, so the answer stands after the window is closed
    * and opened again rather than living only in the button that asked. */
   dialled: PlaceDialled.optional(),
+  /** The copy of the image at this place while it is not standing: the stage sentence while a build runs there, the
+   * reason after one stopped there. Absent once the copy stands, and on a place nothing was ever built at. */
+  build: z.string().optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
