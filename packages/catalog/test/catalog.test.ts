@@ -271,7 +271,7 @@ describe("catalog", () => {
     );
     expect(installLine(catalogEntry("pnpm")!)).toBe("npm install -g pnpm@11.9.0");
     expect(installLine(catalogEntry("wrangler")!)).toBe("npm install -g wrangler");
-    expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c '.*HOMEBREW_NO_AUTO_UPDATE=1.*brew install go'$/);
+    expect(installLine(catalogEntry("go")!)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'cd \.[\s\S]*HOMEBREW_NO_AUTO_UPDATE=1[\s\S]*brew install go'$/);
     const gh = installLine(catalogEntry("gh")!);
     expect(gh).toContain("name='gh'");
     // A failed API call (the rate limit, a network blip) leaves the release empty and falls through to go install.
@@ -334,9 +334,11 @@ describe("catalog", () => {
     expect([junk, line(junk), ROAD_MODULES.go.bin!(junk)]).toEqual([{ road: "go" }, { note: "no module to install from" }, undefined]);
     // Homebrew runs as its own user; a tap formula that took the road comes off from /usr/local/bin when the cellar never had it.
     const gh = ROAD_MODULES.brew.fromRow!(row("gh"));
-    expect(line(gh)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'HOMEBREW_NO_AUTO_UPDATE=1 .*brew install gh'$/);
+    // su keeps the caller's folder, and root's home is one linuxbrew cannot read on some images: every brew moves
+    // off such a folder before it runs, and stays where it was called when that folder can be read.
+    expect(line(gh)).toMatch(/^su -s \/bin\/bash linuxbrew -c 'cd \. 2>\/dev\/null \|\| cd \/home\/linuxbrew\nHOMEBREW_NO_AUTO_UPDATE=1 .*brew install gh'$/);
     expect(off(gh)).toEqual({ cmd: expect.stringMatching(/brew uninstall gh'$/) });
-    expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su .*brew list --formula zingzy\/tap\/diskbloom.* >\/dev\/null 2>&1; then su .*brew uninstall zingzy\/tap\/diskbloom.*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
+    expect(off({ road: "brew", formula: "zingzy/tap/diskbloom" })).toEqual({ cmd: expect.stringMatching(/^if \[ -x \/home\/linuxbrew\/.linuxbrew\/bin\/brew \] && su [\s\S]*brew list --formula zingzy\/tap\/diskbloom[\s\S]* >\/dev\/null 2>&1; then su [\s\S]*brew uninstall zingzy\/tap\/diskbloom[\s\S]*; else rm -f \/usr\/local\/bin\/'diskbloom'; fi$/) });
     // A release at a tag fetches that tag and prints it; with a pin for the same tag the sum is checked; a row that names no repository only comes off.
     const tagged = line({ road: "release", repo: "spoo-me/spoo-cli", version: "v0.4.1", go: "github.com/spoo-me/spoo-cli" }, "spoo");
     expect(tagged).toContain(`release="$(curl 'https://api.github.com/repos/spoo-me/spoo-cli/releases/tags/v0.4.1' || true)"`);
@@ -541,17 +543,21 @@ describe("catalog", () => {
     expect(baseEntryFor("agent-browser")).toBeUndefined();
   });
 
-  it("a covered row's note names both majors when this Mac runs another one, and the base row alone otherwise", () => {
+  it("a covered row's note names the computer that was read and both majors when it runs another one, and the base row alone otherwise", () => {
     const node = baseEntryFor("node")!;
     const python = baseEntryFor("python")!;
-    expect(baseNote(node, "24.1.0")).toBe("Node 22 is part of the base; this Mac runs Node 24");
-    expect(baseNote(node, "v22.23.2")).toBe("Node 22 with npm is part of the base");
-    expect(baseNote(node, undefined)).toBe("Node 22 with npm is part of the base");
-    expect(baseNote(python, "3.14.0")).toBe("Python 3.12 is part of the base; this Mac runs Python 3.14");
-    expect(baseNote(python, "3.12.7")).toBe("Python 3.12 is part of the base");
-    // Only a row that pins a major has one to compare; the rest name the base row whatever version the Mac has.
-    expect(baseNote(baseEntryFor("pnpm")!, "10.0.0")).toBe("pnpm is part of the base");
-    expect(baseNote(baseEntryFor("jq")!, "1.6")).toBe("jq is part of the base");
+    expect(baseNote(node, "24.1.0", "darwin")).toBe("Node 22 is part of the base; this Mac runs Node 24");
+    expect(baseNote(node, "v22.23.2", "darwin")).toBe("Node 22 with npm is part of the base");
+    expect(baseNote(node, undefined, "darwin")).toBe("Node 22 with npm is part of the base");
+    expect(baseNote(python, "3.14.0", "darwin")).toBe("Python 3.12 is part of the base; this Mac runs Python 3.14");
+    expect(baseNote(python, "3.12.7", "darwin")).toBe("Python 3.12 is part of the base");
+    // A note built on a Linux computer names that computer: the platform read, never the one the sentence was written for.
+    expect(baseNote(node, "24.1.0", "linux")).toBe("Node 22 is part of the base; this computer runs Node 24");
+    expect(baseNote(python, "3.14.0", "linux")).toBe("Python 3.12 is part of the base; this computer runs Python 3.14");
+    expect(baseNote(node, "v22.23.2", "linux")).toBe("Node 22 with npm is part of the base");
+    // Only a row that pins a major has one to compare; the rest name the base row whatever version was read here.
+    expect(baseNote(baseEntryFor("pnpm")!, "10.0.0", "darwin")).toBe("pnpm is part of the base");
+    expect(baseNote(baseEntryFor("jq")!, "1.6", "linux")).toBe("jq is part of the base");
   });
 
   it("says which roads no guest has run yet", () => {

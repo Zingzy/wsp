@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, baseNote, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -84,6 +84,10 @@ export interface PlannedSecret {
   place: (secret: string, existing: string | undefined) => string;
   /** The file with this account taken out, for an account whose item was not read while another of the login's was. */
   drop?: (existing: string) => string;
+  /** Set on an account the copy does not carry, with why: its item is never read and it is dropped from the copied
+   * file. A tool that signs in as one account at a time (gh) has one login in use here, and a copy that carried
+   * every account would land a file naming users the machine holds no token for. */
+  left?: string;
 }
 
 /** The name a secret's value is kept and reported under: the service, with the account when the item is per user. */
@@ -130,6 +134,12 @@ const ticked = (e: RecipeEntry): boolean => e.bring === true;
 /** A credential-shaped row travels only on a copy answer; the tick alone withholds it, and so does a skip. */
 export const withheld = (e: Pick<RecipeEntry, "consent" | "choice">): boolean => e.consent === true && e.choice !== "copy";
 export const WITHHELD_NOTE = "credential-shaped; not copied without your answer on its row";
+/** Why a copy leaves one of a login's accounts behind: the tool is signed in as another one here, and the machine
+ * takes the login the tool uses rather than every account the file lists. */
+export const notTheLogin = (active: string): string => `${active} is the login in use here`;
+/** Why a copy leaves every account behind: the file lists more than one and names none in use, so there is nothing
+ * to pick between; the sign-in runs on the machine instead. */
+export const NO_ACTIVE_LOGIN = "the file names no login in use here; sign in on the machine";
 const name = (e: RecipeEntry): string => e.id.slice(e.id.indexOf("/") + 1);
 
 /** An MCP server's row: under the agents rung, filed by the MCP id prefix; the one rule every reader of the agents rung asks. */
@@ -395,8 +405,9 @@ export function placeGhToken(host: string, token: string, existing: string | und
 interface KeychainItem {
   dest: string;
   place: (secret: string, existing: string | undefined, account?: string) => string;
-  /** The laptop file, home-relative, that names the accounts the tool keeps one item each for, and how one leaves it. */
-  accounts?: { file: string; list(text: string): string[]; drop(text: string, account: string): string };
+  /** The laptop file, home-relative, that names the accounts the tool keeps one item each for, which of them the
+   * tool is signed in as here, and how one leaves the file. */
+  accounts?: { file: string; list(text: string): string[]; active(text: string): string | undefined; drop(text: string, account: string): string };
 }
 
 /** Where a Keychain item the recipe lists as `Keychain: <service>` lands on the
@@ -406,7 +417,12 @@ const KEYCHAIN: Record<string, KeychainItem> = {
   "gh:github.com": {
     dest: ".config/gh/hosts.yml",
     place: (secret, existing, account) => placeGhToken("github.com", secret, existing, account),
-    accounts: { file: ".config/gh/hosts.yml", list: text => ghAccounts(text, "github.com").users, drop: (text, account) => dropGhAccount("github.com", text, account) },
+    accounts: {
+      file: ".config/gh/hosts.yml",
+      list: text => ghAccounts(text, "github.com").users,
+      active: text => ghAccounts(text, "github.com").active,
+      drop: (text, account) => dropGhAccount("github.com", text, account),
+    },
   },
 };
 
@@ -482,9 +498,27 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         else {
           const dest = rewrite(keychain.dest);
           const perAccount = keychain.accounts;
-          const accounts = perAccount !== undefined && opts.read !== undefined ? perAccount.list(opts.read(join(opts.home, perAccount.file)) ?? "") : [];
+          const text = perAccount === undefined || opts.read === undefined ? "" : (opts.read(join(opts.home, perAccount.file)) ?? "");
+          const accounts = perAccount === undefined ? [] : perAccount.list(text);
           if (perAccount === undefined || accounts.length === 0) plan.secrets.push({ id: e.id, service, dest, place: keychain.place });
-          else for (const account of accounts) plan.secrets.push({ id: e.id, service, account, dest, place: (secret, existing) => keychain.place(secret, existing, account), drop: existing => perAccount.drop(existing, account) });
+          else {
+            // One login travels: the one the tool is signed in as here, or the only one there is. Every other
+            // account's item is never read and its lines leave the copied file, so the machine is signed in as
+            // that one user rather than holding a file naming users it has no token for.
+            const carried = perAccount.active(text) ?? (accounts.length === 1 ? accounts[0] : undefined);
+            const left = carried === undefined ? NO_ACTIVE_LOGIN : notTheLogin(carried);
+            for (const account of accounts) {
+              plan.secrets.push({
+                id: e.id,
+                service,
+                account,
+                dest,
+                place: (secret, existing) => keychain.place(secret, existing, account),
+                drop: existing => perAccount.drop(existing, account),
+                ...(account === carried ? {} : { left }),
+              });
+            }
+          }
           brought++;
         }
         continue;
@@ -666,8 +700,10 @@ export interface BaseRow {
   id: string;
   /** The base row it stands for, as the catalog names it. */
   name: string;
-  /** What the build reports for the row: the base row's name, and this Mac's major beside the floor's when they differ. */
-  note: string;
+  /** The floor entry it stands for and the version the computer that was read runs, so whoever reports the row
+   * writes its note with the platform that computer is: the plan itself knows no computer. */
+  entry: ToolEntry;
+  version?: string;
 }
 
 export interface PlannedRoad {
@@ -683,13 +719,15 @@ export const CATALOG_PREFIX = "tools/catalog/";
 /** The note beside a catalog road's install when no golden build has proven the road yet. */
 export const UNMEASURED_ROAD = "by an unmeasured road";
 
-/** The base row a tools row stands for, when the base stage installs the same tool on every golden. The Mac's
- * version is the row's, or the brew table's for a formula. */
+/** The base row a tools row stands for, when the base stage installs the same tool on every golden. The version
+ * read here is the row's, or the brew table's for a formula. */
 export function baseRowFor(e: RecipeEntry, brew: BrewTable = new Map()): BaseRow | undefined {
   if (e.rung !== "tools") return undefined;
   const pkg = packageOf(e);
   const entry = baseEntryFor(pkg);
-  return entry === undefined ? undefined : { id: e.id, name: entry.name, note: baseNote(entry, e.version ?? brew.get(pkg)?.version) };
+  if (entry === undefined) return undefined;
+  const version = e.version ?? brew.get(pkg)?.version;
+  return { id: e.id, name: entry.name, entry, ...(version !== undefined ? { version } : {}) };
 }
 
 /** The GitHub repository a formula builds from and the tag of the version the Mac has. */
@@ -778,7 +816,7 @@ function homebrewBootstrap(): string {
     `  git -C ${BREW_REPO} fetch -q --depth 1 origin main || echo "origin/main did not fetch: brew update reads the branch in full"`,
     `  mkdir -p ${BREW_PREFIX}/bin "$(dirname ${BREW_REAL})"`,
     `  ln -sfn ../Homebrew/bin/brew ${BREW_REAL}`,
-    "  chown -R linuxbrew:linuxbrew /home/linuxbrew",
+    `  chown -R linuxbrew:linuxbrew ${LINUXBREW_HOME}`,
     // After the chown, so the one file root executes stays root's; the rm is for the dangling link a half-built
     // machine leaves, which the redirect would otherwise follow into the checkout.
     `  rm -f ${BREW}`,

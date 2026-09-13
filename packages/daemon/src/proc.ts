@@ -9,7 +9,7 @@
 // touches /proc/net.
 import { EventEmitter } from "node:events";
 import { open, readdir, readFile, readlink, stat } from "node:fs/promises";
-import { PROC_CAP, PROC_CMDLINE_BYTES, PROC_SAMPLER_STARTED, PROC_SAMPLER_STOPPED, type ProcEntry, type ProcInspectReply, type ProcSignal, type ProcSnapshot } from "@wsp/protocol";
+import { DAEMON_SAMPLER_INTERVAL_MS, PROC_CAP, PROC_CMDLINE_BYTES, PROC_SAMPLER_STARTED, PROC_SAMPLER_STOPPED, type ProcEntry, type ProcInspectReply, type ProcSignal, type ProcSnapshot } from "@wsp/protocol";
 import { parseProcNetTcp } from "./ports.js";
 import { OpError } from "./workspace-paths.js";
 
@@ -272,7 +272,7 @@ export class ProcSampler extends EventEmitter {
     this.source = source;
     this.selfPid = opts.selfPid ?? process.pid;
     this.ptys = opts.ptys ?? (() => []);
-    this.intervalMs = opts.intervalMs ?? 2000;
+    this.intervalMs = opts.intervalMs ?? DAEMON_SAMPLER_INTERVAL_MS;
     this.now = opts.now ?? Date.now;
     this.log = opts.log ?? (() => {});
   }

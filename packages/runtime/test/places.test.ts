@@ -1042,6 +1042,7 @@ const PLACE_FACTS = {
     containers: false,
     callbackRelay: true,
     diskSnapshots: true,
+    snapshotsAnyLife: false,
     snapshotListing: true,
     templates: true,
     kept: false,

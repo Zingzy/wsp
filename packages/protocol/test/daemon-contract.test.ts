@@ -256,6 +256,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
           containers: false,
           callbackRelay: true,
           diskSnapshots: true,
+          snapshotsAnyLife: false,
           snapshotListing: true,
           templates: true,
           sizes: [
@@ -279,6 +280,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
           containers: false,
           callbackRelay: false,
           diskSnapshots: true,
+          snapshotsAnyLife: false,
           snapshotListing: true,
           templates: true,
           sizes: [],

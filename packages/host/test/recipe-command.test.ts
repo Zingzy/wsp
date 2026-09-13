@@ -17,6 +17,9 @@ import { allRows, commandTableLines, recipeAnswer, recipePrintout } from "../src
 import { RECIPE } from "./init-fixture.js";
 import { claudeLine, fakeHost, HOME } from "./recipe-fixture.js";
 
+/** The screens read this computer for whose login a copy would carry; a home with nothing in it names none. */
+const HOME_HERE = "/home/nobody";
+
 const PROJ = `${HOME}/proj`;
 const OTHER = `${HOME}/other`;
 
@@ -269,7 +272,7 @@ describe("wsp recipe", () => {
     expect(custom()?.find(r => r.id === "ruff")?.check).toBe("ruff --version");
     // The install is the whole row: no catalog row appears for it and no sign-in is ever offered.
     expect(custom()?.every(r => !("signIn" in r))).toBe(true);
-    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map(), "darwin").items.map(i => i.id)).not.toContain("logins/just");
+    expect(signInItems(applyRecipe(withCatalogAgents({ entries: [] }), Recipe.parse(JSON.parse(readFileSync(out, "utf8")))), new Map(), "darwin", HOME_HERE).items.map(i => i.id)).not.toContain("logins/just");
     await expect(runRecipe(laptop(), { out, add: ["just"] }, quiet, at)).rejects.toThrow('--add takes <id>=<command>, and got "just".');
   });
 

@@ -87,7 +87,9 @@ export const APT_UPDATE = `${APT_ENV}\napt-get update -qq`;
 /** Homebrew itself is a git checkout at a release tag whose commit is checked
  * before anything runs (https://docs.brew.sh/Homebrew-on-Linux#alternative-installation). */
 export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
-export const BREW_PREFIX = "/home/linuxbrew/.linuxbrew";
+/** The user Homebrew runs as and the home useradd makes for it. */
+export const LINUXBREW_HOME = "/home/linuxbrew";
+export const BREW_PREFIX = `${LINUXBREW_HOME}/.linuxbrew`;
 /** Homebrew's own checkout, where its Linux install puts it. */
 export const BREW_REPO = `${BREW_PREFIX}/Homebrew`;
 // Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
@@ -100,21 +102,26 @@ export const BREW = `${BREW_PREFIX}/bin/brew`;
  * in a directory no PATH carries and no keg links into, so it is the shim's alone. */
 export const BREW_REAL = `${BREW_PREFIX}/libexec/brew`;
 
+/** su hands linuxbrew the directory the caller stood in, and Homebrew stops before it starts on one linuxbrew
+ * cannot read: root's home is 0700 on the images a box boots, and every formula row failed behind it. Stay where
+ * the call was made when linuxbrew can read it, so a person's own brew still reads the folder they are in. */
+export const FROM_A_READABLE_DIR = `cd . 2>/dev/null || cd ${LINUXBREW_HOME}`;
+
 // Homebrew refuses to run as root, so it lives under its own user at the
 // prefix its Linux bottles are built for; anything else compiles from source.
 export function asLinuxbrewScript(script: string): string {
-  return `su -s /bin/bash linuxbrew -c ${shellQuote(`export ${BREW_ENV}\n${script}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\nexport ${BREW_ENV}\n${script}`)}`;
 }
 
 export function asLinuxbrew(cmd: string): string {
-  return `su -s /bin/bash linuxbrew -c ${shellQuote(`${BREW_ENV} ${BREW} ${cmd}`)}`;
+  return `su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\n${BREW_ENV} ${BREW} ${cmd}`)}`;
 }
 
 /** The file that sits at BREW, so every brew on the machine runs as the user that owns the tree however it was
  * reached. Root running Homebrew's own brew writes root-owned files into that tree and git then refuses to read it,
  * which reads as "No remote origin, skipping update". It sets no Homebrew environment: a person's brew is meant to
  * update, and a caller that wants otherwise exports it, which su carries through. */
-export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`exec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
+export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\nexec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
 
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",

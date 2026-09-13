@@ -36,7 +36,6 @@ import {
   NOTIFY_CALLER,
   NOTIFY_ME,
   NOTIFY_WORDS,
-  NO_REBUILD_NEEDED,
   ProjectExportResult,
   ProjectGolden,
   SealedImage,
@@ -101,6 +100,7 @@ import {
   forgetNotice,
   goldenHead,
   goneRefusal,
+  goneRoadRefusal,
   imageKeptLine,
   imageLine,
   imageTypeOf,
@@ -216,6 +216,7 @@ import { dialAddress, hostTokenFor, hostTokenPath, servingHost } from "./host-lo
 import type { HostStarter } from "./host-start.js";
 import { addressNotPairedLine, aimAddress, aimName, aimedHost, deviceRefusedLine, dialWindowMs, hostSideOnlyFix, hostSideOnlyLine, noAnswerRefusal, noAnswerWithin, stateIgnoredLine, wsUrlOf, type HostAim, type HostPick } from "./hosts.js";
 import { colourDepth, isTTY, wrap } from "./init-layout.js";
+import { watchBlock, watchOn, type WatchSignals } from "./watch.js";
 import { RecipeAnswer, RecipeScan, recipePrintout, scanPrintout } from "./recipe-answer.js";
 import { isRecipeTick, runRecipe, runScan, type ScanInput } from "./recipe-command.js";
 import { historyCache, smallRecipePath } from "./recipe-file.js";
@@ -491,6 +492,12 @@ export interface VerbDeps {
   /** What brings the host up when nothing serves the state file here; both doors hand in the one built from how
    * this process was started. Absent starts nothing, which is what a caller with no wsp to spawn has. */
   start?: HostStarter;
+  /** Where a --watch's stop arrives. This process by default; a test hands in its own, since a real signal would
+   * take the test runner with it. */
+  signals?: WatchSignals;
+  /** How the socket to the host is opened. dialHost by default; a caller hands in its own to count the dials a line
+   * makes, which is the whole of whether a watch holds one socket or opens one per frame. */
+  dial?: typeof dialHost;
 }
 
 /** What a person names when they record a machine of their own: where it is, and the port, key and name they give
@@ -733,11 +740,14 @@ export async function nap(client: HostClient, ref: string): Promise<WorkspaceOut
 }
 
 /** Replaces the machine under a workspace the provider no longer has, the road out of gone that the app's row
- * action takes. The record is read here so a machine that still answers is refused in the row's own words; the
- * runtime alone knows the machine is replaced, and the view it returns carries the new one. */
+ * action takes. The status is read beside the record so the refusal is the row's own: the record alone carries no
+ * reach, and a workspace whose machine stopped answering would read as answering here while every pane on it read
+ * that it had not. The runtime alone knows the machine is replaced, and the view it returns carries the new one. */
 export async function rebuild(client: HostClient, ref: string): Promise<WorkspaceOut> {
   const source = await workspaceOf(client, ref);
-  if (!needsRebuild(source)) throw new Error(NO_REBUILD_NEEDED);
+  const listed = (await workspaceStatuses(client)).find(w => w.id === source.id) ?? null;
+  const state = { phase: source.phase, machineState: listed?.machineState, reach: listed?.reach.state, wakeRefused: source.wakeRefused };
+  if (!needsRebuild(state)) throw new Error(goneRoadRefusal(workspaceState(state), "rebuild"));
   return (await client.request<{ workspace: WorkspaceOut }>("workspaces.rebuild", { workspaceId: source.id })).workspace;
 }
 
@@ -2315,6 +2325,24 @@ const ANSWER_VERBS: readonly CliVerb[] = ANSWER_ROADS.filter((road): road is Ans
   }),
 }));
 
+/** A verb's rows, drawn once or redrawn where they stand until Ctrl-C. The rows come back from one call so a frame
+ * is one reading of the host and never half of two, and the socket is handed to the frame rather than asked for
+ * inside it, so a watch of any length is one dial however many frames it draws. The one road --watch takes, so the
+ * lines that carry it cannot refresh by two different rules. The refusal is read before the dial, so a line with
+ * nowhere to redraw never starts a host to say so. */
+async function drawRows(ctx: VerbContext, words: string, frame: (client: HostClient) => Promise<{ value: object; rows: string[] }>): Promise<number> {
+  if (ctx.flags["watch"] !== true) {
+    const { value, rows } = await frame(await ctx.client());
+    ctx.out.emit(value, rows.join("\n"));
+    return 0;
+  }
+  const on = watchOn(words, { json: ctx.flags["json"] === true, redraw: ctx.io.redraw });
+  if ("refusal" in on) throw on.refusal;
+  const client = await ctx.client();
+  await watchBlock(async () => (await frame(client)).rows, { ...on.redraw, ...(ctx.signals !== undefined ? { signals: ctx.signals } : {}) });
+  return 0;
+}
+
 export const VERBS: readonly Verb[] = [
   {
     name: "places",
@@ -2338,17 +2366,17 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "workspaces",
-    usage: "wsp workspaces",
-    about: "every workspace this host runs: the computer or provider it runs on, the shape of its machine, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it), and how many projects it holds",
+    usage: "wsp workspaces [--watch]",
+    about: "every workspace this host runs: the computer or provider it runs on, the shape of its machine, its state as the sidebar shows it (running, paused, waking or unreachable, off the phase with the provider's word for the machine and the daemon reach beside it), and how many projects it holds; --watch draws the same table again every second where it stands",
     page: "front",
-    options: {},
+    options: { watch: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length !== 0) throw usageRefusal("wsp workspaces takes no positional arguments.", usageIs(ctx));
-      const client = await ctx.client();
-      const rows = await workspaceStatuses(client);
-      const places = rows.some(w => w.place !== undefined) ? await placeNames(client) : new Map<string, string>();
-      ctx.out.emit({ workspaces: rows }, table([["WORKSPACE", "ID", "WHERE", "SIZE", "STATE", "PROJECTS", "AGENTS"], ...rows.map(w => workspaceLine(w, places))]).join("\n"));
-      return 0;
+      return drawRows(ctx, "wsp workspaces", async client => {
+        const rows = await workspaceStatuses(client);
+        const places = rows.some(w => w.place !== undefined) ? await placeNames(client) : new Map<string, string>();
+        return { value: { workspaces: rows }, rows: table([["WORKSPACE", "ID", "WHERE", "SIZE", "STATE", "PROJECTS", "AGENTS"], ...rows.map(w => workspaceLine(w, places))]) };
+      });
     },
     tool: tool({
       description:
@@ -2382,16 +2410,17 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "threads",
-    usage: "wsp threads [<workspace>] [--tree]",
-    about: "who is working, and in which workspace: every thread as the sidebar lists it, with the agent, the state, who opened it and the folder it works in; --tree indents the threads an agent spawned under the one that spawned them",
+    usage: "wsp threads [<workspace>] [--tree] [--watch]",
+    about: "who is working, and in which workspace: every thread as the sidebar lists it, with the agent, the state, who opened it and the folder it works in; --tree indents the threads an agent spawned under the one that spawned them, and --watch draws the same table again every second where it stands",
     page: "front",
-    options: { tree: { type: "boolean" } },
+    options: { tree: { type: "boolean" }, watch: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length > 1) throw usageRefusal("wsp threads takes at most one workspace; wsp threads wait is its one subcommand.", usageIs(ctx));
-      const rows = await threadRows(await ctx.client(), ctx.args[0]);
-      const lines = ctx.flags["tree"] === true ? threadTree(rows).map(t => threadLine(t.row, "  ".repeat(t.depth))) : rows.map(t => threadLine(t));
-      ctx.out.emit({ threads: rows }, table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...lines]).join("\n"));
-      return 0;
+      return drawRows(ctx, "wsp threads", async client => {
+        const rows = await threadRows(client, ctx.args[0]);
+        const lines = ctx.flags["tree"] === true ? threadTree(rows).map(t => threadLine(t.row, "  ".repeat(t.depth))) : rows.map(t => threadLine(t));
+        return { value: { threads: rows }, rows: table([["THREAD", "WORKSPACE", "AGENT", "STATE", "BY", "FOLDER", "TITLE"], ...lines]) };
+      });
     },
     tool: tool({
       description: "Every thread as the sidebar lists it: the workspace, the agent inside, its state, who opened it (person, cli or agent), the folder it works in and its title. Optionally within one workspace. A thread an agent inside another thread opened carries parentThreadId and rootThreadId, which is the tree stop ends as one.",
@@ -3451,6 +3480,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   timeout: "how long to wait before answering that they are still running",
   title: "what to call the thread; the agent names it from the task without one",
   tree: "indent the threads an agent opened under the one that opened them",
+  watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
   yes: "go ahead without being asked",
 };
 
@@ -3559,7 +3589,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "env" | "start">): Promise<number> {
+export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "env" | "start" | "signals" | "dial">): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -3608,12 +3638,13 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
     ...(deps.alsoHere !== undefined ? { alsoHere: deps.alsoHere } : {}),
     ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
     ...(deps.start !== undefined ? { start: deps.start } : {}),
+    ...(deps.signals !== undefined ? { signals: deps.signals } : {}),
     client: async () => {
       if (stateNote !== undefined && !noted) {
         noted = true;
         io.error(stateNote);
       }
-      return (client ??= await dialHost(statePath, { aim, say: line => io.error(line), ...(deps.start !== undefined ? { start: deps.start } : {}) }));
+      return (client ??= await (deps.dial ?? dialHost)(statePath, { aim, say: line => io.error(line), ...(deps.start !== undefined ? { start: deps.start } : {}) }));
     },
   };
   try {

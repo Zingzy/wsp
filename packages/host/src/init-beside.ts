@@ -33,6 +33,8 @@ export interface BesideOptions {
   yes?: boolean;
   /** wsp init --on: the place the image is built on; absent, that host's default place. */
   on?: string;
+  /** wsp init --rebuild: the next version is sealed from a fresh machine, as it is on the road with no host serving. */
+  rebuild?: boolean;
   /** Where the host serving this state answers, printed once the build is over. */
   appUrl?: string;
 }
@@ -135,6 +137,7 @@ export async function buildBesideHost(o: BesideOptions): Promise<number> {
       ...(o.fork?.folder !== undefined ? { importFolder: o.fork.folder } : {}),
       ...(o.yes === true ? { yes: true } : {}),
       ...(o.on !== undefined ? { on: o.on } : {}),
+      ...(o.rebuild === true ? { rebuild: true } : {}),
     });
     return ended(o, await until(job => initJobOver(job.phase)));
   } finally {

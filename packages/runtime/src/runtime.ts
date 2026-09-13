@@ -504,8 +504,10 @@ export interface InitDoor {
   /** Keeps a step's unsent ticks, picks and typed text on the job, so a sheet shut mid-step reopens on them. */
   draft(o: { at: string; ticks?: string[]; answers?: Record<string, string> }): Promise<InitJob>;
   retry(o: { tool: string }): Promise<InitJob>;
-  /** Starts the build at the place `on` names, else the default build place. */
-  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string }): Promise<InitJob>;
+  /** Starts the build at the place `on` names, else the default build place. `rebuild` seals the next version from
+   * a fresh machine rather than from the image plus the changes, which is the question a run at a terminal is asked;
+   * absent takes whichever road the changes call for. */
+  build(o: { firstWorkspace?: string; importFolder?: string; yes?: boolean; on?: string; rebuild?: boolean }): Promise<InitJob>;
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine; refused when none is. */
   signInCode(o: { tool: string; code: string }): Promise<InitJob>;
   cancel(): Promise<InitJob>;
@@ -1292,7 +1294,7 @@ export interface Runtime {
     /** Boots a first-life builder from the recipe; a person sets it up on its live screen, then seals it.
      * Once `signal` aborts the call rejects with PrepareStoppedError: a machine this prepare made is killed by its
      * recorded id and its record dropped (a create still in flight is killed as it lands); a builder it attached to
-     * keeps its first life, its hold is released and its record stays reusable. `place` is where the builder is
+     * keeps the seal in it, its hold is released and its record stays reusable. `place` is where the builder is
      * made, a joined computer or a provider by name or id; absent is the provider this host forks on. `copy` marks a
      * copy's build, whose frames name the place; the image's own build names none, wherever it runs, which is how
      * the app tells the two apart. */
@@ -1550,7 +1552,8 @@ interface BuilderRecord {
   createdAt: string;
   size: WorkspaceSize;
   streamUrl?: string;
-  /** True from creation until the machine is ever paused, resumed or restored; only a first-life machine can be sealed. */
+  /** True from creation until the machine is ever paused, resumed or restored. Whether a builder that lost it can
+   * still be sealed is the place's own rule, read off its backend (`snapshotsAnyLife`), never assumed here. */
   firstLife: boolean;
   /** The process using this builder: written at creation and attach, refreshed every sweep, cleared on close.
    * Another process over the same store leaves the record alone while the holder is alive and the heartbeat fresh. */
@@ -1571,6 +1574,9 @@ interface BuilderRecord {
 interface LiveBuilder {
   record: BuilderRecord;
   builder: Builder;
+  /** Whether a seal can still be taken from it: its machine's first life, or a place whose copy of a disk is the
+   * disk as it stands. What `life` is derived from and what the builder's view carries. */
+  sealable: boolean;
   /** own: made or attached to by this process. reusable: an earlier process's record, marked and running,
    * wearing this owner's label or none; the sweep ages it out at six hours. stale: an earlier record that
    * can never seal; the sweep stops it. foreign: wears another state file's label; never touched.
@@ -1583,7 +1589,7 @@ interface LiveBuilder {
 }
 
 /** What prepare rejects with once its signal aborted. `builderId` is the machine it had, when one existed: killed
- * by its recorded id and its record dropped, unless `kept` (attached to, first life worth keeping, hold released,
+ * by its recorded id and its record dropped, unless `kept` (attached to, a seal still in it, hold released,
  * record left reusable) or `left` (the kill failed for this reason and the record stays for the sweep). */
 export class PrepareStoppedError extends Error {
   readonly builderId?: string;
@@ -1596,7 +1602,7 @@ export class PrepareStoppedError extends Error {
       builderId === undefined
         ? "prepare stopped before a machine existed"
         : kept
-          ? `prepare stopped; builder ${builderId} left running with its first life`
+          ? `prepare stopped; builder ${builderId} left running with a seal still in it`
           : left === undefined
             ? `prepare stopped; builder ${builderId} killed`
             : `prepare stopped; builder ${builderId} did not stop: ${left}`,
@@ -3697,7 +3703,16 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   }
 
   type StoredBuilder = Omit<BuilderRecord, "size" | "firstLife"> & { size?: WorkspaceSize; firstLife?: boolean };
-  const lifeOf = (stored: StoredBuilder, machine: Machine, firstLife: boolean): LiveBuilder["life"] => {
+  /** Whether a seal can still be taken from a builder at this place: the machine's own first life, or a provider
+   * whose copy of a disk is the disk as it stands. The one place the golden road asks it; every reader above the
+   * runtime takes the answer on the builder's view. A place nothing here can reach yet answers on first life
+   * alone, which is what the record already says. */
+  const sealableAt = (place: string | undefined, firstLife: boolean): boolean => {
+    if (firstLife) return true;
+    const at = places.backend(place ?? places.wired) ?? placeDoor?.backendOf(place ?? places.wired);
+    return at?.capabilities.snapshotsAnyLife === true;
+  };
+  const lifeOf = (stored: StoredBuilder, machine: Machine, sealable: boolean): LiveBuilder["life"] => {
     // Only a label that names another state file makes it foreign; a view with no labels is ours.
     const label = machine.labels?.[OWNER_LABEL];
     // A hold from this host is checked against its pid; one from another host is trusted while its heartbeat
@@ -3708,17 +3723,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const fresh = Number.isNaN(beatAge) || beatAge < HELD_TTL_MS;
     const held = holder !== undefined && !mine && fresh && (holder.host !== hostId || pidAlive(holder.pid));
     // A placeholder its dead holder left mid-setup never finished its stages: stale, whatever the marker says.
-    return label !== undefined && label !== owner ? "foreign" : held ? "held" : !firstLife || stored.building === true ? "stale" : "reusable";
+    return label !== undefined && label !== owner ? "foreign" : held ? "held" : !sealable || stored.building === true ? "stale" : "reusable";
   };
-  const liveOf = (record: BuilderRecord, machine: Machine): LiveBuilder => ({
-    record,
-    builder: {
-      machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: record.firstLife, size: record.size,
-      ...(record.import !== undefined ? { import: record.import } : {}),
-      ...(record.base !== undefined ? { base: record.base } : {}),
-    },
-    life: lifeOf(record, machine, record.firstLife),
-  });
+  const liveOf = (record: BuilderRecord, machine: Machine): LiveBuilder => {
+    const sealable = sealableAt(record.place, record.firstLife);
+    return {
+      record,
+      builder: {
+        machine, kind: record.kind, baseTemplate: record.baseTemplate, setupSha: record.setupSha, createdAt: record.createdAt, firstLife: record.firstLife, size: record.size,
+        ...(record.import !== undefined ? { import: record.import } : {}),
+        ...(record.base !== undefined ? { base: record.base } : {}),
+      },
+      sealable,
+      life: lifeOf(record, machine, sealable),
+    };
+  };
   /** A stored record this process has no entry for yet; its machine is fetched once, here. */
   const admit = async (stored: StoredBuilder): Promise<void> => {
     // A builder made at another place is read on that place's backend; the wired one has never heard of it. A
@@ -6011,7 +6030,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     createdAt: r.createdAt,
     size: r.size,
     ...(r.streamUrl !== undefined ? { screen: { streamUrl: r.streamUrl } } : {}),
-    firstLife: b.builder.firstLife,
+    sealable: b.sealable,
     ...(r.import !== undefined ? { recipeHash: r.import.recipeHash } : {}),
     ...(r.import?.recipe !== undefined ? { recipe: r.import.recipe } : {}),
     ...(b.life === "foreign" ? { foreignOwner: b.builder.machine.labels?.[OWNER_LABEL] ?? "" } : {}),
@@ -6234,7 +6253,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           ...(imp !== undefined ? { import: { recipeHash: imp.recipeHash, ...(imp.recipe !== undefined ? { recipe: imp.recipe } : {}), applied: [], smoke: "true" } } : {}),
           ...(place !== undefined ? { place } : {}),
         };
-        const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, life: "own" };
+        const placeholder: LiveBuilder = { record, builder: { machine, kind: spec.kind, baseTemplate: record.baseTemplate, setupSha: "", createdAt: record.createdAt, firstLife: true, size: asked }, sealable: true, life: "own" };
         builders.set(machine.id, placeholder);
         made(placeholder);
         await hold(placeholder);
@@ -6261,7 +6280,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(builder.base !== undefined ? { base: builder.base } : {}),
       ...(place !== undefined ? { place } : {}),
     };
-    const entry: LiveBuilder = placeholder ?? { record, builder, life: "own" };
+    const entry: LiveBuilder = placeholder ?? { record, builder, sealable: true, life: "own" };
     entry.record = record;
     entry.builder = builder;
     builders.set(record.id, entry);
@@ -6449,7 +6468,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const filed = filedAt(place);
       const run = claiming(`builder/${preparingKey}`, async b => {
         await refreshBuilders();
-        // A first-life builder carrying the same ticks is attached to instead of
+        // A builder with a seal still in it carrying the same ticks is attached to instead of
         // booting a second one, whichever process made it; the stages skip on its
         // ledger. A stale, foreign or held record is never reused, and a recipe with no
         // import never attaches: nothing says which ticks the builder carries. The
@@ -6457,7 +6476,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // life does across processes.
         const same = imp === undefined ? undefined : [...builders.values()].find(x => (x.life === "own" || x.life === "reusable") && x.record.building !== true && x.record.sealed === undefined && x.record.name === name && (x.record.place ?? places.wired) === place && x.record.import?.recipeHash === imp.recipeHash);
         // The machine this prepare has, attached to or made. A stop kills a made one by its recorded id and drops the
-        // record; an attached one has a first life and maybe an earlier run's sign-ins, so its hold is released and
+        // record; an attached one still has a seal in it and maybe an earlier run's sign-ins, so its hold is released and
         // its record stays reusable.
         let mine: LiveBuilder | undefined;
         let creating: Promise<Machine> | undefined;

@@ -85,6 +85,18 @@ export function wrap(text: string, width: number, indent = "  "): string[] {
   return [ellipsize(text.slice(0, cut).trimEnd(), width), ...wrap(`${indent}${text.slice(cut + 1).trimStart()}`, width, indent)];
 }
 
+/** The cells a drawn row takes on screen: its text without the colour codes. */
+export const cells = (row: string): number => stripVTControlCharacters(row).length;
+
+/** Back to the first row and column of a block already on screen, with everything from there cleared: what a block
+ * that redraws in place writes before its next frame. `drawn` is the cells each row of the last frame took, as
+ * `cells` counts them. A terminal narrowed under the block reflows every row wider than it now is onto more rows,
+ * so the count is taken at the width the terminal has at this moment and not at the one the frame was drawn to. */
+export function rewind(drawn: readonly number[], columns: number): string {
+  const rows = drawn.reduce((n, w) => n + Math.max(1, Math.ceil(w / columns)), 0);
+  return rows > 0 ? `\x1b[${rows}A\x1b[G\x1b[J` : "";
+}
+
 /** Whether the stream is a terminal. */
 export const isTTY = (output: Writable | undefined): boolean => output !== undefined && "isTTY" in output && output.isTTY === true;
 

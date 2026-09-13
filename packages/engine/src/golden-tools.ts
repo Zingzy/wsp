@@ -6,7 +6,7 @@
 // install in its own session and, at the timeout, kills that session and every
 // process descended from it before returning, so a slow brew never holds a
 // cellar lock into the next tool's turn.
-import { HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
+import { BREW_PREFIX, HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
 import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
@@ -63,7 +63,7 @@ const SWEEP_TMP_CMD = "rm -f /tmp/wsp-vault-*.tgz";
 const CELLAR_LOCKED = /has already locked/;
 /** Every lock Homebrew holds, taken and released in turn: returns once no brew is mid-install. */
 const BREW_LOCK_WAIT_S = 600;
-const BREW_LOCK_WAIT_CMD = `for l in /home/linuxbrew/.linuxbrew/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w ${BREW_LOCK_WAIT_S} "$l" true; done; true`;
+const BREW_LOCK_WAIT_CMD = `for l in ${BREW_PREFIX}/var/homebrew/locks/*.lock; do [ -e "$l" ] && flock -w ${BREW_LOCK_WAIT_S} "$l" true; done; true`;
 
 /** Re-exported so the engine's callers keep one import; the rule itself lives beside fmtBytes in the protocol. */
 export { plural } from "@wsp/protocol";

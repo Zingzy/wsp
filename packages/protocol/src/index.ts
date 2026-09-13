@@ -203,10 +203,15 @@ export const Capabilities = z.object({
   callbackRelay: z.boolean(),
   /** The provider copies a running machine's disk into an image it keeps, which is what a version and a project
    * golden are sealed as and what a fork boots from. False where the disk is the person's own and nothing copies it
-   * (this computer, a machine reached over ssh). Which life the copy may be taken from is the provider's own rule.
+   * (this computer, a machine reached over ssh). Which life the copy may be taken from is snapshotsAnyLife.
    * Whether a fork of that image comes up with the processes still running is liveCloneForks and says nothing about
    * whether one can be taken. */
   diskSnapshots: z.boolean(),
+  /** The copy may be taken from a machine that was paused and woken, not only from one that never was. False where
+   * the provider refuses a resumed machine (Solari answers 502 and consumes the builder), which is the one reason a
+   * builder that woke can no longer be sealed. Read wherever the golden road asks whether a builder still has a
+   * seal in it, so that question is the provider's and never the road's; meaningless where diskSnapshots is false. */
+  snapshotsAnyLife: z.boolean(),
   /** The provider lists every snapshot on the account with its size, so storage can be counted and priced. */
   snapshotListing: z.boolean(),
   /** The provider promotes a snapshot to a template that survives its own restarts, so a sealed version is recorded
@@ -2072,8 +2077,9 @@ export const GoldenBuilderView = z.object({
   /** What the provider built, so a builder left running can be priced. */
   size: z.object({ cpu: z.number(), memMb: z.number() }),
   screen: z.object({ streamUrl: z.string() }).optional(),
-  /** True while the machine has never been paused, resumed or restored, so it can still be sealed. */
-  firstLife: z.boolean().optional(),
+  /** True while a seal can still be taken from this builder: the machine has never been paused, resumed or
+   * restored, or the place it stands on copies a disk from any life of a machine. */
+  sealable: z.boolean().optional(),
   /** The recipe this builder carries; a prepare with the same hash attaches to it instead of booting. */
   recipeHash: z.string().optional(),
   /** The parts behind recipeHash; absent on a builder recorded without them. */
@@ -2608,6 +2614,19 @@ export const ProcEntry = z.object({
 });
 export type ProcEntry = z.infer<typeof ProcEntry>;
 
+/** Which column a list of processes is ordered by: what is spending the cpu, or what is holding the memory. */
+export type ProcSort = "cpu" | "mem";
+
+/** Processes heaviest first on that column, ties broken by pid so one snapshot always lays out the same way. The
+ * app's pane sorts each set of siblings by this and the command line's own list reads it flat; a second copy of the
+ * rule is how the two would come to disagree about which process is the busiest. */
+export const byProcColumn =
+  (sort: ProcSort) =>
+  (a: ProcEntry, b: ProcEntry): number => {
+    const d = sort === "cpu" ? b.cpu - a.cpu : b.rss - a.rss;
+    return d !== 0 ? d : a.pid - b.pid;
+  };
+
 /** cwd is null when unreadable; ports are the TCP ports this pid listens on;
  * children are the pids whose parent it is, as of the last snapshot. */
 export const ProcInspectReply = z.object({
@@ -3118,6 +3137,7 @@ const DAEMON_CONTENTS = [
   "35236ee3220f12db35f3307812b2d2ea8c8762f8910e656d9d57a44bb599b0e3",
   "372241b199d0b23db89c2618409d8edf611bc5f29811fdaffca813ec2b283295",
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
+  "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3185,7 +3205,10 @@ const DAEMON_CONTENTS = [
  * bytes in a snapshot row, an image row and the swept count are what the tree's files hold, and the sweep at the
  * daemon's start drops any blob it finds beside its tree. Version 30 asks a machine for the service manager its
  * daemon would be held up by before a byte lands on it, rather than inside the install: the deploy script carries
- * that check no longer, and a machine wsp did not build is turned away with nothing written on it. */
+ * that check no longer, and a machine wsp did not build is turned away with nothing written on it. Version 31 lets a
+ * place say which life a copy may be taken from: a provider whose snapshot is the disk as it stands answers
+ * snapshotsAnyLife and a builder that woke there is sealed, where one that answers only its first life still refuses
+ * after a restart. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4011,8 +4034,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("init.retry"), tool: z.string() }),
   /** Writes the recipe as answered and starts the build; replies with { job: InitJob } at once, the build riding on.
    * `yes` skips the sign-ins on the machine, as wsp init --yes does: a caller that asked for no waiting gets none.
-   * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place. */
-  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional() }),
+   * `on` is the place the image is built on, by the name or id wsp places lists; absent takes the default place.
+   * `rebuild` seals the next version from a fresh machine rather than from the image plus the changes, which is the
+   * question a run at a terminal is asked; absent takes whichever road the changes call for. */
+  z.object({ id: reqId, op: z.literal("init.build"), firstWorkspace: z.string().optional(), importFolder: z.string().optional(), yes: z.boolean().optional(), on: z.string().optional(), rebuild: z.boolean().optional() }),
   /** Types the code a sign-in's page handed back into the tool waiting for it on the machine, as the person would at
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */
@@ -4318,7 +4343,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, NO_REBUILD_NEEDED, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";
