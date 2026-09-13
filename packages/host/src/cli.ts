@@ -700,6 +700,7 @@ export function makeRuntime(
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
+    copyRecipe: hostCopyRecipe(statePath),
     hostId: hostIdentity(),
     vaultCaches: CACHE_RULE,
   });
@@ -1186,7 +1187,6 @@ async function hostFor(
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
-      copyRecipe: hostCopyRecipe(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

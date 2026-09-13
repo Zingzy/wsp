@@ -8,8 +8,9 @@
 import { z } from "zod";
 
 /** How the recipe gets written: the person on the screens, an agent's thread on this computer reading their usage,
- * or wsp init at a terminal, which asks its own screens and hands the build over with the recipe beside the state. */
-export const InitRoad = z.enum(["manual", "agent", "terminal"]);
+ * wsp init at a terminal, which asks its own screens and hands the build over with the recipe beside the state, or
+ * the image itself, which is the screens over the recipe that stands, opened to read or change what is on it. */
+export const InitRoad = z.enum(["manual", "agent", "terminal", "image"]);
 export type InitRoad = z.infer<typeof InitRoad>;
 
 /** Where the job is. `agent` while the thread writes the recipe; `reading` while this computer is read; `answering`

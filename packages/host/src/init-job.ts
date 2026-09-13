@@ -349,15 +349,18 @@ export class InitJobs implements InitDoor {
       });
       return this.view()!;
     }
-    if (o.road === "terminal") {
-      // wsp init asked its own screens at a terminal and wrote what they answered into the recipe beside the state;
-      // this road reads this computer against that file and builds it here, on the host's runtime. The file is the
-      // whole of the answer, so a road with none behind it is refused rather than building this computer's defaults.
+    if (o.road === "terminal" || o.road === "image") {
+      // Both roads read this computer against the recipe beside the state, so the screens open on what stands
+      // rather than on this computer's defaults. wsp init asked its own screens at a terminal and wrote what they
+      // answered into that file, so the terminal road is refused without one: the file is the whole of its answer.
+      // The image road is a person opening their image to read it, and a computer that has never sealed one has
+      // nothing to read back, so it opens on the defaults instead.
       const path = smallRecipePath(this.deps.statePath);
-      if (recipeStamp(path) === undefined) throw new Error(`the terminal road builds the recipe wsp init writes beside the state, and there is none at ${path}`);
+      const written = recipeStamp(path) !== undefined;
+      if (!written && o.road === "terminal") throw new Error(`the terminal road builds the recipe wsp init writes beside the state, and there is none at ${path}`);
       this.state = state;
       this.emit();
-      this.run(state, () => this.read(state, path));
+      this.run(state, () => this.read(state, written ? path : undefined));
       return this.view()!;
     }
     this.state = state;
@@ -430,6 +433,20 @@ export class InitJobs implements InitDoor {
     const s = this.answering();
     if (!Number.isInteger(o.at) || o.at < 0 || o.at > s.screens.length) throw new Error(`the init job has no step ${o.at}`);
     s.step = o.at;
+    this.emit();
+    return this.view()!;
+  }
+
+  /** The end of the road that only writes down what goes on the image: the recipe as the screens answered it,
+   * written beside the state where this road and wsp init --recipe read it back, and the job over. Nothing is
+   * booted, nothing is sealed and no version is cut here. A copy at a computer or a provider is planned off the
+   * record, never off this file, so what is written here reaches a copy through the next seal. */
+  async save(): Promise<InitJob> {
+    const s = this.answering();
+    const answers = s.answers!;
+    const recipe = answeredByFile(s.road) ? answers.recipe : recipeWithAnswers(answers.recipe, answers.logins);
+    saveSmallRecipe(smallRecipePath(this.deps.statePath), recipe);
+    s.phase = "done";
     this.emit();
     return this.view()!;
   }
@@ -748,7 +765,10 @@ export class InitJobs implements InitDoor {
           }
         : {}),
     };
-    const reading = await readThisComputer({ ...wrapped, statePath: this.deps.statePath, home: this.deps.home, platform: this.deps.platform, ...(recipeFile !== undefined ? { recipeFile } : {}) }, io, true);
+    // Every screen of this job is answered by a person, the Also screen included, unless the road's answers came
+    // off the file whole: a recipe saved by an earlier pass ticks the rows, and the managers are read again so the
+    // screen that ticks them is there to open.
+    const reading = await readThisComputer({ ...wrapped, statePath: this.deps.statePath, home: this.deps.home, platform: this.deps.platform, ...(recipeFile !== undefined ? { recipeFile } : {}) }, io, !answeredByFile(s.road));
     if ("code" in reading) throw new Error(s.log.at(-1) ?? "this computer could not be read");
     if (s.cancelled) return;
     s.reading = reading;

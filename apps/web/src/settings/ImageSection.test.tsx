@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { COPY_CURRENT, COPY_STALE, type InitSetup, type SealedImage, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
+import { COPY_CURRENT, COPY_STALE, type InitJob, type InitScreen, type InitSetup, type SealedImage, type SealedImageCopy, type SealedImageView } from "@wsp/protocol";
 import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { ImageSection } from "./ImageSection.js";
@@ -56,13 +56,26 @@ const copy = (place: string, extra: Partial<SealedImageCopy> = {}): SealedImageC
 
 const SETUP: InitSetup = { keys: { solari: true }, home: "/Users/dev", agents: [{ id: "claude", name: "Claude", configured: true, takesTools: true }], pricing: null, job: null };
 
-function mount(view: SealedImageView) {
+/** The one screen the sheet needs to draw a recipe row, so the foot line under it can be read. */
+const AGENTS: InitScreen = {
+  id: "agents",
+  title: "Agents",
+  top: "Which agents go on the image",
+  items: [{ id: "claude", label: "Claude Code", detail: [] }],
+  ticks: ["claude"],
+  answers: {},
+  footer: [],
+};
+const OPENED: InitJob = { id: "init_1", road: "image", phase: "answering", keys: { solari: true }, step: 0, stoppable: true, screens: [AGENTS], rows: [], progress: { done: 0, total: 0 }, log: [] };
+
+function mount(view: SealedImageView, over: { initStart?: () => Promise<InitJob> } = {}) {
   const api = {
     subscribe: () => () => {},
     image: async () => view,
     initGet: async () => SETUP,
+    ...(over.initStart !== undefined ? { initStart: over.initStart } : {}),
   } as unknown as Api;
-  useStore.setState({ api } as never);
+  useStore.setState({ api, initJob: null } as never);
   return render(<ImageSection />);
 }
 
@@ -165,16 +178,42 @@ describe("before anything is sealed", () => {
 });
 
 describe("Edit", () => {
-  it("opens the init screens under the title Your image", async () => {
-    const { container } = mount({ image: IMAGE, copies: [], projects: [] });
+  it("opens the image itself under the title Your image: the screens on the recipe that stands, and neither the road question nor a provider key", async () => {
+    const asked: { road: string }[] = [];
+    const { container } = mount({ image: IMAGE, copies: [], projects: [] }, {
+      initStart: async (o?: { road: string }) => {
+        asked.push(o!);
+        useStore.setState({ initJob: OPENED } as never);
+        return OPENED;
+      },
+    } as never);
     await settle();
     fireEvent.click(container.querySelector('[data-k="edit-image"]')!);
     await settle();
     const dialog = document.querySelector("[data-cloud-setup-dialog]");
     expect(dialog).not.toBeNull();
     expect(screen.getByText(IMAGE_WORDS.sheet)).toBeTruthy();
-    // The screens themselves are the shipped ones: the first is the choice, drawn by the same component the
-    // sidebar's road draws.
-    expect(dialog?.querySelector('[data-k="choice"]')).not.toBeNull();
+    // The screens themselves are the shipped ones, opened on the image rather than on the first run's questions.
+    expect(asked).toEqual([{ road: "image" }]);
+    expect(dialog?.querySelector('[data-k="choice"]')).toBeNull();
+    expect(dialog?.querySelector('[data-k="keys"]')).toBeNull();
+    expect(dialog?.querySelector('[data-k="screen-agents"]')).not.toBeNull();
+    // Under every screen, what this Save does and nothing more: it cuts no version and rebuilds nothing, so it
+    // never promises one.
+    expect(dialog?.querySelector('[data-k="note"]')?.textContent).toBe(IMAGE_WORDS.savesRecipe);
+    expect(dialog?.querySelector('[data-k="note"]')?.textContent).not.toMatch(/v\d/);
+  });
+
+  it("says the same about a Save where no image has been built yet: it is what the road does, not what the image holds", async () => {
+    const { container } = mount({ image: null, copies: [], projects: [] }, {
+      initStart: async () => {
+        useStore.setState({ initJob: OPENED } as never);
+        return OPENED;
+      },
+    } as never);
+    await settle();
+    fireEvent.click(container.querySelector('[data-k="edit-image"]')!);
+    await settle();
+    expect(document.querySelector("[data-cloud-setup-dialog]")?.querySelector('[data-k="note"]')?.textContent).toBe(IMAGE_WORDS.savesRecipe);
   });
 });

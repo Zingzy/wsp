@@ -1557,6 +1557,8 @@ export const CLOUD_SETUP_WORDS = {
     keycap: "Continue",
     back: "Back",
     build: "Build",
+    /** The last screen of the road that only writes the recipe down: no machine is asked for anything. */
+    save: "Save",
     again: "Start over",
     /** A sign-in row whose tool is off the image: its picker is fixed on skip. */
     notOnImage: "not on the image",

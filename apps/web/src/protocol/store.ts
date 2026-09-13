@@ -294,7 +294,9 @@ export const useStore = create<State>((set, get) => {
   };
   /** Whether a fork of the golden head is held back, having said so in the toast: the refusal is spoken before a
    * creation row exists, so a person who asks too early reads where the image is rather than a row that only failed.
-   * A fork of a named snapshot has its own image and is never held back here. */
+   * A fork of a named snapshot has its own image and is never held back here. A computer of the person's own builds
+   * its own copy of the image, but from the record this computer owns, so with none sealed it waits like every
+   * other row; the dialog's caption is what says so in that row's own words. */
   const holdCreate = (golden: string | undefined): boolean => {
     if (golden !== undefined) return false;
     const refusal = cloudCreateRefusal({ hasGolden: get().hasGolden, job: get().initJob });

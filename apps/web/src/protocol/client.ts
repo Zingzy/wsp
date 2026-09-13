@@ -509,6 +509,9 @@ export interface Api {
   initRetry?(o: { tool: string }): Promise<InitJob>;
   /** Writes the recipe as answered and starts the build, which rides on after the reply. */
   initBuild?(o: { firstWorkspace?: string; importFolder?: string }): Promise<InitJob>;
+  /** Writes the recipe as answered and ends the job, building nothing: the last screen of the road that only says
+   * what goes on the image. */
+  initSave?(): Promise<InitJob>;
   /** The code a sign-in's page handed back, typed into the tool waiting for it on the machine. Nothing of it is kept
    * here or on the host; refused when that sign-in is not waiting for one. */
   initSignInCode?(o: { tool: string; code: string }): Promise<InitJob>;
@@ -728,6 +731,7 @@ export function makeApi(c: ProtocolClient): Api {
     initRetry: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.retry", { ...o })).job),
     initBuild: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.build", { ...o })).job),
     initSignInCode: async o => InitJob.parse((await c.request<{ job?: unknown }>("init.signInCode", { ...o })).job),
+    initSave: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.save")).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
     // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for

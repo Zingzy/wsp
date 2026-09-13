@@ -510,6 +510,26 @@ describe("store creations", () => {
     // The sentence the person reads is never the one that names a command to run.
     expect(JSON.stringify([useStore.getState().toast, CLOUD_SETUP_WORDS.create])).not.toMatch(/wspx|golden build/);
   });
+
+  it("a create on a computer of the person's own waits on the image like every other row, and goes once one is sealed", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    const asked: (string | undefined)[] = [];
+    api.createFromGoldenHead = async (name, _size, on) => {
+      asked.push(on);
+      return view("ws_new");
+    };
+    useStore.getState().bind(api);
+    await flush();
+    // The copy a box builds comes off the image this computer owns, so with none sealed nothing is asked of the host.
+    useStore.setState({ hasGolden: false, initJob: null, places: [HERE_PLACE, HETZNER_PLACE] });
+    expect(await useStore.getState().createWorkspace("beta", undefined, undefined, "p_1")).toBeNull();
+    expect(asked).toEqual([]);
+    // With one sealed the create goes, and the host builds the copy at the box before the fork.
+    useStore.setState({ hasGolden: true, toast: null });
+    expect(await useStore.getState().createWorkspace("beta", undefined, undefined, "p_1")).toBe("ws_new");
+    expect(asked).toEqual(["p_1"]);
+    expect(useStore.getState().toast).toBeNull();
+  });
 });
 
 describe("store sessions", () => {

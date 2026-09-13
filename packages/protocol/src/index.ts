@@ -3846,6 +3846,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * that terminal; replies with { job: InitJob }. The code is never logged, kept or carried on the view. Refused when
    * no sign-in for that tool is waiting for one. */
   z.object({ id: reqId, op: z.literal("init.signInCode"), tool: z.string(), code: z.string().min(1).max(SIGN_IN_CODE_MAX) }),
+  /** Writes the recipe as the screens answered it beside the state, where the image road and wsp init --recipe read
+   * it back, and ends the job without building; replies with { job: InitJob }. What goes on the image is the whole
+   * of what the image road asks. A copy at a computer or a provider is planned off the record and not off this
+   * file, so what is written here reaches a copy through the next seal. */
+  z.object({ id: reqId, op: z.literal("init.save") }),
   /** Stops the job where it is: a thread interrupted, a builder killed; replies with { job: InitJob }. */
   z.object({ id: reqId, op: z.literal("init.cancel") }),
   /** Replies with { preferences: Preferences }: the record on this host's state, the defaults until a client set something. */

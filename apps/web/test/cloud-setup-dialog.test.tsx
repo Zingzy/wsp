@@ -11,6 +11,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CLOUD_SETUP_WORDS, PLACES_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
+import { IMAGE_WORDS } from "../src/settings/image.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
@@ -177,6 +178,11 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
     initRetry: vi.fn(async (o: { tool: string }) => {
       const current = job ?? JOB;
       const next = { ...current, rows: current.rows.map(r => (r.tool === o.tool ? { ...r, state: INIT_ROW_STATES.running } : r)) };
+      emit(next);
+      return next;
+    }),
+    initSave: vi.fn(async () => {
+      const next = { ...(job ?? JOB), phase: "done" as const };
       emit(next);
       return next;
     }),
@@ -1455,5 +1461,96 @@ describe("the cloud setup sheet", () => {
     expect(row.hasAttribute("data-waiting-on-you")).toBe(false);
     expect(row.className).toContain("text-sidebar-muted-foreground");
     expect(row.className).not.toMatch(/warning/);
+  });
+});
+
+describe("the sheet opened on the image", () => {
+  /** Settings > Image > Edit: the same sheet, opened on the image rather than on the first run's questions. */
+  async function openEdit(over: { setup?: InitSetup; note?: string; job?: InitJob } = {}) {
+    const setup = { ...(over.setup ?? SETUP), ...(over.job !== undefined ? { job: over.job } : {}) };
+    const { api, emit } = fakeApi({ setup });
+    useStore.setState({ initJob: setup.job });
+    useStore.getState().bind(api);
+    render(<CloudSetupDialog onClose={vi.fn()} edit={over.note === undefined ? {} : { note: over.note }} />);
+    const dialog = await screen.findByRole("dialog");
+    await act(async () => {
+      await waitFor(() => expect(api.initGet).toHaveBeenCalled());
+    });
+    return { api, emit, dialog };
+  }
+
+  it("neither asks which road writes the recipe nor for a provider key: the job starts on the image and the screens are what it shows", async () => {
+    const { api, emit, dialog } = await openEdit();
+    // The host holds no key on this setup, and the road that would ask for one is not this one.
+    expect(api.initStart).toHaveBeenCalledWith({ road: "image" });
+    expect(api.initKeys).not.toHaveBeenCalled();
+    expect(dialog.querySelector("[data-k=road-manual]")).toBeNull();
+    expect(dialog.querySelector("[data-k=road-agent]")).toBeNull();
+    expect(dialog.querySelector("[data-k=keys]")).toBeNull();
+    emit(JOB);
+    await waitFor(() => expect(k(dialog, "screen-agents")).toBeDefined());
+    expect(dialog.querySelector("[data-k=keys]")).toBeNull();
+    // The rows come up as the image has them, ticked by what the host read back off the recipe that stands.
+    const rows = [...k(dialog, "screen-agents").querySelectorAll<HTMLElement>('[data-k="row"]')];
+    expect(rows.map(r => within(r).getByRole("checkbox").getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+  });
+
+  it("draws a build already running rather than starting another over it", async () => {
+    const building: InitJob = { ...JOB, phase: "building", rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: INIT_ROW_STATES.running }], progress: { done: 0, total: 1 } };
+    const { api, dialog } = await openEdit({ job: building });
+    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
+    expect(api.initStart).not.toHaveBeenCalled();
+  });
+
+  it("ends where the recipe is written down: no first workspace, no fork fields, Save on the last row screen", async () => {
+    const { api, emit, dialog } = await openEdit({ note: "saves as v3; copies are rebuilt when a workspace is next created" });
+    emit(JOB);
+    await waitFor(() => expect(k(dialog, "screen-agents")).toBeDefined());
+    // Four screens, not five: the first run's question about a first cloud workspace is not on this road.
+    expect(k(dialog, "counter").textContent).toBe("1/4");
+    for (const id of ["agents", "tools", "also"]) {
+      expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.screen.keycap);
+      fireEvent.click(k(dialog, "primary"));
+      await waitFor(() => expect(api.initAnswer).toHaveBeenCalledWith(expect.objectContaining({ screen: id })));
+    }
+    await waitFor(() => expect(k(dialog, "screen-logins")).toBeDefined());
+    expect(k(dialog, "counter").textContent).toBe("4/4");
+    expect(k(dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.screen.save);
+    // The foot note stands over the last screen as it does over the others.
+    expect(k(dialog, "note").textContent).toBe("saves as v3; copies are rebuilt when a workspace is next created");
+    fireEvent.click(k(dialog, "primary"));
+    await waitFor(() => expect(api.initSave).toHaveBeenCalled());
+    expect(api.initBuild).not.toHaveBeenCalled();
+    expect(dialog.querySelector("[data-k=screen-ask]")).toBeNull();
+  });
+
+  it("opens on the first row every time: an image job left half answered is stepped back rather than reopened where it was shut", async () => {
+    const half: InitJob = { ...JOB, road: "image", step: 2 };
+    const { api } = await openEdit({ job: half });
+    await waitFor(() => expect(api.initStep).toHaveBeenCalledWith({ at: 0 }));
+    expect(api.initStart).not.toHaveBeenCalled();
+  });
+
+  // What the foot says is what that road's Save does, one sentence per case, and the sheet draws the one its caller
+  // hands it: the words themselves are the Image section's, which is where the choice is made.
+  it("says over the footer what a Save that only writes the recipe down does", async () => {
+    const t = await openEdit({ note: IMAGE_WORDS.savesRecipe });
+    t.emit(JOB);
+    await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
+    expect(k(t.dialog, "note").textContent).toBe("saves the recipe; a place builds its copy from it the first time it needs one");
+  });
+
+  it("says over the footer what a Save that cuts a version does", async () => {
+    const t = await openEdit({ note: IMAGE_WORDS.savesVersion(2) });
+    t.emit(JOB);
+    await waitFor(() => expect(k(t.dialog, "screen-agents")).toBeDefined());
+    expect(k(t.dialog, "note").textContent).toBe("saves as v3; copies are rebuilt when a workspace is next created");
+  });
+
+  it("says nothing over the footer where its caller gave it no sentence", async () => {
+    const none = await openEdit();
+    none.emit(JOB);
+    await waitFor(() => expect(k(none.dialog, "screen-agents")).toBeDefined());
+    expect(none.dialog.querySelector("[data-k=note]")).toBeNull();
   });
 });

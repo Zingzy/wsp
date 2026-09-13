@@ -8,6 +8,7 @@ import { NoProviderBackend, imageHash } from "@wsp/engine";
 import type { GoldenImport } from "@wsp/engine";
 import { RUNTIME_OPS, THREAD_OPS, SealedImageView, placeBuildsNoImageLine, sealedCopyLine, type Recipe, type RecipeDigest, type SealedImage } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { newPlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -45,18 +46,23 @@ const recipeWith = (o: { recipeHash?: string; vault?: boolean } = {}): GoldenRec
 /** What the stub's guest tar comes down as: the empty archive its download server serves for any path. */
 const EMPTY_TGZ_SHA = createHash("sha256").update(require("node:zlib").gzipSync(Buffer.alloc(1024))).digest("hex");
 
-function started(o: { places?: (wired: StubBackend) => PlaceBackends; store?: Store } = {}) {
+/** What this computer says about itself, for the runs that name a place on the line: the place door reads it, and
+ * nothing in this file joins a computer, so the rows come from the provider table alone. */
+const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, docker: true };
+
+function started(o: { places?: (wired: StubBackend) => PlaceBackends; store?: Store; copyRecipe?: (image: SealedImage) => GoldenRecipe; links?: boolean } = {}) {
   const backend = stubBackend();
   backend.execImpl = dfOk;
   const store = o.store ?? memoryStore();
   const places = o.places?.(backend);
-  const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(), hostId: "h1", ...(places !== undefined ? { places } : {}) });
+  const placeLinks: PlaceWiring = { hostKey: newPlaceKeyPair(), provider: () => ({ id: "docker", rateUsdPerHour: 0.11 }), here: () => HERE, hostName: () => HERE.name };
+  const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(), hostId: "h1", ...(places !== undefined ? { places } : {}), ...(o.copyRecipe !== undefined ? { copyRecipe: o.copyRecipe } : {}), ...(o.links === true ? { placeLinks } : {}) });
   return { backend, store, rt };
 }
 
 /** Two places over one runtime: the wired stub and one more named `solari`. */
 function twoPlaces() {
-  const other = stubBackend();
+  const other = stubBackend("solari");
   other.execImpl = dfOk;
   const places = (wired: StubBackend): PlaceBackends => ({
     wired: "docker",
@@ -175,9 +181,9 @@ describe("building the image at a second place", () => {
     return { setup: "true", smoke: "true", import: importOf("h1"), source: SMALL };
   };
 
-  async function sealedAtWired() {
+  async function sealedAtWired(asked?: { count: number }) {
     const { other, places } = twoPlaces();
-    const { backend, store, rt } = started({ places });
+    const { backend, store, rt } = started({ places, copyRecipe: copyRecipeOf(asked) });
     const b = await rt.golden.prepare();
     const { version } = await rt.golden.seal(b.id);
     return { backend, other, store, rt, version };
@@ -190,7 +196,7 @@ describe("building the image at a second place", () => {
     rt.events.on("golden.stage", e => {
       if (e.type === "golden.stage") frames.push({ stage: e.stage, ...(e.place !== undefined ? { place: e.place } : {}) });
     });
-    const { copy, built } = await rt.image.build({ place: "solari", recipe: copyRecipeOf() });
+    const { copy, built } = await rt.image.build({ place: "solari" });
     const record = (await store.get("images", "default")) as { hash: string };
     expect(built).toBe(true);
     expect(copy).toMatchObject({ place: "solari", version: 1, hash: record.hash });
@@ -212,7 +218,7 @@ describe("building the image at a second place", () => {
 
   it("a copy build never runs a sign-in stage and takes no second vault off its own builder", async () => {
     const { other, store, rt } = await sealedAtWired();
-    await rt.image.build({ place: "solari", recipe: copyRecipeOf() });
+    await rt.image.build({ place: "solari" });
     expect(other.machines.flatMap(m => m.execLog).some(c => c.startsWith("for p in "))).toBe(false);
     const image = (await store.get("images", "default")) as { version: number };
     expect(image.version).toBe(1);
@@ -222,23 +228,24 @@ describe("building the image at a second place", () => {
   });
 
   it("a place already holding a copy of this record is answered with that copy and builds nothing", async () => {
-    const { other, rt } = await sealedAtWired();
-    const first = await rt.image.build({ place: "solari", recipe: copyRecipeOf() });
-    const made = other.machines.length;
     const asked = { count: 0 };
-    const again = await rt.image.build({ place: "solari", recipe: copyRecipeOf(asked) });
+    const { other, rt } = await sealedAtWired(asked);
+    const first = await rt.image.build({ place: "solari" });
+    const made = other.machines.length;
+    const composed = asked.count;
+    const again = await rt.image.build({ place: "solari" });
     expect(again).toEqual({ copy: first.copy, built: false });
     // Nothing was forked and this computer was never read for a recipe the build would not have used.
     expect(other.machines.length).toBe(made);
-    expect(asked.count).toBe(0);
+    expect(asked.count).toBe(composed);
     await rt.close();
   });
 
   it("the wired place and a place this host has never heard of are both refused before anything boots", async () => {
-    const { other, rt } = await sealedAtWired();
     const asked = { count: 0 };
-    await expect(rt.image.build({ place: "docker", recipe: copyRecipeOf(asked) })).rejects.toMatchObject({ kind: "conflict" });
-    await expect(rt.image.build({ place: "nowhere", recipe: copyRecipeOf(asked) })).rejects.toMatchObject({ kind: "missing" });
+    const { other, rt } = await sealedAtWired(asked);
+    await expect(rt.image.build({ place: "docker" })).rejects.toMatchObject({ kind: "conflict" });
+    await expect(rt.image.build({ place: "nowhere" })).rejects.toMatchObject({ kind: "missing" });
     expect(other.machines.length).toBe(0);
     expect(asked.count).toBe(0);
     await rt.close();
@@ -251,11 +258,11 @@ describe("building the image at a second place", () => {
       backend: place => (place === "docker" ? wired : place === "here" ? none : undefined),
       list: () => ["docker", "here"],
     });
-    const { rt } = started({ places });
+    const asked = { count: 0 };
+    const { rt } = started({ places, copyRecipe: copyRecipeOf(asked) });
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
-    const asked = { count: 0 };
-    await expect(rt.image.build({ place: "here", recipe: copyRecipeOf(asked) })).rejects.toMatchObject({ kind: "conflict", message: placeBuildsNoImageLine("here") });
+    await expect(rt.image.build({ place: "here" })).rejects.toMatchObject({ kind: "conflict", message: placeBuildsNoImageLine("here") });
     expect(asked.count).toBe(0);
     expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["docker"]);
     await rt.close();
@@ -265,16 +272,16 @@ describe("building the image at a second place", () => {
     const { other, places } = twoPlaces();
     const backend = stubBackend();
     backend.execImpl = dfOk;
-    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ vault: false }), hostId: "h1", places: places(backend) });
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith({ vault: false }), copyRecipe: copyRecipeOf(), hostId: "h1", places: places(backend) });
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
-    await expect(rt.image.build({ place: "solari", recipe: copyRecipeOf() })).rejects.toMatchObject({ kind: "conflict" });
+    await expect(rt.image.build({ place: "solari" })).rejects.toMatchObject({ kind: "conflict" });
     expect(other.machines.length).toBe(0);
     const frames: string[] = [];
     rt.events.on("golden.stage", e => {
       if (e.type === "golden.stage") frames.push(`${e.stage}:${e.detail ?? ""}`);
     });
-    const { copy } = await rt.image.build({ place: "solari", recipe: copyRecipeOf(), force: true });
+    const { copy } = await rt.image.build({ place: "solari", force: true });
     expect(copy.place).toBe("solari");
     expect((await rt.image.get()).image!.vault).toBeUndefined();
     expect(frames.some(f => f.includes("sign-ins"))).toBe(false);
@@ -312,14 +319,14 @@ describe("building the image at a second place", () => {
     const backend = stubBackend();
     backend.execImpl = dfOk;
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(), hostId: "h1", places: places(backend) });
-    await expect(rt.image.build({ place: "solari", recipe: copyRecipeOf() })).rejects.toMatchObject({ kind: "conflict" });
+    await expect(rt.image.build({ place: "solari" })).rejects.toMatchObject({ kind: "conflict" });
     expect(other.machines.length).toBe(0);
     await rt.close();
   });
 
   it("a copy built at an older record reads as stale beside the record, and building again refreshes it", async () => {
     const { store, rt } = await sealedAtWired();
-    await rt.image.build({ place: "solari", recipe: copyRecipeOf() });
+    await rt.image.build({ place: "solari" });
     // The next version at the wired place moves the record's hash; the copy still names the old one.
     const b2 = await rt.golden.prepare({ recipe: recipeWith({ recipeHash: "h2" }) });
     await rt.golden.seal(b2.id);
@@ -332,6 +339,99 @@ describe("building the image at a second place", () => {
     expect(solari.version).toBe(1);
     expect(sealedCopyLine(record as SealedImage, solari)).toContain("stale");
     expect(view.copies.find(c => c.place === "docker")!.hash).toBe(record.hash);
+    await rt.close();
+  });
+});
+
+describe("a workspace created where the image has no copy yet", () => {
+  /** The recipe a copy builds from, counted so a test can say the composition was never asked for. */
+  const copyRecipeOf = (asked?: { count: number }) => (): GoldenRecipe => {
+    if (asked !== undefined) asked.count += 1;
+    return { setup: "true", smoke: "true", import: importOf("h1"), source: SMALL };
+  };
+
+  /** A host with the image sealed at the place it forks on and a second place holding nothing. */
+  async function sealedAtWired(asked?: { count: number }) {
+    const { other, places } = twoPlaces();
+    const { backend, store, rt } = started({ places, copyRecipe: copyRecipeOf(asked), links: true });
+    const b = await rt.golden.prepare();
+    await rt.golden.seal(b.id);
+    const wired = goldenHeadOf(await rt.golden.get());
+    return { backend, other, store, rt, wired };
+  }
+
+  const goldenHeadOf = (manifest: { head: number; versions: { version: number; snapshotId: string }[] } | undefined): string =>
+    manifest!.versions.find(v => v.version === manifest!.head)!.snapshotId;
+
+  it("builds the copy there before the fork, names the place on every line, and forks that place's own snapshot", async () => {
+    const { other, rt, wired } = await sealedAtWired();
+    const lines: { stage: string; place?: string }[] = [];
+    const made: string[] = [];
+    rt.events.on("golden.stage", e => {
+      if (e.type === "golden.stage") lines.push({ stage: e.stage, ...(e.place !== undefined ? { place: e.place } : {}) });
+    });
+    rt.events.on("workspace.creating", e => {
+      if (e.type === "workspace.creating") made.push(e.stage);
+    });
+    const workspace = await rt.workspaces.create({ golden: wired, name: "spoo-fix", on: "solari" });
+    // The place holds a copy it did not have, built there, and the fork stands on that copy's own snapshot, which
+    // is that place's own id and not this computer's.
+    const copy = (await rt.image.get()).copies.find(c => c.place === "solari")!;
+    expect(copy.snapshotId).not.toBe(wired);
+    expect((await rt.workspaces.get(workspace.id)).golden).toBe(copy.snapshotId);
+    expect(workspace.place).toBe("solari");
+    // Every line of the build names the place it ran at, and all of them came before the create said a word.
+    for (const stage of ["creating", "uploading-files", "ready", "snapshotting", "sealed"]) expect(lines.map(l => l.stage)).toContain(stage);
+    expect(lines.every(l => l.place === "solari")).toBe(true);
+    expect(made[0]).toBe("fork-requested");
+    await rt.close();
+  });
+
+  it("the next workspace there builds nothing: the copy standing on the record is what it forks", async () => {
+    const asked = { count: 0 };
+    const { other, rt, wired } = await sealedAtWired(asked);
+    await rt.workspaces.create({ golden: wired, name: "one", on: "solari" });
+    const builders = other.machines.length;
+    const composed = asked.count;
+    const second = await rt.workspaces.create({ golden: wired, name: "two", on: "solari" });
+    // One more machine, the fork itself, and this computer was never read for a recipe nothing would build from.
+    expect(other.machines.length).toBe(builders + 1);
+    expect(asked.count).toBe(composed);
+    expect((await rt.workspaces.get(second.id)).golden).toBe((await rt.image.get()).copies.find(c => c.place === "solari")!.snapshotId);
+    await rt.close();
+  });
+
+  it("two workspaces asked for at once on a box that holds no copy build one copy between them", async () => {
+    const asked = { count: 0 };
+    const { other, rt, wired } = await sealedAtWired(asked);
+    // Both land, which is the whole of it: before the join the second met a builder the first had already stopped
+    // and came back gone, so an await of the pair threw here.
+    const both = await Promise.all([rt.workspaces.create({ golden: wired, name: "one", on: "solari" }), rt.workspaces.create({ golden: wired, name: "two", on: "solari" })]);
+    // One build between them: the recipe is composed once per build, so a second builder would read this computer again.
+    expect(asked.count).toBe(1);
+    const copies = (await rt.image.get()).copies.filter(c => c.place === "solari");
+    expect(copies).toHaveLength(1);
+    for (const workspace of both) expect((await rt.workspaces.get(workspace.id)).golden).toBe(copies[0]!.snapshotId);
+    await rt.close();
+  });
+
+  it("a fork at the place this host forks on takes the snapshot it was asked for and builds no copy", async () => {
+    const asked = { count: 0 };
+    const { rt, wired } = await sealedAtWired(asked);
+    const workspace = await rt.workspaces.create({ golden: wired, name: "here", on: "docker" });
+    expect((await rt.workspaces.get(workspace.id)).golden).toBe(wired);
+    expect(asked.count).toBe(0);
+    expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["docker"]);
+    await rt.close();
+  });
+
+  it("a snapshot no record's head stands at is forked where it was asked for and builds no copy", async () => {
+    const asked = { count: 0 };
+    const { rt } = await sealedAtWired(asked);
+    const workspace = await rt.workspaces.create({ golden: "snap_elsewhere", name: "x", on: "solari" });
+    expect((await rt.workspaces.get(workspace.id)).golden).toBe("snap_elsewhere");
+    expect(asked.count).toBe(0);
+    expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["docker"]);
     await rt.close();
   });
 });

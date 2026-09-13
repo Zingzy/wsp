@@ -14,7 +14,7 @@
 import { useState } from "react";
 import { PLACES_WORDS, fmtRate, fmtSize, offeredSize, sizeOffer, sizeWord, type MachineSizeOffer, type PlaceView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
 import { copyOn } from "../settings/image.js";
-import { WHERE_PICK_WORDS, isProviderPlace, placeIsFull, placeName, whereCaption, whereSegments } from "../settings/places.js";
+import { WHERE_PICK_WORDS, isProviderPlace, placeIsFull, placeName, placeWaitsOnImage, whereCaption, whereSegments } from "../settings/places.js";
 import { Button } from "../components/ui/button.js";
 import {
   Dialog,
@@ -80,7 +80,13 @@ export function NewWorkspaceDialog({
   // that is full. Each is read in the caption under Where, since this dialog waits on a field with no slot of its
   // own. With nowhere to put a workspace there is no caption to write in and no row to create on: the two notes
   // under the label are the reason, and Create is held on that alone.
-  const reason = refusal !== null ? refusal : trimmed.length === 0 ? WHERE_PICK_WORDS.nameFirst : where !== undefined && placeIsFull(where) ? caption : null;
+  //
+  // Every row waits on the image, and the two roads say so in their own words. The row that forks the copy this
+  // computer seals carries the setup's own sentence, which is also the road to it. A row that would build its own
+  // copy carries the plain fact instead: the setup is not where its build happens, so pointing at it would send
+  // the person somewhere that cannot help them.
+  const notBuilt = refusal !== null && where !== undefined && !placeWaitsOnImage(where) ? WHERE_PICK_WORDS.notBuiltYet : refusal;
+  const reason = notBuilt !== null ? notBuilt : trimmed.length === 0 ? WHERE_PICK_WORDS.nameFirst : where !== undefined && placeIsFull(where) ? caption : null;
   const held = where === undefined || reason !== null;
   const submit = (): void => {
     if (held || where === undefined) return;

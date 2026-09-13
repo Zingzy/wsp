@@ -807,9 +807,11 @@ export interface Reading {
 
 export type ReadOptions = Pick<InitOptions, "importFolder" | "recipeFile" | "collect" | "brew" | "recipe" | "statePath" | "home" | "scan" | "platform">;
 
-/** Reads this computer for a run, saying each step on the output; `interactive` says a person will see the Also
- * screen, which is the one reason the package managers are read. */
-export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "output" | "isTTY">, interactive: boolean): Promise<Reading | { code: 1 }> {
+/** Reads this computer for a run, saying each step on the output; `asksAlso` says a person will see the Also
+ * screen, which is the one reason the package managers are read. Each caller answers that for its own road: a
+ * recipe beside the state says which rows are ticked, never whether the screen that ticks them is shown, so a road
+ * that asks every screen off a saved recipe still reads the managers. */
+export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "output" | "isTTY">, asksAlso: boolean): Promise<Reading | { code: 1 }> {
   const out = { output: io.output };
   let manifest: Manifest;
   // The catalog recipe the screens start from: the file given, else read off this computer once the rows are in.
@@ -886,7 +888,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
   manifest = lockRefused(manifest, refusedIsDir(opts.home));
   // What else this computer could put on the image; only its own screen uses it, so nothing runs when it is not shown.
   let scanned: readonly ScanRow[] = [];
-  if (opts.scan !== undefined && interactive && opts.recipeFile === undefined) {
+  if (opts.scan !== undefined && asksAlso) {
     const spinner = spin(io.output, "Reading what your package managers installed here", io.isTTY);
     try {
       // The recipe's own rows go in, so a tool it already installs is not drawn off for a tick to install twice.
@@ -925,7 +927,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     ports = chosen;
   }
 
-  const computer = opts.reading ?? (await readThisComputer(opts, io, interactive));
+  // This run's own screens start at the sign-ins when a recipe answered the rest, so the Also screen is asked for
+  // only when none did.
+  const computer = opts.reading ?? (await readThisComputer(opts, io, interactive && opts.recipeFile === undefined));
   if ("code" in computer) return computer;
   let { manifest, catalogRecipe } = computer;
   const { brew, scanned, projectScan, notes, source } = computer;

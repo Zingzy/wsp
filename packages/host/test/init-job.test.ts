@@ -1261,6 +1261,79 @@ describe("the init job, agent road", () => {
   });
 });
 
+describe("the init job, image road", () => {
+  it("reads this computer against the recipe that stands, so the screens open on the rows the image has", async () => {
+    const f = fake();
+    saveSmallRecipe(smallRecipePath(f.statePath), AGENT_RECIPE);
+    const started = await f.jobs.start({ road: "image" });
+    expect(started.road).toBe("image");
+    await f.settled();
+    const read = f.jobs.view()!;
+    expect(read.phase).toBe("answering");
+    // Codex is ticked because the saved recipe says the image has it, not because this computer's rule would.
+    expect(read.screens.find(s => s.id === "agents")!.ticks.sort()).toEqual(["claude", "codex"]);
+  });
+
+  it("Save writes the recipe the screens answered and ends the job, booting nothing and sealing nothing", async () => {
+    const f = fake();
+    const path = smallRecipePath(f.statePath);
+    saveSmallRecipe(path, AGENT_RECIPE);
+    await f.jobs.start({ road: "image" });
+    await f.settled();
+    // Codex comes off the image on the agents screen and the sign-in the file carried is answered as it stands.
+    const agents = f.jobs.view()!.screens.find(s => s.id === "agents")!;
+    await f.jobs.answer({ screen: "agents", ticks: agents.ticks.filter(t => t !== "codex") });
+    const logins = f.jobs.view()!.screens.find(s => s.id === "logins")!;
+    await f.jobs.answer({ screen: "logins", answers: logins.answers });
+    const done = await f.jobs.save();
+    expect(done.phase).toBe("done");
+    // Nothing was built: no golden, no workspace, and the file says what the screens left.
+    expect(goldenHead(await f.rt.golden.get())).toBeUndefined();
+    expect(await f.rt.workspaces.list()).toEqual([]);
+    const written = loadRecipe(path);
+    expect(written.rows.find(r => r.id === "codex")!.on).toBe(false);
+    expect(written.rows.find(r => r.id === "claude")!.on).toBe(true);
+    expect(phases(f)).toEqual(["reading", "answering", "done"]);
+  });
+
+  it("the Also screen survives a save: the next pass reads the managers again and ticks what the saved recipe carries", async () => {
+    const MIB = 1024 * 1024;
+    const scanned = [
+      { id: "brew/just", name: "just", manager: "brew" as const, group: "Homebrew formulae", install: "brew install just", check: "command -v just", size: 4 * MIB },
+      { id: "brew/pandoc", name: "pandoc", manager: "brew" as const, group: "Homebrew formulae", install: "brew install pandoc", check: "command -v pandoc", size: 600 * MIB },
+    ];
+    const f = fake({ read: { scan: async () => scanned } });
+    const path = smallRecipePath(f.statePath);
+    await f.jobs.start({ road: "image" });
+    await f.settled();
+    const first = f.jobs.view()!.screens.find(s => s.id === "also")!;
+    expect(first.items.map(i => i.id)).toEqual(["brew/just", "brew/pandoc"]);
+    // One formula goes on the image, and Save writes the pass down without building anything.
+    await f.jobs.answer({ screen: "also", ticks: ["brew/just"] });
+    await f.jobs.save();
+    expect((loadRecipe(path).custom ?? []).map(r => r.id)).toEqual(["brew/just"]);
+
+    // Opening the image again: the screen is still there, its rows are what this Mac has, and the one that went on
+    // the image comes back ticked off the recipe the save wrote.
+    await f.jobs.start({ road: "image" });
+    await f.settled();
+    const again = f.jobs.view()!.screens.find(s => s.id === "also");
+    expect(again).toBeDefined();
+    expect(again!.items.map(i => i.id)).toEqual(["brew/just", "brew/pandoc"]);
+    expect(again!.ticks).toEqual(["brew/just"]);
+  });
+
+  it("opens on this computer's own rows where nothing has been sealed here yet, rather than refusing for want of a file", async () => {
+    const f = fake();
+    const started = await f.jobs.start({ road: "image" });
+    expect(started.road).toBe("image");
+    await f.settled();
+    const read = f.jobs.view()!;
+    expect(read.phase).toBe("answering");
+    expect(read.screens.find(s => s.id === "agents")).toBeDefined();
+  });
+});
+
 describe("the init job, terminal road", () => {
   it("builds the recipe wsp init wrote beside the state on the host's own runtime, writes no wsp tools, and refuses with no recipe there", async () => {
     const f = fake();

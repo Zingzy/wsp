@@ -17,6 +17,13 @@ export const IMAGE_WORDS = {
   edit: "Edit",
   /** The sheet the six init screens are drawn in, opened from Edit. */
   sheet: "Your image",
+  /** What the foot of that sheet says Save will do, and nothing more; which of the two it is follows what the road
+   * does rather than what the image holds. A Save that only writes the recipe down cuts no version and seals
+   * nothing: the rows land beside the state, where this sheet and wsp init --recipe read them back, and the copy a
+   * computer or a provider builds is planned off the record, so saved rows reach one through the next seal. */
+  savesRecipe: "saves the recipe; a place builds its copy from it the first time it needs one",
+  /** A Save that is the seal: the version it cuts, and when each place holding a copy takes it. */
+  savesVersion: (version: number): string => `saves as v${version + 1}; copies are rebuilt when a workspace is next created`,
   /** The fact beside the row before anything has been sealed. */
   notBuilt: "not built yet",
   /** The one sentence under that row: what will build it and when. */

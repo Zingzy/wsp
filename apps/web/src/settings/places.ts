@@ -174,6 +174,11 @@ export const WHERE_PICK_WORDS = {
   addOne: "Add a computer you own or connect a provider, and workspaces can be created there.",
   /** Why Create is held with no name typed. */
   nameFirst: "give the workspace a name",
+  /** Why Create is held on a computer of the person's own while this computer has sealed no image: the copy that
+   * would be built there is built from the image this computer owns, and there is none yet. Said as the fact and
+   * nothing else, since the road that seals a first image on a box you own is not built and the one that exists
+   * is a provider's. */
+  notBuiltYet: "your image is not built yet",
 } as const;
 
 /** The one caption line under the Where control, built from the facts the row itself carries: what a workspace
@@ -198,3 +203,9 @@ export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined
 /** Whether a row is out of room for another workspace, which holds Create with the caption as its reason. A row
  * that has not said what it forks with is not refused: nothing here knows it is full. */
 export const placeIsFull = (place: PlaceView): boolean => place.forks !== undefined && place.forks.room === 0;
+
+/** Whether a workspace made here forks the copy the setup seals, rather than one built at the row itself. Both
+ * roads wait on the image this computer owns while there is none, and this is which sentence the row is held with:
+ * the provider this host forks on carries the setup's own, which is also the way to it, and a computer of the
+ * person's own carries the plain fact, since its copy is built where it stands and not by the setup. */
+export const placeWaitsOnImage = (place: PlaceView): boolean => isProviderPlace(place);

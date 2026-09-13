@@ -2,17 +2,24 @@
 // What the sidebar's cloud row opens: wsp init as the host runs it, drawn as a
 // sheet over the whole window in the first launch's grammar and never asking
 // the person to run a command. First the choice, manual or an agent; the
-// provider key screen when the host holds none; the read of this computer as
-// rows; then the screens as data, the build's question, and the build as rows.
+// provider key screen, which is on every run so a person always sees that a key
+// is set and can change it; the read of this computer as rows; then the screens
+// as data, the build's question, and the build as rows.
 // The job, the step and the step's unsent draft live on the host: shutting the
-// sheet changes nothing, and it reopens on the step it was shut at with the
-// answers and what was ticked or typed since in place, until Start over or the
-// build. The sheet's title is the caller's: the sidebar road names these
-// screens to a reader and nothing else, so its title stands for screen readers
-// alone, and a caller that names its own draws it in the sheet's corner, where
-// Settings says which of its rows this sheet was opened from.
-import { useCallback, useEffect, useState } from "react";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobOver, initStepCounter, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+// sheet changes nothing, and the sidebar's road reopens on the step it was shut
+// at with the answers and what was ticked or typed since in place, until Start
+// over or the build. The sheet's title stands in its corner at the head of the
+// window, and is the image's own name whichever road opened it: these screens
+// say what goes on the image and nothing else.
+//
+// Settings > Image > Edit opens the same sheet on the image itself: the screens
+// over the recipe that stands, with neither the road question nor the provider
+// key step, since that key belongs to connecting a provider and an image is
+// built wherever a workspace is first created. It opens on the first row every
+// time, it ends where the recipe is written down rather than on a first cloud
+// workspace, and its caller says over the footer what that save does.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, INIT_BUILD_STEP, KEY_REFUSED, KEY_UNCHECKED, initAgentStep, initDiskOverLine, initImageBytes, initJobBuilding, initJobOver, initStepCounter, wspToolsRowId, type InitDraft, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { Dialog, DialogSheet, DialogTitle } from "../components/ui/dialog.js";
 import { errorText } from "../lib/utils.js";
 import { RequestError } from "../protocol/client.js";
@@ -46,12 +53,21 @@ const shownOf = (job: InitJob): InitScreen[] => job.screens.filter(s => s.id !==
 /** What the host kept of a step the person left mid-answer, if anything. */
 const keptAt = (job: InitJob, at: string): InitDraft | undefined => job.drafts?.find(d => d.at === at);
 
-export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
+/** What Settings > Image > Edit opens this sheet for. Its presence is the whole difference between the two roads:
+ * the first run asks which road writes the recipe and for a provider key before the screens, and Edit asks neither. */
+export interface ImageEdit {
+  /** One line over the footer of every screen: what this road's Save does and nothing more, in its caller's words,
+   * since the caller is what knows whether that Save cuts a version. Absent draws no line at all. */
+  note?: string;
+}
+
+export function CloudSetupDialog({ onClose, edit }: { onClose: () => void; edit?: ImageEdit }) {
   const api = useStore(s => s.api);
   const job = useStore(s => s.initJob);
   const select = useStore(s => s.select);
   const [setup, setSetup] = useState<InitSetup | null>(null);
-  const [step, setStep] = useState<Step>(() => stepFor(job));
+  const editing = edit !== undefined;
+  const [step, setStep] = useState<Step>(() => (editing ? "job" : stepFor(job)));
   const [pick, setPick] = useState<RoadPick>({ road: "manual" });
   const [draft, setDraft] = useState<{ key: string; draft: Draft } | null>(null);
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -86,6 +102,30 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       return false;
     }
   }, []);
+  /** Opens the screens on the image that stands: the read of this computer against the recipe already saved, so
+   * the rows come up ticked as the image has them and the sign-ins as they were answered. */
+  const openImage = useCallback((): void => {
+    if (api?.initStart === undefined) return;
+    void attempt(() => api.initStart!({ road: "image" }));
+  }, [api, attempt]);
+  // Edit is a door on the image, not the first run, so the job starts as the sheet opens rather than after two
+  // questions, and it opens on the rows every time: an image job left half answered goes back to its first screen
+  // rather than reopening where it was shut, which is what read as the first run's wizard. A build is the one job
+  // drawn where it stands: it is what the person is watching and starting another over it would take it away.
+  // What stood at the opening is read once, since the host answers before its event lands.
+  const asked = useRef(false);
+  const stood = useRef(job);
+  useEffect(() => {
+    if (!editing || asked.current || api?.initStart === undefined) return;
+    const held = stood.current;
+    if (held !== null && initJobBuilding(held.phase)) return;
+    asked.current = true;
+    if (held === null || initJobOver(held.phase) || held.road !== "image" || api.initStep === undefined) {
+      openImage();
+      return;
+    }
+    void attempt(() => api.initStep!({ at: 0 }));
+  }, [editing, api, attempt, openImage]);
   // The step moves once the host has taken the start, so a refused one leaves the choice up with the refusal under it.
   const start = (): void => {
     if (api?.initStart === undefined) return;
@@ -133,14 +173,23 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     void api?.initGet?.().then(setSetup, () => {});
   };
   const again = (): void => {
-    setStep("choice");
     setDraft(null);
     void api?.initGet?.().then(setSetup, () => {});
+    if (editing) {
+      openImage();
+      return;
+    }
+    setStep("choice");
   };
 
   let body;
-  if (step === "choice" || setup === null) {
-    body = setup === null ? <SetupScreen k="loading" headline={CLOUD_SETUP_WORDS.choice.headline} top={CLOUD_SETUP_WORDS.choice.top} refusal={refusal} /> : <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
+  if (setup === null) {
+    // Nothing of either road is drawn before the host has answered, and each waits under the words of the step it
+    // is about to show: the first run's question, or the read of this computer the image road goes straight to.
+    const waiting = editing ? CLOUD_SETUP_WORDS.reading : CLOUD_SETUP_WORDS.choice;
+    body = <SetupScreen k="loading" headline={waiting.headline} top={waiting.top} refusal={refusal} />;
+  } else if (step === "choice") {
+    body = <SetupChoice agents={setup.agents} pick={pick} onPick={setPick} onContinue={onContinueChoice} refusal={refusal} />;
   } else if (step === "keys") {
     body = <SetupKeys setup={setup} onSave={onSaveKeys} onBack={() => setStep("choice")} refusal={refusal} check={check} busy={saving} change={keyChange} />;
   } else if (job !== null && initAgentStep(job)) {
@@ -165,9 +214,14 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
     body = <SetupFacts job={job} refusal={refusal} />;
   } else if (job.phase === "answering") {
     const shown = shownOf(job);
-    const total = shown.length + 1;
+    // The first run ends on the question its build needs; the image road ends where the recipe is written down, so
+    // its screens are the whole count and its last one saves.
+    const total = editing ? shown.length : shown.length + 1;
     const at = job.screens[job.step];
-    const index = at === undefined || at.id === FIRST_LAUNCH_SCREEN ? shown.length : shown.findIndex(s => s.id === at.id);
+    const stepAt = at === undefined || at.id === FIRST_LAUNCH_SCREEN ? shown.length : shown.findIndex(s => s.id === at.id);
+    // Past the last screen is the build's question on the first run and nothing at all on the image road, whose
+    // step lands on its last screen instead.
+    const index = editing ? Math.min(stepAt, shown.length - 1) : stepAt;
     const screen = shown[index];
     const stepTo = (i: number): void => void attempt(() => api!.initStep!({ at: job.screens.findIndex(s => s.id === shown[i]!.id) }));
     const startOver = (): void =>
@@ -206,6 +260,7 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
       const current = draft !== null && draft.key === key ? draft.draft : draftOf(screen, keptAt(job, key));
       const image = { used: initImageBytes(job, { at: screen.id, ticks: current.ticks }), ...(job.disk !== undefined ? { total: job.disk.total } : {}) };
       const over = image.total !== undefined ? Math.max(0, image.used - image.total) : 0;
+      const saves = editing && index === shown.length - 1;
       body = (
         <SetupAnswers
           key={`${job.id}:${key}`}
@@ -219,8 +274,11 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
           }}
           refusal={refusal}
           image={image}
+          {...(edit?.note !== undefined ? { note: edit.note } : {})}
           primary={{
-            word: CLOUD_SETUP_WORDS.screen.keycap,
+            // The image road's last screen writes the recipe down and shuts the sheet: nothing is booted and no
+            // version is cut, so the word says save rather than continue.
+            word: saves ? CLOUD_SETUP_WORDS.screen.save : CLOUD_SETUP_WORDS.screen.keycap,
             onPress: () => {
               if (over > 0) {
                 setRefusal(initDiskOverLine(over));
@@ -231,6 +289,9 @@ export function CloudSetupDialog({ onClose }: { onClose: () => void }) {
                 if (Object.keys(typed).length > 0) await api!.initKeys!({ rows: typed });
                 await api!.initAnswer!({ screen: screen.id, ticks: [...current.ticks], answers: current.answers });
                 setDraft(null);
+                if (!saves) return;
+                await api!.initSave!();
+                onClose();
               });
             },
           }}
