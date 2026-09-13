@@ -400,6 +400,8 @@ export interface WorkspaceSpec {
   memMb?: number;
   envs?: Record<string, string>;
   labels?: Record<string, string>;
+  /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
+  engine?: boolean;
 }
 
 /** What a create answers: the view, and a notice when a builder kept after a save was stopped to make room. */
@@ -565,7 +567,7 @@ export interface ProjectImportOptions {
 interface WorkspaceRecord extends WorkspaceView {
   /** cloud or local; a record stored before local existed has none and reads cloud. */
   kind: WorkspaceKind;
-  spec: Pick<WorkspaceSpec, "envs" | "labels">;
+  spec: Pick<WorkspaceSpec, "envs" | "labels" | "engine">;
   idleWindowMs?: number | null;
   /** What the provider built, read back after every create (it may clamp the
    * request); the rail and the rate use this, never what was asked for. */
@@ -2738,6 +2740,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const goldenVersionOf = async (snapshotId: string): Promise<GoldenVersion | undefined> =>
     (await goldenManifestOf(snapshotId))?.versions.find(v => v.snapshotId === snapshotId);
 
+  /** Whether the small recipe this version was sealed from asks for the engine socket on every fork: the sealed
+   * record of the image whose wired copy holds this version says. A version no record names asks for none. */
+  const recipeAsksEngine = async (version: GoldenVersion): Promise<boolean> => {
+    for (const raw of await store.list(IMAGES)) {
+      const image = raw as SealedImage;
+      if (image.version !== version.version) continue;
+      const manifest = await copyOf(places.wired, image.name);
+      if (manifest?.versions.some(v => v.snapshotId === version.snapshotId && v.version === version.version)) return image.recipe?.engine === true;
+    }
+    return false;
+  };
+
   /** What stands behind a snapshot a workspace forks from: a golden version, or a project golden and the version at
    * the root of its lineage. `golden` is that root's snapshot id, the one a snapshot taken from the fork records. */
   const imageOf = async (snapshotId: string): Promise<{ golden: string; version?: GoldenVersion; projects?: WorkspaceProject[] }> => {
@@ -3105,9 +3119,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Size is always explicit: a create that names none gets the provider's own
    * default (2048 MB on Solari), not the size the record and the rate assume. */
-  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"], override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"], engine: boolean, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
     ...image,
     kind,
+    ...(engine ? { engine: true } : {}),
     cpu: override?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.size.memMb,
     envs: { ...GUEST_LOGIN_ENV, ...r.spec.envs, ...override?.envs },
@@ -3229,7 +3244,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const image = await imageOf(record.golden);
         const golden = image.version;
         // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-        const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, override);
+        const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await recipeAsksEngine(golden))), override);
         // A place that has never held this image says missing about a reference no registry has: the fork lands
         // nowhere and the sentence says where it would land until that place holds a copy.
         const machine = await b.create(spec).catch((e: unknown) => {
@@ -3867,6 +3882,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       spec: {
         ...(o.envs !== undefined ? { envs: o.envs } : {}),
         ...(o.labels !== undefined ? { labels: o.labels } : {}),
+        ...(o.engine === true ? { engine: true } : {}),
       },
       ...(o.idleWindowMs !== undefined ? { idleWindowMs: o.idleWindowMs } : {}),
       ...(placeId !== undefined ? { place: placeId } : {}),

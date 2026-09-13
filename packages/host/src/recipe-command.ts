@@ -103,6 +103,9 @@ export interface RecipeInput {
   add?: readonly string[];
   /** `<id>=<command that exits 0 once it is there>` for an added row; without one the id on PATH is the check. */
   addCheck?: readonly string[];
+  /** Marks the recipe so every workspace from its image gets the place's container engine through the fenced
+   * socket. Once in the file it stands through every later run; editing the file is how it comes off. */
+  engine?: boolean;
   /** What the added rows say they are for; the agent's own words. */
   why?: string;
   /** Folders to weigh the histories against, absolute: only sessions that ran in one of them count. */
@@ -292,7 +295,8 @@ export async function runRecipe(host: Host, input: RecipeInput, io: RecipeIo = Q
   const decided = applySignIns(applySets(withOwnRows(carried, packages), ticks), signIns);
   // A package ticked as its own row keeps no added row of an earlier run beside it: the row's road installs it once.
   // An untick of a package that has no such row takes its added row away, which is what its tick wrote.
-  const recipe = withPins(withoutCustom(decided, new Set([...packages.map(p => p.id), ...asAdded.filter(x => !x.on).map(x => x.pkg.id)])), pinsOf(saved?.rows));
+  const engine = input.engine === true || saved?.engine === true;
+  const recipe = { ...withPins(withoutCustom(decided, new Set([...packages.map(p => p.id), ...asAdded.filter(x => !x.on).map(x => x.pkg.id)])), pinsOf(saved?.rows)), ...(engine ? { engine: true } : {}) };
   saveSmallRecipe(input.out, recipe);
   return recipeAnswer(recipe, input.out, unknownCommands(histories));
 }

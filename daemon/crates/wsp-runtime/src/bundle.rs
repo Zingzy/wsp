@@ -64,6 +64,10 @@ impl Layout {
     pub fn boot_log(&self, id: &str) -> PathBuf {
         self.workspace(id).join("boot.log")
     }
+    /// The directory holding the workspace's fenced engine socket, bound into it where it asked for an engine.
+    pub fn engine(&self, id: &str) -> PathBuf {
+        self.workspace(id).join("engine")
+    }
     /// youki's own root: `<root>/state/<id>` holds its state.json and notify sockets.
     pub fn state(&self) -> PathBuf {
         self.root.join("state")
@@ -121,6 +125,9 @@ pub struct Workspace {
     pub mem_mb: Option<u64>,
     pub created_at: String,
     pub init: Init,
+    /// The workspace asked for the box's container engine, so every boot serves the fenced socket into it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub engine: bool,
 }
 
 /// What one config.json is built from, beside the profile.
@@ -136,6 +143,8 @@ pub struct Config<'a> {
     pub init: &'a Path,
     /// The directory holding hostname, hosts and resolv.conf.
     pub etc: &'a Path,
+    /// The directory holding the engine socket, bound at `engine::INSIDE_DIR` where the workspace asked for one.
+    pub engine: Option<&'a Path>,
 }
 
 #[derive(Debug)]
@@ -176,6 +185,9 @@ pub fn config_json(c: &Config) -> Value {
     mounts.push(bind(profile::INIT_PATH, c.init.to_path_buf(), &["bind", "ro"]));
     for name in ["resolv.conf", "hostname", "hosts"] {
         mounts.push(bind(&format!("/etc/{name}"), c.etc.join(name), &["rbind", "rprivate"]));
+    }
+    if let Some(engine) = c.engine {
+        mounts.push(bind(crate::engine::INSIDE_DIR, engine.to_path_buf(), &["rbind", "rprivate"]));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -314,6 +326,7 @@ mod tests {
             cgroup: "/wsp/wsp-a",
             init: Path::new("/usr/local/bin/wsp-daemon"),
             etc: Path::new("/var/lib/wsp/run/wsp-a/etc"),
+            engine: None,
         };
         let spec = config_json(&c);
         assert_eq!(spec["root"]["path"], "rootfs");
@@ -330,8 +343,12 @@ mod tests {
         let hosts = mounts.iter().find(|m| m["destination"] == "/etc/hosts").unwrap();
         assert_eq!(hosts["source"], "/var/lib/wsp/run/wsp-a/etc/hosts");
         assert_eq!(spec["process"]["capabilities"]["bounding"].as_array().unwrap().len(), 13);
+        assert!(mounts.iter().all(|m| m["destination"] != crate::engine::INSIDE_DIR));
         let bare = config_json(&Config { cpu: None, mem_mb: None, ..c });
         assert!(bare["linux"].get("resources").is_none());
+        let with_engine = config_json(&Config { engine: Some(Path::new("/var/lib/wsp/run/wsp-a/engine")), ..c });
+        let socket_dir = with_engine["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == crate::engine::INSIDE_DIR).unwrap();
+        assert_eq!(socket_dir["source"], "/var/lib/wsp/run/wsp-a/engine");
     }
 
     #[test]
@@ -373,8 +390,13 @@ mod tests {
             mem_mb: None,
             created_at: "2026-09-12T00:00:00.000Z".into(),
             init: Init { pid: 4242, started: 123_456, boot_id: "b0".into() },
+            engine: false,
         };
         write_json(&path, &record).unwrap();
-        assert_eq!(read_record(&path).unwrap(), Some(record));
+        assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
+        // A record written before the engine field existed reads as a workspace without one.
+        assert!(!fs::read_to_string(&path).unwrap().contains("engine"));
+        write_json(&path, &Workspace { engine: true, ..record }).unwrap();
+        assert!(read_record(&path).unwrap().unwrap().engine);
     }
 }

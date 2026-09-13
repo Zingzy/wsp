@@ -48,6 +48,9 @@ pub struct MachineSpec {
     pub idle_timeout_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotency_key: Option<String>,
+    /// The workspace gets the box's container engine through this daemon's fenced socket; refused where the box has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

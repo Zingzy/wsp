@@ -1995,6 +1995,9 @@ export const Recipe = z.object({
   rows: z.array(RecipeRow),
   /** Rows outside the catalog, added on purpose; a recipe written before they existed carries none. */
   custom: z.array(RecipeCustomRow).optional(),
+  /** Every workspace from this image gets the place's container engine through the fenced socket, as `wsp new
+   * --engine` gives one; absent is none unless the create asks. */
+  engine: z.boolean().optional(),
 });
 export type Recipe = z.infer<typeof Recipe>;
 
@@ -2670,6 +2673,10 @@ export const MachineSpec = z.object({
   /** One per create attempt: the provider answers a repeat of the same request under it with the machine it already
    * booted. Minted fresh after a kill, since a replay names the dead machine (measured 2026-09-04). */
   idempotencyKey: z.string().optional(),
+  /** The machine gets the place's container engine through its daemon's fenced socket, so a project's own docker
+   * compose runs inside it and sees its own containers alone; a place with no engine refuses the create. Absent is
+   * no socket. */
+  engine: z.boolean().optional(),
 });
 export type MachineSpec = z.infer<typeof MachineSpec>;
 
@@ -3008,6 +3015,7 @@ const DAEMON_CONTENTS = [
   "386b54104e2a8abf8f45f9a35fe767971b72d5d00da68c4d8ae0aa9630b7cc6d",
   "9ff538bbfca0ac4e03ca8c822afd47b630dd21cec17ec929192ddc6ae6f10ce6",
   "14b4b9c0ccad20d544fa123841592c6438f735405f97a88957dafe4c39f47e8b",
+  "c925ed52d7b63463658f2d19f183607831e295e3325a373c0153145cf155d8b0",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3060,7 +3068,10 @@ const DAEMON_CONTENTS = [
  * the upper directory stays as the saved layer, and the wake boots it again on the same address and forwards.
  * Version 24 makes the daemon the workspace manager on a joined computer: its report says whether it runs
  * workspaces here rather than whether it holds a Docker, and the install writes the wsp-workspace AppArmor profile
- * where the box takes it, so what a deploy leaves for a workspace to isolate under changed. */
+ * where the box takes it, so what a deploy leaves for a workspace to isolate under changed. Version 25 serves a
+ * fenced engine socket into a workspace that asked for one: a proxy over the box's own Docker or podman socket that
+ * labels every create with the workspace, filters every listing by it, refuses what would reach the box, and joins
+ * a container's published port to the workspace's loopback; a create names the socket with the new engine field. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3596,6 +3607,8 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** Where this fork lands: a joined computer by name or id, or this computer. Absent takes the place a fork
      * last landed on. */
     on: z.string().optional(),
+    /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
+    engine: z.boolean().optional(),
   }),
   /** The one local workspace: this computer. Forks nothing (the machine already exists); refused when this host wired
    * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */
