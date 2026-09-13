@@ -2948,13 +2948,45 @@ export function offlineFor(ms: number): string {
   return hours < 24 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
 }
 
-/** The Workspaces cell of that table: how many stand on the computer, and the one thing about it that changes what
- * a person may put there. Whether the computer is answering is not one of them: the state slot beside its name
- * carries that, and a row that said it twice was a row that said it in two wordings. The count is what the caller
- * reads off the workspace list, never off the row: a row carries at most the one workspace its join recorded, so
- * this computer's own workspace and a provider's forks are on neither. */
-export function placeWorkspacesCell(view: PlaceView, count: number): string {
-  return view.docker === true || view.kind === "provider" ? `${count}` : `${count} · agents only`;
+/** The Workspaces cell of that table: how many stand on the computer, what it has cost this month where somebody
+ * is charging for them, and the one thing about the computer that changes what a person may put there. Whether it
+ * is answering is not one of them: the state slot beside its name carries that, and a row that said it twice was a
+ * row that said it in two wordings. The count is what the caller reads off the workspace list, never off the row:
+ * a row carries at most the one workspace its join recorded, so this computer's own workspace and a provider's
+ * forks are on neither. */
+export function placeWorkspacesCell(view: PlaceView, count: number, monthUsd?: number): string {
+  const { count: n, note } = placeWorkspacesParts(view, count, monthUsd);
+  return note === undefined ? n : `${n} · ${note}`;
+}
+
+/** The same cell in its two parts, for a table that draws them in two inks: the count a person is counting, and
+ * the note behind it, which is the mock's muted clause. A line that is one string (the command line's row, a
+ * title) reads placeWorkspacesCell instead; both are this one rule. */
+export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: number): { count: string; note?: string } {
+  const n = `${count}`;
+  // Only a provider bills: a computer of the person's own runs their workspaces for nothing, whatever it runs them on.
+  if (view.kind === "provider") return monthUsd === undefined ? { count: n } : { count: n, note: spentThisMonth(monthUsd) };
+  return view.docker === true ? { count: n } : { count: n, note: AGENTS_ONLY };
+}
+
+/** What a computer that holds no Docker of its own runs: the person's agents, and no workspace but the one it is. */
+export const AGENTS_ONLY = "agents only";
+
+/** What a place has taken since the first of the month, the clause every surface that says it says. */
+export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this month`;
+
+/** The Spend row of a place's detail: the month behind it, what it burns right now and how many workspaces that is
+ * across. A row burning nothing says so with the rate rather than dropping the clause, since a $0.00/hr that is
+ * measured and a figure left out read differently. */
+export function placeSpendLine(spend: { monthUsd: number; rateUsdPerHour: number }, workspaces: number): string {
+  return `${spentThisMonth(spend.monthUsd)} · ${fmtRate(spend.rateUsdPerHour)} now across ${plural(workspaces, "workspace")}`;
+}
+
+/** The foot under the places table: what the providers that have taken something this month took, together, and how
+ * many of them that is. A provider that took nothing is not in the count, whether nothing was ever metered on it or
+ * its workspaces have all been asleep since last month: a count of two where one charged reads as two bills. */
+export function placesSpendFoot(monthUsd: number, providers: number): string {
+  return `${spentThisMonth(monthUsd)} across ${plural(providers, "provider")}`;
 }
 
 /** The one line that takes wsp off a computer it is typed on. */

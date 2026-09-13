@@ -39,6 +39,22 @@ export function threadsOpenedBy(projects: ReadonlyArray<SidebarProjectSnapshot>,
   );
 }
 
+/** The thread that opened this one, with the workspace it runs on, which is the other way along the same edge
+ * threadsOpenedBy walks. Nothing for a thread nobody opened, and nothing while the opener's own workspace has not
+ * arrived: a name is only drawn for an opener a click can reach. */
+export function openedBy(
+  projects: ReadonlyArray<SidebarProjectSnapshot>,
+  thread: Pick<SidebarThreadSnapshot, "parentThreadId">,
+): ThreadOnWorkspace | undefined {
+  const opener = thread.parentThreadId;
+  if (opener === null) return undefined;
+  for (const project of projects) {
+    const found = project.threads.find(row => row.id === opener);
+    if (found !== undefined) return { thread: found, runs: project };
+  }
+  return undefined;
+}
+
 /** Every workspace with the threads its rows draw, each spawned thread behind the thread that opened it. A surface
  * that sorts the rows itself (the sidebar parts the working ones from the idle shelf) nests them again after; one
  * that lists them as they come reads the tree from here. */

@@ -11,7 +11,7 @@
 // workspace awake and billing forever.
 
 import { isMissing, roadFailed, type ExecResult, type MachineState, type PreviewReach } from "@wsp/engine";
-import { appendCostPoint, goneWords, reachShown, type EventUnion, type MachineFacts, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { appendCostPoint, goneWords, monthStart, reachShown, spentSince, workspacePlaceId, type EventUnion, type MachineFacts, type PlaceSpend, type PlaceView, type ReachState, type ReachStatus, type WorkspaceCostEvent, type WorkspacePhase, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { realClock, type Clock } from "./clock.js";
 import type { Store } from "./store.js";
 
@@ -154,6 +154,11 @@ export interface StatusApi {
   watch(opts?: StatusWatchOptions): () => void;
   /** The workspace's cost ticks since metering began, across host restarts, folded to the rate changes and the newest tick. */
   history(workspaceId: string): Promise<WorkspaceCostEvent[]>;
+  /** What each row of the places list has cost since the first of the month, over every workspace metered on it in
+   * that month, the deleted ones with the rest, and what it burns now over the ones still there. The list is the
+   * caller's because the tracker meters workspaces and holds no view of the computers they stand on; rows nothing
+   * was metered on are left out, and the order is the list's own. */
+  spend(places: readonly PlaceView[], at?: number): Promise<PlaceSpend[]>;
 }
 
 /** A workspace as the tracker needs it: the view, the size the provider built
@@ -216,10 +221,20 @@ interface Meter {
 
 const COST_HISTORIES = "cost-histories";
 
-/** One store document per workspace: its folded series as of the tick that last added a point. */
+/** What a workspace's document keeps of where it stood, which is what says whose money it spent once the workspace
+ * itself is gone. The fields the one reading of that takes (workspacePlaceId) and no others. */
+type Stood = Pick<WorkspaceView, "kind" | "machineId" | "place" | "provider">;
+
+/** One store document per workspace: its folded series as of the tick that last added a point, where the workspace
+ * stood, and whether it has been deleted, which is what keeps a deleted workspace's share of the month on the
+ * place that billed for it. */
 interface CostHistoryRecord {
   workspaceId: string;
   points: WorkspaceCostEvent[];
+  where?: Stood;
+  /** Set when the workspace was deleted; its series never grows again and the load drops it once its last tick
+   * falls out of the month, so a person who makes and deletes workspaces all year keeps one month of documents. */
+  ended?: boolean;
 }
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -279,6 +294,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   const clock = o.clock ?? realClock;
   const meters = new Map<string, Meter>();
   const histories = new Map<string, WorkspaceCostEvent[]>();
+  /** Where each metered workspace stood, kept past the workspace itself so its month still lands on that place. */
+  const stood = new Map<string, Stood>();
+  /** The metered workspaces that have been deleted: their series are held for the month's sake and nothing else. */
+  const ended = new Set<string>();
   const reconciled = new Map<string, { state: MachineState; at: number }>();
   /** The words behind a gone answer, per workspace, so the status that reports it can quote the provider. */
   const goneReasons = new Map<string, string>();
@@ -364,11 +383,25 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
   // there: a workspace running then resumes its awake stretch at that tick, so the host's downtime is metered as
   // the provider billed it.
   const loading = (async () => {
+    const month = monthStart(clock.now());
     for (const raw of await o.store.list(COST_HISTORIES)) {
       const doc = raw as CostHistoryRecord;
       const last = Array.isArray(doc.points) ? doc.points.at(-1) : undefined;
       if (last === undefined) continue;
+      if (doc.ended === true && Date.parse(last.at) < month) {
+        // A document that will not go is a document that is only read again next month; losing the load with it
+        // would cost every live workspace its meter.
+        await o.store.delete(COST_HISTORIES, doc.workspaceId).catch((e: unknown) => console.warn(`the cost history of the deleted workspace ${doc.workspaceId} could not be dropped`, e));
+        continue;
+      }
       histories.set(doc.workspaceId, doc.points);
+      if (doc.where !== undefined) stood.set(doc.workspaceId, doc.where);
+      // A deleted workspace's meter is nobody's to carry on: nothing polls it, and a mark on it would bill a
+      // machine that no longer exists if a record ever came back wearing its id.
+      if (doc.ended === true) {
+        ended.add(doc.workspaceId);
+        continue;
+      }
       const m = meter(doc.workspaceId);
       m.awakeMs = last.awakeMs;
       if (last.phase === "running") m.mark = m.awakeUntil = Date.parse(last.at);
@@ -381,9 +414,23 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     writes = writes.then(step).catch(() => {});
   };
 
+  /** The document of a workspace as it stands now, which is the series in memory rather than the one on disk: only
+   * a tick that adds a point writes, so a stretch at one rate lives in memory alone until its rate changes. */
+  const document = (id: string): CostHistoryRecord => {
+    const where = stood.get(id);
+    return { workspaceId: id, points: histories.get(id) ?? [], ...(where !== undefined ? { where } : {}), ...(ended.has(id) ? { ended: true } : {}) };
+  };
+
+  /** A deleted workspace's meter is over, and what it spent this month is not: the series is written where it
+   * stands and marked, so the place it stood on still totals the hours it ran before it went. */
   const forget = (id: string): void => {
-    histories.delete(id);
-    persist(() => o.store.delete(COST_HISTORIES, id));
+    if (!histories.has(id)) {
+      stood.delete(id);
+      persist(() => o.store.delete(COST_HISTORIES, id));
+      return;
+    }
+    ended.add(id);
+    persist(() => o.store.put(COST_HISTORIES, id, document(id)));
   };
 
   /** The host's own read of a machine the state read calls running, logged once per spell and never a verdict: one
@@ -656,9 +703,10 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
       };
       const next = appendCostPoint(before, tick);
       histories.set(view.id, next);
+      stood.set(view.id, { kind: view.kind, machineId: view.machineId, ...(view.place !== undefined ? { place: view.place } : {}), ...(view.provider !== undefined ? { provider: view.provider } : {}) });
       // A tick that replaced the newest point lies on the stored line; only an added point changes the document.
       const added = before.length === 0 || next[next.length - 2] === before[before.length - 1];
-      if (added) persist(() => o.store.put(COST_HISTORIES, view.id, { workspaceId: view.id, points: next } satisfies CostHistoryRecord));
+      if (added) persist(() => o.store.put(COST_HISTORIES, view.id, document(view.id)));
       if (only === undefined || last?.rateUsdPerHour !== tick.rateUsdPerHour) o.emit(tick);
     }
   };
@@ -715,10 +763,33 @@ export function createStatusTracker(o: StatusTrackerOptions): StatusApi {
     };
   };
 
+  // A deleted workspace's series is held for the month's total and for nothing else: it has no pane to draw in and
+  // no record to read its caller's right to it off, so this read answers for the workspaces that are still here.
   const history: StatusApi["history"] = async id => {
     await loading;
-    return histories.get(id) ?? [];
+    return ended.has(id) ? [] : (histories.get(id) ?? []);
   };
 
-  return { list, watch, history };
+  const spend: StatusApi["spend"] = async (places, at = clock.now()) => {
+    await loading;
+    const from = monthStart(at);
+    const rows = new Map<string, PlaceSpend>();
+    for (const [id, points] of histories) {
+      const where = stood.get(id);
+      const place = where === undefined ? undefined : workspacePlaceId(where, places);
+      if (place === undefined) continue;
+      const row = rows.get(place) ?? { place, monthUsd: 0, rateUsdPerHour: 0 };
+      row.monthUsd += spentSince(points, from);
+      // What is burning now is what is still there: a deleted workspace's last tick is the instant it stopped
+      // costing anything, whatever rate that tick was carrying when the person took it away.
+      if (!ended.has(id)) row.rateUsdPerHour += points[points.length - 1]?.rateUsdPerHour ?? 0;
+      rows.set(place, row);
+    }
+    return places.flatMap(place => {
+      const row = rows.get(place.id);
+      return row === undefined ? [] : [row];
+    });
+  };
+
+  return { list, watch, history, spend };
 }
