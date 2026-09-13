@@ -5,7 +5,7 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -403,6 +403,69 @@ describe("a computer's own row", () => {
     expect(document.querySelector("[data-place-row='p_1']")?.getAttribute("aria-expanded")).toBe("true");
   });
 
+  /** One row of the open detail, its value alone: the row's own element holds the label first. */
+  const detailValue = (k: string): string | undefined => document.querySelector(`[data-k='place-detail'] [data-k='${k}']`)?.lastElementChild?.textContent ?? undefined;
+
+  it("names the login the host dials and how long the last dial took, so a row says which machine it is", () => {
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: true, roundTripMs: 14 } };
+    useStore.setState({ places: [here, vps], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
+    const detail = document.querySelector("[data-k='place-detail']")!;
+    expect(detailValue("address")).toBe("root@65.21.4.12 · ssh");
+    // The spec's `Answered 3 s ago · 14 ms`: when it last spoke and how long the last frame took. The span is the
+    // road reading's own, so this row and the pane's sentence cannot date one silence differently.
+    expect(detailValue("answered")).toBe(`${absentRoad({ name: "vps", awayMs: NOW - Date.parse(laptop.lastSeenAt!) }).answered} · 14 ms`);
+    // And what it is, marked as last known, the way the pane's OS row is: a person who cannot tell which of two
+    // screens is stale is what this ticket was filed for.
+    expect(detailValue("system")).toBe("macOS 15.6 · last seen 2 h ago");
+  });
+
+  it("says nothing about reaching a provider, which is a key and not a computer this host dials", () => {
+    useStore.setState({ places: [here, ascii], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='box']")!);
+    const detail = document.querySelector("[data-k='place-detail']")!;
+    expect(detail).toBeTruthy();
+    // A provider's machines are at the other end of a key: there is no address to name, nothing that last
+    // answered, no dial to report and no button to press.
+    expect(detailValue("answered")).toBeUndefined();
+    expect(detailValue("address")).toBeUndefined();
+    expect(detail.querySelector("[data-k='dialled']")).toBeNull();
+    expect(detail.querySelector("[data-k='try-now']")).toBeNull();
+    // The rows it does carry are still there, so the guard took the road reading and nothing beside it.
+    expect(detailValue("workspaces")).toBe("none");
+  });
+
+  it("says a computer that never answered so, rather than leaving the row out", () => {
+    const fresh: PlaceView = { ...laptop, id: "p_4", name: "vps", lastSeenAt: undefined };
+    useStore.setState({ places: [here, fresh], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_4']")!);
+    expect(detailValue("answered")).toBe("not since it joined");
+  });
+
+  it("reads a computer that is answering plain, with nothing marked as stale", () => {
+    const live: PlaceView = { ...laptop, id: "p_5", name: "vps", present: true, lastSeenAt: "2026-09-12T11:59:00.000Z" };
+    useStore.setState({ places: [here, live], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_5']")!);
+    expect(detailValue("system")).toBe("macOS 15.6");
+  });
+
+  it("keeps the last refusal under the rows and replaces it with what a press of Try now got", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
+    const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
+    const fake = fakeApi({ dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 412 }, line, place: { ...vps, id: placeId } }) } as Partial<Api>);
+    useStore.setState({ api: fake.api, places: [here, vps], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
+    expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(said);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='try-now']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(line));
+  });
+
   it("computes the Remove sentence from what that computer holds", () => {
     withWorkspaces();
     render(<WhereAgentsRun now={NOW} />);
@@ -487,16 +550,33 @@ describe("the ssh road of the sheet", () => {
   const plan = (): [string | null, string | null][] => [...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")]);
   const WAITING: [string, string][] = [
     [placeAddSheetWord("connect", "running"), "waiting"],
-    [`${placeAddSheetWord("wsp", "running")}${ADD_COMPUTER_WORDS.ssh.folder}`, "waiting"],
+    [`${placeAddSheetWord("wsp", "running")}${PLACE_INSTALL.weight}`, "waiting"],
     [placeAddSheetWord("service", "running"), "waiting"],
     [placeAddSheetWord("join", "running"), "waiting"],
   ];
 
-  it("stands the plan under the note before Add is pressed, in the sheet's own words with the folder in its slot", async () => {
+  it("stands the plan under the note before Add is pressed, in the sheet's own words with the weight in its slot", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
     expect(plan()).toEqual(WAITING);
     // The note the plan stands under, and nothing between them.
     expect(document.querySelector("[data-k='plan']")?.previousElementSibling?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.note);
+  });
+
+  it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, Docker and the opener", async () => {
+    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], projects: [] }) } as unknown as Partial<Api>);
+    const lines = plan().map(([word]) => word ?? "");
+    expect(lines[1]).toBe(`installing wsp under ~/.wsp${PLACE_INSTALL.weight}`);
+    expect(lines[2]).toBe("starting the agent as a user service");
+    await waitFor(() => expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image (4.2 GB) is copied into Docker there the first time a workspace is created. Remove takes all of it off again."));
+    expect(document.querySelector("[data-k='opener-note']")?.textContent).toBe(PLACE_INSTALL.openerLine);
+    // The one word Lena could not read on the way out is on neither screen now.
+    expect(document.body.textContent).not.toContain("shim");
+    expect(document.body.textContent).not.toContain("systemd");
+  });
+
+  it("says the Docker sentence without a figure on a wsp that has built no image yet, rather than one it guessed", async () => {
+    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: null, copies: [], projects: [] }) } as unknown as Partial<Api>);
+    expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is copied into Docker there the first time a workspace is created. Remove takes all of it off again.");
   });
 
   it("fills the same four lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
@@ -518,7 +598,9 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
     expect(plan()).toEqual([
       ["connected · Ubuntu 24.04", "done"],
-      ["installing wsp 0.2.0", "running"],
+      // The weight stands in the slot while the step runs: the installer reports no note of its own for it, and
+      // what wsp takes on the box is what a person pressed Add without knowing.
+      [`installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"],
       [placeAddSheetWord("service", "running"), "waiting"],
       [placeAddSheetWord("join", "running"), "waiting"],
     ]);

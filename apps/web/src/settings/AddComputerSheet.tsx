@@ -13,7 +13,7 @@
 // stages off the installer as it reports them.
 import { ChevronDownIcon } from "lucide-react";
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACES_WORDS, PlaceAddStep, joinAddressWord, placeAddSheetWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, PLACE_INSTALL, PLACES_WORDS, PlaceAddStep, fmtBytes, joinAddressWord, placeAddSheetWord, shownPairCode, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../components/ui/collapsible.js";
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from "../components/ui/input-group.js";
@@ -37,10 +37,10 @@ const ROADS = [
 ] as const;
 type Road = (typeof ROADS)[number]["value"];
 
-/** What a step of the plan carries in its fact slot before it has run: where the install puts wsp on the box,
- * which the step's own words leave out. A step that is running or done carries what the installer answered there
- * instead. Nothing else needs one: the sheet's words say what the agent is started under. */
-const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: ADD_COMPUTER_WORDS.ssh.folder };
+/** What a step of the plan carries in its fact slot: what wsp's own files weigh on the box, which the step's own
+ * words leave out. A step the installer answered with a note of its own carries that instead. Nothing else needs
+ * one: the sheet's words say where wsp lands and what the agent is started under. */
+const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: PLACE_INSTALL.weight };
 
 /** The ssh road's five lines, one per step of the installer: the stage reported for that step where one has
  * arrived, and the step's own line, in the words the sheet gives it, where none has. One list for the plan a
@@ -49,7 +49,7 @@ const PLAN_FACTS: Partial<Record<PlaceAddStep, string>> = { wsp: ADD_COMPUTER_WO
 function planLines(stages: readonly InstallStage[]): RoadLine[] {
   return PlaceAddStep.options.map(step => {
     const reported = stages.find(stage => stage.step === step);
-    const fact = reported === undefined ? PLAN_FACTS[step] : reported.fact;
+    const fact = reported?.fact ?? PLAN_FACTS[step];
     return {
       word: reported?.word ?? placeAddSheetWord(step, "running"),
       state: reported?.state ?? "waiting",
@@ -76,6 +76,9 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
   const [arrived, setArrived] = useState<{ placeId: string; from: string } | null>(null);
   /** A computer the installer handed back, for the ssh road, which finishes on its own reply rather than an event. */
   const [installed, setInstalled] = useState<PlaceView | null>(null);
+  /** What this host's image weighs, for the note that says what lands in Docker on the box. A host that has built
+   * none yet leaves the figure out rather than guessing one. */
+  const [imageBytes, setImageBytes] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     if (api?.placesDoor === undefined || api.pairIssue === undefined) return;
@@ -90,6 +93,20 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
       .catch((e: unknown) => {
         if (live) setCodeSaid(errorText(e));
       });
+    return () => {
+      live = false;
+    };
+  }, [api]);
+
+  useEffect(() => {
+    if (api?.image === undefined) return;
+    let live = true;
+    void api.image().then(
+      view => {
+        if (live) setImageBytes(view.image?.usedBytes);
+      },
+      () => {},
+    );
     return () => {
       live = false;
     };
@@ -185,6 +202,18 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
           {/* The plan and the run are one list in one place, so Add fills the lines in under the hand rather than
               swapping them for another list. */}
           {road === "ssh" ? <RoadLines lines={planLines(stages ?? [])} k="plan" /> : null}
+          {/* What the lines above leave out, said before Add rather than on the way out: what Docker on the box
+              ends up holding, and what wsp leaves on that login's PATH beside its own files. */}
+          {road === "ssh" ? (
+            <div className="flex flex-col gap-1.5">
+              <p className="text-[13px] text-muted-foreground" data-k="image-note">
+                {PLACE_INSTALL.imageCopy(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}
+              </p>
+              <p className="text-[13px] text-muted-foreground" data-k="opener-note">
+                {PLACE_INSTALL.openerLine}
+              </p>
+            </div>
+          ) : null}
           {road === "ssh" && installed !== null ? <p className="text-[13px] text-muted-foreground">{MINE.ssh.named}</p> : null}
         </SheetPanel>
         <SheetFooter className="items-center sm:justify-between">

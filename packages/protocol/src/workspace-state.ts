@@ -287,6 +287,83 @@ export function awayMsOf(place: { readonly lastSeenAt?: string | undefined }, no
   return Number.isNaN(since) ? null : now - since;
 }
 
+/** A fact a computer reported before it went quiet, marked as the reading it is: what it was when it last spoke,
+ * not what it is. Every slot that would otherwise stand at pending on a computer that is not answering says this
+ * instead, since the host already holds the answer and pending reads as a fact still coming.
+ *
+ * The word is the mark's, because the two spans a slot can be dated by are not the same: a fact that does not
+ * change is dated by the silence (`last seen`), and one that grows while the computer is up is dated by the
+ * report it was read in (`reported`), which can be hours older than the last frame. */
+export function lastKnown(value: string, agoMs: number | null, word = "last seen"): string {
+  return agoMs === null ? value : `${value} · ${word} ${offlineFor(agoMs)} ago`;
+}
+
+/** The mark on a figure that was true when the computer last reported and has grown since: its uptime. */
+export const REPORTED_WORD = "reported";
+
+/** What this host knows about reaching one computer, for the surfaces that have to say it. absentComputer says the
+ * computer is silent; this says where the app expects it, when it last spoke and what the last dial said, which
+ * together are what tells a computer that is off from a road that is broken. */
+export interface AbsentRoadInput {
+  name: string;
+  /** The ssh login the host was given for it, and the address its last link dialled in from. */
+  road?: { readonly ssh?: string | undefined; readonly from?: string | undefined } | undefined;
+  /** How long this host has not heard from it; null where it never has. */
+  awayMs: number | null;
+  /** What the last dial of it came to, where one has been made. */
+  dialled?: { readonly answered: boolean; readonly roundTripMs?: number | undefined; readonly said?: string | undefined } | undefined;
+}
+
+/** The road reading in the pieces its two surfaces need: the row detail draws them as rows of their own and the
+ * pane says them as one sentence. Written once so the two cannot date the same silence differently. */
+export interface AbsentRoad {
+  /** The Address row: the login the host dials, or the address the computer dialled in from, with the road it is.
+   * Null on a computer this host was not installed on and has never held a link from. */
+  address: string | null;
+  /** The Answered row, without its label. */
+  answered: string;
+  /** What the last dial said, where it was refused; null where it answered or where none was made. */
+  refused: string | null;
+  /** The three as one sentence, for a pane with room for prose. */
+  sentence: string;
+}
+
+/** The word for each road, said the way a person would: a login this host dials, or an address that dials it. */
+const DIALS_IN = "dials in";
+const OVER_SSH_WORD = "ssh";
+
+export function absentRoad(input: AbsentRoadInput): AbsentRoad {
+  const ssh = input.road?.ssh;
+  const from = input.road?.from;
+  const address = ssh !== undefined && ssh !== "" ? `${ssh} · ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} · ${DIALS_IN}` : null;
+  const answered = input.awayMs === null ? "not since it joined" : `${offlineFor(input.awayMs)} ago`;
+  const refused = input.dialled !== undefined && !input.dialled.answered && input.dialled.said !== undefined ? input.dialled.said : null;
+  const where =
+    ssh !== undefined && ssh !== ""
+      ? `wsp logs in to ${input.name} at ${ssh} over ssh`
+      : from !== undefined && from !== ""
+        ? `wsp waits for ${input.name} to dial in, last from ${from}`
+        : `wsp waits for ${input.name} to dial in`;
+  const when = input.awayMs === null ? `it has not answered since it joined` : `it last answered ${offlineFor(input.awayMs)} ago`;
+  return { address, answered, refused, sentence: `${where}; ${when}.${refused === null ? "" : ` The last try said: ${refused}`}` };
+}
+
+/** What one dial came to, in the slot the button that asked stands in. A computer holding its link answers the
+ * frame; one that does not is dialled over the road it was added on, and a road that answers while the link is
+ * down is the reading a person came for: the computer is on and the agent on it is not calling home. */
+export function placeDialLine(input: { name: string; road?: { readonly ssh?: string | undefined } | undefined; linked: boolean; dialled: { readonly answered: boolean; readonly roundTripMs?: number | undefined; readonly said?: string | undefined } }): string {
+  const { dialled } = input;
+  if (!dialled.answered) return dialled.said ?? `${input.name} answered nothing.`;
+  const took = dialled.roundTripMs === undefined ? "" : ` in ${dialled.roundTripMs} ms`;
+  if (input.linked) return `${input.name} answered${took}.`;
+  const at = input.road?.ssh;
+  return `${at ?? input.name} answered over ${OVER_SSH_WORD}${took}, so the computer is on; the agent on it is not dialling this host.`;
+}
+
+/** The one sentence a dial gets on a computer this host has no road to: it was joined by typing a code, so nothing
+ * here can make it speak and the only thing to do is switch it on. */
+export const placeNoDialLine = (name: string): string => `wsp has no road to dial ${name}: it joined by typing a code, so it connects on its own when it is on.`;
+
 /** Why an action that needs the machine (send, import, export) cannot run in this state; null while running.
  * goneWords are the provider's, quoted when the caller holds them (the runtime does, the composer does not). */
 export function actionRefusal(state: WorkspaceState, action: string, goneWords?: string): string | null {
