@@ -21,6 +21,7 @@ import {
   PLACE_LINK_NONCE_BYTES,
   forkRoom,
   placeLinkTranscript,
+  joinToken,
   absentComputer,
   namesPlace,
   noSuchPlaceRefusal,
@@ -51,7 +52,7 @@ import {
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, isPlainPath, plainPath, type ExecResult, type MachineBackend, type MachineLink } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, isPlainPath, keyFingerprint, plainPath, type ExecResult, type MachineBackend, type MachineLink } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -154,6 +155,8 @@ export interface PlaceInstallRequest {
   name?: string;
   sshPort?: number;
   keyPath?: string;
+  /** The whole token the join on that computer spends: the single-use code and the fingerprint of the key this
+   * host will prove, as one word, the same one the printed join line carries. */
   code: string;
   hostUrls: readonly string[];
 }
@@ -224,6 +227,9 @@ export interface PlaceDoor {
   join(req: PlaceJoinRequest, from: string, now: number): Promise<{ reply: PlaceJoinReply; expect: Uint8Array; notice?: string } | undefined>;
   /** The first frame of a place that already joined; nothing when this host holds no place by that id. */
   auth(req: PlaceAuthRequest, now: number): Promise<{ reply: PlaceAuthReply; expect: Uint8Array } | undefined>;
+  /** The fingerprint of the key this door proves at every join, for the token a join line carries. Read off the
+   * pair the handshake signs with, so a line can never name a key this door will not answer with. */
+  hostKey(): string;
   /** Checks the place's signature over `expect` with the key on record and reads the report it sent by the one rule
    * every report is read by. Answers the report `attach` is to take, or the sentence to refuse the socket with:
    * the key's or the report's own. Attaches nothing yet. */
@@ -754,6 +760,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       return { reply: { nonce, hostPublicKey: wiring.hostKey.publicKey, signature }, expect };
     },
 
+    hostKey() {
+      return keyFingerprint(wiring.hostKey.publicKey);
+    },
+
     async prove(placeId, signature, expect, report) {
       const held = await recordOf(placeId);
       if (held === undefined || !verifyPlaceBytes(held.publicKey, expect, signature)) return { refusal: PLACE_KEY_REFUSAL };
@@ -967,7 +977,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       awaiting.set(code, waiting);
       try {
         const { addId: _stream, ...asked } = req;
-        const installed = await install({ ...asked, code }, stage);
+        const installed = await install({ ...asked, code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)) }, stage);
         stage("join", "running");
         const placeId = await new Promise<string>((woken, fail) => {
           // The link may already be up: the computer dials the moment its own join has written its place file, and

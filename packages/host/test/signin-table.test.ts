@@ -130,13 +130,6 @@ describe("sign-in table", () => {
     }
   });
 
-  it("names the tool's own wait where it has one and leaves it out where the tool never gives up", () => {
-    expect(command("wrangler").toolTimeoutMs).toBe(120_000);
-    expect(command("aws").toolTimeoutMs).toBe(600_000);
-    expect(command("gh").toolTimeoutMs).toBe(900_000);
-    for (const name of ["gcloud", "codex", "claude", "supabase"]) expect(command(name).toolTimeoutMs, name).toBeUndefined();
-  });
-
   it("has a status command for each tool that offers one, and says so for the rest", () => {
     const withStatus = Object.entries(SIGN_INS).filter(([, s]) => statusOf(s) !== undefined).map(([k]) => k);
     expect(withStatus.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "doppler", "fly", "gcloud", "gemini", "gh", "hermes", "hermes-keys", "kube", "netlify", "opencode", "pi", "railway", "supabase", "vercel", "wrangler"]);

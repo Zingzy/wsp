@@ -44,7 +44,7 @@ What your own package managers installed that the image could take: Homebrew for
 
 ### 4. Sign-ins
 
-One row per login present on this computer, with what to do about it: copy it from this computer, sign in on the machine after the build, hand the machine an API key, or skip. A browser or device flow starts as sign in on the machine; a file or a key starts as copy. Some things are never copied whatever you tick, and the row says so: private keys, GPG keys, `.env` files, `.netrc`. The Claude Code OAuth credential defaults to a sign-in on the machine because the vendor's terms forbid a host to collect or intermediate it. See [Sign-ins and the relay](/setup/sign-ins).
+One row per login present on this computer, with what to do about it: copy it from this computer, sign in during the build, sign in when you first need it, hand the machine an API key, or skip. A browser or device flow starts as sign in when you first need it, since running it during the build would wait on you; a file or a key starts as copy. Some things are never copied whatever you tick, and the row says so: private keys, GPG keys, `.env` files, `.netrc`. The Claude Code OAuth credential is never copied because the vendor's terms forbid a host to collect or intermediate it, so it is signed in on the machine rather than carried from here. See [Sign-ins and the relay](/setup/sign-ins).
 
 <Image src="/init/sign-ins.png" alt="The Sign-ins screen: agent logins, developer CLI logins and MCP servers, each row with where the login lives and whether it copies, signs in on the machine or is skipped" caption="Screen four. Each login with where it lives and what happens to it. Arrows change one row, space moves a group." />
 

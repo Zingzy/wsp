@@ -20,6 +20,9 @@ import {
   placeAddSheetWord,
   sentPairCode,
   shownPairCode,
+  joinToken,
+  readJoinToken,
+  JOIN_NO_KEY_REFUSAL,
   WORKSPACE_KIND_WORDS,
   WorkspaceKind,
   workspacesBlockedBy,
@@ -240,6 +243,31 @@ describe("a pairing code as a person reads it and as the host takes it", () => {
     expect(sentPairCode("QW4K-7PZX")).toBe("QW4K7PZX");
     expect(sentPairCode("qw4k-7pzx")).toBe("QW4K7PZX");
     expect(sentPairCode(shownPairCode("QW4K7PZX"))).toBe("QW4K7PZX");
+  });
+});
+
+describe("the one token a join line carries", () => {
+  const KEY = `SHA256:${"a".repeat(43)}`;
+
+  it("writes the code as a screen shows it and the key beside it, and reads both back", () => {
+    expect(joinToken("QW4K7PZX", KEY)).toBe(`QW4K-7PZX.${KEY}`);
+    expect(readJoinToken(joinToken("QW4K7PZX", KEY))).toEqual({ code: "QW4K7PZX", hostKey: KEY });
+  });
+
+  it("takes the code the way every other screen takes one, and leaves the key exactly as it was written", () => {
+    // The code is folded to the letters alone; the key is base64 and case is what tells two keys apart.
+    expect(readJoinToken(`  qw4k-7pzx.${KEY}  `)).toEqual({ code: "QW4K7PZX", hostKey: KEY });
+    expect(readJoinToken(`QW4K-7PZX.SHA256:aB+/cD`).hostKey).toBe("SHA256:aB+/cD");
+  });
+
+  it("answers no key for a token that carries none, which is what the join refuses on", () => {
+    expect(readJoinToken("QW4K-7PZX")).toEqual({ code: "QW4K7PZX" });
+    expect(readJoinToken("QW4K-7PZX.")).toEqual({ code: "QW4K7PZX" });
+    expect(JOIN_NO_KEY_REFUSAL).toContain("wsp add");
+  });
+
+  it("splits at the first mark, so a key holding one is read whole", () => {
+    expect(readJoinToken(`QW4K-7PZX.SHA256:a.b`).hostKey).toBe("SHA256:a.b");
   });
 });
 

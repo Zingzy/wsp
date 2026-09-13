@@ -174,9 +174,6 @@ pub(crate) struct Listener {
     pub(crate) out: Outbound,
 }
 
-/// How often the two samplers read the machine when no flag says otherwise, as the node daemon's do.
-const SAMPLER_INTERVAL_MS: u64 = 2000;
-
 /// What every socket's handler reads: the options as given, the root the hello announces, the ptys and their mode
 /// watcher, and every authed unscoped socket for the events the daemon pushes without being asked.
 pub(crate) struct Ctx {
@@ -262,7 +259,7 @@ impl Ctx {
             return Ok(Arc::clone(sampler));
         }
         let kind = readings::readings_for(&self.options.kind, std::env::consts::OS)?;
-        let interval = Duration::from_millis(self.options.sys_interval_ms.unwrap_or(SAMPLER_INTERVAL_MS));
+        let interval = Duration::from_millis(self.options.sys_interval_ms.unwrap_or(numbers::SAMPLER_INTERVAL_MS));
         let sampler = sys::SysSampler::new((kind.metrics)(&self.readings_options()), interval, Arc::clone(&self.log));
         *held = Some(Arc::clone(&sampler));
         Ok(sampler)
@@ -286,7 +283,7 @@ impl Ctx {
         let opts = proc::ProcSamplerOptions {
             self_pid: std::process::id(),
             ptys,
-            interval: Duration::from_millis(self.options.proc_interval_ms.unwrap_or(SAMPLER_INTERVAL_MS)),
+            interval: Duration::from_millis(self.options.proc_interval_ms.unwrap_or(numbers::SAMPLER_INTERVAL_MS)),
             now: Arc::new(sys::now_ms),
             log: Arc::clone(&self.log),
         };

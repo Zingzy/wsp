@@ -9,7 +9,7 @@
 // happen. Esc hides it with the job running on.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, PLACES_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, PLACES_WORDS, KEY_REFUSED, KEY_UNCHECKED, SIGN_IN_ANSWERS, signInChoices, SIGN_IN_STAGE_ID, GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, MACHINE_SWEEP_LINE, MCP_ADDED_WORD, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initBuildRows, initDiskLine, initDiskOverLine, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, initStageCountLine, initTallyLine, initButtonLine, initProgressLine, initSignInLine, keyRefusedLine, keyUncheckedLine, snapshotStageLine, type EventUnion, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { RequestError, type Api } from "../src/protocol/client.js";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setup/keyRefusedJob.js";
 import { FOLDER_GHOST } from "../src/files/FolderPathField.js";
@@ -52,12 +52,8 @@ const TOOLS: InitScreen = {
   tally: "tools",
 };
 const ALSO: InitScreen = { id: "also", title: "Also on this Mac", top: "What else this Mac brings", items: [{ id: "brew/jq", label: "jq", size: 2 * MIB, group: "Homebrew", detail: [] }], ticks: [], answers: {}, footer: [], tally: "more" };
-const CHOICES = [
-  { value: "copy", label: "copy from this Mac" },
-  { value: "machine", label: "sign in on the machine" },
-  { value: "key", label: "API key" },
-  { value: "skip", label: "skip" },
-];
+/** The answers the host sends, read off the protocol so the fixture cannot drift from what a row really carries. */
+const CHOICES = [...signInChoices("darwin")];
 const LOGINS: InitScreen = {
   id: "logins",
   title: "Sign-ins",
@@ -579,7 +575,10 @@ describe("the cloud setup sheet", () => {
     const picker = claude.querySelector<HTMLElement>("[data-k=answer]")!;
     expect(picker.getAttribute("aria-haspopup")).toBe("menu");
     expect(picker.getAttribute("data-value")).toBe("machine");
-    expect(picker.textContent).toContain("sign in on the machine");
+    // The picker draws the word the host sent, which is the protocol's own for that answer.
+    expect(picker.textContent).toContain(SIGN_IN_ANSWERS.machine.label("darwin"));
+    // Every answer the host offers is on the menu, the one a browser-only row opens on among them.
+    expect(CHOICES.map(c => c.value)).toContain("later");
     expect(claude.querySelector("[data-k=why]")!.textContent).toBe("Keychain");
     // The full path rides in the app's own tooltip, not the browser's.
     expect(claude.querySelector("[data-k=why]")!.getAttribute("data-slot")).toBe("tooltip-trigger");

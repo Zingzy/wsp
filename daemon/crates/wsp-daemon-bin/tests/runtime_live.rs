@@ -173,10 +173,15 @@ impl World {
     }
 
     async fn create(&mut self, spec: Value) -> String {
+        self.created(spec).await["id"].as_str().unwrap().to_owned()
+    }
+
+    /// The whole handle the create answered with, for the cases that read what it says beside the id.
+    async fn created(&mut self, spec: Value) -> Value {
         let reply = self.ok("machine.create", json!({ "spec": spec })).await;
-        let id = reply["machine"]["id"].as_str().unwrap().to_owned();
-        self.made.push(id.clone());
-        id
+        let machine = reply["machine"].clone();
+        self.made.push(machine["id"].as_str().unwrap().to_owned());
+        machine
     }
 
     async fn exec(&self, id: &str, cmd: &str) -> (i64, String, String) {
@@ -239,6 +244,10 @@ async fn builds_the_container_from_the_spec_image_limits_labels_envs_and_the_boo
     }
     let mut w = World::open().await;
     let started = Instant::now();
+    // Two cores of a box that keeps one, so this reads the box rather than a number: a runner with two cores gives
+    // one and the assertions below follow it.
+    let cores = w.ok("machine.capacity", json!({})).await["cores"].as_f64().unwrap();
+    let given_cpu = 2.0f64.min((cores - 1.0).max(1.0));
     let id = w.create(spec(json!({ "cpu": 2, "memMb": 1024, "envs": { "WSP_TOKEN": "t" }, "idempotencyKey": format!("live-665-build-{}", checkout_key()) }))).await;
     let ready = started.elapsed();
     eprintln!("create to ready: {} ms", ready.as_millis());
@@ -248,7 +257,7 @@ async fn builds_the_container_from_the_spec_image_limits_labels_envs_and_the_boo
     assert_eq!(code, 0);
     let lines: Vec<&str> = out.lines().collect();
     assert_eq!(lines[0], "1073741824", "{out}");
-    assert_eq!(lines[1], "200000 100000", "{out}");
+    assert_eq!(lines[1], format!("{} 100000", (given_cpu * 100_000.0) as i64), "{out}");
     assert_eq!(lines[2], "0", "{out}");
     assert_eq!(lines[3], "t");
     assert_eq!(lines[4], format!("wsp-live-665-build-{}", checkout_key()));
@@ -277,12 +286,23 @@ async fn holds_a_machines_size_to_what_the_box_has() {
     }
     let mut w = World::open().await;
     let capacity = w.ok("machine.capacity", json!({})).await;
-    let id = w.create(spec(json!({ "cpu": 512, "memMb": 9_000_000 }))).await;
+    let cores = capacity["cores"].as_f64().unwrap();
+    let made = w.created(spec(json!({ "cpu": 512, "memMb": 9_000_000 }))).await;
+    let id = made["id"].as_str().unwrap().to_owned();
+    // The box keeps a core and a gigabyte of its own, and the answer says what it gave instead.
     let shape = w.ok("machine.describe", json!({ "machineId": id })).await["shape"].clone();
-    assert_eq!(shape["cpu"].as_f64(), capacity["cores"].as_f64());
+    assert_eq!(shape["cpu"].as_f64(), Some((cores - 1.0).max(1.0)));
     assert_eq!(shape["memMb"], capacity["machineMemMb"]);
+    let notice = made["notice"].as_str().unwrap_or_default().to_owned();
+    assert!(notice.contains("cpu clamped to") && notice.contains("memory clamped to"), "{notice}");
     let (_, out, _) = w.exec(&id, "cat /sys/fs/cgroup/memory.max").await;
     assert_eq!(out.trim(), (capacity["machineMemMb"].as_u64().unwrap() * 1024 * 1024).to_string());
+    // The room the doctor reads counts this fork at the size the box gave it, beside whatever else is here.
+    let after = w.ok("machine.capacity", json!({})).await;
+    let taken_cpu = after["cpuTaken"].as_f64().unwrap() - capacity["cpuTaken"].as_f64().unwrap();
+    let taken_mem = after["memTakenMb"].as_u64().unwrap() - capacity["memTakenMb"].as_u64().unwrap();
+    assert_eq!(taken_cpu, (cores - 1.0).max(1.0));
+    assert_eq!(taken_mem, capacity["machineMemMb"].as_u64().unwrap());
     w.close().await;
 }
 
@@ -424,6 +444,44 @@ async fn lists_by_our_labels_and_answers_the_size_the_listing_carries() {
     let all = w.ok("machine.list", json!({ "labels": { "wsp-owner": live_owner() } })).await;
     assert_eq!(all["machines"].as_array().unwrap().len(), 2);
     assert!(all["machines"].as_array().unwrap().iter().any(|m| m["id"] == other && m.get("size").is_none()));
+    w.close().await;
+}
+
+#[tokio::test]
+async fn a_reading_of_a_workspace_is_what_its_cgroup_its_record_and_its_network_say() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let capacity = w.ok("machine.capacity", json!({})).await;
+    let id = w.create(spec(json!({ "cpu": 1, "memMb": 1024 }))).await;
+    // Something for the cgroup to have counted: a second of a core, and a process that stays.
+    w.exec(&id, "nohup sleep 300 > /dev/null 2>&1 & timeout 1 sh -c 'while :; do :; done'; true").await;
+    let reading = w.ok("machine.metrics", json!({ "machineId": id })).await["reading"].clone();
+    assert_eq!(reading["state"], "running");
+    // One core is under the clamp on any box that runs workspaces at all, which keeps one for itself.
+    assert_eq!(reading["cpu"].as_f64(), Some(1.0));
+    assert_eq!(reading["memMb"], 1024.min(capacity["machineMemMb"].as_u64().unwrap()));
+    let mem = reading["memBytes"].as_u64().unwrap();
+    assert!(mem > 0 && mem <= reading["memMb"].as_u64().unwrap() * 1024 * 1024, "{reading}");
+    // The busy second is a second of processor time, give or take the scheduler.
+    assert!(reading["cpuUsageUsec"].as_u64().unwrap() > 500_000, "{reading}");
+    assert!(reading["uptimeMs"].as_u64().unwrap() > 0, "{reading}");
+    // The init, the sleep, and whatever the shell left behind it.
+    assert!(reading["procs"].as_u64().unwrap() >= 2, "{reading}");
+    assert_eq!(reading["address"], w.network(&id).address.to_string());
+    assert_eq!(reading["cgroup"], format!("{CGROUPS}/{id}"));
+    assert_eq!(reading["upper"], root().join("run").join(&id).join("upper").to_string_lossy().as_ref());
+    // A workspace that is stopped keeps its sizes and its paths and has no live figures to give.
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    let napping = w.ok("machine.metrics", json!({ "machineId": id })).await["reading"].clone();
+    assert_eq!(napping["state"], "paused");
+    assert_eq!(napping["memMb"], reading["memMb"]);
+    assert_eq!(napping["cgroup"], reading["cgroup"]);
+    for figure in ["memBytes", "cpuUsageUsec", "uptimeMs", "procs"] {
+        assert!(napping.get(figure).is_none(), "{figure} in {napping}");
+    }
+    w.ok("machine.resume", json!({ "machineId": id })).await;
     w.close().await;
 }
 

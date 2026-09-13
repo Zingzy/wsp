@@ -243,7 +243,7 @@ impl ProcFsSource {
             cmdline: k.cmdline.clone(),
             cpu,
             rss: st.rss_pages * state.page_size,
-            started_at: state.btime.unwrap_or(0) * 1000 + st.starttime as i64 * 10,
+            started_at: state.btime.unwrap_or(0) * 1000 + st.starttime as i64 * numbers::STAT_TICK_MS as i64,
             pty: pty.cloned(),
         })
     }

@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { CATALOG, CATALOG_AGENTS, CATALOG_TOOLS, THREAD_AGENTS, type CatalogEntry } from "@wsp/catalog";
 import { computeRecipe, type ManifestEntry } from "@wsp/collect";
-import type { Recipe } from "@wsp/protocol";
+import { SIGN_IN_LATER, type Recipe } from "@wsp/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
 import {
   AGENT_LOGINS,
@@ -153,9 +153,10 @@ describe("the sign-ins screen", () => {
     expect(s.items.filter(i => i.group === AGENT_LOGINS).map(i => i.label)).toEqual(["Claude Code login", "Codex login", "Hermes Agent login", "Hermes Agent API keys"]);
     expect(s.items.filter(i => i.group === CLI_LOGINS).map(i => i.label)).toEqual(["GitHub CLI login", "kubectl config", "1Password CLI"]);
     expect(s.items.every(i => i.choices !== undefined && i.choices.length > 0)).toBe(true);
-    // Copy where there is something here to copy, the sign-in where the catalog has a flow, the key where the tool reads one.
-    expect(words(s, "logins/claude")).toEqual(["copy", "machine", "key", "skip"]);
-    expect(words(s, "logins/codex")).toEqual(["copy", "machine", "key", "skip"]);
+    // Copy where there is something here to copy, the two sign-in answers where the catalog has a flow (during the
+    // build, or left to first use), the key where the tool reads one.
+    expect(words(s, "logins/claude")).toEqual(["copy", "machine", "later", "key", "skip"]);
+    expect(words(s, "logins/codex")).toEqual(["copy", "machine", "later", "key", "skip"]);
     // hermes stops on a menu only the person can work through, so the machine is no road for it: copy or skip.
     expect(words(s, "logins/hermes")).toEqual(["copy", "skip"]);
     expect(s.items.find(i => i.id === "logins/hermes")!.detail).toContain("asks questions only you can answer");
@@ -163,9 +164,14 @@ describe("the sign-ins screen", () => {
     // A row the catalog locked out is here with its reason and skip as its only answer.
     expect(words(s, "logins/op")).toEqual(["skip"]);
     expect(s.items.find(i => i.id === "logins/op")).toMatchObject({ why: "nothing to copy here", detail: ["needs the 1Password desktop app; the machine uses a service account token", "this one is left alone"] });
+    // A row with a file here to copy starts on the copy; every browser-only row starts left to first use, since
+    // running it during the build would wait on the person and the build waits on nobody.
     expect([...s.initial].sort()).toEqual([
-      ["logins/claude", "machine"], ["logins/codex", "machine"], ["logins/gh", "machine"], ["logins/hermes", "copy"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
+      ["logins/claude", "later"], ["logins/codex", "later"], ["logins/gh", "later"], ["logins/hermes", "copy"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
     ]);
+    // The words the row shows for those two answers, which are the protocol's and nobody else's.
+    const gh = s.items.find(i => i.id === "logins/gh")!;
+    expect(gh.choices!.filter(c => c.value === "machine" || c.value === "later").map(c => c.label)).toEqual(["sign in during the build", SIGN_IN_LATER]);
     // No row on this screen is about this computer's own config, and no sentence explains one choice against another.
     expect(s.items.some(i => i.id.startsWith("wsp-tools/"))).toBe(false);
     expect(s.items.flatMap(i => i.detail).join(" ")).not.toMatch(/API key|instead of|rather than/);
@@ -221,13 +227,13 @@ describe("the sign-ins screen", () => {
     const one = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir).items.find(i => i.id === "logins/gh")!;
     expect(one.detail).toContain("signed in here as Zingzy");
     // Two logins and none marked in use: there is nothing to pick between, so the copy is not offered at all and
-    // the row says why. A saved copy answer has no choice to land on and falls to the sign-in on the machine.
+    // the row says why. A saved copy answer has no choice to land on and falls to the row's own default.
     writeFileSync(join(dir, ".config", "gh", "hosts.yml"), "github.com:\n    git_protocol: ssh\n    users:\n        other:\n        Zingzy:\n");
     const screen = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir);
     const neither = screen.items.find(i => i.id === "logins/gh")!;
-    expect(neither.choices!.map(c => c.value)).toEqual(["machine", "skip"]);
+    expect(neither.choices!.map(c => c.value)).toEqual(["machine", "later", "skip"]);
     expect(neither.detail).toContain("the file names no login in use here; sign in on the machine");
-    expect(screen.initial.get("logins/gh")).toBe("machine");
+    expect(screen.initial.get("logins/gh")).toBe("later");
     // A row with no per-account item answers as it always did: the copy names the computer and nothing else.
     const kube = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", dir).items.find(i => i.id === "logins/kube")!;
     expect(kube.choices!.find(c => c.value === "copy")!.label).toBe("copy from this Mac");
@@ -236,7 +242,7 @@ describe("the sign-ins screen", () => {
   it("a group header counts how its rows answered, in the choice order", () => {
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", HOME_HERE);
     const agents = s.items.filter(i => i.group === AGENT_LOGINS);
-    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  2 sign in  0 API key  0 skip");
+    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  0 during the build  2 when you need it  0 API key  0 skip");
   });
 
   it("the disk estimate counts what the build takes before anyone answers", () => {
@@ -468,7 +474,7 @@ describe("the whole flow", () => {
     if (picked === "cancel") return;
     // Four keypresses, and every answer is the one each screen opened on.
     expect(picked.recipe.rows.filter(r => r.on).map(r => r.id)).toEqual(RECIPE.rows.filter(r => r.on).map(r => r.id));
-    expect([...picked.logins].sort()).toEqual([["logins/claude", "machine"], ["logins/gh", "machine"]]);
+    expect([...picked.logins].sort()).toEqual([["logins/claude", "later"], ["logins/gh", "later"]]);
     expect([...picked.wspTools]).toEqual([]);
   });
 
@@ -559,8 +565,8 @@ describe("the whole flow", () => {
     o.input.write(KEY.enter);
     await settle(20);
     const at = () => o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
-    expect(at()).toMatch(/▾ Agents\s+0 copy\s+1 sign in\s+0 API key\s+0 skip\n┃\s+Claude Code login\s+Keychain: Claude Code-credentials\s+sign in on the machine\n/);
-    expect(at()).toMatch(/▾ Developer CLIs\s+0 copy\s+1 sign in\s+0 skip\n/);
+    expect(at()).toMatch(/▾ Agents\s+0 copy\s+0 during the build\s+1 when you need it\s+0 API key\s+0 skip\n┃\s+Claude Code login\s+Keychain: Claude Code-credentials\s+sign in when you first need it\n/);
+    expect(at()).toMatch(/▾ Developer CLIs\s+0 copy\s+0 during the build\s+1 when you need it\s+0 skip\n/);
     expect(at()).toContain("┗  ← → choose • enter next • esc back");
     expect(at()).not.toMatch(/[●○] all/);
     // A sign-in row carries no box: its answer is the word, and one of the words is skip.
@@ -573,7 +579,11 @@ describe("the whole flow", () => {
     expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+API key/);
     o.input.write(KEY.left);
     await settle();
-    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+sign in on the machine/);
+    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+sign in when you first need it/);
+    // Left again reaches the answer that opts the row into signing in while the build runs.
+    o.input.write(KEY.left);
+    await settle();
+    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+sign in during the build/);
     o.input.write(KEY.enter);
     await settle(20);
     o.input.write(KEY.enter);

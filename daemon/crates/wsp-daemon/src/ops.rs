@@ -14,7 +14,7 @@ use serde_json::Value;
 use wsp_frames::{
     numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, InboxRescanReply, ManifestGetReply,
     ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PortsWatchReply, PtyAttachReply, PtyCreateReply, PtyListReply, Reply,
-    RequestId, DAEMON_OPS, MACHINE_OPS,
+    RequestId, DAEMON_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
@@ -28,7 +28,7 @@ use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound, Outgoin
 type Detach = Box<dyn FnOnce() + Send>;
 
 /// Which road a socket came in on: dialled by a client of this machine, or opened outward by this place to its
-/// host. The leave op and the machine ops are the link's alone.
+/// host. The leave op and every machine op but the two read-only ones are the link's alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Road {
     Inbound,
@@ -168,6 +168,10 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
             Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(machine_answer(ctx, id, name, &frame).await),
             _ => {}
         }
+    } else if let Some(name) = op.filter(|name| MACHINE_OPS_ON_ANY_ROAD.contains(name)) {
+        // A socket that dialled in holds this daemon's token, so a person at this computer may ask it what it is
+        // running and how one workspace is doing. Both only read; the rest of the machine ops stay the link's.
+        return Outgoing::Text(machine_answer(ctx, id, name, &frame).await);
     }
     Outgoing::Text(handle_op(conn, ctx, &frame, id, op).await)
 }
@@ -175,7 +179,8 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
 async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<RequestId>, op: Option<&str>) -> String {
     match op {
         Some("ping") => ok(id),
-        // The leave op and the machine ops are the link's; one sentence for the one rule, as the node daemon says it.
+        // The leave op and every machine op that does anything are the link's; one sentence for the one rule, as the
+        // node daemon says it. The two that only read were answered above, on whichever road they came in on.
         Some(name) if name == "place.leave" || MACHINE_OPS.contains(&name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
@@ -575,7 +580,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_only_ops_are_forbidden_on_an_inbound_socket() {
+    async fn link_only_ops_are_forbidden_on_an_inbound_socket_but_the_two_that_only_read() {
         let b = bench();
         let (c, _rx) = conn(None);
         assert_eq!(
@@ -583,9 +588,21 @@ mod tests {
             json!({"id": 1, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD})
         );
         for op in MACHINE_OPS {
+            if MACHINE_OPS_ON_ANY_ROAD.contains(&op) {
+                continue;
+            }
             assert_eq!(
                 reply(&b, &c, json!({"id": 2, "op": op})).await,
                 json!({"id": 2, "ok": false, "code": "forbidden", "error": "not on this road"}),
+                "{op}"
+            );
+        }
+        // The listing and one workspace's reading are answered on this road: a client here holds the daemon's own
+        // token and neither op drives anything. This bench holds no runtime, so the answer is the backend's.
+        for op in MACHINE_OPS_ON_ANY_ROAD {
+            assert_eq!(
+                reply(&b, &c, json!({"id": 3, "op": op, "machineId": "wsp-x"})).await,
+                json!({"id": 3, "ok": false, "error": format!("this computer's backend has no {op}")}),
                 "{op}"
             );
         }
@@ -602,9 +619,13 @@ mod tests {
                 "{op}"
             );
         }
-        // An inbound socket on the same daemon still gets the road refusal.
+        // An inbound socket on the same daemon is answered the two that read and refused the rest.
         let (inbound, _rx2) = conn(None);
-        assert_eq!(reply(&b, &inbound, json!({"id": 4, "op": "machine.list"})).await["error"], words::NOT_ON_THIS_ROAD);
+        assert_eq!(
+            reply(&b, &inbound, json!({"id": 4, "op": "machine.list"})).await["error"],
+            "this computer's backend has no machine.list"
+        );
+        assert_eq!(reply(&b, &inbound, json!({"id": 4, "op": "machine.kill"})).await["error"], words::NOT_ON_THIS_ROAD);
         let home = tempfile::tempdir().unwrap();
         let at = wsp_frames::place_daemon_paths(home.path());
         std::fs::create_dir_all(&at.wsp).unwrap();
@@ -641,13 +662,22 @@ mod tests {
         .unwrap();
         assert_eq!(lost, json!({"id": 2, "ok": false, "error": "no such workspace: wsp-x", "kind": "missing", "status": 404}));
         assert!(runtime_root.path().join("layers").is_dir(), "the store is opened under the runtime root");
-        // The same op inbound is still the road refusal.
+        // The same op inbound is answered by the same runtime, and the reading of a workspace it has not got is
+        // that workspace missing rather than the road refusal; an op that drives something is still refused.
         let (inbound, _rx2) = conn(None);
-        assert_eq!(
-            serde_json::from_str::<Value>(handle(&inbound, &ctx, &json!({"id": 3, "op": "machine.list"}).to_string()).await.text())
-                .unwrap()["error"],
-            words::NOT_ON_THIS_ROAD
-        );
+        let listed: Value =
+            serde_json::from_str(handle(&inbound, &ctx, &json!({"id": 3, "op": "machine.list"}).to_string()).await.text()).unwrap();
+        assert_eq!(listed, json!({"id": 3, "ok": true, "machines": []}));
+        let read: Value = serde_json::from_str(
+            handle(&inbound, &ctx, &json!({"id": 4, "op": "machine.metrics", "machineId": "wsp-x"}).to_string()).await.text(),
+        )
+        .unwrap();
+        assert_eq!(read, json!({"id": 4, "ok": false, "error": "no such workspace: wsp-x", "kind": "missing", "status": 404}));
+        let refused: Value = serde_json::from_str(
+            handle(&inbound, &ctx, &json!({"id": 5, "op": "machine.pause", "machineId": "wsp-x"}).to_string()).await.text(),
+        )
+        .unwrap();
+        assert_eq!(refused["error"], words::NOT_ON_THIS_ROAD);
     }
 
     #[tokio::test]

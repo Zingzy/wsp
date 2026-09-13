@@ -391,19 +391,32 @@ async fn on_the_link_the_machine_ops_are_the_runtimes_to_answer_and_inbound_the_
     // The store's listings answer from the runtime too, empty on a fresh root.
     let later = ask(&mut ws, 32, "machine.listSnapshots", &mut events).await;
     assert_eq!(later, json!({"id": 32, "ok": true, "snapshots": []}));
-    // The same op on the place's own door, from a client holding its token, is not the link's to answer.
+    // The same op on the place's own door, from a client holding its token, is answered exactly as the link's was:
+    // the listing only reads, so which road it came in on makes no difference to it. Whatever this box answers on
+    // the link is what is expected here, so the case reads the same on a box with a runtime and on one without.
     let (mut inbound, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{}/", d.port)).await.unwrap();
     inbound.send(Message::text(json!({"id": 1, "op": "auth", "token": "link-token"}).to_string())).await.unwrap();
-    let mut refused = None;
     inbound.send(Message::text(json!({"id": 2, "op": "machine.list"}).to_string())).await.unwrap();
-    while let Some(Ok(Message::Text(text))) = inbound.next().await {
+    let mut listed = answer.clone();
+    listed["id"] = json!(2);
+    assert_eq!(reply_with_id(&mut inbound, 2).await, listed);
+    // An op that does something to a workspace is still the link's alone.
+    inbound.send(Message::text(json!({"id": 3, "op": "machine.kill", "machineId": "wsp-x"}).to_string())).await.unwrap();
+    assert_eq!(reply_with_id(&mut inbound, 3).await, json!({"id": 3, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}));
+}
+
+/// The reply to one request off a socket, the events before it skipped.
+async fn reply_with_id<S>(socket: &mut tokio_tungstenite::WebSocketStream<S>, id: u64) -> Value
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    while let Some(Ok(Message::Text(text))) = socket.next().await {
         let frame: Value = serde_json::from_str(&text).unwrap();
-        if frame["id"] == 2 {
-            refused = Some(frame);
-            break;
+        if frame["id"] == id {
+            return frame;
         }
     }
-    assert_eq!(refused.unwrap(), json!({"id": 2, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}));
+    panic!("the socket closed before it answered {id}")
 }
 
 #[tokio::test]

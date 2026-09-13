@@ -24,10 +24,11 @@ use tokio::sync::Mutex;
 use wsp_frames::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineRoads,
-    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
-    MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PauseMode, PlaceCapacity, PlaceImage,
-    PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, WorkspaceSize,
+    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
+    MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
+    MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
+    PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
+    TemplateRow, TemplateStatus, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
@@ -37,6 +38,7 @@ use crate::freeze;
 use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
+use crate::size::{size_on_box, BoxFacts, SizeOnBox};
 use crate::snapshot;
 use crate::store::{self, Chain, Snapshot, Store, Swept};
 use crate::{answer_machine_op, no_backend_refusal};
@@ -45,9 +47,6 @@ use crate::{answer_machine_op, no_backend_refusal};
 pub const OFFER: &str = "runtime";
 /// The image a workspace boots from when nothing names one: the same long term release the goldens build on.
 pub const BASE_IMAGE: &str = "ubuntu:24.04";
-/// The most of the box one workspace's memory cap may name: half leaves the daemon, the person's own processes
-/// and the page cache the rest.
-pub const BOX_MEMORY_SHARE: f64 = 0.5;
 /// The kernel takes 64 bytes of host name and refuses the boot above it.
 pub const HOSTNAME_MAX: usize = 63;
 /// Where a sealed image keeps the script that keeps its daemon running; the boot runs it when it is there.
@@ -147,29 +146,10 @@ impl From<store::Error> for OpError {
     }
 }
 
-/// What the box has, read once at open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BoxFacts {
-    pub cores: u64,
-    pub mem_mb: u64,
-}
-
-impl BoxFacts {
-    fn read() -> BoxFacts {
-        let cores = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
-        let meminfo = fs::read_to_string("/proc/meminfo").unwrap_or_default();
-        let mem_kb: u64 = meminfo
-            .lines()
-            .find_map(|line| line.strip_prefix("MemTotal:"))
-            .and_then(|rest| rest.trim().trim_end_matches("kB").trim().parse().ok())
-            .unwrap_or(0);
-        BoxFacts { cores, mem_mb: mem_kb / 1024 }
-    }
-
-    /// The most one workspace's cap may name here.
-    fn machine_mem_mb(&self) -> u64 {
-        (self.mem_mb as f64 * BOX_MEMORY_SHARE).floor() as u64
-    }
+/// The handle a create answers with, carrying the sentence about the size the box gave where it gave another.
+fn noticed(mut handle: MachineHandle, notice: Option<String>) -> MachineHandle {
+    handle.notice = notice;
+    handle
 }
 
 pub struct Ops {
@@ -387,13 +367,7 @@ impl Ops {
                     },
                 })
             }
-            MachineOp::Metrics { machine_id } => {
-                let record = self.running(&machine_id)?;
-                let cgroup = self.layout.cgroup_dir(&record.id);
-                freeze::memory_current(&cgroup)?;
-                freeze::cpu_usage_usec(&cgroup)?;
-                body(Empty {})
-            }
+            MachineOp::Metrics { machine_id } => body(MachineReadingReply { reading: self.reading(&self.record(&machine_id)?) }),
             MachineOp::DaemonAnswers { machine_id, timeout_ms } => {
                 let record = self.running(&machine_id)?;
                 let result = self.exec(&record.id, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms)).await?;
@@ -537,8 +511,9 @@ impl Ops {
 
     pub fn capacity(&self) -> Result<PlaceCapacity, OpError> {
         let mut counts = MachineCounts { running: 0, paused: 0 };
-        let mut taken_mb = 0;
-        // A frozen workspace keeps every byte it holds and counts at its cap; a stopped one holds nothing.
+        let (mut taken_mb, mut taken_cpu) = (0, 0.0);
+        // A frozen workspace keeps every byte it holds and every core it was given and counts at its cap; a
+        // stopped one holds nothing.
         for record in self.records()? {
             match self.state_of(&record) {
                 MachineState::Gone => continue,
@@ -547,6 +522,7 @@ impl Ops {
             }
             if runtime::alive(&record.init) {
                 taken_mb += record.mem_mb.unwrap_or(0);
+                taken_cpu += record.cpu.unwrap_or(0.0);
             }
         }
         let machine_mem_mb = self.facts.machine_mem_mb();
@@ -564,19 +540,19 @@ impl Ops {
             mem_mb: self.facts.mem_mb,
             mem_room_mb: machine_mem_mb.saturating_sub(taken_mb),
             machine_mem_mb,
+            cpu_taken: Some(taken_cpu),
+            mem_taken_mb: Some(taken_mb),
             disk_free_bytes,
             images,
             machines: counts,
         })
     }
 
-    /// The size this box can give, out of the one asked for; what a seal records is what the box built.
-    pub fn size_on_box(&self, cpu: Option<f64>, mem_mb: Option<u64>) -> (Option<f64>, Option<u64>) {
-        (cpu.map(|c| c.min(self.facts.cores as f64)), mem_mb.map(|m| m.min(self.facts.machine_mem_mb())))
-    }
-
     async fn create(&self, spec: MachineSpec) -> Result<MachineHandle, OpError> {
         let image = spec.from_snapshot.clone().or_else(|| spec.template.clone()).unwrap_or_else(|| BASE_IMAGE.to_owned());
+        // Read before the claim below, so the answer to a create the first one already made carries the same
+        // sentence about the same size rather than going quiet on the second ask.
+        let size = size_on_box(&self.facts, spec.cpu, spec.mem_mb);
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
             None => format!("wsp-{}", store::random_word()),
@@ -588,12 +564,12 @@ impl Ops {
                 return Err(OpError::plain(format!("{}: {e}", dir.display())));
             }
             return match bundle::read_record(&self.layout.record(&id))? {
-                Some(record) => Ok(self.handle(&record, Some(true), None)),
+                Some(record) => Ok(noticed(self.handle(&record, Some(true), None), size.clamped)),
                 None => Err(OpError::plain(format!("workspace {id} is being created"))),
             };
         }
-        match self.build(&id, &image, &spec).await {
-            Ok(record) => Ok(self.handle(&record, None, None)),
+        match self.build(&id, &image, &spec, &size).await {
+            Ok(record) => Ok(noticed(self.handle(&record, None, None), size.clamped)),
             Err(e) => {
                 // A workspace that would not come up is ours and nobody else's: nothing of it stays behind.
                 let _ = self.remove(&id, None).await;
@@ -602,7 +578,7 @@ impl Ops {
         }
     }
 
-    async fn build(&self, id: &str, image: &str, spec: &MachineSpec) -> Result<Workspace, OpError> {
+    async fn build(&self, id: &str, image: &str, spec: &MachineSpec, size: &SizeOnBox) -> Result<Workspace, OpError> {
         // Held until the record is on disk, which is what makes the sweep keep the chain: a delete of the snapshot
         // or template the fork boots from waits here instead of taking the layer from under the mount.
         let _one_at_a_time = self.pulls.lock().await;
@@ -611,7 +587,6 @@ impl Ops {
             engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
         }
         let chain = self.resolve_chain(image).await?;
-        let (cpu, mem_mb) = self.size_on_box(spec.cpu, spec.mem_mb);
         let hostname: String = id.chars().take(HOSTNAME_MAX).collect();
         let mut labels = BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]);
         labels.extend(spec.labels.clone().unwrap_or_default());
@@ -622,8 +597,8 @@ impl Ops {
             chain,
             labels,
             envs: spec.envs.clone().unwrap_or_default(),
-            cpu,
-            mem_mb,
+            cpu: Some(size.cpu),
+            mem_mb: Some(size.mem_mb),
             created_at: store::now_iso(),
             init: Init { pid: 0, started: 0, boot_id: String::new() },
             engine,
@@ -882,7 +857,29 @@ impl Ops {
             seen,
             replayed,
             daemon_supervisor: Some(DaemonSupervisor::Entrypoint),
+            notice: None,
             roads: MachineRoads { preview_url: true, daemon_answers: true, put_bytes: true, describe: true, facts: false, metrics: true },
+        }
+    }
+
+    /// One workspace as this computer reads it now: the sizes its cgroup was written with, what it holds of them
+    /// this moment, and where its processes, its files and its address are. Every live figure is read where the
+    /// kernel keeps it and dropped where it cannot be had, since a workspace may stop between the listing and this
+    /// and a reading that refused for it would take the whole row with it; the sizes and the paths always answer.
+    fn reading(&self, record: &Workspace) -> MachineReading {
+        let cgroup = self.layout.cgroup_dir(&record.id);
+        let live = runtime::alive(&record.init);
+        MachineReading {
+            state: self.state_of(record),
+            cpu: record.cpu,
+            mem_mb: record.mem_mb,
+            mem_bytes: live.then(|| freeze::memory_current(&cgroup).ok()).flatten(),
+            cpu_usage_usec: live.then(|| freeze::cpu_usage_usec(&cgroup).ok()).flatten(),
+            uptime_ms: live.then(|| runtime::uptime_ms(&record.init).ok()).flatten(),
+            procs: live.then(|| freeze::pids_in(&cgroup).ok()).flatten(),
+            address: self.net.record(&record.id).ok().flatten().map(|network| network.address.to_string()),
+            cgroup: cgroup.display().to_string(),
+            upper: self.layout.upper(&record.id).display().to_string(),
         }
     }
 
@@ -1143,6 +1140,7 @@ pub fn stub(id: Option<RequestId>, op: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::size::LEAST_MEM_MB;
 
     #[test]
     fn the_id_word_is_what_youki_and_docker_both_take() {
@@ -1163,11 +1161,29 @@ mod tests {
         assert!(land_script("top", 1).contains("mkdir -p '/'"));
     }
 
+    /// The box the size rule is read against here, as the size module's own tests read it: two cores and four
+    /// gigabytes, the shape of the box a fork took whole.
+    fn small_box() -> BoxFacts {
+        BoxFacts { cores: 2, mem_mb: 4096 }
+    }
+
     #[test]
-    fn the_box_is_read_off_proc_and_the_size_is_held_to_it() {
-        let facts = BoxFacts::read();
-        assert!(facts.cores >= 1 && facts.mem_mb > 0);
-        assert_eq!(facts.machine_mem_mb(), (facts.mem_mb as f64 * BOX_MEMORY_SHARE).floor() as u64);
+    fn the_clamped_size_is_what_the_cgroup_is_written_with() {
+        let given = size_on_box(&small_box(), Some(2.0), Some(4096));
+        let spec = bundle::config_json(&Config {
+            hostname: "wsp-x",
+            args: &["/bin/true".to_owned()],
+            envs: &BTreeMap::new(),
+            cpu: Some(given.cpu),
+            mem_mb: Some(given.mem_mb),
+            cgroup: "/wsp/wsp-x",
+            init: Path::new("/bin/true"),
+            etc: Path::new("/tmp"),
+            engine: None,
+        });
+        // One core of every period, and half of the box's four gigabytes.
+        assert_eq!(spec["linux"]["resources"]["cpu"], serde_json::json!({ "quota": 100_000, "period": 100_000 }));
+        assert_eq!(spec["linux"]["resources"]["memory"], serde_json::json!({ "limit": 2_147_483_648u64 }));
     }
 
     #[test]
@@ -1200,9 +1216,11 @@ mod tests {
         let json = serde_json::to_value(&facts).unwrap();
         assert_eq!(json["pricing"]["snapshotStorage"], serde_json::json!({ "freeGb": 0.0, "usdPerGbMonth": 0.0, "billedFrom": "" }));
         assert!(json["pricing"].get("builderDiskGb").is_none());
-        let (cpu, mem) = ops.size_on_box(Some(9999.0), Some(u64::MAX));
-        assert_eq!((cpu, mem), (Some(ops.facts().cores as f64), Some(ops.facts().machine_mem_mb())));
-        assert_eq!(ops.size_on_box(None, Some(1)), (None, Some(1)));
+        let given = size_on_box(&ops.facts(), Some(9999.0), Some(u64::MAX));
+        assert_eq!((given.cpu, given.mem_mb), (ops.facts().machine_cpu(), ops.facts().machine_mem_mb()));
+        assert!(given.clamped.is_some());
+        let room = size_on_box(&ops.facts(), Some(1.0), Some(LEAST_MEM_MB));
+        assert_eq!((room.cpu, room.mem_mb, room.clamped), (1.0, LEAST_MEM_MB, None));
     }
 
     #[tokio::test]

@@ -4,8 +4,8 @@
 // the code the sheet opens with, and the join it follows on the runtime's
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, doorPortHeldLine, imageCopyStaysLine, placeAddSheetWord, placeNoDialLine, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, doorPortHeldLine, imageCopyStaysLine, joinToken, placeAddSheetWord, placeNoDialLine, readJoinToken, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -16,7 +16,8 @@ import { SettingsRow } from "../src/sidebar/SettingsRow.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
-const DOOR: PlaceDoorView = { port: 4420, addresses: ["http://192.168.1.20:4420"] };
+const HOST_KEY = `SHA256:${"k".repeat(43)}`;
+const DOOR: PlaceDoorView = { port: 4420, addresses: ["http://192.168.1.20:4420"], hostKey: HOST_KEY };
 
 /** A Linux box the ssh installer hands back: it runs Docker, so it can hold copies of the image. */
 const box: PlaceView = {
@@ -193,11 +194,13 @@ describe("the Add a computer sheet", () => {
     useStore.setState({ api: fake.api, places: [here] });
     render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
     await waitFor(() => expect(document.querySelector("[data-k='copy-address']")?.textContent).toBe("192.168.1.20:4420"));
-    expect(document.querySelector("[data-k='copy-code']")?.textContent).toBe("QW4K-7PZ1");
+    expect(document.querySelector("[data-k='copy-code']")?.textContent).toBe(joinToken("QW4K7PZ1", HOST_KEY));
     expect(screen.getByText(CODE_GOOD_LINE)).toBeTruthy();
     fireEvent.click(screen.getByText(PLACES_WORDS.sheet.noApp));
     await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.install)).toBeTruthy());
-    expect(screen.getByText("wsp join 192.168.1.20:4420 --code QW4K-7PZ1")).toBeTruthy();
+    // The terminal line carries one token: the code and the fingerprint of the key this host proves at the join,
+    // so the computer typing it can tell this host from anything else answering at that address.
+    expect(screen.getByText(`wsp join 192.168.1.20:4420 --code ${joinToken("QW4K7PZ1", HOST_KEY)}`)).toBeTruthy();
   });
 
   it("moves to the lines the join writes, then to the joined title and the row, and opens the workspace it made", async () => {
@@ -237,13 +240,35 @@ describe("the Add a computer sheet", () => {
     expect(scroller.nextElementSibling).toBe(popup.querySelector("[data-slot='sheet-footer']"));
   });
 
+  it("copies the same token off the Code row as the terminal line prints, and the join screen reads both halves back out of it", async () => {
+    const writeText = vi.fn(async (_text: string) => {});
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const fake = fakeApi();
+    useStore.setState({ api: fake.api, places: [here] });
+    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
+    await waitFor(() => expect(document.querySelector("[data-k='copy-code']")?.textContent).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: `Copy the ${PLACES_WORDS.sheet.code.toLowerCase()}` }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const copied = writeText.mock.calls[0]![0];
+    // One word, whichever road the person takes it by: the row a person copies and the line they paste into a
+    // terminal carry the same string.
+    fireEvent.click(screen.getByText(PLACES_WORDS.sheet.noApp));
+    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.joinLine("192.168.1.20:4420", copied))).toBeTruthy());
+    // And what the first-run join screen does with that field: the code the other host spends and the key it must
+    // prove, both read back out of the one thing that was copied.
+    expect(readJoinToken(copied)).toEqual({ code: "QW4K7PZ1", hostKey: HOST_KEY });
+    // Read whole, not ended in an ellipsis: a fingerprint a person cannot read is decoration.
+    expect(document.querySelector("[data-k='copy-code']")?.className).toContain("break-all");
+    expect(document.querySelector("[data-k='copy-code']")?.className).not.toContain("truncate");
+  });
+
   it("says the code expired at its own moment and mints another, and moves nothing else", async () => {
     const fake = fakeApi();
     useStore.setState({ api: fake.api, places: [here] });
     render(<AddComputerSheet onClose={() => {}} now={() => NOW + 700_000} />);
     await waitFor(() => expect(screen.getByText(CODE_EXPIRED_LINE)).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: PLACES_WORDS.sheet.newCode }));
-    await waitFor(() => expect(document.querySelector("[data-k='copy-code']")?.textContent).toBe("QW4K-7PZ2"));
+    await waitFor(() => expect(document.querySelector("[data-k='copy-code']")?.textContent).toBe(joinToken("QW4K7PZ2", HOST_KEY)));
   });
 
   it("lands a door this host could not open in the slot, and asks for no code behind it", async () => {

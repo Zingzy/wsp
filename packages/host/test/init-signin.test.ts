@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
 import { describe, expect, it } from "vitest";
-import { flowHooks, keyAsks, signInStage, stageLogins, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
+import { flowHooks, keyAsks, settledOutcomes, signInStage, stageLogins, type SignInFlow, type SignInStageOptions } from "../src/init-signin.js";
 import { fakePtyLink, type FakePty, type FakePtyLink } from "./fake-pty-link.js";
 import { loginOf } from "./signin-questions.js";
 
@@ -199,5 +199,24 @@ describe("what an answer means at build time", () => {
 
   it("Codex takes a key too, under its own variable", () => {
     expect(keyAsks(manifest, new Map([["logins/codex", "key"]]))).toEqual([{ name: "OPENAI_API_KEY", from: "the key Codex reads on the machine", tool: "codex", label: "Codex login" }]);
+  });
+
+  it("a login carrying no answer at all is one the stage signs in, never one it settles where it stands", async () => {
+    // Only an answer named in the table settles a row without running it; anything else, an absent answer included,
+    // is the stage's to sign in. A row dropped here would leave the build silent about a login it never ran.
+    const { choice: _none, ...BARE } = CLAUDE;
+    const settled = settledOutcomes([BARE, { ...GH, choice: "later" }], undefined, new PassThrough());
+    expect(settled.machine.map(([e]) => e.id)).toEqual(["logins/claude"]);
+    expect(settled.outcomes.map(r => r.state)).toEqual(["skipped", "deferred"]);
+
+    // And through the stage itself: the answerless row's own command runs on the machine.
+    const link = fakePtyLink();
+    link.script = (pty, line) => {
+      if (line.startsWith("exec ")) link.exit(pty, 0);
+    };
+    const st = stage(link, { logins: [BARE] });
+    const [r] = await st.run;
+    expect(r).toMatchObject({ state: "signed-in", exit: 0, command: "claude auth login" });
+    expect(link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r"]);
   });
 });

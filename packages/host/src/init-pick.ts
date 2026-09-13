@@ -2,15 +2,15 @@
 // The screens of wsp init on the catalog: the agents (the six, ticked when
 // used on this computer and wsp can run their threads), what they need (the whole
 // table of agents and tools, one row each with its size, over the totals and
-// the disk line), and the sign-ins and keys (logins that sign in on the
-// machine after the build listed, keys ticked to copy, and the wsp tools
+// the disk line), and the sign-ins and keys (a login listed with where its
+// sign-in happens, keys ticked to copy, and the wsp tools
 // offered to each agent here whose config the catalog knows). The recipe is
 // the state: catalog ids with a tick each; the collector's rows follow it.
 import type { Readable, Writable } from "node:stream";
 import { CATALOG_AGENTS, CATALOG_TOOLS, MCP_AGENTS, catalogEntry, type AgentEntry, type CatalogEntry, type Size, type ToolEntry, agentName as catalogName, sizeBytes } from "@wsp/catalog";
 import { LOGIN_CHOICES, withProject, type LoginChoice, type Manifest, type ManifestEntry, type Platform, type ProjectScan, floorApplies } from "@wsp/collect";
 import { estimateDisk, isMcpRow, NO_ACTIVE_LOGIN, parseMcpId, plural, type BrewTable, type DiskEstimate } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, copyNamesLogin, customRows, fmtBytes, initShownScreens, initStepCounter, loginsHereLine, thisComputer, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, SIGN_IN_ANSWERS, copyNamesLogin, customRows, fmtBytes, initShownScreens, initStepCounter, loginsHereLine, signInChoice, signInChoices, thisComputer, wspToolsRowId, type Recipe, type RecipeCustomRow, type RecipeRow } from "@wsp/protocol";
 import { copiedLogin } from "./init-import.js";
 import { mcpConfigFile } from "./mcp-install.js";
 import { GUTTER, card, colourDepth, isTTY, table, textPrompt } from "./init-layout.js";
@@ -21,7 +21,6 @@ import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, ty
 import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
 import { asksThePerson, hasLogin, loginWords, signInFor, type SignIn } from "./signin-table.js";
-import { SIGN_IN_WORDS, signInChoice, signInChoices } from "./signin-words.js";
 import type { ScanRow } from "./scan.js";
 
 /** The screens of a run, in order, with the one sentence each opens with; the build comes after them. */
@@ -173,12 +172,16 @@ function mcpWhy(e: ManifestEntry, manifest: Manifest): string {
   return agents.length === 0 ? "saved by mcp-remote" : `sign-ins mcp-remote saved for ${agents.join(", ")}`;
 }
 
-/** The answers a login row can take: a copy when there is something here to copy, the sign-in when the catalog has a
- * flow that runs there without stopping on the person, an API key when the tool reads one, and always skip. */
+/** The answers a login row can take: a copy when there is something here to copy, an API key when the tool reads one,
+ * and always skip. A catalog flow that runs on the machine without stopping on the person is offered both ways: left
+ * to the first time the tool is needed there, which is the default, or run during the build, which is the opt-in. */
 export function choicesFor(e: ManifestEntry, s: SignIn, platform: Platform): Choice[] {
   const allowed = new Set<string>(["skip"]);
   if (e.paths.length > 0 || e.bytes > 0) allowed.add("copy");
-  if (hasLogin(s) && !asksThePerson(s)) allowed.add("machine");
+  if (hasLogin(s) && !asksThePerson(s)) {
+    allowed.add("machine");
+    allowed.add("later");
+  }
   if (hasLogin(s) && s.keyEnv !== undefined) allowed.add("key");
   return signInChoices(platform).filter(c => allowed.has(c.value));
 }
@@ -187,7 +190,7 @@ export function choicesFor(e: ManifestEntry, s: SignIn, platform: Platform): Cho
 export function signInGroupLine(items: readonly SelectItem[], a: RungAnswer): string {
   const values = [...new Set(items.flatMap(i => (i.choices ?? []).map(c => c.value)))];
   return LOGIN_CHOICES.filter(c => values.includes(c))
-    .map(c => `${items.filter(i => answerOf(i, a.answers) === c).length} ${SIGN_IN_WORDS[c].short}`)
+    .map(c => `${items.filter(i => answerOf(i, a.answers) === c).length} ${SIGN_IN_ANSWERS[c].short}`)
     .join(GUTTER);
 }
 

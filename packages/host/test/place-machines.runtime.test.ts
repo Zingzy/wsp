@@ -105,25 +105,33 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
 
   it("builds the container from the spec: image, limits, labels, envs and the boot command", async () => {
     const key = `live-665-build-${process.pid}`;
+    // Two cores of a box that keeps one for itself, read off the box rather than written down here.
+    const cores = (await backend.capacity()).cores;
+    const givenCpu = Math.min(2, Math.max(1, cores - 1));
     const machine = await create({ kind: "sandbox", template: "ubuntu:24.04", cpu: 2, memMb: 1024, envs: { WSP_TOKEN: "t" }, labels: { row: "build" }, idempotencyKey: key });
     expect(machine.id).toBe(`wsp-${key}`);
     expect(await machine.state()).toBe("running");
     const seen = await exec(machine, "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.swap.max; echo $WSP_TOKEN; hostname; for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline; echo; done");
     expect(seen.exitCode).toBe(0);
     const lines = seen.stdout.split("\n");
-    expect(lines.slice(0, 5)).toEqual(["1073741824", "200000 100000", "0", "t", `wsp-${key}`]);
+    expect(lines.slice(0, 5)).toEqual(["1073741824", `${givenCpu * 100_000} 100000`, "0", "t", `wsp-${key}`]);
     expect(seen.stdout).toContain("exec sleep infinity");
     const again = await backend.create({ kind: "sandbox", idempotencyKey: key });
     expect(again.id).toBe(machine.id);
     expect(again.replayed).toBe(true);
-    expect(await machine.describe!()).toMatchObject({ cpu: 2, memMb: 1024 });
+    expect(await machine.describe!()).toMatchObject({ cpu: givenCpu, memMb: 1024 });
   }, 120_000);
 
-  it("holds a machine's size to what the box has, since a limit the box cannot keep takes its neighbours down", async () => {
+  it("leaves the box a core and a gigabyte whatever the fork asked for, and says so on the handle", async () => {
     const capacity = await backend.capacity();
     const machine = await create({ kind: "sandbox", cpu: 512, memMb: 9_000_000 });
-    expect(await machine.describe!()).toMatchObject({ cpu: capacity.cores, memMb: capacity.machineMemMb });
+    expect(await machine.describe!()).toMatchObject({ cpu: Math.max(1, capacity.cores - 1), memMb: capacity.machineMemMb });
     expect((await exec(machine, "cat /sys/fs/cgroup/memory.max")).stdout.trim()).toBe(String(capacity.machineMemMb * 1024 * 1024));
+    expect(machine.notice).toMatch(/cpu clamped to .* and memory clamped to /);
+    // The room the doctor reads back counts this fork at the size the box gave it.
+    const after = await backend.capacity();
+    expect(after.cpuTaken! - capacity.cpuTaken!).toBe(Math.max(1, capacity.cores - 1));
+    expect(after.memTakenMb! - capacity.memTakenMb!).toBe(capacity.machineMemMb);
   }, 60_000);
 
   it("answers exec with stdout, stderr and the exit code", async () => {

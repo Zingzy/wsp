@@ -12,7 +12,7 @@ import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
 import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -1738,8 +1738,9 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
 
-/** What the join screen sends the shell: the address as it is typed on the other screen, and the code beside it. */
-export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(64) });
+/** What the join screen sends the shell: the address as it is typed on the other screen, and the one token the
+ * join line carried beside it, which is the code and the fingerprint of that host's key. */
+export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(128) });
 export type JoinAsk = z.infer<typeof JoinAsk>;
 
 /** What this computer is to another wsp, read off its place file. */
@@ -1927,13 +1928,6 @@ export function goldenHead(manifest: GoldenManifest | undefined): GoldenVersion 
 export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">): { spec: { template: string } | { fromSnapshot: string }; marks: readonly "volatile"[] } {
   return v.templateId !== undefined ? { spec: { template: v.templateId }, marks: [] } : { spec: { fromSnapshot: v.snapshotId }, marks: ["volatile"] };
 }
-
-/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
- * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
- * `wsp recipe --signin` takes. */
-export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
-export const LoginChoice = z.enum(LOGIN_CHOICES);
-export type LoginChoice = z.infer<typeof LoginChoice>;
 
 /** What a build recorded a row installed: the version, read back off the builder once the row ran (a release's tag,
  * a package's version), and the archive's sha256 where the road hashed one. `latest` marks a row whose road installs
@@ -2880,6 +2874,9 @@ export const MachineHandle = z.object({
   seen: z.object({ state: MachineState, createdAt: z.string().optional() }).optional(),
   replayed: z.boolean().optional(),
   daemonSupervisor: DaemonSupervisor.optional(),
+  /** One sentence on a create whose size the computer would not give as asked, naming what it gave instead. The
+   * handle carries the size itself nowhere, so this is the whole of what the person is told, said once. */
+  notice: z.string().optional(),
   roads: z.object({ previewUrl: z.boolean(), daemonAnswers: z.boolean(), putBytes: z.boolean(), describe: z.boolean(), facts: z.boolean(), metrics: z.boolean() }),
 });
 export type MachineHandle = z.infer<typeof MachineHandle>;
@@ -2895,6 +2892,11 @@ export const PlaceCapacity = z.object({
    * clamped to. The room a fork takes is not the room the whole computer has, and the rule that says so is the
    * backend's own, so the number travels rather than the rule. */
   machineMemMb: z.number(),
+  /** What the machines on this computer hold of it right now, summed over the ones that are not stopped: the cores
+   * their quotas name and the memory their caps name. Absent from a backend that counts neither, which is what the
+   * room line reads before it says anything. */
+  cpuTaken: z.number().optional(),
+  memTakenMb: z.number().optional(),
   diskFreeBytes: z.number(),
   images: z.array(z.object({ id: z.string(), name: z.string().optional(), sizeBytes: z.number() })),
   machines: z.object({ running: z.number(), paused: z.number() }),
@@ -2978,6 +2980,25 @@ export const MachineSnapshotJobReply = z.object({ state: z.enum(["running", "don
 export type MachineSnapshotJobReply = z.infer<typeof MachineSnapshotJobReply>;
 export const MachineStateReply = z.object({ state: MachineState });
 export const MachineShapeReply = z.object({ shape: MachineShape });
+/** One workspace as the computer running it reads it, in one frame: the sizes its cgroup was written with, what it
+ * holds of them now, and where its processes, its files and its address are. Every figure is read at the moment of
+ * the ask rather than sampled, so a row drawn from it is true of that moment and of no moment since; a workspace
+ * that is not running carries the sizes and the paths and none of the live figures. cpuUsageUsec is the processor
+ * time the workspace has spent since it booted, so a rate is the difference between two readings. */
+export const MachineReading = z.object({
+  state: MachineState,
+  cpu: z.number().optional(),
+  memMb: z.number().optional(),
+  memBytes: z.number().int().nonnegative().optional(),
+  cpuUsageUsec: z.number().int().nonnegative().optional(),
+  uptimeMs: z.number().int().nonnegative().optional(),
+  procs: z.number().int().nonnegative().optional(),
+  address: z.string().optional(),
+  cgroup: z.string(),
+  upper: z.string(),
+});
+export type MachineReading = z.infer<typeof MachineReading>;
+export const MachineReadingReply = z.object({ reading: MachineReading });
 export const MachineFactsReply = z.object({ facts: MachineFacts });
 export const MachineAnswersReply = z.object({ answers: z.boolean() });
 /** The route on the place's own loopback; the host turns it into a route of its own with a forward. */
@@ -3165,6 +3186,8 @@ const DAEMON_CONTENTS = [
   "372241b199d0b23db89c2618409d8edf611bc5f29811fdaffca813ec2b283295",
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
+  "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
+  "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3235,7 +3258,13 @@ const DAEMON_CONTENTS = [
  * that check no longer, and a machine wsp did not build is turned away with nothing written on it. Version 31 lets a
  * place say which life a copy may be taken from: a provider whose snapshot is the disk as it stands answers
  * snapshotsAnyLife and a builder that woke there is sealed, where one that answers only its first life still refuses
- * after a restart. */
+ * after a restart. Version 32 holds every workspace on a computer somebody keeps to a size that leaves that
+ * computer a core and the smaller of half its memory and a gigabyte, a spec that names no size included: the
+ * create answers the size it gave and one sentence saying so, the record holds that size, and the capacity says
+ * what the workspaces there hold of the computer. Version 33 answers a client on the computer itself the listing of
+ * the workspaces it holds and one reading of any of them, both read-only and both on the road that dials in; the
+ * reading carries the sizes as applied, the memory and processor time off the cgroup, the uptime, the process
+ * count, the address and the two paths, where the metrics op before it read two of those and replied with none. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3539,6 +3568,35 @@ export function placeLinkTranscript(role: "host" | "place", placeId: string, cha
   return new TextEncoder().encode(`wsp place link v1\n${role}\n${placeId}\n${challenge}\n${answer}\n`);
 }
 
+/** What separates the two halves of the one token a join line carries. Neither half can hold it: a code is
+ * written in PAIR_CODE_ALPHABET with the dash the screens group it with, and a fingerprint is base64. */
+export const JOIN_TOKEN_MARK = ".";
+
+/** The one word a person copies off a join line: the single-use code and the fingerprint of the key the host will
+ * prove, as one string, so a join stays two things to copy and the screens keep the fields they have. */
+export const joinToken = (code: string, hostKey: string): string => `${shownPairCode(code)}${JOIN_TOKEN_MARK}${hostKey}`;
+
+/** The same token read back on the computer being joined, whichever road it came by: a person's paste, the flag,
+ * or the file an install over ssh landed. The code is taken as any screen's code is taken; the fingerprint is left
+ * exactly as it was written, since its own alphabet is case sensitive. A token that carries no fingerprint answers
+ * none, and the caller refuses rather than dialling. */
+export function readJoinToken(typed: string): { code: string; hostKey?: string } {
+  const trimmed = typed.trim();
+  const at = trimmed.indexOf(JOIN_TOKEN_MARK);
+  if (at === -1) return { code: sentPairCode(trimmed) };
+  const hostKey = trimmed.slice(at + 1).trim();
+  const code = sentPairCode(trimmed.slice(0, at));
+  return hostKey === "" ? { code } : { code, hostKey };
+}
+
+/** The refusal a join gets for a line that named no key: every line wsp add prints carries one, so a line without
+ * one was written by hand or cut in half on its way over. Nothing is dialled. */
+export const JOIN_NO_KEY_REFUSAL = "that join line names no key for the host, so this computer cannot tell which host it is joining; run wsp add on the host again and copy the whole code it prints";
+
+/** The refusal a join gets when the host at that address proved a key that is not the one the join line named:
+ * something answered where the host was expected. Nothing of this computer's went to it. */
+export const joinKeyRefusal = (url: string): string => `the host at ${url} proved a key the join line did not name, so it is not the host that printed that line; nothing was sent to it`;
+
 /** The refusal a join whose code this host is not holding gets. Spent, expired and never minted read the same, so
  * guessing tells a caller nothing about which; the words differ from a pairing code's only in naming the verb that
  * mints this one, since a person joining a computer never typed wsp host pair. */
@@ -3588,6 +3646,9 @@ export const PlaceDoorView = z.object({
   port: z.number().int().min(1).max(65535),
   /** `http://<address>:<port>` for every address this computer answers on that leaves it, loopback left out. */
   addresses: z.array(z.string().url()).min(1),
+  /** The fingerprint of the key this host proves at a join, for the token the join line carries: what tells the
+   * computer being joined that the host answering at one of those addresses is the one that printed the line. */
+  hostKey: z.string().min(1).max(200),
   /** The relay hostname as an https address, when the host is linked and its connector is running. */
   relay: z.string().url().optional(),
 });

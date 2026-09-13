@@ -17,7 +17,7 @@ import type { ManifestEntry } from "@wsp/collect";
 import { fmtDuration, redirectsToMachine, shellQuote, type SignInFinish } from "@wsp/protocol";
 import { S_BAR, log } from "@clack/prompts";
 import { agentName } from "./init-recipe.js";
-import { SIGN_IN_CAP_MS, copiedOutcomes, signInCapMs, stateLine, toolOf, type BuilderLink, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
+import { SIGN_IN_CAP_MS, settledOutcomes, stateLine, toolOf, type BuilderLink, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
 import { openerCommand } from "./relay.js";
 import { runQuiet, stripOsc8, urlsIn, watchPty, type WatchOutcome } from "./signin-relay.js";
 import { hasLogin, questionsOf, signInFor } from "./signin-table.js";
@@ -36,8 +36,7 @@ export interface HandoffOptions {
   json?(record: Record<string, unknown>): void;
   /** This computer, for the command that opens a page on it. */
   platform: "darwin" | "linux";
-  /** How long the person gets per sign-in. Without it, what the tool itself waits plus a minute for the person,
-   * else 15 min. */
+  /** How long the person gets per sign-in. Without it, SIGN_IN_CAP_MS. */
   deadlineMs?: number;
   /** How often the tool's own status is asked on the machine while it waits. Default 5s, slowing after the first
    * minute. */
@@ -63,8 +62,8 @@ const SLOW_POLL_MS = 20_000;
 const GRACE_MS = 2_000;
 /** A status command that hangs is given up on, so one bad check never eats the person's deadline. */
 const STATUS_MS = 60_000;
-/** The tool's output kept for the code scan: the page and its code come first, and a tool that prints for fifteen
- * minutes must not be held in memory. */
+/** The tool's output kept for the code scan: the page and its code come first, and a tool that prints for the whole
+ * cap must not be held in memory. */
 const TEXT_CAP = 16 * 1024;
 const dim = (s: string): string => styleText("dim", s);
 /** The note on a sign-in the person stopped before it was through. */
@@ -127,10 +126,11 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
   const pollMs = o.pollMs ?? POLL_MS;
   const graceMs = o.graceMs ?? GRACE_MS;
   if (o.logins.length === 0) return [];
-  const { outcomes, machine } = copiedOutcomes(o.logins, o.left, o.output);
-  // A copied credential is a row of the build too: it settles here, before any page, and is never announced otherwise.
+  const { outcomes, machine } = settledOutcomes(o.logins, o.left, o.output);
+  // A login the build runs nothing for is a row of the build too: it settles here, before any page, and is never
+  // announced otherwise.
   for (const [entry, r] of o.logins.map((e, i): [ManifestEntry, LoginOutcome] => [e, outcomes[i]!])) {
-    if (r.state === "copied") o.json?.({ event: "sign-in-result", tool: agentName(entry), label: r.label, state: r.state });
+    if (r.state === "copied" || r.state === "deferred") o.json?.({ event: "sign-in-result", tool: agentName(entry), label: r.label, state: r.state });
   }
   if (machine.length === 0) return outcomes;
   log.step("Signing in on the machine. Each page below is yours to open on this computer; the run waits for you.", out);
@@ -186,7 +186,7 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
     }
     const command = s.login;
     const status = s.status;
-    const capMs = o.deadlineMs ?? signInCapMs(s, SIGN_IN_CAP_MS);
+    const capMs = o.deadlineMs ?? SIGN_IN_CAP_MS;
     r.command = command;
     // The row stands from the moment the command starts: a tool prints its banner before its page, and a status that
     // already says signed in never prints one, so a reader waiting for the page alone would show nothing while this runs.
@@ -301,8 +301,10 @@ export async function handoffStage(o: HandoffOptions): Promise<LoginOutcome[]> {
         r.note = `${command} asks "${theirs}", which only you can answer; sign in from the app's terminal`;
         return;
       }
+      // The cap ran out with the person not through: the build moves on and the row says where the sign-in goes
+      // instead. A stop from the person overwrites this below, which is a different thing to have happened.
       if (w.stopped || w.timedOut) {
-        r.state = "not-signed-in";
+        r.state = "deferred";
         r.note = [`no sign-in within ${fmtDuration(capMs)}`, ...(told !== undefined ? [] : ["no page to open was ever printed or asked for"]), ...(why !== undefined ? [why] : [])].join("; ");
         return;
       }
