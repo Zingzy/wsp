@@ -321,7 +321,7 @@ describe("store creations", () => {
     expect(useStore.getState().selectedId).toBe(creation!.key);
 
     emit(stage());
-    emit(stage({ message: "starting beta on ascii again", elapsedMs: 1_500, notice: "Stopped the builder kept from golden v1 to make room at the machine cap." }));
+    emit(stage({ message: "starting beta on ascii again", elapsedMs: 1_500, notice: "Stopped the builder kept from image v1 to make room at the machine cap." }));
     // What the machine answered a step with rides the line as its own field: it is written on the line's title and
     // never drawn as a second sentence, so it cannot be confused with a notice.
     emit(stage({ stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 2_100, detail: "hostname beta on m1 failed: hostname: sethostname: Operation not permitted" }));
@@ -329,7 +329,7 @@ describe("store creations", () => {
     expect(logged.workspaceId).toBe("ws_new");
     expect(logged.lines.map(l => [l.stage, l.message, l.elapsedMs, l.notice, l.detail])).toEqual([
       ["fork-requested", "starting beta on ascii", 0, undefined, undefined],
-      ["fork-requested", "starting beta on ascii again", 1_500, "Stopped the builder kept from golden v1 to make room at the machine cap.", undefined],
+      ["fork-requested", "starting beta on ascii again", 1_500, "Stopped the builder kept from image v1 to make room at the machine cap.", undefined],
       ["hostname-set", HOSTNAME_KEPT, 2_100, undefined, "hostname beta on m1 failed: hostname: sethostname: Operation not permitted"],
     ]);
     expect(logged.lines.every(l => !Number.isNaN(Date.parse(l.at)))).toBe(true);
@@ -387,14 +387,14 @@ describe("store creations", () => {
 
   it("a reply that lands before the created event finishes the row from the reply, and carries its notice as the toast", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
-    api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from golden v1 to make room at the machine cap." });
+    api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from image v1 to make room at the machine cap." });
     useStore.getState().bind(api);
     await flush();
     expect(await useStore.getState().createWorkspace("beta")).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_new");
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
-    expect(useStore.getState().toast).toBe("Stopped the builder kept from golden v1 to make room at the machine cap.");
+    expect(useStore.getState().toast).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
     emit({ type: "workspace.created", workspace: view("ws_new") });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
   });

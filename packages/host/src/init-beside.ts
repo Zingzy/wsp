@@ -166,7 +166,7 @@ function ended(o: BesideOptions, job: InitJob): number {
     log.error(`${job.phase === "cancelled" ? CLOUD_SETUP_WORDS.build.stopped : CLOUD_SETUP_WORDS.build.failed}${job.error !== undefined ? `: ${job.error}` : ""}`, out);
     return 1;
   }
-  if (job.golden !== undefined) log.step(`Golden v${job.golden.version} sealed on the host serving this state.`, out);
+  if (job.golden !== undefined) log.step(`Image v${job.golden.version} sealed on the host serving this state.`, out);
   if (job.workspace !== undefined) log.step(`Workspace ${job.workspace.name} (${job.workspace.id}) forked from it.`, out);
   if (o.appUrl !== undefined) log.step(`The app is already running at ${o.appUrl}.`, out);
   return 0;

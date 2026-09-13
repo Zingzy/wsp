@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@wsp/protocol";
-import { agentPage, cli, COMMAND_LINES, devPage, HELP, hostPage, SHARED_FLAGS, type CliIO } from "../src/cli.js";
+import { agentPage, cli, COMMAND_LINES, devPage, HELP, hostPage, MCP_OPTIONS, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { WSP_SKILL, INSTRUCTIONS } from "../src/skill.js";
 import { CLI_VERBS, hasTool, VERBS } from "../src/verbs.js";
 
@@ -41,11 +41,39 @@ describe("the pages wsp prints", () => {
     // Each of the sixteen is a line that declares the front page, and no other line does.
     expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT].sort());
     // The three rules and the two pages behind it, which is what makes "nothing else" findable.
-    expect(HELP).toContain("The workspace comes first on every line.");
-    expect(HELP).toContain("The one flag you meet is --on <place>");
-    expect(HELP).toContain("Sleeping is automatic;");
+    expect(HELP).toContain("A workspace or a thread comes right after the verb.");
+    expect(HELP).toContain("new takes --on <place> once");
+    expect(HELP).toContain("Sleeping is automatic.");
     expect(HELP).toContain("wsp --help agent");
     expect(HELP).toContain("wsp host --help");
+  });
+
+  it("the rules under the front page hold against the lines above them, and the page fits one screen", () => {
+    // A summary the list under it contradicts is worse than no summary: a reader who checks the claim against the
+    // rows stops believing the page. Each clause of the sentence is held to the rows here.
+    // The usage line at the top is a claim of the same kind, so it says no more than the sentence under the rows:
+    // `wsp <verb> <workspace> ...` named a positional that send, stop, remove, places and status do not take.
+    expect(HELP.split("\n\n")[1]).toBe("usage: wsp <verb> ...");
+    const rows = frontLines().map(line => /^ {2}(wsp .*?)(?: {2,}|$)/.exec(line)![1]!);
+    for (const usage of rows) {
+      const words = usage.split(" ");
+      // Wherever a line takes a workspace or a thread, it takes it right after the verb and nowhere else.
+      for (const [at, word] of words.entries()) {
+        if (/^\[?<(workspace|thread)>\]?$/.test(word)) expect(at, usage).toBe(2);
+      }
+    }
+    // The only flag named anywhere in the rows is the one the sentence says a person meets, and it is on new.
+    const block = HELP.split("\n\n")[2]!;
+    expect(block.split("\n").filter(line => line.includes("--")).map(line => line.trim())).toEqual([
+      "wsp new <name>                  a workspace from your image; --on <place>",
+    ]);
+    // run and send take the agent's own flags, as the sentence says, and their own help is where they are listed.
+    for (const name of ["run", "send"]) {
+      const verb = CLI_VERBS.find(v => v.name === name)!;
+      for (const pick of ["model", "effort", "access"]) expect(Object.hasOwn(verb.options, pick), `wsp ${name} reads --${pick}`).toBe(true);
+    }
+    // Forty rows on a normal terminal: the page is read whole or it is not read.
+    expect(HELP.split("\n").length).toBeLessThanOrEqual(40);
   });
 
   it("every line declares a page, and each page names its own lines and no others", () => {
@@ -124,6 +152,20 @@ describe("the pages wsp prints", () => {
     expect(foreign.errors[0]).toBe("--recipe belongs to wsp init; wsp down does not read it. usage: wsp down");
   });
 
+  it("the tool server's own two pages say what each does and give each flag it reads a line", async () => {
+    // Two usage lines and no words was the whole of it, so nobody could read what --agent took.
+    const serve = captured();
+    expect(await cli(["mcp", "--help"], serve, undefined, {}, false)).toBe(0);
+    expect(serve.lines[0]).toContain("usage: wsp mcp");
+    expect(serve.lines[0]).toContain("serve the verbs as tools over stdio");
+    const install = captured();
+    expect(await cli(["mcp", "install", "--help"], install, undefined, {}, false)).toBe(0);
+    expect(install.lines[0]).toContain("usage: wsp mcp install");
+    for (const flag of ["--agent", "--remove", "--json", "--state", "--host"]) expect(install.lines[0], flag).toContain(flag);
+    // Every flag its parse reads has a line; --help is the flag that prints the page and is not one of them.
+    for (const name of Object.keys(MCP_OPTIONS).filter(n => n !== "help")) expect(install.lines[0], name).toContain(`--${name}`);
+  });
+
   it("every flag a command of the shared parse reads has a row naming the commands that read it", () => {
     for (const flag of SHARED_FLAGS) {
       expect(flag.says, flag.name).toMatch(/\S/);
@@ -132,8 +174,38 @@ describe("the pages wsp prints", () => {
     }
   });
 
+  it("no sentence the host prints carries a word the cut took out: no golden, no wspx, no reach loop", () => {
+    // The cut reached the front page and the verbs' usage lines and stopped, so the refusals, the init screens and
+    // the doctor kept the old nouns. Every literal the host is built from is held to the five nouns here: a word
+    // with no whitespace in it is a name (a wire op, a file, a path segment) and is left alone, and an expression
+    // inside a template is code, not words a person reads.
+    const gone: [RegExp, string][] = [
+      [/goldens?\b/i, "golden: the noun is image"],
+      [/\bwspx\s/, "wspx: a person runs wsp"],
+      [/\breach loop\b/i, "the reach loop: say what is being proved"],
+    ];
+    const said: string[] = [];
+    const check = (where: string, text: string): void => {
+      for (const [word, why] of gone) if (word.test(text)) said.push(`${where}: ${why}; in ${JSON.stringify(text.slice(0, 120))}`);
+    };
+    for (const file of filesUnder(join(REPO, "packages/host/src")).filter(f => f.endsWith(".ts"))) {
+      const code = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const [at, line] of code.split("\n").entries()) {
+        if (line.trimStart().startsWith("//")) continue;
+        for (const m of line.matchAll(/"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)) {
+          const literal = (m[1] ?? m[2] ?? m[3] ?? "").replace(/\$\{[^}]*\}/g, " ");
+          if (/\s/.test(literal)) check(`${file.slice(REPO.length)}:${at + 1}`, literal);
+        }
+      }
+    }
+    // The skill is inlined into the same build, so it is one of the strings the host carries.
+    check("the skill", WSP_SKILL);
+    expect(said).toEqual([]);
+  });
+
   it("no page, tool description, skill, instruction, AGENTS.md, README or doc carries a word wsp no longer answers to", () => {
-    const banned = ["thread new", "thread_new", "--in <", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp hosts", "wsp disconnect", "run wsp up first"];
+    // "--in <" alone let three rows of the skill keep the flag in backticks with no value after it.
+    const banned = ["thread new", "thread_new", "--in <", "`--in`", "--to <", "new --local", "new --ssh", "wsp connect", "wsp relay", "wsp pair", "wsp devices", "wsp hosts", "wsp disconnect", "run wsp up first"];
     const docs = filesUnder(join(REPO, "apps/docs/content")).filter(p => p.endsWith(".mdx") || p.endsWith(".md"));
     const texts: [string, string][] = [
       ["the front page", HELP],

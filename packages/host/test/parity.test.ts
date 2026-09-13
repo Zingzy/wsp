@@ -18,7 +18,7 @@ import { agentPage, cli, COMMAND_LINES, commandPage, COMMANDS_FOR_HELP, HELP, HO
 const commandPageFor = (words: string): string => commandPage(words, COMMANDS_FOR_HELP[words]!);
 import { mcpServer } from "../src/mcp.js";
 import { INSTRUCTIONS, RULES_HEADING, SHELL_HEADING, VERBS_HEADING, WSP_SKILL } from "../src/skill.js";
-import { CLI_VERBS, COMMON, VERBS, flagList, hasTool, openingOf, toolName, type Flags } from "../src/verbs.js";
+import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, FLAG_WORDS, HELP_WIDTH, VERBS, flagList, flagSays, hasTool, openingOf, ownFlagsOf, toolName, verbPage, type Flags } from "../src/verbs.js";
 
 interface Tool {
   name: string;
@@ -396,6 +396,37 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
     }
   });
 
+  it("every flag a verb reads has a line of its own in that verb's help, and no line is written for a flag nobody reads", () => {
+    // A verb page that named ten flags on its usage line and then documented the three every verb takes left the
+    // other seven to be guessed at. Each flag is a row, and the rows are held to the flags.
+    const keys = new Set(Object.keys(FLAG_WORDS));
+    for (const verb of CLI_VERBS) {
+      const page = verbPage(verb, "a host on another computer");
+      for (const name of ownFlagsOf(verb)) {
+        expect(flagSays(verb.name, name), `wsp ${verb.name} --${name} has a line`).toMatch(/\S/);
+        expect(page, `wsp ${verb.name} --help names --${name}`).toContain(`--${name}`);
+        keys.delete(`${verb.name} ${name}`);
+        keys.delete(name);
+      }
+    }
+    expect([...keys], "lines written for flags no verb reads").toEqual([]);
+  });
+
+  it("every help page fits the width its rows keep, and spells the flags every line takes one way", () => {
+    // A usage line wrapped to two spaces and then opened with `usage: ` stood five columns wider than the rows
+    // under it, and a verb whose flags were one unbreakable bracket group ran to 147. Every page is measured here.
+    const pages = [
+      ...CLI_VERBS.map(v => [`wsp ${v.name} --help`, verbPage(v, COMMON_FLAG_WORDS.host)] as const),
+      ...Object.keys(COMMANDS_FOR_HELP).map(words => [`wsp ${words} --help`, commandPageFor(words)] as const),
+    ];
+    for (const [where, page] of pages) for (const line of page.split("\n")) expect(line.length, `${where}: ${line}`).toBeLessThanOrEqual(HELP_WIDTH);
+    // One spelling per flag: a verb's page, a command's page and the agent page all read the one table.
+    const takesJson = JSON_COMMANDS[0]!;
+    for (const text of [verbPage(CLI_VERBS.find(v => v.name === "run")!, COMMON_FLAG_WORDS.host), commandPageFor(takesJson), agentPage()]) {
+      expect(text.replace(/\s+/g, " ")).toContain(COMMON_FLAG_WORDS.json.replace(/\s+/g, " "));
+    }
+  });
+
   it("every flag a command reads is in its row of the skill's verbs table and the row shows no other; every verb's usage names only flags it reads", () => {
     expect(flagDrift(WSP_SKILL, COMMAND_LINES)).toEqual([]);
     for (const verb of CLI_VERBS) for (const name of flagsOf(verb.usage)) expect(Object.hasOwn(verb.options, name), `wsp ${verb.name}'s usage names --${name}`).toBe(true);
@@ -537,7 +568,7 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp threads --json   # illustrative",
       "wsp exec dev -- sh -c 'ls | wc -l' > /tmp/out 2>&1 &",
       "```",
-      "Then `wsp run dev --cwd`, `wsp forkk dev`, `wsp <version>` and `wsp new: no golden yet; run wsp init`.",
+      "Then `wsp run dev --cwd`, `wsp forkk dev`, `wsp <version>` and `wsp new: no image yet; run wsp init`.",
     ].join("\n");
     const commands = wspCommands(planted);
     expect(commands).toEqual([

@@ -147,7 +147,7 @@ describe("provider modules", () => {
     // second key does not carry every workspace made after it to another provider.
     const after = { [SOLARI_KEY_ENV]: "slr_live_held", ...providerKeySet({ [SOLARI_KEY_ENV]: "slr_live_held" }, "ascii_live_fake", "box")! };
     expect(providerModule(after).id).toBe("solari");
-    expect(placeProviders(after).map(m => m.id)).toEqual(["docker", "box", "solari"]);
+    expect(placeProviders(after).map(m => m.id)).toEqual(["box", "solari"]);
     expect(providerModule(providerEnvWithKey({}, "ascii_live_fake", "box")).id).toBe("box");
     expect(providerBackendFor(providerEnvWithKey({}, "ascii_live_fake", "box"))).toBeInstanceOf(BoxBackend);
     // With no provider named the key is the wired row's, and the word for it is left as it stands.
@@ -199,8 +199,15 @@ describe("provider modules", () => {
   });
 
   it("the places a copy of the image can be built at are the providers this computer is set up for, each once", () => {
-    // Added by its own word and needing no key: always a place, whatever this computer holds.
+    // Added by its own word: a place once that word is here, and not before. A computer with no Docker and nobody
+    // asking for it listed a docker row anyway, which New workspace then priced at the wired provider's rates.
     expect(placeProviders({ WSP_PROVIDER: "docker" }).map(m => m.id)).toContain("docker");
+    expect(placeProviders({ WSP_DOCKER: "1" }).map(m => m.id)).toContain("docker");
+    expect(placeProviders({}).map(m => m.id)).not.toContain("docker");
+    expect(placeProviders({ [SOLARI_KEY_ENV]: "slr_live_fake" }).map(m => m.id)).not.toContain("docker");
+    // A daemon named in the shell is not somebody asking wsp for it: DOCKER_HOST is where the socket is, never
+    // whether this computer forks there.
+    expect(placeProviders({ DOCKER_HOST: "tcp://127.0.0.1:2375" }).map(m => m.id)).not.toContain("docker");
     // A row that is no place at all, and the one that stands for no provider: neither is offered.
     expect(placeProviders({}).map(m => m.id)).not.toContain("fake");
     expect(placeProviders({}).map(m => m.id)).not.toContain("none");
@@ -257,7 +264,8 @@ describe("provider modules", () => {
       own,
       () => ({}),
     );
-    expect(places.list()).toEqual(["docker"]);
+    // Nothing added and no key here: no place at all, rather than a docker row on a computer that has no Docker.
+    expect(places.list()).toEqual([]);
     expect(places.backend("none")).toBe(own);
     expect(places.backend("solari")).toBeUndefined();
   });

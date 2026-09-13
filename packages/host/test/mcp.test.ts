@@ -201,7 +201,7 @@ describe("the MCP server over the host", () => {
     expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, projects: golden!.projects });
 
     const missing = await call("new", { name: "task-c", from: "nope" });
-    expect(missing).toEqual(failedWith("no project golden named nope; wsp snapshot <workspace> takes one"));
+    expect(missing).toEqual(failedWith("no project image named nope; wsp snapshot <workspace> takes one"));
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
@@ -351,7 +351,7 @@ describe("the MCP server over the host", () => {
     ]);
     // The listing's own words say a workspace need not be a machine, so a caller holding only the tools reads it here.
     const served = (await client!.listTools()).tools.find(t => t.name === "workspaces")!.description!;
-    expect(served).toContain("or this computer itself, which forks from no golden and runs while the host does");
+    expect(served).toContain("or this computer itself, which forks from no image and runs while the host does");
 
     const opened = await call("run", { workspace: "mac", task: "say pong" });
     expect(opened.isError).toBe(false);

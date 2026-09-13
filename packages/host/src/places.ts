@@ -20,7 +20,7 @@ import {
   JOIN_ADDRESS_LINE,
   LOOPBACK,
   PLACE_CODE_REFUSAL,
-  fmtRate,
+  fmtPrice,
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
@@ -169,7 +169,7 @@ export function addableProviders(): string[] {
 }
 
 /** What a provider that just became a place reads as. */
-export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · ${fmtRate(rateUsdPerHour)} · forks your image`;
+export const providerPlaceLine = (id: string, rateUsdPerHour: number): string => `place ${id} · ${fmtPrice(rateUsdPerHour)} · forks your image`;
 
 /** The refusal for a word that is neither a provider wsp holds a key for nor an ssh address, naming all three roads. */
 export function addRefusal(word: string): string {

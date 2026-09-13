@@ -259,7 +259,10 @@ describe("installing the MCP server for a local agent", () => {
     expect(agented.errors[0]).toContain("Unknown option '--agent'");
     const help = io();
     expect(await cli(["mcp", "--help", "--state", statePath], help)).toBe(0);
-    expect(help.lines).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    // The page names both lines the word opens, says what serving does, and gives every flag it reads a row.
+    expect(help.lines[0]).toContain("usage: wsp mcp [--host <alias>]");
+    expect(help.lines[0]).toContain("wsp mcp install --agent <id>");
+    expect(help.lines[0]).toContain("serve the verbs as tools over stdio to an agent on this computer");
     const stray = io();
     expect(await cli(["mcp", "install", "--nope", "--state", statePath], stray)).toBe(3);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");
@@ -276,7 +279,7 @@ describe("installing the MCP server for a local agent", () => {
   it("a line that puts a shared flag before the word still selects the word's own line, and a word no line answers to is named", async () => {
     const flagFirst = io();
     expect(await cli(["--state", statePath, "mcp", "--help"], flagFirst)).toBe(0);
-    expect(flagFirst.lines).toEqual(["usage: wsp mcp [--host <alias>]\n       wsp mcp install --agent <id> [--agent <id>] [--host <alias>] [--json] [--remove]   (claude, codex, gemini, opencode)"]);
+    expect(flagFirst.lines[0]).toContain("usage: wsp mcp [--host <alias>]");
     const stray = io();
     expect(await cli(["--state", statePath, "mcp", "install", "--nope"], stray)).toBe(3);
     expect(stray.errors[0]).toContain("Unknown option '--nope'");

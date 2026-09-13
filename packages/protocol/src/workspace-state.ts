@@ -3,7 +3,7 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { computerWord, fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import { computerWord, fmtThreads, JOINED_COMPUTER, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
 import type { HarnessCatalog, MachineFacts, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
@@ -17,6 +17,13 @@ export function workspaceKind(view: Pick<WorkspaceView, "kind">): WorkspaceKind 
 /** Whether this workspace is this computer. Asked by every surface that offers to make one (the app's sidebar and
  * palette, wsp init's workspace step), and written once so the two cannot disagree about what counts. */
 export const isLocalWorkspace = (view: Pick<WorkspaceView, "kind">): boolean => workspaceKind(view) === "local";
+
+/** The word a turn's cost figure carries, off the workspace it ran on: a turn on a computer of the person's own ran
+ * on their own sign-in, so nobody is billed for it and the number is the agent's own list price; a workspace wsp
+ * forked is billed by its provider and its figure stands alone. Nothing where the caller does not know which
+ * workspace it was. The one reading, so the terminal's last line and the app's chat footer cannot part again. */
+export const turnSpendWord = (view: Pick<WorkspaceView, "kind"> | null | undefined): string | undefined =>
+  view !== null && view !== undefined && isLocalWorkspace(view) ? LIST_PRICE_WORD : undefined;
 
 /** What a workspace's kind changes about the words a client shows for it. */
 export interface WorkspaceKindWords {

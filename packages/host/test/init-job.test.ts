@@ -442,7 +442,7 @@ describe("the init job, manual road", () => {
     expect(goldenHead(await f.rt.golden.get())?.version).toBe(1);
     expect((await f.rt.workspaces.list()).map(w => w.name)).toEqual(["first"]);
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(1);
-    expect(done.log.some(l => l.includes("Golden v1 sealed"))).toBe(true);
+    expect(done.log.some(l => l.includes("Image v1 sealed"))).toBe(true);
     // Done: the setup carries the job for a client opening late, and a new start is allowed again.
     expect((await f.jobs.get()).job?.phase).toBe("done");
   });

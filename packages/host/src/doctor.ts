@@ -17,6 +17,7 @@ import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVer
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
 import { bundledDaemonName, DAEMON_BIN, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "./daemon-binary.js";
+import { ANTHROPIC_KEY, KEY_LAYER_WORDS } from "./env-keys.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
 
@@ -1045,7 +1046,7 @@ export async function promoteGoldens(rt: Runtime, io: Pick<CliIO, "log">): Promi
   }
   if (rows === undefined) return NO_TEMPLATES_LINE;
   for (const r of rows) io.log("error" in r ? templateSkippedLine(r.golden, r.version, r.error) : templateRecordedLine(r.golden, r.version, r.templateId, r.sharing));
-  if (rows.length === 0) return (await rt.golden.get()) === undefined ? "no golden to make durable" : "every version already has a template";
+  if (rows.length === 0) return (await rt.golden.get()) === undefined ? "no image to make durable" : "every version already has a template";
   const counts = [
     [rows.filter(r => !("error" in r)).length, "promoted"],
     [rows.filter(r => "error" in r).length, "not made durable"],
@@ -1186,7 +1187,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
   const buildGolden = async (): Promise<string> => {
     if (!opts.envs) {
-      throw new Error("no golden image and no ANTHROPIC_API_KEY to build one; add the key or run wspx golden build");
+      throw new Error(`no image here, and no ${ANTHROPIC_KEY} to build one from this computer; run wsp init to build your image, or put the key in ${KEY_LAYER_WORDS}`);
     }
     const { version } = await rt.golden.build({
       setup: GOLDEN_SETUP,
@@ -1198,22 +1199,22 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
   };
 
   try {
-    io.log("doctor: proving the reach loop against one live machine");
+    io.log("doctor: proving one live workspace end to end, from your image to the machine it forks and back");
 
-    await timings.time("durable goldens", () => promoteGoldens(rt, io), note => note);
+    await timings.time("image versions made durable", () => promoteGoldens(rt, io), note => note);
     await timings.time("snapshot storage", () => cleanOrphans(rt, io, opts.yes === true, opts.statePath), note => note);
 
     let golden = "";
     const head = goldenHead(await rt.golden.get());
     if (head) {
       golden = head.snapshotId;
-      timings.add("golden image", 0, `reused v${head.version} (${golden})`);
+      timings.add("your image", 0, `reused v${head.version} (${golden})`);
     } else {
-      golden = await timings.time("golden image", buildGolden, id => `built fresh (${id})`);
+      golden = await timings.time("your image", buildGolden, id => `built fresh (${id})`);
     }
 
     const view = await timings.time(
-      "fork workspace",
+      "a workspace forked from it",
       async () => {
         const spec = {
           golden,
@@ -1225,7 +1226,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
           return await rt.workspaces.create(spec);
         } catch (e) {
           if (!isMissing(e)) throw e;
-          io.log("golden snapshot is gone; rebuilding");
+          io.log("your image is gone at the provider; building it again");
           const rebuilt = await buildGolden();
           return rt.workspaces.create({ ...spec, golden: rebuilt });
         }
@@ -1236,22 +1237,22 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     const machine = await rt.backend.get(view.machineId);
 
     const { token } = await timings.time(
-      "deploy daemon",
+      "wsp on that machine",
       () => deployDaemon(machine, opts.daemonDir !== undefined ? { daemonDir: opts.daemonDir } : {}),
       () => `${DAEMON_DEPLOYED_LINE}: tar upload + start on 0.0.0.0:${DAEMON_PORT}`,
     );
 
     if (!machine.previewUrl) {
-      throw new Error("this backend mints no preview URLs (capabilities.previewUrls=false); doctor needs one");
+      throw new Error("this provider gives no address to reach a machine at, which is the half this run proves; wsp add <provider> connects one that does, and wsp doctor --local proves the other half here with no machine at all");
     }
     const reach = await timings.time(
-      "mint previewUrl",
+      "an address to reach it at",
       () => machine.previewUrl!(DAEMON_PORT),
       r => `expires in ${Math.round((r.expiresAt - Date.now()) / 60_000)}min, host ${new URL(r.url).host}`,
     );
 
     socket = await timings.time(
-      "ws connect + first op",
+      "connected to it and asked it something",
       () =>
         connectDaemonSocket({
           url: reach.url,
@@ -1265,13 +1266,13 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
     const beatTarget = 3;
     await timings.time(
-      `heartbeats (${beatTarget} x 10s)`,
+      `still connected after ${beatTarget} heartbeats`,
       async () => {
         const s = socket!;
         const start = Date.now();
         while (s.beats < beatTarget) {
-          if (!s.open) throw new Error("socket died between heartbeats (idle sweep won)");
-          if (Date.now() - start > 60_000) throw new Error("heartbeats stalled");
+          if (!s.open) throw new Error("the machine stopped answering between heartbeats, which is what an idle network sweep does to a quiet connection");
+          if (Date.now() - start > 60_000) throw new Error("the machine stayed connected and sent no heartbeat for a minute");
           await new Promise(r => setTimeout(r, 250));
         }
       },
@@ -1279,11 +1280,11 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     );
 
     await timings.time(
-      "inbox round trip",
+      "a file written there reaches this computer",
       async () => {
         const s = socket!;
         const got = new Promise<void>((resolve, reject) => {
-          const t = setTimeout(() => reject(new Error("no inbox.file event in 20s")), 20_000);
+          const t = setTimeout(() => reject(new Error("a file written on the machine did not reach this computer within 20s")), 20_000);
           eventListeners.push(e => {
             if (e["type"] === "inbox.file") {
               clearTimeout(t);
@@ -1300,7 +1301,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
     socket.close();
     await timings.time(
-      "kill + verify zero",
+      "deleted, with nothing of this run left running",
       async () => {
         await rt.workspaces.delete(workspaceId!);
         workspaceId = undefined;
@@ -1321,6 +1322,6 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     io.error(`\nDOCTOR FAIL: ${failed}`);
     return 1;
   }
-  io.log("\nDOCTOR PASS: fork, daemon, previewUrl, heartbeats, inbox, teardown all live.");
+  io.log("\nDOCTOR PASS: your image, a workspace forked from it, wsp on its machine, the connection, a file coming back and the teardown all answered.");
   return 0;
 }

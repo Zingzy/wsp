@@ -107,7 +107,7 @@ export async function askFirst(o: FirstAsk): Promise<WorkspaceStep | symbol> {
   if (!o.interactive) return { fork: { name }, local: offered };
   const go = await confirmPrompt({
     message: FIRST_QUESTION,
-    hint: `Enter forks a workspace from the golden just sealed and imports a folder onto it. ${offered ? `No forks nothing; the next question offers ${THIS_COMPUTER} instead.` : "No leaves the app with none; you can make one there."}`,
+    hint: `Enter forks a workspace from the image just sealed and imports a folder onto it. ${offered ? `No forks nothing; the next question offers ${THIS_COMPUTER} instead.` : "No leaves the app with none; you can make one there."}`,
     initialValue: true,
     input: o.input,
     output: o.output,
@@ -184,7 +184,7 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
     return undefined;
   }
   o.json?.({ event: "first-workspace", name: o.first.name, state: "forked", workspace: { id: workspace.id, name: workspace.name } });
-  log.step(`Workspace ${workspace.name} (${workspace.id}) forked from golden v${o.goldenVersion}.${workspace.notice !== undefined ? ` ${workspace.notice}` : ""}`, out);
+  log.step(`Workspace ${workspace.name} (${workspace.id}) forked from image v${o.goldenVersion}.${workspace.notice !== undefined ? ` ${workspace.notice}` : ""}`, out);
   if (o.first.folder === undefined) return { workspace };
   // Each line lands with the spinner stopped: a spinner redraws its own row from the first cell and would eat one printed under it.
   let spinner = o.spin(`Reading ${o.first.folder}`);

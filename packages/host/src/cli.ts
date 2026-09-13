@@ -33,7 +33,7 @@ import { webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
-import { ANTHROPIC_KEY, agentKeyEnvs, keyIn, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
+import { ANTHROPIC_KEY, agentKeyEnvs, KEY_LAYER_WORDS, keyIn, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
 // The writer of the wsp home's .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
@@ -87,7 +87,7 @@ import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCom
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
 /** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
@@ -103,12 +103,11 @@ const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_C
  * entries that declare the front page, so a verb cannot be added to one and not the other. */
 export const HELP = `wsp - ${TAGLINE}
 
-usage: wsp <verb> <workspace> ...
+usage: wsp <verb> ...
 
   wsp init                        seal this computer into your image, once
   wsp add                         a place: user@host for a computer over ssh,
-                                  <provider> for a provider, nothing for the
-                                  join line another computer types
+                                  <provider> for a provider
   wsp places                      your places, the default marked
   wsp remove <place>              take a place out; the computer is left as
                                   wsp found it
@@ -124,12 +123,11 @@ usage: wsp <verb> <workspace> ...
   wsp send <thread> "<message>"   the thread's next message
   wsp stop <thread>               end the thread's running turn
   wsp status                      whether a host serves, and where
-  wsp mcp                         the same verbs as tools for the agents on this
-                                  computer; mcp install --agent <id> wires one
+  wsp mcp                         the verbs as tools for agents on this computer
 
-The workspace comes first on every line. The one flag you meet is --on <place>
-on new, and only once you have more than one place. Sleeping is automatic;
-pause and wake are for now.
+A workspace or a thread comes right after the verb. new takes --on <place> once
+you have more than one place; run and send take the agent's own flags, run
+--help lists them. Sleeping is automatic.
 
 wsp <verb> --help      the verb's own flags
 wsp --help agent       the verbs your agents use, and up and down
@@ -137,9 +135,6 @@ wsp host --help        a host on another computer: pair, connect, link
 wsp --version
 `;
 
-/** Where a key is read from, as a line says it: one wording for the screen that asks for one and for every refusal
- * that says there was nobody to ask. */
-const KEY_LAYER_WORDS = "the environment, ./.env, or ~/.wsp/.env";
 
 export interface CliIO {
   log(line: string): void;
@@ -1637,7 +1632,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     about: "seal this computer into your image, one screen at a time: Agents, Tools, Also on this computer, Sign-ins, wsp for your agents on this computer, each shown when it has a row to pick, then Build. Beside a host already serving this state file the screens are the same and the build runs in that host, on the place --on names or its default place, a computer you joined included. With no host serving and no provider key it seals nothing and makes this computer your workspace instead",
     json: true,
     host: "refused",
-    cliOnly: "builds the golden and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
+    cliOnly: "builds your image and serves for hours; an agent runs it from a shell and relays the sign-ins it prints",
     run: (io, opts, values) =>
       init(io, opts, {
         yes: values.yes === true,
@@ -1700,7 +1695,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   doctor: {
     page: "dev",
     usage: "wsp doctor [--local] [--yes]",
-    about: "run the reach loop end to end against one live machine; --local proves the other half instead, a thread on this computer and its reply, with no machine and no key",
+    about: "prove one workspace end to end: your image, a machine forked from it, wsp on that machine, a file coming back and the teardown; --local proves the other half instead, a thread on this computer and its reply, with no machine and no key",
     json: false,
     host: "refused",
     cliOnly: "forks a live machine and bills while it runs, or with --local runs a thread on this computer; a person decides that at a terminal",
@@ -1805,7 +1800,7 @@ async function mcp(io: CliIO, argv: string[], statePathOf: (flag?: string) => st
     return failed(io, jsonAsked(argv), usageRefusal(e instanceof Error ? e.message : String(e), usage));
   }
   if (values.help === true) {
-    io.log(usage);
+    io.log(mcpPage(words[0] === "install"));
     return 0;
   }
   const statePath = statePathOf(values.state);
@@ -1930,10 +1925,7 @@ export function agentPage(): string {
     "  exec wake a paused workspace first, with one line on stderr saying so.",
     "",
     "every verb takes:",
-    `  --json         print the raw protocol values, one JSON object per line`,
-    `  --state PATH   the state file the host serves`,
-    `  --host NAME    run the line against a host on another computer, by the name`,
-    `                 wsp host connect gave it; WSP_HOST names one for a whole shell`,
+    ...(["json", "state", "host"] as const).flatMap(name => wrap(`  ${`--${name}`.padEnd(15)}${COMMON_FLAG_WORDS[name]}`, HELP_WIDTH, " ".repeat(17))),
     "",
     "exit codes; every failure is one line on stderr, the failure object with --json:",
     exitCodeHelp(),
@@ -1967,7 +1959,11 @@ function pageLines(page: Page): string {
 
 /** A shared flag: the word, the commands that read it, and the sentence its own command's help prints. One parse
  * reads the union of them, and a flag typed on a command whose row does not name it is refused naming the ones
- * that do, so the sentences live beside the rule rather than in a page nobody reads to the end. */
+ * that do, so the sentences live beside the rule rather than in a page nobody reads to the end.
+ *
+ * One word can have a row per command where it means different things there: a flag's readers are every row that
+ * names it, and each command's own help prints the row written for it. A single row answering for two commands
+ * put both meanings in one paragraph, which is a page teaching rather than reminding. */
 export interface SharedFlag {
   name: Extract<keyof SharedFlags, string>;
   /** The words of every command that reads it. */
@@ -1992,7 +1988,8 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
-  { name: "yes", on: ["init", "doctor"], says: "init: take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal. doctor: also delete the snapshots and templates this host left behind, which is not reversible" },
+  { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, defaults to sign in on the machine unless a saved recipe answered copy, so macOS has nothing to ask either and the sign-ins wait for the app's terminal" },
+  { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
   { name: "on", on: ["init"], says: "the place the image is built on, by the name wsp places lists, a computer you joined included; the default place without it" },
@@ -2000,22 +1997,38 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
   { name: "no-local", on: ["init"], says: "leave this computer alone; the workspace step ticks it by default, since a workspace here forks nothing and bills nothing" },
   { name: "non-interactive", on: ["init"], says: "ask nothing, but still run the sign-ins on the machine: each prints the page to open on this computer, the code when the flow shows one, and the command that opens it, then waits for you" },
-  { name: "local", on: ["doctor"], says: "prove a thread on this computer and its reply instead of the reach loop, which needs no provider key, forks nothing and bills nothing" },
+  { name: "local", on: ["doctor"], says: "prove a thread on this computer and its reply instead of a forked machine, which needs no provider key, forks nothing and bills nothing" },
 ];
+
+/** Every command that reads one flag, over each of its rows: a word with a row per command is read by all of them,
+ * so nothing refuses a flag one of its own rows names. */
+export const readers = (name: string): string[] => SHARED_FLAGS.filter(f => f.name === name).flatMap(f => f.on);
 
 /** What one command's own `--help` prints: its usage, what it does, and its own flags, one line each. */
 export function commandPage(words: string, command: Command): string {
-  const rows = [
+  return helpPage(command.usage, wrap(`  ${command.about}`, HELP_WIDTH, "  "), [
     ...SHARED_FLAGS.filter(f => f.on.includes(words)).map(f => [`--${f.name}`, f.says] as const),
-    ...(command.json ? [["--json", "print the raw values, one JSON object per line, with everything else on stderr"] as const] : []),
-    ...(command.host === "refused" ? [] : [["--host", command.host === "hostSide" ? "read to say this line runs at its own host's terminal; it dials no other" : "run the line against a host on another computer, by the name wsp host connect gave it"] as const]),
-  ];
-  const width = Math.max(...rows.map(([flag]) => flag.length), 0) + 4;
-  return [
-    ...usageLines(command.usage, "       ").map((line, at) => (at === 0 ? `usage: ${line.trimStart()}` : line)),
-    ...wrap(`  ${command.about}`, HELP_WIDTH, "  "),
-    ...(rows.length === 0 ? [] : ["", ...rows.flatMap(([flag, says]) => wrap(`  ${flag.padEnd(width)}${says}`, HELP_WIDTH, " ".repeat(width + 2)))]),
-  ].join("\n");
+    ...(command.json ? [["--json", COMMON_FLAG_WORDS.json] as const] : []),
+    ...(command.host === "refused" ? [] : [["--host", command.host === "hostSide" ? COMMON_FLAG_WORDS.hostSide : COMMON_FLAG_WORDS.host] as const]),
+  ]);
+}
+
+/** What each flag the tool server reads says on its own page. Its parse is its own, so its words are too; the page
+ * they print on is the one every other line prints on. */
+const MCP_FLAG_WORDS: Readonly<Record<string, string>> = {
+  agent: `the agent to write the server, this skill and wsp's own section of AGENTS.md into, by catalog id (${MCP_AGENT_IDS}); repeats, and off a terminal every agent whose own command is on this computer's PATH takes it`,
+  remove: "take the server, the skill and that section back out of those agents instead",
+  json: "print what each agent took as one JSON object",
+  state: COMMON_FLAG_WORDS.state,
+  host: "write the server against a host on another computer, by the name wsp host connect gave it, so the tools drive that host",
+};
+
+/** The tool server's own two pages, each with the flags it reads. `wsp mcp` alone serves; `wsp mcp install` writes
+ * an agent's config. Both were two usage lines and no words until a person asked what --agent took. */
+function mcpPage(install: boolean): string {
+  const line = COMMAND_LINES.find(l => l.words === (install ? `${MCP_COMMAND} install` : MCP_COMMAND))!;
+  const flags = install ? ["agent", "remove", "json", "state", "host"] : ["state", "host"];
+  return helpPage(line.usage, wrap(`  ${line.about}`, HELP_WIDTH, "  "), flags.map(name => [`--${name}`, MCP_FLAG_WORDS[name]!] as const));
 }
 
 /** `run` is how this process was started, which the MCP install writes into an agent's config as the way to start it
@@ -2115,9 +2128,9 @@ export async function cli(
   }
   // A flag another command of the shared parse reads: the union is one parse, so the line that does not read it is
   // told which lines do rather than taking it and doing nothing with it.
-  const foreign = SHARED_FLAGS.find(f => values[f.name] !== undefined && !f.on.includes(words));
+  const foreign = SHARED_FLAGS.find(f => values[f.name] !== undefined && !readers(f.name).includes(words));
   if (foreign !== undefined) {
-    return failed(io, json, usageRefusal(foreignFlagLine(`--${foreign.name}`, foreign.on.map(w => `wsp ${w}`), `wsp ${words}`), `usage: ${command.usage}`));
+    return failed(io, json, usageRefusal(foreignFlagLine(`--${foreign.name}`, readers(foreign.name).map(w => `wsp ${w}`), `wsp ${words}`), `usage: ${command.usage}`));
   }
   try {
     return await command.run(io, opts, values, asked.slice(words.split(" ").length));
