@@ -208,6 +208,10 @@ export interface PlaceDoorOptions {
   onDaemonEvent?: (placeId: string, event: DaemonEvent) => void;
   /** How far an install on a computer this host has never met has got; the runtime puts these on its own stream. */
   onStage?: (event: PlaceStageEvent) => void;
+  /** What a place's row says about its copy of the image while it is not standing: the stage of the build running
+   * there, or the reason the last one stopped. The runtime holds the builds, so it answers; nothing for a copy that
+   * stands. */
+  copyBuild?: (placeId: string) => string | undefined;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
   /** How long one dial of a computer gets before it is an answer of its own. The bound is the runtime's and not
@@ -1014,11 +1018,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         },
         ...held.map(r => {
           const forks = room.get(r.id);
-          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}) };
+          const build = opts.copyBuild?.(r.id);
+          return { ...viewOf(r, marked), ...(forks !== undefined ? { forks } : {}), ...(build !== undefined ? { build } : {}) };
         }),
         ...providers.map(id => {
           const rate = providerRate(id);
-          return { id, kind: "provider" as const, name: id, default: marked === id, takesForks: true, ...(rate !== undefined ? { rateUsdPerHour: rate } : {}) };
+          const build = opts.copyBuild?.(id);
+          return { id, kind: "provider" as const, name: id, default: marked === id, takesForks: true, ...(rate !== undefined ? { rateUsdPerHour: rate } : {}), ...(build !== undefined ? { build } : {}) };
         }),
       ];
     },

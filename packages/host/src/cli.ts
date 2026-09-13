@@ -660,6 +660,8 @@ export function swapProvider(rt: Runtime, keys: Readonly<Record<string, string |
     pick.id = wiredProviderId(env);
     pick.env = env;
   }
+  // The key is up: the provider is a place now, and its copy of the image is built behind the save.
+  void rt.image.keepCurrent(wiredProviderId(env));
 }
 
 /** What a host serving this line tells a turn about where it answers: the address and port it binds, and the
@@ -700,6 +702,7 @@ export function makeRuntime(
     store: jsonFileStore(statePath),
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
+    copyRecipe: hostCopyRecipe(statePath),
     hostId: hostIdentity(),
     vaultCaches: CACHE_RULE,
   });
@@ -1196,7 +1199,6 @@ async function hostFor(
       recipePath: recipePath(opts.statePath),
       statePath: opts.statePath,
       init: hostInitDoor(rt, opts.statePath, run, opts.openUrl ?? systemOpener(), line => io.log(line), opts.providerEnv),
-      copyRecipe: hostCopyRecipe(opts.statePath),
     });
     writeFileSync(lockPath, JSON.stringify({ ...lock, port: handle.port, wsPort: handle.wsPort, address }));
     // Other local tools read the token from disk; the WS never sees it in a URL.

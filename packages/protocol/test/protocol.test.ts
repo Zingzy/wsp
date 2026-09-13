@@ -89,7 +89,7 @@ import {
 
 import * as wire from "../src/index.js";
 
-import { COPY_CURRENT, COPY_STALE, buildsImages, copyIsCurrent, copyStanding, sealedBuiltLine, sealedCopyLine, type SealedImage, type SealedImageCopy } from "../src/index.js";
+import { COPY_CURRENT, COPY_STALE, NETWORK_LOST_LINE, buildsImages, copyBuildingLine, copyIsCurrent, copyStanding, copyStoppedLine, placeWorkspacesParts, sealedBuiltLine, sealedCopyLine, type PlaceView, type SealedImage, type SealedImageCopy } from "../src/index.js";
 
 describe("a copy of the image beside the record", () => {
   const image: SealedImage = { name: "default", version: 2, hash: "a".repeat(64), recipeHash: "rh", logins: [], sealedAt: "t", sealedFrom: "h1" };
@@ -119,6 +119,19 @@ describe("a copy of the image beside the record", () => {
     const built = copy({ hash: image.hash });
     expect(sealedBuiltLine(sealed, { copy: built, built: true })).toBe(sealedCopyLine(sealed, built));
     expect(sealedBuiltLine(sealed, { copy: built, built: false })).toBe(`${sealedCopyLine(sealed, built)} · already built from this image; nothing was built`);
+  });
+
+  it("a place's row says the stage a copy build there is at in the seal's own words, or why the last one stopped, and that sentence is the row's note while it stands", () => {
+    expect(copyBuildingLine("creating")).toBe("building your image · creating the machine");
+    expect(copyBuildingLine("uploading-files")).toBe("building your image · copying your files");
+    expect(copyStoppedLine("no room today")).toBe("the build stopped · no room today");
+    expect(copyStoppedLine()).toBe("the build stopped");
+    expect(copyStoppedLine("fetch failed")).toBe(`the build stopped · ${NETWORK_LOST_LINE}`);
+    const box: PlaceView = { id: "p_1", kind: "computer", name: "box", default: false, runsWorkspaces: true, build: copyBuildingLine("creating") };
+    expect(placeWorkspacesParts(box, 2)).toEqual({ count: "2", note: copyBuildingLine("creating") });
+    const provider: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, build: copyStoppedLine("no room") };
+    expect(placeWorkspacesParts(provider, 1, 0.41)).toEqual({ count: "1", note: copyStoppedLine("no room") });
+    expect(placeWorkspacesParts({ ...provider, build: undefined }, 1, 0.41)).toEqual({ count: "1", note: "$0.41 this month" });
   });
 
   it("a place builds a copy only where it both forks a machine and copies its disk", () => {

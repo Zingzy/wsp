@@ -807,6 +807,22 @@ export function sealedImageLine(image: SealedImage): string {
   return [`${image.name} v${image.version}`, image.hash, held, ...size, `sealed on ${image.sealedFrom}`].join(" · ");
 }
 
+/** A sentence opening read mid-line: its first letter lowered, the rest as written. */
+export const lowerFirst = (words: string): string => `${words.charAt(0).toLowerCase()}${words.slice(1)}`;
+
+/** What a place's row says while a copy of the image is built there: the stage in the seal's own words, so the row
+ * and the init sheet name one stage one way. */
+export const copyBuildingLine = (stage: Exclude<GoldenStage, "failed">): string => `building your image · ${lowerFirst(GOLDEN_STAGE_WORDS[stage])}`;
+
+/** What the row says after a build there stopped: the seal's own headline, and the reason the way the sheet reads it.
+ * It stands until the next build there starts: wsp image build, the next version cut, or the computer connecting
+ * again. */
+export const copyStoppedLine = (reason?: string): string => {
+  const head = lowerFirst(CLOUD_SETUP_WORDS.build.failed);
+  const said = reason === undefined ? "" : initStoppedLine(reason);
+  return said === "" ? head : `${head} · ${said}`;
+};
+
 /** The two words a copy's standing is said in, either of which fits the slot the longer one needs. */
 export const COPY_CURRENT = "current";
 export const COPY_STALE = "stale";
@@ -1840,7 +1856,7 @@ export const initRowOver = (row: Pick<InitRow, "state" | "login">): boolean => r
 
 /** Where a stopped build was, from the stage that was running: one spelling for the terminal's stop line and the
  * app's sentence, since the stage names read as sentence openings ("Creating the machine"). */
-export const initStageWhile = (stage: string): string => `while ${stage.charAt(0).toLowerCase()}${stage.slice(1)}`;
+export const initStageWhile = (stage: string): string => `while ${lowerFirst(stage)}`;
 
 /** The opening of every stop line, terminal and app alike: where the run was when it stopped. What follows it is
  * what became of the machine, which differs by who is reading. */
@@ -3106,6 +3122,8 @@ export function placeWorkspacesCell(view: PlaceView, count: number, monthUsd?: n
  * title) reads placeWorkspacesCell instead; both are this one rule. */
 export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: number): { count: string; note?: string } {
   const n = `${count}`;
+  // A copy being built or stopped there is what the row has to say while it lasts: the workspaces the row counts wait on it.
+  if (view.build !== undefined) return { count: n, note: view.build };
   // Only a provider bills: a computer of the person's own runs their workspaces for nothing, whatever it runs them on.
   if (view.kind === "provider") return monthUsd === undefined ? { count: n } : { count: n, note: spentThisMonth(monthUsd) };
   return view.runsWorkspaces === true ? { count: n } : { count: n, note: AGENTS_ONLY };
