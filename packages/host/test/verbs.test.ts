@@ -1931,8 +1931,11 @@ describe("wsp verbs over the host", () => {
     const level = markedDefault(effortsFor(harnessCatalog("claude")!, markedDefault(harnessCatalog("claude")!.models) ?? null))!.value;
     expect(claude.starts.at(-1)).toMatchObject({ model: shown, effort: level });
     // The access is named too, and named explicitly: an unnamed one reached the adapter as nothing, which every
-    // adapter here reads as its own skip-everything flag, so the picker's word and the CLI's flag could differ.
-    const access = markedDefault(harnessCatalog("claude")!.permissionModes)!.value;
+    // adapter here reads as its own skip-everything flag, so the picker's word and the CLI's flag could differ. It
+    // is read off the workspace's own catalog, the list the composer draws, since which mode a start with no flag
+    // runs at belongs to the kind of workspace the thread is on.
+    const [alpha] = await rt.workspaces.list();
+    const access = markedDefault((await rt.harnesses.list(alpha!.id)).find(c => c.harness === "claude")!.permissionModes)!.value;
     expect(access).toBe("bypassPermissions");
     expect(claude.starts.at(-1)!.permissionMode).toBe(access);
     const [, thread] = await rt.sessions.list();
@@ -1949,6 +1952,21 @@ describe("wsp verbs over the host", () => {
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
     expect(forked.code).toBe(0);
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions", effort: level });
+  });
+
+  it("a thread on this computer runs every action without asking when the line names no access, and at the word the line names when it does", async () => {
+    await run("new", "mac", "--on", HERE);
+    const bare = await run("run", "mac", "write the notes");
+    expect(bare.code).toBe(0);
+    // The owner's word for his own computer: a thread here does what a session he starts in his own terminal does.
+    expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
+    const picked = await run("run", "mac", "--access", "plan", "read the notes");
+    expect(picked.code).toBe(0);
+    expect(claude.starts.at(-1)!.permissionMode).toBe("plan");
+    // The command line reads it off the same catalog the app's composer draws, so neither holds a default of its own.
+    const [mac] = await rt.workspaces.list();
+    const shown = (await rt.harnesses.list(mac!.id)).find(c => c.harness === "claude")!;
+    expect(markedDefault(shown.permissionModes)?.value).toBe("bypassPermissions");
   });
 
   it("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {

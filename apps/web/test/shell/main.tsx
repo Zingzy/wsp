@@ -60,7 +60,7 @@
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -158,14 +158,14 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
-// The access modes are the CLI's own list, and keptAccess turns it into the kept-machine list the runtime hands out
-// for a workspace on this computer: the mode the harness asks in marked, and bypass named after the machine it would
-// touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per machine.
+// The access modes are the CLI's own list, and workspaceAccess turns it into the list the runtime hands out for a
+// workspace on this computer: the mode a thread here starts at marked, and bypass named after the machine it would
+// touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per workspace.
 const ACCESS_MODES = [
   { value: "default", label: "Default", description: "Asks in the chat about each action that needs permission" },
   { value: "acceptEdits", label: "Accept edits", description: "Edits files without asking; asks about commands that need permission" },
   { value: "plan", label: "Plan", description: "Reads and plans only; changes nothing" },
-  { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking", isDefault: true },
+  { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking" },
 ];
 // ?efforts=1 gives the claude row the effort levels and context windows the runtime's table lists for it, so the
 // composer's row carries the effort picker beside the others and is as wide as it gets.
@@ -174,7 +174,7 @@ const CLAUDE_EFFORTS = ["Low", "Medium", "High", "Extra high", "Max"].map(label 
 const CLAUDE_CONTEXT_WINDOWS = [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }];
 
 const catalogs: HarnessCatalog[] = [
-  keptAccess(
+  workspaceAccess(
     {
       harness: "claude",
       label: "Claude Code",
@@ -200,7 +200,7 @@ const catalogs: HarnessCatalog[] = [
         { name: "help", control: "docs" },
       ],
     },
-    THIS_COMPUTER,
+    "local",
   ),
   {
     harness: "codex",

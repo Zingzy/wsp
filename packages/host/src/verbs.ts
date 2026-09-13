@@ -2223,7 +2223,7 @@ const ConfirmIn = z.boolean().optional().describe("true deletes the machine; abs
 const PICK_INPUTS = {
   model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
   effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
-  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
+  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
 };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
 const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
@@ -3431,7 +3431,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
   "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
   add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",
-  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); its default without it",
+  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); without it, what a thread on that workspace starts at: every action without asking on this computer and on a machine wsp forked, asking about each one on a computer you own",
   cut: "a path inside the folder to leave behind, on top of the plan's own answer; repeats",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",

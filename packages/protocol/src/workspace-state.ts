@@ -80,6 +80,14 @@ export interface WorkspaceKindWords {
    * kind. Only a kind wsp drives pays by the hour or has a version behind it, so a kind that takes none of that
    * names what it does hold rather than verbs its panel never offers. */
   panel: string;
+  /** What a thread on a machine of this kind runs at when nobody names an access: `asks` is the harness row's own
+   * keptMode, whose tools reach the person as a prompt, and `bypass` is the row's bypassMode, which runs every
+   * action without asking. A machine wsp forked costs a rebuild and nothing else. This computer is the person's
+   * own and the owner's word for it is bypass: a thread here may do what a session they start in their own terminal
+   * may do, and a queue of prompts for reading a file and running a command is what they asked to be rid of. A
+   * computer somebody already owns and works on is where a thread asks. Read through workspaceAccess, which every
+   * road that opens a thread goes through, so no road holds a default of its own. */
+  access: "asks" | "bypass";
 }
 
 /** What a delete does to a machine, in the two moods the two sentences need: the clause the confirmation asks
@@ -119,10 +127,34 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs." },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing." },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
+
+/**
+ * The access list a workspace of this kind shows and its starts are checked against: the harness's own modes, in
+ * the same order and with the same sentences, with the default mark on the mode this kind starts a thread at and
+ * the mode that skips the asking named after the machine it would hand over. That name is the kind's own word for
+ * its machine, and only a kind wsp neither forks nor throws away carries one: picking it on a machine wsp made
+ * hands over nothing of the person's. The CLI's own word for that mode stays as the row's short form, which is
+ * what the picker's button says once it is picked: the long name is read in the menu and in every line about the
+ * pick, and a button that carried it crushed the model's name beside it in a narrow window (measured 2026-09-09,
+ * 316 px of row at a 1200 px viewport with the right panel open). A catalog whose CLI takes no access mode comes
+ * back as it went in. The one place a start's access is decided, so the composer's picker, the command line and
+ * the MCP tool cannot show three answers.
+ */
+export function workspaceAccess(catalog: HarnessCatalog, kind: WorkspaceKind): HarnessCatalog {
+  if (catalog.keptMode === undefined) return catalog;
+  const words = WORKSPACE_KIND_WORDS[kind];
+  const starts = words.access === "asks" ? catalog.keptMode : catalog.bypassMode;
+  const permissionModes = catalog.permissionModes.map(({ isDefault: _unplaced, ...mode }) => ({
+    ...mode,
+    ...(mode.value === starts ? { isDefault: true } : {}),
+    ...(!words.driven && mode.value === catalog.bypassMode ? { label: `${mode.label} on ${words.machine}`, short: mode.label } : {}),
+  }));
+  return { ...catalog, permissionModes };
+}
 
 export function kindWords(kind: WorkspaceKind): WorkspaceKindWords {
   return WORKSPACE_KIND_WORDS[kind];

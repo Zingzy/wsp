@@ -362,6 +362,21 @@ describe("the MCP server over the host", () => {
     expect(rows.threads.map(t => [t.workspaceName, t.startedBy])).toEqual([["mac", "agent"]]);
   });
 
+  it("a thread the tools open on this computer runs every action without asking, and at the word the call names when it names one", async () => {
+    await call("new", { on: HERE_PLACE, name: "mac" });
+    expect((await call("run", { workspace: "mac", task: "write the notes" })).isError).toBe(false);
+    // The same answer the command line runs: the tools hold no default of their own, they read the workspace's.
+    expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
+    expect((await call("run", { workspace: "mac", task: "read the notes", access: "plan" })).isError).toBe(false);
+    expect(claude.starts.at(-1)!.permissionMode).toBe("plan");
+    const refused = await call("run", { workspace: "mac", task: "go", access: "yolo" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toMatch(/^access mode "yolo" is not one claude takes/);
+    // What the tool's own words promise about naming none, so an agent reading them is told the same rule.
+    const served = (await client!.listTools()).tools.find(t => t.name === "run")!.inputSchema.properties as Record<string, { description?: string }>;
+    expect(served["access"]?.description).toContain("what a thread on that workspace starts at");
+  });
+
   it("fork makes a sibling from the source's golden version, by name or id, and a task opens its first thread", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
