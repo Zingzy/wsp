@@ -99,8 +99,10 @@ describe("the wsp skill", () => {
     expect(section).toContain("`wsp threads` (the `threads` tool) is where you find that id");
     expect(section).toContain("comes back as its own next message");
     expect(section).toContain("`--notify me`");
+    // Which threads it may reach, since a send outside its own tree is refused and the doc is where it learns that.
+    expect(section).toContain("an agent reaches the threads it opened and the ones those opened");
     // The instructions carry it too, since an agent holding only the tools reads nothing else.
-    expect(INSTRUCTIONS).toContain("how one thread talks to another");
+    expect(INSTRUCTIONS).toContain("how one thread talks to a thread it opened");
   });
 
   it("quotes the failure a reply with a background command gets, as the adapter words it", () => {

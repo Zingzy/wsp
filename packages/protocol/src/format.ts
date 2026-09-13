@@ -2257,6 +2257,13 @@ export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
 }
 
+/** The one sentence a thread is refused with for driving a thread outside its own tree, which is the one rule behind
+ * steering, stopping, renaming and sending into a thread. A thread a person opened is the top of its own tree, so no
+ * agent's token ever reaches it, and neither does one reach a lead beside it on the same workspace. */
+export function threadReachRefusal(threadId: string, driven: string): string {
+  return `thread ${threadWord(threadId)} may drive the threads it opened and the ones they opened, and thread ${threadWord(driven)} is outside that tree`;
+}
+
 /** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
  * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
 export function noWorkspaceRefusal(ref: string): string {
