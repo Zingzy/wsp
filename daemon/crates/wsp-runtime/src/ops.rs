@@ -24,10 +24,11 @@ use tokio::sync::Mutex;
 use wsp_frames::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineRoads,
-    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
-    MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PauseMode, PlaceCapacity, PlaceImage,
-    PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, WorkspaceSize,
+    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
+    MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
+    MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
+    PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
+    TemplateRow, TemplateStatus, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
@@ -366,13 +367,7 @@ impl Ops {
                     },
                 })
             }
-            MachineOp::Metrics { machine_id } => {
-                let record = self.running(&machine_id)?;
-                let cgroup = self.layout.cgroup_dir(&record.id);
-                freeze::memory_current(&cgroup)?;
-                freeze::cpu_usage_usec(&cgroup)?;
-                body(Empty {})
-            }
+            MachineOp::Metrics { machine_id } => body(MachineReadingReply { reading: self.reading(&self.record(&machine_id)?) }),
             MachineOp::DaemonAnswers { machine_id, timeout_ms } => {
                 let record = self.running(&machine_id)?;
                 let result = self.exec(&record.id, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms)).await?;
@@ -864,6 +859,27 @@ impl Ops {
             daemon_supervisor: Some(DaemonSupervisor::Entrypoint),
             notice: None,
             roads: MachineRoads { preview_url: true, daemon_answers: true, put_bytes: true, describe: true, facts: false, metrics: true },
+        }
+    }
+
+    /// One workspace as this computer reads it now: the sizes its cgroup was written with, what it holds of them
+    /// this moment, and where its processes, its files and its address are. Every live figure is read where the
+    /// kernel keeps it and dropped where it cannot be had, since a workspace may stop between the listing and this
+    /// and a reading that refused for it would take the whole row with it; the sizes and the paths always answer.
+    fn reading(&self, record: &Workspace) -> MachineReading {
+        let cgroup = self.layout.cgroup_dir(&record.id);
+        let live = runtime::alive(&record.init);
+        MachineReading {
+            state: self.state_of(record),
+            cpu: record.cpu,
+            mem_mb: record.mem_mb,
+            mem_bytes: live.then(|| freeze::memory_current(&cgroup).ok()).flatten(),
+            cpu_usage_usec: live.then(|| freeze::cpu_usage_usec(&cgroup).ok()).flatten(),
+            uptime_ms: live.then(|| runtime::uptime_ms(&record.init).ok()).flatten(),
+            procs: live.then(|| freeze::pids_in(&cgroup).ok()).flatten(),
+            address: self.net.record(&record.id).ok().flatten().map(|network| network.address.to_string()),
+            cgroup: cgroup.display().to_string(),
+            upper: self.layout.upper(&record.id).display().to_string(),
         }
     }
 

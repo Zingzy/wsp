@@ -602,6 +602,20 @@ async fn refuses_the_link_only_ops_on_an_inbound_socket_with_the_road_sentence()
 }
 
 #[tokio::test]
+async fn answers_the_listing_and_a_workspace_reading_on_an_inbound_socket_holding_the_token() {
+    let d = start(None).await;
+    let (mut c, _) = Client::connect(d.addr, TOKEN, None).await;
+    // A socket that dialled in with the token, which is the only client this daemon has on the box itself. Neither
+    // op is refused the road; this daemon runs no workspaces, so both answer for the backend it has not got.
+    for (n, op) in [(2, "machine.list"), (3, "machine.metrics")] {
+        let r = c.request(op, json!({ "machineId": "wsp-x" })).await;
+        assert_eq!(r, json!({ "id": n, "ok": false, "error": format!("this computer's backend has no {op}") }), "{op}");
+    }
+    // And the socket carries on: a refused road is not a socket the daemon gave up on.
+    assert_eq!(c.request("ping", json!({})).await["ok"], true);
+}
+
+#[tokio::test]
 async fn refuses_to_start_without_a_token_to_check_against() {
     let missing = Options::new("/nonexistent/wsp-daemon-token");
     let err = Daemon::bind(missing).await.err().expect("no daemon without a token");
