@@ -3389,15 +3389,17 @@ describe("runtime create stages", () => {
       rt.events.on("*", e => events.push(e));
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
       const stages = creating(events);
-      expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+      expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+      // No line for the machine coming up and no fork's id anywhere: the starting line is the step a person waits
+      // through, and the row draws it for the whole boot.
       expect(stages.map(e => e.message)).toEqual([
         "starting task-1 on default",
-        "Machine m1 is booting.",
-        "Hostname set to task-1.",
+        "hostname set to task-1",
         "Preview route to the daemon minted.",
         "Daemon answered.",
-        "Ready.",
+        "ready",
       ]);
+      for (const e of stages) expect(e.message).not.toContain(backend.machines[0]!.id);
       for (const e of stages) expect(e).toMatchObject({ workspaceId: ws.id, name: "task-1", elapsedMs: expect.any(Number) });
       expect(stages.some(e => "notice" in e)).toBe(false);
       const log = backend.machines[0]!.execLog;
@@ -3425,7 +3427,10 @@ describe("runtime create stages", () => {
     // notice, which every surface draws as a line of its own.
     expect(named.detail).toBe("hostname clone-test on m1 failed: hostname: sethostname: Operation not permitted");
     expect(named).not.toHaveProperty("notice");
-    for (const e of stages) expect(e.message).not.toContain("sethostname");
+    for (const e of stages) {
+      expect(e.message).not.toContain("sethostname");
+      expect(e.message).not.toContain("m1");
+    }
     expect((await rt.workspaces.get(ws.id)).name).toBe("clone-test");
   });
 
@@ -3438,8 +3443,8 @@ describe("runtime create stages", () => {
     rt.events.on("*", e => events.push(e));
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const stages = creating(events);
-    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready"]);
-    expect(stages[4]).toMatchObject({ message: "Daemon did not answer.", notice: expect.stringMatching(/daemon on m1 did not answer within 300 ms/) });
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+    expect(stages[3]).toMatchObject({ message: "Daemon did not answer.", notice: expect.stringMatching(/daemon on m1 did not answer within 300 ms/) });
     expect(backend.machines[0]!.killed).toBe(false);
     expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
   });
@@ -3463,8 +3468,8 @@ describe("runtime create stages", () => {
     rt.events.on("*", e => events.push(e));
     await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const stages = creating(events);
-    expect(stages[4]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
-    expect("notice" in stages[4]!).toBe(false);
+    expect(stages[3]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
+    expect("notice" in stages[3]!).toBe(false);
     expect(asked).toBe(1);
   });
 
@@ -3483,9 +3488,9 @@ describe("runtime create stages", () => {
     await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const stages = creating(events);
     expect(backend.machines[0]!.previewUrl).toBeUndefined();
-    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "daemon-answering", "ready"]);
-    expect(stages[3]).toMatchObject({ message: "Daemon answered." });
-    expect("notice" in stages[3]!).toBe(false);
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "daemon-answering", "ready"]);
+    expect(stages[2]).toMatchObject({ message: "Daemon answered." });
+    expect("notice" in stages[2]!).toBe(false);
   });
 
   it("a mint that fails is its own line, and the daemon is still asked over the road it has", async () => {
@@ -3505,9 +3510,9 @@ describe("runtime create stages", () => {
     rt.events.on("*", e => events.push(e));
     await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
     const stages = creating(events);
-    expect(stages[3]).toMatchObject({ stage: "preview-route", message: "No preview route to the daemon.", notice: expect.stringMatching(/publishes no port 7070/) });
-    expect(stages[4]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
-    expect("notice" in stages[4]!).toBe(false);
+    expect(stages[2]).toMatchObject({ stage: "preview-route", message: "No preview route to the daemon.", notice: expect.stringMatching(/publishes no port 7070/) });
+    expect(stages[3]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
+    expect("notice" in stages[3]!).toBe(false);
   });
 
   it("a create that fails after the fork kills its machine, reports failed with the reason, and lists nothing", async () => {
@@ -3523,7 +3528,7 @@ describe("runtime create stages", () => {
     rt.events.on("*", e => events.push(e));
     await expect(rt.workspaces.create({ golden: "snap_g", name: "task-1" })).rejects.toThrow("disk full");
     const stages = creating(events);
-    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "machine-booting", "hostname-set", "failed"]);
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "failed"]);
     expect(stages.at(-1)!.message).toBe("disk full");
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
@@ -5511,14 +5516,14 @@ describe("runtime golden update and the post-seal grace", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "one" });
     warn.mockRestore();
-    expect(stages.map(e => (e.type === "workspace.creating" ? e.stage : e.type))).toEqual(["fork-requested", "fork-requested", "machine-booting", "hostname-set", "ready"]);
+    expect(stages.map(e => (e.type === "workspace.creating" ? e.stage : e.type))).toEqual(["fork-requested", "fork-requested", "hostname-set", "ready"]);
     expect(stages[0]).not.toHaveProperty("notice");
     expect(stages[1]).toMatchObject({
       workspaceId: ws.id,
       message: "starting one on default again",
       notice: "Stopped the builder kept from golden v1 to make room at the machine cap.",
     });
-    expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(5).fill("one"));
+    expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(4).fill("one"));
   });
 
   it("a create that needs no room carries no notice, on the result and on the wire; one that made room carries it beside the workspace", async () => {

@@ -1092,16 +1092,19 @@ describe("new workspace dialog", () => {
     expect(useStore.getState().selectedId).toMatch(/^creating:/);
     const stage = { type: "workspace.creating" as const, workspaceId: "ws_beta", name: "beta", elapsedMs: 0 };
     act(() => useStore.getState().applyEvent({ ...stage, stage: "fork-requested", message: "starting beta on ascii" }));
-    act(() => useStore.getState().applyEvent({ ...stage, stage: "machine-booting", message: "Machine m7 is booting.", elapsedMs: 4_200 }));
-    const line = within(rowOf("beta")).getByText("Machine m7 is booting.");
+    const line = within(rowOf("beta")).getByText("starting beta on ascii");
     expect(line.className).toContain("whitespace-normal");
     expect(line.className).not.toContain("truncate");
-    expect(within(rowOf("beta")).queryByText("starting beta on ascii")).toBeNull();
-    // A verdict on a step already taken belongs to the log: the row holds the step the create is waiting on.
+    // A verdict on a step already taken belongs to the log: the row holds the step the create is waiting on, which
+    // is the starting line for the whole boot.
     act(() => useStore.getState().applyEvent({ ...stage, stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_000, detail: "hostname beta on m7 failed: hostname: sethostname: Operation not permitted" }));
-    expect(within(rowOf("beta")).getByText("Machine m7 is booting.")).toBeDefined();
+    expect(within(rowOf("beta")).getByText("starting beta on ascii")).toBeDefined();
     expect(rowOf("beta").textContent).not.toContain(HOSTNAME_KEPT);
     expect(rowOf("beta").textContent).not.toContain("sethostname");
+    // The next step the create waits on takes the line, and the one before it goes.
+    act(() => useStore.getState().applyEvent({ ...stage, stage: "preview-route", message: "Preview route to the daemon minted.", elapsedMs: 6_100 }));
+    expect(within(rowOf("beta")).getByText("Preview route to the daemon minted.")).toBeDefined();
+    expect(within(rowOf("beta")).queryByText("starting beta on ascii")).toBeNull();
     const created = view("ws_beta", "beta");
     act(() => useStore.getState().applyEvent({ type: "workspace.created", workspace: created }));
     await waitFor(() => expect(rowOf("beta").getAttribute("aria-busy")).toBeNull());

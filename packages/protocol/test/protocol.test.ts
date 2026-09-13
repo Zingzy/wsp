@@ -339,7 +339,7 @@ describe("a create's stage lines on the wire", () => {
 
   it("the hostname's verdict is a note on a step taken; every other line is the step the create waits on", () => {
     expect(creationAwaits("hostname-set")).toBe(false);
-    for (const word of ["fork-requested", "machine-booting", "preview-route", "daemon-answering", "ready", "failed", "image"]) {
+    for (const word of ["fork-requested", "preview-route", "daemon-answering", "ready", "failed", "image"]) {
       expect(creationAwaits(word)).toBe(true);
     }
   });

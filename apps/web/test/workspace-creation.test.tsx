@@ -17,7 +17,7 @@ const CAP_LINE = "both machine slots are in use: first, t-cap. Pause one or wait
 
 function lines(count: number): CreationLine[] {
   return Array.from({ length: count }, (_, i) => ({
-    stage: i === count - 1 ? "failed" : "machine-booting",
+    stage: i === count - 1 ? "failed" : "daemon-answering",
     message: i === count - 1 ? CAP_LINE : `Stage ${i + 1} of the create ran and reported its progress here.`,
     at: new Date(Date.UTC(2026, 8, 5, 12, 31, i)).toISOString(),
     elapsedMs: 800 * (i + 1),
@@ -126,7 +126,7 @@ describe("workspace creation layout", () => {
         { stage: "image", message: "building your image on hetzner · installing agents", at: at(6), elapsedMs: 108_000 },
         { stage: "image", message: "building your image on hetzner · taking the snapshot", notice: "about 4.2 GB", at: at(54), elapsedMs: 130_000 },
         { stage: "fork-requested", message: "starting spoo-fix on hetzner", at: at(58), elapsedMs: 190_000 },
-        { stage: "ready", message: "Ready.", at: at(59), elapsedMs: 210_000 },
+        { stage: "ready", message: "ready", at: at(59), elapsedMs: 210_000 },
       ],
     });
     const rows = within(within(view).getByRole("list", { name: "Creation log" })).getAllByRole("listitem");
@@ -134,7 +134,7 @@ describe("workspace creation layout", () => {
       "building your image on hetzner · installing agents",
       "building your image on hetzner · taking the snapshot",
       "starting spoo-fix on hetzner",
-      "Ready.",
+      "ready",
     ]);
     // What a step answered rides under its own line, muted, and moves nothing beside it.
     const notice = rows[1]!.querySelector("span span")!;

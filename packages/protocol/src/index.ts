@@ -1221,7 +1221,7 @@ export const isSessionEvent = (e: { type: string }): e is SessionEvent => SESSIO
  * up, so a change to a record a client already holds is never this event. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
-export const WorkspaceCreateStage = z.enum(["fork-requested", "machine-booting", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
+export const WorkspaceCreateStage = z.enum(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
 export type WorkspaceCreateStage = z.infer<typeof WorkspaceCreateStage>;
 /** Whether a line of a create's log is the step the create is waiting on, rather than a note on a step it already
  * took. A surface with one line for the whole create shows the last of these, so a cosmetic step's verdict never

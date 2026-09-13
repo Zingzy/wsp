@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, VAULT_KEPT, absentComputer, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, DAEMON_VERSION, FREE_WORD, LINEAGE_MARKS, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, NO_LINGER_LINE, NOT_ON_THIS_KIND, absentComputer, fmtBytes, fmtSize, imageKeptLine, kindWords, machineLacksShort, placeMachineId, servesReading, workspaceKind } from "@wsp/protocol";
 import type {
   Capabilities,
   EventUnion,
@@ -227,9 +227,13 @@ describe("machine facts", () => {
     expect(cell.querySelector("span")!.className).toContain("text-muted-foreground");
     expect(document.querySelector('[data-slot="badge"]')).toBeNull();
     // The verdict, once, in words about this workspace; what the machine answered rides the line's title.
-    expect(fact("vault-refused")).toBe(VAULT_KEPT);
+    expect(fact("vault-refused")).toBe("the nap saved no backup; what was saved before is kept");
     expect(document.querySelector('[data-k="vault-refused"]')!.getAttribute("title")).toBe("the export was 646 MB, over the 200 MB cap");
     expect(document.body.textContent).not.toContain("the export was 646 MB");
+    // A workspace whose naps never stored one has nothing kept anywhere, and the row beside it says so with no day.
+    act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: undefined } }));
+    await waitFor(() => expect(fact("vault")).toBe("no backup"));
+    expect(fact("vault-refused")).toBe("the nap saved no backup; nothing is saved off the machine");
     // A nap that stores one clears both: the row goes, and nothing about backups is said.
     act(() => api.emit({ type: "workspace.status", status: { ...status(w), vaultedAt: "2026-09-09T08:00:00.000Z", vaultRefused: undefined } }));
     await waitFor(() => expect(document.querySelector('[data-k="vault"]')).toBeNull());

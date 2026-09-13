@@ -13,8 +13,7 @@ document.documentElement.classList.toggle("dark", params.get("theme") !== "light
 
 const MESSAGES = [
   "starting beta on ascii",
-  "Machine m1 is booting.",
-  "Hostname set to beta.",
+  "hostname set to beta",
   "Waiting for the daemon to answer on its port.",
   "Daemon reachable; preparing the workspace checkout and the harness configuration directory.",
 ];
@@ -23,7 +22,7 @@ const MESSAGES = [
 const FAILED = "both machine slots are in use: first, t-cap. Pause one or wait for a nap.";
 
 const lines: CreationLine[] = Array.from({ length: count }, (_, i) => ({
-  stage: i === count - 1 ? "failed" : "machine-booting",
+  stage: i === count - 1 ? "failed" : "daemon-answering",
   message: i === count - 1 ? FAILED : MESSAGES[i % MESSAGES.length]!,
   at: new Date(Date.UTC(2026, 8, 5, 12, 31, i)).toISOString(),
   elapsedMs: 800 * (i + 1),

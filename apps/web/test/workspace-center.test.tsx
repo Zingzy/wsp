@@ -131,12 +131,12 @@ describe("workspace creation view", () => {
     expect(log.textContent).toContain("Asking wsp to start it.");
 
     emit(stage({}));
-    emit(stage({ stage: "machine-booting", message: "Machine m1 is booting.", elapsedMs: 3_400 }));
+    emit(stage({ stage: "preview-route", message: "Preview route to the daemon minted.", elapsedMs: 3_400 }));
     emit(stage({ stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_100, detail: "hostname beta on m1 failed: read-only" }));
     const lines = within(log).getAllByRole("listitem");
     expect(lines.map(l => l.textContent)).toEqual([
       expect.stringMatching(/^\d\d:\d\d:\d\dstarting beta on ascii0\.0s$/),
-      expect.stringMatching(/^\d\d:\d\d:\d\dMachine m1 is booting\.3\.4s$/),
+      expect.stringMatching(/^\d\d:\d\d:\d\dPreview route to the daemon minted\.3\.4s$/),
       expect.stringMatching(new RegExp(`^\\d\\d:\\d\\d:\\d\\d${HOSTNAME_KEPT}5\\.1s$`)),
     ]);
     // The guest's own words stand on the line's title and nowhere a person reads a sentence.
