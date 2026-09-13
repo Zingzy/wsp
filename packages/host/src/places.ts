@@ -55,6 +55,7 @@ import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { daemonBinaryHere } from "./assets.js";
+import { guestDaemonTarget, noGuestDaemonLine } from "./daemon-binary.js";
 import { runningWsp, type RunningWsp } from "./mcp-install.js";
 import { randomBytes } from "node:crypto";
 import WebSocket from "ws";
@@ -64,7 +65,7 @@ import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./host
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedBy, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
-import { pairOnLoopbackLine, reachAddresses } from "./pairing.js";
+import { advertiseWord, pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
   installService,
   runFailureLine,
@@ -117,10 +118,12 @@ export function hostPlaceKey(statePath: string): PlaceKeyPair {
 
 /** What a host wires for its places: its own pair, the provider it is set up for as a row of the same list, and
  * this computer's own row. */
-export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
+export function placeWiring(statePath: string, env: ProviderEnv, advertise?: string): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
-    install: placeInstaller(),
+    // The word the person gave --advertise travels to the install, which is the one road that knows the computer
+    // being joined is somewhere else and so whether that word could ever be dialled from it.
+    install: placeInstaller(advertise === undefined ? {} : { advertise }),
     dial: placeDialler(),
     provider: () => {
       const module = providerModule(env);
@@ -187,6 +190,21 @@ export const ADD_FLAGS_REFUSAL =
  * have no address to reach this host at, so the agent would be installed and never link. */
 export const ADD_LOOPBACK_REFUSAL =
   "wsp add: this host answers on its own loopback alone, which a computer somewhere else cannot dial. Start it with --listen 0.0.0.0, or link it to your relay, and run this again.";
+
+/** The refusal for a box that would not say what chip it runs on: everything wsp puts there is built for one, and
+ * guessing it is how a binary for the wrong chip gets installed and dies on its first start. */
+export const UNSAID_CHIP_REFUSAL =
+  "wsp add: that computer did not say what chip it runs on over ssh, and the daemon wsp would install there is built for one; check that uname -m answers on it and run this again.";
+
+/** The refusal for an install on another computer while this host advertises an address on its own loopback. The
+ * word is the person's, so it is read back to them rather than left out: an install that quietly falls through to
+ * an address they did not name is an install reaching somewhere they did not choose, which is how a join ends in
+ * twenty seconds of silence at a card nobody meant. */
+export const advertisedLoopbackRefusal = (url: string): string =>
+  `wsp add: this host is advertising ${url}, which is this computer's own loopback: the computer being joined would dial itself there and reach nothing of this wsp. Start this host with --advertise naming an address that computer can reach, or drop the flag and let it dial what this computer answers on.`;
+
+/** What the install says about where the box will dial back, in the order its link will try them. */
+export const dialsBackLine = (hostUrls: readonly string[]): string => `it dials this computer at ${hostUrls.join(", ")}`;
 
 /** What a remove says about the device a join bought for that computer's own window. One code bought the place and
  * the device, and a remove takes the place alone: the token is still good until somebody hands it back, from the
@@ -255,15 +273,21 @@ export function addFlags(name?: string, port?: string, keyPath?: string): AddFla
  *
  * Nothing waits here for the link: the computer dials this host on its own, and the place door is what knows when
  * it has. */
-export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string; cliDir?: string } = {}): PlaceInstaller {
+export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string; cliDir?: string; advertise?: string } = {}): PlaceInstaller {
   return async (req, stage) => {
     const reach = parseSshAddress(req.address, {
       ...(req.sshPort !== undefined ? { port: req.sshPort } : {}),
       ...(req.keyPath !== undefined ? { keyPath: req.keyPath } : {}),
     });
     // A computer somewhere else cannot dial this computer's own loopback, so an install that would leave the agent
-    // there with no address to come back on is refused before anything lands on it.
-    const hostUrls = sshDialsThisComputer(reach, [hostname()]) ? req.hostUrls : req.hostUrls.filter(at => !isLoopback(new URL(at).hostname));
+    // there with no address to come back on is refused before anything lands on it. The computer being joined is
+    // sometimes this one under another name, and there loopback is the address that works.
+    const here = sshDialsThisComputer(reach, [hostname()]);
+    // Read off the word itself and not off what is left after the filter: a host bound to this computer alone
+    // behind a relay also carries a loopback address in that list, and nobody typed that one.
+    const named = joinAddressOf(advertiseWord(deps.advertise) ?? "");
+    if (!here && named !== undefined && isLoopback(new URL(named).hostname)) throw new Error(advertisedLoopbackRefusal(named));
+    const hostUrls = here ? req.hostUrls : req.hostUrls.filter(at => !isLoopback(new URL(at).hostname));
     if (hostUrls.length === 0) throw new Error(ADD_LOOPBACK_REFUSAL);
     stage("connect", "running");
     const backend = deps.backend ?? new SshBackend();
@@ -284,22 +308,31 @@ export function placeInstaller(deps: { backend?: SshBackend; daemonDir?: string;
       await sayKey(await backend.keyFor(reach).catch(() => undefined));
       throw e;
     }
-    const { machine, login, hostKey } = adopted;
+    const { machine, login, arch, hostKey } = adopted;
+    // The binary that lands is picked off the word the box just said about its own chip, never off this computer's:
+    // the two are different computers as often as they are alike, and a binary for the wrong one starts and dies.
+    // Read before anything is sent, so a chip wsp builds no daemon for leaves the box exactly as it was found.
+    const target = arch === undefined ? undefined : guestDaemonTarget(arch);
+    if (target === undefined) throw new Error(arch === undefined ? UNSAID_CHIP_REFUSAL : noGuestDaemonLine(arch));
     const name = req.name?.trim() !== undefined && req.name.trim() !== "" ? req.name.trim() : sshMachineName(reach);
     const at = placeDaemonPaths(login.HOME);
     const place = joinedPlace({ home: login.HOME, path: login.PATH }, { hostUrls, codeFile: `${at.wsp}/join-code`, name });
     stage("connect", "done", await osSaid(machine));
     await sayKey(hostKey);
-    stage("wsp", "running");
+    stage("wsp", "running", target.uname);
     await deployDaemon(machine, {
       place,
+      target,
       // The code goes over the byte road and never into a command: what sits in a command line sits in a world
       // readable /proc/<pid>/cmdline for as long as it runs, and this one buys a place in somebody's wsp.
       land: [{ path: place.join!.codeFile, bytes: new TextEncoder().encode(`${req.code}\n`) }],
       onLine: line => {
         if (line.includes(WSP_READY_LINE)) {
-          stage("wsp", "done");
-          stage("service", "running");
+          stage("wsp", "done", target.uname);
+          // The addresses the box is about to dial, said as its join starts rather than after the wait it ends in:
+          // a wrong one is twenty seconds of silence followed by a sentence naming it, and this is the same fact
+          // read while it can still be stopped.
+          stage("service", "running", dialsBackLine(hostUrls));
         } else if (line.includes(PLACE_JOINED_LINE)) {
           stage("service", "done");
         }
@@ -447,7 +480,8 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
  * computer answered beside it. */
 export function stageLines(event: PlaceStageEvent): string[] {
   const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
-  if (event.state === "running") return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}`];
+  // A running step says its note as a finished one does: what the box was read as and where it will dial back are
+  // read while the step they belong to is still running, and holding them until it ends is holding them too long.
   return [`  ${mark} ${PLACE_ADD_WORDS[event.step]}${event.note === undefined ? "" : `: ${event.note}`}`];
 }
 

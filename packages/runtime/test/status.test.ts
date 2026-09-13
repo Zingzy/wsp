@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { roadFailed } from "@wsp/engine";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
-import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusWatchOptions } from "../src/status.js";
+import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -439,6 +439,52 @@ describe("the status ticks", () => {
     expect(last).toMatchObject({ phase: "running", machineState: "running", reach: { state: "reachable" } });
     expect(sendRefusal(workspaceState({ phase: last.phase, machineState: last.machineState, reach: last.reach.state }))).toBeNull();
   }, 10_000);
+
+  it("a workspace that goes takes its facts backoff with it, so the next workspace under that id is asked at once", async () => {
+    const fc = fakeClock();
+    const heard: ((e: EventUnion) => void)[] = [];
+    let dials = 0;
+    const dark: StatusRecord = {
+      id: "ws_a",
+      name: "box",
+      machineId: "ssh://dev@box:22",
+      kind: "ssh",
+      phase: "running",
+      golden: "",
+      createdAt: new Date(fc.clock.now()).toISOString(),
+      size: { cpu: 2, memMb: 2048 },
+      rateUsdPerHour: 0,
+      generation: 1,
+      providerState: async () => "running",
+      exec: async () => ({ exitCode: 0, stdout: "", stderr: "" }),
+      // A machine that is off: every read of what it is costs a dial and answers nothing.
+      facts: async () => {
+        dials++;
+        throw new Error("did not say what it is over ssh");
+      },
+    };
+    const tracker = createStatusTracker({
+      records: async () => [dark],
+      store: memoryStore(),
+      emit: () => {},
+      on: (_type, listener) => {
+        heard.push(listener);
+        return () => {};
+      },
+      clock: fc.clock,
+    });
+    await tracker.list();
+    expect(dials).toBe(1);
+    // Backed off: a second read inside the window spends no dial.
+    await tracker.list();
+    expect(dials).toBe(1);
+    // The workspace is deleted. Its entry goes with every other per-workspace thing the tracker held, so a record
+    // that turns up under that id again is a new workspace and is asked at once rather than serving out the
+    // window the dead one earned.
+    for (const listener of heard) listener({ type: "workspace.deleted", workspaceId: "ws_a" });
+    await tracker.list();
+    expect(dials).toBe(2);
+  });
 
   it("a tick that throws is logged and the next tick still runs; nothing reaches the process as an unhandled rejection", async () => {
     const rejections: unknown[] = [];

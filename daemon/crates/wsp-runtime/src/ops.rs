@@ -376,7 +376,7 @@ impl Ops {
                 let record = self.record(&machine_id)?;
                 let upper = self.layout.upper(&record.id);
                 // Off the runtime thread: a workspace after a build holds hundreds of thousands of files.
-                let used_bytes = tokio::task::spawn_blocking(move || snapshot::upper_bytes(&upper).ok()).await.ok().flatten();
+                let used_bytes = tokio::task::spawn_blocking(move || store::tree_bytes(&upper).ok()).await.ok().flatten();
                 body(MachineShapeReply {
                     shape: MachineShape {
                         cpu: record.cpu,
@@ -943,7 +943,7 @@ async fn commit_snapshot(
     let progress = Arc::clone(job);
     let reading = Arc::clone(&store);
     let committed = tokio::task::spawn_blocking(move || {
-        let total = snapshot::upper_bytes(&upper).map_err(|source| store::Error::Io { path: upper.clone(), source })?;
+        let total = store::tree_bytes(&upper).map_err(|source| store::Error::Io { path: upper.clone(), source })?;
         let _ = progress.total.set(total);
         reading.commit_blob(|out| snapshot::write_layer(&upper, out, &progress.written))
     })

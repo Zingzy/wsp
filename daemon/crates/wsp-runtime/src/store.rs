@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The layer store under `<root>/layers`. Blobs land as fetched or committed and are unpacked once; an image is a
-//! name over a chain of layers and a config; a build is a recipe's hash over the chain it produced; a snapshot is
-//! a workspace's saved layer over the chain it booted from; a template is a name over a snapshot's chain. A layer
-//! is referenced while any of those names it, or a workspace the sweep is told about holds it, and the sweep
-//! removes what nothing names. The shape on disk is `Layout`, and nothing outside this file reads it.
+//! The layer store under `<root>/layers`. A layer's blob lands as fetched or committed, is unpacked once and goes:
+//! the unpacked tree is the one form a layer keeps on the box, since forks mount it and nothing serves the blob,
+//! and a layer's bytes are what that tree's files hold. A config blob is JSON nothing unpacks and stays a blob. An
+//! image is a name over a chain of layers and a config; a build is a recipe's hash over the chain it produced; a
+//! snapshot is a workspace's saved layer over the chain it booted from; a template is a name over a snapshot's
+//! chain. A layer is referenced while any of those names it, or a workspace the sweep is told about holds it, and
+//! the sweep removes what nothing names. The shape on disk is `Layout`, and nothing outside this file reads it.
 
 use std::collections::HashSet;
 use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -116,13 +119,15 @@ pub struct Image {
     pub platform: Platform,
     #[serde(flatten)]
     pub chain: Chain,
+    /// Each layer's bytes as its unpacked files hold them, in the chain's order.
     pub layer_bytes: Vec<u64>,
     pub pulled_at: u64,
 }
 
 /// `snapshots/<id>.json`: a workspace's upper directory saved as one layer over the chain it booted from. The id is
 /// the snapshot's own, fresh at every commit, since two commits of an unchanged workspace make one layer and must
-/// stay two snapshots; `layer` is that saved layer, the last of the chain, and `layer_bytes` its blob.
+/// stay two snapshots; `layer` is that saved layer, the last of the chain, and `layer_bytes` what its unpacked
+/// files hold.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Snapshot {
     pub id: Digest,
@@ -243,11 +248,14 @@ impl Store {
         }
         let manifest = client.manifest(source, &self.platform)?;
         self.take_blob(client, source, &manifest.config)?;
+        let mut layer_bytes = Vec::with_capacity(manifest.layers.len());
         for layer in &manifest.layers {
-            self.take_blob(client, source, layer)?;
-            self.unpack(layer)?;
+            if self.unpacked(&layer.digest).is_none() {
+                self.take_blob(client, source, layer)?;
+            }
+            layer_bytes.push(self.unpack(&layer.digest, layer.layer_encoding()?)?);
         }
-        let image = Image::from_manifest(name, source, &manifest, &self.platform);
+        let image = Image::from_manifest(name, source, &manifest, &self.platform, layer_bytes);
         self.write_record(&self.layout.image(name), &image)?;
         Ok(Pulled { image, fetched: true })
     }
@@ -280,11 +288,11 @@ impl Store {
         Ok(chains)
     }
 
-    /// A snapshot of a workspace: the layer `commit_blob` took from it, unpacked here, and the record naming it over
-    /// the chain the workspace booted from. `from` is what that workspace was made from. Two calls, since the
-    /// workspace is held still only while its layer is read and runs again while the layer unpacks.
+    /// A snapshot of a workspace: the layer `commit_blob` took from it, unpacked here with the blob gone, and the
+    /// record naming it over the chain the workspace booted from. `from` is what that workspace was made from. Two
+    /// calls, since the workspace is held still only while its layer is read and runs again while the layer unpacks.
     pub fn record_snapshot(&self, name: &str, workspace: &str, from: &str, base: &Chain, committed: &Committed) -> Result<Snapshot, Error> {
-        self.unpack(&Descriptor { digest: committed.digest.clone(), size: committed.bytes, media_type: fetch::LAYER_TAR.to_owned() })?;
+        let layer_bytes = self.unpack(&committed.digest, LayerEncoding::Plain)?;
         let created_at = now_iso();
         let mut layers = base.layers.clone();
         layers.push(committed.digest.clone());
@@ -296,7 +304,7 @@ impl Store {
             from: from.to_owned(),
             chain: Chain { config: base.config.clone(), layers },
             layer: committed.digest.clone(),
-            layer_bytes: committed.bytes,
+            layer_bytes,
             created_at,
         };
         self.write_record(&self.layout.snapshot(&snapshot.id), &snapshot)?;
@@ -363,7 +371,8 @@ impl Store {
     }
 
     /// The tar `write` produces, hashed into a blob as it is: a layer's bytes, not yet unpacked; `record_snapshot`
-    /// unpacks it. A blob already in the store under that digest is left as it is.
+    /// unpacks it and drops the blob. Not compressed: gzip took five times the tar itself on a two core box, and
+    /// the blob lives only until its unpack. A blob already in the store under that digest is left as it is.
     pub fn commit_blob(&self, write: impl FnOnce(&mut dyn Write) -> io::Result<()>) -> Result<Committed, Error> {
         let partial = self.layout.committing(&random_word());
         let file = File::create(&partial).map_err(io_at(&partial))?;
@@ -401,9 +410,10 @@ impl Store {
     }
 
     /// Removes every blob and unpacked layer no record names and no chain in `held` carries, every partial blob,
-    /// and every unpack that never finished. `held` is what the workspaces on the box booted from, whose layers
-    /// stay mounted under them whatever the records say. Not for while a pull or a commit is in flight: their
-    /// partial and their unpack in progress are what it would take.
+    /// every unpack that never finished, and every blob whose layer is unpacked beside it whatever names it, since
+    /// the tree is the layer's one form. `held` is what the workspaces on the box booted from, whose layers stay
+    /// mounted under them whatever the records say. Not for while a pull or a commit is in flight: their partial
+    /// and their unpack in progress are what it would take.
     pub fn sweep(&self, held: &[Chain]) -> Result<Swept, Error> {
         let mut live: HashSet<Digest> = HashSet::new();
         for chain in self.chains()?.iter().chain(held) {
@@ -416,7 +426,8 @@ impl Store {
             let path = entry.path();
             let partial = self.layout.is_partial(&path);
             let digest = digest_of(&path);
-            if !partial && digest.as_ref().is_none_or(|d| live.contains(d)) {
+            let twin = digest.as_ref().is_some_and(|d| self.unpacked(d).is_some());
+            if !partial && !twin && digest.as_ref().is_none_or(|d| live.contains(d)) {
                 continue;
             }
             swept.bytes += entry.metadata().map_err(io_at(&path))?.len();
@@ -436,7 +447,7 @@ impl Store {
             if finished && live.contains(&digest) {
                 continue;
             }
-            swept.bytes += dir_bytes(&path)?;
+            swept.bytes += tree_bytes(&path).map_err(io_at(&path))?;
             fs::remove_dir_all(&path).map_err(io_at(&path))?;
             if finished {
                 swept.unpacked.push(digest);
@@ -470,34 +481,39 @@ impl Store {
         fs::rename(&partial, &done).map_err(io_at(&done))
     }
 
-    /// The layer's files under `unpacked/<digest>`, once: a finished directory is left alone, an unfinished one
-    /// from an earlier try is started over.
-    fn unpack(&self, layer: &Descriptor) -> Result<(), Error> {
-        let done = self.layout.unpacked(&layer.digest);
-        if done.is_dir() {
-            return Ok(());
-        }
-        let encoding = layer.layer_encoding()?;
-        let work = self.layout.unpacking(&layer.digest);
-        if work.exists() {
-            fs::remove_dir_all(&work).map_err(io_at(&work))?;
-        }
-        fs::create_dir_all(&work).map_err(io_at(&work))?;
-        let mut result = self.unpack_blob(layer, encoding, &work, true);
-        if matches!(&result, Err(e) if e.kind() == io::ErrorKind::PermissionDenied) {
-            fs::remove_dir_all(&work).map_err(io_at(&work))?;
+    /// The layer in its one form: its files under `unpacked/<digest>` and no blob beside them. A finished directory
+    /// is left alone, an unfinished one from an earlier try is started over, and the blob goes once the directory
+    /// is whole. Answers the bytes the directory's files hold.
+    fn unpack(&self, digest: &Digest, encoding: LayerEncoding) -> Result<u64, Error> {
+        let done = self.layout.unpacked(digest);
+        if !done.is_dir() {
+            let work = self.layout.unpacking(digest);
+            if work.exists() {
+                fs::remove_dir_all(&work).map_err(io_at(&work))?;
+            }
             fs::create_dir_all(&work).map_err(io_at(&work))?;
-            result = self.unpack_blob(layer, encoding, &work, false);
+            let mut result = self.unpack_blob(digest, encoding, &work, true);
+            if matches!(&result, Err(e) if e.kind() == io::ErrorKind::PermissionDenied) {
+                fs::remove_dir_all(&work).map_err(io_at(&work))?;
+                fs::create_dir_all(&work).map_err(io_at(&work))?;
+                result = self.unpack_blob(digest, encoding, &work, false);
+            }
+            if let Err(e) = result {
+                let _ = fs::remove_dir_all(&work);
+                return Err(Error::Unpack { digest: digest.clone(), detail: e.to_string() });
+            }
+            fs::rename(&work, &done).map_err(io_at(&done))?;
         }
-        if let Err(e) = result {
-            let _ = fs::remove_dir_all(&work);
-            return Err(Error::Unpack { digest: layer.digest.clone(), detail: e.to_string() });
+        // The layer is on disk in its one form whatever became of the blob; one that will not remove is the next
+        // sweep's, so it fails no pull and no snapshot record.
+        if let Err(e) = remove_if_there(&self.layout.blob(digest)) {
+            eprintln!("layer {digest}: its blob stayed beside the tree, the next sweep takes it: {e}");
         }
-        fs::rename(&work, &done).map_err(io_at(&done))
+        tree_bytes(&done).map_err(io_at(&done))
     }
 
-    fn unpack_blob(&self, layer: &Descriptor, encoding: LayerEncoding, work: &Path, owners: bool) -> io::Result<()> {
-        let file = File::open(self.layout.blob(&layer.digest))?;
+    fn unpack_blob(&self, digest: &Digest, encoding: LayerEncoding, work: &Path, owners: bool) -> io::Result<()> {
+        let file = File::open(self.layout.blob(digest))?;
         match encoding {
             LayerEncoding::Gzip => unpack_tar(flate2::read::GzDecoder::new(file), work, owners),
             LayerEncoding::Plain => unpack_tar(file, work, owners),
@@ -536,14 +552,14 @@ impl Store {
 }
 
 impl Image {
-    fn from_manifest(name: &str, source: &Reference, manifest: &Manifest, platform: &Platform) -> Image {
+    fn from_manifest(name: &str, source: &Reference, manifest: &Manifest, platform: &Platform, layer_bytes: Vec<u64>) -> Image {
         Image {
             name: name.to_owned(),
             source: source.to_string(),
             manifest: manifest.digest.clone(),
             platform: platform.clone(),
             chain: Chain { config: manifest.config.digest.clone(), layers: manifest.layers.iter().map(|l| l.digest.clone()).collect() },
-            layer_bytes: manifest.layers.iter().map(|l| l.size).collect(),
+            layer_bytes,
             pulled_at: now(),
         }
     }
@@ -597,14 +613,46 @@ fn digest_of(path: &Path) -> Option<Digest> {
     Digest::parse(&format!("sha256:{stem}")).ok()
 }
 
-fn dir_bytes(dir: &Path) -> Result<u64, Error> {
+/// How many bytes the files under a directory hold, each inode once: an upper directory's, which is what its
+/// layer's tar comes to give or take the headers, or an unpacked layer's, which is what the layer costs the box.
+/// Read off the box, never off a df inside the workspace, which reads the box's whole disk. A workspace may be
+/// running while its upper is read, so an entry gone between the listing and its stat is skipped, never a failure
+/// of the whole count; only a directory that is not there fails.
+pub fn tree_bytes(dir: &Path) -> io::Result<u64> {
+    let mut seen = HashSet::new();
     let mut total = 0;
-    for entry in fs::read_dir(dir).map_err(io_at(dir))? {
-        let entry = entry.map_err(io_at(dir))?;
-        let meta = entry.metadata().map_err(io_at(&entry.path()))?;
-        total += if meta.is_dir() { dir_bytes(&entry.path())? } else { meta.len() };
+    for entry in fs::read_dir(dir)? {
+        count_entry(entry?, &mut seen, &mut total)?;
     }
     Ok(total)
+}
+
+/// One entry's bytes into the total, its directory walked under it; a vanished entry or directory counts nothing.
+fn count_entry(entry: fs::DirEntry, seen: &mut HashSet<(u64, u64)>, total: &mut u64) -> io::Result<()> {
+    let meta = match entry.metadata() {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.is_dir() {
+        let entries = match fs::read_dir(entry.path()) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        for child in entries {
+            count_entry(child?, seen, total)?;
+        }
+    } else if meta.is_file() && shared_inode(&meta).is_none_or(|key| seen.insert(key)) {
+        *total += meta.len();
+    }
+    Ok(())
+}
+
+/// The key of a file the workspace hard linked more than once, by device and inode: the layer carries its bytes
+/// once under the first name and a link under every other, and the count reads it once the same way.
+pub(crate) fn shared_inode(meta: &fs::Metadata) -> Option<(u64, u64)> {
+    (meta.is_file() && meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
 }
 
 fn remove_if_there(path: &Path) -> Result<bool, Error> {
@@ -687,9 +735,64 @@ mod tests {
         let base = Chain { config: Digest::of(b"config"), layers: vec![Digest::of(b"base")] };
         let snapshot = store.record_snapshot("v1", "wsp-x", "ubuntu:24.04", &base, &committed).unwrap();
         assert_eq!(fs::read(store.unpacked(&committed.digest).unwrap().join("etc/word")).unwrap(), b"hello");
-        assert_eq!((&snapshot.layer, snapshot.layer_bytes), (&committed.digest, committed.bytes));
+        assert!(!store.has_blob(&committed.digest), "the blob went with the unpack");
+        assert_eq!((&snapshot.layer, snapshot.layer_bytes), (&committed.digest, 5), "the size is the tree's, not the tar's");
         assert_eq!(snapshot.chain.layers, vec![Digest::of(b"base"), committed.digest.clone()]);
         assert_eq!(store.snapshot(&snapshot.id).unwrap(), Some(snapshot));
+    }
+
+    #[test]
+    fn a_blob_that_will_not_remove_fails_no_record_and_goes_at_the_next_sweep() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        if fs::metadata(dir.path()).unwrap().uid() == 0 {
+            eprintln!("skipped: root removes a file whatever its directory's mode");
+            return;
+        }
+        let store = Store::open(dir.path()).unwrap();
+        let word = dir.path().join("word");
+        fs::write(&word, b"hello").unwrap();
+        let committed = store
+            .commit_blob(|out| {
+                let mut tar = tar::Builder::new(out);
+                tar.append_path_with_name(&word, "etc/word")?;
+                tar.finish()
+            })
+            .unwrap();
+        // The blobs directory read only: the blob can be opened and unpacked, and cannot be removed.
+        let blobs = store.layout.blobs();
+        fs::set_permissions(&blobs, fs::Permissions::from_mode(0o555)).unwrap();
+        let base = Chain { config: Digest::of(b"config"), layers: vec![Digest::of(b"base")] };
+        let recorded = store.record_snapshot("v1", "wsp-x", "ubuntu:24.04", &base, &committed);
+        fs::set_permissions(&blobs, fs::Permissions::from_mode(0o755)).unwrap();
+        let snapshot = recorded.expect("the record stands though the blob stayed");
+        assert_eq!(snapshot.layer_bytes, 5);
+        assert!(store.unpacked(&committed.digest).is_some(), "the tree is there");
+        assert!(store.has_blob(&committed.digest), "the blob stayed, since it would not remove");
+        let swept = store.sweep(&[]).unwrap();
+        assert_eq!((swept.blobs, swept.bytes), (vec![committed.digest.clone()], committed.bytes), "the next sweep takes the blob");
+        assert!(!store.has_blob(&committed.digest) && store.unpacked(&committed.digest).is_some());
+    }
+
+    #[test]
+    fn an_entry_gone_between_the_listing_and_its_read_counts_nothing_and_fails_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let upper = dir.path().join("upper");
+        fs::create_dir_all(upper.join("kept")).unwrap();
+        fs::write(upper.join("kept/file"), vec![1u8; 100]).unwrap();
+        fs::create_dir_all(upper.join("going")).unwrap();
+        fs::write(upper.join("going/file"), vec![1u8; 100]).unwrap();
+        // The listing is taken with both directories there; one is removed before its entry is walked.
+        let mut entries: Vec<fs::DirEntry> = fs::read_dir(&upper).unwrap().collect::<io::Result<_>>().unwrap();
+        entries.sort_by_key(fs::DirEntry::file_name);
+        fs::remove_dir_all(upper.join("going")).unwrap();
+        let mut seen = HashSet::new();
+        let mut total = 0;
+        for entry in entries {
+            count_entry(entry, &mut seen, &mut total).unwrap();
+        }
+        assert_eq!(total, 100);
     }
 
     #[test]

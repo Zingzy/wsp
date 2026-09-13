@@ -310,6 +310,50 @@ async fn answers_exec_with_stdout_stderr_and_the_exit_code() {
 }
 
 #[tokio::test]
+async fn an_exec_runs_behind_the_workspaces_seccomp_filter_with_the_inits_capabilities() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    const FENCE_LINES: &str = "grep -E '^(Seccomp|Seccomp_filters|CapBnd|CapEff|CapPrm|CapInh|CapAmb):'";
+    let (code, out, err) = w.exec(&id, &format!("{FENCE_LINES} /proc/1/status; echo --; {FENCE_LINES} /proc/$$/status")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{out}");
+    let (init, shell) = out.split_once("--\n").unwrap();
+    eprintln!("the init's status:\n{init}the exec'd shell's status:\n{shell}");
+    assert!(shell.contains("Seccomp:\t2\n"), "the exec'd shell runs unfenced: {shell}");
+    assert!(shell.contains("Seccomp_filters:\t1\n"), "{shell}");
+    assert!(!shell.contains("CapEff:\t000001ffffffffff\n"), "the exec'd shell kept the box's capabilities: {shell}");
+    assert_eq!(shell, init, "an exec'd process runs as the init does");
+    w.close().await;
+}
+
+#[tokio::test]
+async fn an_exec_against_a_filter_with_a_notify_action_is_refused_and_the_workspace_still_answers() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The bundle's config.json is what every exec reads its filter from; a rule with the notify action is added to
+    // it while the workspace runs, and the original is put back before the next exec.
+    let config = root().join("run").join(&id).join("config.json");
+    let kept = fs::read_to_string(&config).unwrap();
+    let mut bundle: Value = serde_json::from_str(&kept).unwrap();
+    bundle["linux"]["seccomp"]["syscalls"].as_array_mut().unwrap().push(json!({ "names": ["getcwd"], "action": "SCMP_ACT_NOTIFY" }));
+    fs::write(&config, bundle.to_string()).unwrap();
+    let refused = w.ask("machine.exec", json!({ "machineId": id, "cmd": "echo unfenced", "timeoutMs": 10_000 })).await;
+    fs::write(&config, &kept).unwrap();
+    assert_eq!(
+        refused,
+        json!({ "id": 1, "ok": false, "error": "runtime exec: the workspace's seccomp filter has a rule whose action is notify, and an exec serves no listener for it, so the command did not run" })
+    );
+    let (code, out, _) = w.exec(&id, "echo fenced; grep Seccomp: /proc/$$/status").await;
+    assert_eq!((code, out.as_str()), (0, "fenced\nSeccomp:\t2\n"));
+    w.close().await;
+}
+
+#[tokio::test]
 async fn pauses_and_resumes_with_the_freezer() {
     if !live() {
         return;
@@ -927,8 +971,8 @@ async fn commits_a_snapshot_under_the_name_and_answers_the_id() {
     assert_eq!(record.name, format!("{}-v1", live_owner()));
     assert_eq!(record.workspace, id);
     assert_eq!(record.chain.layers.last(), Some(&record.layer), "the saved layer tops the chain");
-    assert!(store.has_blob(&record.layer), "the layer's blob is in the store");
-    let unpacked = store.unpacked(&record.layer).expect("the layer is unpacked beside its blob");
+    assert!(!store.has_blob(&record.layer), "the blob went with the unpack: the tree is the layer's one form");
+    let unpacked = store.unpacked(&record.layer).expect("the layer is unpacked");
     // The whiteouts as the store reads them: a character device for the deleted file, the opaque mark on /home.
     let passwd = fs::symlink_metadata(unpacked.join("usr/bin/passwd")).unwrap();
     assert!(passwd.file_type().is_char_device() && passwd.rdev() == 0, "the deleted file is a whiteout in the layer");
@@ -1031,11 +1075,11 @@ async fn promotes_by_naming_the_chain() {
     let (_, out, _) = w.exec(&fork, READ_THE_DISK).await;
     assert_eq!(out, "taken\npasswd-gone\nonly\n");
     w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    assert!(store.has_blob(&snapshot.layer), "the template still names the layer");
+    assert!(store.unpacked(&snapshot.layer).is_some(), "the template still names the layer");
     w.ok("machine.deleteTemplate", json!({ "templateId": template_id })).await;
     let lost = w.ask("machine.getTemplate", json!({ "templateId": template_id })).await;
     assert_eq!((lost["kind"].as_str(), lost["status"].as_u64()), (Some("missing"), Some(404)), "{lost}");
-    assert!(store.has_blob(&snapshot.layer), "the fork still holds the layer");
+    assert!(store.unpacked(&snapshot.layer).is_some(), "the fork still holds the layer");
     let (_, out, _) = w.exec(&fork, "cat /root/marker").await;
     assert_eq!(out, "taken\n");
     w.close().await;
@@ -1082,14 +1126,15 @@ async fn delete_drops_the_reference_and_the_sweep_removes_the_layer() {
     assert_eq!(code, 0);
     let snapshot_id = w.snapshot(&id, "v1", true).await;
     let store = Store::open(&root()).unwrap();
-    let layer = store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().unwrap().layer;
+    let snapshot = store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().unwrap();
+    let (layer, layer_bytes) = (snapshot.layer, snapshot.layer_bytes);
     assert_eq!(store.references(&layer).unwrap(), 1);
     let fork = w.create(spec(json!({ "fromSnapshot": snapshot_id, "template": Value::Null }))).await;
-    let du_before = fs::metadata(root().join("layers/blobs/sha256").join(layer.hex())).unwrap().len();
+    assert!(!store.has_blob(&layer), "one form: the tree alone, {layer_bytes} bytes");
     // The delete drops the snapshot's reference; the fork's record still holds the chain, so the layer stays.
     w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
     assert_eq!(store.references(&layer).unwrap(), 0, "no record names the layer");
-    assert!(store.has_blob(&layer) && store.unpacked(&layer).is_some(), "a fork still mounts the layer");
+    assert!(store.unpacked(&layer).is_some(), "a fork still mounts the layer");
     let (_, out, _) = w.exec(&fork, "cat /root/marker").await;
     assert_eq!(out, "taken\n");
     let again = w.ask("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
@@ -1097,13 +1142,13 @@ async fn delete_drops_the_reference_and_the_sweep_removes_the_layer() {
     // With the fork gone nothing holds the layer, and the next sweep, at the daemon's start, takes it.
     w.ok("machine.kill", json!({ "machineId": fork })).await;
     w.made.retain(|m| m != &fork);
-    assert!(store.has_blob(&layer), "the kill itself sweeps nothing");
+    assert!(store.unpacked(&layer).is_some(), "the kill itself sweeps nothing");
     w.reopen().await;
     let swept = w.ops.swept_at_open();
-    assert!(swept.blobs.contains(&layer), "{swept:?}");
+    assert!(!swept.blobs.contains(&layer), "no blob of the layer was there to sweep: {swept:?}");
     assert!(swept.unpacked.contains(&layer), "{swept:?}");
-    assert!(swept.bytes >= du_before, "{} bytes swept, the blob was {du_before}", swept.bytes);
-    assert!(!store.has_blob(&layer) && store.unpacked(&layer).is_none());
+    assert!(swept.bytes >= layer_bytes, "{} bytes swept, the layer's tree held {layer_bytes}", swept.bytes);
+    assert!(store.unpacked(&layer).is_none());
     w.close().await;
 }
 
@@ -1133,7 +1178,7 @@ async fn a_sweep_in_flight_beside_a_fork_takes_nothing_the_fork_mounts() {
     w.made.push(fork.clone());
     assert_eq!(deleted["ok"], true, "{deleted}");
     assert!(store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().is_none(), "the snapshot's record went");
-    assert!(store.has_blob(&layer) && store.unpacked(&layer).is_some(), "the fork's record holds the layer through the sweep");
+    assert!(store.unpacked(&layer).is_some(), "the fork's record holds the layer through the sweep");
     let (code, out, err) = w.exec(&fork, "cat /root/marker").await;
     assert_eq!((code, out.as_str()), (0, "taken\n"), "the fork mounts the layer whole: {err}");
     w.close().await;

@@ -24,8 +24,9 @@ export const DAEMON_TARGETS: readonly DaemonTarget[] = [
   { triple: "x86_64-apple-darwin", platform: "darwin", arch: "x64", uname: "x86_64" },
 ];
 
-/** The targets a machine wsp forks or reaches over ssh can be: every Linux row, since the host cannot read a
- * guest's chip before the bundle lands and one round trip costs more than the second file. */
+/** The targets a guest can be: every Linux row. A deploy carries all of them where the host has not read the
+ * machine's own word for its chip, which is every fork of an image, since nothing answers there until the daemon
+ * does; the ssh roads read it off the machine first and carry the one row it names. */
 export const GUEST_DAEMON_TARGETS: readonly DaemonTarget[] = DAEMON_TARGETS.filter(t => t.platform === "linux");
 
 /** The binary's name, on every machine and in every folder that carries one. */
@@ -49,3 +50,15 @@ export const bundledDaemonName = (target: DaemonTarget): string => `${DAEMON_BIN
 
 export const noDaemonBuildLine = (platform: string, arch: string): string =>
   `wsp builds no daemon for ${platform} ${arch}, so this computer cannot serve its own workspace or join a wsp as a place`;
+
+/** The row a machine's own `uname -m` names, out of the targets a guest can be. The one mapping from what a box
+ * says about its chip to the binary it is sent, so nothing picks that binary off the chip of the computer doing
+ * the sending. Nothing for a chip wsp builds no daemon for. */
+export function guestDaemonTarget(uname: string): DaemonTarget | undefined {
+  const said = uname.trim();
+  return GUEST_DAEMON_TARGETS.find(t => t.uname === said);
+}
+
+/** The refusal for a box whose chip wsp builds no daemon for, said before a byte of wsp's lands on it. */
+export const noGuestDaemonLine = (uname: string): string =>
+  `that computer says its chip is ${uname}, and wsp builds no daemon for it; wsp joins a computer running ${GUEST_DAEMON_TARGETS.map(t => t.uname).join(" or ")}`;

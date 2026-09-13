@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+export * from "./mac-paths.js";
 export * from "./roads.js";
 export * from "./road-modules.js";
 export * from "./linux-casks.js";

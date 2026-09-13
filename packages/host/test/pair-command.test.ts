@@ -13,6 +13,7 @@ import { advertisedUrl, deviceLines, hostReach, pairLines, pairOnLoopbackLine, r
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { cli, HOST_FLAG, type CliIO } from "../src/cli.js";
 import { dialAddress } from "../src/host-lock.js";
+import { doorAddresses } from "../src/server.js";
 import { setDefaultHost, writeHost, type HostRecord } from "../src/hosts.js";
 import type { HostClient } from "../src/verbs.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -262,8 +263,9 @@ describe("the addresses a client may use", () => {
     expect(relayed.url).toBe("http://192.168.1.20:4700");
     name = "wsp-box.example.com";
     expect(relayed.url).toBe("https://wsp-box.example.com");
-    // What the person named stands above both, and above every kind's own answer at the launch.
-    expect({ ...hostReach(at, "https://box.example/wsp/", () => name, interfaces) }).toEqual({ advertise: "https://box.example/wsp", url: "https://wsp-box.example.com", port: 4700 });
+    // What the person named stands above both, and above every kind's own answer at the launch: somebody who names
+    // an address has said which one the other end can reach, and a relay name they never asked for is a guess.
+    expect({ ...hostReach(at, "https://box.example/wsp/", () => name, interfaces) }).toEqual({ advertise: "https://box.example/wsp", url: "https://box.example/wsp", port: 4700 });
     // The wildcard on a computer that answers on nothing else: no address to hand a machine somewhere else, and
     // still the port, since a container reaches the gateway whatever this computer's own cards say.
     const onlyLoopback = { lo0: [{ address: "127.0.0.1", family: "IPv4", internal: true }] } as unknown as Interfaces;
@@ -274,7 +276,37 @@ describe("the addresses a client may use", () => {
     // A host bound to this computer alone names no port either: nothing outside this computer reaches it there,
     // so a kind that would write an address of its own with it is told none.
     expect({ ...hostReach({ address: "127.0.0.1", port: 4700 }, undefined, none, interfaces) }).toEqual({ url: undefined });
-    expect({ ...hostReach({ address: "127.0.0.1", port: 4700 }, "http://10.0.0.9:4700", none, interfaces) }).toEqual({ advertise: "http://10.0.0.9:4700", url: undefined });
+    // A host bound to this computer alone that was given a word dials back at the word: the flag is the one
+    // override for a bind nothing outside can reach, which is what it exists for.
+    expect({ ...hostReach({ address: "127.0.0.1", port: 4700 }, "http://10.0.0.9:4700", none, interfaces) }).toEqual({ advertise: "http://10.0.0.9:4700", url: "http://10.0.0.9:4700" });
+  });
+
+  it("hands out the word the person named, the relay's name where they named none, and the interface where there is neither", () => {
+    const at = { address: "0.0.0.0", port: 4720 };
+    const none = (): undefined => undefined;
+    // The word, over interfaces that would otherwise pick this computer's first card. This is the case the flag
+    // exists for: the card a host answers on is one the box across the room cannot route to.
+    expect(hostReach(at, "http://65.21.4.12:4720", none, interfaces).url).toBe("http://65.21.4.12:4720");
+    expect(hostReach(at, "http://65.21.4.12:4720", () => "wsp-box.example.com", interfaces).url).toBe("http://65.21.4.12:4720");
+    // No word: the relay's name, which works from anywhere, and the interface where no connector is holding one.
+    expect(hostReach(at, undefined, () => "wsp-box.example.com", interfaces).url).toBe("https://wsp-box.example.com");
+    expect(hostReach(at, undefined, none, interfaces).url).toBe("http://192.168.1.20:4720");
+  });
+
+  it("leads the addresses a joining box is told with the word the person named, and keeps this computer's after it", () => {
+    // The sighting this pins: a host on the wildcard whose first card is a Tailscale address the box cannot route
+    // to, started with a word naming the address it can. The word is first, so it is the one the box dials first.
+    expect(doorAddresses("0.0.0.0", 4720, "http://65.21.4.12:4720", interfaces)).toEqual(["http://65.21.4.12:4720", "http://192.168.1.20:4720"]);
+    // Named none: what this computer answers on, as before.
+    expect(doorAddresses("0.0.0.0", 4720, undefined, interfaces)).toEqual(["http://192.168.1.20:4720"]);
+    // A word this computer already answers on is not handed out twice.
+    expect(doorAddresses("0.0.0.0", 4720, "http://192.168.1.20:4720", interfaces)).toEqual(["http://192.168.1.20:4720"]);
+    // A word that is no address at all is left out rather than handed to a box as one, which would be a dial that
+    // could never land and a person reading their own typo back twenty seconds later.
+    expect(doorAddresses("0.0.0.0", 4720, "box.local", interfaces)).toEqual(["http://192.168.1.20:4720"]);
+    // Loopback is not filtered here: a person who names it is told it reaches nothing by the install that refuses,
+    // which names the flag, rather than having their word silently dropped.
+    expect(doorAddresses("0.0.0.0", 4720, "http://127.0.0.1:4720", interfaces)).toEqual(["http://127.0.0.1:4720", "http://192.168.1.20:4720"]);
   });
 
   it("brackets an IPv6 address in the line it prints, so the URL is one a browser takes", () => {

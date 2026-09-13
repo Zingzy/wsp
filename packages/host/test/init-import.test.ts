@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { GUARD_BEGIN, GUARD_END, type ManifestEntry, withIgnoreUnknown } from "@wsp/collect";
 import { NODE_RELEASES, planFiles } from "@wsp/engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_SERVERS_JSON } from "@wsp/catalog";
+import { GOLDEN_SETUP, GOLDEN_SMOKE, GUEST_HOME, MCP_SERVERS_JSON } from "@wsp/catalog";
 import { withRefused } from "../../runtime/test/fs-refusal.js";
 import { digestOf, importFor, importResultPath, keychainLogins, keychainReader, packPlan, readSecrets, statOf, type SecretReader } from "../src/init-import.js";
 
@@ -132,6 +132,46 @@ describe("packPlan", () => {
     // Nothing came out of the copy, so the pack has nothing to report as left behind.
     expect(packed.skipped).toEqual([]);
     expect(listTar(packed.tar).find(e => e.path === ".ssh/config")?.mode).toMatch(/^-r--------/);
+  });
+
+  it("names gh by name in the copied git config, so a push inside a fork does not call the Mac's Homebrew path", async () => {
+    const home = laptop();
+    const mac = ["[user]", "\tname = Me", '[credential "https://github.com"]', "\thelper = ", "\thelper = !/opt/homebrew/bin/gh auth git-credential", ""].join("\n");
+    writeFileSync(join(home, ".gitconfig"), mac);
+    const plan = planFiles([row({ rung: "identity", id: "identity/git-user", paths: ["~/.gitconfig"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const landed = readFileSync(join(extract(packed.tar), ".gitconfig"), "utf8");
+    expect(landed).toBe(["[user]", "\tname = Me", '[credential "https://github.com"]', "\thelper = ", "\thelper = !gh auth git-credential", ""].join("\n"));
+    expect(landed).not.toContain("/opt/homebrew");
+    expect(packed.macPaths).toEqual(["/opt/homebrew/bin/gh now gh"]);
+    // What git itself reads out of the copy, on the machine the copy lands on.
+    const at = extract(packed.tar);
+    const read = spawnSync("git", ["config", "--file", join(at, ".gitconfig"), "--get-all", "credential.https://github.com.helper"], { encoding: "utf8" });
+    expect(read.stdout.split("\n").filter(l => l !== "")).toEqual(["!gh auth git-credential"]);
+  });
+
+  it("repoints the Homebrew prefix and the person's home in a copied rc file, and takes out the line of a path the image has no place for", async () => {
+    const home = laptop();
+    const rc = [
+      'eval "$(/opt/homebrew/bin/brew shellenv)"',
+      "fpath+=/opt/homebrew/share/zsh/site-functions",
+      'export PATH="/Applications/Visual Studio Code.app/Contents/Resources/app/bin:$PATH"',
+      "export EDITOR=vim",
+      "",
+    ].join("\n");
+    writeFileSync(join(home, ".zshrc"), rc);
+    const plan = planFiles([row({ rung: "shell", id: "shell/zshrc", paths: ["~/.zshrc"] })], { home, stat: statOf, platform: "darwin" });
+    const packed = await packPlan(plan, { secrets: new Map(), home });
+    const landed = readFileSync(join(extract(packed.tar), ".zshrc"), "utf8");
+    expect(landed).toContain('eval "$(brew shellenv)"');
+    expect(landed).toContain("fpath+=/home/linuxbrew/.linuxbrew/share/zsh/site-functions");
+    expect(landed).toContain("export EDITOR=vim");
+    expect(landed).not.toContain("/Applications");
+    expect(packed.macPaths).toEqual([
+      "/opt/homebrew/bin/brew now brew",
+      "/opt/homebrew/share/zsh/site-functions now /home/linuxbrew/.linuxbrew/share/zsh/site-functions",
+      "/Applications/Visual Studio Code.app/Contents/Resources/app/bin out of .zshrc",
+    ]);
   });
 
   it("ships a linked dotfile as the target's bytes at the link's path, and leaves out links inside a copied directory that leave home, hit a refused path, or dangle", async () => {
@@ -426,18 +466,23 @@ describe("packPlan", () => {
     writeFileSync(join(home, ".codex", "computer-use", "SkyComputerUseClient"), "MZ-ish", { mode: 0o755 });
     const app = `${home}/.codex/computer-use/SkyComputerUseClient`;
     const config = `model = "gpt-5.5"\nnotify = ["${app}", "turn-ended"]\n\n[projects."${home}"]\ntrust_level = "trusted"\n`;
+    // The copy as the machine reads it: a home this computer spelled out lands on the guest's, wherever this
+    // computer keeps its home. Built from the home the pack was handed, so the same bytes are expected on any
+    // computer this test runs on.
+    const onImage = (text: string): string => text.split(home).join(GUEST_HOME);
+    const withoutNotify = `model = "gpt-5.5"\n\n[projects."${home}"]\ntrust_level = "trusted"\n`;
     writeFileSync(join(home, ".codex", "config.toml"), config);
     const plan = planFiles([row({ rung: "agents", id: "agents/codex", paths: ["~/.codex/config.toml"] })], { home, stat: statOf, platform: "darwin" });
     const packed = await packPlan(plan, { secrets: new Map(), home });
-    expect(readFileSync(join(extract(packed.tar), ".codex", "config.toml"), "utf8")).toBe(`model = "gpt-5.5"\n\n[projects."${home}"]\ntrust_level = "trusted"\n`);
+    expect(readFileSync(join(extract(packed.tar), ".codex", "config.toml"), "utf8")).toBe(onImage(withoutNotify));
     const left = [{ id: "agents/codex", path: "~/.codex/config.toml", note: `hook left behind: ${app}` }];
     expect(packed.skipped).toEqual(left);
     expect(packed.leftBehind).toEqual(left);
-    // A notify the machine can run travels with the rest of the file, byte for byte.
+    // A notify the machine can run travels with the rest of the file, every other byte as it was.
     const runs = config.replace(app, "/usr/bin/notify-send");
     writeFileSync(join(home, ".codex", "config.toml"), runs);
     const kept = await packPlan(plan, { secrets: new Map(), home });
-    expect(readFileSync(join(extract(kept.tar), ".codex", "config.toml"), "utf8")).toBe(runs);
+    expect(readFileSync(join(extract(kept.tar), ".codex", "config.toml"), "utf8")).toBe(onImage(runs));
     expect(kept.skipped).toEqual([]);
     expect(kept.leftBehind).toBeUndefined();
     // The shape Codex's own config page writes: the interpreter stays, the script it runs travels to its guest path.
@@ -445,14 +490,14 @@ describe("packPlan", () => {
     writeFileSync(join(home, ".codex", "config.toml"), config.replace(`"${app}", "turn-ended"`, `"python3", "${home}/.codex/notify.py"`));
     const script = await packPlan(plan, { secrets: new Map(), home });
     const at = extract(script.tar);
-    expect(readFileSync(join(at, ".codex", "config.toml"), "utf8")).toBe(config.replace(`"${app}", "turn-ended"`, '"python3", "/root/.codex/notify.py"'));
+    expect(readFileSync(join(at, ".codex", "config.toml"), "utf8")).toBe(onImage(config.replace(`"${app}", "turn-ended"`, `"python3", "${GUEST_HOME}/.codex/notify.py"`)));
     expect(readFileSync(join(at, ".codex", "notify.py"), "utf8")).toBe("print('hi')\n");
     expect(statSync(join(at, ".codex", "notify.py")).mode & 0o777).toBe(0o755);
     expect(script.skipped).toEqual([]);
     // The same shape naming a script that is not there: the key goes, listed by the script.
     writeFileSync(join(home, ".codex", "config.toml"), config.replace(`"${app}", "turn-ended"`, '"python3", "~/.codex/gone.py"'));
     const gone = await packPlan(plan, { secrets: new Map(), home });
-    expect(readFileSync(join(extract(gone.tar), ".codex", "config.toml"), "utf8")).toBe(`model = "gpt-5.5"\n\n[projects."${home}"]\ntrust_level = "trusted"\n`);
+    expect(readFileSync(join(extract(gone.tar), ".codex", "config.toml"), "utf8")).toBe(onImage(withoutNotify));
     expect(gone.leftBehind).toEqual([{ id: "agents/codex", path: "~/.codex/config.toml", note: "hook left behind: ~/.codex/gone.py" }]);
   });
 
@@ -758,7 +803,7 @@ describe("packPlan: rc files with secret exports", () => {
 });
 
 describe("packPlan: source guard", () => {
-  it("a bare source line whose file is not in the pack, or sits outside home, is wrapped so the machine skips it; one naming this computer's home is wrapped with the home written as $HOME; one whose file travels, a guarded line and a fish config stay as written; the mode holds", async () => {
+  it("a bare source line whose file is not in the pack, or sits outside home, is wrapped so the machine skips it; one naming this computer's home is wrapped with the home written as $HOME; one whose file travels, a guarded line and a fish config stay as written; a Homebrew path moves to the image's prefix and keeps its guard; the mode holds", async () => {
     const home = laptop();
     mkdirSync(join(home, ".zsh"));
     writeFileSync(join(home, ".zsh", "functions.zsh"), "f() { :; }\n");
@@ -770,9 +815,10 @@ describe("packPlan: source guard", () => {
     const packed = await packPlan(planFiles(rows, { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
     expect(listTar(packed.tar).find(e => e.path === ".zshrc")?.mode).toMatch(/^-r--r--r--/);
     const dir = extract(packed.tar);
-    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe(['[ -r "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", '[ -r "$HOME"/.deno/env ] && source "$HOME"/.deno/env # deno', "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "source $ZSH/oh-my-zsh.sh", "[ -r /opt/homebrew/opt/nvm/nvm.sh ] && source /opt/homebrew/opt/nvm/nvm.sh", '[ -r "$HOME/.zsh/functions.zsh" ] && . "$HOME/.zsh/functions.zsh"', ""].join("\n"));
+    expect(readFileSync(join(dir, ".zshrc"), "utf8")).toBe(['[ -r "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"', "source ~/.zsh/functions.zsh", '[ -r "$HOME"/.deno/env ] && source "$HOME"/.deno/env # deno', "[ -f ~/.fzf.zsh ] && source ~/.fzf.zsh", "source $ZSH/oh-my-zsh.sh", "[ -r /home/linuxbrew/.linuxbrew/opt/nvm/nvm.sh ] && source /home/linuxbrew/.linuxbrew/opt/nvm/nvm.sh", '[ -r "$HOME/.zsh/functions.zsh" ] && . "$HOME/.zsh/functions.zsh"', ""].join("\n"));
     expect(readFileSync(join(dir, ".config", "fish", "config.fish"), "utf8")).toBe("source ~/.config/fish/local.fish\n");
     expect(packed.cut).toEqual([{ path: "~/.zshrc", names: ["RO_KEY"] }]);
+    expect(packed.macPaths).toEqual(["/opt/homebrew/opt/nvm/nvm.sh now /home/linuxbrew/.linuxbrew/opt/nvm/nvm.sh"]);
     const without = await packPlan(planFiles([rows[0]!], { home, stat: statOf, platform: "darwin" }), { secrets: new Map(), home });
     expect(readFileSync(join(extract(without.tar), ".zshrc"), "utf8")).toContain("[ -r ~/.zsh/functions.zsh ] && source ~/.zsh/functions.zsh");
   });
