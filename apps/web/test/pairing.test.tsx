@@ -136,6 +136,48 @@ describe("the screen a page with no token shows", () => {
     expect(screen.getByText(PAIR_HEADING)).toBeTruthy();
   });
 
+  it("a host restart under the shell is healed by asking it again, not by the code screen", async () => {
+    const { port } = await serving();
+    // The shell reads the token file at every call, so a page holding the token the host minted before it restarted
+    // gets the new one the moment it asks again. The stale one stands for what the shell held before the restart.
+    const held = ["a-token-the-restarted-host-refuses", "host-token"];
+    const asked: number[] = [];
+    window.wsp = {
+      hostToken: async () => {
+        asked.push(asked.length);
+        return held.shift() ?? "host-token";
+      },
+    };
+    try {
+      render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+      // Two asks: the first token the host refuses, and the one it is serving now.
+      await waitFor(() => expect(asked).toHaveLength(2), { timeout: 5_000 });
+      await waitFor(() => expect(screen.queryByTestId?.("booting") ?? null).toBeNull());
+      expect(screen.queryByText(PAIR_HEADING)).toBeNull();
+    } finally {
+      delete window.wsp;
+    }
+  });
+
+  it("a shell whose token the host keeps refusing ends on the code screen rather than asking for ever", async () => {
+    const { port } = await serving();
+    const asked: number[] = [];
+    window.wsp = {
+      hostToken: async () => {
+        asked.push(asked.length);
+        return "a-token-this-host-never-minted";
+      },
+    };
+    try {
+      render(<BootGate boot={boot({ token: undefined, paired: false })} at={{ protocol: "http:", host: `127.0.0.1:${port}` }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);
+      expect(await screen.findByText(PAIR_HEADING, undefined, { timeout: 5_000 })).toBeTruthy();
+      // The one token the shell holds was asked about once and refused once: nothing loops on it.
+      expect(asked.length).toBeLessThanOrEqual(2);
+    } finally {
+      delete window.wsp;
+    }
+  });
+
   it("goes straight to the app when the page carries the host's own token", async () => {
     await act(async () => {
       render(<BootGate boot={boot()} at={{ protocol: "http:", host: "127.0.0.1:4400" }} agent="Mozilla/5.0 (Macintosh)" storage={window.localStorage} />);

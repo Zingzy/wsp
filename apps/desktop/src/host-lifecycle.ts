@@ -35,8 +35,8 @@ export interface Located {
 
 /** How this app was launched, as everything that decides where its state file sits reads it. */
 export interface Launch {
-  /** app.isPackaged. A packaged app inherits whatever folder the person launched it from, so a .env sitting there
-   * says nothing about it; only a development run out of the checkout means the checkout's state. */
+  /** app.isPackaged. A packaged app inherits whatever folder the person launched it from, so a checkout it happens
+   * to open in says nothing about it; only a development run out of one means the checkout's state. */
   packaged: boolean;
   /** WSP_HOME as launched; a Finder launch has none. It names the home outright, over any launch folder. */
   env?: string;
@@ -90,7 +90,7 @@ function attached(port: number): HostSession {
   return { url: `http://127.0.0.1:${port}`, port, owned: false, remote: false, label: hereWord(process.platform === "darwin"), close: async () => {} };
 }
 
-/** The bin's rule, read from the bin: a .env in cwd marks a dev checkout whose .wsp state is shared with wspx. It
+/** The bin's rule, read from the bin: a checkout of wsp in cwd marks a dev run whose .wsp state is shared with wspx. It
  * holds for a development run and nothing else, since a packaged app is launched from a folder it did not choose,
  * and WSP_HOME names the home over it in every case, which is what the locate doc says. */
 export function statePathIn(home: string, launch: Launch): string {

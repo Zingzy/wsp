@@ -32,6 +32,7 @@ import {
   stopDaemonScript,
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
+  deployFailureLine,
   GUEST_ENVS,
   claudeEnvs,
   CLOUD_PLACE,
@@ -54,6 +55,9 @@ import { redact } from "../src/init-log.js";
 import type { CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 
@@ -483,6 +487,20 @@ describe("guest environment", () => {
     // A machine reached at a published port answers with an address: a dev server allowlist entry is for a name.
     const published = { ...bare, previewUrl: async () => ({ url: "http://127.0.0.1:49155", token: "", expiresAt: 0 }) };
     await expect(previewHostSuffix(published)).resolves.toBeUndefined();
+  });
+});
+
+describe("what a deploy that would not come up says", () => {
+  it("names the commands it was running, as they ran, with the machine's own last words first", () => {
+    const said = deployFailureLine(CLOUD_PLACE, { stdout: "WSP_READY\n", stderr: "boom" }, ".preview.example.com");
+    expect(said.startsWith("daemon deploy failed: WSP_READY")).toBe(true);
+    // The unit printed is the unit that ran: the deploy states the dev server allowlist on it, and a near copy
+    // without that line would send the next person to read a file that does not match what is on the machine.
+    expect(said).toContain(`Environment=${VITE_ALLOWED_HOSTS_ENV}=.preview.example.com`);
+    expect(said).toContain(daemonUnit(CLOUD_PLACE, ".preview.example.com"));
+    // A fork's token is written by a line of its own and a box's is landed over the byte road; no start line has it.
+    expect(said).not.toContain("aabbcc");
+    expect(deployFailureLine(CLOUD_PLACE, { stdout: "", stderr: "" }, ".preview.example.com")).not.toContain("aabbcc");
   });
 });
 
@@ -1017,7 +1035,7 @@ describe("the doctor's local road", () => {
         backend: new NoProviderBackend(),
         store: memoryStore(),
         adapters,
-        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }) },
+        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }) },
         hostId: "box:h1",
       }),
     };

@@ -2,12 +2,12 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { homedir, platform } from "node:os";
+import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
-import { reachAddresses } from "./pairing.js";
+import { advertiseWord, reachAddresses } from "./pairing.js";
 import { accountHere, publicHostname } from "./relay-link.js";
 import { wspHome } from "./hosts.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
@@ -35,6 +35,10 @@ export interface HostOptions {
   /** The address both servers bind. Default LOOPBACK; anything else serves the page with no token inlined and asks
    * every JSON route for a paired device's token. */
   listen?: string;
+  /** The address the person named with --advertise. It leads the addresses a computer you own is told to dial,
+   * since somebody who names an address has said which one the other end can reach; what this computer answers on
+   * follows it, so a word that turns out to be wrong is not the only road back. */
+  advertise?: string;
   /** Auth token for the runtime WS; generated when omitted. */
   authToken?: string;
   /** Envs baked into a workspace created from the JSON route, given the golden version it forks. */
@@ -53,10 +57,6 @@ export interface HostOptions {
   recipePath?: string;
   /** The state file this host serves, named in the boot object so the page scopes its memory to it. */
   statePath?: string;
-  /** Whether another road reaches this host from beyond the computer it runs on, a relay tunnel carrying traffic
-   * to its loopback port. A host like that binds loopback and is still open to the world, so it is held to the
-   * same rule as one that bound an address: no token in the page, and a paired device's token on every JSON route. */
-  beyondThisComputer?: boolean;
   /** The init job on this computer, served to the app as the init.* ops and the init.job events; absent, they are refused. */
   init?: InitDoor;
   /** Whether the door a computer you own dials is bound as this host starts. Open when a joined computer is on
@@ -135,6 +135,15 @@ function loadPage(webDir: string, boot: BootPayload): string {
   const html = readFileSync(path, "utf8");
   if (!BOOT_SCRIPT.test(html)) throw new Error(`${path} has no window.__WSP__ boot line to replace`);
   return html.replace(BOOT_SCRIPT, `<script>window.__WSP__ = ${inlineJson(boot)};</script>`);
+}
+
+/** Whether the connector forwarded this request, rather than a process on the computer this host runs on: what
+ * cloudflared puts on everything it carries. Either header on its own is enough, since the cost of reading a
+ * request as forwarded when it was not is a pairing code, and the cost the other way is the page's token. Nobody
+ * talks their way in with a header either: a process that can already reach this loopback port is on this
+ * computer, and adding them only takes the token away from itself. */
+function throughConnector(req: IncomingMessage): boolean {
+  return req.headers["cf-connecting-ip"] !== undefined || req.headers["cf-ray"] !== undefined;
 }
 
 /** The token an Authorization header carries, or nothing when it carries none in the one scheme this host takes.
@@ -269,6 +278,19 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+/** Where a computer you own is told to dial this host, in the order its link tries them: the address the person
+ * named with --advertise first, since somebody who names one has said which one the other end can reach, and what
+ * this computer answers on after it, so a word that turns out to be wrong is not the only road back. The named word
+ * is read the one way an address a person types is read; a word that is no address is left out rather than handed
+ * to a box as one. A named address on this computer's own loopback is handed out here and refused by name at the
+ * install, which is the one road that knows whether the computer being joined is this one: filtering it here would
+ * drop it before anybody could be told it reaches nothing. */
+export function doorAddresses(bound: string, port: number, advertise?: string, interfaces?: ReturnType<typeof networkInterfaces>): string[] {
+  const named = joinAddressOf(advertiseWord(advertise) ?? "");
+  const own = reachAddresses(bound, interfaces).map(address => `http://${authority(address, port)}`);
+  return [...(named === undefined ? [] : [named]), ...own.filter(at => at !== named)];
+}
+
 export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const rt = opts.runtime;
   const authToken = opts.authToken ?? randomBytes(24).toString("base64url");
@@ -290,14 +312,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const address = opts.listen ?? LOOPBACK;
   // Reaching a loopback host already means being on this computer, so the page carries the token and the JSON
   // routes need nothing. Beyond it the page pairs for a device token first and every JSON route asks for one.
-  // What the host bound is not the whole of who can reach it: a relay tunnel lands on that same loopback port.
-  const onThisComputer = isLoopback(address) && opts.beyondThisComputer !== true;
+  const boundHere = isLoopback(address);
   let rtServer: RuntimeServer;
 
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
   // `here` is false on the door a computer you own dials: that page carries no token and pairs for one, whatever
   // the address this host bound says about the loopback port beside it.
-  const page = (here = onThisComputer): string => {
+  const page = (here: boolean): string => {
     const terminalFont = terminalFontOf(opts.recipePath);
     return loadPage(webDir, {
       wsPort: rtServer.port,
@@ -321,7 +342,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     return scope === undefined ? {} : { caller: { origin: "relayed", by: scope } };
   };
 
-  const handler = (here: boolean) => (req: IncomingMessage, res: ServerResponse) => {
+  const handler = (hereFor: (req: IncomingMessage) => boolean) => (req: IncomingMessage, res: ServerResponse) => {
+    const here = hereFor(req);
     const sendPage = (): void => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(page(here));
@@ -378,7 +400,9 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     });
   };
 
-  const server = createServer(handler(onThisComputer));
+  // What the host bound is not the whole of who can reach it: a relay tunnel lands on that same loopback port, and
+  // the request is what tells the two apart rather than the address both arrive at.
+  const server = createServer(handler(req => boundHere && !throughConnector(req)));
 
   // The door a computer you own dials: a second listener on the wildcard, built from the same request handler with
   // the page's token withheld, whose upgrades reach the one runtime. Its port is fixed rather than stepped over,
@@ -387,7 +411,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   // pair stays zero, which is the rule the app's own port pair already reads.
   const asked = opts.port ?? DEFAULT_PORT;
   const doorPort = asked === 0 ? 0 : asked + PLACE_PORT_OFFSET;
-  const doorServer = createServer(handler(false));
+  const doorServer = createServer(handler(() => false));
   let doorAt: number | undefined;
   let doorOpening: Promise<PlaceDoorView> | undefined;
   /** Where a person is told to dial, with the relay's own name beside it when a connector is carrying this host. */
@@ -395,13 +419,13 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     const relay = publicHostname(opts.statePath ?? "");
     return {
       port: at,
-      addresses: reachAddresses(bound).map(address => `http://${authority(address, at)}`),
+      addresses: doorAddresses(bound, at, opts.advertise),
       ...(relay === undefined ? {} : { relay: relayUrlOf(relay) }),
     };
   };
   const openDoor = async (): Promise<PlaceDoorView> => {
     // A host that already answers beyond this computer needs no second listener: it names its own port instead.
-    if (!onThisComputer) return viewOf(port, address);
+    if (!boundHere) return viewOf(port, address);
     if (doorAt !== undefined) return viewOf(doorAt, WILDCARD);
     doorOpening ??= new Promise<PlaceDoorView>((resolve, reject) => {
       const failed = (e: NodeJS.ErrnoException): void => {
@@ -447,7 +471,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
     throw e;
   }
   try {
-    page();
+    page(boundHere);
   } catch (e) {
     await relay.close();
     await rtServer.close();

@@ -1,50 +1,74 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The ExecStreamFactory a harness turn on a local workspace runs through: a
-// real child process on this computer, not the guest's detached-and-polled
-// road. machineExecStream is written for a Linux guest reached over REST
-// (setsid, base64 -w0, /proc), which cannot drive a binary on this Mac, so a
-// local machine has its own factory. A turn is one command: bash -c it, its
-// stdout and stderr merged to the line stream in arrival order, its exit code
-// on `exited`. A stream started with an input channel gets the child's stdin,
-// seeded with the launch's lines and appended to by write(); one started
+// real process on this computer, launched detached the way the daemon launches
+// one inside a guest. machineExecStream is written for a Linux guest reached
+// over REST (setsid, base64 -w0, /proc), which cannot drive a binary on this
+// Mac, so a local machine has its own factory; the shape of a run is the same
+// on both roads. A turn is one command: bash -c it, its stdout and stderr
+// merged into one log file in arrival order, its exit code in an exit file
+// beside it. The reader polls that log, so the run belongs to the computer and
+// not to the process that launched it: a host that restarts re-opens the run
+// by the handle its stream reported and reads what the turn printed while
+// nobody was listening, and a run no row of the connecting host holds is ended
+// by the sweep. A stream started with an input channel gets a file the launch
+// seeds and every write() appends to; a tail feeds it through a fifo, so a
+// message reaches a running process this host holds no pipe to. One started
 // without gets no stdin at all, so the binary reads EOF rather than hanging on
-// a silent open pipe. The child leads a process group of its own and every
-// signal goes to that group, never to the leader alone: a harness leaves its
-// own children behind when it goes, and a grandchild that outlives the leader
-// holds the inherited stdout pipe, so a signal to the leader alone left the
-// stream unended and the harness running (seven such processes were found on
-// one box, the oldest fourteen hours past its turn's reply) and left a cut
-// turn's test workers and packagers burning that box's cores. The group is
-// taken at every ending, the leader's own exit included, which is what the
-// cloud road's reap does at the same point. Its own group also means a turn no
-// longer goes with the terminal's Ctrl-C, so the host ends what is running
-// here as it stops (endLocalRuns); the host owns those signals and this module
-// handles none. The turn runs under the same two limits a cloud turn does,
-// idle and wall, read from the one rule machine-exec reads, so a hung agent
-// ends with the same line on either kind, and the idle limit reads the same
-// activity on both: bytes, the person's messages, and the work the turn's own
-// tree is doing while it prints nothing. The run dies with the host that
-// launched it, so the factory offers no attach and no sweep.
+// a silent open pipe.
+//
+// The child leads a process group of its own and every signal goes to that
+// group, never to the leader alone: a harness leaves its own children behind
+// when it goes, and a grandchild that outlives the leader holds the inherited
+// log, so a signal to the leader alone left the stream unended and the harness
+// running (seven such processes were found on one box, the oldest fourteen
+// hours past its turn's reply) and left a cut turn's test workers and packagers
+// burning that box's cores. The group is taken at every ending, the leader's
+// own exit included, which is what the cloud road's reap does at the same
+// point. The claim directory is what says a run is still on this computer; the
+// reap takes it with the rest, so an attach to a swept run answers gone. What
+// it signals is read before it signals it: a pid this computer handed out again
+// leads a group of its own, so the reap asks whether the group is still there
+// and how old its leader is against the claim, and leaves anything else alone.
+// The turn runs under the same two limits a cloud turn does, idle and
+// wall, read from the one rule machine-exec reads, so a hung agent ends with
+// the same line on either kind, and the idle limit reads the same activity on
+// both: bytes, the person's messages, and the work the turn's own tree is doing
+// while it prints nothing.
 
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { psCpuSeconds, RUN_STOP_MS, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
+import { execFile, spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { EXEC_CHUNK_BYTES, psCpuSeconds, RUN_STOP_MS, shellQuote, TURN_IDLE_MS, TURN_WALL_MS } from "@wsp/protocol";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
 import { readsWork, turnActivity, turnCut, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 
 export interface LocalExecOptions extends Pick<MachineExecOptions, "idleMs" | "deadlineMs" | "now" | "pollMs"> {
   /** The folder the child starts in; the command may cd elsewhere, as a harness turn's does. */
   root: string;
+  /** The folder a run's script, log, pid and exit code live in. One folder per state file, so two hosts on this
+   * computer never sweep each other's turns. */
+  runDir: string;
 }
 
-/** How often the limits are read against the clock, and the turn's tree with them; the cloud road reads both at its
- * poll. */
-const CHECK_MS = 1_000;
-/** Every process group a turn on this computer is running in, across every factory this process made: a turn leads
- * a group of its own, so nothing else on this computer knows where to find it. A group is dropped the moment its
- * stream settles, which is what makes the set the answer to whether a recorded pid is still that turn's. */
-const groups = new Set<number>();
+/** How often the log is read and the limits are read against the clock; the cloud road polls its guest the same way,
+ * slower because every poll there is a round trip. */
+const POLL_MS = 100;
+/** How often the reap looks at the group it asked to go, while it waits out the one stop grace both roads give. */
+const GRACE_POLL_MS = 200;
+/** A handle this factory could have minted: a name of this shape inside the run folder it launches into. Read off
+ * every handle that arrives from a store before it reaches a path or a signal, since a value that has been to a file
+ * on disk is no longer this code's. */
+const RUN_ID = /^[0-9a-f]{12}$/;
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/** One turn's whole group, by the pid its spawn recorded: the child leads the group, so a negative pid is every
+/** The line that ends one run's input channel. The pump forwards every line written before it and then goes, so the
+ * command reads EOF after the last message and never in front of one; ending the pump by a signal instead took the
+ * message a person had just sent with it. Derived from the run's own name, so a host that attaches to a run an
+ * earlier one launched closes the same channel without being told anything. */
+const endMarker = (base: string): string => `__WSP_EOF_${base.slice(-12)}__`;
+
+/** One turn's whole group, by the pid its launch recorded: the child leads the group, so a negative pid is every
  * process the turn started. A group whose last member is already gone answers ESRCH, which is the same nothing to
  * do as no group at all. */
 function signalGroup(pid: number, sig: NodeJS.Signals): void {
@@ -55,22 +79,21 @@ function signalGroup(pid: number, sig: NodeJS.Signals): void {
   }
 }
 
-/**
- * Ends every turn running on this computer and everything those turns started: SIGTERM to each group, SIGKILL to
- * whatever is still there once the grace passes, and answers the groups it had to kill. What a host calls as it
- * stops, since a local turn's process cannot be re-opened by the host that comes next and answers nobody after this
- * one goes.
- */
-export async function endLocalRuns(graceMs = RUN_STOP_MS): Promise<readonly number[]> {
-  const ending = [...groups];
-  if (ending.length === 0) return [];
-  for (const pid of ending) signalGroup(pid, "SIGTERM");
-  await new Promise<void>(resolve => setTimeout(resolve, graceMs));
-  // A group id is the kernel's again once its last member goes, so a turn that went down on the TERM is read out of
-  // the set rather than killed by the pid it used to be: this computer may have given that pid to something else.
-  const killed = ending.filter(pid => groups.has(pid));
-  for (const pid of killed) signalGroup(pid, "SIGKILL");
-  return killed;
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code === "EPERM";
+  }
+}
+
+function readFile(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 /** Cumulative CPU as ps prints it, in the ticks the activity clock counts. The column is parsed in one place, which
@@ -102,32 +125,123 @@ function readGroupWork(pgid: number, then: (ticks: number | undefined) => void):
   }
 }
 
+const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+/** What a run's own folder and its files are readable by: the person whose turn it is and nobody else on this
+ * computer. A Mac has other logins on it, and a run's script carries the whole launch environment. */
+const OWNER_DIR = 0o700;
+const OWNER_FILE = 0o600;
+
+/** One of a run's files, made owner-only from its first byte. `wx` is what makes that true rather than hoped for:
+ * the mode is only applied to a file this call creates, so a path that somehow already exists fails the launch
+ * instead of writing a turn's environment into a file somebody else made. */
+function writeOwned(path: string, text: string): void {
+  writeFileSync(path, text, { mode: OWNER_FILE, flag: "wx" });
+}
+
+/** Whether a process group with this id exists at all: signal 0 asks the kernel and sends nothing, and a group
+ * whose last member is gone answers ESRCH. EPERM is a group under another login, which exists. */
+function groupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code === "EPERM";
+  }
+}
+
+/** When a process started, in milliseconds on this computer's clock, off the elapsed time ps prints: `[[dd-]hh:]mm:ss`
+ * on both computers wsp runs a local turn on. Nothing here may reach the caller's error road, so a ps that will not
+ * answer is no reading rather than a throw. */
+function startedAt(pid: number): Promise<number | undefined> {
+  return new Promise(resolve => {
+    const parse = (out: string): number | undefined => {
+      const said = out.trim();
+      const [span = "", days = "0"] = said.split("-").reverse();
+      const parts = span.split(":").map(Number);
+      if (parts.length < 2 || parts.some(n => !Number.isFinite(n))) return undefined;
+      const [hours = 0, minutes = 0, seconds = 0] = parts.length === 3 ? parts : [0, ...parts];
+      return Date.now() - (((Number(days) * 24 + hours) * 60 + minutes) * 60 + seconds) * 1_000;
+    };
+    try {
+      execFile("ps", ["-o", "etime=", "-p", String(pid)], (err, stdout) => resolve(err === null ? parse(stdout) : undefined));
+    } catch {
+      resolve(undefined);
+    }
+  });
+}
+
+/** How far a leader's own age may sit from the claim's before it is read as somebody else's process. The launch
+ * makes the claim and spawns within the same moment, so this is slack for a busy computer and nothing more; a pid
+ * this computer handed out again is younger than its claim by however long the run had been going. */
+const LEADER_WINDOW_MS = 5_000;
+
+/** Whether the pid a run recorded still leads that run's own group, which is what a reap must know before it
+ * signals anything. A pid is free again only once its group has no members left, so a group that still answers is
+ * the one this run made and its stragglers are the turn's. The one hole that leaves is a pid handed out again
+ * after the whole group went, to a process that then led a group of its own; the leader's own age closes it, since
+ * the launch claims and spawns in the same moment. A ps that will not answer leaves the group's own reading as the
+ * whole of it, which is what this had before the age was read at all. */
+async function leadsThisRun(base: string, pid: number): Promise<boolean> {
+  if (!groupExists(pid)) return false;
+  // The leader is gone and its children hold the group open: the kernel keeps that number while they do.
+  if (!alive(pid)) return true;
+  const started = await startedAt(pid);
+  if (started === undefined) return true;
+  const claimed = ((): number | undefined => {
+    try {
+      return statSync(`${base}.d`).mtimeMs;
+    } catch {
+      return undefined;
+    }
+  })();
+  return claimed === undefined || Math.abs(started - claimed) <= LEADER_WINDOW_MS;
+}
+
+/** Everything one run left on this computer, ended and taken away: the run's own process group gets TERM, then
+ * KILL once the stop grace passes, and the run's files go. The group and never the leader alone, at every ending
+ * including the leader's own exit, since the children a harness leaves behind are what hold a machine's memory for
+ * its life. A group that is not this run's is left alone and only its files go. */
+async function reapRun(base: string, graceMs = RUN_STOP_MS): Promise<void> {
+  const pid = Number(readFile(`${base}.pid`)?.trim() ?? "");
+  if (Number.isSafeInteger(pid) && pid > 0 && (await leadsThisRun(base, pid))) {
+    signalGroup(pid, "SIGTERM");
+    // The grace is the group's, not the leader's: a leader that goes at once on the TERM leaves the children it
+    // started to take the whole of it, which is the stop every road here promises them.
+    for (let waited = 0; waited < graceMs && groupExists(pid); waited += GRACE_POLL_MS) await sleep(Math.min(GRACE_POLL_MS, graceMs - waited));
+    signalGroup(pid, "SIGKILL");
+  }
+  for (const suffix of ["sh", "log", "pid", "exit", "in", "fifo", "tail"]) rmSync(`${base}.${suffix}`, { force: true });
+  rmSync(`${base}.d`, { recursive: true, force: true });
+}
+
+/** The fifo a turn's messages reach its command through, owner-only like the files beside it: what a person sends
+ * into a running turn travels through it. mkfifo is on both computers wsp runs a local turn on, and node has no
+ * call of its own for one. */
+function spawnFifo(path: string): void {
+  const made = spawnSync("mkfifo", ["-m", "600", path]);
+  if (made.status !== 0) throw new Error(`no input channel for this turn: mkfifo ${path} answered ${String(made.status)}`);
+}
+
 /** One complete line at a time out of a growing byte stream: what precedes each newline is yielded, the tail waits
- * for more, and the final tail with no newline is yielded when the streams close. Two streams share one queue so
- * stdout and stderr interleave in the order the child wrote them. */
+ * for more, and the final tail with no newline is yielded when the stream closes. The queue fills whether or not
+ * anybody is iterating, so a turn's ending is the run's own and not its reader's. */
 class Lines {
   private readonly queue: string[] = [];
-  private pendingOut = "";
-  private pendingErr = "";
+  private pending = "";
   private wake: (() => void) | undefined;
   private done = false;
   private error: Error | undefined;
 
-  private push(line: string): void {
-    this.queue.push(line);
+  feed(chunk: string): void {
+    this.pending += chunk;
+    let nl: number;
+    while ((nl = this.pending.indexOf("\n")) !== -1) {
+      this.queue.push(this.pending.slice(0, nl));
+      this.pending = this.pending.slice(nl + 1);
+    }
     this.wake?.();
     this.wake = undefined;
-  }
-
-  feed(which: "out" | "err", chunk: string): void {
-    let pending = (which === "out" ? this.pendingOut : this.pendingErr) + chunk;
-    let nl: number;
-    while ((nl = pending.indexOf("\n")) !== -1) {
-      this.push(pending.slice(0, nl));
-      pending = pending.slice(nl + 1);
-    }
-    if (which === "out") this.pendingOut = pending;
-    else this.pendingErr = pending;
   }
 
   /** Ends the stream with an error once everything already read is out: what a cut turn's reader sees last. */
@@ -137,13 +251,9 @@ class Lines {
   }
 
   end(): void {
-    if (this.pendingOut !== "") {
-      this.push(this.pendingOut);
-      this.pendingOut = "";
-    }
-    if (this.pendingErr !== "") {
-      this.push(this.pendingErr);
-      this.pendingErr = "";
+    if (this.pending !== "") {
+      this.queue.push(this.pending);
+      this.pending = "";
     }
     this.done = true;
     this.wake?.();
@@ -168,115 +278,239 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
   const limits = { idleMs: opts.idleMs ?? TURN_IDLE_MS, deadlineMs: opts.deadlineMs ?? TURN_WALL_MS };
   const waiting = isWaiting ?? (() => false);
   const now = opts.now ?? Date.now;
-  const checkMs = opts.pollMs ?? CHECK_MS;
-  const factory: ExecStreamFactory = (command, { env, input }) => {
-    const child: ChildProcessWithoutNullStreams = spawn("bash", ["-c", command], {
-      cwd: opts.root,
-      env: { ...env },
-      // No input channel means stdin is EOF, never a silent open pipe.
-      stdio: [input === undefined ? "ignore" : "pipe", "pipe", "pipe"],
-      // Its own process group, so a signal can reach what the turn started without reaching this host.
-      detached: true,
-    }) as ChildProcessWithoutNullStreams;
-    const pgid = child.pid;
-    if (pgid !== undefined) groups.add(pgid);
+  const pollMs = opts.pollMs ?? POLL_MS;
+  const runDir = opts.runDir;
+  /** A handle this factory could have minted, and nothing else: the shape is read here, by the one predicate both
+   * the attach road and the sweep read, so nothing that turned up in the run folder reaches a signal on the
+   * strength of being there. */
+  const minted = (run: string): boolean => run.startsWith(`${runDir}/`) && RUN_ID.test(run.slice(runDir.length + 1));
 
-    /** Nothing goes out once the stream settled, since the group id is then a pid this computer is free to hand to
-     * someone else; while it runs, every signal goes to the group and never to the leader alone. */
-    const signal = (sig: NodeJS.Signals): void => {
-      if (pgid === undefined || finished !== undefined) return;
-      signalGroup(pgid, sig);
-    };
-
-    const lines = new Lines();
+  /** The one reader both roads share: a launch that has just started its child, and an attach to a run an earlier
+   * host process left behind. The log is read from its first byte either way, so a run that printed while no host
+   * was listening is replayed to whoever attaches. */
+  const open = (base: string, hasInput: boolean, launch?: { failed?: Error }): ExecStream => {
+    // Both limits run from this reader's first second: nothing on disk records when the run's last byte landed, so
+    // an attach cannot inherit an idle clock and starts the turn's cap again.
     const startedAt = now();
     const activity = turnActivity(startedAt);
-    const feed = (which: "out" | "err", b: Buffer): void => {
-      activity.touch(now());
-      lines.feed(which, b.toString("utf8"));
-    };
-    child.stdout.on("data", (b: Buffer) => feed("out", b));
-    child.stderr.on("data", (b: Buffer) => feed("err", b));
-
-    let finished: number | null | undefined;
-    let killedBy: string | undefined;
-    let cut: Error | undefined;
+    let killed = false;
+    let inputClosed = false;
+    let finishCode: number | null | undefined;
     let resolveExit: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => {
       resolveExit = resolve;
     });
-    const settle = (code: number | null): void => {
-      if (finished !== undefined) return;
-      clearInterval(check);
-      if (pgid !== undefined) groups.delete(pgid);
-      finished = cut === undefined ? code : null;
+    const finish = (code: number | null): void => {
+      if (finishCode !== undefined) return;
+      finishCode = code;
+      resolveExit(code);
+    };
+    const leader = (): number | undefined => {
+      const pid = Number(readFile(`${base}.pid`)?.trim() ?? "");
+      return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+    };
+    const signal = (sig: NodeJS.Signals): void => {
+      const pid = leader();
+      if (pid === undefined || finishCode !== undefined) return;
+      signalGroup(pid, sig);
+    };
+
+    /** The poll runs whether or not anybody is reading yet: the run is on this computer either way, so its limits,
+     * its ending and its reap cannot wait on a consumer. What it reads is queued for whoever iterates. */
+    const lines = new Lines();
+    let offset = 0;
+    let downs = 0;
+    let reading = false;
+    /** What the log holds past what has been read, a chunk at a time so one poll of a run that printed megabytes
+     * while nobody watched cannot hold the loop. */
+    const readLog = (): Buffer => {
+      let fd: number | undefined;
+      try {
+        const size = statSync(`${base}.log`).size;
+        if (size <= offset) return Buffer.alloc(0);
+        fd = openSync(`${base}.log`, "r");
+        const buf = Buffer.alloc(Math.min(size - offset, EXEC_CHUNK_BYTES));
+        const read = readSync(fd, buf, 0, buf.length, offset);
+        offset += read;
+        return buf.subarray(0, read);
+      } catch {
+        return Buffer.alloc(0);
+      } finally {
+        if (fd !== undefined) closeSync(fd);
+      }
+    };
+    const settle = async (code: number | null, cut?: Error): Promise<void> => {
+      if (finishCode !== undefined) return;
+      await reapRun(base);
       if (cut === undefined) lines.end();
       else lines.fail(cut);
-      resolveExit(finished);
+      finish(code);
     };
-    // A limit that passes kills the turn's group; the close that follows ends the stream with the cut's words.
-    let reading = false;
-    const check = setInterval(() => {
-      const at = now();
-      if (waiting()) activity.touch(at);
-      const quietMs = activity.quietMs(at);
-      if (pgid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
-        reading = true;
-        readGroupWork(pgid, ticks => {
-          reading = false;
-          if (ticks !== undefined) activity.read(ticks, at);
-        });
-      }
-      cut = turnCut(limits, at - startedAt, quietMs);
-      if (cut !== undefined) {
-        clearInterval(check);
-        signal("SIGKILL");
-      }
-    }, checkMs);
-    check.unref();
-    child.on("error", () => settle(null));
-    // The leader is gone and what it started is not: those processes hold the stdout it handed them, so close waits
-    // on them and the turn would read as still running. The group goes here, at the one ending every other passes
-    // through, so no ending has to remember to take it.
-    child.on("exit", () => signal("SIGKILL"));
-    child.on("close", (code, exitSignal) => {
-      killedBy = exitSignal ?? undefined;
-      settle(code ?? (exitSignal !== null ? -1 : 0));
-    });
 
-    let inputClosed = false;
-    if (input !== undefined) {
-      for (const line of input) child.stdin.write(`${line}\n`);
-    }
+    const poll = async (): Promise<void> => {
+      while (finishCode === undefined) {
+        if (killed) return settle(null);
+        // Nothing was launched, so no process will write a log or an exit code: the stream ends where a run that
+        // was killed before it answered ends, rather than polling a log nobody writes.
+        if (launch?.failed !== undefined) return settle(null);
+        const at = now();
+        if (waiting()) activity.touch(at);
+        const quietMs = activity.quietMs(at);
+        const pid = leader();
+        if (pid !== undefined && !reading && readsWork(limits.idleMs, quietMs)) {
+          reading = true;
+          readGroupWork(pid, ticks => {
+            reading = false;
+            if (ticks !== undefined) activity.read(ticks, at);
+          });
+        }
+        const cut = turnCut(limits, at - startedAt, quietMs);
+        if (cut !== undefined) return settle(null, cut);
+
+        // The exit file is read before the log, so a poll that sees an exit code reads a log that is complete.
+        const ended = readFile(`${base}.exit`);
+        const chunk = readLog();
+        if (chunk.length > 0) {
+          activity.touch(now());
+          lines.feed(chunk.toString("utf8"));
+          continue; // there may be more than one chunk waiting
+        }
+        if (ended !== undefined) return settle(Number.parseInt(ended.trim(), 10));
+        // The leader is checked after the exit file: one that finished in between shows as down with no exit yet.
+        if ((pid === undefined || !alive(pid)) && ++downs > 1) return settle(null);
+        await sleep(pollMs);
+      }
+    };
+    // Nothing the poll does may reach this process's own error road: a reader that threw would take the host and
+    // every other turn on it with it, so the throw ends this stream alone and its reader sees it.
+    void poll().catch((e: unknown) => {
+      lines.fail(e instanceof Error ? e : new Error(String(e)));
+      finish(null);
+    });
 
     return {
       lines: lines.iterate(),
+      run: base,
       // The leader of the turn's own group, which is every process the turn started: what names this turn's tree in
       // the pane that lists this computer's processes.
-      ...(pgid !== undefined ? { pid: pgid } : {}),
+      ...((): { pid?: number } => {
+        const pid = leader();
+        return pid !== undefined ? { pid } : {};
+      })(),
       teardown: () => signal("SIGTERM"),
-      kill: () => signal("SIGKILL"),
+      kill: () => {
+        killed = true;
+        signal("SIGKILL");
+      },
       write: async line => {
-        if (input === undefined) throw new Error("this stream has no input channel");
-        if (finished !== undefined || inputClosed) return "gone";
-        return new Promise<"written" | "gone">(resolve => {
-          child.stdin.write(`${line}\n`, err => {
-            // The person just acted, so the turn gets its idle time over, as on a cloud turn.
-            if (!err) activity.touch(now());
-            resolve(err ? "gone" : "written");
-          });
-        });
+        if (!hasInput) throw new Error("this stream has no input channel");
+        if (finishCode !== undefined || inputClosed) return "gone";
+        // The run knows the command ended the moment its exit file exists, up to a poll before this side does, and
+        // a reap in flight has taken the claim with the rest of the run.
+        if (existsSync(`${base}.exit`) || !existsSync(`${base}.d`)) return "gone";
+        try {
+          appendFileSync(`${base}.in`, `${line}\n`);
+        } catch {
+          return "gone";
+        }
+        // The person just acted, so the turn gets its idle time over, as on a cloud turn.
+        activity.touch(now());
+        return "written";
       },
       closeInput: () => {
-        if (input === undefined || inputClosed || finished !== undefined) return;
+        if (!hasInput || inputClosed || finishCode !== undefined) return;
         inputClosed = true;
-        child.stdin.end();
+        try {
+          appendFileSync(`${base}.in`, `${endMarker(base)}\n`);
+        } catch {
+          return;
+        }
       },
       exited,
-      get signalled() {
-        return killedBy;
-      },
     } satisfies ExecStream;
   };
+
+  const factory: ExecStreamFactory = (command, { env, input }) => {
+    const base = join(runDir, randomBytes(6).toString("hex"));
+    mkdirSync(runDir, { recursive: true, mode: OWNER_DIR });
+    // The claim is the one path that says a run is on this computer, and mkdir is what makes it exist at once.
+    mkdirSync(`${base}.d`, { mode: OWNER_DIR });
+    const exports = Object.entries(env)
+      .filter(([k]) => ENV_KEY.test(k))
+      .map(([k, v]) => `export ${k}=${shellQuote(v)}`)
+      .join("\n");
+    // The tail starts in a subshell so bash's job notice for its kill never lands in the log; the command's exit
+    // code is written before the tail is killed, so a poll that sees it reads a finished log.
+    // The command runs in a subshell, so a turn whose own line ends in `exit` leaves the script standing and its
+    // code still reaches the exit file: a run whose code nobody wrote reads as a run that answered nothing.
+    const body =
+      input === undefined
+        ? `( ${command}\n)\necho $? > ${shellQuote(`${base}.exit`)}\n`
+        : `( tail -n +1 -f ${shellQuote(`${base}.in`)} | { while IFS= read -r l; do [ "$l" = ${shellQuote(endMarker(base))} ] && break; printf '%s\\n' "$l"; done; } > ${shellQuote(`${base}.fifo`)} & echo $! > ${shellQuote(`${base}.tail`)} )\n` +
+          `( ${command}\n) < ${shellQuote(`${base}.fifo`)}\n` +
+          `echo $? > ${shellQuote(`${base}.exit`)}\n` +
+          `kill $(cat ${shellQuote(`${base}.tail`)}) 2>/dev/null\n`;
+    // The three files that carry what a turn is: the script holds the whole launch environment as export lines,
+    // the provider key and the turn's own token among them, the input channel holds every message a person sends
+    // and the log holds everything the agent prints. The mode goes on at the open, never by a chmod after it: a
+    // file that is readable for one moment has been read.
+    writeOwned(`${base}.sh`, `${exports}\n${body}`);
+    if (input !== undefined) {
+      writeOwned(`${base}.in`, input.map(line => `${line}\n`).join(""));
+      spawnFifo(`${base}.fifo`);
+    }
+    writeOwned(`${base}.log`, "");
+    const log = openSync(`${base}.log`, "a");
+    /** A launch node itself could not make: no bash on the PATH the turn runs under. Nothing wrote a log or an exit
+     * code, so the reader has to be told rather than left polling for one. */
+    const launch: { failed?: Error } = {};
+    try {
+      const child = spawn("bash", [`${base}.sh`], {
+        cwd: opts.root,
+        env: { ...env },
+        // No pipe of this process's is handed to the run: its output is the log, and its stdin the fifo the script
+        // opens, so nothing it holds dies with the host that launched it.
+        stdio: ["ignore", log, log],
+        // Its own process group, so a signal can reach what the turn started without reaching this host, and the
+        // terminal's Ctrl-C reaches the host alone.
+        detached: true,
+      });
+      child.on("error", (e: Error) => {
+        launch.failed = e;
+      });
+      child.unref();
+      if (child.pid !== undefined) writeFileSync(`${base}.pid`, `${child.pid}\n`);
+    } finally {
+      closeSync(log);
+    }
+    return open(base, input !== undefined, launch);
+  };
+
+  factory.attach = async (run, { input }) => {
+    if (!minted(run)) throw new Error(`${run} is not a run this host could have launched`);
+    // The claim is what says the run is still here, and this computer's own answer is the only one there is: a
+    // folder that is gone is a run that is gone, and nothing else may end one.
+    if (!existsSync(`${run}.d`)) return "gone";
+    return open(run, input);
+  };
+
+  factory.sweep = async keep => {
+    const kept = new Set(keep);
+    let held: string[];
+    try {
+      held = readdirSync(runDir);
+    } catch {
+      return [];
+    }
+    const stale = held
+      .filter(name => name.endsWith(".d"))
+      .map(name => join(runDir, name.slice(0, -".d".length)))
+      .filter(base => minted(base) && !kept.has(base));
+    // Each run's group is ended beside the others, not after them: every reap waits out its own stop grace, and a
+    // computer holding a day of them would spend that grace once per run in a connect that has to end.
+    await Promise.all(stale.map(base => reapRun(base)));
+    return stale;
+  };
+
   return factory;
 }

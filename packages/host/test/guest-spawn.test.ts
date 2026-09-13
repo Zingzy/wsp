@@ -14,6 +14,9 @@ import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { PAGE, captured, heldAgent, type Captured } from "./verbs-fixture.js";
+import { runsFromItsOwnFolder } from "./own-folder.js";
+
+runsFromItsOwnFolder();
 
 describe("the wsp command on a thread's machine", () => {
   let dir: string;

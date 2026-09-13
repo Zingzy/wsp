@@ -2,12 +2,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { endLocalRuns, localExecStream } from "@wsp/runtime";
+import { localExecStream } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExecStream } from "@wsp/protocol";
 import { stopOnSignals, type CliIO, type StopProcess } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
-import { alive, gone, grandchild, sweepStrays } from "../../runtime/test/strays.js";
+import { alive, grandchild, sweepStrays } from "../../runtime/test/strays.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const quietIO = (errors: string[] = []): CliIO => ({ log: () => {}, error: l => errors.push(l), ask: noPrompt, askSecret: noPrompt });
@@ -31,8 +31,10 @@ function standInHost(): { self: StopProcess; exits: number[]; signal: (sig: "SIG
 
 describe("a serving host stopping on a signal", () => {
   let root: string;
+  let runDir: string;
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "wsp-stopsignals-"));
+    runDir = join(root, "runs");
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
@@ -42,7 +44,7 @@ describe("a serving host stopping on a signal", () => {
   /** A local turn whose tree holds a sleeping grandchild, so what is left of the group after a stop can be read. */
   async function turn(name: string): Promise<{ stream: ExecStream; pid: number }> {
     const marker = join(root, `${name}.pid`);
-    const stream = localExecStream({ root })(`sleep 30 & echo $! > ${marker}; sleep 30`, { env: {} });
+    const stream = localExecStream({ root, runDir })(`sleep 30 & echo $! > ${marker}; sleep 30`, { env: {} });
     void (async () => {
       for await (const line of stream.lines) void line;
     })().catch(() => undefined);
@@ -61,25 +63,22 @@ describe("a serving host stopping on a signal", () => {
     await running.stream.exited;
   }, 20_000);
 
-  it("the first signal closes, the close is where this computer's turns end, and it exits 0 after", async () => {
+  it("the first signal closes and exits 0, and the turn running here is left running for the host that comes next", async () => {
     const host = standInHost();
     let closes = 0;
-    // What the wiring's own close does at this point, and the only place a stop ends the turns from.
-    const handle = {
-      close: async () => {
-        closes++;
-        await endLocalRuns(20);
-      },
-    } as unknown as HostHandle;
+    const handle = { close: async () => void closes++ } as unknown as HostHandle;
     stopOnSignals(handle, quietIO(), host.self);
     const running = await turn("first");
     host.signal("SIGINT");
     await vi.waitFor(() => expect(host.exits).toEqual([0]), { timeout: 5_000 });
     expect(closes).toBe(1);
-    await gone(running.pid);
+    // The turn's whole tree outlives the host: nothing in the stop reaches a process group it does not lead.
+    expect(alive(running.pid)).toBe(true);
+    running.stream.kill();
+    await running.stream.exited;
   }, 20_000);
 
-  it("a close that hangs holds the turn until a second signal, which ends it without the grace and exits at once", async () => {
+  it("a close that hangs cannot trap the terminal: a second signal exits at once and still leaves the turn", async () => {
     const host = standInHost();
     let closes = 0;
     const handle = {
@@ -92,12 +91,13 @@ describe("a serving host stopping on a signal", () => {
     const running = await turn("hanging");
     host.signal("SIGINT");
     await vi.waitFor(() => expect(closes).toBe(1), { timeout: 5_000 });
-    // The close never finishes, so nothing has ended the turn and nothing has exited: this is the escape hatch's road.
+    // The close never finishes, so nothing has exited: this is the escape hatch's road.
     expect(host.exits).toEqual([]);
-    expect(alive(running.pid)).toBe(true);
     host.signal("SIGINT");
     await vi.waitFor(() => expect(host.exits).toEqual([130]), { timeout: 5_000 });
-    await gone(running.pid);
+    expect(alive(running.pid)).toBe(true);
     expect(closes).toBe(1);
+    running.stream.kill();
+    await running.stream.exited;
   }, 20_000);
 });

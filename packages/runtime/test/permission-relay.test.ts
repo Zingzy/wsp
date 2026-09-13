@@ -127,7 +127,7 @@ describe("a permission prompt relayed into the chat", () => {
     wait = fakeClock();
     localWiring = {
       backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, ...o }),
+      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
@@ -318,7 +318,7 @@ describe("the access a thread starts at", () => {
     store = memoryStore();
     localWiring = {
       backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, ...o }),
+      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
@@ -514,7 +514,7 @@ describe("an access picked while a turn runs", () => {
     });
     const local: LocalWiring = {
       backend: new LocalBackend({ root }),
-      execStream: o => localExecStream({ root, ...o }),
+      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),

@@ -3,9 +3,9 @@ import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { OS_READ, UPTIME_READ, readValues } from "../src/machine-facts.js";
+import { ARCH_READ, OS_READ, UPTIME_READ, archOf, readValues } from "../src/machine-facts.js";
 import type { ExecResult, Machine } from "../src/machine.js";
-import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
+import { SSH_CONTROL_PERSIST_S, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SSH_STORE_VARS, SshBackend, makeSshControlDir, readSshMachine, sshControlDir, sshControlPath, parseSshAddress, parseSshMachineId, hostKeyFound, knownHostFiles, knownHostKey, knownHostTarget, plainPath, DEFAULT_REMOTE_PATH, sshArgs, sshDialArgs, sshIdentity, sshMachineId, sshMachineName, sshReachOf, type SshHostKeyReader, type SshLocalRun, type SshReach, type SshTransport } from "../src/ssh-backend.js";
 
 /** An ssh client that never leaves this computer: it answers the read every adopt makes, records every script it was
  * asked to carry, and lets a case script the answer for anything else. */
@@ -251,6 +251,44 @@ describe("ssh backend", () => {
     await expect(machine.kill()).resolves.toBeUndefined();
     expect(await machine.state()).toBe("running");
     expect(await backend.list()).toEqual([]);
+  });
+});
+
+describe("the chip a machine over ssh says it runs", () => {
+  /** A client that answers the adopt read with the chip word this case is about, and nothing else scripted. Every
+   * other line is what an Ubuntu box prints, so only the one answer under test differs between cases. */
+  const readsArch = (line: string): SshTransport => async (_reach, script) =>
+    script === SSH_READ_SCRIPT
+      ? { exitCode: 0, stdout: `home /home/dev\n${line}user dev\npath /usr/bin:/bin\ncpu 8\nmemkb 16384000\n`, stderr: "" }
+      : { exitCode: 0, stdout: "", stderr: "" };
+
+  it("asks for it on the read that adopts the machine, in the words uname itself prints", () => {
+    // One printf on the read that already runs, not a round trip of its own: the chip is wanted before anything is
+    // sent to the machine, which is the same moment the home and the login PATH are wanted.
+    expect(SSH_READ_SCRIPT).toContain(ARCH_READ);
+    expect(ARCH_READ).toContain("uname -m");
+  });
+
+  it("carries the word back whatever it is, since the table that knows the chips is not this one's", async () => {
+    // Every word a machine may print for itself rides through unread: Linux prints x86_64 or aarch64, a Mac prints
+    // arm64, and a board nobody builds for prints its own. Which of them wsp has a daemon for is decided against a
+    // table above this file, so nothing here turns an unknown word into nothing.
+    for (const said of ["x86_64", "aarch64", "arm64", "riscv64"]) {
+      expect(await readSshMachine(REACH, readsArch(`arch ${said}\n`))).toMatchObject({ arch: said });
+      expect(await new SshBackend({ transport: readsArch(`arch ${said}\n`), hostKey: async () => undefined, knownHosts: async () => undefined }).adopt(REACH)).toMatchObject({ arch: said });
+    }
+  });
+
+  it("answers none where the machine printed none, rather than a word this computer made up", async () => {
+    // A machine whose uname printed nothing leaves the key present and empty, and one on a shell that never ran the
+    // line leaves it absent. Neither is a chip, and the caller refuses rather than guessing at one.
+    for (const line of ["", "arch \n"]) {
+      expect(await readSshMachine(REACH, readsArch(line))).not.toHaveProperty("arch");
+      expect(await new SshBackend({ transport: readsArch(line), hostKey: async () => undefined, knownHosts: async () => undefined }).adopt(REACH)).not.toHaveProperty("arch");
+    }
+    expect(archOf({})).toBeUndefined();
+    expect(archOf({ arch: "" })).toBeUndefined();
+    expect(archOf({ arch: "x86_64" })).toBe("x86_64");
   });
 });
 

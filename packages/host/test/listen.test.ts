@@ -2,10 +2,13 @@
 // What changes when the host binds an address other than this computer's own:
 // the page carries no token, the JSON routes ask for a paired device's, the
 // lock and the address lines name the address, and the runtime answers on the
-// app's own port at WS_PATH.
+// app's own port at WS_PATH. A box on a relay binds this computer alone and is
+// reached down both roads at once, so there it is what a request carries that
+// decides, not what the host bound.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { request } from "node:http";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { agentsOffRefusal, API_UNAUTHORIZED, listenBeyondLoopbackLine, LOOPBACK, WS_PATH, type BootPayload } from "@wsp/protocol";
@@ -65,10 +68,29 @@ async function up(listen?: string): Promise<{ handle: HostHandle; runtime: Runti
 }
 
 /** The boot object out of the page the host served, which is the one inline script it carries. */
-async function bootOf(port: number): Promise<BootPayload> {
-  const html = await (await fetch(`http://127.0.0.1:${port}/`)).text();
+async function bootOf(port: number, headers: Record<string, string> = {}): Promise<BootPayload> {
+  const html = await (await fetch(`http://127.0.0.1:${port}/`, { headers })).text();
   const script = /<script>window\.__WSP__ = ([\s\S]*?);<\/script>/.exec(html);
   return JSON.parse(script![1]!) as BootPayload;
+}
+
+/** What the connector puts on every request it forwards, as a request that came in through the tunnel carries it. */
+const THROUGH_CONNECTOR = { "cf-connecting-ip": "203.0.113.7", "cf-ray": "8e0f4a1b2c3d4e5f-BOM" };
+
+/** The same reading down a raw socket, which is the only way to put a header on the wire in the capitals it was
+ * written in. */
+async function rawBootOf(port: number, headers: Record<string, string>): Promise<BootPayload> {
+  const html = await new Promise<string>((done, fail) => {
+    const req = request({ host: "127.0.0.1", port, path: "/", headers }, res => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", chunk => (body += chunk));
+      res.once("end", () => done(body));
+    });
+    req.once("error", fail);
+    req.end();
+  });
+  return JSON.parse(/<script>window\.__WSP__ = ([\s\S]*?);<\/script>/.exec(html)![1]!) as BootPayload;
 }
 
 /** Redeems a code the way a browser does: the first frame of a socket nothing authed, over the app's own port. */
@@ -182,6 +204,15 @@ describe("a host that listens beyond this computer", () => {
     expect((await runtime.workspaces.list()).map(w => w.name)).toEqual(["lead"]);
   });
 
+  it("pairs whatever a request carries, since the connector's headers are not what opened that road", async () => {
+    const { handle: h } = await up("0.0.0.0");
+    for (const headers of [{}, THROUGH_CONNECTOR]) {
+      const boot = await bootOf(h.port, headers);
+      expect(boot.token).toBeUndefined();
+      expect(boot.paired).toBe(false);
+    }
+  });
+
   it("still serves the page and its assets to anyone who reaches the port, since pairing is the gate", async () => {
     const { handle: h } = await up("0.0.0.0");
     expect((await fetch(`http://127.0.0.1:${h.port}/`)).status).toBe(200);
@@ -261,32 +292,77 @@ describe("the lock the host writes", () => {
 });
 
 describe("a host on loopback that a relay carries traffic to", () => {
-  it("is not a host on this computer alone: no token in the page, and the JSON routes ask for a paired device's", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "wsp-listen-relay-"));
+  /** A linked box serving its own loopback port, with the relay itself off: what decides here is what a request
+   * carries, not whether the tunnel is up. */
+  async function linkedBox(tag: string): Promise<{ h: HostHandle; lines: string[] }> {
+    const dir = mkdtempSync(join(tmpdir(), `wsp-listen-${tag}-`));
     dirs.push(dir);
     const statePath = join(dir, "state.json");
-    // A relay that is off: what matters is that this host can be reached from beyond this computer at all.
     writeRelayRecord(statePath, { relayUrl: "http://127.0.0.1:1", hostId: "h1", token: "relay-token", name: "box", linkedAt: new Date().toISOString() });
     const lines: string[] = [];
     handle = await serve(quietIO(lines), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime: testRuntime() });
+    return { h: handle, lines };
+  }
 
-    const boot = await bootOf(handle.port);
-    expect(boot.token).toBeUndefined();
-    expect(boot.paired).toBe(false);
-    expect((await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`)).status).toBe(401);
-    expect(lines.join("\n")).toContain("pairing is the gate");
+  it("serves its own computer's app the token in the page, exactly as it did before it was linked", async () => {
+    const { h } = await linkedBox("relay-here");
+    const boot = await bootOf(h.port);
+    expect(boot.token).toBe(h.authToken);
+    expect(boot.paired).toBe(true);
+    expect((await fetch(`http://127.0.0.1:${h.port}/api/workspaces`)).status).toBe(200);
+  });
 
-    // The one road in still works: a code from the host's own terminal buys a device token.
-    const code = await pairCode(handle.wsPort, handle.authToken);
-    const redeemed = await redeem(handle.port, code);
+  it("takes the pairing road on a request the connector forwarded, and the local road on one it did not, down the one port", async () => {
+    const { h } = await linkedBox("relay-through");
+    const port = h.port;
+
+    // Both readings on the one host, since telling them apart is the whole of what this does: a host that answers
+    // the same way to both has no rule at all.
+    const forwarded = await bootOf(port, THROUGH_CONNECTOR);
+    expect(forwarded.token).toBeUndefined();
+    expect(forwarded.paired).toBe(false);
+    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: THROUGH_CONNECTOR })).status).toBe(401);
+
+    const local = await bootOf(port);
+    expect(local.token).toBe(h.authToken);
+    expect(local.paired).toBe(true);
+    expect((await fetch(`http://127.0.0.1:${port}/api/workspaces`)).status).toBe(200);
+
+    // The one road in for the forwarded request still works: a code from the host's own terminal buys a device token.
+    const code = await pairCode(h.wsPort, h.authToken);
+    const redeemed = await redeem(port, code);
     expect(redeemed.deviceToken).toMatch(/\S/);
-    const authed = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, { headers: { authorization: `Bearer ${redeemed.deviceToken!}` } });
+    const authed = await fetch(`http://127.0.0.1:${port}/api/workspaces`, { headers: { ...THROUGH_CONNECTOR, authorization: `Bearer ${redeemed.deviceToken!}` } });
     expect(authed.status).toBe(200);
+  });
+
+  it("says at start which requests pair and which open as before", async () => {
+    const { lines } = await linkedBox("relay-said");
+    expect(lines.join("\n")).toContain("through the relay");
+  });
+
+  it("still opens its own door for a computer on this network, which the relay is no road to", async () => {
+    const { h } = await linkedBox("relay-door");
+    const view = await h.door.open();
+    expect(h.door.port()).toBeDefined();
+    expect(view.port).toBe(h.door.port());
+    expect(view.port).not.toBe(h.port);
+  });
+
+  it("reads either of the connector's two headers, in the capitals cloudflared writes them", async () => {
+    const { h } = await linkedBox("relay-half");
+    // Written the way the connector writes them and sent down a raw socket, since fetch lowercases what it is given
+    // and this host's reading has to hold for what actually arrives.
+    for (const header of [["Cf-Connecting-Ip", "203.0.113.7"], ["Cf-Ray", "8e0f4a1b2c3d4e5f-BOM"]] as const) {
+      const boot = await rawBootOf(h.port, { [header[0]]: header[1] });
+      expect(boot.token, header[0]).toBeUndefined();
+      expect(boot.paired, header[0]).toBe(false);
+    }
   });
 });
 
 describe("wsp up --no-relay on a linked box", () => {
-  it("serves no token either, and stops the connector an earlier run left running", async () => {
+  it("serves its own computer the token, and stops the connector an earlier run left running", async () => {
     const dir = mkdtempSync(join(tmpdir(), "wsp-listen-norelay-"));
     dirs.push(dir);
     const statePath = join(dir, "state.json");
@@ -299,9 +375,9 @@ describe("wsp up --no-relay on a linked box", () => {
     handle = await serve(quietIO(), { port: 0, wsPort: 0, statePath, webDir: fakeWebDir(), runtime: testRuntime(), relay: false });
 
     const boot = await bootOf(handle.port);
-    expect(boot.token).toBeUndefined();
-    expect(boot.paired).toBe(false);
-    expect((await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`)).status).toBe(401);
+    expect(boot.token).toBe(handle.authToken);
+    expect(boot.paired).toBe(true);
+    expect((await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, { headers: THROUGH_CONNECTOR })).status).toBe(401);
     await gone;
     expect(existsSync(join(dir, "connector.pid"))).toBe(false);
   });

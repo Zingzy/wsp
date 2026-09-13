@@ -16,7 +16,7 @@ import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
-import { bundledDaemonName, DAEMON_BIN, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "./daemon-binary.js";
+import { bundledDaemonName, DAEMON_BIN, daemonBinaryIn, GUEST_DAEMON_TARGETS, type DaemonTarget } from "./daemon-binary.js";
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS } from "./env-keys.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
@@ -473,8 +473,8 @@ exit 0
 /** The first file the bundle would carry that this computer has not got, named in the words the asset table gives
  * it; nothing when every one is there. Read off disk and nothing else, so a run can ask before it boots anything
  * what the deploy will ask for after the machine is billing. */
-export function missingBundleFile(daemonDir = assetDir("daemon"), cliDir = assetDir("cli")): string | undefined {
-  for (const target of GUEST_DAEMON_TARGETS) {
+export function missingBundleFile(daemonDir = assetDir("daemon"), cliDir = assetDir("cli"), targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string | undefined {
+  for (const target of targets) {
     const from = daemonBinaryIn(daemonDir, target.triple);
     if (!existsSync(from)) return `${assetName("daemon")} missing: ${from}`;
   }
@@ -484,14 +484,21 @@ export function missingBundleFile(daemonDir = assetDir("daemon"), cliDir = asset
 
 /** Lay out an installable copy of the daemon for one place: the static binary for each chip a guest can be, the
  * wsp command, and the browser shim. Nothing in it is built on the machine. */
-export async function stageDaemonBundle(stageDir: string, place: DaemonPlace, daemonDir = assetDir("daemon"), cliDir = assetDir("cli")): Promise<void> {
+export async function stageDaemonBundle(
+  stageDir: string,
+  place: DaemonPlace,
+  daemonDir = assetDir("daemon"),
+  cliDir = assetDir("cli"),
+  targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS,
+): Promise<void> {
   // Read before anything is copied, rather than as a raw copy failure halfway through a bundle. A run that boots a
   // machine asks the same question before the confirm, so nothing bills while this is what stops the deploy.
-  const missing = missingBundleFile(daemonDir, cliDir);
+  const missing = missingBundleFile(daemonDir, cliDir, targets);
   if (missing !== undefined) throw new Error(missing);
-  const binaries = GUEST_DAEMON_TARGETS.map(target => ({ target, from: daemonBinaryIn(daemonDir, target.triple) }));
+  const binaries = targets.map(target => ({ target, from: daemonBinaryIn(daemonDir, target.triple) }));
   mkdirSync(stageDir, { recursive: true });
-  // Both chips' binaries: the host does not know the guest's before the bundle lands, and the deploy keeps one.
+  // Every chip the machine may turn out to be, which is both of them where the host has not read the machine's own
+  // word for it yet; the deploy keeps the one the machine names.
   for (const { target, from } of binaries) {
     const to = join(stageDir, bundledDaemonName(target));
     cpSync(from, to);
@@ -514,13 +521,13 @@ const NODE_MAJOR = `node -p 'process.versions.node.split(".")[0]'`;
 
 /** Keeps the binary for the chip the guest turns out to be and drops the other, by the one word the machine says
  * about itself. A chip wsp builds no daemon for ends the deploy here, before anything is started. */
-function keepDaemonForThisChip(place: DaemonPlace): string {
+function keepDaemonForThisChip(place: DaemonPlace, targets: readonly DaemonTarget[]): string {
   const file = (name: string): string => sh(place, `${place.dir}/${name}`);
   return [
     'case "$(uname -m)" in',
-    ...GUEST_DAEMON_TARGETS.map(target => {
-      const others = GUEST_DAEMON_TARGETS.filter(t => t !== target).map(t => file(bundledDaemonName(t)));
-      return `  ${target.uname}) mv -f ${file(bundledDaemonName(target))} ${file(DAEMON_BIN)}; rm -f ${others.join(" ")} ;;`;
+    ...targets.map(target => {
+      const others = targets.filter(t => t !== target).map(t => file(bundledDaemonName(t)));
+      return `  ${target.uname}) mv -f ${file(bundledDaemonName(target))} ${file(DAEMON_BIN)}${others.length === 0 ? "" : `; rm -f ${others.join(" ")}`} ;;`;
     }),
     '  *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;',
     "esac",
@@ -648,7 +655,7 @@ export const DAEMON_PORT_LINE = "DAEMON_PORT";
 /** The install and start sequence on the machine. `previewHostSuffix` (".preview.example.com") is what dev servers
  * must accept to answer through the edge; absent on a backend with no route to a machine's port. The daemon is
  * left running under whatever supervises it, so nothing here has to outlive the exec. */
-export function deployScript(place: DaemonPlace, token: string, previewHostSuffix?: string): string {
+export function deployScript(place: DaemonPlace, token: string, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
   const profileDir = posix.dirname(place.profileFile);
   return [
     "set -e",
@@ -660,7 +667,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     ...place.exportEnv,
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
-    keepDaemonForThisChip(place),
+    keepDaemonForThisChip(place, targets),
     // The profile a box needs before its workspaces can isolate, where AppArmor is enforcing; written once the
     // binary it names is in place, and only on a root install, since a login-scoped daemon owns no /etc and runs
     // its workspaces under the person's own login instead.
@@ -812,15 +819,36 @@ export async function packBundle(stage: string, tgz: string): Promise<void> {
  * the machine's hello announces from then on. */
 export const DAEMON_DEPLOYED_LINE = `daemon v${DAEMON_VERSION}`;
 
+/** What a deploy that would not come up says: the machine's own last words, then the commands the deploy was running
+ * on it when they stopped, which on a joined computer is its own `wsp join`. Named so the next person runs them on
+ * the machine rather than working out what wsp ran there first. The token is never among them: it is landed over
+ * the byte road or written by a line of its own, and no supervision's start lines carry it. */
+export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string }, previewHostSuffix?: string): string {
+  const said = `daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`.trim();
+  return [said, "it stopped in these commands, which run on that computer:", ...place.supervise.start(place, previewHostSuffix)].join("\n");
+}
+
 /** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts
  * with (the runtime replaces it the first time a client reaches the daemon) and, where the machine picked the port,
  * the port it bound. The bytes go by the one road that reads the machine
  * for how bytes reach it, so a machine whose provider mints no signed URL is deployed to over its own connection. */
 export async function deployDaemon(
   machine: Machine,
-  opts: { token?: string; daemonDir?: string; cliDir?: string; place?: DaemonPlace; land?: readonly { path: string; bytes: Uint8Array }[]; onLine?: (line: string) => void } = {},
+  opts: {
+    token?: string;
+    daemonDir?: string;
+    cliDir?: string;
+    place?: DaemonPlace;
+    land?: readonly { path: string; bytes: Uint8Array }[];
+    onLine?: (line: string) => void;
+    /** The chip the machine itself said it is, where the caller read it before this ran. The bundle then carries
+     * that one binary, so a host holding the machine's own target deploys to it whether or not it holds the other.
+     * Absent where the machine cannot be asked before the bundle lands, which is every fork of an image. */
+    target?: DaemonTarget;
+  } = {},
 ): Promise<{ token: string; port?: number }> {
   const place = opts.place ?? guestPlace(machine.daemonSupervisor ?? "systemd");
+  const targets = opts.target === undefined ? GUEST_DAEMON_TARGETS : [opts.target];
   const token = opts.token ?? randomBytes(24).toString("hex");
   const stage = mkdtempSync(join(tmpdir(), "wsp-daemon-bundle-"));
   const tgz = `${stage}.tgz`;
@@ -828,7 +856,7 @@ export async function deployDaemon(
     // Before the bundle is even packed: what wsp puts on a machine somebody owns goes when the record does, and
     // the surest way to keep that promise for a machine that refuses is to have put nothing there at all.
     await preflight(machine, place);
-    await stageDaemonBundle(stage, place, opts.daemonDir, opts.cliDir);
+    await stageDaemonBundle(stage, place, opts.daemonDir, opts.cliDir, targets);
     await packBundle(stage, tgz);
     await landBytes(machine, place.bundle, new Uint8Array(readFileSync(tgz)));
     // Before the script rather than in it, where the place says the machine may carry other accounts: the bytes
@@ -839,9 +867,9 @@ export async function deployDaemon(
     for (const { path, bytes } of opts.land ?? []) await landBytes(machine, path, bytes);
 
     const suffix = await previewHostSuffix(machine);
-    const res = await machine.run(deployScript(place, token, suffix), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
+    const res = await machine.run(deployScript(place, token, suffix, targets), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
-      throw new Error(`daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`);
+      throw new Error(deployFailureLine(place, res, suffix));
     }
     const port = Number(new RegExp(`${DAEMON_PORT_LINE} (\\d+)`).exec(res.stdout)?.[1] ?? 0);
     return { token, ...(port > 0 ? { port } : {}) };
