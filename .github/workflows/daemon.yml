@@ -100,3 +100,75 @@ jobs:
         env:
           WSP_DAEMON_BIN: daemon/target/release/wsp-daemon
         run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon/test/daemon-ws.test.ts packages/daemon/test/daemon-ops.test.ts packages/daemon/test/exec.test.ts packages/daemon/test/fs-git-ops.test.ts packages/daemon/test/relay.test.ts packages/daemon/test/place-link.test.ts packages/daemon/test/local-urls.test.ts packages/daemon/test/harness.test.ts
+
+  # The two Linux daemons this head would ship, uploaded on every run so staging one on another computer is a
+  # download from the run that built the head instead of a release dispatched by hand. The build and the artifact
+  # names are the release job's, so daemon-binary.mjs reads an artifact from either the same way. Each binary is
+  # staged through that script before it goes up, so the refusal of a musl binary that names a shared library runs
+  # on the bytes uploaded, and the sha256 travels beside it.
+  daemon-artifacts:
+    name: Linux daemon ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
+          rustup show
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            daemon/target
+          key: daemon-artifacts-${{ matrix.target }}-${{ hashFiles('daemon/Cargo.lock', 'daemon/rust-toolchain.toml') }}
+          restore-keys: |
+            daemon-artifacts-${{ matrix.target }}-
+      # Each binary is built on its own chip's runner, so the static link needs no cross toolchain.
+      - name: C compiler for the musl target, and libseccomp built against musl
+        run: |
+          sudo apt-get install -y --no-install-recommends musl-tools gperf
+          ./scripts/libseccomp-archive.sh musl
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          LIBSECCOMP_LIB_PATH="$PWD/target/libseccomp/musl" cargo build --release --target "$TARGET" -p wsp-daemon-bin
+          cp "target/$TARGET/release/wsp-daemon" "wsp-daemon-$TARGET"
+          ls -l "wsp-daemon-$TARGET"
+          file "wsp-daemon-$TARGET"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: The binary staged, as the command stages it
+        working-directory: .
+        env:
+          TARGET: ${{ matrix.target }}
+        run: node packages/wspx/scripts/daemon-binary.mjs --triple "$TARGET" --from "daemon/wsp-daemon-$TARGET"
+      - name: Its sha256, beside it
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          sha256sum "wsp-daemon-$TARGET" > "wsp-daemon-$TARGET.sha256"
+          cat "wsp-daemon-$TARGET.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wsp-daemon-${{ matrix.target }}
+          path: |
+            daemon/wsp-daemon-${{ matrix.target }}
+            daemon/wsp-daemon-${{ matrix.target }}.sha256
+          if-no-files-found: error
