@@ -3,8 +3,8 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import { computerWord, fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import type { HarnessCatalog, MachineFacts, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -219,6 +219,27 @@ export function workspaceWord(state: WorkspaceState): string {
   return WORDS[state];
 }
 
+/** What a row this workspace's machine stands on says under WHERE: the name this host has for the computer it runs
+ * on, which only a caller holding the places list can give and which is what a person calls that machine; else the
+ * provider its own record names, since this host may be wired to any of them and reading it off the kind would tell
+ * somebody on Docker their workspace is at Solari; else the kind's own word; else the name wsp has for the machine,
+ * which on those kinds is a login or a name somebody gave it and never an id a provider minted. Wherever that comes
+ * out as the computer the host runs on, it is said in that machine's own words. The one place a surface asks where
+ * a workspace runs. */
+export function whereWord(record: Pick<WorkspaceView, "machineId"> & { kind?: WorkspaceKind | undefined; provider?: string | undefined; facts?: Pick<MachineFacts, "os"> | undefined }, named?: string): string {
+  const word = named ?? record.provider ?? kindWords(workspaceKind(record)).where ?? record.machineId;
+  return word === THIS_COMPUTER ? computerWord(record.facts?.os) : word;
+}
+
+/** The line a verb that moved a workspace prints once the runtime has answered: the workspace and the word the next
+ * listing will show for it, in the lowercase a line of work reads. The one place that word is lowered, so a pause
+ * and a wake cannot spell one state two ways. A machine the provider has started and nothing on it answers gets a
+ * sentence of its own, since one word there would say the wake failed when what happened is that the machine is up
+ * and its daemon is not talking yet; a caller holding only a phase never reaches it. */
+export function workspaceStateLine(name: string, state: WorkspaceState): string {
+  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state).toLowerCase()}`;
+}
+
 /** What every surface says about a workspace whose computer is not answering, one reading per slot that has to
  * hold it: the mono word of a state slot, a row's third line, the length of the silence beside the computer's own
  * name, the two halves a pane refuses in, and the whole sentence. Six surfaces used to word this silence six ways
@@ -253,12 +274,95 @@ export function absentComputer(name: string, awayMs: number | null): AbsentCompu
   return { word: workspaceWord("unreachable"), away, line: `${dated} · is it on?`, said, will, sentence: `${said}; ${will}` };
 }
 
+/** What the slot above the composer says while the workspace's computer is not answering. The box stays open and
+ * keeps what is typed, so the line says what became of those words rather than that a send was refused: nothing
+ * leaves until the computer answers, and then only on the person's own send. The computer is named because it is
+ * the one thing the person can act on; the state word belongs to the row. */
+export const composerHeldLine = (computer: string): string => `held until ${computer} answers`;
+
 /** How long this host has not heard from a computer, off the row it holds for it; null on a row that never
  * reported. One spelling of the silence's length, so the table and the sidebar date it alike. */
 export function awayMsOf(place: { readonly lastSeenAt?: string | undefined }, now: number): number | null {
   const since = place.lastSeenAt === undefined ? NaN : Date.parse(place.lastSeenAt);
   return Number.isNaN(since) ? null : now - since;
 }
+
+/** A fact a computer reported before it went quiet, marked as the reading it is: what it was when it last spoke,
+ * not what it is. Every slot that would otherwise stand at pending on a computer that is not answering says this
+ * instead, since the host already holds the answer and pending reads as a fact still coming.
+ *
+ * The word is the mark's, because the two spans a slot can be dated by are not the same: a fact that does not
+ * change is dated by the silence (`last seen`), and one that grows while the computer is up is dated by the
+ * report it was read in (`reported`), which can be hours older than the last frame. */
+export function lastKnown(value: string, agoMs: number | null, word = "last seen"): string {
+  return agoMs === null ? value : `${value} · ${word} ${offlineFor(agoMs)} ago`;
+}
+
+/** The mark on a figure that was true when the computer last reported and has grown since: its uptime. */
+export const REPORTED_WORD = "reported";
+
+/** What this host knows about reaching one computer, for the surfaces that have to say it. absentComputer says the
+ * computer is silent; this says where the app expects it, when it last spoke and what the last dial said, which
+ * together are what tells a computer that is off from a road that is broken. */
+export interface AbsentRoadInput {
+  name: string;
+  /** The ssh login the host was given for it, and the address its last link dialled in from. */
+  road?: { readonly ssh?: string | undefined; readonly from?: string | undefined } | undefined;
+  /** How long this host has not heard from it; null where it never has. */
+  awayMs: number | null;
+  /** What the last dial of it came to, where one has been made. */
+  dialled?: { readonly answered: boolean; readonly roundTripMs?: number | undefined; readonly said?: string | undefined } | undefined;
+}
+
+/** The road reading in the pieces its two surfaces need: the row detail draws them as rows of their own and the
+ * pane says them as one sentence. Written once so the two cannot date the same silence differently. */
+export interface AbsentRoad {
+  /** The Address row: the login the host dials, or the address the computer dialled in from, with the road it is.
+   * Null on a computer this host was not installed on and has never held a link from. */
+  address: string | null;
+  /** The Answered row, without its label. */
+  answered: string;
+  /** What the last dial said, where it was refused; null where it answered or where none was made. */
+  refused: string | null;
+  /** The three as one sentence, for a pane with room for prose. */
+  sentence: string;
+}
+
+/** The word for each road, said the way a person would: a login this host dials, or an address that dials it. */
+const DIALS_IN = "dials in";
+const OVER_SSH_WORD = "ssh";
+
+export function absentRoad(input: AbsentRoadInput): AbsentRoad {
+  const ssh = input.road?.ssh;
+  const from = input.road?.from;
+  const address = ssh !== undefined && ssh !== "" ? `${ssh} · ${OVER_SSH_WORD}` : from !== undefined && from !== "" ? `${from} · ${DIALS_IN}` : null;
+  const answered = input.awayMs === null ? "not since it joined" : `${offlineFor(input.awayMs)} ago`;
+  const refused = input.dialled !== undefined && !input.dialled.answered && input.dialled.said !== undefined ? input.dialled.said : null;
+  const where =
+    ssh !== undefined && ssh !== ""
+      ? `wsp logs in to ${input.name} at ${ssh} over ssh`
+      : from !== undefined && from !== ""
+        ? `wsp waits for ${input.name} to dial in, last from ${from}`
+        : `wsp waits for ${input.name} to dial in`;
+  const when = input.awayMs === null ? `it has not answered since it joined` : `it last answered ${offlineFor(input.awayMs)} ago`;
+  return { address, answered, refused, sentence: `${where}; ${when}.${refused === null ? "" : ` The last try said: ${refused}`}` };
+}
+
+/** What one dial came to, in the slot the button that asked stands in. A computer holding its link answers the
+ * frame; one that does not is dialled over the road it was added on, and a road that answers while the link is
+ * down is the reading a person came for: the computer is on and the agent on it is not calling home. */
+export function placeDialLine(input: { name: string; road?: { readonly ssh?: string | undefined } | undefined; linked: boolean; dialled: { readonly answered: boolean; readonly roundTripMs?: number | undefined; readonly said?: string | undefined } }): string {
+  const { dialled } = input;
+  if (!dialled.answered) return dialled.said ?? `${input.name} answered nothing.`;
+  const took = dialled.roundTripMs === undefined ? "" : ` in ${dialled.roundTripMs} ms`;
+  if (input.linked) return `${input.name} answered${took}.`;
+  const at = input.road?.ssh;
+  return `${at ?? input.name} answered over ${OVER_SSH_WORD}${took}, so the computer is on; the agent on it is not dialling this host.`;
+}
+
+/** The one sentence a dial gets on a computer this host has no road to: it was joined by typing a code, so nothing
+ * here can make it speak and the only thing to do is switch it on. */
+export const placeNoDialLine = (name: string): string => `wsp has no road to dial ${name}: it joined by typing a code, so it connects on its own when it is on.`;
 
 /** Why an action that needs the machine (send, import, export) cannot run in this state; null while running.
  * goneWords are the provider's, quoted when the caller holds them (the runtime does, the composer does not). */
@@ -375,6 +479,13 @@ export function needsRebuild(input: WorkspaceStateInput): boolean {
  * command line refuse in the same words. A caller holding only the record reads no reach, so this is its gone rule.
  * Two halves like every other refusal here: what is so, then when the rebuild is there to take. */
 export const NO_REBUILD_NEEDED = "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering";
+
+/** Why a road out that opens only once the machine is gone is refused on one that is merely not answering. The
+ * rebuild and the forget are both such roads and stand four rows apart in one list, so they read the workspace's
+ * state off the same field and say it in the same words: a machine nothing has heard from does not answer, and a
+ * person told both at once stops believing either. Two halves as every refusal here has them: what is so, then when
+ * the road is there to take. */
+export const notAnsweringYet = (road: "rebuild" | "forget"): string => `This one is not answering yet; the ${road} is offered once it is gone`;
 
 /** The one sentence for a verb a gone machine cannot take (send, wake, fork), with the provider's words when the
  * caller holds them; rebuild and delete are the roads out. */

@@ -12,7 +12,7 @@
 // (whereCaption), so this dialog holds no second spelling of a rate, a count
 // or an image version.
 import { useState } from "react";
-import { PLACES_WORDS, fmtRate, fmtSize, offeredSize, sizeWord, type MachineSizeOffer, type PlaceView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
+import { PLACES_WORDS, fmtRate, fmtSize, offeredSize, sizeOffer, sizeWord, type MachineSizeOffer, type PlaceView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
 import { copyOn } from "../settings/image.js";
 import { WHERE_PICK_WORDS, isProviderPlace, placeIsFull, placeName, placeWaitsOnImage, whereCaption, whereSegments } from "../settings/places.js";
 import { Button } from "../components/ui/button.js";
@@ -72,7 +72,10 @@ export function NewWorkspaceDialog({
   const trimmed = name.trim();
   const offers = where !== undefined && isProviderPlace(where) ? sizes : [];
   const checked = picked ?? (goldenSize !== null && offeredSize(offers, goldenSize) ? goldenSize : null);
-  const caption = where === undefined ? null : whereCaption(where, copyOn(copies, where));
+  // The caption prices the workspace this dialog would make, so it quotes the ticked row's rate; with no row ticked
+  // it passes none and the caption falls back to the place's own rate, which is that rule's one home.
+  const ticked = checked === null ? undefined : sizeOffer(offers, checked);
+  const caption = where === undefined ? null : whereCaption(where, copyOn(copies, where), ticked?.rateUsdPerHour);
   // In the order a person meets them: the image that is not built, then the name they have not typed, then the row
   // that is full. Each is read in the caption under Where, since this dialog waits on a field with no slot of its
   // own. With nowhere to put a workspace there is no caption to write in and no row to create on: the two notes
@@ -94,9 +97,11 @@ export function NewWorkspaceDialog({
 
   return (
     <Dialog open onOpenChange={open => { if (!open) onCancel(); }}>
-      {/* Anchored at its top rather than centred: picking a row that offers sizes grows the card downward, and the
-          name and the pick above it stay where the hand left them. */}
-      <DialogPopup className="sm:row-start-1 sm:mt-36 sm:max-w-sm sm:self-start">
+      {/* Anchored at its top, 160 px down, rather than centred: picking a row that offers sizes grows the card
+          downward, and the name and the pick above it stay where the hand left them. The height it may grow to is
+          the window minus that anchor and the viewport's own inset, so the sizes stand on screen at 1280 by 800
+          instead of the grid row's half of the window cutting the card in two. */}
+      <DialogPopup className="sm:row-start-1 sm:mt-36 sm:max-h-[calc(100dvh-11rem)] sm:max-w-sm sm:self-start">
         <form
           className="flex min-h-0 flex-col"
           onSubmit={e => {
@@ -157,7 +162,7 @@ export function NewWorkspaceDialog({
                       }}
                     >
                       {offers.map(s => (
-                        <label key={sizeWord(s)} className="flex h-9 cursor-pointer items-center gap-2.5 font-mono text-[11px] text-muted-foreground">
+                        <label key={sizeWord(s)} data-size={sizeWord(s)} className="flex h-9 cursor-pointer items-center gap-2.5 font-mono text-[11px] text-muted-foreground">
                           <Radio value={sizeWord(s)} />
                           <span className="flex-1 tabular-nums">{fmtSize(s)}</span>
                           <span className="tabular-nums">{fmtRate(s.rateUsdPerHour)}</span>
@@ -174,7 +179,8 @@ export function NewWorkspaceDialog({
               Cancel
             </Button>
             {/* With nowhere to put a workspace, Add a computer is the one road forward, so it is the loud one and
-                Create stands held beside it. */}
+                Create stands held beside it: a held keycap is drawn as the outline, so a dialog that made this one
+                the outline too would have nothing to press first. */}
             {where === undefined && (
               <Button type="button" data-k="add-computer" onClick={onAddComputer}>
                 {PLACES_WORDS.addComputer}

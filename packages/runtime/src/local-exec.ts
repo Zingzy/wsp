@@ -199,6 +199,7 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     child.stderr.on("data", (b: Buffer) => feed("err", b));
 
     let finished: number | null | undefined;
+    let killedBy: string | undefined;
     let cut: Error | undefined;
     let resolveExit: (code: number | null) => void = () => {};
     const exited = new Promise<number | null>(resolve => {
@@ -238,7 +239,10 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
     // on them and the turn would read as still running. The group goes here, at the one ending every other passes
     // through, so no ending has to remember to take it.
     child.on("exit", () => signal("SIGKILL"));
-    child.on("close", (code, exitSignal) => settle(code ?? (exitSignal !== null ? -1 : 0)));
+    child.on("close", (code, exitSignal) => {
+      killedBy = exitSignal ?? undefined;
+      settle(code ?? (exitSignal !== null ? -1 : 0));
+    });
 
     let inputClosed = false;
     if (input !== undefined) {
@@ -269,6 +273,9 @@ export function localExecStream(opts: LocalExecOptions, isWaiting?: TurnWaiting)
         child.stdin.end();
       },
       exited,
+      get signalled() {
+        return killedBy;
+      },
     } satisfies ExecStream;
   };
   return factory;

@@ -5,10 +5,11 @@
 // row the panes draw, over one quiet list of folders: a row goes into its
 // folder, the crumbs go back out, and one action names the folder shown, which
 // is what the system dialog's own Choose does. The list keeps its height
-// across levels so the dialog around it never moves, and the typed path in
-// the field above still works for a path pasted from somewhere else.
+// across levels so the dialog around it never moves, and it walks to whatever
+// folder the field above names, so the crumbs and that field never stand on
+// two different folders at once.
 import { FolderGitIcon, FolderIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { folderLevelLine, folderRefusalLine, type HostFolderListing } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { baseName } from "../files/entries.js";
@@ -36,6 +37,16 @@ export function FolderBrowser({ disabled, start, onPick }: { disabled: boolean; 
     setRemembered(false);
     setAsked(dir);
   };
+  // A folder named above the list walks it there: the path a person types in the field is the folder the dialog is
+  // about, and crumbs left on the folder the memory opened at read as a second folder on the same screen. The one
+  // the list opened at is not walked to again, so a remembered folder that has gone still falls back quietly.
+  const followed = useRef(start);
+  useEffect(() => {
+    if (start === undefined || start === followed.current) return;
+    followed.current = start;
+    setRemembered(false);
+    setAsked(start);
+  }, [start]);
 
   useEffect(() => {
     if (browse === undefined) return;

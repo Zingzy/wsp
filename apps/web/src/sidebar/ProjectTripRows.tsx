@@ -110,7 +110,7 @@ export function FactRow({ label, k, title, mono = true, muted = false, children 
 
 /** The caches left behind as a count, with the list behind a disclosure so a long one wraps below the row instead of
  * being cut; before the trip knows them, the idle word muted, or nothing. */
-export function CachesRow({ excluded, idle = "" }: { excluded: readonly string[] | null; idle?: string }) {
+export function CachesRow({ excluded, idle = "" }: { excluded: readonly string[] | null; idle?: ReactNode }) {
   if (excluded === null || excluded.length === 0) {
     return (
       <FactRow label="Caches left behind" k="caches" muted={excluded === null}>

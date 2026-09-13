@@ -43,3 +43,9 @@ export const WEB_DIR_ENV = "WSP_WEB_DIR";
  * and live readings on a fork that stands for nothing. Unset everywhere else, where the stand-in holds its
  * machines for one process and they have no guest at all. */
 export const FAKE_ROOT_ENV = "WSP_FAKE_ROOT";
+
+/** The file a stand-in provider keeps its records in, for a harness that seeds a fleet and wants no guest: the
+ * machines a fixture names come up in the state that file gives them, and nothing runs on any of them. A harness
+ * that names a folder above needs none of this, since the records go in that folder. Unset everywhere else, where
+ * the stand-in holds its machines for one process. */
+export const FAKE_RECORDS_ENV = "WSP_FAKE_RECORDS";

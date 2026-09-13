@@ -127,6 +127,104 @@ describe.skipIf(renderSkipped !== undefined)("the settings region, the table and
     60_000,
   );
 
+  it.each(["dark", "light"] as const)(
+    "in the %s theme every row of the table is one height and the note behind a count is the muted ink",
+    async theme => {
+      // A row with a menu button used to stand 6 px taller than the row without one, which is the first thing a
+      // person reads as wrong in a table of four rows.
+      await open(WINDOWS[0], `theme=${theme}&ws=ws_a&panel=machine&places=1&settings=1`);
+      await page!.waitForSelector("[data-k=places-table]");
+      const rows = await page!.locator("[data-k=places-table] tbody tr").evaluateAll(els => els.map(el => ({ id: el.getAttribute("data-place-row"), height: el.getBoundingClientRect().height, cells: el.children.length })));
+      console.info(`places rows in the ${theme} theme: ${rows.map(r => `${r.id} ${r.height} px in ${r.cells} cells`).join(", ")}`);
+      expect(rows.length).toBeGreaterThan(2);
+      expect(new Set(rows.map(r => Math.round(r.height))).size).toBe(1);
+      // The head's own height, and every row carries the menu column whether or not it has a menu in it.
+      expect(Math.round(rows[0]!.height)).toBe(Math.round(await page!.locator("[data-k=places-table] thead tr").evaluate(el => el.getBoundingClientRect().height)));
+      expect(new Set(rows.map(r => r.cells)).size).toBe(1);
+      // The count stands in the row's own ink and the clause behind it is muted, as the mock draws it.
+      const inks = await page!.locator("[data-k=places-table] tbody [data-k=workspaces-note]").evaluateAll(els =>
+        els.map(el => ({ note: getComputedStyle(el).color, count: getComputedStyle(el.parentElement!).color })),
+      );
+      console.info(`the note behind a count in the ${theme} theme: ${inks.map(i => `${i.note} on ${i.count}`).join(", ")}`);
+      expect(inks.length).toBeGreaterThan(0);
+      for (const ink of inks) expect(ink.note).not.toBe(ink.count);
+      await page!.screenshot({ path: join(SHOTS, `settings-table-rows-${theme}.png`) });
+    },
+    60_000,
+  );
+
+  it.each(WINDOWS.flatMap(w => (["dark", "light"] as const).map(theme => ({ ...w, theme }))))(
+    "at $name in the $theme theme an open row's refusal wraps inside the card rather than widening the table",
+    async window => {
+      await open(window, `theme=${window.theme}&ws=ws_a&panel=machine&places=1&settings=1`);
+      await page!.waitForSelector("[data-k=places-table]");
+      const closed = await page!.locator("[data-k=places-table]").evaluate(el => {
+        const container = el.closest("[data-slot=table-container]")!;
+        return { scrollWidth: container.scrollWidth, clientWidth: container.clientWidth };
+      });
+      await page!.locator("[data-place-row=p_laptop]").click();
+      await page!.waitForSelector("[data-k=place-detail] [data-k=dialled]");
+      const open_ = await page!.locator("[data-k=places-table]").evaluate(el => {
+        const container = el.closest("[data-slot=table-container]")!;
+        const said = el.querySelector("[data-k=dialled]")!;
+        const cell = said.closest("td")!;
+        return {
+          scrollWidth: container.scrollWidth,
+          clientWidth: container.clientWidth,
+          wrap: getComputedStyle(said).whiteSpace,
+          said: Math.round(said.getBoundingClientRect().width),
+          cell: Math.round(cell.getBoundingClientRect().width),
+          cut: said.scrollWidth > said.clientWidth,
+          // The longest sentence ssh hands back, laid out in the same box: a refusal is one line or several, and
+          // either way it may not push the table out from under the card.
+          overflowsLong: ((): boolean => {
+            const held = said.textContent;
+            said.textContent = `${held ?? ""} ${(held ?? "").repeat(2)}`;
+            const over = said.scrollWidth > said.clientWidth;
+            said.textContent = held;
+            return over;
+          })(),
+        };
+      });
+      console.info(`table at ${window.name} ${window.theme}: closed ${closed.scrollWidth} in ${closed.clientWidth}, open ${open_.scrollWidth} in ${open_.clientWidth}, refusal ${open_.said} px (${open_.wrap}) in a ${open_.cell} px cell`);
+      // The amendment's rule: the table never scrolls sideways. A refusal that inherits the cell's nowrap widens
+      // it and is clipped at the card's edge, which is the half of the sentence that says what happened.
+      expect(closed.scrollWidth).toBe(closed.clientWidth);
+      expect(open_.scrollWidth).toBe(open_.clientWidth);
+      expect(open_.cut).toBe(false);
+      expect(open_.overflowsLong).toBe(false);
+      expect(open_.wrap).not.toBe("nowrap");
+      await page!.screenshot({ path: join(SHOTS, `settings-detail-refusal-${window.width}-${window.theme}.png`) });
+    },
+    60_000,
+  );
+
+  it.each(["dark", "light"] as const)(
+    "in the %s theme every row of the table is one height and the note behind a count is the muted ink",
+    async theme => {
+      // A row with a menu button used to stand 6 px taller than the row without one, which is the first thing a
+      // person reads as wrong in a table of four rows.
+      await open(WINDOWS[0], `theme=${theme}&ws=ws_a&panel=machine&places=1&settings=1`);
+      await page!.waitForSelector("[data-k=places-table]");
+      const rows = await page!.locator("[data-k=places-table] tbody tr").evaluateAll(els => els.map(el => ({ id: el.getAttribute("data-place-row"), height: el.getBoundingClientRect().height, cells: el.children.length })));
+      console.info(`places rows in the ${theme} theme: ${rows.map(r => `${r.id} ${r.height} px in ${r.cells} cells`).join(", ")}`);
+      expect(rows.length).toBeGreaterThan(2);
+      expect(new Set(rows.map(r => Math.round(r.height))).size).toBe(1);
+      // The head's own height, and every row carries the menu column whether or not it has a menu in it.
+      expect(Math.round(rows[0]!.height)).toBe(Math.round(await page!.locator("[data-k=places-table] thead tr").evaluate(el => el.getBoundingClientRect().height)));
+      expect(new Set(rows.map(r => r.cells)).size).toBe(1);
+      // The count stands in the row's own ink and the clause behind it is muted, as the mock draws it.
+      const inks = await page!.locator("[data-k=places-table] tbody [data-k=workspaces-note]").evaluateAll(els =>
+        els.map(el => ({ note: getComputedStyle(el).color, count: getComputedStyle(el.parentElement!).color })),
+      );
+      console.info(`the note behind a count in the ${theme} theme: ${inks.map(i => `${i.note} on ${i.count}`).join(", ")}`);
+      expect(inks.length).toBeGreaterThan(0);
+      for (const ink of inks) expect(ink.note).not.toBe(ink.count);
+      await page!.screenshot({ path: join(SHOTS, `settings-table-rows-${theme}.png`) });
+    },
+    60_000,
+  );
+
   it.each(WINDOWS.flatMap(w => (["dark", "light"] as const).map(theme => ({ ...w, theme }))))(
     "at $name in the $theme theme every pane value ends 20 px from the panel's edge",
     async window => {

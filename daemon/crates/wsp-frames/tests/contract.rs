@@ -12,8 +12,9 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, MachineAnswersReply,
-    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineShapeReply, MachineStateReply,
-    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachinePromoteReply, MachineReachReply, MachineShapeReply,
+    MachineSnapshotReply, MachineSnapshotsReply, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest,
+    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -189,6 +190,21 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "MachineReachReply" => {
                     round_trip::<MachineReachReply>(&sample, &at);
                 }
+                "MachineSnapshotReply" => {
+                    round_trip::<MachineSnapshotReply>(&sample, &at);
+                }
+                "MachineSnapshotsReply" => {
+                    round_trip::<MachineSnapshotsReply>(&sample, &at);
+                }
+                "MachinePromoteReply" => {
+                    round_trip::<MachinePromoteReply>(&sample, &at);
+                }
+                "MachineTemplateReply" => {
+                    round_trip::<MachineTemplateReply>(&sample, &at);
+                }
+                "MachineTemplatesReply" => {
+                    round_trip::<MachineTemplatesReply>(&sample, &at);
+                }
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
@@ -206,9 +222,14 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineExecReply",
         "MachineHandleReply",
         "MachineListReply",
+        "MachinePromoteReply",
         "MachineReachReply",
         "MachineShapeReply",
+        "MachineSnapshotReply",
+        "MachineSnapshotsReply",
         "MachineStateReply",
+        "MachineTemplateReply",
+        "MachineTemplatesReply",
     ];
     expected.sort_unstable();
     assert_eq!(seen, expected, "every reply this daemon answers has its fixture");

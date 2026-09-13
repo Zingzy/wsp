@@ -5,7 +5,7 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceView, type WorkspaceView } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -78,7 +78,9 @@ function fakeApi(over: Partial<Api> = {}): { api: Api; push(event: EventUnion): 
 }
 
 beforeEach(() => {
-  useStore.setState({ api: null, places: [], workspaces: [], sessions: {}, addComputerOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+  // The provider sheet is drawn by the section itself, and a test that opened one leaves the rest of the document
+  // inert for the next: a row inside an aria-hidden container is a row no role query finds.
+  useStore.setState({ api: null, places: [], workspaces: [], sessions: {}, addComputerOpen: false, connectProviderOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 });
 
 /** The client a test built the app's own api from. Closed here however that test ended: one left behind redials
@@ -242,6 +244,141 @@ describe("the Add a computer sheet", () => {
   });
 });
 
+describe("what the places cost this month", () => {
+  const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.11 };
+  const atProvider = (id: string, provider: string): WorkspaceView => ({ ...workspace(id, "cloud", `fk_${id}`), provider });
+  /** One tick off the runtime's meter, which is what sends the section back for the month again. */
+  const COST_TICK = { type: "workspace.cost", workspaceId: "ws_x", phase: "running", rateUsdPerHour: 0.16, awakeMs: 60_000, accruedUsd: 0.41, at: "2026-09-12T12:00:00.000Z", seq: 1 } as EventUnion;
+
+  /** A host that answers the month read, and says how many times it was asked. */
+  const withSpend = (rows: PlaceSpend[]): { api: Api; asks: () => number; push(event: EventUnion): void } => {
+    const state = { asks: 0 };
+    const fake = fakeApi({
+      spend: async () => {
+        state.asks += 1;
+        return rows;
+      },
+    });
+    return { api: fake.api, asks: () => state.asks, push: fake.push };
+  };
+
+  it("puts what a provider took this month in its Workspaces cell, and leaves a computer of the person's own alone", async () => {
+    const { api } = withSpend([{ place: "box", monthUsd: 0.41, rateUsdPerHour: 0.16 }]);
+    useStore.setState({ api, places: [here, laptop, ascii], workspaces: [mine, onLaptop, fork("ws_x"), fork("ws_y")] });
+    render(<WhereAgentsRun now={NOW} />);
+    const rows = () => screen.getAllByRole("row").slice(1);
+    await waitFor(() => expect(cells(rows()[2]!)[3]).toBe("2 · $0.41 this month"));
+    expect(cells(rows()[0]!)[3]).toBe("1 · agents only");
+    expect(cells(rows()[1]!)[3]).toBe("1 · agents only");
+  });
+
+  it("gives each provider its own total, off the provider each fork was stamped with", async () => {
+    const { api } = withSpend([
+      { place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 },
+      { place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 },
+    ]);
+    useStore.setState({ api, places: [here, ascii, solari], workspaces: [atProvider("ws_x", "box"), atProvider("ws_y", "solari"), atProvider("ws_z", "solari")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(cells(screen.getAllByRole("row")[2]!)[3]).toBe("1 · $0.41 this month"));
+    expect(cells(screen.getAllByRole("row")[3]!)[3]).toBe("2 · $4.12 this month");
+    // The foot adds up every provider on the list and says how many that is.
+    expect(document.querySelector("[data-k='places-spend']")?.textContent).toBe("$4.53 this month across 2 providers");
+  });
+
+  it("says the month, the burn now and how many workspaces that is in the row's own detail", async () => {
+    const { api } = withSpend([{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }]);
+    useStore.setState({ api, places: [here, solari], workspaces: [atProvider("ws_y", "solari"), atProvider("ws_z", "solari")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(document.querySelector("[data-place-row='solari']")).toBeTruthy());
+    fireEvent.click(document.querySelector("[data-place-row='solari']")!);
+    expect(document.querySelector("[data-k='place-detail'] [data-k='spend']")?.textContent).toBe("Spend$4.12 this month · $0.16/hr now across 2 workspaces");
+  });
+
+  it("leaves a computer of the person's own without a Spend row, and says nothing at the foot with no provider on the list", async () => {
+    const { api } = withSpend([{ place: "p_1", monthUsd: 0.41, rateUsdPerHour: 0 }]);
+    useStore.setState({ api, places: [here, laptop], workspaces: [mine, onLaptop] });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='place-detail']")).toBeTruthy());
+    expect(document.querySelector("[data-k='place-detail'] [data-k='spend']")).toBeNull();
+    expect(document.querySelector("[data-k='places-spend']")).toBeNull();
+  });
+
+  it("follows the meter: every cost tick reads the month again, and a read in flight is not asked twice", async () => {
+    const { api, asks, push } = withSpend([{ place: "box", monthUsd: 0.41, rateUsdPerHour: 0.16 }]);
+    useStore.setState({ api, places: [here, ascii], workspaces: [fork("ws_x")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(asks()).toBe(1));
+    act(() => {
+      push(COST_TICK);
+      push(COST_TICK);
+    });
+    await waitFor(() => expect(asks()).toBe(2));
+    act(() => push(COST_TICK));
+    await waitFor(() => expect(asks()).toBe(3));
+  });
+
+  it("says no money at all on a window that may not read it, and asks that window once", async () => {
+    let asks = 0;
+    const fake = fakeApi({
+      spend: async () => {
+        asks += 1;
+        return Promise.reject(new Error(PLACES_TICKET_REFUSAL));
+      },
+    });
+    useStore.setState({ api: fake.api, places: [here, ascii], workspaces: [fork("ws_x")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(cells(screen.getAllByRole("row")[2]!)[3]).toBe("1"));
+    expect(document.querySelector("[data-k='places-spend']")).toBeNull();
+    await waitFor(() => expect(asks).toBe(1));
+    act(() => fake.push(COST_TICK));
+    await waitFor(() => expect(asks).toBe(1));
+  });
+
+  it("asks again after a read that failed on the way, since a dropped request is not a refusal", async () => {
+    let asks = 0;
+    const fake = fakeApi({
+      spend: async () => {
+        asks += 1;
+        return asks === 1 ? Promise.reject(new Error("disconnected")) : [{ place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 }];
+      },
+    });
+    useStore.setState({ api: fake.api, places: [here, ascii], workspaces: [fork("ws_x")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(asks).toBe(1));
+    act(() => fake.push(COST_TICK));
+    await waitFor(() => expect(cells(screen.getAllByRole("row")[2]!)[3]).toBe("1 · $0.41 this month"));
+  });
+
+  it("leaves a provider that took nothing this month out of the foot's count", async () => {
+    const solariRow: PlaceView = { ...ascii, id: "solari", name: "solari" };
+    const { api } = withSpend([
+      { place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 },
+      // Metered, and asleep since last month: a row with a figure of zero is not a provider that charged.
+      { place: "solari", monthUsd: 0, rateUsdPerHour: 0 },
+    ]);
+    useStore.setState({ api, places: [here, ascii, solariRow], workspaces: [atProvider("ws_x", "box"), atProvider("ws_y", "solari")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(document.querySelector("[data-k='places-spend']")?.textContent).toBe("$0.41 this month across 1 provider"));
+    // The row that took nothing still says so in its own cell; it is the count of who charged that leaves it out.
+    expect(cells(screen.getAllByRole("row")[3]!)[3]).toBe("1 · $0.00 this month");
+  });
+
+  it("leaves a provider nothing was metered on out of the foot's count, and a computer that runs Docker out of the money", async () => {
+    const docker: PlaceView = { ...ascii, id: "docker", name: "docker" };
+    const runsDocker: PlaceView = { ...here, docker: true };
+    const { api } = withSpend([
+      { place: "here", monthUsd: 0, rateUsdPerHour: 0 },
+      { place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 },
+    ]);
+    useStore.setState({ api, places: [runsDocker, ascii, docker], workspaces: [mine, atProvider("ws_x", "box")] });
+    render(<WhereAgentsRun now={NOW} />);
+    await waitFor(() => expect(document.querySelector("[data-k='places-spend']")?.textContent).toBe("$0.41 this month across 1 provider"));
+    // This Mac runs Docker and still charges its owner nothing, so its cell says what may go there and no money.
+    expect(cells(screen.getAllByRole("row")[1]!)[3]).toBe("1");
+  });
+});
+
 describe("a computer's own row", () => {
   const withWorkspaces = (): void => {
     useStore.setState({
@@ -264,6 +401,69 @@ describe("a computer's own row", () => {
     expect(detail.textContent).toContain("claude, codex");
     expect(detail.textContent).toContain("spoo-fix · Running · 2 threads");
     expect(document.querySelector("[data-place-row='p_1']")?.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  /** One row of the open detail, its value alone: the row's own element holds the label first. */
+  const detailValue = (k: string): string | undefined => document.querySelector(`[data-k='place-detail'] [data-k='${k}']`)?.lastElementChild?.textContent ?? undefined;
+
+  it("names the login the host dials and how long the last dial took, so a row says which machine it is", () => {
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: true, roundTripMs: 14 } };
+    useStore.setState({ places: [here, vps], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
+    const detail = document.querySelector("[data-k='place-detail']")!;
+    expect(detailValue("address")).toBe("root@65.21.4.12 · ssh");
+    // The spec's `Answered 3 s ago · 14 ms`: when it last spoke and how long the last frame took. The span is the
+    // road reading's own, so this row and the pane's sentence cannot date one silence differently.
+    expect(detailValue("answered")).toBe(`${absentRoad({ name: "vps", awayMs: NOW - Date.parse(laptop.lastSeenAt!) }).answered} · 14 ms`);
+    // And what it is, marked as last known, the way the pane's OS row is: a person who cannot tell which of two
+    // screens is stale is what this ticket was filed for.
+    expect(detailValue("system")).toBe("macOS 15.6 · last seen 2 h ago");
+  });
+
+  it("says nothing about reaching a provider, which is a key and not a computer this host dials", () => {
+    useStore.setState({ places: [here, ascii], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='box']")!);
+    const detail = document.querySelector("[data-k='place-detail']")!;
+    expect(detail).toBeTruthy();
+    // A provider's machines are at the other end of a key: there is no address to name, nothing that last
+    // answered, no dial to report and no button to press.
+    expect(detailValue("answered")).toBeUndefined();
+    expect(detailValue("address")).toBeUndefined();
+    expect(detail.querySelector("[data-k='dialled']")).toBeNull();
+    expect(detail.querySelector("[data-k='try-now']")).toBeNull();
+    // The rows it does carry are still there, so the guard took the road reading and nothing beside it.
+    expect(detailValue("workspaces")).toBe("none");
+  });
+
+  it("says a computer that never answered so, rather than leaving the row out", () => {
+    const fresh: PlaceView = { ...laptop, id: "p_4", name: "vps", lastSeenAt: undefined };
+    useStore.setState({ places: [here, fresh], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_4']")!);
+    expect(detailValue("answered")).toBe("not since it joined");
+  });
+
+  it("reads a computer that is answering plain, with nothing marked as stale", () => {
+    const live: PlaceView = { ...laptop, id: "p_5", name: "vps", present: true, lastSeenAt: "2026-09-12T11:59:00.000Z" };
+    useStore.setState({ places: [here, live], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_5']")!);
+    expect(detailValue("system")).toBe("macOS 15.6");
+  });
+
+  it("keeps the last refusal under the rows and replaces it with what a press of Try now got", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
+    const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
+    const fake = fakeApi({ dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 412 }, line, place: { ...vps, id: placeId } }) } as Partial<Api>);
+    useStore.setState({ api: fake.api, places: [here, vps], workspaces: [], sessions: {} });
+    render(<WhereAgentsRun now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
+    expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(said);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='try-now']")!);
+    await waitFor(() => expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(line));
   });
 
   it("computes the Remove sentence from what that computer holds", () => {
@@ -350,16 +550,33 @@ describe("the ssh road of the sheet", () => {
   const plan = (): [string | null, string | null][] => [...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")]);
   const WAITING: [string, string][] = [
     [placeAddSheetWord("connect", "running"), "waiting"],
-    [`${placeAddSheetWord("wsp", "running")}${ADD_COMPUTER_WORDS.ssh.folder}`, "waiting"],
+    [`${placeAddSheetWord("wsp", "running")}${PLACE_INSTALL.weight}`, "waiting"],
     [placeAddSheetWord("service", "running"), "waiting"],
     [placeAddSheetWord("join", "running"), "waiting"],
   ];
 
-  it("stands the plan under the note before Add is pressed, in the sheet's own words with the folder in its slot", async () => {
+  it("stands the plan under the note before Add is pressed, in the sheet's own words with the weight in its slot", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
     expect(plan()).toEqual(WAITING);
     // The note the plan stands under, and nothing between them.
     expect(document.querySelector("[data-k='plan']")?.previousElementSibling?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.note);
+  });
+
+  it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, Docker and the opener", async () => {
+    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], projects: [] }) } as unknown as Partial<Api>);
+    const lines = plan().map(([word]) => word ?? "");
+    expect(lines[1]).toBe(`installing wsp under ~/.wsp${PLACE_INSTALL.weight}`);
+    expect(lines[2]).toBe("starting the agent as a user service");
+    await waitFor(() => expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image (4.2 GB) is copied into Docker there the first time a workspace is created. Remove takes all of it off again."));
+    expect(document.querySelector("[data-k='opener-note']")?.textContent).toBe(PLACE_INSTALL.openerLine);
+    // The one word Lena could not read on the way out is on neither screen now.
+    expect(document.body.textContent).not.toContain("shim");
+    expect(document.body.textContent).not.toContain("systemd");
+  });
+
+  it("says the Docker sentence without a figure on a wsp that has built no image yet, rather than one it guessed", async () => {
+    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: null, copies: [], projects: [] }) } as unknown as Partial<Api>);
+    expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is copied into Docker there the first time a workspace is created. Remove takes all of it off again.");
   });
 
   it("fills the same four lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
@@ -381,7 +598,9 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
     expect(plan()).toEqual([
       ["connected · Ubuntu 24.04", "done"],
-      ["installing wsp 0.2.0", "running"],
+      // The weight stands in the slot while the step runs: the installer reports no note of its own for it, and
+      // what wsp takes on the box is what a person pressed Add without knowing.
+      [`installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"],
       [placeAddSheetWord("service", "running"), "waiting"],
       [placeAddSheetWord("join", "running"), "waiting"],
     ]);

@@ -13,6 +13,8 @@ import {
   threadMessages,
   threadReadText,
   threadResult,
+  leadAsk,
+  openAsk,
   threadRowLines,
   turnEndLine,
   type SessionEvent,
@@ -67,6 +69,16 @@ describe("a thread's messages", () => {
       { who: "person", at: AT, text: "edit it" },
       { who: "tool", at: AT + 1, text: "edited packages/host/src/verbs.ts" },
     ]);
+  });
+
+  it("holds a call in the present until its result lands, so a read of a write nobody has allowed never says it happened", () => {
+    const events = [
+      { type: "session.start", ...SCOPE, turnId: "u1", at: AT, prompt: "write it" },
+      { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 1, kind: "tool_use", toolName: "Write", toolUseId: "toolu_1", text: JSON.stringify({ file_path: "kai.txt" }) },
+    ] as const;
+    expect(threadMessages([...events], "t1").map(row => row.text)).toEqual(["write it", "writing kai.txt"]);
+    const answered = threadMessages([...events, { type: "session.delta", ...SCOPE, turnId: "u1", at: AT + 2, kind: "tool_result", toolUseId: "toolu_1", text: "File created successfully at: kai.txt" }], "t1");
+    expect(answered.map(row => row.text)).toEqual(["write it", "wrote kai.txt"]);
   });
 
   it("gives a call the harness named no id for a row of its own, and never runs a new turn's words into the turn before it", () => {
@@ -251,5 +263,35 @@ describe("the printout a reader sees", () => {
     expect(turnEndLine({ status: "completed", durationMs: 724_000, costUsd: 0.41 })).toBe("completed · Worked for 12m 4s · $0.41");
     expect(turnEndLine({ status: "interrupted" })).toBe("interrupted");
     expect(turnEndLine({ status: "failed", error: "the harness died" })).toBe("failed: the harness died");
+  });
+});
+
+describe("the prompt a thread is stopped on", () => {
+  const ask = (askId: string, command: string): SessionEvent => ({
+    type: "session.permission",
+    ...SCOPE,
+    turnId: "u1",
+    at: AT,
+    askId,
+    toolName: "Bash",
+    input: JSON.stringify({ command }),
+    options: [{ id: "allow", label: "Allow", effect: "allow" }],
+  });
+  const closed = (askId: string): SessionEvent => ({ type: "session.permission.closed", ...SCOPE, turnId: "u1", at: AT + 1, askId, outcome: "allowed" });
+
+  it("is the oldest ask with no close behind it, the one the harness stopped at, and nothing once every ask was answered", () => {
+    expect(openAsk([], "t1")).toBeUndefined();
+    expect(openAsk([ask("a1", "ls")], "t1")).toMatchObject({ askId: "a1" });
+    expect(openAsk([ask("a1", "ls"), closed("a1")], "t1")).toBeUndefined();
+    expect(openAsk([ask("a1", "ls"), closed("a1"), ask("a2", "rm -rf x")], "t1")).toMatchObject({ askId: "a2" });
+    // Two open at once: the older leads, which is what the runtime leads the thread's row with.
+    expect(openAsk([ask("a1", "ls"), ask("a2", "rm -rf x")], "t1")).toMatchObject({ askId: "a1" });
+    expect(leadAsk([])).toBeUndefined();
+  });
+
+  it("is read per thread: an ask open on another thread is not this one's", () => {
+    const elsewhere = { ...ask("a1", "ls"), threadId: "t2" } as SessionEvent;
+    expect(openAsk([elsewhere], "t1")).toBeUndefined();
+    expect(openAsk([elsewhere], "t2")).toMatchObject({ askId: "a1" });
   });
 });

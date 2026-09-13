@@ -102,6 +102,7 @@ import {
   notifyLine,
   notifyTail,
   offeredSize,
+  sizeOffer,
   plural,
   PROVIDER_UNREACHED_LINE,
   providerAnswerLine,
@@ -138,6 +139,8 @@ import {
   titlePrompt,
   titleLine,
   toolActivityLine,
+  toolDoneLine,
+  validatorRefusal,
   toolCallFacts,
   toolResultLine,
   TURN_IDLE_MS,
@@ -158,6 +161,10 @@ import {
   IMAGE_ALREADY_NEWEST,
   IMAGE_MOVE_CONFIRM,
   vaultKeptLine,
+  HOSTNAME_KEPT,
+  hostnameSetLine,
+  startingLine,
+  CREATE_READY,
   vaultStaleLine,
   vaultOverCapLine,
   importIntoLine,
@@ -512,20 +519,40 @@ describe("a turn's activity in one line each", () => {
   });
 
   it("reads a file behind the verb that touched it, and a search behind what it looked for", () => {
-    expect(toolActivityLine("Read", JSON.stringify({ file_path: "packages/engine/src/golden-mcp.ts" }))).toBe("read packages/engine/src/golden-mcp.ts");
-    expect(toolActivityLine("Write", JSON.stringify({ file_path: "src/a.ts" }))).toBe("wrote src/a.ts");
-    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("edited src/a.ts");
-    expect(toolActivityLine("NotebookEdit", JSON.stringify({ notebook_path: "run.ipynb" }))).toBe("edited run.ipynb");
-    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searched code for shellQuote");
-    expect(toolActivityLine("WebSearch", JSON.stringify({ query: "solari snapshot" }))).toBe("searched the web for solari snapshot");
-    expect(toolActivityLine("WebFetch", JSON.stringify({ url: "https://example.com" }))).toBe("fetched https://example.com");
+    expect(toolActivityLine("Read", JSON.stringify({ file_path: "packages/engine/src/golden-mcp.ts" }))).toBe("reading packages/engine/src/golden-mcp.ts");
+    expect(toolActivityLine("Write", JSON.stringify({ file_path: "src/a.ts" }))).toBe("writing src/a.ts");
+    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("editing src/a.ts");
+    expect(toolActivityLine("NotebookEdit", JSON.stringify({ notebook_path: "run.ipynb" }))).toBe("editing run.ipynb");
+    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searching code for shellQuote");
+    expect(toolActivityLine("WebSearch", JSON.stringify({ query: "solari snapshot" }))).toBe("searching the web for solari snapshot");
+    expect(toolActivityLine("WebFetch", JSON.stringify({ url: "https://example.com" }))).toBe("fetching https://example.com");
     expect(toolActivityLine("Task", JSON.stringify({ description: "review the diff" }))).toBe("agent: review the diff");
   });
 
   it("counts the paths of a change call that carries several, and names the one it carries alone", () => {
     const one = [{ kind: "edit", path: "src/a.ts" }];
-    expect(toolActivityLine("file_change", JSON.stringify({ changes: one }))).toBe("edited src/a.ts");
-    expect(toolActivityLine("file_change", JSON.stringify({ changes: [...one, { kind: "add", path: "src/b.ts" }] }))).toBe(`edited ${plural(2, "file")}`);
+    expect(toolActivityLine("file_change", JSON.stringify({ changes: one }))).toBe("editing src/a.ts");
+    expect(toolDoneLine("file_change", JSON.stringify({ changes: one }))).toBe("edited src/a.ts");
+    expect(toolActivityLine("file_change", JSON.stringify({ changes: [...one, { kind: "add", path: "src/b.ts" }] }))).toBe(`editing ${plural(2, "file")}`);
+  });
+
+  it("says what a call is doing while it runs and what it did once its result landed, never the past before the fact", () => {
+    const write = JSON.stringify({ file_path: "kai.txt" });
+    expect(toolActivityLine("Write", write)).toBe("writing kai.txt");
+    expect(toolDoneLine("Write", write)).toBe("wrote kai.txt");
+    expect(toolActivityLine("Read", JSON.stringify({ file_path: "src/a.ts" }))).toBe("reading src/a.ts");
+    expect(toolDoneLine("Read", JSON.stringify({ file_path: "src/a.ts" }))).toBe("read src/a.ts");
+    expect(toolActivityLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("editing src/a.ts");
+    expect(toolDoneLine("Edit", JSON.stringify({ file_path: "src/a.ts" }))).toBe("edited src/a.ts");
+    expect(toolActivityLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searching code for shellQuote");
+    expect(toolDoneLine("Grep", JSON.stringify({ pattern: "shellQuote" }))).toBe("searched code for shellQuote");
+  });
+
+  it("a call whose row reads the same either way has no line of its own for its result, and its answer stands", () => {
+    expect(toolDoneLine("Bash", JSON.stringify({ command: "git status" }))).toBeUndefined();
+    expect(toolDoneLine("Task", JSON.stringify({ description: "review the diff" }))).toBeUndefined();
+    expect(toolDoneLine("TodoWrite", JSON.stringify({ todos: [] }))).toBeUndefined();
+    expect(toolDoneLine("Write", "{\"file_pa")).toBeUndefined();
   });
 
   it("falls back to the tool's own name when there is no row for it, when its input carries nothing the row needs, and when the input is not an object", () => {
@@ -831,6 +858,34 @@ describe("refusedTurn", () => {
   });
 });
 
+describe("a refusal the host's own validator wrote", () => {
+  const issues = (rows: unknown[]): string => JSON.stringify(rows, null, 2);
+
+  it("reads an op the host does not know as the two builds differing, and never prints the ops it listed", () => {
+    const refusal = issues([{ code: "invalid_union_discriminator", options: ["auth", "status.list", "workspaces.exec"], path: ["op"], message: "Invalid discriminator value. Expected 'auth' | 'status.list' | 'workspaces.exec'" }]);
+    const line = validatorRefusal(refusal);
+    expect(line).toBe("the host does not serve this line; it runs another version of wsp, restart it with wsp up");
+    expect(line).not.toContain("workspaces.exec");
+    expect(line).not.toContain("discriminator");
+  });
+
+  it("names the argument the host refused, in the words the line was typed in", () => {
+    expect(validatorRefusal(issues([{ code: "invalid_type", expected: "string", received: "number", path: ["cwd"], message: "Expected string, received number" }]))).toBe("the host would not read --cwd on this line");
+    expect(validatorRefusal(issues([{ code: "invalid_type", path: ["workspaceId"], message: "Required" }, { code: "invalid_type", path: ["argv", 0], message: "Required" }]))).toBe("the host would not read the workspace and the command on this line");
+  });
+
+  it("says the line alone where the field it named is one no line carries", () => {
+    expect(validatorRefusal(issues([{ code: "invalid_type", path: ["turnToken"], message: "Required" }]))).toBe("the host would not read this line");
+  });
+
+  it("leaves every refusal wsp writes itself alone", () => {
+    expect(validatorRefusal("no workspace nope")).toBeUndefined();
+    expect(validatorRefusal("[]")).toBeUndefined();
+    expect(validatorRefusal(JSON.stringify([{ message: "Required" }]))).toBeUndefined();
+    expect(validatorRefusal(JSON.stringify({ code: "invalid_type", path: ["cwd"] }))).toBeUndefined();
+  });
+});
+
 describe("harnessExitLine", () => {
   it("exit 127 names the binary the shell could not find and the PATH it searched, never the bare code alone", () => {
     const path = "/root/.local/bin:/usr/bin:/bin";
@@ -842,9 +897,19 @@ describe("harnessExitLine", () => {
     expect(harnessExitLine("claude", 127, undefined)).toBe("claude was not found on PATH (exit 127); the launch exported no PATH, the machine's own was searched");
   });
 
-  it("any other exit reads as the code, a null one as null", () => {
+  it("any other exit reads as the code", () => {
     expect(harnessExitLine("claude", 1, "/usr/bin")).toBe("claude exited with code 1 before emitting a result");
-    expect(harnessExitLine("claude", null, "/usr/bin")).toBe("claude exited with code null before emitting a result");
+  });
+
+  it("a run that ended on a signal says the agent was killed, and names the signal where the host saw one", () => {
+    expect(harnessExitLine("claude", null, "/usr/bin", { reached: true, signal: "SIGKILL" })).toBe("claude was killed (SIGKILL) before it answered");
+    expect(harnessExitLine("claude", -1, "/usr/bin", { reached: true, signal: "SIGTERM" })).toBe("claude was killed (SIGTERM) before it answered");
+    expect(harnessExitLine("claude", null, "/usr/bin", { reached: true })).toBe("claude was killed before it answered");
+  });
+
+  it("a launch that never reached the agent says that instead of naming a code", () => {
+    expect(harnessExitLine("claude", null, "/usr/bin", { reached: false })).toBe("the launch never reached claude: its run ended before the agent said a word");
+    expect(harnessExitLine("claude", 127, "/usr/bin", { reached: false })).toBe("claude was not found on PATH (exit 127); PATH searched: /usr/bin");
   });
 });
 
@@ -910,6 +975,9 @@ describe("machine size words", () => {
     expect(offeredSize(offers, { cpu: 2, memMb: 8192 })).toBe(true);
     expect(offeredSize(offers, { cpu: 4, memMb: 8192 })).toBe(false);
     expect(offeredSize([], { cpu: 2, memMb: 4096 })).toBe(false);
+    // The same match answers with the row itself, which is where a picker reads the rate it quotes.
+    expect(sizeOffer(offers, { cpu: 2, memMb: 8192 })).toEqual({ cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 });
+    expect(sizeOffer(offers, { cpu: 4, memMb: 8192 })).toBeUndefined();
     expect(fmtRate(0.11)).toBe("$0.11/hr");
     expect(sizeRefusal("4x8", offers)).toBe("4x8 is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
     expect(sizeRefusal("big", offers)).toBe("big is not a size this provider offers; the sizes are 2x4 ($0.11/hr), 2x8 ($0.15/hr)");
@@ -1102,9 +1170,15 @@ describe("the nap's words when its vault was not stored", () => {
     expect(vaultOverCapLine(6_000, 5_000)).toBe("the export was 6 KB, over the 5 KB cap");
   });
 
-  it("vaultKeptLine says the previous vault stands and why, whatever stopped the export", () => {
-    expect(vaultKeptLine(vaultOverCapLine(797_760_137, 209_715_200))).toBe("the nap kept what was saved before it; the export was 761 MB, over the 200 MB cap");
-    expect(vaultKeptLine("fetch failed")).toBe("the nap kept what was saved before it; fetch failed");
+  it("the verdict says what the nap did and what stands, which is nothing where no nap ever stored one", () => {
+    expect(vaultKeptLine({ vaultedAt: "2026-09-08T07:10:04.444Z" })).toBe("the nap saved no backup; what was saved before is kept");
+    // A workspace whose first nap failed has no earlier backup to keep, and the row beside this one says "no
+    // backup" with no day: a line promising one kept would be the app inventing a file.
+    expect(vaultKeptLine({})).toBe("the nap saved no backup; nothing is saved off the machine");
+    // Whatever refused the export stays on the line's title: a shell's own words are evidence, not a sentence.
+    for (const why of [vaultOverCapLine(797_760_137, 209_715_200), "vault enumeration failed: ls: /root: No such file or directory"]) {
+      for (const w of [{ vaultedAt: "2026-09-08T07:10:04.444Z" }, {}]) expect(vaultKeptLine(w)).not.toContain(why);
+    }
   });
 
   it("vaultStaleLine is the one word every surface shows for a machine whose files are not backed up, short enough for the row, and nothing while the last nap stored a vault", () => {
@@ -1116,6 +1190,33 @@ describe("the nap's words when its vault was not stored", () => {
     expect(vaultStaleLine({ vaultRefused: refused })).toBe("no backup");
     expect(vaultStaleLine({ vaultedAt: "2026-09-08T07:10:04.444Z" })).toBeNull();
     expect(vaultStaleLine({})).toBeNull();
+  });
+});
+
+describe("a create's own words", () => {
+  it("the fork's line names the workspace and the computer it starts on, and nothing of the image it copies", () => {
+    expect(startingLine("spoo-fix", "hetzner")).toBe("starting spoo-fix on hetzner");
+    expect(startingLine("clone-test", "ascii")).toBe("starting clone-test on ascii");
+    for (const word of ["fork", "golden", "image", "machine"]) expect(startingLine("spoo-fix", "hetzner")).not.toContain(word);
+    // The row draws this line while a fork boots, and it holds thirty mono characters.
+    expect(startingLine("clone-test", "ascii").length).toBeLessThanOrEqual(30);
+  });
+
+  it("every line of the log is written one way: lower case, no full stop, no machine's id", () => {
+    const lines = [startingLine("clone-test", "box"), hostnameSetLine("clone-test"), HOSTNAME_KEPT, CREATE_READY];
+    for (const line of lines) {
+      expect(line[0]).toBe(line[0]!.toLowerCase());
+      expect(line.endsWith(".")).toBe(false);
+      expect(line).not.toMatch(/\bfk_/);
+    }
+    expect(hostnameSetLine("clone-test")).toBe("hostname set to clone-test");
+    expect(CREATE_READY).toBe("ready");
+  });
+
+  it("a refused hostname reads as what it means for the workspace, with no shell's words in it", () => {
+    expect(HOSTNAME_KEPT).toBe("hostname not set; the workspace keeps the machine's own name");
+    expect(HOSTNAME_KEPT).not.toContain("sethostname");
+    expect(HOSTNAME_KEPT).not.toContain("failed");
   });
 });
 

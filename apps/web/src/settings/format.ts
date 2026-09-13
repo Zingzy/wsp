@@ -35,11 +35,23 @@ export const WHERE_WORDS = {
   /** Why a row's action is held: the op that carries it is not on the wire yet. */
   notYet: "not on this wsp yet",
   system: "System",
+  spend: "Spend",
   agents: "Agents",
   joined: "Joined",
   answered: "Answered",
+  /** The row that says where the host expects that computer: the login it dials, or the address the computer
+   * dialled in from, with the road it is. */
+  address: "Address",
   none: "none",
   ago: (span: string): string => `${span} ago`,
+  /** The button beside that reading, which asks the host to dial the computer once, and its word while it is
+   * waiting on the answer: a pressed button keeps its variant and changes its word. */
+  tryNow: "Try now",
+  dialling: "Dialling…",
+  /** What the app says when its own client carries no dial road, in place of a button that would ask nobody. A
+   * whole sentence, because it stands after one in the pane's slot and a clause opening in lower case after a
+   * full stop reads as a line that broke. */
+  cannotDial: "This wsp cannot dial a computer from here.",
 } as const;
 
 /** What Add a computer says beyond PLACES_WORDS.sheet: the two roads, every line the ssh road says, and the one
@@ -61,8 +73,6 @@ export const ADD_COMPUTER_WORDS = {
     portPlaceholder: "22",
     addon: "ssh",
     note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
-    /** The folder the install makes on the box, in that line's fact slot, since the step's own words leave it out. */
-    folder: "~/.wsp",
     add: "Add",
     adds: "adds",
     loginFirst: "type the login first",

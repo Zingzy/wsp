@@ -466,6 +466,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, ...(await places().remove(msg.placeId)) });
               return;
             }
+            case "places.dial": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await places().dial(msg.placeId, now())) });
+              return;
+            }
             case "places.door": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACE_DOOR_REFUSAL });
@@ -808,6 +816,15 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "cost.history":
               send({ id: msg.id, ok: true, points: await rt.status.history(msg.workspaceId, origin) });
+              return;
+            case "cost.spend":
+              // What the person's computers and providers have cost them is read on the same road their list is:
+              // a socket let in on a ticket sees neither.
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, places: await rt.status.spend((await rt.places?.list(now())) ?? []) });
               return;
             case "snapshots.rollback": {
               const name = msg.name ?? "default";

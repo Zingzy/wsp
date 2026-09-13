@@ -4,13 +4,13 @@
 // but for the one hook beside the where word, which reads that word off the
 // store for the surfaces that hold a workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, machineLacksShort, outOfMemoryRowLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
-import { useStatus, useWorkspace } from "../protocol/store.js";
+import { usePlaces, useStatus, useWorkspace } from "../protocol/store.js";
 import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.logic.js";
 
 export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
@@ -59,10 +59,10 @@ export function daemonGoneLine(reach: ReachState | null, kind: WorkspaceKindWord
 /** The sentences a meta line can carry in place of its counts, in the order a surface draws them: the
  * computer that is not answering first, since nothing else on the row is known while it is, then a thread of this
  * workspace stopped on a question, then what the runtime is doing to the machine's daemon, then a drop with
- * memory near full, then a daemon that is not there at all, then a nap whose vault was refused. Written once
- * because two surfaces draw them and both have to tell them from a figure: prose takes the ink that reads at AA,
- * the counts beside it keep the whisper. The vault comes last of them: the others are what a person is waiting on
- * now, and this one holds until the next nap. */
+ * memory near full, then a daemon that is not there at all. Written once because two surfaces draw them and both
+ * have to tell them from a figure: prose takes the ink that reads at AA, the counts beside it keep the whisper.
+ * Every one of them is something a person is waiting on now; a note on a step already taken (a nap that saved no
+ * backup) is not here, since this slot is the row's state and its spend. */
 export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMetaInput, "project" | "absent" | "outOfMemory">): string[] {
   return [
     absent?.line,
@@ -70,7 +70,6 @@ export function metaSentences({ project, absent, outOfMemory }: Pick<WorkspaceMe
     daemonNote(project),
     outOfMemory === undefined ? undefined : outOfMemoryRowLine(outOfMemory),
     daemonGoneLine(project.reach, kindWords(workspaceKind(project.workspace)), (project.status ?? project.workspace).daemonRefusedAt?.why),
-    vaultStaleLine(project.status ?? project.workspace) ?? undefined,
   ].filter((line): line is string => line !== undefined);
 }
 
@@ -178,16 +177,11 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
 // draws it from the root's copy of the token.
 const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
-/** The computer or the provider a workspace runs on, as a row names it: the provider the record itself carries,
- * else the kind's own word where it has one, else the name wsp holds for the machine, the live one once a status
- * has arrived. The provider leads because this host is wired to one of several and only the record knows which;
- * reading it off the kind would tell a person on Docker or Box that their workspace is at Solari. A fork whose
- * record names no provider falls to the kind's word rather than to that machine's id, which names nothing to the
- * person reading the row. The one place a surface asks where a workspace runs, so the day a computer carries the
- * name its owner gave it is one edit here. */
+/** The computer or the provider a workspace runs on, as a row names it: the live record once a status has arrived,
+ * read through the protocol's one reading of that question, so this row, the command line's table and the pane
+ * cannot name one machine three ways. */
 export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
-  const record = project.status ?? project.workspace;
-  return record.provider ?? kindWords(workspaceKind(project.workspace)).where ?? record.machineId;
+  return whereOf({ ...(project.status ?? project.workspace), kind: workspaceKind(project.workspace) });
 }
 
 /** The fuller reading of the same question, for the pane that has a whole row for it: the computer or provider the
@@ -200,8 +194,20 @@ export function whereWord(project: Pick<SidebarProjectSnapshot, "status" | "work
 export function whereRuns(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
   const at = placeOf(places, project.workspace);
   if (at === undefined) return whereWord(project);
-  if (at === places[0]) return THIS_COMPUTER_WORD;
-  return `${placeName(at)} · ${PLACE_KIND_WORDS[at.kind]}`;
+  const name = nameOfPlace(places, at);
+  return at === places[0] ? name : `${name} · ${PLACE_KIND_WORDS[at.kind]}`;
+}
+
+/** What one row of the places list is called inside a sentence: the computer the host runs on says so in the words
+ * a sentence says it in, and every other row carries the name it reported. */
+const nameOfPlace = (places: readonly PlaceView[], at: PlaceView): string => (at === places[0] ? THIS_COMPUTER_WORD : placeName(at));
+
+/** The same name with nothing after it, for a sentence that has to call the computer something and has no room to
+ * say what kind of row it is: a person waiting on a machine is waiting on the name their own list shows, never on
+ * a machine id or on the kind's word. */
+export function computerName(places: readonly PlaceView[], project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string {
+  const at = placeOf(places, project.workspace);
+  return at === undefined ? whereWord(project) : nameOfPlace(places, at);
 }
 
 /** The same word for a surface that holds the workspace's id and no snapshot: the record and its status off the
@@ -212,6 +218,15 @@ export function useWhereWord(workspaceId: string): string {
   const workspace = useWorkspace(workspaceId);
   const status = useStatus(workspaceId);
   return workspace === null ? workspaceId : whereWord({ workspace, status });
+}
+
+/** The computer's name off the store for the same kind of surface, so the sentence a composer holds names the
+ * machine the row beside it names. */
+export function useComputerName(workspaceId: string): string {
+  const places = usePlaces();
+  const workspace = useWorkspace(workspaceId);
+  const status = useStatus(workspaceId);
+  return workspace === null ? workspaceId : computerName(places, { workspace, status });
 }
 
 /** The words a thread row's meta line carries after the agent's mark, in the order it draws them. A thread a

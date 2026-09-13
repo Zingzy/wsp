@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher } from "@wsp/engine";
-import { runForTheList, agentsKindRefusal, askingLine, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceKind, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -17,7 +17,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, PLAN_ONLY, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, threadRows, threadTree, threadsOf, type HostClient } from "../src/verbs.js";
+import { CLI_VERBS, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, lastTarget, messageTo, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import { writeHost } from "../src/hosts.js";
@@ -230,24 +230,37 @@ describe("wsp verbs over the host", () => {
     expect(sized.io.errors[0]).toBe(`wsp new: ${HERE} forks nothing, so it takes no --from or --size. Drop them.`);
   });
 
-  it("workspaces lists this computer beside a fork, its machine cell the size line its sidebar row reads and its state cell empty, and run takes it by name like any workspace", async () => {
+  it("this computer's row carries Running while its daemon answers and the reach word when it does not, as every other row does", () => {
+    const here = { id: "ws_1", name: "mac", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-12T00:00:00.000Z", machineState: "running" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 };
+    expect(workspaceLine({ ...here, reach: { state: "reachable" } })[4]).toBe("Running");
+    expect(workspaceLine({ ...here, reach: { state: "no-daemon" } })[4]).toBe("Unreachable");
+    expect(workspaceLine({ ...here, reach: { state: "unreachable" } })[4]).toBe("Unreachable");
+  });
+
+  it("workspaces gives every row one state word, where it runs in the person's words and its shape apart from it, and the machine id only in the json", async () => {
     await run("new", "alpha");
     await run("new", "mac", "--on", HERE);
     const listed = await run("workspaces");
     expect(listed.code).toBe(0);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
-    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "MACHINE", "STATE", "PROJECTS", "AGENTS"]);
-    // The fork names its provider machine and its state; this computer's machine cell is its cores and memory, the
-    // one size line the app's row reads, and it has no state to name, so that cell falls off the end of the row.
+    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "WHERE", "SIZE", "STATE", "PROJECTS", "AGENTS"]);
+    // One kind of thing per column: where it runs, then the shape, then one state word per row, this computer's
+    // included. The id the provider minted for the machine is on no row.
     expect(rows.map(r => r.split(/ {2,}/))).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
-      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB$/)],
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+\u00a0vCPU\u00a0·\u00a0\d+\u00a0GB$/), expect.stringMatching(/^\S+$/)],
+      ["mac", expect.stringMatching(/^ws_/), expect.stringMatching(/^this (?:Mac|computer)$/), expect.stringMatching(/^\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB$/), expect.stringMatching(/^\S+$/)],
     ]);
     expect(listed.io.errors).toEqual([]);
 
     const raw = await run("workspaces", "--json");
-    const rawRows = (json(raw.io)[0] as { workspaces: (WorkspaceView & { size: { cpu: number; memMb: number } })[] }).workspaces;
-    expect(rows[1]!.split(/ {2,}/)[2]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
+    const rawRows = (json(raw.io)[0] as { workspaces: WorkspaceListing[] }).workspaces;
+    expect(listed.io.lines[0]).not.toContain(rawRows[0]!.machineId);
+    expect(rows[0]!.split(/ {2,}/)[2]).toBe(whereWord(rawRows[0]!));
+    expect(rows[1]!.split(/ {2,}/)[2]).toBe(whereWord(rawRows[1]!));
+    expect(rows[1]!.split(/ {2,}/)[3]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
+    // Which word each row carries is the one predicate's, read off that row's own status: what this computer's
+    // daemon is doing on the machine this test runs on decides the word, and never whether there is a word.
+    expect(rows.map(r => r.split(/ {2,}/)[4])).toEqual(rawRows.map(w => workspaceWord(workspaceStateOf(w, w))));
     expect(rawRows.map(w => [w.name, workspaceKind(w), w.golden])).toEqual([
       ["alpha", "cloud", head(SEALED_GOLDEN).snapshotId],
       ["mac", "local", ""],
@@ -286,7 +299,7 @@ describe("wsp verbs over the host", () => {
         ["dark", "running"],
       ]);
       const [, ...rows] = listed.io.lines[0]!.split("\n");
-      expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[3]!))).toEqual([
+      expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[4]!))).toEqual([
         ["napped", expect.stringMatching(/^ws_/), "Paused"],
         ["dark", expect.stringMatching(/^ws_/), "Unreachable"],
       ]);
@@ -325,7 +338,7 @@ describe("wsp verbs over the host", () => {
 
       const listed = await run("workspaces");
       expect(listed.io.lines[0]).not.toContain("pt_token");
-      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[3]).toBe("Running");
+      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[4]).toBe("Running");
     } finally {
       await new Promise<void>(r => edge.close(() => r()));
     }
@@ -354,7 +367,7 @@ describe("wsp verbs over the host", () => {
     const [thread] = await rt.sessions.list(worker.id);
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id}`, `thread ${thread!.threadId}`, "re: build it"]);
-    expect(sent.io.streamed.endsWith("Ready.\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
+    expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
   });
 
   it("run --title names the thread from the first second, in the agent's own launch and in the table", async () => {
@@ -426,7 +439,7 @@ describe("wsp verbs over the host", () => {
     expect(asJson.io.lines).toEqual([]);
     expect(asJson.io.errors.map(l => JSON.parse(l) as unknown)).toEqual([{ error: "This one answers, so nothing needs rebuilding; the rebuild is offered when a workspace stops answering", class: "provider", exit: EXIT_CODES.provider }]);
     const missing = await run("rebuild", "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp rebuild: no workspace nope"]);
     const extra = await run("rebuild", "alpha", "beta");
     expect(extra.code).toBe(EXIT_CODES.usage);
@@ -657,7 +670,7 @@ describe("wsp verbs over the host", () => {
     expect(io.lines).toEqual(["alpha paused"]);
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await run("pause", "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp pause: no workspace nope"]);
   });
 
@@ -677,8 +690,30 @@ describe("wsp verbs over the host", () => {
     const plain = await run("wake", "alpha");
     expect(plain.io.lines).toEqual(["alpha running"]);
     const missing = await run("wake", "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp wake: no workspace nope"]);
+  });
+
+  it("wake prints the word the next workspaces will print, and says a machine that came up and answers nothing is up and not answering yet", async () => {
+    await run("new", "alpha");
+    await run("pause", "alpha");
+    const edge = createHttpServer((_req, res) => {
+      res.writeHead(502).end();
+    });
+    await new Promise<void>(r => edge.listen(0, "127.0.0.1", r));
+    try {
+      const port = (edge.address() as AddressInfo).port;
+      backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${port}/`, token: "stub", expiresAt: Date.now() + 3_600_000 });
+      const woken = await run("wake", "alpha");
+      expect(woken.code).toBe(0);
+      // The provider started it, so the phase alone would say running; nothing on it answers, so the table says
+      // Unreachable, and the wake says the same thing in a sentence rather than a second word for one machine.
+      expect(woken.io.lines).toEqual(["alpha is up and not answering yet"]);
+      const listed = await run("workspaces");
+      expect(listed.io.lines[0]!.split("\n")[1]!.split(/ {2,}/)[4]).toBe("Unreachable");
+    } finally {
+      await new Promise<void>(r => edge.close(() => r()));
+    }
   });
 
   it("a machine the provider paused on its own, under a record that says running, is woken by wake and by exec: the runtime's one state read settles it", async () => {
@@ -783,7 +818,7 @@ describe("wsp verbs over the host", () => {
     expect(json(asJson.io)).toMatchObject([{ was: "beta", workspace: { name: "gamma" } }]);
 
     const missing = await run("rename", "nope", "a");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp rename: no workspace nope"]);
     const short = await run("rename", "gamma");
     expect(short.code).toBe(3);
@@ -824,7 +859,7 @@ describe("wsp verbs over the host", () => {
     expect(await rt.workspaces.list()).toEqual([]);
 
     const missing = await run("forget", "nope", "--yes");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp forget: no workspace nope"]);
   });
 
@@ -878,8 +913,243 @@ describe("wsp verbs over the host", () => {
     expect(await rt.workspaces.list()).toEqual([]);
 
     const missing = await run("delete", "nope", "--yes");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp delete: no workspace nope"]);
+  });
+
+  it("forget on a workspace that runs on a computer sends the person to delete, the one road that takes it away", async () => {
+    await run("new", "mac", "--on", HERE);
+    const here = (await rt.workspaces.list())[0]!;
+    const sent = await run("forget", "mac", "--yes");
+    expect(sent.code).toBe(1);
+    expect(sent.io.errors).toEqual([`wsp forget: ${forgetUndrivenRefusal("mac", THIS_COMPUTER)}`]);
+    expect((await rt.workspaces.list()).map(w => w.id)).toEqual([here.id]);
+
+    const deleted = await run("delete", "mac", "--yes");
+    expect(deleted.code).toBe(0);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  /** The prompt the persona's turn stopped on, as the claude adapter's control channel hands one over: a command to
+   * run, with allow, deny and the mode the harness offers beside them. */
+  const RUN_ASK: PermissionAsk = {
+    askId: "ask_1",
+    toolName: "Bash",
+    input: JSON.stringify({ command: "wc -l < /etc/hosts" }),
+    options: [
+      { id: PERMISSION_ALLOW, label: "Allow", effect: "allow" },
+      { id: PERMISSION_DENY, label: "Deny", effect: "deny" },
+      { id: "mode:acceptEdits", label: "the adapter's own words for this one", effect: "mode", mode: "acceptEdits" },
+    ],
+  };
+
+  it("the thread id is printed the moment the thread exists, ahead of the turn's first delta", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const started = starting("run", "alpha", "print the number of lines in /etc/hosts");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    // The id is on stdout while the turn has said nothing: a person watching knows what to stop and what to read.
+    await vi.waitFor(() => expect(started.io.lines).toEqual([`thread ${row!.threadId}`]));
+    expect(started.io.streamed).toBe("");
+
+    held.release(0, "10");
+    expect(await started.ended).toBe(0);
+    expect(started.io.screen.startsWith(`thread ${row!.threadId}\n10`)).toBe(true);
+  });
+
+  it("a turn stopped on a prompt says so in the terminal that is blocked, with the keys that answer it, and a typed y answers it", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    let type: (key: string | undefined) => void = () => {};
+    const offered: string[][] = [];
+    io.answerKey = (accept, until) => {
+      offered.push([...accept]);
+      return new Promise<string | undefined>(resolve => {
+        type = resolve;
+        void until.then(() => resolve(undefined));
+      });
+    };
+    const ended = cli(["run", "alpha", "print the number of lines in /etc/hosts", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+
+    held.ask(0, RUN_ASK);
+    await vi.waitFor(() => expect(io.streamed).toContain(needsYouLine(RUN_ASK)));
+    // The mode road has no words of its own: the runtime lends the option the words the app's own picker shows for
+    // that mode, and the line under the prompt reads them rather than guessing what the mode does.
+    const lent = { ...RUN_ASK, options: RUN_ASK.options.map(o => (o.effect === "mode" ? { ...o, label: permissionModeOptionLabel("Accept edits") } : o)) };
+    expect(io.streamed.split("\n").slice(-3, -1)).toEqual([needsYouLine(RUN_ASK), answerKeysLine(lent.options)]);
+    expect(answerKeysLine(lent.options)).toBe("answer here: type y to run it, n to refuse it, a to allow, then Accept edits");
+    expect(offered).toEqual([["y", "n", "a"]]);
+
+    type("y");
+    await vi.waitFor(() => expect(held.answers).toEqual([{ askId: "ask_1", optionId: PERMISSION_ALLOW, outcome: "allowed" }]));
+    held.release(0, "10");
+    expect(await ended).toBe(0);
+  });
+
+  it("a turn stopped on two prompts is waiting on the older one, and the line that answers closes the one the listing named", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const running = starting("run", "alpha", "count both files");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const thread = row!.threadId!;
+    const older: PermissionAsk = { ...RUN_ASK, askId: "ask_older" };
+    const newer: PermissionAsk = { ...RUN_ASK, askId: "ask_newer", input: JSON.stringify({ command: "wc -l < /etc/passwd" }) };
+
+    held.ask(0, older);
+    held.ask(0, newer);
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.asking).toBe(askingLine(older)));
+
+    const allowed = await run("thread", "allow", thread);
+    expect(allowed.code).toBe(0);
+    expect(allowed.io.lines).toEqual([answeredLine(thread, older, "allowed")]);
+    expect(held.answers).toEqual([{ askId: "ask_older", optionId: PERMISSION_ALLOW, outcome: "allowed" }]);
+    // The newer one leads now, and the same line answers that.
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.asking).toBe(askingLine(newer)));
+
+    held.release(0, "10");
+    expect(await running.ended).toBe(0);
+  });
+
+  it("a prompt that asks the person something rather than for consent says so: no key and no verb here stands for its own answers", async () => {
+    const asked: PermissionAsk = {
+      askId: "ask_q",
+      toolName: QUESTION_TOOL,
+      input: JSON.stringify({ questions: [{ question: "Which one?", header: "Pick", options: [{ label: "the first" }, { label: "the second" }] }] }),
+      options: [
+        { id: "q:0", label: "the first", effect: "answer" },
+        { id: "q:1", label: "the second", effect: "answer" },
+      ],
+    };
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const running = starting("run", "alpha", "ask me which one");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const thread = row!.threadId!;
+
+    held.ask(0, asked);
+    await vi.waitFor(() => expect(running.io.streamed).toContain(needsYouLine(asked)));
+    expect(running.io.streamed.split("\n").slice(-3, -1)).toEqual([needsYouLine(asked), ANSWER_IN_THE_APP]);
+
+    const refused = await run("thread", "allow", thread);
+    expect(refused.code).toBe(EXIT_CODES.provider);
+    expect(refused.io.errors).toEqual([`wsp thread allow: ${noSuchAnswerLine(thread, "allow")}`]);
+
+    held.release(0, "done");
+    expect(await running.ended).toBe(0);
+  });
+
+  it("--json at a terminal offers no keys and waits on none: it writes the events and no stream, so its caller answers by the verb", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    const offered: string[][] = [];
+    io.answerKey = accept => {
+      offered.push([...accept]);
+      return new Promise<string | undefined>(() => {});
+    };
+    const ended = cli(["run", "alpha", "print the number of lines in /etc/hosts", "--json", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+
+    held.ask(0, RUN_ASK);
+    await vi.waitFor(() => expect(io.lines.some(l => l.includes('"session.permission"'))).toBe(true));
+    expect(offered).toEqual([]);
+    expect(io.streamed).toBe("");
+
+    expect((await run("thread", "allow", row!.threadId!)).code).toBe(0);
+    held.release(0, "10");
+    expect(await ended).toBe(0);
+  });
+
+  it("a caller with no terminal gets the same words and the verbs that answer by thread id, and those verbs answer the open prompt", async () => {
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const running = starting("run", "alpha", "print the number of lines in /etc/hosts");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    const [row] = await rt.sessions.list();
+    const thread = row!.threadId!;
+
+    held.ask(0, RUN_ASK);
+    await vi.waitFor(() => expect(running.io.streamed).toContain(needsYouLine(RUN_ASK)));
+    expect(running.io.streamed.split("\n").slice(-3, -1)).toEqual([needsYouLine(RUN_ASK), answerVerbsLine(thread)]);
+
+    const allowed = await run("thread", "allow", thread);
+    expect(allowed.code).toBe(0);
+    expect(allowed.io.lines).toEqual([answeredLine(thread, RUN_ASK, "allowed")]);
+    expect(held.answers).toEqual([{ askId: "ask_1", optionId: PERMISSION_ALLOW, outcome: "allowed" }]);
+
+    // The prompt is closed, so the same line again has nothing to answer and says so rather than answering twice.
+    const twice = await run("thread", "allow", thread);
+    expect(twice.code).toBe(EXIT_CODES.provider);
+    expect(twice.io.errors).toEqual([`wsp thread allow: ${noOpenAskLine(thread)}`]);
+
+    const second: PermissionAsk = { ...RUN_ASK, askId: "ask_2" };
+    held.ask(0, second);
+    await vi.waitFor(async () => expect((await rt.sessions.list())[0]!.asking).toBe(askingLine(RUN_ASK)));
+    const denied = await run("thread", "deny", thread);
+    expect(denied.code).toBe(0);
+    expect(denied.io.lines).toEqual([answeredLine(thread, second, "denied")]);
+    expect(held.answers.at(-1)).toEqual({ askId: "ask_2", optionId: PERMISSION_DENY, outcome: "denied" });
+
+    held.release(0, "10");
+    expect(await running.ended).toBe(0);
+  });
+
+  it("a name nothing here holds is refused before anything ran, on every verb that resolves one: the usage class, never the provider's", async () => {
+    await run("new", "alpha");
+    await run("run", "alpha", "build it");
+    const folder = join(dir, "here");
+    mkdirSync(folder, { recursive: true });
+    const workspaceLines: [string, string[]][] = [
+      ["exec", ["exec", "nope", "--", "true"]],
+      ["pause", ["pause", "nope"]],
+      ["wake", ["wake", "nope"]],
+      ["rename", ["rename", "nope", "other"]],
+      ["forget", ["forget", "nope", "--yes"]],
+      ["delete", ["delete", "nope", "--yes"]],
+      ["rebuild", ["rebuild", "nope"]],
+      ["projects", ["projects", "nope"]],
+      ["run", ["run", "nope", "build it"]],
+      ["threads", ["threads", "nope"]],
+      ["fork", ["fork", "nope", "--name", "child"]],
+      ["import", ["import", "nope", folder, "--yes"]],
+      ["export", ["export", "nope", folder, "--from", "/root/work/proj"]],
+      ["image move", ["image", "move", "nope"]],
+    ];
+    const walked = async (lines: [string, string[]][]): Promise<[string, number, string[]][]> => {
+      const refused: [string, number, string[]][] = [];
+      for (const [verb, argv] of lines) {
+        const { code, io } = await run(...argv);
+        refused.push([verb, code, io.errors]);
+      }
+      return refused;
+    };
+    expect(await walked(workspaceLines)).toEqual(workspaceLines.map(([verb]) => [verb, EXIT_CODES.usage, [`wsp ${verb}: ${noWorkspaceRefusal("nope")}`]]));
+    const threadLines: [string, string[]][] = [
+      ["thread read", ["thread", "read", "nope"]],
+      ["thread rename", ["thread", "rename", "nope", "other"]],
+      ["thread forget", ["thread", "forget", "nope"]],
+      ["thread allow", ["thread", "allow", "nope"]],
+      ["thread deny", ["thread", "deny", "nope"]],
+      ["send", ["send", "nope", "hello"]],
+      ["stop", ["stop", "nope"]],
+    ];
+    expect(await walked(threadLines)).toEqual(threadLines.map(([verb]) => [verb, EXIT_CODES.usage, [`wsp ${verb}: no thread nope`]]));
   });
 
   it("run opens a thread under the named agent, announces it, streams the reply and prints the last message", async () => {
@@ -940,6 +1210,17 @@ describe("wsp verbs over the host", () => {
     expect(piped.io.streamed).toBe("25.4.0\ncompleted\n");
   });
 
+  it("a reply printed under a stream that stopped mid-line starts its own line, so the answer is never glued to the work above it", async () => {
+    await run("new", "alpha");
+    const io = captured();
+    io.isTTY = true;
+    const ended = cli(["run", "alpha", "build it", "--state", statePath], io, undefined, env);
+    expect(await ended).toBe(0);
+    const [row] = await rt.sessions.list();
+    expect(io.screen).toBe(`thread ${row!.threadId}\nre: \n$ ls\nbuild it\nre: build it\ncompleted\n`);
+    expect(io.lines).toEqual([`thread ${row!.threadId}`, "re: build it"]);
+  });
+
   it("--json prints the turn's events and its one turn value, at a terminal as into a pipe, and writes no stream", async () => {
     const held = heldAgent(false);
     await restartHost({ claude: held.adapter });
@@ -966,6 +1247,7 @@ describe("wsp verbs over the host", () => {
         [
           { toolName: "Bash", input: { command: "git status\n--porcelain" }, output: "On branch main\nnothing to commit" },
           { toolName: "Read", input: { file_path: "packages/engine/src/golden-mcp.ts" }, output: "" },
+          { toolName: "Write", input: { file_path: "kai.txt" }, output: "File created successfully at: kai.txt" },
           { toolName: "Grep", input: { pattern: "shellQuote" }, output: "packages/host/src/exec.ts:12:  shellQuote(argv)" },
           { toolName: "Wombat", input: { fur: "grey" }, output: "no tool by that name", failed: true },
         ],
@@ -976,11 +1258,15 @@ describe("wsp verbs over the host", () => {
     const io = captured();
     io.muted = text => `~${text}~`;
     expect(await cli(["run", "alpha", "look around", "--state", statePath], io, undefined, env)).toBe(0);
+    // Every call opens in the present, before it has run and before any prompt it waits on is answered; a call that
+    // changed a file says what it changed once its result says it did, and every other call says what came back.
     expect(io.streamed.split("\n")).toEqual([
       "~$ git status~",
       "~On branch main~",
-      "~read packages/engine/src/golden-mcp.ts~",
-      "~searched code for shellQuote~",
+      "~reading packages/engine/src/golden-mcp.ts~",
+      "~writing kai.txt~",
+      "~wrote kai.txt~",
+      "~searching code for shellQuote~",
       "~packages/host/src/exec.ts:12: shellQuote(argv)~",
       "~Wombat~",
       "~failed: no tool by that name~",
@@ -997,6 +1283,7 @@ describe("wsp verbs over the host", () => {
     expect(calls.map(e => [e.kind, e.toolName])).toEqual([
       ["tool_use", "Bash"], ["tool_result", undefined],
       ["tool_use", "Read"], ["tool_result", undefined],
+      ["tool_use", "Write"], ["tool_result", undefined],
       ["tool_use", "Grep"], ["tool_result", undefined],
       ["tool_use", "Wombat"], ["tool_result", undefined],
     ]);
@@ -1152,7 +1439,7 @@ describe("wsp verbs over the host", () => {
     expect((await rt.sessions.list()).map(r => r.threadId)).toEqual([ran]);
 
     const missing = await run("thread", "forget", "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp thread forget: no thread nope"]);
     // A turn from before threads folds under its own id and no thread here answers to it; the verb says that
     // rather than dialling for a thread nobody has, which is the guard the app's row makes.
@@ -1328,11 +1615,11 @@ describe("wsp verbs over the host", () => {
     const workspaces = await run("workspaces");
     const table = workspaces.io.lines[0]!.split("\n").slice(1).map(r => r.split(/ {2,}/));
     expect(table).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running", "2"],
-      ["beta", expect.stringMatching(/^ws_/), expect.stringMatching(/^m\d+$/), "Running"],
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/vCPU/), "Running", "2"],
+      ["beta", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/vCPU/), "Running"],
     ]);
     const unknown = await run("projects", "nope");
-    expect(unknown.code).toBe(1);
+    expect(unknown.code).toBe(EXIT_CODES.usage);
     expect(unknown.io.errors).toEqual(["wsp projects: no workspace nope"]);
     const bare = await run("projects");
     expect(bare.code).toBe(3);
@@ -1542,6 +1829,22 @@ describe("wsp verbs over the host", () => {
     expect(await rt.sessions.list()).toHaveLength(1);
   });
 
+  it("a message that joined a turn stopped on a prompt says the turn is waiting on the person, so the quiet has a reason", async () => {
+    const held = heldAgent(true);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    const first = run("run", "alpha", "write it");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(1));
+    held.ask(0, { askId: "a1", toolName: "Write", input: JSON.stringify({ file_path: "kai.txt" }), options: [{ id: "allow", label: "Yes", effect: "allow" }, { id: "deny", label: "No", effect: "deny" }] });
+    const [row] = await rt.sessions.list();
+    const io = captured();
+    const sent = cli(["send", row!.threadId!, "yes", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(io.errors).toEqual(["joined the running turn", `the turn is waiting on a permission; wsp threads shows it as ${threadStateWord("waiting")}`]));
+    held.release(0, "done");
+    expect(await sent).toBe(0);
+    await first;
+  });
+
   it("send into a thread whose turn runs on an agent that cannot steer waits for that turn, then starts its own: one stderr line, the second start after the first done", async () => {
     const held = heldAgent(false);
     await restartHost({ claude: held.adapter });
@@ -1590,7 +1893,7 @@ describe("wsp verbs over the host", () => {
     expect(json(idle.io)).toEqual([{ threadId: row!.threadId, outcome: "not-running" }]);
     expect(held.interrupted).toHaveLength(1);
     const missing = await run("stop", "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp stop: no thread nope"]);
   });
 
@@ -1626,7 +1929,7 @@ describe("wsp verbs over the host", () => {
     expect(unsupported.io.lines).toEqual([`thread ${codexRow.threadId} not named: Codex keeps no name of a person's for a session`]);
 
     const missing = await run("thread", "rename", "nope", "the name");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp thread rename: no thread nope"]);
     const short = await run("thread", "rename", row!.threadId!);
     expect(short.code).toBe(3);
@@ -1808,7 +2111,7 @@ describe("wsp verbs over the host", () => {
     expect(io.errors).toEqual([`thread ${row!.threadId!.slice(0, 8)} finished (completed): re: build it`]);
 
     const bad = await run("fork", "alpha", "--name", "never", "--send", "build it", "--notify", "nope");
-    expect(bad.code).toBe(1);
+    expect(bad.code).toBe(EXIT_CODES.usage);
     expect(bad.io.lines).toEqual([]);
     expect(bad.io.errors).toEqual(["wsp fork: no thread nope"]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "worker"]);
@@ -1910,7 +2213,7 @@ describe("wsp verbs over the host", () => {
     expect(soon.code).toBe(3);
     expect(soon.io.errors[0]).toContain('--timeout takes seconds, a number above zero, and got "soon".');
     const missing = await run("threads", "wait", a!.threadId!, "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp threads wait: no thread nope"]);
     // One word is the workspace it lists; two is more than the line takes.
     const stray = await run("threads", "nope", "also");
@@ -1992,7 +2295,7 @@ describe("wsp verbs over the host", () => {
     // No turn ran under it, so the thread is not one the sidebar lists or a later wait can name.
     expect(await threadRows(await dialHost(statePath))).toEqual([]);
     const later = await run("threads", "wait", thread);
-    expect(later.code).toBe(1);
+    expect(later.code).toBe(EXIT_CODES.usage);
     expect(later.io.errors).toEqual([`wsp threads wait: no thread ${thread}`]);
   });
 
@@ -2115,7 +2418,7 @@ describe("wsp verbs over the host", () => {
     expect(none.code).toBe(3);
     expect(none.io.errors[0]).toContain("wsp thread read takes one thread");
     const missing = await run("thread", "read", "nope");
-    expect(missing.code).toBe(1);
+    expect(missing.code).toBe(EXIT_CODES.usage);
     expect(missing.io.errors).toEqual(["wsp thread read: no thread nope"]);
   });
 
@@ -2393,6 +2696,46 @@ describe("wsp verbs over the host", () => {
       expect(io.lines).toEqual([]);
       expect(io.streamed).toBe("");
       expect(io.errors).toEqual(["wsp run: the host answered sessions.start in a shape this wsp does not read; it runs another version of wsp, restart it with wsp up"]);
+    } finally {
+      for (const client of old.clients) client.terminate();
+      await new Promise(r => old.close(r));
+    }
+  });
+
+  it("a request the host's own validator refuses reads as one line naming what it would not take and the form the verb takes, never the wire's schema", async () => {
+    await handle!.close();
+    handle = undefined;
+    const old = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await new Promise<void>(r => old.once("listening", r));
+    const wsPort = (old.address() as AddressInfo).port;
+    writeFileSync(hostTokenPath(statePath), "tok\n");
+    writeFileSync(lockPathFor(statePath), JSON.stringify({ pid: process.pid, port: wsPort, wsPort, startedAt: new Date().toISOString() }));
+    const workspace = { id: "ws_1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_gold", createdAt: "2026-09-06T00:00:00.000Z" };
+    // The validator's own words, off the very schema the host parses a request with.
+    let refusal = RuntimeRequest.safeParse({ id: 1, op: "workspaces.exec" }).error!.message;
+    old.on("connection", socket => {
+      socket.on("message", raw => {
+        const { id, op } = JSON.parse(String(raw)) as { id: number; op: string };
+        if (op === "workspaces.exec") return void socket.send(JSON.stringify({ id, ok: false, error: refusal }));
+        const reply = op === "workspaces.resolve" || op === "workspaces.wake" ? { workspace } : {};
+        socket.send(JSON.stringify({ id, ok: true, ...reply }));
+      });
+    });
+    try {
+      const ran = await run("exec", "alpha", "--", "ls");
+      expect(ran.code).toBe(EXIT_CODES.usage);
+      expect(ran.io.errors).toEqual(["wsp exec: the host would not read the workspace and the command on this line. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      // None of the wire's own words reach the person: not a field name, not a code, not one of the ops it listed.
+      expect(ran.io.errors[0]).not.toContain("workspaceId");
+      expect(ran.io.errors[0]).not.toContain("invalid_type");
+
+      // An op the host does not know is the two builds differing, which no argument of the line can fix.
+      refusal = RuntimeRequest.safeParse({ id: 1, op: "a.verb.this.host.has.never.served" }).error!.message;
+      const skewed = await run("exec", "alpha", "--", "ls");
+      expect(skewed.code).toBe(EXIT_CODES.usage);
+      expect(skewed.io.errors).toEqual(["wsp exec: the host does not serve this line; it runs another version of wsp, restart it with wsp up. usage: wsp exec <workspace> [--cwd <dir>] -- <command...>"]);
+      expect(skewed.io.errors[0]).not.toContain("discriminator");
+      expect(skewed.io.errors[0]).not.toContain("workspaces.createLocal");
     } finally {
       for (const client of old.clients) client.terminate();
       await new Promise(r => old.close(r));
@@ -2712,7 +3055,7 @@ describe("wsp verbs over the host", () => {
     const values = json(again.io) as [{ plan: unknown }, { imported: unknown }];
     expect(values).toHaveLength(2);
     expect(values[0]).toEqual({ plan: expect.objectContaining({ source: real, repo: false, files: 2, bytes: 39, excluded: [], agents: [], secrets: [expect.objectContaining({ path: ".env", bytes: 19 })] }) });
-    expect(values[1]).toEqual({ imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [] } });
+    expect(values[1]).toEqual({ imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 20 } } });
     expect(landings()[1]).toContain(`rm -rf '${real}'`);
   });
 
@@ -2723,7 +3066,7 @@ describe("wsp verbs over the host", () => {
     const kept = await run("import", "alpha", proj, "--keep", ".env", "--json");
     expect(kept.code).toBe(0);
     expect(kept.io.errors).toEqual([]);
-    expect(json(kept.io).at(-1)).toEqual({ imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [] } });
+    expect(json(kept.io).at(-1)).toEqual({ imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 39 } } });
     expect(landings()).toHaveLength(1);
     const bad = await run("import", "alpha", proj, "--cut", "src/index.ts", "--replace");
     expect(bad.code).toBe(3);
@@ -2852,7 +3195,9 @@ describe("wsp verbs over the host", () => {
     expect(proto.io.errors[0]).not.toContain("belongs to");
     const half = await run("thread");
     expect(half.code).toBe(3);
-    expect(half.io.errors).toEqual(['wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>']);
+    expect(half.io.errors).toEqual([
+      'wsp thread opens a line rather than being one. usage: wsp thread read <thread> [--last]\nusage: wsp thread rename <thread> "<title>"\nusage: wsp thread forget <thread>\nusage: wsp thread allow <thread>\nusage: wsp thread deny <thread>',
+    ]);
   });
 
   it("without a host serving the state file, and with nothing to start one, every verb refuses in one line before dialling anything", async () => {

@@ -29,7 +29,9 @@ import {
   InitJob,
   InitSetup,
   type InitRoad,
+  PlaceDial,
   PlaceDoorView,
+  PlaceSpend,
   PlaceStageEvent,
   PlaceView,
   placeAddSheetWord,
@@ -392,6 +394,10 @@ export interface Api {
   /** Takes a computer or a provider back out: the host sweeps wsp off it over its link where it is connected, drops
    * the workspaces standing on it and the record. */
   removePlace?(placeId: string): Promise<PlaceRemoved>;
+  /** Asks the host to dial one computer once, now: a frame over the link it holds, or one login over the road it
+   * was added on when it holds none. Answers what came back, the sentence to say it in and the row as it now
+   * stands. A client without it draws no Try now rather than one that would ask nobody. */
+  dialPlace?(placeId: string): Promise<PlaceDial>;
   /** The ssh road of Add a computer: the host logs in as the person's terminal would, installs wsp on the box and
    * waits for the box to dial back, calling `onStage` with each stage as the installer reaches it. Resolves with the
    * computer once it has joined and rejects with the step's own sentence when the install stops. A client without
@@ -525,6 +531,10 @@ export interface Api {
   /** The workspace's cost ticks since the runtime began metering it, folded to the rate changes and the newest. Optional
    * so fixtures without a usage chart need not fake it; without it the chart starts with the next tick. */
   costHistory?(workspaceId: string): Promise<WorkspaceCostEvent[]>;
+  /** What each place has cost since the first of the month and what it burns now, one row per place anything was
+   * metered on. Optional so fixtures without the settings table need not fake it; without it the table says no
+   * money at all rather than guessing at one. */
+  spend?(): Promise<PlaceSpend[]>;
   /** Moves head to a version in the manifest; workspaces already forked keep their image. */
   rollbackSnapshot(version: number, name?: string): Promise<SnapshotRollbackResult>;
   /** Snapshots the workspace's disk as a project golden; the runtime refuses a machine that is not first-life. Optional
@@ -720,6 +730,9 @@ export function makeApi(c: ProtocolClient): Api {
     initSave: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.save")).job),
     initCancel: async () => InitJob.parse((await c.request<{ job?: unknown }>("init.cancel")).job),
     removePlace: async placeId => await c.request<PlaceRemoved>("places.remove", { placeId }),
+    // Parsed, not trusted: the row the answer lands on is redrawn off it, so only what the wire type vouches for
+    // reaches the table.
+    dialPlace: async placeId => PlaceDial.parse(await c.request<Record<string, unknown>>("places.dial", { placeId })),
     subscribe: fn => c.subscribe(fn),
     getGolden: async (name = "default") => (await c.request<{ manifest?: GoldenManifest }>("golden.get", { name })).manifest,
     listSnapshots: async name =>
@@ -727,6 +740,8 @@ export function makeApi(c: ProtocolClient): Api {
     snapshotStorage: async () => (await c.request<{ storage: SnapshotStorage | null }>("snapshots.storage")).storage,
     // Parsed, not trusted: the chart interpolates whatever numbers it is handed.
     costHistory: async workspaceId => WorkspaceCostEvent.array().parse((await c.request<{ points?: unknown }>("cost.history", { workspaceId })).points),
+    // Parsed, not trusted: a figure a person reads as money is a figure the wire type vouched for.
+    spend: async () => PlaceSpend.array().parse((await c.request<{ places?: unknown }>("cost.spend")).places),
     // Parsed, not trusted: the lineage renders and forks only snapshots the wire type vouches for.
     snapshotWorkspace: async id => ProjectGolden.parse((await c.request<{ projectGolden?: unknown }>("workspaces.snapshot", { workspaceId: id })).projectGolden),
     listProjectGoldens: async () => ProjectGolden.array().parse((await c.request<{ projectGoldens?: unknown }>("projectGoldens.list")).projectGoldens),

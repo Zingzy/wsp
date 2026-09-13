@@ -11,7 +11,7 @@
 // sits at a 120-character path and four agents' sessions travelled, one of
 // them failing, so the landed line needs a third line.
 import { createRoot } from "react-dom/client";
-import type { EventUnion, ProjectAgentResult, ProjectImportEvent, ProjectPlan, WorkspaceView } from "@wsp/protocol";
+import { folderName, type EventUnion, type ProjectAgentResult, type ProjectImportEvent, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api } from "../../src/protocol/client";
 import { useStore } from "../../src/protocol/store";
@@ -29,6 +29,9 @@ const TAB = params.get("tab") === "1";
 if (!TAB) window.wsp = { pickFolder: async () => undefined };
 
 const LONG = params.get("long") === "1";
+/** ?read=0 opens the dialog with no folder in it, which is what a person meets before they type: the summary's
+ * rows standing as bars, and the reason Import waits under the field. */
+const READ = params.get("read") !== "0";
 const BEAT = Number(params.get("beat") ?? "150");
 const SOURCE = LONG ? "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo" : "/Users/me/code/spoo";
 const agents: ProjectAgentResult[] = LONG
@@ -120,7 +123,8 @@ const api: Api = {
       await beat();
     }
     emit({ stage: "done", message: `1202 files, 38 MB, landed at ${SOURCE}.`, elapsedMs: 9_800 });
-    return { dest: SOURCE, files: 1_202, bytes: 38.0 * 1024 * 1024, parts: 1, cut, rewritten: [".git/config"], agents };
+    const bytes = 38.0 * 1024 * 1024;
+    return { dest: SOURCE, files: 1_202, bytes, parts: 1, cut, rewritten: [".git/config"], agents, project: { name: folderName(SOURCE), dest: SOURCE, importedAt: new Date().toISOString(), size: bytes } };
   },
   subscribe: fn => {
     listeners.add(fn);
@@ -133,7 +137,7 @@ useStore.getState().bind(api);
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
     <div className="h-full bg-background text-foreground">
-      <ImportProjectDialog workspace={workspace} initialSource={SOURCE} onClose={() => {}} />
+      <ImportProjectDialog workspace={workspace} {...(READ ? { initialSource: SOURCE } : {})} onClose={() => {}} />
     </div>
   </TooltipProvider>,
 );
