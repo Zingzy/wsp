@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join as joinPath } from "node:path";
 import { JoinRefused, placeFilePath, readHost } from "@wsp/host";
-import { placeFileText, type PlaceReport } from "@wsp/protocol";
+import { JOIN_NO_KEY_REFUSAL, joinToken, placeFileText, type PlaceReport } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { LEFT_ALONE_LINE, NOT_JOINED_LINE, TOKEN_LEFT_LINE, joinRoad, parseJoinAsk, type JoinRoad, type JoinRoadDeps } from "../src/join.js";
 
@@ -27,6 +27,11 @@ afterEach(() => {
 });
 
 const SHIM = "/Users/someone/.wsp/bin/wsp";
+
+/** The one token the other wsp's join line carried, as a person pastes it into the Code field: the code that wsp
+ * spends and the fingerprint of the key it proves. */
+const HOST_KEY = `SHA256:${"k".repeat(43)}`;
+const TOKEN = joinToken("QW4K7PZX", HOST_KEY);
 
 /** What this computer told the host about itself on the join frame, which is what the joined screen then reads. */
 const REPORT = {
@@ -140,9 +145,10 @@ describe("the road a computer that joined another wsp runs on", () => {
   it("dials the address a person typed as an http one, with the code as the host takes it and the app's own wsp as the line the service runs, and buys the token this window holds", async () => {
     const fake = fakeJoin(JOINED);
     const road = shell({ join: fake.join });
-    const answer = await road.road.join({ address: " 192.168.1.20:4420 ", code: "qw4k-7pzx" });
+    const answer = await road.road.join({ address: " 192.168.1.20:4420 ", code: `qw4k-7pzx.${HOST_KEY}` });
     expect(fake.asks).toHaveLength(1);
-    expect(fake.asks[0]).toMatchObject({ home: road.home, addresses: ["http://192.168.1.20:4420"], code: "QW4K7PZX", client: true, wsp: expect.objectContaining({ shim: SHIM }) });
+    // The code field carries one token: the code the other wsp spends and the fingerprint of the key it will prove.
+    expect(fake.asks[0]).toMatchObject({ home: road.home, addresses: ["http://192.168.1.20:4420"], code: "QW4K7PZX", hostKey: HOST_KEY, client: true, wsp: expect.objectContaining({ shim: SHIM }) });
     // The joined screen's card: this computer's name, its shape and disk in the app's own words, and whether it
     // forks, all off the report the join frame carried rather than a second read of this computer.
     expect(answer).toEqual({ ok: true, here: { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"), runsWorkspaces: false } });
@@ -150,7 +156,7 @@ describe("the road a computer that joined another wsp runs on", () => {
 
   it("writes the host record the window opens on, named after the wsp it joined and reached the way it was reached", async () => {
     const road = shell();
-    await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    await road.road.join({ address: "192.168.1.20:4420", code: TOKEN });
     const record = readHost(road.wspHome, "192.168.1.20");
     expect(record).toMatchObject({ url: "http://192.168.1.20:4420", deviceId: "d_1", deviceToken: "tok_1", label: "zingzy-mbp", road: "direct" });
     // A computer that was paired with nothing takes the wsp it joined as the one every wsp line on it runs against.
@@ -162,13 +168,13 @@ describe("the road a computer that joined another wsp runs on", () => {
     mkdirSync(joinPath(road.wspHome, "hosts"), { recursive: true });
     writeFileSync(joinPath(road.wspHome, "hosts", "box.json"), JSON.stringify({ url: "http://box:4400", deviceId: "d_0", deviceToken: "tok_0", pairedAt: new Date(0).toISOString() }));
     writeFileSync(joinPath(road.wspHome, "hosts", "default"), "box\n");
-    await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    await road.road.join({ address: "192.168.1.20:4420", code: TOKEN });
     expect(readFileSync(joinPath(road.wspHome, "hosts", "default"), "utf8").trim()).toBe("box");
   });
 
   it("writes no host record for a join that bought no token, so the window stays on this computer", async () => {
     const road = shell({ join: fakeJoin({ silent: true }).join });
-    expect(await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" })).toMatchObject({ ok: true });
+    expect(await road.road.join({ address: "192.168.1.20:4420", code: TOKEN })).toMatchObject({ ok: true });
     expect(readHost(road.wspHome, "192.168.1.20")).toBeUndefined();
     expect(road.road.alias()).toBeUndefined();
   });
@@ -177,8 +183,15 @@ describe("the road a computer that joined another wsp runs on", () => {
     const fake = fakeJoin(JOINED);
     for (const word of ["box", "", "ws://192.168.1.20:4420", "192.168.1.20"]) {
       const road = shell({ join: fake.join });
-      expect(await road.road.join({ address: word, code: "QW4K7PZX" })).toEqual({ ok: false, why: "address" });
+      expect(await road.road.join({ address: word, code: TOKEN })).toEqual({ ok: false, why: "address" });
     }
+    expect(fake.asks).toEqual([]);
+  });
+
+  it("refuses a code that names no key under the code field, and dials nothing", async () => {
+    const fake = fakeJoin(JOINED);
+    const road = shell({ join: fake.join });
+    expect(await road.road.join({ address: "192.168.1.20:4420", code: "QW4K-7PZX" })).toEqual({ ok: false, why: "code", said: JOIN_NO_KEY_REFUSAL });
     expect(fake.asks).toEqual([]);
   });
 
@@ -186,7 +199,7 @@ describe("the road a computer that joined another wsp runs on", () => {
     const fake = fakeJoin(JOINED);
     const road = shell({ join: fake.join });
     standAsJoined(road.home);
-    expect(await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" })).toEqual({ ok: false, why: "already" });
+    expect(await road.road.join({ address: "192.168.1.20:4420", code: TOKEN })).toEqual({ ok: false, why: "already" });
     expect(fake.asks).toEqual([]);
   });
 
@@ -198,7 +211,7 @@ describe("the road a computer that joined another wsp runs on", () => {
     ];
     for (const one of cases) {
       const road = shell({ join: fakeJoin(one.threw).join });
-      expect(await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" })).toEqual({ ok: false, why: one.why, said: one.threw.message });
+      expect(await road.road.join({ address: "192.168.1.20:4420", code: TOKEN })).toEqual({ ok: false, why: one.why, said: one.threw.message });
       expect(readHost(road.wspHome, "192.168.1.20")).toBeUndefined();
     }
   });
@@ -207,7 +220,7 @@ describe("the road a computer that joined another wsp runs on", () => {
     const road = shell();
     expect(road.road.standing()).toBeUndefined();
     expect(road.road.alias()).toBeUndefined();
-    await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    await road.road.join({ address: "192.168.1.20:4420", code: TOKEN });
     standAsJoined(road.home);
     expect(road.road.standing()).toEqual({
       hostName: "zingzy-mbp",
@@ -233,7 +246,7 @@ describe("the road a computer that joined another wsp runs on", () => {
 
   it("leaves by asking the wsp over there to remove this computer, then handing its token back", async () => {
     const road = shell();
-    await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    await road.road.join({ address: "192.168.1.20:4420", code: TOKEN });
     standAsJoined(road.home);
     expect(await road.road.leave()).toEqual({ ok: true });
     expect(road.asked).toEqual([{ op: "places.remove", params: { placeId: "pl_1" } }]);
@@ -243,7 +256,7 @@ describe("the road a computer that joined another wsp runs on", () => {
 
   it("leaves on its own when the wsp over there does not answer, and says it still lists this computer", async () => {
     const road = shell({ request: () => Promise.reject(new Error("connect ECONNREFUSED 192.168.1.20:4420")) });
-    await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    await road.road.join({ address: "192.168.1.20:4420", code: TOKEN });
     standAsJoined(road.home);
     expect(await road.road.leave()).toEqual({ ok: false, at: "url", error: LEFT_ALONE_LINE });
     expect(road.swept).toEqual([road.home]);
@@ -256,7 +269,7 @@ describe("the road a computer that joined another wsp runs on", () => {
 
   it("says the token is the one thing left over there when the removal landed and the hand back did not", async () => {
     const road = shell({ disconnect: () => Promise.reject(new Error("connect ECONNREFUSED 192.168.1.20:4420")) });
-    await road.road.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
+    await road.road.join({ address: "192.168.1.20:4420", code: TOKEN });
     standAsJoined(road.home);
     // The wsp over there took the removal, so telling the person it was never told would be false; what stands is
     // the token, and only its person can take that away.
@@ -273,8 +286,8 @@ describe("the road a computer that joined another wsp runs on", () => {
   });
 
   it("takes only the join screen's own shape off the wire", () => {
-    expect(parseJoinAsk({ address: "192.168.1.20:4420", code: "QW4K7PZX" })).toEqual({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
-    for (const raw of [null, undefined, "192.168.1.20:4420", { address: "192.168.1.20:4420" }, { address: 1, code: "QW4K7PZX" }, { address: "a".repeat(201), code: "x" }]) {
+    expect(parseJoinAsk({ address: "192.168.1.20:4420", code: TOKEN })).toEqual({ address: "192.168.1.20:4420", code: TOKEN });
+    for (const raw of [null, undefined, "192.168.1.20:4420", { address: "192.168.1.20:4420" }, { address: 1, code: TOKEN }, { address: "a".repeat(201), code: "x" }]) {
       expect(parseJoinAsk(raw)).toBeUndefined();
     }
   });

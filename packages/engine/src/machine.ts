@@ -72,6 +72,10 @@ export interface Machine {
   readonly seen?: { state: MachineState; createdAt?: string };
   /** On a handle from create(): the provider answered from an earlier create under the same key instead of booting. */
   readonly replayed?: boolean;
+  /** On a handle from create(): one sentence about the machine the computer actually made, where it would not make
+   * the one asked for. A computer somebody keeps holds a fork's size down to what leaves the computer itself room,
+   * and this is where it says so. Printed once beside the create's own line and read for nothing else. */
+  readonly notice?: string;
   /** One short command; a backend's exec has a hard ceiling, so anything that can run longer goes through run().
    * `idempotencyKey` is the caller saying this command lands the same whether it runs once or twice, which is what
    * lets the road under it send the command again after the road itself broke; a backend that runs commands in

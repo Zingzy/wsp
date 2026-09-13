@@ -346,6 +346,10 @@ pub struct MachineHandle {
     pub replayed: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_supervisor: Option<DaemonSupervisor>,
+    /// One sentence on a create or a fork whose size the computer would not give as asked, naming what it gave
+    /// instead; the record holds the size itself, so this is said once and never read back for a number.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
     pub roads: MachineRoads,
 }
 
@@ -405,6 +409,12 @@ pub struct PlaceCapacity {
     pub mem_mb: u64,
     pub mem_room_mb: u64,
     pub machine_mem_mb: u64,
+    /// What the workspaces on this computer hold of it right now, summed over the ones that are not stopped:
+    /// the cores their quotas name and the memory their caps name. Absent from a backend that counts neither.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_taken: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_taken_mb: Option<u64>,
     pub disk_free_bytes: u64,
     pub images: Vec<PlaceImage>,
     pub machines: MachineCounts,

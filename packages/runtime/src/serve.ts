@@ -113,8 +113,9 @@ export interface AccountDoor {
  * owns who may ask for it. */
 export interface PlaceDoorControl {
   /** Opens the door if it is shut and answers where it is; a host already bound beyond loopback answers its own
-   * port and opens nothing. */
-  open(): Promise<PlaceDoorView>;
+   * port and opens nothing. The key proved there is not the host's to say: the place door holds the pair, and the
+   * runtime puts its fingerprint on the view it serves. */
+  open(): Promise<Omit<PlaceDoorView, "hostKey">>;
 }
 
 /** Seals the vault to the passphrase and writes it at `dest` on the computer the host runs on. */
@@ -483,7 +484,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACE_DOOR_UNSERVED });
                 return;
               }
-              send({ id: msg.id, ok: true, door: await opts.door.open() });
+              // Where to dial is the host's, the key answered there is the place door's own: one view, so a line
+              // built from it cannot name an address without the key that will answer at it.
+              send({ id: msg.id, ok: true, door: { ...(await opts.door.open()), hostKey: places().hostKey() } });
               return;
             }
             case "places.add": {

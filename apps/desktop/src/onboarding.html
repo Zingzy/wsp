@@ -418,6 +418,16 @@
       }
       const sentCode = shown => shown.replace(/-/g, "");
 
+      /** The one token the join line carries, in its two halves: the code the other wsp spends, and after the mark
+       * the fingerprint of the key it will prove. The rule is the protocol's readJoinToken, copied for the same
+       * reason the code's own rule above is, and held to it by first-run.test.ts. The key half is left exactly as
+       * it was copied: base64 is case sensitive and holds none of the code's alphabet. */
+      const TOKEN_MARK = ".";
+      const markAt = typed => typed.indexOf(TOKEN_MARK);
+      const codeHalf = typed => sentCode(markAt(typed) === -1 ? typed : typed.slice(0, markAt(typed)));
+      const keyHalf = typed => (markAt(typed) === -1 ? "" : typed.slice(markAt(typed) + 1).trim());
+      const shownToken = typed => (markAt(typed) === -1 ? shownCode(typed) : `${shownCode(typed.slice(0, markAt(typed)))}${TOKEN_MARK}${keyHalf(typed)}`);
+
       /** Every refusal this screen draws, by the word the shell answers with: which slot it belongs in, what happened
        * and what to do. Each is written to fit the two lines of its own slot, which is 404 px under the address, 140 px
        * under the code, and the column's 560 px in the footer for what is about neither field. None of them carries
@@ -446,9 +456,11 @@
        * moment the screen opens, since one of the two fields has to carry it and the address is the first. */
       const JOIN_HELD = "type the address and the code first";
 
-      /** Whether both fields are filled: an address, and a whole code. Until then the keycap is the outline variant,
-       * disabled, with its reason in the slot under the address. */
-      const filled = () => $("address").value.trim() !== "" && sentCode($("code").value).length === CODE_LENGTH;
+      /** Whether both fields are filled: an address, and a whole code, which is its letters and the key the line
+       * carried beside them. Half a token is a code this Mac could not hold the other wsp to, so the keycap stays
+       * held rather than pressing into a refusal. Until then it is the outline variant, disabled, with its reason
+       * in the slot under the address. */
+      const filled = () => $("address").value.trim() !== "" && codeHalf($("code").value).length === CODE_LENGTH && keyHalf($("code").value) !== "";
       function drawJoin() {
         const ready = filled();
         $("go").disabled = !ready;
@@ -476,7 +488,7 @@
         $("go").disabled = true;
         $("back").disabled = true;
         try {
-          const answer = await window.wsp.join({ address: $("address").value.trim(), code: sentCode($("code").value) });
+          const answer = await window.wsp.join({ address: $("address").value.trim(), code: $("code").value.trim() });
           if (answer.ok) {
             $("here-name").textContent = answer.here.name;
             $("here-facts").textContent = answer.here.facts;
@@ -496,7 +508,7 @@
 
       for (const field of ["address", "code"]) {
         $(field).addEventListener("input", () => {
-          if (field === "code") $("code").value = shownCode($("code").value);
+          if (field === "code") $("code").value = shownToken($("code").value);
           // A refusal described what is no longer there, so typing into the field it was about takes it off.
           clearRefusal($(`${field}-said`));
           $(field).removeAttribute("aria-invalid");

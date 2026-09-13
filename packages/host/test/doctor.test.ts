@@ -11,7 +11,7 @@ import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { bundledDaemonName, DAEMON_TARGETS, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, signInRefusalLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, signInRefusalLine, type HarnessCatalogAnswer, type PlaceCapacity } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -45,6 +45,7 @@ import {
   localDoctor,
   localPrompt,
   promoteGoldens,
+  roomLeft,
   sshDaemonPlace,
   stageDaemonBundle,
   tarPackCommand,
@@ -270,6 +271,20 @@ describe("cleanOrphans", () => {
       throw new Error("502 Bad Gateway");
     };
     expect(await cleanOrphans(live, cli, true)).toBe("listing not read: 502 Bad Gateway");
+  });
+});
+
+describe("roomLeft", () => {
+  const counting = (capacity: Partial<PlaceCapacity>) => ({ capacity: () => Promise.resolve({ cores: 2, memMb: 4096, memRoomMb: 1024, machineMemMb: 2048, diskFreeBytes: 0, images: [], machines: { running: 1, paused: 0 }, ...capacity }) });
+
+  it("reads the cores and the memory the forks there hold, in one note", async () => {
+    expect(await roomLeft(counting({ cpuTaken: 1, memTakenMb: 1024 }))).toBe("2 cores, 1 in use by forks, 1 free; 4 GB, 1 GB in use by forks, 3 GB free");
+  });
+
+  it("says nothing where the computer counts no room, answers none, or is not a computer that forks", async () => {
+    expect(await roomLeft(counting({}))).toBe("");
+    expect(await roomLeft({ capacity: () => Promise.reject(new Error("link gone")) })).toBe("");
+    expect(await roomLeft({})).toBe("");
   });
 });
 

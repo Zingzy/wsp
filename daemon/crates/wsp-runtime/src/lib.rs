@@ -25,6 +25,7 @@ pub mod ops;
 pub mod profile;
 #[cfg(target_os = "linux")]
 pub mod runtime;
+pub mod size;
 #[cfg(target_os = "linux")]
 pub mod snapshot;
 pub mod store;

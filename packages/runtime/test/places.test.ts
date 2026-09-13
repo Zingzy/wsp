@@ -23,6 +23,8 @@ import {
   placeForksNowhereLine,
   workspaceState,
   placeLinkTranscript,
+  joinToken,
+  readJoinToken,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeDialBackLine,
@@ -35,7 +37,7 @@ import {
 } from "@wsp/protocol";
 import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
-import { NoProviderBackend, type MachineBackend } from "@wsp/engine";
+import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
 import { newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -602,7 +604,7 @@ describe("dialling a computer that stopped answering", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           stage("connect", "done", "Ubuntu 24.04");
-          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          box = (await join(hostKey, { code: readJoinToken(req.code).code, name: "vps" })).client;
           return { name: "vps", ssh: "root@65.21.4.12" };
         },
         dial: async login => {
@@ -636,7 +638,7 @@ describe("dialling a computer that stopped answering", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           stage("connect", "done", "Ubuntu 24.04");
-          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          box = (await join(hostKey, { code: readJoinToken(req.code).code, name: "vps" })).client;
           return { name: "vps", ssh: "root@65.21.4.12", ...(req.keyPath === undefined ? {} : { sshKeyPath: req.keyPath }) };
         },
         dial: async login => {
@@ -669,7 +671,7 @@ describe("dialling a computer that stopped answering", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           stage("connect", "done", "Ubuntu 24.04");
-          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          box = (await join(hostKey, { code: readJoinToken(req.code).code, name: "vps" })).client;
           return { name: "vps", ssh: "root@65.21.4.12" };
         },
         dial: () => Promise.reject(new Error(said)),
@@ -711,7 +713,7 @@ describe("dialling a computer that stopped answering", () => {
         ...wiring(hostKey),
         install: async (req, stage) => {
           stage("connect", "done", "Ubuntu 24.04");
-          box = (await join(hostKey, { code: req.code, name: "vps" })).client;
+          box = (await join(hostKey, { code: readJoinToken(req.code).code, name: "vps" })).client;
           return { name: "vps", ssh: "root@65.21.4.12" };
         },
         // A road that neither answers nor refuses: an ssh child on a network that swallows the packets.
@@ -776,7 +778,7 @@ describe("putting the agent on a computer over ssh", () => {
           handed = req;
           stage("connect", "done", "Ubuntu 24.04");
           // The computer's own join, with the code the install was handed: the door spends it and the link follows.
-          await join(hostKey, { code: req.code, name: "box" });
+          await join(hostKey, { code: readJoinToken(req.code).code, name: "box" });
           return { name: "box", hostKey: "ssh-ed25519 SHA256:abc" };
         },
       },
@@ -788,8 +790,10 @@ describe("putting the agent on a computer over ssh", () => {
     expect(added.place.name).toBe("box");
     expect(added.place.present).toBe(true);
     expect(added.hostKey).toBe("ssh-ed25519 SHA256:abc");
-    // The code and every address this host answers on are the door's to hand the installer, not the installer's to find.
-    expect(handed?.code).toMatch(/^[A-Z0-9]+$/);
+    // The token and every address this host answers on are the door's to hand the installer, not the installer's to
+    // find: one word carrying the code the box spends and the fingerprint of the key this host will prove to it.
+    expect(handed?.code).toBe(joinToken(readJoinToken(handed!.code).code, keyFingerprint(hostKey.publicKey)));
+    expect(readJoinToken(handed!.code).code).toMatch(/^[A-Z0-9]+$/);
     // The door's reading, handed down: the install reads no addresses of its own.
     expect(handed?.hostUrls).toEqual(DOOR);
     expect(stages.map(s => `${s.step} ${s.state}`)).toEqual(["connect done", "join running", "join done"]);
@@ -810,7 +814,7 @@ describe("putting the agent on a computer over ssh", () => {
         install: async req => {
           // What happens on a real computer: its own join dials once, writes its place file and closes that socket,
           // and the unit its join installed is what opens the link a moment later.
-          const { client, placeId, pair } = await join(hostKey, { code: req.code, name: "box" });
+          const { client, placeId, pair } = await join(hostKey, { code: readJoinToken(req.code).code, name: "box" });
           await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
           client.close();
           await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
@@ -836,7 +840,7 @@ describe("putting the agent on a computer over ssh", () => {
       placeLinks: {
         ...wiring(hostKey),
         install: async (req, stage) => {
-          minted = req.code;
+          minted = readJoinToken(req.code).code;
           stage("wsp", "running");
           throw new Error("ssh refused the login (publickey)");
         },
@@ -972,7 +976,7 @@ describe("the four events a computer you own rides the runtime's stream on", () 
 
 describe("the door a computer you own dials", () => {
   it("is refused on a host that serves none, and answered on one that does", async () => {
-    await serving();
+    const { hostKey } = await serving();
     const c = await WsClient.connect(srv!.port, { token: "host-token" });
     const none = await c.request("places.door");
     expect(none).toMatchObject({ ok: false, error: PLACE_DOOR_UNSERVED });
@@ -982,7 +986,8 @@ describe("the door a computer you own dials", () => {
     srv = await serveRuntime(runtime!, { port: 0, authToken: "host-token", devices: runtime!.devices, door: { open: async () => view } });
     const opened = await WsClient.connect(srv.port, { token: "host-token" });
     const answer = await opened.request("places.door");
-    expect(answer).toMatchObject({ ok: true, door: view });
+    // Where to dial is the host's answer; the key proved there is the place door's own, off the pair it signs with.
+    expect(answer).toMatchObject({ ok: true, door: { ...view, hostKey: keyFingerprint(hostKey.publicKey) } });
     opened.close();
   });
 

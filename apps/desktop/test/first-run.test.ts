@@ -6,13 +6,19 @@
 // whole of what this file reads; what the shell does with each ask is its own
 // road, proved where recordThisComputer and the join are.
 import { readFileSync } from "node:fs";
-import { DEFAULT_PLACE_PORT, JOIN_ADDRESS_LINE, JOIN_ALREADY, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH } from "@wsp/protocol";
+import { DEFAULT_PLACE_PORT, JOIN_ADDRESS_LINE, JOIN_ALREADY, JOIN_TOKEN_MARK, PAIR_CODE_ALPHABET, PAIR_CODE_LENGTH, joinToken, readJoinToken } from "@wsp/protocol";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import { shownCode } from "../../web/src/hosts/pairingCode.js";
 
 /** The page as stage.mjs writes it, minus the stylesheet: nothing here reads a computed colour. */
 const PAGE = readFileSync(new URL("../src/onboarding.html", import.meta.url), "utf8").replace("__WEB_CSS__", "about:blank");
+
+/** What the Add a computer sheet's Code row hands a person, built by the protocol's own writing of it: the code
+ * the other wsp spends and the fingerprint of the key it will prove, as the one word this screen's Code field
+ * takes. */
+const HOST_KEY = `SHA256:${"k".repeat(43)}`;
+const TOKEN = joinToken("QW4K7PZX", HOST_KEY);
 
 /** One computer's catalog rows as the recipe scan answers with them: two agents here, two the scan did not find. */
 const AGENTS = [
@@ -190,13 +196,13 @@ describe("the first launch's screen", () => {
     const refused = await open(AGENTS, { join: { ok: false, why: "address" } });
     await refused.press("#join");
     await refused.type("#address", "box");
-    await refused.type("#code", "QW4K7PZX");
+    await refused.type("#code", TOKEN);
     await refused.press("#go");
     expect(refused.text("#address-said")).toBe(`${JOIN_ADDRESS_LINE.what} ${JOIN_ADDRESS_LINE.fix}`);
     const already = await open(AGENTS, { join: { ok: false, why: "already" } });
     await already.press("#join");
     await already.type("#address", "192.168.1.20:4420");
-    await already.type("#code", "QW4K7PZX");
+    await already.type("#code", TOKEN);
     await already.press("#go");
     // What to do is the protocol's own sentence: the sidebar of a Mac that joined one carries the way out, so the
     // screen never sends a person to a terminal for it. What happened says Mac, since this screen is a Mac's own.
@@ -217,15 +223,21 @@ describe("the first launch's screen", () => {
     expect(go.disabled).toBe(true);
     await screen.type("#code", "QW4K7PZ");
     expect(go.disabled).toBe(true);
-    // The eighth letter fills it; the code is shown as the field shapes it, upper case with the dash it was typed with.
+    // Nor is a whole code with no key beside it: half a token names no host, so the keycap stays held rather than
+    // pressing into a refusal.
     await screen.type("#code", "qw4k-7pzx");
     expect((screen.at("#code") as HTMLInputElement).value).toBe("QW4K-7PZX");
+    expect(go.disabled).toBe(true);
+    // The key fills it; the code half is shown as the field shapes it, and the key half exactly as it was copied.
+    await screen.type("#code", `qw4k-7pzx.${HOST_KEY}`);
+    expect((screen.at("#code") as HTMLInputElement).value).toBe(TOKEN);
     expect(go.disabled).toBe(false);
     expect(go.className).toBe("primary");
     expect(screen.text("#address-said")).toBe("");
-    // A press now reaches the shell with the address as typed and the code without its dash.
+    // A press now reaches the shell with the address as typed and the whole token, which the join road splits.
     await screen.press("#go");
-    expect(screen.asks.join).toEqual([{ address: "192.168.1.20:7788", code: "QW4K7PZX" }]);
+    expect(screen.asks.join).toEqual([{ address: "192.168.1.20:7788", code: TOKEN }]);
+    expect(readJoinToken(screen.asks.join[0]!.code)).toEqual({ code: "QW4K7PZX", hostKey: HOST_KEY });
     // Emptying a field holds it again.
     await screen.type("#address", "");
     expect(go.disabled).toBe(true);
@@ -235,7 +247,7 @@ describe("the first launch's screen", () => {
     const screen = await open(AGENTS, { join: { ok: false, why: "answer", said: "http://192.168.1.20:7788 could not be reached: connect ECONNREFUSED" } });
     await screen.press("#join");
     await screen.type("#address", "192.168.1.20:7788");
-    await screen.type("#code", "QW4K-7PZX");
+    await screen.type("#code", TOKEN);
     await screen.press("#go");
     expect(halves(screen.at("#address-said"))).toEqual({
       happened: "Nothing answered at that address.",
@@ -260,7 +272,7 @@ describe("the first launch's screen", () => {
     const screen = await open(AGENTS, { join: { ok: false, why: "code", said: "that join code is not one this host is waiting for; run wsp add on the host for a fresh one" } });
     await screen.press("#join");
     await screen.type("#address", "192.168.1.20:7788");
-    await screen.type("#code", "QW4K-7PZX");
+    await screen.type("#code", TOKEN);
     await screen.press("#go");
     expect(halves(screen.at("#code-said"))).toEqual({ happened: "Wrong or expired.", fix: "Get a fresh one." });
     expect(screen.text("#address-said")).toBe("");
@@ -277,11 +289,18 @@ describe("the first launch's screen", () => {
     // page's field does with a typed code against what the app's own field does with it.
     expect(/const CODE_ALPHABET = "([^"]+)"/.exec(PAGE)?.[1]).toBe(PAIR_CODE_ALPHABET);
     expect(Number(/const CODE_LENGTH = (\d+)/.exec(PAGE)?.[1])).toBe(PAIR_CODE_LENGTH);
+    expect(/const TOKEN_MARK = "([^"]+)"/.exec(PAGE)?.[1]).toBe(JOIN_TOKEN_MARK);
     const screen = await open();
     await screen.press("#join");
     for (const typed of ["qw4k-7pzx", "qw4k7pzxzz", "  qw4k-7pzx  ", "oil1qw4k7pzx", "7pzx", "----", "q-w4k7pzx"]) {
       await screen.type("#code", typed);
       expect((screen.at("#code") as HTMLInputElement).value).toBe(shownCode(typed));
+    }
+    // And the half after the mark is left alone, since a fingerprint is base64 and the code's alphabet holds none
+    // of its letters: the field shapes the code and copies the key through.
+    for (const typed of [`qw4k-7pzx.${HOST_KEY}`, `QW4K7PZX.${HOST_KEY}`, ` qw4k-7pzx.${HOST_KEY} `]) {
+      await screen.type("#code", typed);
+      expect(readJoinToken((screen.at("#code") as HTMLInputElement).value)).toEqual({ code: "QW4K7PZX", hostKey: HOST_KEY });
     }
   });
 
@@ -289,7 +308,7 @@ describe("the first launch's screen", () => {
     const screen = await open();
     await screen.press("#join");
     await screen.type("#address", "192.168.1.20:7788");
-    await screen.type("#code", "QW4K-7PZX");
+    await screen.type("#code", TOKEN);
     // The press a person means as leaving is a press on Back: the screen's own Enter stands aside for the button the
     // keyboard is on, and what the button does is its own click. (jsdom does not activate a button on Enter, so this
     // reads the half that is the page's; the whole road is in the browser file.)
@@ -304,7 +323,7 @@ describe("the first launch's screen", () => {
     const screen = await open();
     await screen.press("#join");
     await screen.type("#address", "192.168.1.20:7788");
-    await screen.type("#code", "QW4K-7PZX");
+    await screen.type("#code", TOKEN);
     await screen.press("#go");
     expect(screen.shown()).toBe("joined");
     expect(screen.text("#joined h1")).toBe("This Mac joined your wsp");
@@ -317,7 +336,7 @@ describe("the first launch's screen", () => {
     const withDocker = await open(AGENTS, { join: { ok: true, here: { ...HERE, runsWorkspaces: true } } });
     await withDocker.press("#join");
     await withDocker.type("#address", "192.168.1.20:7788");
-    await withDocker.type("#code", "QW4K-7PZX");
+    await withDocker.type("#code", TOKEN);
     await withDocker.press("#go");
     expect(withDocker.text("#here-workspaces")).toBe("runs your workspaces · your image builds here on first use");
     // The one press out of the page is the same one: the tools into the agents found here, then this Mac recorded.
