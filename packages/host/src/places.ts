@@ -24,6 +24,8 @@ import {
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
+  placeWorkspacesLine,
+  placeEngineLine,
   PLACE_LINK_NONCE_BYTES,
   PlaceJoinReply,
   PlaceStageEvent,
@@ -139,7 +141,7 @@ export function placeWiring(statePath: string, env: ProviderEnv): PlaceWiring {
  * shown right after it joined somebody else's wsp cannot describe the same computer differently. */
 export function placeHere(name: string = placeNameHere()): HerePlace {
   const report = placeReport({ name });
-  return { name: report.name, os: report.os, shape: report.shape, docker: report.docker, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
+  return { name: report.name, os: report.os, shape: report.shape, runsWorkspaces: report.runsWorkspaces, engine: report.engine, ...(report.diskFreeBytes !== undefined ? { diskFreeBytes: report.diskFreeBytes } : {}) };
 }
 
 /** How long a join gets to open the socket and finish the handshake. A person is watching, and a host that is not
@@ -436,9 +438,7 @@ export function addedLines(place: PlaceView, hostKey: string | undefined): strin
   return [
     `${place.name} joined this wsp${place.shape === undefined ? "" : ` · ${fmtSize(place.shape, "cores")}`}${place.diskFreeBytes === undefined ? "" : ` · ${fmtBytes(place.diskFreeBytes)} free`}`,
     ...(hostKey === undefined ? [] : [`its ssh key      ${hostKey}`]),
-    place.docker === true
-      ? "docker: yes · it can hold copies of your image"
-      : "docker: no · it runs your agents as one workspace; install Docker there to hold copies of your image",
+    ...[placeWorkspacesLine(place), placeEngineLine(place)].filter((line): line is string => line !== undefined),
     `wsp remove ${place.name} takes it back out and sweeps wsp off it.`,
   ];
 }

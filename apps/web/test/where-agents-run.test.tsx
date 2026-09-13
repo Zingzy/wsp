@@ -25,7 +25,7 @@ const box: PlaceView = {
   name: "hetzner",
   default: false,
   present: true,
-  docker: true,
+  runsWorkspaces: true, engine: "docker",
   os: "Ubuntu 24.04",
   shape: { cpu: 2, memMb: 4096 },
   diskFreeBytes: 38 * 1024 ** 3,
@@ -34,14 +34,14 @@ const box: PlaceView = {
   workspaceId: "ws_c",
 };
 
-const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, docker: false, shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3, workspaceId: "ws_a" };
+const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, runsWorkspaces: false, engine: "none", shape: { cpu: 8, memMb: 16384 }, diskFreeBytes: 210 * 1024 ** 3, workspaceId: "ws_a" };
 const laptop: PlaceView = {
   id: "p_1",
   kind: "computer",
   name: "old-macbook",
   default: false,
   present: false,
-  docker: false,
+  runsWorkspaces: false, engine: "none",
   os: "macOS 15.6",
   agents: ["claude", "codex"],
   shape: { cpu: 4, memMb: 8192 },
@@ -216,7 +216,7 @@ describe("the Add a computer sheet", () => {
     useStore.setState({ places: [here, { ...laptop, present: true }] });
     await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.joinedTitle("old-macbook"))).toBeTruthy());
     expect(screen.getByText(PLACES_WORDS.sheet.joined("macOS 15.6", ["claude", "codex"]))).toBeTruthy();
-    expect(screen.getByText(PLACES_WORDS.sheet.dockerOptional)).toBeTruthy();
+    expect(screen.getByText(PLACES_WORDS.sheet.cannotRunWorkspaces)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: PLACES_WORDS.sheet.open("old-macbook") }));
     expect(opened).toEqual(["ws_b"]);
     expect(closed).toBe(true);
@@ -378,7 +378,7 @@ describe("what the places cost this month", () => {
 
   it("leaves a provider nothing was metered on out of the foot's count, and a computer that runs Docker out of the money", async () => {
     const docker: PlaceView = { ...ascii, id: "docker", name: "docker" };
-    const runsDocker: PlaceView = { ...here, docker: true };
+    const runsDocker: PlaceView = { ...here, runsWorkspaces: true, engine: "docker" };
     const { api } = withSpend([
       { place: "here", monthUsd: 0, rateUsdPerHour: 0 },
       { place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 },
@@ -622,12 +622,12 @@ describe("the ssh road of the sheet", () => {
     expect(plan()).toHaveLength(4);
   });
 
-  it("reads the box as joined once the installer answers with it, and says it can run copies", async () => {
+  it("reads the box as joined once the installer answers with it, and says it runs workspaces", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='title']")?.textContent).toBe("hetzner joined"));
-    expect(document.querySelector("[data-k='description']")?.textContent).toBe(ADD_COMPUTER_WORDS.joinedWithDocker);
+    expect(document.querySelector("[data-k='description']")?.textContent).toBe(ADD_COMPUTER_WORDS.runsWorkspaces);
     expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
   });
 
@@ -673,7 +673,7 @@ describe("the ssh road of the sheet", () => {
     await act(async () => {
       // The note the runtime really sends with a done join: the box's size is in the row above, and a line that
       // carried it too would be cut from the right under its own check.
-      stage("join", "done", "docker yes");
+      stage("join", "done", "workspaces yes · engine none");
       sock.onmessage?.({ data: JSON.stringify({ id: asked["id"], ok: true, addId, place: box }) });
       await Promise.resolve();
     });
@@ -685,7 +685,7 @@ describe("the ssh road of the sheet", () => {
       [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
       [placeAddSheetWord("service", "done"), "done"],
-      [`${placeAddSheetWord("join", "done")}docker yes`, "done"],
+      [`${placeAddSheetWord("join", "done")}workspaces yes · engine none`, "done"],
     ]);
     expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
   });

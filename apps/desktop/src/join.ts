@@ -54,7 +54,7 @@ export interface JoinedHere {
   name: string;
   /** Its cores, memory and the room left where its threads work, in the app's own words for them. */
   facts: string;
-  docker: boolean;
+  runsWorkspaces: boolean;
 }
 
 export type JoinOutcome = { ok: true; here: JoinedHere } | { ok: false; why: JoinRefusal; said?: string };
@@ -169,7 +169,7 @@ export function joinRoad(deps: JoinRoadDeps): JoinRoad {
       // The report is what this computer told the host about itself on the join frame, so the card the person reads
       // and the row the host keeps are one reading rather than two.
       const { report } = joined;
-      return { ok: true, here: { name: report.name, facts: placeFactsLine(report.shape, report.diskFreeBytes), docker: report.docker } };
+      return { ok: true, here: { name: report.name, facts: placeFactsLine(report.shape, report.diskFreeBytes), runsWorkspaces: report.runsWorkspaces } };
     },
     standing() {
       const place = placeStanding(deps.home);

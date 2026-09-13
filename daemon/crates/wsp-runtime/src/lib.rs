@@ -7,6 +7,7 @@
 
 #[cfg(target_os = "linux")]
 pub mod bundle;
+pub mod doctor;
 pub mod fetch;
 #[cfg(target_os = "linux")]
 pub mod freeze;

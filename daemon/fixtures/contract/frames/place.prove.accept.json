@@ -18,7 +18,8 @@
         "USER": "maya",
         "PATH": "/usr/bin"
       },
-      "docker": true,
+      "runsWorkspaces": true,
+      "engine": "docker",
       "daemonVersion": 17,
       "daemonPort": 41234,
       "wsp": [
@@ -45,7 +46,9 @@
         "memMb": 16384
       },
       "login": {},
-      "docker": false,
+      "runsWorkspaces": false,
+      "workspacesBlocked": "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on",
+      "engine": "none",
       "daemonVersion": 0,
       "wsp": [
         "wsp"

@@ -14,8 +14,8 @@ import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
 afterEach(cleanup);
 
-const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, docker: false, present: true };
-const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, shape: { cpu: 2, memMb: 4096 }, docker: true, present: true, forks: { running: 0, room: 3 } };
+const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: false, engine: "none", present: true };
+const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, shape: { cpu: 2, memMb: 4096 }, runsWorkspaces: true, engine: "docker", present: true, forks: { running: 0, room: 3 } };
 const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
 const COPY: SealedImageCopy = { place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" };
 
@@ -159,7 +159,7 @@ describe("the Where control", () => {
 });
 
 describe("with nowhere to put a workspace", () => {
-  const NOWHERE = [HERE, { ...HETZNER, id: "p_9", name: "old-macbook", default: false, docker: false, forks: undefined }];
+  const NOWHERE: PlaceView[] = [HERE, { ...HETZNER, id: "p_9", name: "old-macbook", default: false, runsWorkspaces: false, engine: "none", forks: undefined }];
 
   it("drops the control for two notes, the first of them why this computer is not on the list, and makes the one road forward the loud key", async () => {
     const onAddComputer = vi.fn();

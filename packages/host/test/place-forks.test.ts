@@ -88,7 +88,7 @@ describe("wsp new --on", () => {
     const sent: Record<string, unknown>[] = [];
     const client = {
       request: async (op: string, params?: Record<string, unknown>) => {
-        if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, docker: true, present: true, takesForks: true }] };
+        if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, runsWorkspaces: true, present: true, takesForks: true }] };
         if (op === "golden.get") return { manifest: { name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_head" }] } };
         sent.push({ op, ...params });
         return { workspace: { id: "ws_1", name: "x", machineId: "m1", phase: "running", kind: "cloud", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z" } };

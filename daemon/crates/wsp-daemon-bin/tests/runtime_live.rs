@@ -1228,6 +1228,56 @@ async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forwa
     w.close().await;
 }
 
+/// The image build's own road over the seam, which is the road `wsp image build <place>` drives on a joined
+/// computer: a workspace forked from the base runs the recipe as execs, the vault's sign-ins land on it, a
+/// snapshot commits the result as a layer under a name, a template names its chain, and a fork from that image
+/// runs the recipe's tool and reads the vault. The vault is inside the built layer and nowhere in the store's
+/// metadata: the records name digests and times, never a secret's bytes.
+#[tokio::test]
+async fn an_image_built_by_running_a_recipe_holds_the_vault_in_its_layer_and_not_in_the_stores_metadata() {
+    if !live() {
+        return;
+    }
+    const TOKEN: &str = "SIGN-IN-TOKEN-665e-secret";
+    let mut w = World::open().await;
+    // The builder from the base chain, as prepareBuilder forks one.
+    let builder = w.create(spec(json!({}))).await;
+    // The recipe as execs: a tool the image carries, and the vault handed in the way the image build hands it
+    // today, a file written inside the workspace, not an env on the record.
+    let (code, _, err) = w
+        .exec(
+            &builder,
+            "install -D -m 0755 /dev/stdin /usr/local/bin/recipe-tool <<'TOOL'\n#!/bin/sh\necho recipe-tool-ran\nTOOL\nmkdir -p /root/.wsp && printf %s 'SIGN-IN-TOKEN-665e-secret' > /root/.wsp/vault",
+        )
+        .await;
+    assert_eq!((code, err.as_str()), (0, ""), "the recipe steps run");
+    // The seal: commit the upper directory as a layer under a name, then name its chain a template a fork boots
+    // from, as sealGolden snapshots and promoteSnapshot names.
+    let snapshot_id = w.snapshot(&builder, "built", true).await;
+    let promoted = w.ok("machine.promoteSnapshot", json!({ "snapshotId": snapshot_id, "name": format!("{}-image", live_owner()) })).await;
+    let template_id = promoted["templateId"].as_str().unwrap().to_owned();
+    // A fork from the built image runs the recipe's tool and reads the vault, as a workspace made from a copy does.
+    let fork = w.create(spec(json!({ "template": template_id }))).await;
+    let (code, out, _) = w.exec(&fork, "recipe-tool; cat /root/.wsp/vault").await;
+    assert_eq!((code, out.as_str()), (0, &format!("recipe-tool-ran\n{TOKEN}")[..]), "the fork runs the tool and holds the vault");
+    // The vault's bytes are in the layer, which the fork just read, and in none of the store's metadata records.
+    for dir in ["snapshots", "templates", "images"] {
+        let at = root().join("layers").join(dir);
+        if let Ok(entries) = fs::read_dir(&at) {
+            for entry in entries {
+                let path = entry.unwrap().path();
+                if path.extension().is_some_and(|e| e == "json") {
+                    let text = fs::read_to_string(&path).unwrap();
+                    assert!(!text.contains(TOKEN), "the store's {dir} record {} holds the vault: {text}", path.display());
+                }
+            }
+        }
+    }
+    w.ok("machine.deleteTemplate", json!({ "templateId": template_id })).await;
+    w.ask("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
+    w.close().await;
+}
+
 /// One line read off a fresh connection to the address, inside two seconds, off the runtime thread: the forwards
 /// under test are tasks of this very runtime and need it free to answer.
 async fn read_line(addr: SocketAddrV4) -> std::io::Result<String> {

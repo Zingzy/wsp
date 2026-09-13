@@ -28,7 +28,7 @@ const box = {
   name: "hetzner",
   default: false,
   present: true,
-  docker: true,
+  runsWorkspaces: true, engine: "docker",
   os: "Ubuntu 24.04",
   shape: { cpu: 2, memMb: 4096 },
   diskFreeBytes: 40_802_189_312,

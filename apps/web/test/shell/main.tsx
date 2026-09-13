@@ -550,7 +550,7 @@ if (params.get("places") === "1") {
   useStore.setState({
     places: [
       { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, workspaceId: "ws_a" },
-      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, docker: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, runsWorkspaces: true, engine: "docker", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
       // The worst row the detail draws: a computer away with a login on its record and the longest refusal ssh
       // hands back, which is the line that used to push the table past the card it sits in.
       {

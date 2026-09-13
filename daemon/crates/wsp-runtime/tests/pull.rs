@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use registry::{Layout, Server};
 use wsp_runtime::fetch::{self, Client, Digest, Reference};
-use wsp_runtime::store::{self, Chain, Store};
+use wsp_runtime::store::{self, Store};
 
 const IMAGE: &str = "ubuntu:24.04";
 
@@ -145,19 +145,17 @@ fn a_second_pull_answers_from_the_store_without_a_fetch() {
 }
 
 #[test]
-fn reference_counts_follow_images_and_builds_and_the_sweep_takes_what_nothing_names() {
+fn reference_counts_follow_images_and_the_sweep_takes_what_nothing_names() {
     let w = world();
     let root = tempfile::tempdir().unwrap();
     let store = Store::open(root.path()).unwrap();
     let mut client = Client::new();
     let ubuntu = store.pull(IMAGE, &source(&w.server, "ubuntu", "24.04"), &mut client).unwrap().image;
     let tools = store.pull("tools:1", &source(&w.server, "tools", "1"), &mut client).unwrap().image;
-    let recipe = "9f".repeat(32);
-    store.record_build(&recipe, Chain { config: ubuntu.chain.config.clone(), layers: vec![w.base.clone(), w.os_release.clone()] }).unwrap();
-    assert_eq!(store.build(&recipe).unwrap().unwrap().chain.layers, vec![w.base.clone(), w.os_release.clone()]);
 
-    assert_eq!(store.references(&w.base).unwrap(), 2, "ubuntu and the build");
-    assert_eq!(store.references(&w.os_release).unwrap(), 3, "ubuntu, tools and the build");
+    // ubuntu is base then os-release; tools:1 is os-release then tools, so os-release is the shared layer.
+    assert_eq!(store.references(&w.base).unwrap(), 1, "ubuntu alone");
+    assert_eq!(store.references(&w.os_release).unwrap(), 2, "ubuntu and tools");
     assert_eq!(store.references(&w.tools).unwrap(), 1);
     assert_eq!(store.references(&tools.chain.config).unwrap(), 1);
     assert_eq!(store.sweep(&[]).unwrap(), store::Swept::default(), "everything is named");
@@ -165,7 +163,7 @@ fn reference_counts_follow_images_and_builds_and_the_sweep_takes_what_nothing_na
     assert!(store.remove_image("tools:1").unwrap());
     assert!(!store.remove_image("tools:1").unwrap());
     assert_eq!(store.references(&w.tools).unwrap(), 0);
-    assert_eq!(store.references(&w.os_release).unwrap(), 2);
+    assert_eq!(store.references(&w.os_release).unwrap(), 1, "ubuntu still names the shared layer");
     let swept = store.sweep(&[]).unwrap();
     let mut gone = vec![w.tools.clone(), tools.chain.config.clone()];
     gone.sort();
@@ -178,11 +176,6 @@ fn reference_counts_follow_images_and_builds_and_the_sweep_takes_what_nothing_na
     assert!(store.unpacked(&w.os_release).is_some());
 
     assert!(store.remove_image(IMAGE).unwrap());
-    assert_eq!(store.references(&w.base).unwrap(), 1, "the build still names it");
-    assert_eq!(store.sweep(&[]).unwrap(), store::Swept::default());
-    assert!(store.has_blob(&w.base));
-
-    assert!(store.remove_build(&recipe).unwrap());
     let swept = store.sweep(&[]).unwrap();
     let mut gone = vec![w.base.clone(), w.os_release.clone(), ubuntu.chain.config.clone()];
     gone.sort();

@@ -448,13 +448,14 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.shape === undefined ? "" : String(p.shape.cpu),
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
-    p.docker === undefined ? "" : p.docker ? "yes" : "no",
+    p.runsWorkspaces === undefined ? "" : p.runsWorkspaces ? "yes" : "no",
+    p.engine === undefined ? "" : p.engine,
     p.kind === "provider" ? fmtRate(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "DOCKER", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "WORKSPACES", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -2256,7 +2257,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Every place this host holds, which is the whole of where work can run: this computer, each computer joined to it as a place, and the provider it forks on. A computer's row carries what it last reported (cores, memory, free disk, whether it has Docker) and whether it is connected right now; a provider's row carries its hourly rate. Exactly one row is the default, which is the last place added. A place is not a workspace: a workspace on a place is what threads run in, and wsp workspaces lists those.",
+        "Every place this host holds, which is the whole of where work can run: this computer, each computer joined to it as a place, and the provider it forks on. A computer's row carries what it last reported (cores, memory, free disk, whether it runs workspaces and the engine it has for a project's own containers) and whether it is connected right now; a provider's row carries its hourly rate. Exactly one row is the default, which is the last place added. A place is not a workspace: a workspace on a place is what threads run in, and wsp workspaces lists those.",
       input: {},
       output: { places: z.array(PlaceView) },
       call: async (_args, deps) => asJson({ places: (await (await deps.client()).request<{ places: PlaceView[] }>("places.list")).places }),

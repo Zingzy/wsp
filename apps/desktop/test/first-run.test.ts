@@ -39,10 +39,10 @@ interface Asks {
 }
 
 /** What the shell answers a join with, as the screen reads it: this computer's own facts, or which refusal. */
-type JoinAnswer = { ok: true; here: { name: string; facts: string; docker: boolean } } | { ok: false; why: string; said?: string };
+type JoinAnswer = { ok: true; here: { name: string; facts: string; runsWorkspaces: boolean } } | { ok: false; why: string; said?: string };
 
 /** The computer the live shell would answer with, in the app's own words for a shape and a disk. */
-const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free", docker: false };
+const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free", runsWorkspaces: false };
 
 interface Screen {
   window: JSDOM["window"];
@@ -311,15 +311,15 @@ describe("the first launch's screen", () => {
     expect(screen.text("#joined .sentence")).toBe("It now runs threads for your wsp. Leave it plugged in and awake.");
     expect(screen.text("#here-name")).toBe(HERE.name);
     expect(screen.text("#here-facts")).toBe(HERE.facts);
-    expect(screen.text("#here-docker")).toBe("not installed · runs your agents, one workspace");
+    expect(screen.text("#here-workspaces")).toBe("runs your agents, one workspace");
     expect(screen.text("#open-joined").replace(/\s+/g, " ").trim()).toBe("Open wsp →");
     // A computer that can fork says so instead, on the same row.
-    const withDocker = await open(AGENTS, { join: { ok: true, here: { ...HERE, docker: true } } });
+    const withDocker = await open(AGENTS, { join: { ok: true, here: { ...HERE, runsWorkspaces: true } } });
     await withDocker.press("#join");
     await withDocker.type("#address", "192.168.1.20:7788");
     await withDocker.type("#code", "QW4K-7PZX");
     await withDocker.press("#go");
-    expect(withDocker.text("#here-docker")).toBe("installed · runs copies of your image");
+    expect(withDocker.text("#here-workspaces")).toBe("runs your workspaces · your image builds here on first use");
     // The one press out of the page is the same one: the tools into the agents found here, then this Mac recorded.
     await withDocker.press("#open-joined");
     expect(withDocker.asks.install).toEqual([["claude", "codex"]]);

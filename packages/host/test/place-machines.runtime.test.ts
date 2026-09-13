@@ -301,6 +301,32 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect(await exec(fork, "cat /root/after-thaw")).toMatchObject({ stdout: "second life\n" });
   }, 120_000);
 
+  // What `wsp image build <place>` drives over this seam: a builder forked from the base runs the recipe as
+  // execs, the vault's sign-ins land on it the way the image build hands them, a snapshot commits the result as a
+  // layer and a template names its chain, and a fork from that image runs the recipe's tool and holds the vault.
+  // The daemon builds no image of its own: the host drives it through create, exec, putBytes, snapshot and
+  // promoteSnapshot, the same calls the Docker road drove.
+  it("builds an image at a place by running a recipe over the seam, its tool and vault in the fork and no secret in the store", async () => {
+    const builder = await create({ kind: "sandbox" });
+    const token = `sign-in-${randomBytes(8).toString("hex")}`;
+    expect(await exec(builder, "install -D -m 0755 /dev/stdin /usr/local/bin/recipe-tool <<'TOOL'\n#!/bin/sh\necho recipe-tool-ran\nTOOL")).toMatchObject({ exitCode: 0 });
+    // The vault handed in the way the image build hands it: a file landed on the builder, never an env on the record.
+    await builder.putBytes!("/root/.wsp/vault", Buffer.from(token));
+    const snapshotId = await builder.snapshot(`live-665-${process.pid}-built`, { firstLife: true });
+    const templateId = await backend.promoteSnapshot!(snapshotId, `live-665-${process.pid}-image`);
+    const fork = await create({ kind: "sandbox", template: templateId });
+    expect(await exec(fork, "recipe-tool; cat /root/.wsp/vault")).toMatchObject({ exitCode: 0, stdout: `recipe-tool-ran\n${token}` });
+    // The vault is in the built layer the fork just read, and in none of the store's metadata records.
+    for (const dir of ["snapshots", "templates", "images"]) {
+      const at = join(root, "layers", dir);
+      for (const name of existsSync(at) ? readdirSync(at) : []) {
+        if (name.endsWith(".json")) expect(readFileSync(join(at, name), "utf8")).not.toContain(token);
+      }
+    }
+    await backend.deleteTemplate!(templateId);
+    await backend.deleteSnapshot(snapshotId);
+  }, 120_000);
+
   it("naps by stopping, and the wake boots the saved layer with the same id, address and forward, under 200 ms", async () => {
     const machine = await create({ kind: "sandbox", memMb: 512 });
     expect(await exec(machine, ANSWER_ON_7070)).toMatchObject({ exitCode: 0, stderr: "" });

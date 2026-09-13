@@ -559,6 +559,48 @@ export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?:
   ].join("\n");
 }
 
+/** Where the workspace AppArmor profile lands, and the name it loads under. */
+export const WSP_WORKSPACE_APPARMOR_PATH = "/etc/apparmor.d/wsp-workspace";
+export const WSP_WORKSPACE_APPARMOR = "wsp-workspace";
+
+/** The AppArmor profile a box needs on Ubuntu 23.10 and later, where the kernel refuses a plain binary the user
+ * namespaces a workspace's own isolation is built from (`kernel.apparmor_restrict_unprivileged_userns=1`, the
+ * default there). It attaches to the daemon binary, which is what clones a workspace, and carries the one rule
+ * that restriction reads, the road Ubuntu's own podman profile takes. A box without AppArmor enforcing never sees
+ * it written. */
+export function apparmorProfile(place: DaemonPlace): string {
+  return [
+    "abi <abi/4.0>,",
+    "include <tunables/global>",
+    `profile ${WSP_WORKSPACE_APPARMOR} ${place.dir}/${DAEMON_BIN} flags=(default_allow) {`,
+    "  userns,",
+    `  include if exists <local/${WSP_WORKSPACE_APPARMOR}>`,
+    "}",
+    "",
+  ].join("\n");
+}
+
+/** The install step that writes the profile above and loads it, only where AppArmor is enforcing and this deploy
+ * is root: elsewhere a box has nothing to load it into, or no place to write it, and needs neither. The profile's
+ * bytes ride base64 so nothing in it has to be quoted for the shell, and the person watching the install is told
+ * it landed. */
+function apparmorStep(place: DaemonPlace): string[] {
+  const bytes = Buffer.from(apparmorProfile(place)).toString("base64");
+  return [
+    'if command -v apparmor_parser >/dev/null 2>&1 && [ -w /etc/apparmor.d ] && [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ]; then',
+    `  printf %s '${bytes}' | base64 -d > ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    // An older parser (AppArmor 3, Ubuntu 22.04) does not know the userns rule and refuses the profile; leaving it
+    // written and unloaded would say nothing, so it is removed and the refusal is said.
+    `  if apparmor_parser -r -W ${WSP_WORKSPACE_APPARMOR_PATH} 2>/dev/null; then`,
+    `    echo "the ${WSP_WORKSPACE_APPARMOR} apparmor profile is loaded, so workspaces isolate here"`,
+    "  else",
+    `    rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    `    echo "this computer's apparmor does not take the ${WSP_WORKSPACE_APPARMOR} profile; workspaces here run without it"`,
+    "  fi",
+    "fi",
+  ];
+}
+
 /** Stops whatever holds the daemon's place before the new daemon starts: an update lands on a machine whose daemon
  * is running, and a second bind would fail while the port check still read the old one as up. The unit goes first,
  * since an explicit stop is the only thing Restart=always yields to and killing the pid under it would have
@@ -609,6 +651,10 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
     keepDaemonForThisChip(place),
+    // The profile a box needs before its workspaces can isolate, where AppArmor is enforcing; written once the
+    // binary it names is in place, and only on a root install, since a login-scoped daemon owns no /etc and runs
+    // its workspaces under the person's own login instead.
+    ...(place.scope === "system" ? apparmorStep(place) : []),
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs
     // only when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.

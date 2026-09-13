@@ -167,7 +167,7 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
   };
 
   const title = joined === undefined ? WORDS.title : WORDS.joinedTitle(joined.name);
-  const description = reported && joined !== undefined ? (joined.docker === true ? MINE.joinedWithDocker : WORDS.joinedDescription) : road === "app" ? WORDS.description : MINE.ssh.description;
+  const description = reported && joined !== undefined ? (joined.runsWorkspaces === true ? MINE.runsWorkspaces : WORDS.joinedDescription) : road === "app" ? WORDS.description : MINE.ssh.description;
   const footNote = joined !== undefined ? undefined : stages !== null ? { word: MINE.ssh.running } : road === "app" ? { kbd: "esc", word: MINE.app.escCloses } : { kbd: "↵", word: MINE.ssh.adds };
   const sshHeld = login.trim() === "" ? MINE.ssh.loginFirst : api?.addComputerOverSsh === undefined ? MINE.ssh.noRoad : undefined;
   const sshTyping = joined === undefined && road === "ssh" && stages === null;
@@ -262,7 +262,7 @@ function AppRoad({ place, address, code, said, expired, arrived, reported, relay
       : [
           { word: WORDS.connected(arrived.from), state: "done" },
           ...(reported && place !== undefined
-            ? [{ word: WORDS.joined(place.os ?? "", place.agents ?? []), state: "done" as const }, ...(place.docker === true ? [] : [{ word: WORDS.dockerOptional, state: "done" as const }])]
+            ? [{ word: WORDS.joined(place.os ?? "", place.agents ?? []), state: "done" as const }, ...(place.runsWorkspaces === true ? [] : [{ word: place.workspacesBlocked ?? WORDS.cannotRunWorkspaces, state: "done" as const }])]
             : [{ word: WORDS.reading, state: "running" as const }]),
         ];
   return (

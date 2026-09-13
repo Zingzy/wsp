@@ -91,7 +91,7 @@ export const placeNamed = (place: PlaceView, word: string): boolean => word === 
 /** Whether workspaces of their own can stand on this row at all: a provider forks by definition, and a computer
  * does once it has said it runs Docker. A computer that runs agents alone holds the one workspace it already is,
  * so it is never offered as somewhere to put another. */
-export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPlace(place) || place.docker === true;
+export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPlace(place) || place.runsWorkspaces === true;
 
 /** Which row a workspace stands on, or nothing for one this list cannot place, read the protocol's one way so the
  * pane's Where row, the table's own holdings and the host's month total cannot disagree about which computer a

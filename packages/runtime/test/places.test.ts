@@ -53,7 +53,7 @@ afterEach(async () => {
  * them rather than reading them a second time. */
 const DOOR = ["http://192.168.1.20:4400"];
 
-const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, docker: true };
+const HERE = { name: "zingzys-mac", os: "macOS 15.0", shape: { cpu: 8, memMb: 16384 }, runsWorkspaces: true, engine: "docker" as const };
 
 function wiring(hostKey: PlaceKeyPair, provider?: { id: string; rateUsdPerHour: number }): PlaceWiring {
   return { hostKey, provider: () => provider, here: () => HERE, hostName: () => "zingzys-mac" };
@@ -67,7 +67,8 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   shape: { cpu: 4, memMb: 4096 },
   diskFreeBytes: 831 * 1024 * 1024 * 1024,
   login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
-  docker: true,
+  runsWorkspaces: true,
+  engine: "none",
   daemonVersion: 17,
   agents: [],
   wsp: ["/home/maya/.npm-global/bin/wsp"],
@@ -205,7 +206,7 @@ describe("a computer joining", () => {
     expect(placeId).toMatch(/^p_[0-9a-f]{16}$/);
     const places = await placesOf();
     const row = places.find(p => p.id === placeId)!;
-    expect(row).toMatchObject({ kind: "computer", name: "old-macbook", default: true, docker: true, os: "Ubuntu 24.04", present: true });
+    expect(row).toMatchObject({ kind: "computer", name: "old-macbook", default: true, runsWorkspaces: true, os: "Ubuntu 24.04", present: true });
     expect(row.shape).toEqual({ cpu: 4, memMb: 4096 });
     const workspaces = await runtime!.workspaces.list();
     const ws = workspaces.find(w => w.name === "old-macbook")!;
@@ -434,7 +435,7 @@ describe("the list of every place", () => {
     sockets.push(first.client.ws);
     const places = await placesOf();
     expect(places.map(p => p.kind)).toEqual(["computer", "computer", "provider"]);
-    expect(places[0]).toMatchObject({ id: "here", name: HERE.name, present: true, docker: true });
+    expect(places[0]).toMatchObject({ id: "here", name: HERE.name, present: true, runsWorkspaces: true });
     expect(places.at(-1)).toMatchObject({ id: "box", kind: "provider", rateUsdPerHour: 0.018 });
     expect(places.filter(p => p.default)).toHaveLength(1);
     expect(places.find(p => p.default)!.id).toBe(first.placeId);
@@ -783,7 +784,7 @@ describe("putting the agent on a computer over ssh", () => {
     expect(added.addId).toBe("a_mine");
     expect(stages.every(s => s.addId === "a_mine")).toBe(true);
     // The one fact the box's own row does not already carry: a size here as well cuts the line the app draws.
-    expect(stages.at(-1)?.note).toBe("docker yes");
+    expect(stages.at(-1)?.note).toBe("workspaces yes · engine none");
   });
 
   it("waits for the link the agent dials, not the socket the join itself opened and closed", async () => {
@@ -1281,7 +1282,7 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const withDocker = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(withDocker.client.ws);
-    const without = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { docker: false }) });
+    const without = await join(hostKey, { code: await code(), name: "laptop", report: report("laptop", { runsWorkspaces: false }) });
     sockets.push(without.client.ws);
     const rows = await placesOf();
     // The computer the host runs on is where the person's own agents run, never something the host forks into.
@@ -1295,7 +1296,7 @@ describe("a fork on a computer you joined", () => {
     expect(backend.machines).toHaveLength(0);
     expect(made.place).toBe(withDocker.placeId);
     // And a row that says no forks nowhere: the refusal is that computer's, not a fork nobody asked for.
-    await expect(runtime.workspaces.create({ golden: "snap_g", name: "y", on: "laptop" })).rejects.toThrow(/laptop runs your agents but has no Docker/);
+    await expect(runtime.workspaces.create({ golden: "snap_g", name: "y", on: "laptop" })).rejects.toThrow(/laptop cannot run wsp workspaces/);
   });
 
   it("refuses a word that names no place, and names what this host holds", async () => {
@@ -1307,9 +1308,9 @@ describe("a fork on a computer you joined", () => {
 
   it("refuses a computer that forks nowhere, in its own words", async () => {
     const { hostKey } = await serving();
-    const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { docker: false }), answers: c => forks(c) });
+    const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false }), answers: c => forks(c) });
     sockets.push(client.ws);
-    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv runs your agents but has no Docker/);
+    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv cannot run wsp workspaces/);
     expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
   });
 

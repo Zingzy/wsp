@@ -963,7 +963,7 @@ describe("the projects section", () => {
 
 describe("where a workspace runs", () => {
   const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
-  const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, docker: true, present: true };
+  const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, runsWorkspaces: true, engine: "docker", present: true };
   const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
 
   it("names the computer a workspace stands on and what that computer is", async () => {
