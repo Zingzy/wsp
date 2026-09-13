@@ -221,6 +221,19 @@ const stepLine = step => `> ${[step.verb, ...step.words].join(" ")}`;
  * visible is what the browser laid out, never what the markup says. */
 export const READ_PAGE = () => {
   const CLICKABLE = 'button, a[href], summary, input, textarea, select, [role="button"], [role="tab"], [role="menuitem"], [role="option"], [role="switch"], [role="checkbox"], [data-row-id], [data-surface-launch], [data-cloud-setup-row]';
+  // What a control says about itself that its words do not: a radio picked, a checkbox ticked, the tab a page is
+  // on, a panel open. A tester who clicked a radio was told the page read the same, because a page's text is all
+  // this reads and a dot is not text. The words are the ones a screen reader says, off the same attributes.
+  const stateOf = el => {
+    const checked = el.getAttribute("aria-checked") ?? (el.type === "checkbox" || el.type === "radio" ? String(el.checked) : null);
+    if (checked === "true") return "checked";
+    if (checked === "false") return "unchecked";
+    const selected = el.getAttribute("aria-selected");
+    if (selected !== null) return selected === "true" ? "selected" : "not selected";
+    const open = el.getAttribute("aria-expanded");
+    if (open !== null) return open === "true" ? "open" : "closed";
+    return undefined;
+  };
   const shown = el => {
     const box = el.getBoundingClientRect();
     const style = getComputedStyle(el);
@@ -245,10 +258,18 @@ export const READ_PAGE = () => {
   const STYLING = new Set(["slot", "size", "active", "pressed", "value", "scroll-anchor-ignore"]);
   const labels = new Set();
   const attrs = new Set();
+  /** The state a line of the page's text carries, by the words that line is. A control with no words of its own is
+   * read by the words of the label it sits in, which is what a tester clicks and what the page draws its state
+   * beside; two controls under one set of words that disagree leave that line as it was, since one line cannot say
+   * two things. */
+  const states = new Map();
   for (const el of document.querySelectorAll(CLICKABLE)) {
     if (!shown(el)) continue;
     const named = nameOf(el);
     if (named !== undefined) labels.add(named);
+    const state = stateOf(el);
+    const under = named ?? nameOf(el.closest("label") ?? el);
+    if (state !== undefined && under !== undefined) states.set(under, states.has(under) && states.get(under) !== state ? undefined : state);
     for (const attr of el.attributes) {
       const name = attr.name.startsWith("data-") ? attr.name.slice(5) : undefined;
       if (name === undefined || STYLING.has(name) || name.startsWith("base-ui-")) continue;
@@ -264,8 +285,9 @@ export const READ_PAGE = () => {
   // cannot read a name cannot say it, and these are the ones they most often want: the + that opens a workspace,
   // the arrow that sends a message.
   const silent = [...labels].filter(name => !written.has(name));
-  const foot = silent.length === 0 ? [] : ["controls with no words of their own:", ...silent.map(name => `[${name}]`)];
-  return { text: [...lines.map(line => (labels.has(line) ? `[${line}]` : line)), ...foot].join("\n"), attrs: [...attrs].sort() };
+  const said = line => (states.get(line) === undefined ? "" : ` (${states.get(line)})`);
+  const foot = silent.length === 0 ? [] : ["controls with no words of their own:", ...silent.map(name => `[${name}]${said(name)}`)];
+  return { text: [...lines.map(line => `${labels.has(line) ? `[${line}]` : line}${said(line)}`), ...foot].join("\n"), attrs: [...attrs].sort() };
 };
 
 /** Whether the page says a word somewhere that is not the tester's own words coming back at them. Read in the
@@ -378,6 +400,59 @@ export async function whyNotClicked(page, word) {
   return (await openMenu(page)) ? UNDER_AN_OPEN_MENU(word) : undefined;
 }
 
+/** What a click on a control the page is holding back is told. Said before the click and not after it: a held
+ * control takes no click ever, so the click waited out its whole timeout and answered with a timeout, which reads
+ * as the driver breaking rather than as the page saying no (fifteen seconds on a held Create). */
+export const HELD = (word, why) =>
+  `${JSON.stringify(word)} is on the page and is held: the page draws it disabled, so no click will land on it${why === undefined ? ", and the page writes no reason beside it" : `. The page says why beside it: ${JSON.stringify(why)}`}`;
+
+/** How long a control the page is holding is given to stop being held before the driver says so. An app still
+ * connecting holds its own controls for a moment (the sidebar's plus is held while the client has no host yet), and
+ * a click used to wait that out; a control the page will never let go of is what this is for, and three seconds is
+ * a boot rather than the whole of a click's own wait. */
+const HELD_GRACE_MS = 3_000;
+
+/** The page's answer for a control that would not take a click, once it has had that grace: what it says, or
+ * nothing where the page is not holding it. Read off the element only while the page has one, since a word aimed at
+ * an attribute nothing carries is the click's own refusal to make. */
+export async function whyHeld(found, grace = HELD_GRACE_MS) {
+  const deadline = Date.now() + grace;
+  for (;;) {
+    const held = (await found.count()) > 0 ? await found.evaluate(HELD_ON_THE_PAGE) : undefined;
+    if (held == null) return undefined;
+    if (Date.now() >= deadline) return held;
+    await sleep(200);
+  }
+}
+
+/** Whether the page is holding a control back, and the reason it writes beside it. The reason a held control waits
+ * belongs in the slot under the field it waits on, which is the app's own rule for one, so the words to read are
+ * the last ones above it that belong to no control and to no control's label. Run in the page, since what holds a
+ * control is what the browser laid out. */
+export const HELD_ON_THE_PAGE = el => {
+  const held = el.closest(':disabled, [aria-disabled="true"]');
+  if (held === null) return undefined;
+  const CONTROLS = "button, a[href], input, textarea, select, label";
+  const near = at => {
+    const walker = document.createTreeWalker(at, NodeFilter.SHOW_TEXT);
+    const words = [];
+    for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+      const text = (node.textContent ?? "").trim();
+      if (text === "" || node.parentElement === null) continue;
+      // The control's own words, and everything the page draws after it, are not the reason it waits.
+      if (held.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) break;
+      if (node.parentElement.closest(CONTROLS) !== null) continue;
+      words.push(text);
+    }
+    return words.at(-1);
+  };
+  for (let at = held.parentElement; at !== null; at = at.parentElement) {
+    const said = near(at);
+    if (said !== undefined) return { why: said };
+  }
+  return {};
+};
+
 /** Opens an address and waits until the page has words on it: the app draws itself after the document is there, so
  * a page read the moment it loads reads nothing. The wait is for words rather than for a selector, since this
  * drives whatever a tester was given the address of. */
@@ -440,6 +515,8 @@ async function act({ verb, words, width, focus }, page) {
       if (found === undefined) missed(word, (await page.getByPlaceholder(word, { exact: true }).count()) > 0 ? GHOST_IS_NOT_A_CONTROL(word) : undefined);
       const several = await whyNotOne(page, word);
       if (several !== undefined) missed(word, several);
+      const held = await whyHeld(found);
+      if (held !== undefined) missed(word, HELD(word, held.why));
       try {
         await found.click({ timeout: WAIT_MS });
       } catch (e) {

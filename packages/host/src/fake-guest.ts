@@ -27,10 +27,13 @@
 
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
-import { standInMachinePath, type PreviewReach } from "@wsp/protocol";
+import { GUEST_WSP_BIN, shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
 import { LocalDaemon } from "./local-daemon.js";
+import { onPath, runningWsp, thisComputersPath, wspCommand } from "./mcp-install.js";
 
 /** A loopback road has no edge token and no expiry; the field is the shape every reach arrives in. */
 const NO_EDGE_TOKEN = "";
@@ -59,17 +62,60 @@ const GUEST_FOLDERS = ["root", "etc", "tmp", "var"];
 /** The guest's home, which is the folder its commands start in and where a path written under ~ lands. */
 const guestHome = (at: string): string => join(at, "root");
 
-/** Where this guest keeps the handful of commands a Linux guest has and a Mac spells differently or will not run;
- * first on the path every command here runs under. Hidden, since the folder is also the disk a tester browses. */
-const guestBin = (at: string): string => join(at, ".wsp-guest-bin");
+/** Where this guest keeps the handful of commands a Linux guest has and a Mac spells differently or will not run,
+ * and the agents this computer carries. The folder a golden's own tools sit in, under the machine's home, and not
+ * one of this harness's choosing: a turn's script exports the image's PATH over whatever the shell it was launched
+ * from had, and that PATH leads here (`TOOLS_PATH`), so a folder anywhere else is on the launch's path and on no
+ * turn's. */
+const guestBin = (at: string): string => join(at, "root", ".local", "bin");
+
+/** The rule a file landing on this machine is read by, kept as a program of its own: the pattern carries both kinds
+ * of quote, so no shell line holds it whole. */
+const guestPaths = (at: string): string => join(guestBin(at), "guest-paths.pl");
 
 /** The commands that folder holds. A fork names itself at birth, a Mac refuses the call, and the line it prints
  * reads as a fork that failed; the transfer that writes a machine's own context hashes its archive by the name
- * coreutils gives that command, which a Mac spells shasum. */
-const GUEST_COMMANDS: Record<string, string> = {
-  hostname: '#!/bin/sh\n[ $# -eq 0 ] && cat "$(dirname "$0")/../etc/hostname" 2>/dev/null\nexit 0\n',
+ * coreutils gives that command, which a Mac spells shasum; every turn and every exec launches its script in a
+ * session of its own, which a Mac has no command for, so the reader waits on a run that died before the agent
+ * spoke; and a file lands on a machine as text a shell decodes, whose own words name the guest's folders and would
+ * otherwise name this computer's. The session is what the reap of a run takes away, so the stand-in's own has to be
+ * a real one: perl's setsid is on every Mac and leaves the launched process leading its own group, which is what
+ * the pid written down is killed as. */
+const guestCommands = (at: string): Record<string, string> => ({
+  hostname: `#!/bin/sh\n[ $# -eq 0 ] && cat ${shellQuote(join(at, "etc", "hostname"))} 2>/dev/null\nexit 0\n`,
   sha256sum: '#!/bin/sh\nexec shasum -a 256 "$@"\n',
-};
+  setsid: '#!/bin/sh\nexec perl -e \'use POSIX qw(setsid); setsid(); exec @ARGV or die "$ARGV[0]: $!\\n";\' -- "$@"\n',
+  base64: `#!/bin/sh\ncase " $* " in\n  *" -d "*|*" --decode "*) /usr/bin/base64 "$@" | perl -p ${shellQuote(guestPaths(at))}; exit $?;;\nesac\nexec /usr/bin/base64 "$@"\n`,
+  // What the wsp tools of a turn on a fork are started with, and what an agent shipped as a script runs under.
+  node: `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`,
+  ...guestAgents(),
+});
+
+/** The wsp command where a machine's own bundle keeps it. A turn on a workspace whose agents may spawn is launched
+ * with the wsp tools run from that path, and a stand-in machine carries no bundle, so its agent met a file that was
+ * not there and had no tools at all. One line loading this computer's own command, which serves the host those
+ * tools would dial anyway. Nothing where this wsp is no script on this computer (an npx cache, a packaged binary),
+ * since then there is no file to load. */
+function stageWsp(at: string): void {
+  const script = wspCommand(runningWsp()).args.at(-1);
+  if (script === undefined || !script.endsWith(".js")) return;
+  const path = guestPath(at, GUEST_WSP_BIN);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `import ${JSON.stringify(pathToFileURL(script).href)};\n`);
+}
+
+/** The agents on this machine: the ones this computer has, each run where it stands here. A stand-in machine forks
+ * from an image this computer sealed, so the agents it is meant to carry are this computer's own; without them a
+ * turn's launch reaches a PATH with no agent on it and the reader waits on a run that said nothing. The directory
+ * the real command lives in is put back on the path it runs with, since an agent shipped as a script looks for the
+ * runtime beside it. */
+const guestAgents = (): Record<string, string> =>
+  Object.fromEntries(
+    CATALOG_AGENTS.flatMap(agent => {
+      const found = onPath(agent.bin, thisComputersPath());
+      return found === undefined ? [] : [[agent.bin, `#!/bin/sh\nPATH=${shellQuote(dirname(found))}:$PATH\nexport PATH\nexec ${shellQuote(found)} "$@"\n`]];
+    }),
+  );
 
 /** One path of the guest's inside the folder standing in for its disk; every other path as it was written. */
 export const guestPath = (at: string, path: string): string =>
@@ -82,12 +128,18 @@ const GUEST_PATH = new RegExp(`(^|[\\s"'=(])/(?=$|[\\s"')]|(?:${GUEST_FOLDERS.jo
 
 export const inGuestRoot = (at: string, cmd: string): string => cmd.replace(GUEST_PATH, (_, before: string) => `${before}${at}/`);
 
+/** The same rewrite in the spelling the landing road reads it in, over one line at a time. An end of line is \Z
+ * there, since a bare $ before a | is one of perl's own variables and would read as its value. */
+const guestPathsProgram = (at: string): string => `s{${GUEST_PATH.source.replaceAll("$", "\\Z")}}{$1${at}/}g;\n`;
+
 /** Makes that folder tree and the commands in it, at every call: a machine's folder is a throwaway one and may
  * have been taken away between two. */
 function layGuestRoot(at: string): void {
   for (const folder of GUEST_FOLDERS) mkdirSync(join(at, folder), { recursive: true });
   mkdirSync(guestBin(at), { recursive: true });
-  for (const [name, text] of Object.entries(GUEST_COMMANDS)) {
+  writeFileSync(guestPaths(at), guestPathsProgram(at));
+  stageWsp(at);
+  for (const [name, text] of Object.entries(guestCommands(at))) {
     const path = join(guestBin(at), name);
     writeFileSync(path, text);
     chmodSync(path, 0o755);
