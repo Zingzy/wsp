@@ -28,6 +28,7 @@ import {
   internalToolResult,
   subagentTaskLine,
   subagentAskerLine,
+  waitingAskerLine,
   noModelsLine,
   type HarnessCatalog,
   MEMORY_NEAR_FULL,
@@ -152,6 +153,7 @@ import {
   turnSpendPart,
   turnSettledLine,
   turnSettledParts,
+  waitedOnYouPart,
   refusedTurn,
   signInRefusalLine,
   upgradeSealFailedGoneLine,
@@ -570,6 +572,20 @@ describe("a turn's activity in one line each", () => {
     expect(turnSettledLine({ status: "interrupted", durationMs: 1_500 })).toBe("interrupted · Worked for 1.5s");
     expect(turnSettledParts({ durationMs: null, costUsd: null })).toEqual([]);
     expect(turnSettledParts({ durationMs: 72_000, costUsd: 0.22 })).toEqual(["Worked for 1m 12s", "$0.22"]);
+  });
+
+  it("counts work in Worked for: the minutes a turn stood on a question come off it, and are said where they are most of it", () => {
+    // The harness reports wall time from launch to result, prompts included; the person's minutes are not the turn's.
+    expect(turnSettledParts({ durationMs: 215_000, waitedMs: 211_000, costUsd: 0.05 })).toEqual(["Worked for 4.0s", "waited on you 3m 31s", "$0.05"]);
+    // A wait that is not most of the turn is taken off all the same; the turn has nothing to explain.
+    expect(turnSettledParts({ durationMs: 72_000, waitedMs: 12_000 })).toEqual(["Worked for 1m"]);
+    // A turn nothing of it waited on reads exactly as it did before.
+    expect(turnSettledParts({ durationMs: 72_000, waitedMs: null })).toEqual(["Worked for 1m 12s"]);
+    // A harness whose figure is shorter than the wait the runtime clocked cannot make a turn work negative time.
+    expect(turnSettledParts({ durationMs: 1_000, waitedMs: 60_000 })).toEqual(["Worked for 1ms", "waited on you 1.0s"]);
+    expect(waitedOnYouPart(211_000)).toBe("waited on you 3m 31s");
+    // The line a thread's end sends counts the same minutes the footer does; two readings of one turn cannot differ.
+    expect(notifyLine("thr_abcd1234", { status: "completed", durationMs: 215_000, waitedMs: 211_000, costUsd: 0.05, text: "done" })).toBe("thread thr_abcd finished (completed, 4.0s, $0.05): done");
   });
 
   it("says what the threads a thread opened spent beside its own figure, and says what each figure counts, so neither reads as the other", () => {
@@ -1800,6 +1816,9 @@ describe("the words a relayed permission prompt shows", () => {
     expect(subagentTaskLine(JSON.stringify({ description: "count alpha files", prompt: "run ls" }))).toBe("count alpha files");
     expect(subagentTaskLine(JSON.stringify({ prompt: "run ls" }))).toBeUndefined();
     expect(subagentAskerLine("count alpha files")).toBe("count alpha files asks");
+    // A prompt drawn in a thread that did not raise it names the thread that did, in the row grammar's two parts
+    // under a middle dot, so it reads as one line of the same family as the asker line above it.
+    expect(waitingAskerLine("read the file")).toBe("read the file asks · this thread waits on the answer");
   });
 
   it("has one deny line, the person's own, and it points the agent at no other access mode", () => {

@@ -33,6 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
+import type { ThreadWaitingOn } from "@wsp/protocol";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
@@ -185,6 +186,9 @@ export interface MessagesTimelineProps {
   machineWait?: MachineWait | null;
   isPreparingWorktree?: boolean;
   activeTurnStartedAt: string | null;
+  /** The thread this one's running call is stopped behind, with that thread's open question, so the person answers
+   * it here rather than hunting for the thread that raised it; null when this thread is behind nobody. */
+  waitingOn?: ThreadWaitingOn | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReadonlyArray<TimelineEntry>;
   turns: ReadonlyArray<TurnSummary>;
@@ -228,6 +232,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   machineWait = null,
   isPreparingWorktree = false,
   activeTurnStartedAt,
+  waitingOn = null,
   listRef,
   timelineEntries,
   turns,
@@ -382,8 +387,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
+        waitingOn,
       }),
-    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt],
+    [timelineEntries, turns, expandedTurnIds, expandedWorkGroupIds, isWorking, activeTurnStartedAt, waitingOn],
   );
   const rows = useStableRows(rawRows);
   const minimapItems = useMemo(() => deriveTimelineMinimapItems(rows), [rows]);
@@ -1120,7 +1126,7 @@ function ProposedPlanTimelineRow({
 
 function PermissionTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "permission" }> }) {
   const ctx = use(TimelineRowCtx);
-  return <PermissionPromptRow permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
+  return <PermissionPromptRow asker={row.asker} permission={row.permission} onAnswer={ctx.onAnswerPermission} />;
 }
 
 function SubagentTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "subagent" }> }) {

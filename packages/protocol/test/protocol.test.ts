@@ -79,6 +79,8 @@ import {
   threadState,
   threadStateWord,
   threadWordOf,
+  threadsFollowed,
+  waitingLine,
   threadRan,
   NOTIFY_ME,
   WorkspaceListing,
@@ -1281,10 +1283,48 @@ describe("thread provenance", () => {
     expect(threadWordOf(settled!)).toBe("Idle");
   });
 
-  it("every thread state has one word, and a settled turn's is the word it always was", () => {
-    expect(threadStateWord("failed")).toBe("Ended");
+  it("a thread whose own call is behind another thread's question is waiting too, and its line is that question", () => {
+    const behind = {
+      threadId: "thr_b",
+      workspaceId: "ws_1",
+      sessionId: "s2",
+      title: "read the file",
+      prompt: { askId: "ask_1", toolName: "Write", input: '{"file_path":"/root/hello.txt","content":"hi"}', options: [] },
+    };
+    const caller = { status: "running" as const, waitingOn: behind };
+    expect(threadState(caller)).toBe("waiting");
+    expect(threadWordOf(caller)).toBe("Needs you");
+    expect(waitingLine(caller)).toBe("Write hello.txt in root (2 B) needs an answer");
+    // Its own prompt leads: a thread asked something itself says that, whatever it is also behind.
+    expect(waitingLine({ ...caller, asking: "Permission for Bash: ls" })).toBe("Permission for Bash: ls");
+    expect(waitingLine({})).toBeUndefined();
+    expect(threadState({ status: "running" })).toBe("running");
+  });
+
+  it("reads the wsp calls that wait for another thread off the call alone, and nothing else", () => {
+    expect(threadsFollowed({ toolName: "mcp__wsp__send", input: '{"thread":"thr_b","message":"go"}' })).toEqual({ named: ["thr_b"] });
+    expect(threadsFollowed({ toolName: "mcp__wsp__threads_wait", input: '{"threads":["thr_b","thr_c"],"timeout":60}' })).toEqual({ named: ["thr_b", "thr_c"] });
+    // run opens the thread it follows, so the call names none and the caller is behind what it started.
+    expect(threadsFollowed({ toolName: "mcp__wsp__run", input: '{"workspace":"api","task":"build it"}' })).toEqual({ opened: true });
+    // Detached is the whole point of detach: the call answers at once and waits for nobody.
+    expect(threadsFollowed({ toolName: "mcp__wsp__run", input: '{"workspace":"api","task":"build it","detach":true}' })).toBeUndefined();
+    expect(threadsFollowed({ toolName: "mcp__wsp__send", input: '{"thread":"thr_b","message":"go","detach":true}' })).toBeUndefined();
+    // A wsp verb that answers out of the host alone, another server's tool, the agent's own tools, and junk input.
+    expect(threadsFollowed({ toolName: "mcp__wsp__threads", input: "{}" })).toBeUndefined();
+    expect(threadsFollowed({ toolName: "mcp__other__send", input: '{"thread":"thr_b"}' })).toBeUndefined();
+    expect(threadsFollowed({ toolName: "Read", input: '{"file_path":"/root/hello.txt"}' })).toBeUndefined();
+    expect(threadsFollowed({ toolName: "mcp__wsp__send", input: "not json" })).toBeUndefined();
+    expect(threadsFollowed({ toolName: "mcp__wsp__send", input: "{}" })).toBeUndefined();
+  });
+
+  it("every thread state has one word, and a turn that failed says so rather than reading as one that finished", () => {
+    // The design spec's four words for a thread: Working, Idle, Failed and the prompt's own Needs you. A launch that
+    // never ran is the row this separates from a thread that did its work and stopped.
+    expect([threadStateWord("running"), threadStateWord("completed")]).toEqual(["Working", "Idle"]);
+    expect(threadStateWord("failed")).toBe("Failed");
     expect(threadStateWord("interrupted")).toBe("Idle");
     expect(threadStateWord("waiting")).toBe("Needs you");
+    expect(threadWordOf({ status: "failed" })).toBe("Failed");
     // Only a running turn is ever waiting on a person: the runtime clears the prompt however the turn ends, on the
     // harness's own exit and on the roads that cut it, so a settled row carrying one is a row nothing can answer.
     expect(threadWordOf({ status: "running", asking: "Permission for Write: out.txt" })).toBe("Needs you");

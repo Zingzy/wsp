@@ -154,6 +154,9 @@ export interface TurnSummary {
   readonly prompt: string | null;
   readonly model: string | null;
   readonly durationMs: number | null;
+  /** How much of durationMs the turn stood on a permission prompt nobody had answered; null on a turn that waited
+   * on nobody. The footer takes it off the duration, so Worked for counts work. */
+  readonly waitedMs: number | null;
   readonly costUsd: number | null;
   readonly error: string | null;
   readonly startedAt: string | null;
@@ -211,7 +214,15 @@ export type MessagesTimelineRow =
       readonly assistantCopyStreaming: boolean;
     }
   | { readonly kind: "proposed-plan"; readonly id: string; readonly createdAt: string; readonly proposedPlan: ProposedPlan }
-  | { readonly kind: "permission"; readonly id: string; readonly createdAt: string; readonly permission: PermissionPrompt }
+  | {
+      readonly kind: "permission";
+      readonly id: string;
+      readonly createdAt: string;
+      readonly permission: PermissionPrompt;
+      /** Who raised it, where the thread reading this row did not: the thread this one's own call is waiting behind.
+       * Absent on every prompt of the thread's own turn. */
+      readonly asker?: string;
+    }
   | { readonly kind: "subagent"; readonly id: string; readonly createdAt: string; readonly subagent: SubagentRun }
   | {
       readonly kind: "working";

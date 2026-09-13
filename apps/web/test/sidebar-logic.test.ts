@@ -405,7 +405,7 @@ describe("workspace row labels", () => {
     const pill = (over: { status: SidebarThreadSnapshot["status"]; indicator: SidebarThreadSnapshot["indicator"]; asking?: string }) =>
       threadPill({ ...over, asking: over.asking ?? null });
     expect(pill({ status: "running", indicator: { label: "Working", tone: "neutral", pulse: true } })).toMatchObject({ label: "Working", pulse: true, dotClass: expect.stringContaining("sidebar-whisper") });
-    expect(pill({ status: "failed", indicator: { label: "Ended", tone: "neutral", pulse: false } })).toMatchObject({ label: "Ended", dotClass: expect.stringContaining("sidebar-whisper") });
+    expect(pill({ status: "failed", indicator: { label: "Failed", tone: "neutral", pulse: false } })).toMatchObject({ label: "Failed", dotClass: expect.stringContaining("sidebar-whisper") });
     expect(pill({ status: "failed", indicator: { label: "Stopped short", tone: "neutral", pulse: false } })).toMatchObject({ label: "Stopped short" });
     expect(pill({ status: "completed", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();
     expect(pill({ status: "interrupted", indicator: { label: "Idle", tone: "neutral", pulse: false } })).toBeNull();

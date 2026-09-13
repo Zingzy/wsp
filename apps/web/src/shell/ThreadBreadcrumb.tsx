@@ -8,7 +8,7 @@
 // carries the one state a person has to act on, so a prompt is never hidden by
 // the header the pane is scrolled under.
 import { FolderIcon } from "lucide-react";
-import { threadState, threadWordOf } from "@wsp/protocol";
+import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
 import { useCreation, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
@@ -54,7 +54,7 @@ export function ThreadBreadcrumb() {
                 {thread.title}
               </span>
               {threadState(thread) === "waiting" ? (
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={thread.asking}>
+                <span className="shrink-0 font-mono text-[11px] text-muted-foreground" title={waitingLine(thread)}>
                   {threadWordOf(thread)}
                 </span>
               ) : null}

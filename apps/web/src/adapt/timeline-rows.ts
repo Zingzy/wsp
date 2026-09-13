@@ -5,9 +5,9 @@
 // wsp's turns can express: no proposed plans, subagent fleets, checkpoints or
 // MCP presentation tables. Turn duration comes from the turn summary because
 // entries are unstamped on our wire.
-import { fmtDuration, isCodeSearchTool } from "@wsp/protocol";
+import { fmtDuration, isCodeSearchTool, waitingAskerLine, type ThreadWaitingOn } from "@wsp/protocol";
 import { isPromptOpen } from "./session.js";
-import type { MessagesTimelineRow, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry, WorkLogTone } from "./view-model.js";
+import type { MessagesTimelineRow, PermissionPrompt, TimelineEntry, ToolGroupAction, ToolGroupSummaryKind, TurnSummary, WorkLogEntry, WorkLogTone } from "./view-model.js";
 
 const LIVE_ACTIVITY_ROW_ID = "live-activity-row";
 
@@ -18,6 +18,10 @@ export interface DeriveRowsInput {
   readonly expandedWorkGroupIds?: ReadonlySet<string>;
   readonly isWorking: boolean;
   readonly activeTurnStartedAt: string | null;
+  /** The thread this one's running call is stopped behind, with that thread's open question; null when it is behind
+   * nobody. The question is drawn here, at the tail, because this is the screen the person is reading and the wait
+   * ends the moment they answer it. */
+  readonly waitingOn?: ThreadWaitingOn | null;
 }
 
 export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTimelineRow[] {
@@ -85,7 +89,8 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   // outcome on it. The turn matters. A host that restarted while a prompt stood open leaves it in the transcript
   // with none, since the runtime cuts the row short at load and records nothing that closes the question, and the
   // thread's own row reads the latest turn alone. Scoped here, the count and the row cannot say two things.
-  const waitingOnYou = unsettledTurnId !== null && entries.some(entry => entry.kind === "permission" && entry.permission.turnId === unsettledTurnId && isPromptOpen(entry.permission));
+  const behind = input.waitingOn ?? null;
+  const waitingOnYou = behind !== null || (unsettledTurnId !== null && entries.some(entry => entry.kind === "permission" && entry.permission.turnId === unsettledTurnId && isPromptOpen(entry.permission)));
   const pushWorking = (): void => { rows.push({ kind: "working", id: "working-indicator-row", createdAt: input.activeTurnStartedAt, waitingOnYou }); };
   const pushActive = (): void => {
     if (activeRow === null) return;
@@ -174,10 +179,29 @@ export function deriveMessagesTimelineRows(input: DeriveRowsInput): MessagesTime
   }
 
   if (input.isWorking && activeTurnHeaderIndex === entries.length) pushWorking();
-  if (input.isWorking && (!hasActivityRow || latestToolFailed)) {
+  if (behind !== null) rows.push({ kind: "permission", id: `waiting-on:${behind.threadId}:${behind.prompt.askId}`, createdAt: input.activeTurnStartedAt ?? "", permission: borrowedPrompt(behind), asker: waitingAskerLine(behind.title) });
+  else if (input.isWorking && (!hasActivityRow || latestToolFailed)) {
     rows.push({ kind: "thinking", id: LIVE_ACTIVITY_ROW_ID, createdAt: input.activeTurnStartedAt });
   }
   return rows;
+}
+
+/** Another thread's open question as this thread's own row: the turn it belongs to is not one of these, so it hangs
+ * on no turn here, and the session it answers is that thread's, which is what lets one click end both waits. */
+function borrowedPrompt(behind: ThreadWaitingOn): PermissionPrompt {
+  const { prompt } = behind;
+  return {
+    askId: prompt.askId,
+    turnId: null,
+    sessionId: behind.sessionId,
+    toolName: prompt.toolName,
+    input: prompt.input,
+    ...(prompt.detail !== undefined ? { detail: prompt.detail } : {}),
+    options: prompt.options,
+    createdAt: "",
+    outcome: null,
+    optionId: null,
+  };
 }
 
 // --- folds -----------------------------------------------------------------------

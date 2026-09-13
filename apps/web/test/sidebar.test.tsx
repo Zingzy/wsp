@@ -203,9 +203,9 @@ describe("rows from the fixture wire", () => {
     fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     // a session without a prompt falls back to the harness session id
     expect(rowOf("59094224-bb3d").textContent).toContain("2d");
-    // status pills: the running one works, the one that never settled ended, the idle one is plain
+    // status pills: the running one works, the one that never settled failed, the idle one is plain
     expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
-    expect(within(rowOf("59094224-bb3d")).getByLabelText("Ended")).toBeDefined();
+    expect(within(rowOf("59094224-bb3d")).getByLabelText("Failed")).toBeDefined();
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
     // Both workspaces head their shelf, whether or not one of their threads is working: ws_b's holds nothing but
     // the nested archive, and a shelf that holds only that is still a shelf.
@@ -1828,7 +1828,7 @@ describe("a thread another thread's agent opened", () => {
     expect(meta("write the migration").className).toContain("font-mono");
     // The dot alone says it works, the rule a workspace row already follows; a row that failed keeps its word.
     expect(meta("write the migration").textContent).not.toContain("Working");
-    expect(meta("review the diff").textContent).toBe("Ended··solari");
+    expect(meta("review the diff").textContent).toBe("Failed··solari");
     // The opener word is dropped on a spawned row: the indent says an agent opened it. The row above keeps both.
     expect(meta("write the migration").textContent).not.toContain("agent");
     expect(meta("ship the search rewrite").textContent).toBe("Working··you");
