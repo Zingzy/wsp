@@ -3,8 +3,8 @@
 // provider's word and the daemon reach only change it where they contradict
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
-import { fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import { computerWord, fmtThreads, JOINED_COMPUTER, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
+import type { HarnessCatalog, MachineFacts, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -219,6 +219,31 @@ export function workspaceWord(state: WorkspaceState): string {
   return WORDS[state];
 }
 
+/** What a row this workspace's machine stands on says under WHERE: the name this host has for the computer it runs
+ * on, which only a caller holding the places list can give and which is what a person calls that machine; else the
+ * provider its own record names, since this host may be wired to any of them and reading it off the kind would tell
+ * somebody on Docker their workspace is at Solari; else the kind's own word; else the name wsp has for the machine,
+ * which on those kinds is a login or a name somebody gave it and never an id a provider minted. Wherever that comes
+ * out as the computer the host runs on, it is said in that machine's own words. The one place a surface asks where
+ * a workspace runs. */
+export function whereWord(record: Pick<WorkspaceView, "machineId"> & { kind?: WorkspaceKind | undefined; provider?: string | undefined; facts?: Pick<MachineFacts, "os"> | undefined }, named?: string): string {
+  const word = named ?? record.provider ?? kindWords(workspaceKind(record)).where ?? record.machineId;
+  return word === THIS_COMPUTER ? computerWord(record.facts?.os) : word;
+}
+
+/** The line a verb that moved a workspace prints once the runtime has answered: the workspace and the word the next
+ * listing will show for it, in the lowercase a line of work reads. The one place that word is lowered, so a pause
+ * and a wake cannot spell one state two ways. A machine the provider has started and nothing on it answers gets a
+ * sentence of its own, since one word there would say the wake failed when what happened is that the machine is up
+ * and its daemon is not talking yet; a caller holding only a phase never reaches it. */
+export function workspaceStateLine(name: string, state: WorkspaceState): string {
+  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state).toLowerCase()}`;
+}
+
+/** Every word a slot beside facts can hold for a computer that is not answering, which is what lets a reader of
+ * that slot keep a closed set of words: a reading added here is a word added there, in one place. */
+export type AwayWord = "no answer" | "no daemon";
+
 /** What every surface says about a workspace whose computer is not answering, one reading per slot that has to
  * hold it: the mono word of a state slot, a row's third line, the length of the silence beside the computer's own
  * name, the two halves a pane refuses in, and the whole sentence. Six surfaces used to word this silence six ways
@@ -229,7 +254,7 @@ export interface AbsentComputer {
   readonly word: string;
   /** The one word a table slot standing beside three fact columns holds: the silence itself, with no figure on it.
    * How long it has been rides the row's title and the detail that already carries it. */
-  readonly away: string;
+  readonly away: AwayWord;
   /** A workspace row's third line, which has room for the figure. Written to thirty characters because that is
    * what the row leaves for text: a longer line is cut from the right, and the half that says what to do is the
    * half that goes. The second half states the silence and asks; it never says the computer is off, which this
@@ -237,10 +262,15 @@ export interface AbsentComputer {
   readonly line: string;
   /** What happened, the first half a pane refuses in. */
   readonly said: string;
-  /** What happens next, the second half: nobody has to reconnect it, so the one thing left to do is switch it on. */
-  readonly will: string;
+  /** What happens next, the second half: nobody has to reconnect it, so the one thing left to do is switch it on.
+   * Absent on a reading that carries a button instead, where the button is what happens next. */
+  readonly will?: string;
   /** Both halves, for every slot with room for a sentence: the row's title, the pane's State row, the held send. */
   readonly sentence: string;
+  /** The word on the button that puts back what the reading names, where this host owns the process that is
+   * missing rather than waiting on a computer of its own accord. A reading that carries one is also one a turn
+   * runs under, since what is missing never carried the turn: the composer stays open on it. */
+  readonly start?: string;
 }
 
 /** The one state of a computer that is not answering. awayMs is how long this host has not heard from it, null
@@ -251,6 +281,21 @@ export function absentComputer(name: string, awayMs: number | null): AbsentCompu
   const will = "it connects on its own when it is on";
   const dated = awayMs === null ? away : `${away} ${offlineFor(awayMs)}`;
   return { word: workspaceWord("unreachable"), away, line: `${dated} · is it on?`, said, will, sentence: `${said}; ${will}` };
+}
+
+/** The word on the button under every pane that needs the daemon this host started. */
+export const START_DAEMON_WORD = "Start it";
+
+/** The one state of the daemon this host started for its own computer's workspace while it is not running. The
+ * daemon is a child of the host, so this computer's reach is that child's reach and the app reads it as the
+ * computer being absent, in this computer's own words; the host can start another, so the reading carries the
+ * button rather than a second sentence, and a turn here runs without it. Unreachable is never one of these words:
+ * the computer the app is drawn on is the one computer a person can see is on. */
+export function ownDaemonDown(name: string): AbsentComputer {
+  const said = `${name}'s daemon is not running`;
+  // The row leaves thirty characters, which the sentence itself does not fit in, so the line says the same fact
+  // without the computer's name: the row already names the workspace, and the whole sentence rides its title.
+  return { word: "No daemon", away: "no daemon", line: "daemon not running · start it", said, sentence: said, start: START_DAEMON_WORD };
 }
 
 /** What the slot above the composer says while the workspace's computer is not answering. The box stays open and
@@ -421,6 +466,11 @@ export function screenCommandLine(command: ScreenCommand, catalog: Pick<HarnessC
 const ANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["reachable", "slow"]);
 /** A probe nothing answered: silence, or the edge dialling the guest and finding the daemon port dead. */
 const UNANSWERED: ReadonlySet<ReachState> = new Set<ReachState>(["unreachable", "no-daemon"]);
+
+/** Whether a workspace's reach says nothing is answering on its daemon's road: the probe found silence, or found
+ * the road open with the daemon port dead. On the computer the host runs on both mean one thing, the child this
+ * host started is not running, which is why the one reading of it asks this and not a list of states. */
+export const daemonSilent = (reach: ReachState | null | undefined): boolean => reach != null && UNANSWERED.has(reach);
 
 /** The reach word a row shows after one probe. A single silence after an answer keeps the answer's word: one slow
  * edge answer, one DNS blip, one busy second on the box or one probe that landed while the daemon was restarting

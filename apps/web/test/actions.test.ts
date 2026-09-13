@@ -6,7 +6,7 @@
 // menus are built from.
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, machineWord, notAnsweringYet, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { goneRefusal, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
@@ -29,6 +29,7 @@ const workspace = (state: WorkspaceState, over: Partial<WorkspaceTarget> = {}): 
   reach: state === "gone" ? "gone" : state === "paused" ? "napping" : state === "unreachable" ? "unreachable" : "reachable",
   reason: null,
   wakeRefused: null,
+  absent: null,
   ...over,
 });
 
@@ -41,6 +42,7 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     newThread: vi.fn(),
     copyText: vi.fn(async () => {}),
     rebuild: vi.fn(async () => {}),
+    restartDaemon: vi.fn(async () => {}),
     forget: vi.fn(),
     rename: vi.fn(),
     pickLook: vi.fn(),
@@ -60,6 +62,7 @@ describe("workspace actions", () => {
     expect(titles(actions)).toEqual([
       WORKSPACE_WORDS.pause,
       WORKSPACE_WORDS.rebuild,
+      WORKSPACE_WORDS.startDaemon,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
@@ -195,12 +198,38 @@ describe("workspace actions", () => {
   it("one target builder serves every surface: the status's phase, machine state, reach and reason lead, the record fills in", () => {
     const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
     const status: WorkspaceStatus = { ...view, machineId: "m_new", phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
-    expect(workspaceTarget(view, status)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words", wakeRefused: null });
-    expect(workspaceTarget(view, null)).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words", wakeRefused: null });
+    expect(workspaceTarget(view, status, [])).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words", wakeRefused: null, absent: null });
+    expect(workspaceTarget(view, null, [])).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words", wakeRefused: null, absent: null });
     // The record's own wake words ride apart from the reason, which the next status push replaces.
-    expect(workspaceTarget({ ...view, wakeRefused: "the provider answered none of 31 resume requests over 30m" }, null).wakeRefused).toBe("the provider answered none of 31 resume requests over 30m");
+    expect(workspaceTarget({ ...view, wakeRefused: "the provider answered none of 31 resume requests over 30m" }, null, []).wakeRefused).toBe("the provider answered none of 31 resume requests over 30m");
     // A record from before local workspaces existed carries no kind and reads as a fork; one that does keeps it.
-    expect(workspaceTarget({ ...view, kind: "local" }, null).kind).toBe("local");
+    expect(workspaceTarget({ ...view, kind: "local" }, null, []).kind).toBe("local");
+    // The computer the host runs on carries the one reading of its own daemon, so a verb refused on it names the
+    // part that is down; every other kind's silence is its computer's link and is read off the places list.
+    const here = { ...view, kind: "local" as const };
+    expect(workspaceTarget(here, { ...status, kind: "local", phase: "running", machineState: "running", reach: { state: "unreachable" } }, []).absent?.said).toBe("this Mac's daemon is not running");
+    expect(workspaceTarget(here, { ...status, kind: "local", phase: "running", machineState: "running", reach: { state: "reachable" } }, []).absent).toBeNull();
+    // A fork at a provider whose computer has stopped answering reads that computer's own sentence off the list,
+    // which is the same door and not a second rule: the reading is null while nothing on the list is away.
+    const laptop: PlaceView = { id: "pc_laptop", kind: "computer", name: "laptop", default: false, present: false };
+    const answering: PlaceView = { ...laptop, present: true };
+    const away = { ...view, kind: "place" as const, place: "pc_laptop" };
+    expect(workspaceTarget(away, null, [answering]).absent).toBeNull();
+    expect(workspaceTarget(away, null, [laptop]).absent?.said).toBe("laptop is not answering");
+    expect(workspaceTarget(view, { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } }, []).absent).toBeNull();
+  });
+
+  it("refuses a preview and a forget on this computer in the one sentence, never by calling it unreachable", () => {
+    const here = workspace("unreachable", { kind: "local", absent: ownDaemonDown("this Mac") });
+    const actions = resolveActions(workspaceActions, here, workspaceVerbs({ forget: vi.fn() }));
+    expect(actionById(actions, "open-browser").refusal).toBe("this Mac's daemon is not running");
+    expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this Mac's daemon is not running");
+    for (const action of actions) expect(action.refusal ?? "").not.toMatch(/unreachable/i);
+    // A fork whose machine stopped answering keeps the state table's words, which say what opens when it answers,
+    // and the one sentence both roads out of gone are refused in.
+    const fork = resolveActions(workspaceActions, workspace("unreachable"), workspaceVerbs({ forget: vi.fn() }));
+    expect(actionById(fork, "open-browser").refusal).toBe("Workspace is unreachable; previews open when the machine answers");
+    expect(actionById(fork, "forget").refusal).toBe(notAnsweringYet("forget"));
   });
 
   it("a paused machine the provider would not resume offers the rebuild beside the wake, with the record's own words on it", () => {
@@ -419,6 +448,7 @@ describe("menu items from actions", () => {
     expect(items.map(i => [i.id, i.label, i.group, i.enabled])).toEqual([
       ["phase", WORKSPACE_WORDS.wake, "state", true],
       ["rebuild", WORKSPACE_WORDS.rebuild, "state", false],
+      ["start-daemon", WORKSPACE_WORDS.startDaemon, "state", false],
       ["new-thread", WORKSPACE_WORDS.newThread, "open", true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],

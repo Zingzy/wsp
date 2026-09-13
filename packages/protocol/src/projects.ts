@@ -91,6 +91,13 @@ export function registeredLine(dest: string): string {
   return `${folderName(dest)} registered at ${dest}; nothing was copied.`;
 }
 
+/** What a drop the host would not register says: the folder by its own name, what did not happen and what to try.
+ * The host's reason is not the sentence. It ends in whatever threw, and the sentence used to begin with the
+ * workspace's name and a colon, which read as a machine talking to itself in the corner of the screen. */
+export function dropRefusedLine(dest: string): string {
+  return `${folderName(dest)} was not imported; check the folder is still there and drop it again.`;
+}
+
 /** The line under an import that named no workspace: where it goes instead, and why that one. */
 export function lastTargetLine(workspaceName: string): string {
   return `importing to ${workspaceName}, the workspace the last thread started on`;

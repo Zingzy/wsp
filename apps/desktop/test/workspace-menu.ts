@@ -19,7 +19,9 @@ export type MenuShape = ReadonlyArray<string>;
  * status is left out for the same reason; the one word that reads it is the phase row, and a workspace the smoke
  * has just created is running, which is what its record already says. */
 export function workspaceMenuShape(workspace: WorkspaceView): MenuShape {
-  const target = workspaceTarget(workspace, null);
+  // No places list: only the shape is read, and the one field that reads it is a verb's refusal, which decides
+  // whether a row is dimmed rather than whether it is there.
+  const target = workspaceTarget(workspace, null, []);
   // The smoke's host runs with labs off, the public build's setting, so the registry's labs rows are not among the menu's.
   const items = workspaceActions.filter(entry => entry.labs !== true).map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true }));
   return contextMenuTemplate(items, () => {}).map(row => (row.type === "separator" ? SEPARATOR : String(row.label)));

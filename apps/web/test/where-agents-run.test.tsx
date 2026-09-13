@@ -5,7 +5,7 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, doorPortHeldLine, placeAddSheetWord, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -80,7 +80,7 @@ function fakeApi(over: Partial<Api> = {}): { api: Api; push(event: EventUnion): 
 beforeEach(() => {
   // The provider sheet is drawn by the section itself, and a test that opened one leaves the rest of the document
   // inert for the next: a row inside an aria-hidden container is a row no role query finds.
-  useStore.setState({ api: null, places: [], workspaces: [], sessions: {}, addComputerOpen: false, connectProviderOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+  useStore.setState({ api: null, places: [], workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, connectProviderOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 });
 
 /** The client a test built the app's own api from. Closed here however that test ended: one left behind redials
@@ -123,6 +123,18 @@ describe("Where agents run", () => {
     expect(cells(rows[1]!).slice(1)).toEqual(["4 cores · 8 GB".replace(/ /g, " "), "91 GB", "1 · agents only"]);
     // The whole sentence rides the row's title, so the table and the sidebar row say one thing.
     expect(rows[1]!.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on");
+  });
+
+  it("says this computer's own daemon is not running in the slot, rather than listing this Mac as perfectly fine", () => {
+    // This Mac holds no link of its own, so the table read it as present and said nothing while every pane on it
+    // said unreachable: the app was telling a person two different things in two rooms.
+    const silent = { id: mine.id, phase: "running", machineState: "running", reach: { state: "unreachable" }, machineId: "local", kind: "local", size: { cpu: 8, memMb: 16384 }, name: mine.name, golden: "", createdAt: mine.createdAt } as unknown as WorkspaceStatus;
+    useStore.setState({ places: [here], workspaces: [mine], statuses: { [mine.id]: silent } });
+    render(<WhereAgentsRun now={NOW} />);
+    const row = screen.getAllByRole("row")[1]!;
+    expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("no daemon");
+    expect(row.getAttribute("title")).toContain("this Mac's daemon is not running");
+    expect(row.textContent).not.toContain("Unreachable");
   });
 
   it("counts the workspaces standing on each row off the list the sidebar shows, not off the row", () => {

@@ -98,11 +98,16 @@ export function composerSendBlock(input: {
   /** This workspace's computer is not answering, which is its state whatever a status that predates the silence
    * still says: the send is held on it in the same slot every other state is held in. */
   absent?: boolean;
+  /** What is not answering is a daemon this host started, not the computer under it: the turn runs in this host's
+   * own process, on this computer, and never went through that daemon, so neither the silence nor the state word
+   * it folds into holds the box. The panes that do need the daemon say so where they are. */
+  daemonOnly?: boolean;
 }): SendRefusalKind | null {
   if (!input.hasApi || input.conn === "connecting") return "connecting";
   if (input.conn === "reconnecting") return "reconnecting";
   if (input.conn === "closed") return "closed";
   if (input.state === null) return "not-found";
+  if (input.daemonOnly === true) return !input.hydrated ? "loading" : input.agents ? null : "no-agents";
   if (input.absent === true) return "unreachable";
   if (input.state !== "running") return input.state;
   if (!input.hydrated) return "loading";
@@ -182,7 +187,9 @@ export function ChatComposer({ workspaceId, thread }: { workspaceId: string; thr
   const linkDown = useLinkDownLine(workspaceId);
   const { harness } = thread.view;
   const catalog = useMemo(() => catalogFromHarness({ id: harnessId, harness, screen: screenCommandsOf(harnessCatalog) }), [harness, harnessCatalog, harnessId]);
-  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null });
+  // A daemon this host started is not the road a turn takes, so its absence leaves the box open on this computer.
+  const daemonOnly = absent?.start !== undefined;
+  const blocked = composerSendBlock({ conn, hasApi: api !== null, state, hydrated: thread.hydrated, agents: harnessCatalogs.length > 0, absent: absent !== null, daemonOnly });
   // A send wakes a paused machine by itself, so paused is not a refusal here: the box takes the words and the send
   // button says it wakes first.
   const wakesFirst = blocked === "paused";

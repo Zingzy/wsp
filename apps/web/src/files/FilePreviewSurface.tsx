@@ -71,7 +71,7 @@ export function FilePreviewSurface({ workspaceId, surface, theme }: { workspaceI
 
   useEffect(() => load(), [load]);
 
-  if (!wire) return <NotRunning />;
+  if (!wire) return <NotRunning workspaceId={workspaceId} />;
 
   const isMarkdown = isMarkdownFile(path);
   const rendered = isMarkdown && renderMarkdown;

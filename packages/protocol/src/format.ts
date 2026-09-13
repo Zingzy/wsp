@@ -394,8 +394,14 @@ export const NEWER_TURN_LINE = "a newer turn is running; the reply above is the 
 /** One tool call's input, as the wire's delta carries it: the JSON the harness reported, already parsed. */
 type ToolInput = Readonly<Record<string, unknown>>;
 
-/** The line one tool name reads as; undefined when the call's input does not carry what the line needs. */
-type ToolLine = (input: ToolInput) => string | undefined;
+/** Which moment a call's line is written for: the call as the harness reported it, which is before it has run and
+ * before any prompt it waits on is answered, or the result that says it ran. A row whose words differ between the
+ * two carries both, so nothing reads as done before it is. */
+type ToolMoment = "asked" | "done";
+
+/** The line one tool name reads as at one of those moments; undefined when the call's input does not carry what
+ * the line needs. */
+type ToolLine = (input: ToolInput, moment: ToolMoment) => string | undefined;
 
 /** What kind of item a call is to a client that groups its rows by kind, in the words the app's transcript uses. */
 export type ToolItemType = "command_execution" | "file_change" | "web_search" | "collab_agent_tool_call" | "mcp_tool_call";
@@ -444,10 +450,10 @@ const shellRow: ToolRow = {
   requestKind: "command",
 };
 
-const pathRow = (verb: string, field: string, requestKind: ToolRequestKind): ToolRow => ({
-  line: input => {
+const pathRow = (doing: string, did: string, field: string, requestKind: ToolRequestKind): ToolRow => ({
+  line: (input, moment) => {
     const path = toolField(input, field);
-    return path === undefined ? undefined : `${verb} ${path}`;
+    return path === undefined ? undefined : `${moment === "done" ? did : doing} ${path}`;
   },
   shows: [field],
   requestKind,
@@ -456,10 +462,10 @@ const pathRow = (verb: string, field: string, requestKind: ToolRequestKind): Too
     : {}),
 });
 
-const aboutRow = (verb: string, field: string, rest: Omit<ToolRow, "line" | "shows"> = {}): ToolRow => ({
-  line: input => {
+const aboutRow = (words: { doing: string; did?: string }, field: string, rest: Omit<ToolRow, "line" | "shows"> = {}): ToolRow => ({
+  line: (input, moment) => {
     const what = toolField(input, field);
-    return what === undefined ? undefined : `${verb} ${titleLine(what)}`;
+    return what === undefined ? undefined : `${(moment === "done" ? words.did : undefined) ?? words.doing} ${titleLine(what)}`;
   },
   shows: [field],
   ...rest,
@@ -476,10 +482,11 @@ function changedPaths(input: ToolInput): readonly string[] {
 }
 
 const changeRow: ToolRow = {
-  line: input => {
+  line: (input, moment) => {
     const paths = changedPaths(input);
     if (paths.length === 0) return undefined;
-    return paths.length === 1 ? `edited ${paths[0]}` : `edited ${plural(paths.length, "file")}`;
+    const verb = moment === "done" ? "edited" : "editing";
+    return paths.length === 1 ? `${verb} ${paths[0]}` : `${verb} ${plural(paths.length, "file")}`;
   },
   shows: [],
   itemType: "file_change",
@@ -609,7 +616,7 @@ const questionAsk: PermissionWords = {
 };
 
 /** Launching a subagent, under either name the harness gives that call. */
-const agentRow: ToolRow = aboutRow("agent:", "description", { itemType: "collab_agent_tool_call" });
+const agentRow: ToolRow = aboutRow({ doing: "agent:" }, "description", { itemType: "collab_agent_tool_call" });
 
 /** Every tool a harness reports, one row per name, Claude's and Codex's alike: what the command line writes for the
  * call and what the app's transcript makes of it come from the same row, so a new tool is a row here and nothing
@@ -617,17 +624,17 @@ const agentRow: ToolRow = aboutRow("agent:", "description", { itemType: "collab_
 const TOOL_ROWS: ReadonlyMap<string, ToolRow> = new Map<string, ToolRow>([
   ["Bash", shellRow],
   ["command_execution", shellRow],
-  ["Read", pathRow("read", "file_path", "file-read")],
-  ["Write", pathRow("wrote", "file_path", "file-change")],
-  ["Edit", pathRow("edited", "file_path", "file-change")],
-  ["MultiEdit", pathRow("edited", "file_path", "file-change")],
-  ["NotebookEdit", pathRow("edited", "notebook_path", "file-change")],
+  ["Read", pathRow("reading", "read", "file_path", "file-read")],
+  ["Write", pathRow("writing", "wrote", "file_path", "file-change")],
+  ["Edit", pathRow("editing", "edited", "file_path", "file-change")],
+  ["MultiEdit", pathRow("editing", "edited", "file_path", "file-change")],
+  ["NotebookEdit", pathRow("editing", "edited", "notebook_path", "file-change")],
   ["file_change", changeRow],
-  ["Grep", aboutRow("searched code for", "pattern", { codeSearch: true })],
-  ["Glob", aboutRow("searched code for", "pattern", { codeSearch: true })],
-  ["WebSearch", aboutRow("searched the web for", "query", { itemType: "web_search" })],
-  ["web_search", aboutRow("searched the web for", "query", { itemType: "web_search" })],
-  ["WebFetch", aboutRow("fetched", "url", { itemType: "web_search" })],
+  ["Grep", aboutRow({ doing: "searching code for", did: "searched code for" }, "pattern", { codeSearch: true })],
+  ["Glob", aboutRow({ doing: "searching code for", did: "searched code for" }, "pattern", { codeSearch: true })],
+  ["WebSearch", aboutRow({ doing: "searching the web for", did: "searched the web for" }, "query", { itemType: "web_search" })],
+  ["web_search", aboutRow({ doing: "searching the web for", did: "searched the web for" }, "query", { itemType: "web_search" })],
+  ["WebFetch", aboutRow({ doing: "fetching", did: "fetched" }, "url", { itemType: "web_search" })],
   ["Task", agentRow],
   ["Agent", agentRow],
   [QUESTION_TOOL, questionRow],
@@ -655,7 +662,18 @@ export function toolActivityLine(toolName: string | undefined, input: string): s
   const row = TOOL_ROWS.get(name);
   if (row === undefined) return name;
   const fields = toolInput(input);
-  return fields === undefined ? name : row.line(fields) ?? name;
+  return fields === undefined ? name : row.line(fields, "asked") ?? name;
+}
+
+/** The same call once its result says it ran: the past of the line it opened with, which is the only place a client
+ * may write one. Nothing for a call whose row reads the same at both moments, and for one whose input never became
+ * an object, so the call's own answer stands there instead. */
+export function toolDoneLine(toolName: string | undefined, input: string): string | undefined {
+  const row = TOOL_ROWS.get(toolName ?? "tool");
+  const fields = row === undefined ? undefined : toolInput(input);
+  if (row === undefined || fields === undefined) return undefined;
+  const done = row.line(fields, "done");
+  return done === undefined || done === row.line(fields, "asked") ? undefined : done;
 }
 
 /** What a tool call is, for a client whose rows carry more than one line: the field to show, the shell command and
@@ -721,6 +739,19 @@ export function toolResultLine(text: string, isError = false): string | undefine
   const first = titleLine(text);
   if (!isError) return first === "" ? undefined : first;
   return first === "" ? "failed" : `failed: ${first}`;
+}
+
+/** What a terminal watching a turn prints once one call's result lands: what a call that changed a file changed,
+ * in the past, since the answer such a call hands back is the harness telling itself the write landed; and for
+ * every other call what came back, which is what a person is watching it for. Nothing where neither has anything
+ * to say. A call still waiting on a person has no result and so no line here, which is what keeps the past out of
+ * a terminal until the thing has happened. */
+export function toolAnsweredLine(toolName: string | undefined, input: string, result: { text: string; isError?: boolean }): string | undefined {
+  if (result.isError !== true && toolCallFacts(toolName ?? "tool", input).requestKind === "file-change") {
+    const did = toolDoneLine(toolName, input);
+    if (did !== undefined) return did;
+  }
+  return toolResultLine(result.text, result.isError === true);
 }
 
 /** What a call that launched a subagent said the task was, from the call's own input: the title of the fold that
@@ -972,13 +1003,69 @@ export function stepRetryLine(limitS: number): string {
   return `${timedOutLine(limitS)}; trying once more`;
 }
 
-/** The turn's error when the harness process ended before any result. Exit 127 is the shell saying the binary was
- * not on PATH, so the line names the binary and the PATH the launch exported (or that it exported none) instead of a
- * bare code; every other code reads as the code. */
-export function harnessExitLine(bin: string, exitCode: number | null, path: string | undefined): string {
-  if (exitCode !== 127) return `${bin} exited with code ${String(exitCode)} before emitting a result`;
-  const searched = path === undefined ? "the launch exported no PATH, the machine's own was searched" : `PATH searched: ${path}`;
-  return `${bin} was not found on PATH (exit 127); ${searched}`;
+/** The turn's error when the harness process ended before any result, in the words of what actually ended it rather
+ * than in a number nobody can act on. Exit 127 is the shell saying the binary was not on PATH, so the line names the
+ * binary and the PATH the launch exported, or that it exported none. A signal is the process being killed, named.
+ * A code the run has is the code. No code at all is a run whose leader is gone without leaving one, which is a kill
+ * the road could not name; where nothing of the agent ever came back, the launch never reached it and says so. */
+export function harnessExitLine(bin: string, exitCode: number | null, path: string | undefined, ended: HarnessEnded = {}): string {
+  if (exitCode === 127) {
+    const searched = path === undefined ? "the launch exported no PATH, the machine's own was searched" : `PATH searched: ${path}`;
+    return `${bin} was not found on PATH (exit 127); ${searched}`;
+  }
+  if (ended.signal !== undefined) return `${bin} was killed (${ended.signal}) before it answered`;
+  if (exitCode !== null) return `${bin} exited with code ${String(exitCode)} before emitting a result`;
+  if (ended.reached === false) return `the launch never reached ${bin}: its run ended before the agent said a word`;
+  return `${bin} was killed before it answered`;
+}
+
+/** What the road that watched the run knows about how it ended, beyond the code: the signal that ended it where it
+ * saw one, and whether the agent ever announced itself. A road that knows neither leaves both out and the code
+ * stands on its own. */
+export interface HarnessEnded {
+  /** The signal's own name, as the computer running the process spells it. */
+  readonly signal?: string;
+  /** False says nothing of the agent ever came back, so the run ended before the launch became a turn. */
+  readonly reached?: boolean;
+}
+
+/** What a person's line calls each field a request carries, for the refusal that has to name one. The wire's own
+ * names are never printed: a person types flags and words, not fields. A field with no row here is one no line
+ * names on its own, and the refusal says the line instead. */
+const REQUEST_WORDS: Readonly<Record<string, string>> = {
+  workspaceId: "the workspace",
+  threadId: "the thread",
+  sessionId: "the thread",
+  argv: "the command",
+  prompt: "the message",
+  cwd: "--cwd",
+  model: "--model",
+  effort: "--effort",
+  permissionMode: "--access",
+};
+
+/** What the host would not read, out of the refusal its own validator answers a request with. The list carries the
+ * wire's field names and every op the host serves, so none of it reaches a person: what comes back is the one thing
+ * they can act on, which of their arguments the host refused, or that this wsp and the host are different builds.
+ * Nothing when the refusal is a sentence, which is every refusal wsp writes itself. */
+export function validatorRefusal(error: string): string | undefined {
+  let issues: unknown;
+  try {
+    issues = JSON.parse(error);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(issues) || issues.length === 0) return undefined;
+  const rows = issues.map(issue => (typeof issue === "object" && issue !== null ? (issue as { code?: unknown; path?: unknown }) : {}));
+  if (!rows.every(row => typeof row.code === "string" && Array.isArray(row.path))) return undefined;
+  const fields = rows.map(row => (row.path as unknown[])[0]).filter((field): field is string => typeof field === "string");
+  // A discriminator the host does not know is this wsp asking for an op the host does not serve, which no argument
+  // of the line can fix: the two builds differ.
+  if (rows.some(row => row.code === "invalid_union_discriminator") && fields.every(field => field === "op")) {
+    return "the host does not serve this line; it runs another version of wsp, restart it with wsp up";
+  }
+  const named = [...new Set(fields.map(field => REQUEST_WORDS[field]).filter((word): word is string => word !== undefined))];
+  return named.length === 0 ? "the host would not read this line" : `the host would not read ${named.join(" and ")} on this line`;
 }
 
 /** The host's one line when it asked the person's login shell for their PATH and got none back: why, and that the
@@ -2022,6 +2109,18 @@ export const MACHINE_WSP_FORKS = "a machine wsp forks";
  * any other computer the plain word. The one place that word is decided, so no screen tells a Linux reader the tool
  * was built for somebody else. */
 export const thisComputer = (platform: "darwin" | "linux"): string => (platform === "darwin" ? "this Mac" : THIS_COMPUTER);
+
+/** Whether the machine that reported this system name is a Mac: the name its maker gives it, and the kernel's own
+ * word where the machine answered nothing better, which is what a machine on this computer falls back to. The
+ * folder browsers read it beside the home to know whether that home keeps a Library. Absent is not a Mac: what
+ * reads this hides a folder, and a machine that said nothing has said nothing to hide. */
+export function isMacMachine(osName: string | null | undefined): boolean {
+  return /^(?:macOS|Darwin)\b/.test(osName ?? "");
+}
+
+/** The computer the host runs on as a row names it, off what that machine itself reported: the same word every
+ * screen that names this computer uses, so a table and the settings list cannot call one computer two things. */
+export const computerWord = (os: string | null | undefined): string => thisComputer(isMacMachine(os) ? "darwin" : "linux");
 
 /** The heading over the tools a package manager here has that no catalog row carries: the wizard's own screen and
  * the `wsp recipe scan` section are one section, so they carry one name. */

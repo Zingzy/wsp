@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, absentComputer, absentRoad, awayMsOf, lastKnown, placeAddSheetWord, placeDialLine, placeNoDialLine, workspacePlace, workspaceState } from "../src/index.js";
+import { PLACE_INSTALL, PLACES_WORDS, REPORTED_WORD, ROW_LINE_MAX, START_DAEMON_WORD, absentComputer, absentRoad, awayMsOf, daemonSilent, lastKnown, ownDaemonDown, placeAddSheetWord, placeDialLine, placeNoDialLine, workspacePlace, workspaceState } from "../src/index.js";
 
 describe("the one state of a computer that is not answering", () => {
   const now = Date.parse("2026-09-12T13:30:00.000Z");
@@ -48,6 +48,44 @@ describe("the one state of a computer that is not answering", () => {
 
   it("folds a computer that answers nothing into the state word every surface reads", () => {
     expect(workspaceState({ phase: "running", reach: "unreachable" })).toBe("unreachable");
+  });
+});
+
+describe("the one state of this computer's own daemon while it is not running", () => {
+  const reading = ownDaemonDown("this Mac");
+
+  it("says the same thing in every slot that has to hold it, and the ticket's sentence where there is room", () => {
+    expect(reading.said).toBe("this Mac's daemon is not running");
+    expect(reading.sentence).toBe("this Mac's daemon is not running");
+    expect(reading.word).toBe("No daemon");
+    expect(reading.away).toBe("no daemon");
+    expect(reading.line).toBe("daemon not running · start it");
+  });
+
+  it("never says Unreachable about the computer the app is drawn on", () => {
+    for (const slot of [reading.word, reading.away, reading.line, reading.said, reading.sentence]) {
+      expect(slot.toLowerCase()).not.toContain("unreachable");
+    }
+  });
+
+  it("writes the row's line under the cap the row cuts at", () => {
+    expect(reading.line.length).toBeLessThanOrEqual(ROW_LINE_MAX);
+  });
+
+  it("carries the button instead of a second sentence, since the host holds the process and can start another", () => {
+    expect(reading.start).toBe(START_DAEMON_WORD);
+    expect(reading.will).toBeUndefined();
+    // A computer this host only waits for has no such road, and says what happens next instead.
+    expect(absentComputer("old-laptop", null).start).toBeUndefined();
+    expect(absentComputer("old-laptop", null).will).toBe("it connects on its own when it is on");
+  });
+
+  it("reads one daemon that is not running off either silence a probe of this computer can find", () => {
+    expect(daemonSilent("unreachable")).toBe(true);
+    expect(daemonSilent("no-daemon")).toBe(true);
+    for (const answering of ["reachable", "slow", "napping", "gone", "unsupported", "zombie"] as const) expect(daemonSilent(answering)).toBe(false);
+    expect(daemonSilent(null)).toBe(false);
+    expect(daemonSilent(undefined)).toBe(false);
   });
 });
 

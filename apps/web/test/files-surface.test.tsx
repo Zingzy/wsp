@@ -298,6 +298,38 @@ describe("files surface", () => {
     expect(screen.getAllByText("The workspace is not running.")).toHaveLength(2);
   });
 
+  it("says this computer's own daemon is not running and offers the start, in place of telling a person to wake it", async () => {
+    const asked: string[] = [];
+    const here = { ...imported, kind: "local" as const, machineId: "local" };
+    act(() =>
+      useStore.setState({
+        api: { subscribe: () => () => {}, restartDaemon: async (id: string) => void asked.push(id) } as never,
+        workspaces: [here],
+        statuses: { [WS]: { ...here, machineState: "running", reach: { state: "unreachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never },
+      }),
+    );
+    render(<FilesSurface workspaceId={WS} theme="dark" />);
+    expect(screen.getByText("this Mac's daemon is not running")).toBeTruthy();
+    // The instruction with no control behind it goes: there was no Wake on this panel, on the row or in the palette.
+    expect(document.body.textContent).not.toContain("wake it to browse them");
+    await act(async () => void fireEvent.click(screen.getByRole("button", { name: "Start it" })));
+    expect(asked).toEqual([WS]);
+  });
+
+  it("a tree already drawn is dropped when that daemon goes: a listing with no sentence is the pane saying it is fine", async () => {
+    const here = { ...imported, kind: "local" as const, machineId: "local" };
+    const up = { ...here, machineState: "running", reach: { state: "reachable" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 };
+    provideDaemonWire(WS, fakeWire({ "fs.list": LISTING }));
+    provideDaemonHello(WS, { root: PROJECT_DEST, version: 3 });
+    act(() => useStore.setState({ api: { subscribe: () => () => {} } as never, workspaces: [here], statuses: { [WS]: up as never } }));
+    const { container } = render(<FilesSurface workspaceId={WS} theme="dark" />);
+    await waitFor(() => expect(treeRows(container).length).toBeGreaterThan(0));
+
+    act(() => useStore.setState({ statuses: { [WS]: { ...up, reach: { state: "unreachable" } } as never } }));
+    await waitFor(() => expect(screen.getByText("this Mac's daemon is not running")).toBeTruthy());
+    expect(treeRows(container)).toEqual([]);
+  });
+
   it("keeps the root crumb going to its root when the daemon browses two roots, with the switch its own button beside it, and up stops at each root's edge", async () => {
     const wire = fakeWire({ "fs.list": LISTING });
     provideDaemonWire(WS, wire);

@@ -12,15 +12,16 @@
 // action a row carries, as a button or in its right-click menu, comes from
 // the workspace and thread registries. The surface itself is the shell's
 // sidebar-glass: nothing here paints a background.
-import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon } from "lucide-react";
+import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, dropRefusedLine, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
-import { CREATION_ASKED } from "../actions/format.js";
+import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
 import { sidebarActions } from "../actions/sidebarActions.js";
 import { threadActions, threadTarget, type ThreadVerbs } from "../actions/threadActions.js";
 import { useThreadVerbs, useWorkspaceVerbs } from "../actions/verbs.js";
+import { CLOSE_TOAST_LABEL, useToastLife } from "./toastLife.js";
 import { workspaceActions, workspaceTarget } from "../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
 import { useOutOfMemoryReadings } from "../machine/live.js";
@@ -132,6 +133,7 @@ export function WorkspaceSidebar() {
   const costs = useStore(s => s.costs);
   const toast = useStore(s => s.toast);
   const clearToast = useStore(s => s.clearToast);
+  useToastLife(toast, clearToast);
   // Keyed by the words it was set with, so a toast said since it took the slot never shows another sentence's action.
   const toastAction = useStore(s => (s.toastAction !== null && s.toastAction.for === s.toast ? s.toastAction : null));
   const select = useStore(s => s.select);
@@ -258,7 +260,7 @@ export function WorkspaceSidebar() {
       await api.rebuild(project.id);
     } catch (e) {
       setRebuilding(({ [project.id]: _dropped, ...rest }) => rest);
-      useStore.setState({ toast: `${project.displayName}: ${e instanceof Error ? e.message : String(e)}` });
+      useStore.setState({ toast: rebuildRefusedLine(project.displayName) });
     }
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
@@ -288,7 +290,7 @@ export function WorkspaceSidebar() {
       useStore.getState().landProject(project.id, landed.project);
       useStore.setState({ toast: registeredLine(landed.dest) });
     } catch (e) {
-      useStore.setState({ toast: `${project.displayName}: ${errorText(e)}` });
+      useStore.setState({ toast: dropRefusedLine(source) });
     }
   };
   /** The row's tile while a drag lasts, where a drop has somewhere to go: a kind with an import road, on a machine the
@@ -357,14 +359,14 @@ export function WorkspaceSidebar() {
   /** The machine one workspace runs on, as a thread's verbs read it: the state its row shows and, where it is gone,
    * the words that say so. Read per thread off the workspace the thread itself runs on. */
   const machineOf = (project: SidebarProjectSnapshot): RowMachine => {
-    const workspace = workspaceTarget(project.workspace, project.status);
+    const workspace = workspaceTarget(project.workspace, project.status, places);
     return { state: workspaceState(workspace), ...(workspace.reason !== null ? { goneWords: workspace.reason } : {}) };
   };
 
   /** What both bodies need about one workspace: the actions every surface of it reads, and the action that opens
    * its first thread. */
   const blockOf = (project: SidebarProjectSnapshot) => {
-    const actions = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status), verbs, labs);
+    const actions = resolveActions(workspaceActions, workspaceTarget(project.workspace, project.status, places), verbs, labs);
     return { actions, newThreadAction: actionById(actions, "new-thread") };
   };
 
@@ -650,6 +652,19 @@ export function WorkspaceSidebar() {
                   {toastAction.word}
                 </Button>
               ) : null}
+              <Button
+                data-toast-close
+                size="icon-xs"
+                variant="ghost-muted"
+                aria-label={CLOSE_TOAST_LABEL}
+                className="shrink-0"
+                onClick={event => {
+                  event.stopPropagation();
+                  clearToast();
+                }}
+              >
+                <XIcon />
+              </Button>
             </div>
           ) : null}
           {mode === "spaces" ? (

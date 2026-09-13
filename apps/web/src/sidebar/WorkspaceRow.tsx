@@ -19,7 +19,7 @@
 // While a folder is dragged over the window the row is a dotted drop tile
 // instead, the same height, saying what a drop on it does in the row's muted
 // mono; the sidebar hands it the words and takes the drop.
-import { ChevronDownIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { ChevronDownIcon, PlayIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useState, type DragEvent } from "react";
 import { needsRebuild, workspaceKind, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
@@ -40,7 +40,10 @@ const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
 const INNER_GLYPH_CLASS = cn(GLYPH_CLASS, "right-7");
 /** The row's text runs to the row's own inset; the glyphs land in the state slot on hover. */
 const ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
-const STATE_SLOT_CLASS = "min-w-11 shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
+/** The slot holds the longest state word there is, so a word arriving or leaving never moves the name beside it:
+ * Unreachable measures 72.9 px in the row's mono at 11 px, and at 44 px the slot took the 16 px it needed off the
+ * name, which moved under a person reading it. */
+const STATE_SLOT_CLASS = "min-w-[74px] shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
 /** The kind's glyph reads at the weight of the muted meta beside it until the state's own class takes the ink over. */
 const LEAD_GLYPH_CLASS = "text-muted-foreground/60";
 
@@ -134,6 +137,11 @@ export function WorkspaceRow({
   const forgetAction = actionById(actions, "forget");
   const rebuildAction = actionById(actions, "rebuild");
   const newThreadAction = actionById(actions, "new-thread");
+  const startDaemonAction = actionById(actions, "start-daemon");
+  // The row's line says start it, so the row's own glyph is that start while the reading carries one; the thread
+  // it stands in for is a key and a menu row away, and the reading is what every surface offers this off.
+  const startable = startDaemonAction.refusal === null;
+  const glyphAction = startable ? startDaemonAction : newThreadAction;
   return (
     <>
       <SidebarMenuButton
@@ -210,10 +218,10 @@ export function WorkspaceRow({
             </SidebarMenuAction>
           ) : null}
           <Tooltip>
-            <TooltipTrigger render={<SidebarMenuAction showOnHover className={GLYPH_CLASS} aria-label={rowLabelOf(newThreadAction)} onClick={() => void runAction(newThreadAction)} />}>
-              <PlusIcon />
+            <TooltipTrigger render={<SidebarMenuAction showOnHover className={GLYPH_CLASS} aria-label={rowLabelOf(glyphAction)} onClick={() => void runAction(glyphAction)} />}>
+              {startable ? <PlayIcon /> : <PlusIcon />}
             </TooltipTrigger>
-            <TooltipPopup side="bottom">{NEW_THREAD_TITLE}</TooltipPopup>
+            <TooltipPopup side="bottom">{startable ? startDaemonAction.title : NEW_THREAD_TITLE}</TooltipPopup>
           </Tooltip>
         </>
       )}

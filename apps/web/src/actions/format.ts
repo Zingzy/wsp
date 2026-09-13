@@ -24,6 +24,7 @@ export const WORKSPACE_WORDS = {
   fork: "Run a copy",
   copyId: "Copy computer id",
   forget: "Forget workspace",
+  startDaemon: "Start the daemon",
 } as const;
 
 /** The sidebar's two bodies, keyed by mode: the body's name as the settings page lists it, the toggle's words as the
@@ -90,6 +91,10 @@ export const phaseHint = (state: WorkspaceState): string =>
 export const FORGET_HINT = "Its computer is gone; forget the workspace to drop it from this computer";
 export const REBUILD_HINT = "The workspace answers nothing; rebuild it from your image";
 
+/** What a rebuild the host refused says, wherever it was asked from. The host's own reason is not quoted: it ends
+ * in whatever threw, and the line used to begin with the workspace's name and a colon. */
+export const rebuildRefusedLine = (name: string): string => `${name} was not rebuilt. The Workspace panel says what it is doing.`;
+
 export function phaseRefusal(state: WorkspaceState): string | null {
   switch (state) {
     case "running":
@@ -112,6 +117,7 @@ export function phaseRefusal(state: WorkspaceState): string | null {
 
 export const CLIENT_CANNOT_REBUILD = "This client cannot rebuild workspaces";
 export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
+export const CLIENT_CANNOT_START_DAEMON = "This client cannot start a daemon";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
 export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
@@ -120,18 +126,38 @@ export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspa
 export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";
 export const NO_WORKSPACE_FORK = "Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it";
 
+/** The half of the forget's refusal that holds whatever the workspace is: what is so about it comes after, and
+ * two callers word that half differently. */
+const FORGET_NEEDS_GONE = "Only a workspace whose computer is gone can be forgotten";
+
 /** Why a road that waits on the machine being gone is not offered yet, for the two rows that are such roads: the
  * rebuild and the forget. They sit in one list, so both read the one state and say it in the one word the row
  * under them shows; each names its own road in the second half, which is all that differs between them. */
 export function goneRoadRefusal(state: WorkspaceState, road: "rebuild" | "forget"): string {
   if (state === "unreachable") return notAnsweringYet(road);
   const word = workspaceWord(state).toLowerCase();
-  return road === "rebuild" ? `This one is ${word}, so nothing needs rebuilding; the rebuild is offered once a workspace is gone` : `Only a workspace whose computer is gone can be forgotten; this one is ${word}`;
+  return road === "rebuild" ? `This one is ${word}, so nothing needs rebuilding; the rebuild is offered once a workspace is gone` : `${FORGET_NEEDS_GONE}; this one is ${word}`;
 }
 
-export function forgetRefusal(state: WorkspaceState): string | null {
-  return state === "gone" ? null : goneRoadRefusal(state, "forget");
+/** Why a forget cannot run, or null when it can. `said` is what the computer this workspace stands on says about
+ * itself while it is not answering, which stands in place of the state word: on the computer the app is drawn on
+ * that word would be unreachable, and the part that is down is what a person can act on. */
+export function forgetRefusal(state: WorkspaceState, said?: string): string | null {
+  if (state === "gone") return null;
+  return said === undefined ? goneRoadRefusal(state, "forget") : `${FORGET_NEEDS_GONE}; ${said}`;
 }
+
+/** Why the daemon cannot be started from here, which is both the workspace whose daemon is answering and every
+ * kind whose daemon runs on a machine this host does not hold the process of: one sentence, since what a person
+ * needs from either is that this is not theirs to press. */
+export const NO_DAEMON_TO_START = "Only a daemon this host started offers this, and only while it is not running";
+
+/** What a terminal the workspace refused says, wherever it was asked from: the link is up, so no pane stands in
+ * for this and the sentence says what did not happen and what is left to try. The link's own words are not
+ * quoted; they end in whatever threw, and the line used to begin with a workspace name and a colon. Named where
+ * the app holds a record for the workspace, which is everywhere but a pane outliving its own row. */
+export const terminalRefusedLine = (name?: string): string =>
+  name === undefined ? "No terminal opened; try again in a moment." : `No terminal opened on ${name}; try again in a moment.`;
 
 export const openTerminalRefusal = (state: WorkspaceState): string | null => (state === "gone" ? goneRefusal("open a terminal") : null);
 export const openBrowserRefusal = (state: WorkspaceState): string | null => actionRefusal(state, "preview");

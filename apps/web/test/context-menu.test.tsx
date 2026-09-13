@@ -227,6 +227,7 @@ describe("a workspace row's menu", () => {
     expect(labels()).toEqual([
       WORKSPACE_WORDS.pause,
       WORKSPACE_WORDS.rebuild,
+      WORKSPACE_WORDS.startDaemon,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
@@ -252,6 +253,8 @@ describe("a workspace row's menu", () => {
     fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.rebuild));
     fireEvent.keyDown(opened, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(item(WORKSPACE_WORDS.startDaemon));
+    fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.newThread));
     fireEvent.keyDown(opened, { key: "End" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.forget));
@@ -269,9 +272,7 @@ describe("a workspace row's menu", () => {
     const opened = await screen.findByRole("menu");
     fireEvent.click(item(WORKSPACE_WORDS.fork));
     expect(menu()).not.toBeNull();
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
-    fireEvent.keyDown(opened, { key: "ArrowDown" });
+    for (let step = 0; step < 4; step++) fireEvent.keyDown(opened, { key: "ArrowDown" });
     expect(document.activeElement).toBe(item(WORKSPACE_WORDS.openTerminal));
     fireEvent.keyDown(opened, { key: "Enter" });
     await waitFor(() => expect(useTerminalDrawerStore.getState().byWorkspaceId["ws_a"]?.terminalOpen).toBe(true));
@@ -326,6 +327,7 @@ describe("a workspace row's menu", () => {
     expect(sent.map(i => [i.id, i.label, i.enabled])).toEqual([
       ["phase", WORKSPACE_WORDS.pause, true],
       ["rebuild", WORKSPACE_WORDS.rebuild, false],
+      ["start-daemon", WORKSPACE_WORDS.startDaemon, false],
       ["new-thread", WORKSPACE_WORDS.newThread, true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, true],
