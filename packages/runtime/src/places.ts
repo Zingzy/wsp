@@ -219,6 +219,9 @@ export interface PlaceDoorOptions {
   dialWaitMs?: number;
   /** How long one machine frame waits for its answer when the caller named no bound of its own; tests shrink it. */
   frameWaitMs?: number;
+  /** How long a request that may be asked again waits for a computer's link to come back before it fails as one
+   * that may not does; tests shrink it. */
+  relinkWaitMs?: number;
   /** How long between the writes of a linked place's last seen, so a link held for a day is not a write a second. */
   seenEveryMs?: number;
   now?: () => number;
@@ -435,6 +438,11 @@ interface Forward {
  * minutes of work: a snapshot is a job the place names at once and is asked after a frame at a time. */
 const LINK_FRAME_MS = 300_000;
 
+/** How long a request the host may ask again waits for the computer to open a socket again. A daemon whose link
+ * dropped dials this host back in seconds and its own backoff is bounded well under this, so a gap this long is a
+ * computer that went away rather than a socket that blinked, and the stage waiting on it says so and stops. */
+const RELINK_WAIT_MS = 120_000;
+
 /** How long a place gets to say what its backend is, and how long the table asking what room it has left waits;
  * a person is watching both, and a place that does not answer in time shows what this host already knows. */
 const BACKEND_FACTS_MS = 10_000;
@@ -453,6 +461,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const seenEveryMs = opts.seenEveryMs ?? SEEN_EVERY_MS;
   const dialWaitMs = opts.dialWaitMs ?? DIAL_MS;
   const frameWaitMs = opts.frameWaitMs ?? LINK_FRAME_MS;
+  const relinkWaitMs = opts.relinkWaitMs ?? RELINK_WAIT_MS;
   const live = new Map<string, Live>();
   /** The records as they stand, by id: `load` fills it and every write below keeps it, so the one road that must
    * answer without waiting (which backend a fork's record stands on) can. */
@@ -524,15 +533,83 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     await keep({ ...held, lastSeenAt: new Date(at).toISOString() });
   };
 
+  /** What is waiting for one computer to open a socket again, by its place id: every ask that may be made a second
+   * time parks here for the gap, and the attach that takes the next socket wakes them. */
+  const waiting = new Map<string, Set<(back: boolean) => void>>();
+  /** When each computer's last socket closed under this host, by place id. A gap is a computer between sockets, and
+   * this is the only reading that tells one from a computer that is simply off: an ask made into the gap is waited
+   * out from the close, and an ask made at a computer this host holds no closed socket for is refused at once, as
+   * every ask at an absent computer was before anything waited. */
+  const closedAt = new Map<string, number>();
+  /** Ends every wait on one computer: true for the socket it just opened, false for a place this host is letting
+   * go, which leaves each held request failing with what it failed with the first time. */
+  const woken = (placeId: string, back: boolean): void => {
+    const held = waiting.get(placeId);
+    waiting.delete(placeId);
+    for (const wake of held ?? []) wake(back);
+  };
+  /** Waits for that computer to dial in again, up to `until`. False on a link that is up, which is what says a
+   * frame failed on the far side's own answer rather than on the road, and false on a computer that did not come
+   * back inside the wait. A socket that is closing is not up: its frames are already refused and its close event is
+   * on its way, so a wait on it waits for the socket after it. */
+  const dialsBack = (placeId: string, until: number): Promise<boolean> =>
+    new Promise(resolve => {
+      const up = live.get(placeId);
+      if (up !== undefined && up.socket.readyState === up.socket.OPEN) return resolve(false);
+      const left = until - Date.now();
+      if (left <= 0) return resolve(false);
+      const held = waiting.get(placeId) ?? new Set<(back: boolean) => void>();
+      waiting.set(placeId, held);
+      const wake = (back: boolean): void => {
+        held.delete(wake);
+        clearTimeout(timer);
+        resolve(back);
+      };
+      const timer = setTimeout(() => wake(false), left);
+      timer.unref?.();
+      held.add(wake);
+    });
+
   /** The road the engine drives one place's machines over: one frame and its answer, and the loopback forward a
    * route into a machine there is taken by. A place that is not connected is PlaceAbsentError on every call, which
-   * is the one answer every road on an absent place reads. */
+   * is the one answer every road on an absent place reads.
+   *
+   * A frame the caller named an idempotency key for is the one thing that outlives a gap: the socket under it going
+   * away is waited out for `relinkWaitMs` from the first gap and the frame is sent again on the socket that computer
+   * opens next. Nothing else is, since the far side runs what it is sent; a frame with no key fails on the gap as it
+   * always has, and so does one whose wait ran out, with the sentence it failed with. */
   const linkTo = (placeId: string): MachineLink => ({
     request: async (op, params, o) => {
-      const reach = live.get(placeId)?.reach;
-      if (reach === undefined) throw new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
-      return bounded(reach.request(op, params), o?.timeoutMs ?? frameWaitMs, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
+      // The bound runs from the gap, not from the ask: a frame may be in flight for minutes before the link under
+      // it goes, and a frame asked into a gap that is already open has however much of the wait is left. Read once,
+      // at the first gap this request meets.
+      let until = 0;
+      const waitingFrom = (from: number): number => (until === 0 ? (until = from + relinkWaitMs) : until);
+      for (;;) {
+        const held = live.get(placeId);
+        if (held === undefined) {
+          const absent = new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence);
+          // A computer whose socket closed inside the wait is between sockets; one this host holds no closed socket
+          // for is off, or was never here, and nothing is coming that waiting would catch.
+          const closed = closedAt.get(placeId);
+          if (o?.idempotencyKey === undefined || closed === undefined || !(await dialsBack(placeId, waitingFrom(closed)))) throw absent;
+          continue;
+        }
+        try {
+          return await bounded(held.reach.request(op, params), o?.timeoutMs ?? frameWaitMs, `${op} on ${kept.get(placeId)?.name ?? placeId}`);
+        } catch (e) {
+          // The socket this frame rode is still the one this host holds and is still open, so the place answered
+          // for itself: a refusal, or a silence the frame's own bound ended. Neither is a gap to wait out. A socket
+          // that is closing is already a gap, and is read as one before its close event lands.
+          const now = live.get(placeId);
+          if (o?.idempotencyKey === undefined || (now?.reach === held.reach && now.socket.readyState === now.socket.OPEN)) throw e;
+          // A computer that dialled back while the frame was failing is here already; the rest wait for it.
+          if (now !== undefined && now.reach !== held.reach && Date.now() < waitingFrom(Date.now())) continue;
+          if (!(await dialsBack(placeId, waitingFrom(Date.now())))) throw e;
+        }
+      }
     },
+    dialsBack: () => dialsBack(placeId, Date.now() + relinkWaitMs),
     forward: placePort => door.forward(placeId, placePort),
   });
 
@@ -725,6 +802,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // The poller must not hold a host that is otherwise done open.
       seen.unref?.();
       live.set(placeId, { socket, reach, seen });
+      // Before anything else this attach does: a request held over the gap is sent again on this socket, and the
+      // stage waiting on it was told to wait rather than told the computer was gone.
+      woken(placeId, true);
       // A computer that says it no longer forks is taken at its word at once: what it said before is not a fact
       // about the computer that is here now. One that says it does is asked what it forks with behind the attach
       // and not in front of it, so the link is held whether or not that answer comes and the first listing after a
@@ -735,6 +815,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         const mine = live.get(placeId);
         if (mine?.socket !== socket) return;
         live.delete(placeId);
+        closedAt.set(placeId, Date.now());
         clearInterval(seen);
         // The port this host opened for that computer's panes goes with the link that carried them: a listener
         // left standing would answer a pane with a connection to nothing.
@@ -1061,6 +1142,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       backends.delete(placeId);
       await store.delete(PLACES, placeId);
       if ((await defaultId()) === placeId) await store.delete(DEFAULT_COLLECTION, DEFAULT_ID);
+      woken(placeId, false);
+      closedAt.delete(placeId);
       emit({ type: "place.removed", placeId });
       return { removed: true, swept, dropped, ...(note !== undefined ? { note } : {}) };
     },
@@ -1074,6 +1157,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
 
     close: async () => {
       for (const placeId of [...live.keys()]) cut(placeId, "this host is stopping");
+      for (const placeId of [...waiting.keys()]) woken(placeId, false);
       for (const [key, f] of forwards) {
         for (const conn of f.conns.values()) conn.destroy();
         f.conns.clear();
