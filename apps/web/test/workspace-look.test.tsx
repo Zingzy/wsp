@@ -56,7 +56,6 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     watchStatuses: async () => statuses,
     nap: async id => view(id, "?", "napping"),
     wake: async id => view(id, "?"),
-    upgrade: async id => view(id, "?"),
     capabilities: async () => (caps()),
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),

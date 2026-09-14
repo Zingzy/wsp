@@ -16,7 +16,6 @@ const FLAGS: { name: string; on: boolean; why: string }[] = [
   { name: "callbackRelay", on: true, why: "sign-ins open on your computer and tunnel back" },
   { name: "templates", on: true, why: "a sealed version survives the provider's restarts" },
   { name: "snapshotListing", on: true, why: "storage is counted and priced" },
-  { name: "containers", on: false, why: "the guest kernel has no overlayfs, so services install natively" },
 ];
 
 export function Providers() {
@@ -67,8 +66,7 @@ export function Providers() {
             <p className="mt-5 max-w-2xl text-lg leading-relaxed text-muted-foreground">
               wsp talks to a provider through one interface and reads a list of capabilities instead of assuming. The
               app and the command line degrade on what a provider lacks rather than pretending. A second provider is one
-              module and a registry entry, and your own computer as a workspace is next, so agents can start each other
-              locally too.
+              module and a registry entry.
             </p>
           </div>
         </div>

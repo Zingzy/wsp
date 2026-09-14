@@ -80,7 +80,6 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
     rebuild: vi.fn(async (id: string) => ({ ...view(id, "?", "running"), machineId: "m_rebuilt" })),
     forget: vi.fn(async (_id: string) => {}),
-    upgrade: vi.fn(async (id: string) => view(id, "?", "running")),
     capabilities: vi.fn(async () => (caps())),
     startSession: vi.fn(async (o: { workspaceId: string }) => session("s_x", o.workspaceId)),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: NOW + 3_600_000 })),

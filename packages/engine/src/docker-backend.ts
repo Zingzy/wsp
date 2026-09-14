@@ -445,11 +445,9 @@ export class DockerBackend implements MachineBackend {
       // The freezer keeps the processes and every byte they hold, so a nap saves CPU and never memory; a stop keeps
       // the disk alone and the wake boots the container again off its own layers.
       pauseMode: this.pauseMode,
-      resize: false,
       replacesMachine: true, // a fresh container from the same image with the vault restored, which is what a rebuild and an image move hand the workspace
       previewUrls: false, // a published port is bare TCP with no token and no expiry, so nothing public is minted
       signedUrls: false, // bytes go through the archive API instead
-      containers: false, // a container inside a container needs a daemon of its own, which nothing here installs
       // The daemon's port is published on the box's loopback, which this host dials when the box is this computer,
       // so a sign-in a guest opens reaches the person's browser. A daemon on another box needs a forward first.
       callbackRelay: this.onThisComputer,

@@ -4,7 +4,6 @@
 //! passes a socket and nothing here binds anything but the address it was told.
 
 mod auth;
-mod awake;
 mod clock;
 mod door;
 mod exec;
@@ -353,12 +352,11 @@ impl Daemon {
     }
 
     /// Accepts until a leave answered on the link ends the daemon; each socket gets its own task and its own door.
-    /// A place file turns the outbound link on beside the listener, with the awake hold that reads the same file.
+    /// A place file turns the outbound link on beside the listener.
     pub async fn run(self) -> io::Result<()> {
-        if let Some(file) = self.ctx.options.place_file.clone() {
+        if self.ctx.options.place_file.is_some() {
             let port = self.local_addr().port();
             tokio::spawn(link::run(Arc::clone(&self.ctx), port));
-            tokio::spawn(awake::hold_while_joined(Arc::clone(&self.ctx), file));
         }
         if let Some(open_socket) = self.open_socket {
             tokio::spawn(relay::serve_open_socket(open_socket, Arc::clone(&self.ctx)));

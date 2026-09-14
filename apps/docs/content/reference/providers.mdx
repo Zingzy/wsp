@@ -1,5 +1,3 @@
-import { Callout } from 'scalar-mdx-components'
-
 # Providers and capabilities
 
 wsp talks to a machine provider through one interface and reads a list of capability flags rather than assuming what it can do. Provider details stay in the engine; the app and the command line read the flags and degrade on what a provider lacks instead of pretending. Solari is the first provider, on your own account.
@@ -14,11 +12,9 @@ A backend gives wsp `create`, `get`, `list`, `deleteSnapshot`, a `capabilities` 
 | --- | --- | --- |
 | `liveCloneForks` | what a fork of an image comes up as: with the processes still running where the image holds memory, or booted cold with the agents started again where it holds only a disk. The provider table publishes it; no verb reads it, since each verb reads the road its own move needs | yes |
 | `pauseMode` | how a pause works: `memory` keeps the processes and every byte they hold, `disk` stops the machine and boots it again on wake; absent, the machine cannot be paused | `memory` |
-| `resize` | a machine is asked for at a size another was not made at. Half of the resize road, since a resize replaces the machine first, so the verb and the app's Upgrade button both read this flag and `replacesMachine` together | no, the Starter plan clamps every machine to 2 vCPU |
 | `replacesMachine` | a fresh fork of the image behind a machine stands in for it and the workspace goes on, its vaulted files carried over: the road a rebuild and an image move both read | yes |
 | `previewUrls` | a port reaches a browser through a signed URL; without it there is no browser reach and no framed ports | yes |
 | `signedUrls` | files travel by signed download and upload URLs; without it there is no import or export road | yes |
-| `containers` | the guest runs containers; without it services install natively | no, the guest kernel has no overlayfs or netfilter, so Docker does not run |
 | `callbackRelay` | sign-in pages open on your computer and the callback port tunnels back; without it you finish sign-ins by copy and paste | yes |
 | `diskSnapshots` | a running machine's disk is copied into an image the provider keeps, which is what a version and a project golden are sealed as; without it a workspace cannot be snapshotted | yes, of a machine that was never resumed |
 | `snapshotListing` | snapshots can be listed with sizes, so storage is counted and priced | yes |
@@ -52,7 +48,3 @@ The facts below are measured against the live provider and dated in the code. A 
 ## Pricing
 
 The rate is Solari's published Starter pricing, 3.5 cents per vCPU hour plus 1 cent per GB hour, computed locally. Snapshot storage is free to 10 GB per organization, then $0.05 per GB-month pro-rated daily from 1 October 2026. The plans behind these are on [Solari's pricing page](https://www.getsolari.com/pricing). What wsp does with the numbers is on [Costs, naps and limits](/work/costs).
-
-<Callout type="info">
-  Your own computer as a workspace is the next provider planned, so agents can start each other locally as well as in the cloud.
-</Callout>

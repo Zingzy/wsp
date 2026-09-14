@@ -115,9 +115,6 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
     wake: vi.fn(async () => {
       throw new Error("none");
     }),
-    upgrade: vi.fn(async () => {
-      throw new Error("none");
-    }),
     capabilities: vi.fn(async () => (caps())),
     daemon: noDaemonApi,
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),

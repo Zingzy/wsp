@@ -40,12 +40,12 @@ describe("the one written form of a place's machine", () => {
 describe("what a place's backend offers", () => {
   const backend = new PlaceBackend(recorder().transport);
 
-  it("forks, pauses, snapshots and resizes nothing, and the machine is the person's own and kept", () => {
+  it("forks, pauses and snapshots nothing, and the machine is the person's own and kept", () => {
     const caps = backend.capabilities;
     expect(caps.sizes).toEqual([]);
     expect(caps.kept).toBe(true);
     expect(caps.pauseMode).toBeUndefined();
-    for (const flag of [caps.liveCloneForks, caps.resize, caps.replacesMachine, caps.previewUrls, caps.signedUrls, caps.containers, caps.callbackRelay, caps.diskSnapshots, caps.snapshotListing, caps.templates]) {
+    for (const flag of [caps.liveCloneForks, caps.replacesMachine, caps.previewUrls, caps.signedUrls, caps.callbackRelay, caps.diskSnapshots, caps.snapshotListing, caps.templates]) {
       expect(flag).toBe(false);
     }
   });

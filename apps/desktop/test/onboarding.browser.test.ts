@@ -13,7 +13,6 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { DEFAULT_PLACE_PORT, JOIN_ALREADY } from "@wsp/protocol";
 import type { Browser, CDPSession, Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { launchRender, renderSkipped, stopRender } from "../../web/test/render-browser.js";
@@ -51,19 +50,12 @@ function stagePage(): string {
   return dir;
 }
 
-/** This computer as the shell answers a join with it, in the app's own words for a shape and a disk. */
-const HERE = { name: "old-macbook", facts: "4 cores · 8 GB · 91 GB free".replace(/ /g, "\u00a0"), runsWorkspaces: false };
-
-/** The shell's bridge, answered in the page: the fixture's agents, an install that lands every id, and a join that
- * lands on this computer. */
-const bridge = (agents: typeof AGENTS = AGENTS, join: unknown = { ok: true, here: HERE }): string => `window.wsp = {
+/** The shell's bridge, answered in the page: the fixture's agents and an install that lands every id. */
+const bridge = (agents: typeof AGENTS = AGENTS): string => `window.wsp = {
   agents: async () => ${JSON.stringify(agents)},
   install: async ids => ({ installed: ids.map(id => ({ id })), failures: [] }),
   finish: async () => {},
-  join: async () => (${JSON.stringify(join)}),
 };`;
-/** The refusals the join screen draws, each named by the word the shell answers with. */
-const REFUSED = (why: string): string => bridge(AGENTS, { ok: false, why, said: "http://192.168.1.20:4420 could not be reached: connect ECONNREFUSED 192.168.1.20:4420" });
 const NO_AGENTS = bridge(AGENTS.map(a => ({ ...a, found: false })));
 /** The catalog's six agents, every one here: the most names one refusal can ever have to carry. */
 const SIX = [
@@ -80,7 +72,6 @@ const SLOW_SCAN = `window.wsp = {
   agents: () => new Promise(land => setTimeout(() => land(${JSON.stringify(AGENTS)}), 1500)),
   install: async ids => ({ installed: ids.map(id => ({ id })), failures: [] }),
   finish: async () => {},
-  join: async () => ({ ok: true, here: ${JSON.stringify(HERE)} }),
 };`;
 /** The same computer, with one agent's config refusing the tools, which is the one refusal this screen can draw. */
 const TOOLS_REFUSED = `${bridge()}\n${REFUSE_EVERY}`;
@@ -201,23 +192,6 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     return { x: Math.round(b.x * 10) / 10, y: Math.round(b.y * 10) / 10, w: Math.round(b.w * 10) / 10, h: Math.round(b.h * 10) / 10 };
   };
 
-  /** The pointer taken off what was last pressed, and the hover it left seeked past: a photograph is the screen at
-   * rest, not the screen under a mouse. */
-  async function away(): Promise<void> {
-    await page!.mouse.move(0, 0);
-    await settle();
-  }
-
-  /** The quiet link pressed, which is the whole of how the join screen is reached. */
-  async function toJoin(): Promise<void> {
-    await settle();
-    await page!.click("#join");
-    await page!.waitForFunction(() => document.getElementById("joining")?.hidden === false);
-    // The screen opens on the Address field, whose border moves to the focused colour over 150 ms; every animation
-    // here is held, so it is seeked past its end and what is read or photographed is the screen that stands.
-    await settle();
-  }
-
   /** A token's own colour as this appearance computes it, so an ink is read off the token and not off a literal. */
   const inkOf = (name: string, percent?: number): Promise<string> =>
     page!.evaluate(
@@ -291,7 +265,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect((await page!.textContent("#status"))?.trim()).toBe("");
   });
 
-  it.each(["dark", "light"] as const)("in the %s appearance the screen is the SetupScreen grammar at its numbers: the 560 px column, the 34 px headline over one sentence, one 48 px card row with the tick and the scan's word, the line under it, and the keycap with the quiet link", async theme => {
+  it.each(["dark", "light"] as const)("in the %s appearance the screen is the SetupScreen grammar at its numbers: the 560 px column, the 34 px headline over one sentence, one 48 px card row with the tick and the scan's word, the line under it, and the keycap", async theme => {
     await open(theme);
     await settle();
     const column = await box(".setup");
@@ -318,13 +292,9 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect(await page!.$eval("#slot", el => /mono/i.test(getComputedStyle(el).fontFamily) && getComputedStyle(el).fontSize === "12px")).toBe(true);
     expect(await page!.$eval("#line", el => getComputedStyle(el).fontSize)).toBe("13px");
     expect(await page!.$eval("#line", el => getComputedStyle(el).color)).toBe(await mutedInk());
-    // One loud thing: the keycap. The link under it is quiet and takes the muted ink.
+    // One loud thing: the keycap.
     expect(await page!.$$eval("#welcome button", els => els.filter(el => el.classList.contains("primary")).length)).toBe(1);
-    expect(await page!.textContent("#join")).toBe("This Mac joins another wsp");
-    expect(await page!.$eval("#join", el => getComputedStyle(el).color)).toBe(await mutedInk());
-    expect(await page!.$eval("#join", el => getComputedStyle(el).fontSize)).toBe("15px");
-    // The mock's boxes: the links row at 15 px over 1.5, the state word at 12 px over 1.5, both from the app's body.
-    expect(await box("#join").then(b => b.h)).toBeCloseTo(22.5, 1);
+    // The mock's box: the state word at 12 px over 1.5, from the app's body.
     expect(await box("#slot").then(b => b.h)).toBeCloseTo(18, 1);
     // No badge, chip or pill: the scan's word is mono text in the row's slot and nothing draws a second border.
     expect(await page!.$$eval("#welcome .slot *", els => els.map(el => getComputedStyle(el).borderTopWidth))).toEqual(["0px"]);
@@ -346,7 +316,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
 
   it.each(["dark", "light"] as const)("in the %s appearance a config that refused the tools is said in the footer's gap as two halves, the destructive ink then the foreground ink, over two lines that move nothing", async theme => {
     await open(theme, "reduce", TOOLS_REFUSED);
-    const before = { head: await box(".head"), card: await box(".card"), keycap: await box("#open"), link: await box("#join") };
+    const before = { head: await box(".head"), card: await box(".card"), keycap: await box("#open") };
     await page!.click("#open");
     await page!.waitForFunction(() => (document.querySelector("#status")?.textContent ?? "") !== "");
     // The slot stands where SetupScreen puts it: 18 px into the footer's 56 px gap, the column wide, two lines tall.
@@ -356,7 +326,7 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect(slot.w).toBe(560);
     expect(slot.h).toBeGreaterThanOrEqual(36);
     // Nothing above or below it moved.
-    expect({ head: await box(".head"), card: await box(".card"), keycap: await box("#open"), link: await box("#join") }).toEqual(before);
+    expect({ head: await box(".head"), card: await box(".card"), keycap: await box("#open") }).toEqual(before);
     // Two halves, two inks, and the words are the screen's own and not the shell's, which rides on the title.
     const drawn = await page!.$eval("#status", el => {
       const fix = el.querySelector(".fix")!;
@@ -424,12 +394,12 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     // Read while the scan is still out: the row's slot and the line under it are empty.
     expect(await page!.textContent("#slot")).toBe("");
     expect(await page!.textContent("#line")).toBe("");
-    const waiting = { headline: await box("h1"), card: await box(".card"), hint: await box(".hint"), keycap: await box("#open"), link: await box("#join") };
+    const waiting = { headline: await box("h1"), card: await box(".card"), hint: await box(".hint"), keycap: await box("#open") };
     expect(waiting.hint.h).toBeCloseTo(19.5, 1);
     await page!.waitForFunction(() => (document.querySelector("#slot")?.textContent ?? "") !== "", undefined, { timeout: 10_000 });
     expect(await page!.textContent("#line")).toBe("Lets Claude Code and Codex open threads and workspaces on this Mac.");
     // The words arrived into the room already kept for them: the column did not recentre under them.
-    expect({ headline: await box("h1"), card: await box(".card"), hint: await box(".hint"), keycap: await box("#open"), link: await box("#join") }).toEqual(waiting);
+    expect({ headline: await box("h1"), card: await box(".card"), hint: await box(".hint"), keycap: await box("#open") }).toEqual(waiting);
   });
 
   it.each(["dark", "light"] as const)("in the %s appearance the entrance is CSS alone: at 0 ms nothing is drawn, mid-way the tilde is drawn and the title rising, at rest everything stands and nothing plays after", async theme => {
@@ -509,251 +479,11 @@ describe.skipIf(renderSkipped !== undefined)("the first launch's screen laid out
     expect((await focusRing(":focus-visible")).outline).toBe("solid");
   });
 
-  it.each(["dark", "light"] as const)("in the %s appearance the link swaps the column for the join screen: two fields at the mock's numbers, a slot standing under each, and the Join keycap the primary at 64 per cent until both are filled", async theme => {
-    await open(theme, "reduce", bridge(), JUDGE);
-    await toJoin();
-    // The same 560 px column, and the welcome screen takes no room while the join screen stands.
-    expect(await box("#joining").then(b => b.w)).toBe(560);
-    expect(await page!.$eval("#welcome", el => (el as HTMLElement).offsetParent !== null || el.getBoundingClientRect().height > 0)).toBe(false);
-    expect(await page!.textContent("#joining h1")).toBe("Join another wsp");
-    // The mock's own boxes: the head, the two fields, the slot under each, the footer's 56 px and the keycap.
-    const head = await box("#joining .head");
-    const content = await box("#joining .content");
-    const foot = await box("#joining .foot");
-    expect(Math.round(content.y - (head.y + head.h))).toBe(64);
-    expect(await rounded("#address")).toEqual({ x: 440, y: 492.5, w: 404, h: 48 });
-    expect(await rounded("#code")).toEqual({ x: 860, y: 492.5, w: 140, h: 48 });
-    expect(await rounded("#address-said")).toEqual({ x: 440, y: 548.5, w: 404, h: 36 });
-    expect(await rounded("#code-said")).toEqual({ x: 860, y: 548.5, w: 140, h: 36 });
-    expect(content.h).toBe(113);
-    expect(Math.round((await box("#go")).y - foot.y)).toBe(56);
-    expect(await box("#go").then(b => b.h)).toBe(40);
-    // The ghosts, and the field's 13 px mono at 48 px with the app's own tracking.
-    expect(await page!.getAttribute("#address", "placeholder")).toBe(`192.168.1.20:${DEFAULT_PLACE_PORT}`);
-    expect(await page!.getAttribute("#code", "placeholder")).toBe("XXXX-XXXX");
-    expect(await page!.$eval("#address", el => ({ font: `${getComputedStyle(el).fontSize}/${getComputedStyle(el).lineHeight}`, mono: /mono/i.test(getComputedStyle(el).fontFamily), tracking: getComputedStyle(el).letterSpacing }))).toEqual({
-      font: "13px/48px",
-      mono: true,
-      tracking: "0.52px",
-    });
-    // Held: the outline variant, disabled, at the size and in the slot the live one has, with its reason standing
-    // in the Address slot before any pointer has touched the screen.
-    // The fill is read off the border rather than the background: the keycap's background transitions over 150 ms
-    // and this page's animations are held at their start, so the background right after a fill is still the old one.
-    const keycap = async () => page!.$eval("#go", el => ({ disabled: (el as HTMLButtonElement).disabled, held: el.classList.contains("outline"), edge: getComputedStyle(el).borderColor, ...(({ width, height, x }) => ({ w: Math.round(width), h: Math.round(height), x: Math.round(x) }))(el.getBoundingClientRect()) }));
-    const held = await keycap();
-    expect(held.disabled).toBe(true);
-    expect(held.held).toBe(true);
-    expect(await page!.textContent("#address-said")).toBe("type the address and the code first");
-    // Filled, the accent arrives and nothing moves: the same box, a different fill.
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    const live = await keycap();
-    expect({ w: live.w, h: live.h, x: live.x }).toEqual({ w: held.w, h: held.h, x: held.x });
-    expect(live.disabled).toBe(false);
-    expect(live.held).toBe(false);
-    expect(live.edge).not.toBe(held.edge);
-    expect(await page!.$$eval("#joining button.primary", els => els.length)).toBe(1);
-    expect(await page!.textContent("#address-said")).toBe("");
-    expect(await page!.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
-  });
-
-  it.each(["dark", "light"] as const)("in the %s appearance an address nothing answered at fills its own slot, marks its own field, and moves nothing", async theme => {
-    await open(theme, "reduce", REFUSED("answer"), JUDGE);
-    await toJoin();
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    const before = { head: await box("#joining .head"), content: await box("#joining .content"), keycap: await box("#go"), back: await box("#back"), code: await box("#code") };
-    await page!.click("#go");
-    await page!.waitForFunction(() => (document.querySelector("#address-said")?.textContent ?? "") !== "");
-    // Two halves in the two inks, inside the two lines the slot stands at.
-    const drawn = await page!.$eval("#address-said", el => {
-      const fix = el.querySelector(".fix")!;
-      const style = getComputedStyle(el);
-      return {
-        happened: (el.textContent ?? "").replace(fix.textContent ?? "", "").trim(),
-        fix: fix.textContent,
-        ink: style.color,
-        fixInk: getComputedStyle(fix).color,
-        font: `${style.fontSize}/${style.lineHeight}`,
-        mono: /mono/i.test(style.fontFamily),
-        wrap: style.whiteSpace,
-        clipped: style.textOverflow,
-        align: style.textAlign,
-        title: el.getAttribute("title"),
-      };
-    });
-    expect(drawn.happened).toBe("Nothing answered at that address.");
-    expect(drawn.fix).toBe("Check both Macs are on one network and the address on the other screen.");
-    expect(drawn.font).toBe("12px/18px");
-    expect(drawn.mono).toBe(true);
-    expect(drawn.wrap).toBe("normal");
-    expect(drawn.clipped).toBe("clip");
-    expect(drawn.align).toBe("left");
-    expect(drawn.title).toContain("ECONNREFUSED");
-    // The border moves to its refused colour over 150 ms, and every animation on this page is held: seeked past
-    // its end, the colour read is the one that stands.
-    await settle();
-    const inks = await tokenInks();
-    expect(drawn.ink).toBe(inks.destructive);
-    expect(drawn.fixInk).toBe(inks.foreground);
-    expect(await box("#address-said").then(b => b.h)).toBe(36);
-    // One slot per field: the code was not refused, so its own slot stands empty and its field is unmarked.
-    expect(await page!.textContent("#code-said")).toBe("");
-    expect(await page!.getAttribute("#code", "aria-invalid")).toBeNull();
-    // The refused field wears the shipped 36 per cent destructive border, and nothing on the screen moved.
-    expect(await page!.$eval("#address", el => getComputedStyle(el).borderTopColor)).toBe(await inkOf("--destructive", 36));
-    expect({ head: await box("#joining .head"), content: await box("#joining .content"), keycap: await box("#go"), back: await box("#back"), code: await box("#code") }).toEqual(before);
-    expect(await page!.isEnabled("#go")).toBe(true);
-    await away();
-    await page!.screenshot({ path: join(SHOTS, `02b2-first-run-join-refused-1440${theme === "dark" ? "-dark" : ""}.png`) });
-    // Typing into the field takes the refusal off it, since it described what is no longer there.
-    await page!.fill("#address", "192.168.1.21:4420");
-    expect(await page!.textContent("#address-said")).toBe("");
-    expect(await page!.getAttribute("#address", "aria-invalid")).toBeNull();
-  });
-
-  it.each(["dark", "light"] as const)("in the %s appearance a code the host would not take fills the code's own slot, inside the two lines it stands at at 140 px", async theme => {
-    await open(theme, "reduce", REFUSED("code"), JUDGE);
-    await toJoin();
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    const before = { content: await box("#joining .content"), keycap: await box("#go"), address: await box("#address") };
-    await page!.click("#go");
-    await page!.waitForFunction(() => (document.querySelector("#code-said")?.textContent ?? "") !== "");
-    // The slot is 140 px, which holds about 19 characters of 12 px mono a line; its refusal is written to two of them.
-    expect(await page!.textContent("#code-said")).toBe("Wrong or expired. Get a fresh one.");
-    expect(await box("#code-said").then(b => b.h)).toBe(36);
-    // One slot per field: the address was not refused, so its own slot stands empty and its field is unmarked.
-    expect(await page!.textContent("#address-said")).toBe("");
-    expect(await page!.getAttribute("#address", "aria-invalid")).toBeNull();
-    expect(await page!.getAttribute("#code", "aria-invalid")).toBe("true");
-    await settle();
-    expect(await page!.$eval("#code", el => getComputedStyle(el).borderTopColor)).toBe(await inkOf("--destructive", 36));
-    expect({ content: await box("#joining .content"), keycap: await box("#go"), address: await box("#address") }).toEqual(before);
-    await away();
-    await page!.screenshot({ path: join(SHOTS, `02b2-first-run-join-code-refused-1440${theme === "dark" ? "-dark" : ""}.png`) });
-  });
-
-  it("holds a join refusal about neither field in the footer's own slot, and the refusal about an address inside its two lines however long the address was", async () => {
-    // A refusal about neither field goes to the footer's own slot, 18 px into its gap, as SetupScreen draws it.
-    await open("light", "reduce", REFUSED("already"), JUDGE);
-    await toJoin();
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    const standing = { content: await box("#joining .content"), keycap: await box("#go") };
-    await page!.click("#go");
-    await page!.waitForFunction(() => (document.querySelector("#join-said")?.textContent ?? "") !== "");
-    const foot = await box("#joining .foot");
-    const slot = await box("#join-said");
-    expect(Math.round(slot.y - foot.y)).toBe(18);
-    expect(slot.w).toBe(560);
-    expect(slot.h).toBe(36);
-    // What to do is the protocol's own sentence, since the sidebar of a joined Mac carries the way out.
-    expect(await page!.textContent("#join-said")).toBe(`This Mac already runs threads for another wsp. ${JOIN_ALREADY.fix}`);
-    expect(await page!.getAttribute("#address", "aria-invalid")).toBeNull();
-    expect({ content: await box("#joining .content"), keycap: await box("#go") }).toEqual(standing);
-    await page!.close();
-
-    // The refusal about an address carries no address, so it is the same two lines whatever was typed: 43 characters
-    // here, where a sentence that repeated them would take a third line.
-    await open("light", "reduce", REFUSED("answer"), JUDGE);
-    await toJoin();
-    await page!.fill("#address", "a-very-long-name-for-a-computer.local:44000");
-    await page!.fill("#code", "QW4K-7PZX");
-    const room = { content: await box("#joining .content"), keycap: await box("#go"), code: await box("#code"), back: await box("#back") };
-    await page!.click("#go");
-    await page!.waitForFunction(() => (document.querySelector("#address-said")?.textContent ?? "") !== "");
-    const said = await box("#address-said");
-    // Two lines, nothing cut, and the whole of what was typed still in the field it is about.
-    expect(await page!.textContent("#address-said")).toBe("Nothing answered at that address. Check both Macs are on one network and the address on the other screen.");
-    expect(await page!.inputValue("#address")).toBe("a-very-long-name-for-a-computer.local:44000");
-    expect(said.h).toBe(36);
-    expect(await page!.$eval("#address-said", el => el.scrollHeight <= Math.ceil(el.getBoundingClientRect().height))).toBe(true);
-    expect((await box("#go")).y - (said.y + said.h)).toBeGreaterThan(0);
-    expect({ content: await box("#joining .content"), keycap: await box("#go"), code: await box("#code"), back: await box("#back") }).toEqual(room);
-  });
-
-  it("answers Enter on a focused Back by leaving the screen, never by joining", async () => {
-    await open("light", "reduce", bridge(), JUDGE);
-    await toJoin();
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    // The keyboard walks to Back and presses it: that is leaving, and the screen's own Enter stands aside for it.
-    await page!.focus("#back");
-    await page!.keyboard.press("Enter");
-    await page!.waitForFunction(() => document.getElementById("welcome")?.hidden === false);
-    expect(await page!.evaluate(() => document.getElementById("joined")?.hidden)).toBe(true);
-    // Enter from the fields is still the keycap.
-    await page!.click("#join");
-    await page!.focus("#code");
-    await page!.keyboard.press("Enter");
-    await page!.waitForFunction(() => document.getElementById("joined")?.hidden === false);
-  });
-
-  it.each(["dark", "light"] as const)("in the %s appearance a join that landed swaps in the joined screen: one card of two rows, this computer's facts, and one keycap", async theme => {
-    await open(theme, "reduce", bridge(), JUDGE);
-    await toJoin();
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    await page!.click("#go");
-    await page!.waitForFunction(() => document.getElementById("joined")?.hidden === false);
-    expect(await page!.textContent("#joined h1")).toBe("This Mac joined your wsp");
-    expect(await page!.textContent("#joined .sentence")).toBe("It now runs threads for your wsp. Leave it plugged in and awake.");
-    // The mock's card: 560 wide, two 48 px rows with a hairline between them, the facts in the row's own slot.
-    const card = await box("#joined .card");
-    expect(card.w).toBe(560);
-    expect(card.h).toBe(98);
-    expect(await page!.$$eval("#joined .row", els => els.map(el => el.getBoundingClientRect().height))).toEqual([48, 48]);
-    expect(await page!.$eval("#joined .row + .row", el => getComputedStyle(el).borderTopWidth)).toBe("1px");
-    expect(await page!.textContent("#here-name")).toBe(HERE.name);
-    expect(await page!.textContent("#here-facts")).toBe(HERE.facts);
-    expect(await page!.textContent("#here-workspaces")).toBe("runs your agents, one workspace");
-    expect(await page!.$eval("#here-facts", el => ({ font: getComputedStyle(el).fontSize, mono: /mono/i.test(getComputedStyle(el).fontFamily), ink: getComputedStyle(el).color }))).toEqual({
-      font: "12px",
-      mono: true,
-      ink: await mutedInk(),
-    });
-    // One loud thing, and no badge, chip or second border anywhere in the card.
-    expect(await page!.$$eval("#joined button.primary", els => els.length)).toBe(1);
-    expect(await page!.textContent("#open-joined")).toContain("Open wsp");
-    expect(await page!.$$eval("#joined .slot *", els => els.map(el => getComputedStyle(el).borderTopWidth))).toEqual(["0px", "0px"]);
-    expect(await page!.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
-    await away();
-    await page!.screenshot({ path: join(SHOTS, `02c-first-run-joined-1440${theme === "dark" ? "-dark" : ""}.png`) });
-  });
-
   it.each(["dark", "light"] as const)("photographs the %s side at the size the mocks were drawn at, so a judge lays the shot beside the mock", async theme => {
     await open(theme, "reduce", bridge(), JUDGE);
     await page!.screenshot({ path: join(SHOTS, `02a-first-run-1440${theme === "dark" ? "-dark" : ""}.png`) });
     await page!.close();
     await open(theme, "reduce", NO_AGENTS, JUDGE);
     await page!.screenshot({ path: join(SHOTS, `02a2-first-run-no-agents-1440${theme === "dark" ? "-dark" : ""}.png`) });
-    await page!.close();
-    await open(theme, "reduce", bridge(), JUDGE);
-    await toJoin();
-    await page!.screenshot({ path: join(SHOTS, `02b-first-run-join-1440${theme === "dark" ? "-dark" : ""}.png`) });
-    await page!.close();
-    // And the three screens at the window's own size, which is the one a person's first launch opens at.
-    const dark = theme === "dark" ? "-dark" : "";
-    await open(theme, "reduce", bridge());
-    await toJoin();
-    await page!.screenshot({ path: join(SHOTS, `join${dark}-1280x800.png`) });
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    await page!.click("#go");
-    await page!.waitForFunction(() => document.getElementById("joined")?.hidden === false);
-    await away();
-    await page!.screenshot({ path: join(SHOTS, `joined${dark}-1280x800.png`) });
-    await page!.close();
-    await open(theme, "reduce", REFUSED("answer"));
-    await toJoin();
-    await page!.fill("#address", "192.168.1.20:4420");
-    await page!.fill("#code", "QW4K-7PZX");
-    await page!.click("#go");
-    await page!.waitForFunction(() => (document.querySelector("#address-said")?.textContent ?? "") !== "");
-    await settle();
-    await away();
-    await page!.screenshot({ path: join(SHOTS, `join-refused${dark}-1280x800.png`) });
   });
 });

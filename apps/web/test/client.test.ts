@@ -137,15 +137,6 @@ describe("makeApi wrappers", () => {
     await expect(api.planProject!("/var/proj")).rejects.toThrow();
   });
 
-  it("upgrade sends workspaces.upgrade with the size and unwraps the workspace", async () => {
-    const { api, lastSent } = await connect();
-    const workspace = { id: "ws_1", name: "x", machineId: "m2", phase: "running", golden: "g", createdAt: "t" };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, workspace });
-    const got = await api.upgrade("ws_1", { cpu: 4, memMb: 8192 });
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.upgrade", workspaceId: "ws_1", cpu: 4, memMb: 8192 });
-    expect(got).toEqual(workspace);
-  });
-
   it("createWorkspace and createFromGoldenHead send a picked size as cpu and memMb, and nothing about size without one", async () => {
     const { api, lastSent } = await connect();
     const workspace = { id: "ws_1", name: "beta", machineId: "m1", phase: "running", golden: "snap_1", createdAt: "t" };
@@ -161,7 +152,7 @@ describe("makeApi wrappers", () => {
 
   it("capabilities sends capabilities.get and unwraps the flags", async () => {
     const { api, lastSent } = await connect();
-    const capabilities = caps({ resize: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
+    const capabilities = caps({ sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, capabilities });
     expect(await api.capabilities()).toEqual(capabilities);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "capabilities.get" });

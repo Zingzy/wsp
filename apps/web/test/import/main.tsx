@@ -83,7 +83,6 @@ const api: Api = {
   watchStatuses: async () => [],
   nap: async () => workspace,
   wake: async () => workspace,
-  upgrade: async () => workspace,
   capabilities: async () => (caps()),
   startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),

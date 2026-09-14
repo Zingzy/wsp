@@ -252,11 +252,9 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         capabilities: {
           liveCloneForks: false,
           pauseMode: "disk",
-          resize: false,
           replacesMachine: true,
           previewUrls: false,
           signedUrls: false,
-          containers: false,
           callbackRelay: true,
           diskSnapshots: true,
           snapshotsAnyLife: false,
@@ -276,11 +274,9 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         offer: "docker",
         capabilities: {
           liveCloneForks: false,
-          resize: false,
           replacesMachine: true,
           previewUrls: false,
           signedUrls: false,
-          containers: false,
           callbackRelay: false,
           diskSnapshots: true,
           snapshotsAnyLife: false,

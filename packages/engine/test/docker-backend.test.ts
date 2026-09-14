@@ -146,13 +146,11 @@ describe("DockerBackend against a fake Engine API", () => {
     expect(backend.capabilities).toMatchObject({
       liveCloneForks: false,
       pauseMode: "memory",
-      resize: false,
-      // A container that exists takes no new size, and a fresh one from the same image stands in for it: the pair
-      // that says the three verbs read three flags rather than one fact about forks.
+      // A fresh container from the same image stands in for one a workspace is on, which is what the rebuild and
+      // the image move both read.
       replacesMachine: true,
       previewUrls: false,
       signedUrls: false,
-      containers: false,
       callbackRelay: true,
       diskSnapshots: true,
       snapshotListing: true,

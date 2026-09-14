@@ -49,7 +49,6 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
     watchStatuses: async () => [],
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
-    upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     listSessions: async () => [],

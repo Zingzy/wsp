@@ -27,7 +27,6 @@ const PLACE: PlaceFile = {
   hostPublicKey: "k",
   keyPath: "/nowhere/place-key.pem",
   joinedAt: "2026-09-13T02:00:00.000Z",
-  awake: false,
 };
 
 const PROC = (over: Partial<ProcEntry>): ProcEntry => ({ pid: 1, ppid: 0, user: "root", state: "S", comm: "init", cmdline: "/sbin/init", cpu: 0, rss: 1024, startedAt: 0, ...over });

@@ -636,15 +636,13 @@ describe("a pause the provider made", () => {
 describe("accrued cost", () => {
   const usd = (rateUsdPerHour: number, ms: number): number => (rateUsdPerHour * ms) / 3_600_000;
 
-  it("is each awake stretch billed at the rate that held over it: a pause, an unwatched wake and size change, a restart", async () => {
+  it("is each awake stretch billed at the rate that held over it: a pause, an unwatched wake, a restart", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
     const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
     const small = backend.pricing.rateUsdPerHour(backend.pricing.defaultSize);
-    const big = backend.pricing.rateUsdPerHour({ cpu: 4, memMb: 4096 });
-    expect(big).toBeGreaterThan(small);
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
@@ -661,28 +659,22 @@ describe("accrued cost", () => {
     expect(costs.at(-1)!.accruedUsd).toBeCloseTo(usd(small, 2 * TICK_MS), 10);
     stop();
 
-    // Nobody watching. The wake lands its own tick, so the hour that follows is on record at the small size, and
-    // the size change an hour later bills that hour at small whatever the size is now.
+    // Nobody watching. The wake lands its own tick, then an hour passes with nothing looking: the meter reads wall
+    // time, so the first tick after it carries that hour rather than only the ticks that ran.
     await stepped(costs, () => first.workspaces.wake(ws.id));
     expect(costs.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: small, awakeMs: 2 * TICK_MS });
     fc.advance(3_600_000);
-    await stepped(costs, () => first.workspaces.upgrade(ws.id, { cpu: 4 }));
-    expect((await first.status.list())[0]!.rateUsdPerHour).toBeCloseTo(big, 10);
-    const atSmall = usd(small, 2 * TICK_MS + 3_600_000);
-    expect(costs.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: big, awakeMs: 2 * TICK_MS + 3_600_000 });
-    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(atSmall, 10);
 
-    // From the change on, only the big size bills.
     stop = first.status.watch();
     await tickCost(fc, costs);
     await tickCost(fc, costs);
     stop();
     const awake = 4 * TICK_MS + 3_600_000;
-    const twoStretches = atSmall + usd(big, 2 * TICK_MS);
-    expect(costs.at(-1)).toMatchObject({ rateUsdPerHour: big, awakeMs: awake });
-    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(twoStretches, 10);
-    // Never the rate now times all awake time.
-    expect(Math.abs(costs.at(-1)!.accruedUsd - usd(big, awake))).toBeGreaterThan(1e-3);
+    const billed = usd(small, awake);
+    expect(costs.at(-1)).toMatchObject({ rateUsdPerHour: small, awakeMs: awake });
+    expect(costs.at(-1)!.accruedUsd).toBeCloseTo(billed, 10);
+    // The nap in the middle added nothing: the hour it sat paused is on neither the awake time nor the bill.
+    expect(costs.at(-1)!.awakeMs).toBeLessThan(2 * 3_600_000);
     await first.close();
 
     // An hour down with the machine running: the next host meters on from the stored total at the stored rate.
@@ -693,8 +685,8 @@ describe("accrued cost", () => {
     stop = second.status.watch();
     await tickCost(fc, after);
     stop();
-    expect(after.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: big, awakeMs: awake + 3_600_000 + TICK_MS });
-    expect(after.at(-1)!.accruedUsd).toBeCloseTo(twoStretches + usd(big, 3_600_000 + TICK_MS), 10);
+    expect(after.at(-1)).toMatchObject({ phase: "running", rateUsdPerHour: small, awakeMs: awake + 3_600_000 + TICK_MS });
+    expect(after.at(-1)!.accruedUsd).toBeCloseTo(billed + usd(small, 3_600_000 + TICK_MS), 10);
     expect((await second.status.history(ws.id)).at(-1)!.accruedUsd).toBeCloseTo(after.at(-1)!.accruedUsd, 10);
     await second.close();
   });

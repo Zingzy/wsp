@@ -52,7 +52,6 @@ function fixtureApi(history: SessionEvent[]) {
     createWorkspace: async () => workspace,
     nap: async () => workspace,
     wake: async () => workspace,
-    upgrade: async () => workspace,
     capabilities: async () => (caps()),
     listSessions: async () => [],
     watchStatuses: async () => [],

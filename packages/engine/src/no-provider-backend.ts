@@ -39,11 +39,9 @@ const refuse = (): never => {
 export class NoProviderBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    resize: false,
     replacesMachine: false, // nothing here forks, so there is no machine to hand a workspace in place of another
     previewUrls: false,
     signedUrls: false,
-    containers: false,
     callbackRelay: false,
     diskSnapshots: false,
     snapshotsAnyLife: false,

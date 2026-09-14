@@ -32,7 +32,6 @@ function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; 
     watchStatuses: vi.fn(async () => []),
     nap: vi.fn(async () => first),
     wake: vi.fn(async () => first),
-    upgrade: vi.fn(async () => first),
     rebuild: vi.fn(async () => first),
     capabilities: vi.fn(async () => CAPS),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),

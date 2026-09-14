@@ -1545,7 +1545,6 @@ interface SharedFlags {
   "code-file"?: string;
   "ssh-port"?: string;
   "ssh-key"?: string;
-  awake?: boolean;
   watch?: boolean;
   name?: string;
   relay?: string;
@@ -1756,7 +1755,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   join: {
     page: "agent",
-    usage: "wsp join <url>... --code <code> [--code-file <path>] [--name <name>] [--awake]",
+    usage: "wsp join <url>... --code <code> [--code-file <path>] [--name <name>]",
     about: "on the computer you are sitting at: join it to the wsp at that address, then install the daemon under this computer's own service manager, which dials again at every login",
     json: false,
     host: "refused",
@@ -1766,7 +1765,6 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         ...(values.code !== undefined ? { code: values.code } : {}),
         ...(values["code-file"] !== undefined ? { codeFile: values["code-file"] } : {}),
         ...(values.name !== undefined ? { name: values.name } : {}),
-        ...(values.awake === true ? { awake: true } : {}),
       }),
   },
   leave: {
@@ -1952,7 +1950,6 @@ export const SHARED_OPTIONS: Options = {
   "code-file": { type: "string" },
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
-  awake: { type: "boolean" },
   watch: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
@@ -2071,7 +2068,6 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "docker-host", on: ["up", "init"], says: "the Docker daemon to dial, as DOCKER_HOST words it; this computer's own socket without it" },
   { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
-  { name: "awake", on: ["join"], says: "hold this computer out of idle sleep while it is joined, for as long as the agent runs" },
   { name: "watch", on: ["status"], says: "draw the same rows again every second where they stand, until Ctrl-C; it needs a terminal to redraw on, and reads nothing but this computer's own agent" },
   { name: "name", on: ["host connect", "host link", "add", "join"], says: "the name to call the computer by here; what its address calls it without one" },
   { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },

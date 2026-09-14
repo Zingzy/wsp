@@ -14,11 +14,11 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtRate, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, resizesMachines, servesReading, sizeWord, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type MachineSizeOffer, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceSize, type WorkspaceStatus, type WorkspaceView, REPORTED_WORD, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, servesReading, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceStatus, type WorkspaceView, REPORTED_WORD, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, staleWord, useOutOfMemoryReading, useWorkspaceLive, type StaleWord } from "../../machine/live.js";
-import { upgradeOptions, useCostSeries, useUpgrade, type Upgrade } from "../../protocol/machine.js";
+import { useCostSeries } from "../../protocol/machine.js";
 import { useAbsentComputer, useCapabilities, useCost, usePlaces, useProtocolEvents, useStatus, useStore, useWorkspace } from "../../protocol/store.js";
 import { DaemonDown } from "../DaemonDown.js";
 import {
@@ -64,8 +64,6 @@ export function MachineSurface({ workspaceId }: { workspaceId: string }) {
 
 function Surface({ workspace, series }: { workspace: WorkspaceView; series: WorkspaceCostEvent[] }) {
   const status = useStatus(workspace.id);
-  const upgrade = useUpgrade(workspace.id);
-  const pendingSize = upgrade.phase.kind === "resizing" || upgrade.phase.kind === "settling" ? upgrade.phase.size : null;
   // A machine wsp neither forks nor pays for has no spend to chart, nothing to nap and no image behind it; its rows
   // say what it is instead.
   const kind = kindWords(workspaceKind(workspace));
@@ -77,13 +75,13 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
     <div className="flex h-full min-h-0 flex-col">
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
-        <Facts workspace={workspace} status={status} pendingSize={pendingSize} kind={kind} />
+        <Facts workspace={workspace} status={status} kind={kind} />
         <Projects workspace={workspace} status={status} kind={kind} onTaken={() => setTakes(n => n + 1)} />
         <Live workspace={workspace} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} takes={takes} />}
         {kind.driven && <GoldenLineage workspace={workspace} projects={goldens} />}
       </ScrollArea>
-      <Actions workspace={workspace} status={status} upgrade={upgrade} />
+      <Actions workspace={workspace} status={status} />
     </div>
   );
 }
@@ -156,14 +154,12 @@ function Row({ label, k, title, children }: { label: string; k: string; title?: 
 interface FactsProps {
   workspace: WorkspaceView;
   status: WorkspaceStatus | null;
-  /** Painted while a resize is in flight, before a status carries the new size. */
-  pendingSize: WorkspaceSize | null;
   kind: WorkspaceKindWords;
 }
 
 /** State and size for every machine; the nap for one wsp drives; for one that already existed, what it costs
  * (nothing), the system it runs, how long it has been up and the folder its commands start in. */
-function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
+function Facts({ workspace, status, kind }: FactsProps) {
   const capabilities = useCapabilities();
   const places = usePlaces();
   const now = useClock(status?.idleAt !== undefined);
@@ -216,17 +212,8 @@ function Facts({ workspace, status, pendingSize, kind }: FactsProps) {
         <Row label="Where" k="where" title={where}>
           {where}
         </Row>
-        <Row label="Size" k="size" title={pendingSize ? `${fmtSize(pendingSize)} · resizing` : status ? fmtSize(status.size, kind.cpu) : "pending"}>
-          {pendingSize ? (
-            <>
-              {fmtSize(pendingSize)}
-              <span className="text-muted-foreground"> · resizing</span>
-            </>
-          ) : status ? (
-            fmtSize(status.size, kind.cpu)
-          ) : (
-            "pending"
-          )}
+        <Row label="Size" k="size" title={status ? fmtSize(status.size, kind.cpu) : "pending"}>
+          {status ? fmtSize(status.size, kind.cpu) : "pending"}
         </Row>
         {kind.driven ? (
           <>
@@ -941,41 +928,20 @@ function LineageNote({ k, label, text }: { k: string; label: string; text: strin
   );
 }
 
-/** Pause or wake, resize and forget, for a machine wsp drives; a machine that already existed takes none of them, so
- * the tab ends at its facts. Each button is offered only while its verb can run: Pause while the machine bills, Wake
- * while it is paused, nothing while it moves between the two; Resize only on a provider that resizes and only while a
- * bigger size is on offer; Forget once the machine is gone. */
-function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; status: WorkspaceStatus | null; upgrade: Upgrade }) {
+/** Pause or wake, and forget, for a machine wsp drives; a machine that already existed takes neither, so the tab ends
+ * at its facts. Each button is offered only while its verb can run: Pause while the machine bills, Wake while it is
+ * paused, nothing while it moves between the two; Forget once the machine is gone. */
+function Actions({ workspace, status }: { workspace: WorkspaceView; status: WorkspaceStatus | null }) {
   const verbs = useWorkspaceVerbs();
-  const capabilities = useCapabilities();
   const places = usePlaces();
   const sessions = useStore(s => s.sessions[workspace.id]);
-  const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<MachineSizeOffer | null>(null);
   const [forgetting, setForgetting] = useState(false);
   const gone = workspace.phase === "gone";
   // The tab's forget opens its own dialog, in place of the request the sidebar answers; the dialog names a client without the verb.
   const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, forget: () => setForgetting(true) }, false);
   const phase = actionById(actions, "phase");
   const forget = actionById(actions, "forget");
-  // Backend fact, not a probe: a provider with no road to a new size gets no picker and no button. The whole road
-  // is read, the same reading the runtime's own gate makes, so nothing here offers a size the confirm would refuse.
-  const options = status && capabilities !== null && resizesMachines(capabilities) ? upgradeOptions(status.size, capabilities.sizes) : [];
-  const choice = picked ?? options[0] ?? null;
-  const rate = status?.rateUsdPerHour ?? null;
   const driven = kindWords(workspaceKind(workspace)).driven;
-  const offersResize = status !== null && !gone && options.length > 0;
-  const note = upgrade.phase.kind === "resizing" ? "Resizing…" : upgrade.phase.kind === "settling" ? "Resized." : null;
-
-  const close = (): void => {
-    setOpen(false);
-    setPicked(null);
-  };
-  const confirm = (): void => {
-    if (!choice) return;
-    close();
-    upgrade.run({ cpu: choice.cpu, memMb: choice.memMb });
-  };
 
   if (!driven) return null;
   const buttons = [
@@ -997,64 +963,12 @@ function Actions({ workspace, status, upgrade }: { workspace: WorkspaceView; sta
         {phase.buttonWord}
       </Button>
     ) : null,
-    offersResize ? (
-      <Button key="resize" size="sm" className="flex-1" disabled={upgrade.phase.kind === "resizing"} aria-label={`resize ${workspace.name}`} onClick={() => (open ? close() : setOpen(true))}>
-        Resize
-      </Button>
-    ) : null,
   ].filter(button => button !== null);
-  if (buttons.length === 0 && note === null && upgrade.phase.kind !== "failed") return null;
+  if (buttons.length === 0) return null;
   return (
     <footer className={cn("flex flex-col gap-2 border-t border-border/60 py-3", PANE_INSET)}>
-      {buttons.length > 0 && <div className="flex gap-2">{buttons}</div>}
-      {open && status && choice && (
-        <div className="flex flex-col gap-2 rounded-md border border-border/60 p-2.5">
-          {options.length > 1 && (
-            <div className="flex flex-wrap gap-1">
-              {options.map(o => (
-                <Button
-                  key={sizeWord(o)}
-                  size="xs"
-                  variant="outline"
-                  aria-pressed={sizeWord(o) === sizeWord(choice)}
-                  className={cn(sizeWord(o) === sizeWord(choice) && "border-foreground/60")}
-                  onClick={() => setPicked(o)}
-                >
-                  {fmtSize(o)}
-                </Button>
-              ))}
-            </div>
-          )}
-          <div className="divide-y divide-border/40">
-            <Row label="Current" k="resize-from">
-              {fmtSize(status.size)}
-              {rate !== null ? ` · ${fmtRate(rate)}` : ""}
-            </Row>
-            <Row label="New" k="resize-to">
-              {`${fmtSize(choice)} · ${fmtRate(choice.rateUsdPerHour)}`}
-            </Row>
-          </div>
-          <div className="flex justify-end gap-2">
-            <Button size="xs" variant="ghost" onClick={close}>
-              Cancel
-            </Button>
-            <Button size="xs" onClick={confirm}>
-              Confirm resize
-            </Button>
-          </div>
-        </div>
-      )}
+      <div className="flex gap-2">{buttons}</div>
       {gone && <ForgetWorkspaceDialog workspace={workspace} threads={foldThreads(sessions ?? []).length} open={forgetting} onOpenChange={setForgetting} />}
-      {(note !== null || upgrade.phase.kind === "failed") && (
-        <p className="text-[11px] text-muted-foreground" role="status">
-          {note}
-          {upgrade.phase.kind === "failed" && (
-            <button type="button" className="cursor-pointer text-left text-destructive-foreground" onClick={upgrade.dismiss}>
-              {upgrade.phase.message}
-            </button>
-          )}
-        </p>
-      )}
     </footer>
   );
 }

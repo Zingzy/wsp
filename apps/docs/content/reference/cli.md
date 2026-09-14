@@ -142,7 +142,7 @@ the verbs your agents use, and the two lines that serve a host by hand:
   wsp down
       stop the host: the service and its unit where one holds it up, and the
       host a verb started otherwise
-  wsp join <url>... --code <code> [--code-file <path>] [--name <name>] [--awake]
+  wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
       on the computer you are sitting at: join it to the wsp at that address,
       then install the daemon under this computer's own service manager, which
       dials again at every login
@@ -839,7 +839,6 @@ usage: wsp image
 
 ```text
 usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
-       [--awake]
   on the computer you are sitting at: join it to the wsp at that address, then
   install the daemon under this computer's own service manager, which dials
   again at every login
@@ -851,8 +850,6 @@ usage: wsp join <url>... --code <code> [--code-file <path>] [--name <name>]
                  wsp add for a place
   --code-file    read the code off this file and delete the file before dialing,
                  so a code never sits on a disk
-  --awake        hold this computer out of idle sleep while it is joined, for as
-                 long as the agent runs
   --name         the name to call the computer by here; what its address calls
                  it without one
 ```

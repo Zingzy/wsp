@@ -636,14 +636,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               await rt.workspaces.restartDaemon(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
               return;
-            case "workspaces.upgrade": {
-              const spec = {
-                ...(msg.cpu !== undefined ? { cpu: msg.cpu } : {}),
-                ...(msg.memMb !== undefined ? { memMb: msg.memMb } : {}),
-              };
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, spec, origin)) });
+            case "workspaces.upgrade":
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, undefined, origin)) });
               return;
-            }
             case "workspaces.updateImage": {
               const moved = await rt.workspaces.updateImage(msg.workspaceId, origin);
               send({ id: msg.id, ok: true, workspace: handed(moved.workspace), moved: moved.moved, kept: moved.kept, ...(moved.fallback === true ? { fallback: true } : {}) });

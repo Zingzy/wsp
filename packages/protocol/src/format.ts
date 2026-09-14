@@ -3244,14 +3244,6 @@ export const HOST_WORDS = {
   disconnect: (label: string): string => `Disconnect ${label}`,
   /** Why the disconnect row is dimmed while the window is on the app's own computer. */
   hereStays: (here: string): string => `${here} is the app's own host`,
-  /** The two rows a computer that joined another wsp adds, and the line its sidebar foot reads. */
-  place: {
-    line: (hostName: string): string => `runs threads for ${hostName}`,
-    leave: "leave",
-    leaveRow: (hostName: string): string => `Leave ${hostName}'s wsp`,
-    awakeRow: "Stay awake while joined",
-    awakeWhy: "while the lid is open and it is plugged in",
-  },
   sheet: {
     headline: "Connect to a host",
     top: "A wsp host on another computer, by its address or over ssh.",
@@ -3445,8 +3437,6 @@ export const hereWord = (mac: boolean): string => (mac ? "This Mac" : "This comp
 const HOST_MENU_SWITCH = "switch:";
 const HOST_MENU_CONNECT = "connect";
 const HOST_MENU_DISCONNECT = "disconnect:";
-const HOST_MENU_AWAKE = "awake:";
-const HOST_MENU_LEAVE = "leave-place";
 
 /** The Hosts menu as one list of rows, read by the shell's own menu bar and by the sidebar's foot alike: this computer
  * first, every saved host, the current one marked, then the connect row, then the disconnect of the host the window is
@@ -3460,12 +3450,6 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
     current !== undefined
       ? { id: `${HOST_MENU_DISCONNECT}${current.alias}`, label: HOST_WORDS.disconnect(current.label), group: "remove", enabled: true, destructive: true }
       : { id: HOST_MENU_DISCONNECT, label: HOST_WORDS.disconnect(view.here), group: "remove", enabled: false, refusal: HOST_WORDS.hereStays(view.here), destructive: true },
-    ...(view.place === undefined
-      ? []
-      : [
-          { id: `${HOST_MENU_AWAKE}${view.place.awake ? "off" : "on"}`, label: HOST_WORDS.place.awakeRow, group: "place", enabled: true, checked: view.place.awake, hint: HOST_WORDS.place.awakeWhy },
-          { id: HOST_MENU_LEAVE, label: HOST_WORDS.place.leaveRow(view.place.hostName), group: "place", enabled: true, destructive: true },
-        ]),
   ];
 }
 
@@ -3473,17 +3457,10 @@ export function hostsMenuItems(view: HostsView): ContextMenuItem[] {
 export type HostMenuAction =
   | { kind: "switch"; alias: string | null }
   | { kind: "connect" }
-  | { kind: "disconnect"; alias: string }
-  | { kind: "awake"; on: boolean }
-  | { kind: "leave" };
+  | { kind: "disconnect"; alias: string };
 
 export function hostMenuAction(id: string): HostMenuAction | undefined {
   if (id === HOST_MENU_CONNECT) return { kind: "connect" };
-  if (id === HOST_MENU_LEAVE) return { kind: "leave" };
-  if (id.startsWith(HOST_MENU_AWAKE)) {
-    const word = id.slice(HOST_MENU_AWAKE.length);
-    return word === "on" || word === "off" ? { kind: "awake", on: word === "on" } : undefined;
-  }
   if (id.startsWith(HOST_MENU_SWITCH)) {
     const alias = id.slice(HOST_MENU_SWITCH.length);
     return { kind: "switch", alias: alias === "" ? null : alias };

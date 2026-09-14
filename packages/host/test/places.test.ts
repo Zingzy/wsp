@@ -41,7 +41,6 @@ import {
   leavePlace,
   placeNameHere,
   placeStanding,
-  writePlaceAwake,
   removeCommand,
   removeLines,
   twoPlacesLine,
@@ -503,7 +502,7 @@ describe("taking wsp off the computer it is typed on", () => {
   it("unloads the unit, takes every path wsp put there and keeps the work folder, and says so", async () => {
     const home = tmp("leave-home");
     const at = placeDaemonPaths(home);
-    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "old-macbook", hostName: "zingzy-mbp", hostUrls: ["http://192.168.1.20:4400"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString(), awake: false });
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "old-macbook", hostName: "zingzy-mbp", hostUrls: ["http://192.168.1.20:4400"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
     writeFileSync(placeKeyPath(home), "key");
     writeFileSync(at.tokenPath, "token");
     writeFileSync(at.portFile, "7071");
@@ -538,7 +537,7 @@ describe("taking wsp off the computer it is typed on", () => {
     const unitDir = join(home, ".config", "systemd", "user");
     mkdirSync(unitDir, { recursive: true });
     const runner = fakeRunner();
-    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString(), awake: false });
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
     const unit = SERVICE_MANAGERS.systemd.unit({ role: "place", statePath: placeFilePath(home), home, uid: 1000 });
     writeFileSync(unit.path, "[Unit]\n");
     const swept = await sweepPlace({ home, manager: SERVICE_MANAGERS.systemd, run: runner.run, uid: 1000 });
@@ -1162,7 +1161,7 @@ describe("what a remove says about the device the join bought", () => {
 });
 
 describe("a join as the app's shell runs it", () => {
-  it("names the shim it was handed as this computer's wsp, writes the wsp's name and a place that is not held awake, and buys the window its token", async () => {
+  it("names the shim it was handed as this computer's wsp, writes the wsp's name and buys the window its token", async () => {
     const home = tmp("join-shell");
     const host = await fakeHost();
     const runner = fakeRunner();
@@ -1182,7 +1181,7 @@ describe("a join as the app's shell runs it", () => {
     expect(joined).toMatchObject({ hostName: "zingzy-mbp", hostUrls: [host.url], device: { deviceId: "d_1", deviceToken: "dev-token" } });
     expect(joined.report.name).toBe("old-macbook");
     const file = readPlaceFile(placeFilePath(home))!;
-    expect(file).toMatchObject({ hostName: "zingzy-mbp", awake: false, name: "old-macbook" });
+    expect(file).toMatchObject({ hostName: "zingzy-mbp", name: "old-macbook" });
     const unitDir = join(home, ".config", "systemd", "user");
     const written = readFileSync(join(unitDir, readdirSync(unitDir)[0]!), "utf8");
     // The unit runs the daemon; the shim is what the daemon reports as the wsp a turn's agent runs here.
@@ -1253,31 +1252,6 @@ describe("the daemon's line on a joined computer", () => {
     // Minted again at every start: the host replaces it on its first reach either way.
     preparePlaceHome(home);
     expect(readFileSync(at.tokenPath, "utf8")).not.toBe(first);
-  });
-});
-
-describe("holding a joined computer awake", () => {
-  it("writes the hold on at the join when the flag asked for it", async () => {
-    const home = tmp("join-awake");
-    const host = await fakeHost();
-    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A"), awake: true }, joinDepsFor(home, fakeRunner().run))).toBe(0);
-    expect(readPlaceFile(placeFilePath(home))!.awake).toBe(true);
-  });
-
-  it("flips it on the file and keeps every other field, since the agent watches that file and nothing restarts", async () => {
-    const home = tmp("awake-flip");
-    const host = await fakeHost();
-    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "A") }, joinDepsFor(home, fakeRunner().run))).toBe(0);
-    const before = placeStanding(home)!;
-    const after = writePlaceAwake(home, true);
-    expect(after).toEqual({ ...before, awake: true });
-    expect(placeStanding(home)!.awake).toBe(true);
-    expect(writePlaceAwake(home, false).awake).toBe(false);
-  });
-
-  it("has nothing to flip on a computer that belongs to no wsp", () => {
-    expect(placeStanding(tmp("awake-none"))).toBeUndefined();
-    expect(() => writePlaceAwake(tmp("awake-none-2"), true)).toThrow(NOTHING_TO_LEAVE_LINE);
   });
 });
 

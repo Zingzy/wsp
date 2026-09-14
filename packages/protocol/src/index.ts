@@ -184,10 +184,6 @@ export const Capabilities = z.object({
   /** Absent: the machine cannot be paused, and the runtime refuses a nap and a wake. The app reads the value for its
    * words; the runtime reads only whether it is there. */
   pauseMode: PauseMode.optional(),
-  /** The provider asks for a machine at a size another one was not made at. False on a provider that clamps every
-   * machine to one size, whatever else it can do to one. Half of the resize road, since a resize replaces the
-   * machine first: resizesMachines reads the pair, and the verb and the button that offers a size both read that. */
-  resize: z.boolean(),
   /** The provider replaces a machine with a fresh fork of the image behind it and the workspace goes on, its
    * vaulted files carried over: the one road a rebuild and an image move both take, since both throw a machine away
    * and hand its workspace another. False where nothing forks: this computer, a machine reached over ssh, a host with
@@ -196,8 +192,6 @@ export const Capabilities = z.object({
   replacesMachine: z.boolean(),
   previewUrls: z.boolean(),
   signedUrls: z.boolean(),
-  /** Guests can run containers; false means services get installed natively. */
-  containers: z.boolean(),
   /** A daemon link exists, so sign-in URLs a guest tool opens land in the laptop's browser and the
    * callback port is forwarded back; false means the person finishes sign-ins by copy and paste. */
   callbackRelay: z.boolean(),
@@ -241,17 +235,8 @@ export function buildsImages(capabilities: Pick<Capabilities, "diskSnapshots"> &
   return !forksNoMachines(capabilities) && capabilities.diskSnapshots;
 }
 
-/** Whether this provider can give a machine that already exists a new size, which is both halves of that one road:
- * a resize replaces the machine with a fresh fork of its image, then asks for that one at a size the old was not
- * made at. The one place the pair is read, so the gate that refuses a resize and the button that offers a size
- * cannot hold half the rule each. */
-export function resizesMachines(capabilities: Pick<Capabilities, "resize" | "replacesMachine">): boolean {
-  return capabilities.replacesMachine && capabilities.resize;
-}
-
-/** Whether a request asks for a size at all, the one reading both roads that take one make: a create naming none
- * takes the golden's own size and a resize naming none replaces the machine at the size it has, so neither checks
- * a size nor reads the road a new one needs. */
+/** Whether a request asks for a size at all: a create naming none takes the golden's own size, and so never reads
+ * the list of sizes the provider offers. */
 export function namesSize(asked: Partial<WorkspaceSize> | undefined): boolean {
   return asked?.cpu !== undefined || asked?.memMb !== undefined;
 }
@@ -1346,8 +1331,8 @@ export const WorkspaceCostEvent = z.object({
   rateUsdPerHour: z.number(),
   /** Total awake milliseconds behind accruedUsd since metering began; carried across host restarts. */
   awakeMs: z.number(),
-  /** The awake time so far billed stretch by stretch at the rate that held over each, so a size change or a wake at
-   * another size never re-prices what came before it. */
+  /** The awake time so far billed stretch by stretch at the rate that held over each, so a machine replaced or a
+   * wake never re-prices what came before it. */
   accruedUsd: z.number(),
   at: z.string(),
 });
@@ -1720,8 +1705,6 @@ export interface HostsView {
   here: string;
   current: string | null;
   hosts: HostListing[];
-  /** What this computer is to another wsp, when it joined one: the menu grows the two rows for it. */
-  place?: { hostName: string; awake: boolean };
 }
 
 /** What the connect sheet asks the shell for: an address with the code wsp host pair printed there, or an ssh login the
@@ -1731,20 +1714,6 @@ export type HostConnectAsk = { road: "direct"; url: string; code: string } | { r
 /** How a host move or connect ended: done, or refused in the host's own words with the field the words are about, so
  * the sheet can put them under it. */
 export type HostOutcome = { ok: true } | { ok: false; error: string; at: "url" | "code" | "address" };
-
-/** What the join screen sends the shell: the address as it is typed on the other screen, and the one token the
- * join line carried beside it, which is the code and the fingerprint of that host's key. */
-export const JoinAsk = z.object({ address: z.string().max(200), code: z.string().max(128) });
-export type JoinAsk = z.infer<typeof JoinAsk>;
-
-/** What this computer is to another wsp, read off its place file. */
-export interface PlaceStanding {
-  hostName: string;
-  hostUrl: string;
-  alias: string;
-  joinedAt: string;
-  awake: boolean;
-}
 
 /** The class the desktop preload puts on the html element when the window has no title bar of its own: the app's
  * header row is the window's frame, the traffic lights sit in it and the sidebar shows the window's frosted glass. */
@@ -1804,16 +1773,6 @@ export interface DesktopBridge {
   disconnectHost(alias: string): Promise<HostOutcome>;
   /** The shell's own menu asked for the connect sheet. Returns the unsubscribe. */
   onConnectHostOpen(handler: () => void): () => void;
-  // What this computer is to the wsp it joined, and the two things its window does about it. All three are absent
-  // on a shell from before the bridge carried them, as `version` is: the page and the shell are two halves that ship
-  // together and can be two releases apart, so a page that would use one reads for it first. The join itself is not
-  // among them: it is asked for on the first launch's own page, whose bridge is that page's and not this one.
-  /** What this computer is to another wsp, or nothing when it belongs to none. */
-  place?(): Promise<PlaceStanding | undefined>;
-  /** Takes this computer back out of that wsp and returns the window to its own. */
-  leaveWsp?(): Promise<HostOutcome>;
-  /** Holds this computer out of idle sleep while it is joined, or lets it go; answers the standing as it now is. */
-  setStayAwake?(on: boolean): Promise<PlaceStanding>;
 }
 
 // --- golden image (manifest, interactive builder, build stages) ---------------
@@ -3160,6 +3119,7 @@ const DAEMON_CONTENTS = [
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
   "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
   "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
+  "9ecd9dcce5a8ed6da8ac136935fdd36e848cf7122ec655c70393542b19310a50",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3236,7 +3196,9 @@ const DAEMON_CONTENTS = [
  * what the workspaces there hold of the computer. Version 33 answers a client on the computer itself the listing of
  * the workspaces it holds and one reading of any of them, both read-only and both on the road that dials in; the
  * reading carries the sizes as applied, the memory and processor time off the cgroup, the uptime, the process
- * count, the address and the two paths, where the metrics op before it read two of those and replied with none. */
+ * count, the address and the two paths, where the metrics op before it read two of those and replied with none.
+ * Version 34 holds a joined computer out of idle sleep no longer: the hold that watched the place file is gone and
+ * the file carries no field for it, so a computer sleeps on its own schedule while it is joined. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3681,9 +3643,6 @@ export interface PlaceFile {
   hostPublicKey: string;
   keyPath: string;
   joinedAt: string;
-  /** Whether this computer is held out of idle sleep while it is joined. The hold lives in the agent, which watches
-   * this file, so the toggle is a write here and quitting the app changes nothing. */
-  awake: boolean;
 }
 
 /** The mode the place file and the private key beside it are kept at: the person's own and nobody else's. A key any
@@ -3706,7 +3665,6 @@ export function parsePlaceFile(text: string): PlaceFile | undefined {
     typeof f.placeId === "string" &&
     typeof f.name === "string" &&
     typeof f.hostName === "string" &&
-    typeof f.awake === "boolean" &&
     Array.isArray(f.hostUrls) &&
     f.hostUrls.every(u => typeof u === "string") &&
     typeof f.hostPublicKey === "string" &&
@@ -3841,15 +3799,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("workspaces.restartDaemon"), workspaceId: z.string() }),
   /** Stops a wake that is asking the provider again on its own and replies with the record it leaves behind. */
   z.object({ id: reqId, op: z.literal("workspaces.stopWake"), workspaceId: z.string() }),
-  z.object({
-    id: reqId,
-    op: z.literal("workspaces.upgrade"),
-    workspaceId: z.string(),
-    cpu: z.number().optional(),
-    memMb: z.number().optional(),
-  }),
+  z.object({ id: reqId, op: z.literal("workspaces.upgrade"), workspaceId: z.string() }),
   /** Moves a workspace onto the golden's head version: a fresh fork of the newer image carrying this workspace's
-   * files across, the way a resize does. The person asks for it; nothing moves a machine they are working on.
+   * files across. The person asks for it; nothing moves a machine they are working on.
    * Refused (kind "conflict") for a workspace forked from a project golden, whose disk the move would throw away. */
   z.object({ id: reqId, op: z.literal("workspaces.updateImage"), workspaceId: z.string() }),
   /** Names the workspace and replies with its fresh { workspace }. The name is unique on this host, so one another

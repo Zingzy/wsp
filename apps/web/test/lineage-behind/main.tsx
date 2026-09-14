@@ -28,7 +28,6 @@ const lineage: SnapshotLineage = {
 
 const listeners = new Set<(e: EventUnion) => void>();
 const api: Api = {
-  upgrade: async () => workspace,
   updateImage: async () => ({ workspace: { ...workspace, golden: "snap_golden-v12" }, moved: true, kept: [".zshrc"] }),
   capabilities: async () => (caps()),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),

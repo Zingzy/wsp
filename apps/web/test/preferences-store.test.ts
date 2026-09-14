@@ -27,7 +27,6 @@ function fakeApi(record: Preferences, refuse?: () => Error) {
     watchStatuses: async () => [],
     nap: async () => view("ws_a"),
     wake: async () => view("ws_a"),
-    upgrade: async () => view("ws_a"),
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),

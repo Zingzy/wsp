@@ -3,7 +3,7 @@
 // already exists, theirs, reached over the link it opened to this host. It sits
 // behind the same MachineBackend seam the Solari, local and ssh backends do, so
 // the runtime never learns which kind it holds. Nothing here creates, forks,
-// pauses, snapshots or resizes: every capability behind those is false, so each
+// pauses or snapshots: every capability behind those is false, so each
 // road refuses by capability before it reaches this file. One call leaves this
 // module, the transport, which is one `exec` frame on the link.
 
@@ -133,11 +133,9 @@ export class PlaceMachine implements Machine {
 export class PlaceBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    resize: false,
     replacesMachine: false, // the computer is the person's own: wsp made it no image and throws it away for nothing
     previewUrls: false,
     signedUrls: false,
-    containers: false,
     callbackRelay: false,
     diskSnapshots: false,
     snapshotsAnyLife: false,
