@@ -65,15 +65,14 @@ fn fresh_nonce() -> PlaceNonce {
 }
 
 /// The protocol's wsUrlOf: the scheme turned to its socket form, the host kept, trailing slashes cut, the socket
-/// path appended. Only http addresses are dialled here: nothing in this daemon speaks TLS yet.
+/// path appended. An https address is a relay's or a tunnel's, which is the one road to a host behind a home
+/// router, so it becomes wss and the connect wraps the socket in TLS against the roots baked into this binary.
 pub(crate) fn ws_url_of(url: &str) -> Result<String, &'static str> {
     if !is_http_url(url) {
         return Err("not an http address");
     }
     let (scheme, rest) = url.split_once("://").ok_or("not an http address")?;
-    if scheme.eq_ignore_ascii_case("https") {
-        return Err("this daemon dials http addresses only; it holds no TLS");
-    }
+    let socket = if scheme.eq_ignore_ascii_case("https") { "wss" } else { "ws" };
     let rest = rest.split(['?', '#']).next().unwrap_or(rest);
     let (host, path) = match rest.find('/') {
         Some(at) => (&rest[..at], rest[at..].trim_end_matches('/')),
@@ -82,7 +81,7 @@ pub(crate) fn ws_url_of(url: &str) -> Result<String, &'static str> {
     if host.is_empty() {
         return Err("not an http address");
     }
-    Ok(format!("ws://{host}{path}/ws"))
+    Ok(format!("{socket}://{host}{path}/ws"))
 }
 
 /// Whole seconds as node's Math.round gives them for the two sentences that name a wait.
@@ -342,12 +341,15 @@ mod tests {
     }
 
     #[test]
-    fn the_socket_address_is_the_protocols_reading_of_the_http_one() {
+    fn the_socket_address_is_the_protocols_reading_of_the_http_or_https_one() {
         assert_eq!(ws_url_of("http://192.168.1.20:4400").unwrap(), "ws://192.168.1.20:4400/ws");
         assert_eq!(ws_url_of("http://192.168.1.20:4400/").unwrap(), "ws://192.168.1.20:4400/ws");
         assert_eq!(ws_url_of("http://host.example/base//").unwrap(), "ws://host.example/base/ws");
         assert_eq!(ws_url_of("HTTP://h:1?x=1").unwrap(), "ws://h:1/ws");
-        assert!(ws_url_of("https://relay.example.com").is_err());
+        assert_eq!(ws_url_of("https://h.example/").unwrap(), "wss://h.example/ws");
+        assert_eq!(ws_url_of("https://h645d7f8a8d48cbd6.example").unwrap(), "wss://h645d7f8a8d48cbd6.example/ws");
+        assert_eq!(ws_url_of("https://h.example/base//").unwrap(), "wss://h.example/base/ws");
+        assert_eq!(ws_url_of("HTTPS://h.example:8443?x=1").unwrap(), "wss://h.example:8443/ws");
         assert!(ws_url_of("ftp://h").is_err());
         assert!(ws_url_of("http://").is_err());
         assert!(ws_url_of("http:///path").is_err());

@@ -58,8 +58,8 @@ import {
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { SshBackend, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
+import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
@@ -138,6 +138,7 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
     // being joined is somewhere else and so whether that word could ever be dialled from it.
     install: placeInstaller(advertise === undefined ? {} : { advertise }),
     dial: placeDialler(),
+    log: placeLogReader(),
     update: placeUpdater(),
     provider: () => {
       const module = providerModule(env);
@@ -505,6 +506,26 @@ export function placeDialler(deps: { transport?: SshTransport } = {}): PlaceDial
   return async login => {
     const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
     await sshDial(reach, ...(deps.transport === undefined ? [] : [deps.transport]));
+  };
+}
+
+/** How many of the agent's own last lines go under a wait that ran out: enough to carry the address it refused and
+ * the one that did not answer, short enough to read under one sentence. */
+export const PLACE_LOG_TAIL = 10;
+
+/** The end of the agent's own log on a computer that took it and has not dialled back, over the login the install
+ * used. The daemon writes the address it could not dial and why into that log every ten seconds, so this is the
+ * fact a person would otherwise go looking for by hand on a box they just met.
+ *
+ * The path is the one placeDaemonPaths writes, spelled against the box's own HOME rather than a home read here: a
+ * second ssh child to ask what that home is costs a person who is already past a wait that ran out. A box with no
+ * log yet answers nothing, which leaves the wait's own sentence exactly as it stood. */
+export function placeLogReader(deps: { transport?: SshTransport } = {}): PlaceLogReader {
+  return async login => {
+    const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
+    const at = placeDaemonPaths("$HOME").placeLog;
+    const said = await (deps.transport ?? sshClient)(reach, `tail -n ${PLACE_LOG_TAIL} "${at}" 2>/dev/null`, { timeoutMs: SSH_DIAL_MS });
+    return said.stdout.split("\n").map(line => line.trimEnd()).filter(line => line !== "").slice(-PLACE_LOG_TAIL);
   };
 }
 

@@ -979,6 +979,57 @@ describe("putting the agent on a computer over ssh", () => {
     await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("box"));
   });
 
+  it("puts the agent's own last lines under that sentence, read over the login the install used", async () => {
+    const hostKey = newPlaceKeyPair();
+    const asked: { ssh: string; keyPath?: string }[] = [];
+    const said = ["https://h645d7f8a8d48cbd6.example could not be dialled: not an http address", "http://100.129.175.77:4420 did not answer in 10s"];
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async () => ({ name: "box", ssh: "root@10.0.0.9", sshKeyPath: "/Users/lena/.ssh/hetzner" }),
+        log: async login => {
+          asked.push(login);
+          return said;
+        },
+      },
+      placeJoinWaitMs: 50,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const stages: PlaceStageEvent[] = [];
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await expect(runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now())).rejects.toThrow([placeNoLinkLine("box"), ...said].join("\n"));
+    expect(asked).toEqual([{ ssh: "root@10.0.0.9", keyPath: "/Users/lena/.ssh/hetzner" }]);
+    // The step's note is one line by construction: a terminal prints it after the step's marker and the sheet puts
+    // it in one span, so the box's own lines ride the throw, which both roads print whole.
+    expect(stages.at(-1)?.note).toBe(placeNoLinkLine("box"));
+  });
+
+  it("says the wait's own sentence and nothing else when the box will not answer the read either", async () => {
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async () => ({ name: "box", ssh: "root@10.0.0.9" }),
+        log: async () => {
+          throw new Error("ssh: connect to host 10.0.0.9 port 22: Connection refused");
+        },
+      },
+      placeJoinWaitMs: 50,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const failed = await runtime.places!.add({ address: "root@10.0.0.9", hostUrls: DOOR }, Date.now()).then(
+      () => undefined,
+      (e: unknown) => e as Error,
+    );
+    expect(failed?.message).toBe(placeNoLinkLine("box"));
+  });
+
 });
 
 
