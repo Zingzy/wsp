@@ -3211,6 +3211,7 @@ const DAEMON_CONTENTS = [
   "46fe3b809d1bcc82d0dc644d8f300672cb72ae63c99668f6c1be1c75aa71a3f4",
   "87a461ca21eb894d129e0d692bcbdf56f1134d6160a0e84fe52692ed36f317cd",
   "8308517d14718d8b82e1e129f1e48a8a511aa9fdaae26b60c900b6280fa85051",
+  "a51cf26e554a02935fda02942869ddd7251b41e84625e500336c7ce171a4d667",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3312,7 +3313,12 @@ const DAEMON_CONTENTS = [
  * such a host writes into every place file, and until now the link refused it and the box never dialled back.
  * Version 41 is the same binary as version 40: what this record hashes changed, not what a deploy installs. A
  * crate's tests/ folder is out of the sha, so test-only work stops cutting a version and no machine reads itself
- * as behind over cases it would never run. */
+ * as behind over cases it would never run.
+ * Version 42 holds a guest session open across a host that went: the daemon keeps the frame each session opened
+ * with and names every session it holds to whatever socket asks to watch next, so a host that restarted picks them
+ * back up instead of closing the first message it cannot place, and a session nobody has watched for ten minutes
+ * ends to its guest with one sentence, so the process inside the machine prints it and exits rather than waiting
+ * for the life of the workspace. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
