@@ -151,14 +151,21 @@ export interface PlaceWiring {
   update?: PlaceUpdater;
 }
 
+/** One login over ssh as this host holds it: the address in the spelling a person would type back, and the key file
+ * the add was given where they named one, which is a path on this computer and stays here. */
+export interface PlaceLogin {
+  ssh: string;
+  keyPath?: string;
+}
+
 /** One dial of a computer over the login this host holds for it, with the key file the add was given where there
  * was one. Throws with the road's own sentence (ssh's line on the ssh road), which is what a person reads in place
  * of a wsp-shaped refusal. */
-export type PlaceDialler = (login: { ssh: string; keyPath?: string }) => Promise<void>;
+export type PlaceDialler = (login: PlaceLogin) => Promise<void>;
 
 /** The last lines the agent wrote on a computer, read over the login it was installed over. Answers nothing where
  * there is no log to read, which is a fact about that computer and not a reason to stop. */
-export type PlaceLogReader = (login: { ssh: string; keyPath?: string }) => Promise<readonly string[]>;
+export type PlaceLogReader = (login: PlaceLogin) => Promise<readonly string[]>;
 
 /** What one update is told: which computer, what it last said about itself (its chip picks the binary), the link
  * this host is holding where it holds one, and the login it was installed over where the record holds one. Which
@@ -168,7 +175,7 @@ export interface PlaceUpdateRequest {
   name: string;
   report: PlaceReport;
   link?: DaemonReach;
-  ssh?: { ssh: string; keyPath?: string };
+  ssh?: PlaceLogin;
 }
 
 /** What an update answers: which road carried the binary, where it landed on that computer, and where the one it
@@ -593,11 +600,32 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     }
   };
 
+  /** The installs waiting on a computer to dial in, keyed by the code each handed it: the join notes which place
+   * the code became and the attach that follows wakes the install. The login the install logged in over is here
+   * too, from the moment its ssh answered, since the record is written by whichever of the two lands second. */
+  const awaiting = new Map<string, { placeId?: string; login?: PlaceLogin; woken?: (placeId: string) => void }>();
+
+  /** The road the install came in over, written onto a record: the join frame the record is made from says nothing
+   * about how the computer was reached, and every later dial, update and read of its log rides this login. */
+  const withRoad = (record: PlaceRecord, login: PlaceLogin | undefined): PlaceRecord =>
+    login === undefined ? record : { ...record, road: { ...record.road, ssh: login.ssh, ...(login.keyPath !== undefined ? { keyPath: login.keyPath } : {}) } };
+
+  /** The login an install in flight logged in over, by the place its code became; nothing for every computer no
+   * install is putting the agent on right now, whose record already carries whatever road it has. */
+  const roadOfInstall = (placeId: string): PlaceLogin | undefined => {
+    for (const waiting of awaiting.values()) if (waiting.placeId === placeId) return waiting.login;
+    return undefined;
+  };
+
   /** The one write of a place record: the store and the memory the sync roads read both move, so a backend answered
-   * without a read is never answered off a record the store has moved past. */
-  const keep = async (record: PlaceRecord): Promise<void> => {
-    kept.set(record.id, record);
-    await store.put(PLACES, record.id, record);
+   * without a read is never answered off a record the store has moved past. An install still in flight has its
+   * login written on every one of them, so the join's own record and the link's first write carry the road back
+   * rather than a write after the wait having to add it. */
+  const keep = async (record: PlaceRecord): Promise<PlaceRecord> => {
+    const held = withRoad(record, roadOfInstall(record.id));
+    kept.set(held.id, held);
+    await store.put(PLACES, held.id, held);
+    return held;
   };
   const defaultId = async (): Promise<string | undefined> => {
     const held = (await store.get(DEFAULT_COLLECTION, DEFAULT_ID)) as { placeId?: unknown } | undefined;
@@ -740,9 +768,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     held.socket.close(1000, reason);
   };
 
-  /** The installs waiting on a computer to dial in, keyed by the code each handed it: the join notes which place
-   * the code became and the attach that follows wakes the install. */
-  const awaiting = new Map<string, { placeId?: string; woken?: (placeId: string) => void }>();
   /** How many forks a place holds and how many more it takes, off what its own backend says about the computer it
    * runs on. Only what this host already knows is waited for: a table is something a person is watching, so a place
    * that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and one
@@ -819,17 +844,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // computer's link would replace the newer's on every dial.
       const id = `p_${randomBytes(8).toString("hex")}`;
       const stamp = new Date(at).toISOString();
-      const record: PlaceRecord = { id, name: taken.name, publicKey: req.publicKey, joinedAt: stamp, lastSeenAt: stamp, reportedAt: stamp, report: taken };
-      await keep(record);
+      // An install that handed this computer the code is waiting on the link it will open next; which place the
+      // code became is noted before the first write of the record, so that write carries the road it came in over.
+      const waiting = awaiting.get(req.code);
+      if (waiting !== undefined) waiting.placeId = id;
+      const record = await keep({ id, name: taken.name, publicKey: req.publicKey, joinedAt: stamp, lastSeenAt: stamp, reportedAt: stamp, report: taken });
       // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
       await markDefault(id);
       // One code buys the place and, when the app asked, the token the joining computer's own window holds: the
       // person's intent was one act. The socket stays the place link and is bound to no device.
       const client = req.client === undefined ? undefined : await devices.admit(req.client.name, at);
       const { nonce, signature, expect } = challenge(id, req.nonce);
-      // An install that handed this computer the code is waiting on the link it will open next.
-      const waiting = awaiting.get(req.code);
-      if (waiting !== undefined) waiting.placeId = id;
       emit({ type: "place.joined", place: viewOf(record, id), from });
       return {
         reply: {
@@ -1063,11 +1088,17 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         opts.onStage?.({ type: "place.stage", addId, step: which, state, ...(note !== undefined ? { note } : {}) });
       };
       const { code } = await devices.issue({ now: at, ttlMs: PAIR_CODE_TTL_MS });
-      const waiting: { placeId?: string; woken?: (placeId: string) => void } = {};
+      const waiting: { placeId?: string; login?: PlaceLogin; woken?: (placeId: string) => void } = {};
       awaiting.set(code, waiting);
       try {
         const { addId: _stream, ...asked } = req;
         const installed = await install({ ...asked, code: joinToken(code, keyFingerprint(wiring.hostKey.publicKey)) }, stage);
+        // The road back to this computer is the host's the moment the install answers, and what the wait comes to
+        // does not change it: the computer that most needs a login held here is the one whose agent never dials.
+        // A join still to land carries it off this entry; one that already landed has its record written again.
+        waiting.login = installed.ssh === undefined ? undefined : { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) };
+        const early = waiting.login === undefined || waiting.placeId === undefined ? undefined : await recordOf(waiting.placeId);
+        if (early !== undefined) await keep(early);
         stage("join", "running");
         const placeId = await new Promise<string>((woken, fail) => {
           // The link may already be up: the computer dials the moment its own join has written its place file, and
@@ -1087,13 +1118,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           // its dial does not land every ten seconds. Its own sentence beats a person guessing at routes.
           throw new Error([e instanceof Error ? e.message : String(e), ...(await boxSaid(wiring, installed))].join("\n"));
         });
-        const found = await recordOf(placeId);
-        if (found === undefined) throw new Error(placeNoLinkLine(installed.name));
-        // The login the install used is the road back to this computer when its agent stops dialling, so the record
-        // keeps it: the join frame the record was made from says nothing about how the computer was reached.
-        const held: PlaceRecord =
-          installed.ssh === undefined ? found : { ...found, road: { ...found.road, ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) } };
-        if (installed.ssh !== undefined) await keep(held);
+        const held = await recordOf(placeId);
+        if (held === undefined) throw new Error(placeNoLinkLine(installed.name));
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
         stage("join", "done", `engine ${held.report.engine}`);
