@@ -3210,6 +3210,7 @@ const DAEMON_CONTENTS = [
   "9a92c0f6248b0182e5f5f7ad02c2d6e54b0809513171a390927d63bc3ee00e70",
   "46fe3b809d1bcc82d0dc644d8f300672cb72ae63c99668f6c1be1c75aa71a3f4",
   "87a461ca21eb894d129e0d692bcbdf56f1134d6160a0e84fe52692ed36f317cd",
+  "8308517d14718d8b82e1e129f1e48a8a511aa9fdaae26b60c900b6280fa85051",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3308,7 +3309,10 @@ const DAEMON_CONTENTS = [
  * Version 40 dials a host at an https address: the link turns one into wss as the protocol does and speaks TLS
  * through rustls with the root certificates baked into the binary, since a box may carry no certificate store of
  * its own. It is the one road to a host that sits on a laptop behind a home router, which is the first address
- * such a host writes into every place file, and until now the link refused it and the box never dialled back. */
+ * such a host writes into every place file, and until now the link refused it and the box never dialled back.
+ * Version 41 is the same binary as version 40: what this record hashes changed, not what a deploy installs. A
+ * crate's tests/ folder is out of the sha, so test-only work stops cutting a version and no machine reads itself
+ * as behind over cases it would never run. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3317,8 +3321,11 @@ export const DAEMON_VERSION = DAEMON_CONTENTS.length;
  * record), the scripts the host writes beside it, DAEMON_ROOTS_PATH and the work-score line. The host's
  * daemon-content test recomputes it and fails when that content moved and this record did not, so changed content
  * cannot reach nobody: a start script gained a PATH line under an unchanged version once and every machine already
- * running kept the old one. Left out: the rest of this file, which the binary reads only through the fixtures;
- * hashing the protocol whole would turn every edit to it into a redeploy of every machine. */
+ * running kept the old one. Left out: every file under a crate's tests/ folder, which is built for a test run
+ * and no deploy installs, so test-only work cuts no version for a binary nobody's machine would read as new; an
+ * inline #[cfg(test)] module stays hashed, since the file carrying it ships. Left out too: the rest of this file,
+ * which the binary reads only through the fixtures; hashing the protocol whole would turn every edit to it into a
+ * redeploy of every machine. */
 export const DAEMON_CONTENT_SHA = DAEMON_CONTENTS[DAEMON_CONTENTS.length - 1]!;
 
 /** The file on the guest naming the imported project folders, one absolute path per line: the runtime writes it
