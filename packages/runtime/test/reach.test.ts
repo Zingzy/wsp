@@ -2,33 +2,36 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, type DaemonHandle, type ListeningPort } from "@wsp/daemon";
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
+import { fakeProcTree, setListeners } from "../../daemon/test/fake-proc.js";
+import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { connectDaemon, daemonWsUrl, type DaemonReach } from "../src/reach.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
 import { until } from "./until.js";
 
 const TOKEN = "reach-token";
 
-let daemon: DaemonHandle | undefined;
+let daemon: DaemonUnderTest | undefined;
 let proxy: TcpProxy | undefined;
 let reach: DaemonReach | undefined;
 let inboxDir: string | undefined;
-let snapshot: ListeningPort[] = [];
+let procRoot: string | undefined;
 
-// Both watchers must be faked: darwin has no /proc/net/tcp and no /root/inbox.
-async function startTestDaemon(): Promise<DaemonHandle> {
+// The machine the daemon reads is a fake /proc tree and a folder of this test's own: darwin has neither
+// /proc/net/tcp nor /root/inbox, and a listener here is a row written into that tree.
+async function startTestDaemon(): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-reach-inbox-"));
-  snapshot = [];
-  return startDaemon({
+  procRoot = fakeProcTree([]);
+  return daemonUnderTest({
+    host: "127.0.0.1",
     port: 0,
     token: TOKEN,
-    inboxDir,
+    inbox: inboxDir,
     inboxQuietMs: 100,
     inboxPollMs: 25,
-    portsSource: async () => snapshot,
+    procRoot,
     portsIntervalMs: 25,
   });
 }
@@ -42,6 +45,8 @@ afterEach(async () => {
   daemon = undefined;
   if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
   inboxDir = undefined;
+  if (procRoot) rmSync(procRoot, { recursive: true, force: true });
+  procRoot = undefined;
 });
 
 describe("daemonWsUrl", () => {
@@ -104,7 +109,7 @@ describe("connectDaemon", () => {
     await until(() => reach!.stats().reconnects >= 1);
 
     // ports.watch was re-subscribed on the new connection
-    snapshot = [{ port: 9999, pid: 42, inode: 7, uid: 0, loopback: false }];
+    setListeners(procRoot!, [{ port: 9999, pid: 42 }]);
     await until(() => events.some(e => e.type === "port.open" && e.port === 9999));
 
     // inbox.watch was re-subscribed too: a post-reconnect file still arrives

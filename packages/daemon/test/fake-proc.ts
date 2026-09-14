@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -107,9 +107,28 @@ export function fakeProcTree(procs: FakeProc[], pageSize = 4096): string {
 
 export interface FakeListener {
   port: number;
-  /** The process holding the socket; its fake entry is made when the tree has none. */
-  pid: number;
+  /** The process holding the socket; its fake entry is made when the tree has none. Absent leaves the row with no
+   * holder anywhere in the tree, which is a listener the daemon can see and cannot name a pid for. */
+  pid?: number;
   loopback?: boolean;
+}
+
+/** Where the inodes this file mints for listening sockets start, above anything a test writes by hand, so the sweep
+ * below never takes a socket some other part of a tree put there. */
+const LISTENER_INODE = 100_000;
+
+/** Every fd link this file made for a listening socket that this set no longer names, taken out: a row that names
+ * no holder must leave none behind, or the daemon still reads the pid that was there. Run after the new links are
+ * in place, so a port that kept its holder is never momentarily holderless under a daemon's own clock. */
+function sweepListeners(root: string, held: ReadonlySet<string>): void {
+  for (const name of readdirSync(root)) {
+    if (!/^\d+$/.test(name)) continue;
+    const fd = join(root, name, "fd");
+    if (!existsSync(fd)) continue;
+    for (const entry of readdirSync(fd)) {
+      if (Number(entry) >= LISTENER_INODE && !held.has(`${name}/${entry}`)) rmSync(join(fd, entry), { force: true });
+    }
+  }
 }
 
 /** The address column of /proc/net/tcp: each 32-bit word little-endian in hex, so 127.0.0.1 is 0100007F. */
@@ -120,15 +139,21 @@ const hexPort = (port: number): string => port.toString(16).toUpperCase().padSta
  * daemon's ports road reads both, so a row here is a port.open or a port.close on its next poll. */
 export function setListeners(root: string, rows: readonly FakeListener[]): void {
   const lines = ["  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode"];
+  const held = new Set<string>();
   rows.forEach((row, i) => {
-    const inode = 100_000 + row.port;
+    const inode = LISTENER_INODE + row.port;
     lines.push(`   ${i}: ${hexAddress(row.loopback === true)}:${hexPort(row.port)} 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 ${inode} 1 0000000000000000 100 0 0 10 0`);
+    if (row.pid === undefined) return;
     const dir = join(root, String(row.pid));
     if (!existsSync(join(dir, "stat"))) writeProc(root, { pid: row.pid });
-    mkdirSync(join(dir, "fd"), { recursive: true });
-    relink(`socket:[${inode}]`, join(dir, "fd", String(inode)));
+    const fd = join(dir, "fd");
+    mkdirSync(fd, { recursive: true });
+    // Listed, not stat'ed: the link points at a socket: name no file answers, so a read that follows it says absent.
+    if (!readdirSync(fd).includes(String(inode))) symlinkSync(`socket:[${inode}]`, join(fd, String(inode)));
+    held.add(`${row.pid}/${inode}`);
   });
   writeWhole(join(root, "net", "tcp"), `${lines.join("\n")}\n`);
+  sweepListeners(root, held);
 }
 
 const uid = process.getuid?.() ?? 0;

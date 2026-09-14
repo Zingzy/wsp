@@ -79,10 +79,10 @@ export function codeIn(text: string, shape: RegExp | undefined): string | undefi
 }
 
 /** A callback sign-in's pty runs with a DISPLAY, which the daemon otherwise drops so a tool takes its paste-code
- * road instead (see ptyEnv): gcloud, gemini and railway read an empty DISPLAY as "no browser here". Nothing ever
- * connects to it; the shim as BROWSER is what carries the page to this computer, and the forwarded port carries the
- * redirect back. Written here rather than imported: the host mirrors the guest's constants (see doctor.ts) so
- * node-pty stays out of this bundle. */
+ * road instead: gcloud, gemini and railway read an empty DISPLAY as "no browser here". Nothing ever connects to it;
+ * the shim as BROWSER is what carries the page to this computer, and the forwarded port carries the redirect back.
+ * Written here rather than imported: the daemon is a binary the host cannot import, so the host mirrors the guest's
+ * constants (see doctor.ts). */
 export const CALLBACK_DISPLAY = ":0";
 
 /** The environment a login's pty runs with, by the road its row finishes on; nothing added on the other roads. */

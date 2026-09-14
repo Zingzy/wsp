@@ -1,11 +1,11 @@
 // The typed contract every client speaks: workspace/session views, the event
 // union fanned out by the runtime, and the wire types for both servers (the
-// runtime's serveRuntime and the in-VM daemon). The daemon package has no
-// exported wire types, so these schemas are their one home; @wsp/daemon's
-// handlers are the reference implementation they mirror. A few readings of a
-// machine are parsed here too (ps-time.ts): the runtime and the daemon both
-// read them and neither may import the other, so this package is the only
-// home a second copy cannot grow beside.
+// runtime's serveRuntime and the in-VM daemon). The daemon is a binary that
+// imports nothing of node's, so these schemas are the one home of the shapes
+// it answers in and the suite in packages/daemon holds it to them. A few
+// readings of a machine are parsed here too (ps-time.ts): the runtime and the
+// daemon both read them and neither may import the other, so this package is
+// the only home a second copy cannot grow beside.
 
 import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
@@ -3248,6 +3248,7 @@ const DAEMON_CONTENTS = [
   "0bec2f8329f6e46772d072acb082a83a943fe87ed31f2a83df3295069d1f6243",
   "5ef12ef8bf31cdb5ebbdd7ef56113fc447876b63dbabd073752a802491db5fab",
   "e0134bee72be55ed8349d11a9e656b61ee20ba55472be25546f0809763f99d9c",
+  "9a92c0f6248b0182e5f5f7ad02c2d6e54b0809513171a390927d63bc3ee00e70",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3338,7 +3339,9 @@ const DAEMON_CONTENTS = [
  * there needs no address of this host, no TLS and no node. The binary answers that word itself, and the deploy
  * writes a two-line shim onto the machine's PATH, in the same arm as the unit, that hands it the line.
  * Version 37 answers no op differently: the contract fixture a reply is held to no longer names a provider nothing
- * can serve, and a fixture's bytes are in the sha whatever they say. */
+ * can serve, and a fixture's bytes are in the sha whatever they say. Version 38 answers nothing new either: this
+ * record holds every Rust source under crates, test code included, so two cases added beside the place link's
+ * agent parsing and the pty's cwd move it while the binary a guest runs is the one version 37 named. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

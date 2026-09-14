@@ -6,8 +6,8 @@ import type { Machine, PreviewReach } from "./machine.js";
  * tokens live an hour this keeps URLs younger than about fifty minutes in circulation. */
 export const PREVIEW_REFRESH_MARGIN_MS = 10 * 60_000;
 
-/** The in-guest daemon's port (mirrors @wsp/daemon DEFAULT_PORT; the engine
- * cannot import the daemon package, which only runs inside guests). */
+/** The in-guest daemon's port (mirrors DAEMON_DEFAULT_PORT in @wsp/protocol; the engine sits under the protocol
+ * and cannot import it). */
 export const DAEMON_PORT = 7070;
 
 /** Whether the daemon is serving, asked from inside the guest, in the words a container image can answer in:

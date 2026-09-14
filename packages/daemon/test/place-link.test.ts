@@ -3,14 +3,13 @@
 // server with a real ed25519 pair: nothing here fakes a signature, so the
 // handshake the daemon runs is the one the host answers.
 import { createPrivateKey, sign, verify } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
 import { NO_PLACE_FILE_LINE, NOT_ON_THIS_ROAD, PLACE_UNKNOWN_REFUSAL, PlaceProveRequest, PlaceReport, hostKeyRefusal, hostQuietLine, linkedLine, placeDaemonPaths, placeLinkTranscript, unknownOpLine, type PlaceFile } from "@wsp/protocol";
-import { placeBackoffMs, readPlaceFile, writePlaceFile } from "../src/link.js";
-import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled } from "./fake-place-host.js";
+import { closeFakePlaceHosts, fakePlaceHost, listening, placePair, settled, writePlaceFile } from "./fake-place-host.js";
 import { daemonUnderTest, type DaemonUnderTest, type DaemonUnderTestArgs } from "./harness.js";
 import { rejectedEvents } from "./wire-events.js";
 
@@ -53,12 +52,6 @@ const untilLogged = (d: DaemonUnderTest, test: (line: string) => boolean, timeou
     },
     { timeout, interval: 10 },
   );
-
-describe("the wait before each attempt", () => {
-  it("doubles from two seconds to thirty and stops there", () => {
-    expect([1, 2, 3, 4, 5, 6].map(placeBackoffMs)).toEqual([2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
-  });
-});
 
 describe("the link a place dials", () => {
   it("sends place.auth as its first frame and proves with a report the host reads, before anything else", async () => {
@@ -126,6 +119,16 @@ describe("the link a place dials", () => {
     const home = mkdtempSync(join(tmpdir(), "wsp-link-none-"));
     dirs.push(home);
     const d = await placeDaemon({ home, file: placeDaemonPaths(home).placeFile }, { linkRefusedRetryMs: 600_000 });
+    await untilLogged(d, line => line === NO_PLACE_FILE_LINE);
+  });
+
+  it("says the same of a file that is not a place file, rather than dialling on what it could not read", async () => {
+    const home = mkdtempSync(join(tmpdir(), "wsp-link-junk-"));
+    dirs.push(home);
+    const at = placeDaemonPaths(home);
+    mkdirSync(dirname(at.placeFile), { recursive: true, mode: 0o700 });
+    writeFileSync(at.placeFile, "not a place file");
+    const d = await placeDaemon({ home, file: at.placeFile }, { linkRefusedRetryMs: 600_000 });
     await untilLogged(d, line => line === NO_PLACE_FILE_LINE);
   });
 
@@ -292,16 +295,5 @@ describe("the socket a place proved, served as an inbound one", () => {
     const dialed = host.dials();
     await settled(150);
     expect(host.dials()).toBe(dialed);
-  });
-});
-
-describe("the place file", () => {
-  it("reads back what was written, and a file that is not one reads as none", () => {
-    const key = placePair();
-    const { file: path } = placeFile(["http://192.168.1.20:4400"], key.publicKey, placePair().privateKeyPem);
-    expect(readPlaceFile(path)?.placeId).toBe("p_ab12cd34");
-    writeFileSync(path, "not a place file");
-    expect(readPlaceFile(path)).toBeUndefined();
-    expect(readPlaceFile(`${path}.nope`)).toBeUndefined();
   });
 });

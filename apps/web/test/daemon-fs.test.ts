@@ -115,7 +115,7 @@ describe("daemon-fs over a real daemon link through the host", () => {
     writeFileSync(join(repo, "a.txt"), "two\n");
 
     // Its roots file goes beside its own root: the option's default names the guest's /root, another user's folder here.
-    relay = await startRelayHarness({ daemonOptions: { root, rootsPath: rootsPathIn(root) } });
+    relay = await startRelayHarness({ daemonArgs: { root, rootsPath: rootsPathIn(root) } });
     const statuses: string[] = [];
     link = connectDaemonLink({
       daemon: relay.api.daemon,

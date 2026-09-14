@@ -43,7 +43,7 @@ const factsPath = (roots: GuestRoots): string => `${roots.etc}/wsp/machine-conte
 const SECRETS_SH = "/etc/profile.d/wsp-secrets.sh";
 const SECRETS_FISH = "/etc/fish/conf.d/wsp-secrets.fish";
 
-/** Mirrors @wsp/daemon's OPEN_SHIM_PATH (the engine cannot import the daemon package, which only runs inside guests); a host test pins the two equal. */
+/** Mirrors OPEN_SHIM_PATH in @wsp/protocol (the engine sits under the protocol and cannot import it); a host test pins the two equal. */
 export const BROWSER_SHIM_PATH = "/usr/local/bin/wsp-open";
 
 // --- what did not land, kept on the guest between builds ---------------------

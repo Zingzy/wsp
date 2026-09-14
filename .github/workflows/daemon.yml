@@ -4,7 +4,7 @@ name: daemon
 # The Rust daemon under daemon/ has its own gate, run on every pull request
 # and every push to main that touches it or the wire it is held to: format,
 # lints as errors, the tests, the release build, the static musl build, and
-# the node wire suite driven against the built binary, which is the contract
+# the wire suite driven against the built binary, which is the contract
 # every daemon speaking the protocol is held to. It sits in its own workflow
 # so the paths filter leaves the node jobs in ci.yml exactly as they are.
 on:
@@ -94,12 +94,13 @@ jobs:
       - name: The static binary staged
         working-directory: .
         run: node packages/wspx/scripts/daemon-binary.mjs --triple x86_64-unknown-linux-musl
-      # The wire suite as the contract: the same files that drive the node daemon in the ci gate drive this binary.
+      # The wire suite as the contract: every daemon test drives a binary, and here it is the one this job built
+      # rather than the static one staged above, so a change to daemon/ is gated on the binary it produced.
       - name: Wire suite against the binary
         working-directory: .
         env:
           WSP_DAEMON_BIN: daemon/target/release/wsp-daemon
-        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon/test/daemon-ws.test.ts packages/daemon/test/daemon-ops.test.ts packages/daemon/test/exec.test.ts packages/daemon/test/fs-git-ops.test.ts packages/daemon/test/relay.test.ts packages/daemon/test/place-link.test.ts packages/daemon/test/local-urls.test.ts packages/daemon/test/harness.test.ts
+        run: pnpm exec vitest run --minWorkers=1 --maxWorkers=1 packages/daemon
 
   # The two Linux daemons this head would ship, uploaded on every run so staging one on another computer is a
   # download from the run that built the head instead of a release dispatched by hand. The build and the artifact

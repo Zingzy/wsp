@@ -11,6 +11,9 @@ import type { DaemonApi } from "../protocol/client.js";
 import { errorText } from "../lib/utils.js";
 import { NOT_OPENED_YET, type TerminalWire } from "./link.js";
 
+/** What a refusal reads as when the daemon sent no sentence with it; every op this page drives sends one. */
+export const UNWORDED_REFUSAL = "daemon error";
+
 /** The daemon refused a request; code is set when the op sends a typed one (files and diff ops do). */
 export class DaemonRequestError extends Error {
   readonly code: DaemonErrorCode | undefined;
@@ -119,7 +122,7 @@ export function connectDaemonLink(opts: DaemonLinkOptions): DaemonLink {
           if (reply.ok === true) resolve(reply as Record<string, unknown>);
           else {
             const code = DaemonErrorCode.safeParse((reply as { code?: unknown }).code);
-            reject(new DaemonRequestError(String((reply as { error?: unknown }).error ?? "daemon error"), code.success ? code.data : undefined));
+            reject(new DaemonRequestError(String((reply as { error?: unknown }).error ?? UNWORDED_REFUSAL), code.success ? code.data : undefined));
           }
         },
         (e: unknown) => {
