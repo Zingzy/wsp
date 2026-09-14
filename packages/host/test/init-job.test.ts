@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, STOP_LEFT_MACHINE_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1006,6 +1006,43 @@ describe("the init job, manual road", () => {
     expect(said).toContain(INIT_ROW_STATES.retrying);
     expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${fork.id}`, state: INIT_ROW_STATES.gone });
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+  });
+
+  it("a seal whose rollback could not reach the provider says on the sheet that the machine is still billing, and keeps trying it", async () => {
+    // The incident of 2026-09-14: the network went while the image was being taken, so the smoke fork never booted
+    // and no kill of the builder landed either. The stage's own sentence says what stopped the build; what became
+    // of the builder is the run's to say, and the sheet is one of the two roads a person reads it on.
+    const f = fake();
+    let down = false;
+    const made = f.backend.create.bind(f.backend);
+    const read = f.backend.get.bind(f.backend);
+    const booted: StubMachine[] = [];
+    f.backend.create = async spec => {
+      if (down) throw new Error("fetch failed");
+      const m = (await made(spec)) as StubMachine;
+      m.kill = async () => Promise.reject(new Error("fetch failed"));
+      booted.push(m);
+      return m;
+    };
+    f.backend.get = async id => (down ? Promise.reject(new Error("fetch failed")) : read(id));
+    f.backend.beforeSnapshot = () => {
+      down = true;
+    };
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    const builder = booted[0]!;
+    expect(builder.killed).toBe(false);
+    // The headline says what stopped the build and that the machine is still there, in the words a stop the person
+    // asked for uses; before this the sheet said the first half alone.
+    expect(view.error).toBe(`${NETWORK_LOST_LINE} ${STOP_LEFT_MACHINE_LINE}`);
+    const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
+    expect(said).toContain(INIT_ROW_STATES.retrying);
+    expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${builder.id}`, label: MACHINE_ROW_LABEL });
   });
 
   it("one count for one build: the host's progress is the sheet's own bar, over the same rows", async () => {

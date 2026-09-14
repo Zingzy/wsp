@@ -14,7 +14,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
-import { ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SEAL_FAILED_LINE, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry } from "@wsp/catalog";
@@ -22,7 +22,7 @@ import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.j
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
-import { reduceStages, runInit, stageLine, summaryNote, SWEEP, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
+import { reduceStages, runInit, sealFailedMachineLeftLine, stageLine, summaryNote, SWEEP, type HostHooks, type InitIO, type InitOptions } from "../src/init.js";
 import { ALSO_LOCAL_QUESTION, FIRST_QUESTION, folderQuestion } from "../src/init-first.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
 import { startCallbackRelay } from "../src/relay.js";
@@ -2026,13 +2026,51 @@ describe("wsp init, flags and no terminal", () => {
         return machine;
       };
       f.backends.push(backend);
-      return createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
+      return createRuntime({ backend, store: f.store, adapters: {}, goldenRecipe: recipe, hostId: "box:h1" });
     };
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(1);
     // The id is what somebody can act on, so the failure road prints it where the signal road already did.
     expect(f.text()).toContain(`The machine did not stop (${f.backends[0]!.machines[0]!.id}); ${SWEEP}`);
     expect(f.text()).not.toContain("nothing is billing");
+    // The machine outlived the run, so the record that names it does too: the next init attaches to it and the
+    // doctor sweeps it. A record dropped here leaves it billing with nothing on this computer pointing at it.
+    expect(await f.store.list("builders")).toEqual([expect.objectContaining({ id: f.backends[0]!.machines[0]!.id })]);
+  });
+
+  it("a seal whose rollback could not reach the provider keeps the builder in the record, machine id and all", async () => {
+    const f = fake({ yes: true });
+    f.opts.runtime = recipe => {
+      const backend = stubBackend();
+      backend.execImpl = (_m, cmd) => guestAnswer(cmd);
+      // The link goes while the image is being taken, the way this computer's network went mid-seal: the snapshot
+      // lands, the smoke fork never boots, and afterwards neither a kill nor a read reaches the provider. The read
+      // failing is the half that decides the record: a 404 would be the machine gone, and this is not one.
+      let down = false;
+      const made = backend.create.bind(backend);
+      const read = backend.get.bind(backend);
+      backend.create = async spec => {
+        if (down) throw new Error("fetch failed");
+        const machine = await made(spec);
+        machine.kill = async () => Promise.reject(new Error("fetch failed"));
+        return machine;
+      };
+      backend.get = async id => (down ? Promise.reject(new Error("fetch failed")) : read(id));
+      backend.beforeSnapshot = () => {
+        down = true;
+      };
+      f.backends.push(backend);
+      return createRuntime({ backend, store: f.store, adapters: {}, goldenRecipe: { ...recipe, deployDaemon: async () => "node v22.12.0" }, hostId: "box:h1" });
+    };
+    const result = await runInit(f.opts, f.io);
+    expect(result.code).toBe(1);
+    const builder = f.backends[0]!.machines[0]!;
+    expect(builder.killed).toBe(false);
+    // The record outlives the run, so the next init attaches to the machine and the doctor sweeps it; the outro
+    // names it rather than telling the person the builder is gone while it bills.
+    expect(await f.store.list("builders")).toEqual([expect.objectContaining({ id: builder.id })]);
+    expect(f.text()).toContain(sealFailedMachineLeftLine(builder.id));
+    expect(f.text()).not.toContain(SEAL_FAILED_LINE);
   });
 
   it("over ssh the address is printed with the forward line instead of opening a browser", async () => {

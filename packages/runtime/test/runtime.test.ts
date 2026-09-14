@@ -2810,7 +2810,7 @@ describe("runtime golden builders", () => {
     expect(await rt.golden.get()).toBeUndefined();
   });
 
-  it("a seal whose builder outlives two kills fails with kind machineAlive, forks nothing, and writes no manifest", async () => {
+  it("a seal whose builder outlives two kills fails with kind machineAlive, forks nothing, writes no manifest and keeps the builder in the record", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe, killConfirm: { graceMs: 20, pollMs: 1 } });
     const b = await rt.golden.prepare();
@@ -2821,7 +2821,9 @@ describe("runtime golden builders", () => {
     expect(kills).toBe(2);
     expect(backend.machines).toHaveLength(1);
     expect(await rt.golden.get()).toBeUndefined();
-    expect(await rt.golden.builders()).toEqual([]);
+    // The provider still has the machine, so the record still names it: a builder dropped here would bill with
+    // nothing on this computer pointing at it.
+    expect(await rt.golden.builders()).toEqual([expect.objectContaining({ id: b.id })]);
   });
 
   it("stamps its builders with one owner id per store, kept across processes", async () => {
