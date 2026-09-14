@@ -826,7 +826,10 @@ export class InitJobs implements InitDoor {
         const stage = text("stage");
         if (stage === undefined) return;
         const step = record["step"] as GoldenStep | undefined;
-        s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), ...(record["booted"] === false ? { booted: false } : {}), at });
+        // The ids a failure's rollback could not remove ride on the stored frame: what became of the machine is read
+        // off the frames, and a frame without them tells a person nothing bills while one does.
+        const left = Array.isArray(record["left"]) ? (record["left"] as unknown[]).filter((id): id is string => typeof id === "string") : [];
+        s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), ...(left.length > 0 ? { left } : {}), ...(record["booted"] === false ? { booted: false } : {}), at });
         // The failure's sentence and what became of the machine are both read off the frames, never guessed here or
         // spelled a second way: the sentence is the one the view's own block closes the stage with, so a failure
         // that named no reason still says which stage stopped, and the machine is said in the words a stop the
@@ -839,7 +842,7 @@ export class InitJobs implements InitDoor {
         s.slotWait = record["waiting"] === true ? stage : undefined;
         // A machine the stage made and could not remove bills on, whether the person stopped the build or it failed
         // on its own: every road that leaves one comes through here, so the sweep starts from all of them.
-        for (const id of Array.isArray(record["left"]) ? (record["left"] as unknown[]) : []) if (typeof id === "string") this.sweep(id);
+        for (const id of left) this.sweep(id);
         // The phase turns to signing in on the first sign-in row, not when the machine answers: the checks and the
         // secrets between the two are the build's, and a status that says signing in with no row to sign in is a lie.
         if (stage === "sealed") s.phase = "finishing";
