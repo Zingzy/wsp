@@ -37,7 +37,7 @@ import { runRecipe } from "../src/recipe-command.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
 import { fakeHost } from "./recipe-fixture.js";
 import type { ScanRow } from "../src/scan.js";
-import { guestAnswer, mcpEditPlan, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
+import { guestAnswer, type StubBackend, stubBackend, type StubMachine } from "./stub-backend.js";
 import { loginOf } from "./signin-questions.js";
 
 /** The screens read this computer for whose login a copy would carry; a home with nothing in it names none. */
@@ -837,9 +837,9 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.enter);
     await f.until("Tools  2/3");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
-    // Fifteen base rows fold behind the visible ones, and the why column is cut to the screen's width.
-    expect(f.text()).toMatch(/• sqlite3\s+base\s+always on th[^\n]*?\s+3 MB\n/);
-    expect(f.text()).toContain("On: 15 tools, 1003 MB");
+    // The base rows fold behind the visible ones, and the why column is cut to the screen's width.
+    expect(f.text()).toMatch(/• zip and unzip\s+base\s+always on th[^\n]*?\s+996 KB\n/);
+    expect(f.text()).toContain("On: 13 tools, 785 MB");
     // No formula, no sign-in and no agent here that takes the wsp tools: none of those three screens is shown.
     await f.press(KEY.enter);
     await f.until(BOOT);
@@ -965,6 +965,11 @@ describe("wsp init, the summary-first screens", () => {
       mkdirSync(dirname(join(f.opts.home, rel)), { recursive: true });
       writeFileSync(join(f.opts.home, rel), text);
     }
+    // The stand-in guest's Claude config carries the two servers the recipe names, so the edit has them to keep.
+    const claudeMcp = JSON.stringify({ mcpServers: { github: { url: "https://github.example/mcp", headers: { Authorization: "Bearer sk-ant-x-mcp" } }, notes: { url: "https://notes.example/mcp" } } }, null, 2);
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => guestAnswer(cmd, file => (file.endsWith(".claude.json") ? claudeMcp : undefined));
+    f.backends.push(backend);
     const run = runInit(f.opts, f.io);
 
     await f.until("Agents");
@@ -990,12 +995,12 @@ describe("wsp init, the summary-first screens", () => {
     // Screen two is the list itself: the base as bullets under the title, then a group per why, every row with its
     // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
     expect(two).toMatch(/^◆  Tools  2\/5\n┃ {2}Tools from your usage\n┃ {2}You can change this later\.\n┃ {2}search/);
-    expect(two).toMatch(/▾ Always on the image\s+15\s+1003 MB\n┃\s+• C toolchain with cmake and ninja\s+base\s+always on the image\s+469 MB\n/);
+    expect(two).toMatch(/▾ Always on the image\s+13\s+785 MB\n┃\s+• C toolchain with cmake and ninja\s+base\s+always on the image\s+469 MB\n/);
     expect(two).toMatch(/▾ You use these\s+1 of 2\s+239 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239 MB\n/);
     // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the Also screen is its.
     expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+54 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+14 MB\n/);
     expect(two).not.toContain("tsx");
-    expect(two).toMatch(/On: 18 tools, 1\.3 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
+    expect(two).toMatch(/On: 16 tools, 1\.1 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
     expect(two).not.toContain("adjust");
     expect(two).not.toContain("every row on this screen that can be ticked");
     // Typing narrows the rows to a match; space unticks yq and the totals follow it.
@@ -1003,7 +1008,7 @@ describe("wsp init, the summary-first screens", () => {
     await f.until(/search {2}yq/);
     await f.press(KEY.space);
     await f.until(/○ yq/);
-    expect(f.text().slice(f.text().lastIndexOf("◆  Tools"))).toContain("On: 18 tools");
+    expect(f.text().slice(f.text().lastIndexOf("◆  Tools"))).toContain("On: 16 tools");
     await f.press(KEY.enter);
 
     await f.until("Sign-ins  3/5");
@@ -1080,11 +1085,19 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("logins/kube")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: true, choice: "copy" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
-    // The server with the token was answered copy on the screen, so the edit the machine ran kept it in the config
-    // beside the one without a secret, and the build says both are there.
-    const edits = log.flatMap(c => mcpEditPlan(c) ?? []);
-    expect(edits.map(e => e.write)).toEqual([false, true]);
-    expect(edits[1]!.agents[0]!.scopes[0]).toMatchObject({ keep: ["github", "notes"], drop: [] });
+    // The server with the token was answered copy on the screen, so the edit kept it in the config beside the one
+    // without a secret, and the build says both are there. The machine was asked to read its config out, once, and
+    // took the edited bytes back as bytes: no definition of the person's rode a command line.
+    expect(log.filter(c => c.includes("wsp_mcp_read "))).toHaveLength(1);
+    expect(log.some(c => c.includes("mcpServers"))).toBe(false);
+    // The read's answer is every config whole. The run log is kept beside the state for five runs and a person may
+    // paste it into a bug report, so the read says its output is not a log's: the command is recorded, not what it
+    // printed, and neither the server's own bearer nor the base64 the read prints is anywhere in the file.
+    const runLog = readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8");
+    expect(runLog).toContain("$ wsp_mcp_read 0 ");
+    expect(runLog).not.toContain("sk-ant-x-mcp");
+    expect(runLog).not.toContain(Buffer.from(claudeMcp, "utf8").toString("base64"));
+    expect(out).not.toContain("sk-ant-x-mcp");
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8")).mcp).toEqual(expect.arrayContaining([expect.objectContaining({ name: "github", outcome: "installed" }), expect.objectContaining({ name: "notes", outcome: "installed" })]));
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
     const rows = new Map(small.rows.map(r => [r.id, r]));
@@ -1096,7 +1109,8 @@ describe("wsp init, the summary-first screens", () => {
     expect(rows.get("yq")).toMatchObject({ on: false });
     expect(rows.get("gh")).toMatchObject({ on: true, signIn: "machine" });
     expect(rows.get("wrangler")).toMatchObject({ on: true });
-    expect(rows.get("node")).toMatchObject({ on: true });
+    // Node is off the floor: this fixture's own use of it is under the floor, and the npm rows bring it at build time.
+    expect(rows.get("node")).toMatchObject({ on: false });
     expect(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")).not.toMatch(/sk-x|minikube/);
   });
 
@@ -1226,7 +1240,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
-    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
+    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
     // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.
@@ -3062,8 +3076,9 @@ describe("summaryNote", () => {
       ["oniguruma", { name: "oniguruma", fullName: "oniguruma", deps: [], bytes: 1024 * 1024, macosOnly: false }],
     ]);
     const lines = summaryNote(FIXTURE, ticks, new Map(), 200, 300 * 1024 * 1024, brew, [], BUILDER_DISK_GB);
-    // 300 MB files + 1024 toolchain + 53 tools + 663 agents + 50 assumed for tsx = 2090 MiB.
-    expect(lines).toContain("Disk      2 GB of 15.2 GB on the 20 GB builder (files 300 MB, Homebrew's toolchain 1 GB, tools 53 MB, agents 663 MB; 1 unmeasured, ~50 MB)");
+    // 300 MB files + 1024 toolchain + 252 tools (53 plus the node the tsx row's npm road brings) + 663 agents
+    // + 50 assumed for tsx = 2289 MiB.
+    expect(lines).toContain("Disk      2.2 GB of 15.2 GB on the 20 GB builder (files 300 MB, Homebrew's toolchain 1 GB, tools 252 MB, agents 663 MB; 1 unmeasured, ~50 MB)");
     const huge = new Map([["gh", { name: "gh", fullName: "gh", deps: [], bytes: 30 * 1024 * 1024 * 1024, macosOnly: false }]]);
     const over = summaryNote(FIXTURE, new Set(["tools/brew/gh"]), new Map(), 200, 0, huge, [], BUILDER_DISK_GB).find(l => l.startsWith("Disk"));
     expect(over).toBe("Disk      31 GB, 15.8 GB over the 15.2 GB the 20 GB builder leaves (Homebrew's toolchain 1 GB, tools 30 GB)");

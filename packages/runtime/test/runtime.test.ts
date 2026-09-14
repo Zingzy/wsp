@@ -4158,8 +4158,8 @@ describe("runtime golden import", () => {
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
       "deploying-daemon",
-      ...["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/17)`),
-      "deploying-daemon:17 installed; caches swept; 2.9 GB free",
+      ...["login shell PATH", "apt index", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/15)`),
+      "deploying-daemon:15 installed; caches swept; 2.9 GB free",
       // The stub answers the versions read with nothing, so the stage closes on the disk alone.
       "deploying-daemon:2.9 GB free",
       "applying-setup:1 file: shell 1",
@@ -5131,8 +5131,8 @@ describe("runtime golden update and the post-seal grace", () => {
 
   it("coverage: a kept builder a second process rehydrates from the store seals its update with the floor the first process read", async () => {
     const { backend, store, rt, clock } = started();
-    const floor = [{ name: "node", version: "22.23.2" }, { name: "pnpm", version: "10.4.1" }];
-    backend.execImpl = (m, cmd) => (cmd.includes("VERSION node:") && !cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION pnpm: 10.4.1\nVERSION cc: \n", stderr: "" } : dfOk(m, cmd));
+    const floor = [{ name: "curl", version: "8.5.0" }, { name: "jq", version: "1.7.1" }];
+    backend.execImpl = (m, cmd) => (cmd.includes("VERSION curl:") && !cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "VERSION curl: curl 8.5.0\nVERSION jq: jq-1.7.1\nVERSION cc: \n", stderr: "" } : dfOk(m, cmd));
     const b = await rt.golden.prepare();
     const { version: one } = await rt.golden.seal(b.id);
     expect(one.base).toEqual(floor);

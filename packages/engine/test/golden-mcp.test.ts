@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The MCP stage against a guest that is a temp directory: the merge script
-// runs under this machine's node; the command checks, the uv install and the df
-// reading are canned, so the files it writes are the proof.
+// The MCP stage against a guest that is a temp directory: the configs are read
+// off it and the edited bytes land back on it; the command checks, the uv
+// install and the df reading are canned, so the files it ends with are the proof.
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { applyMcp, mcpPlanFor, mcpTally, type McpPlan, type McpResult } from "../src/golden-mcp.js";
-import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, type McpFormat, type McpGuestEditor } from "@wsp/catalog";
+import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, UV_INSTALL, type McpEditor, type McpFormat } from "@wsp/catalog";
 import { MCP_ID_PREFIX } from "@wsp/protocol";
 import type { RecipeEntry } from "../src/golden-import.js";
 import { FREE_KB_CMD, guardedRoad, type ToolResult } from "../src/golden-tools.js";
@@ -98,14 +98,22 @@ function guest(present: string[], canned: Record<string, ExecResult> = {}) {
       return { exitCode: typeof err.code === "number" ? err.code : 1, stdout: err.stdout ?? "", stderr: err.stderr ?? "" };
     }
   };
+  const landed: string[] = [];
+  const runOpts: { unlogged?: boolean }[] = [];
   const machine = {
     id: "m1", kind: "sandbox", exec,
-    run: (script: string) => {
+    run: (script: string, o: { unlogged?: boolean }) => {
       runs.push(script);
+      runOpts.push(o);
       return exec(script);
     },
+    // The backend road for bytes, as a box's daemon carries it; the pour-over that follows is the guest's own.
+    putBytes: async (path: string, bytes: Uint8Array) => {
+      landed.push(path);
+      writeFileSync(path, bytes);
+    },
   } as unknown as Machine;
-  return { root, cmds, runs, machine };
+  return { root, cmds, runs, runOpts, landed, machine };
 }
 
 const CLAUDE = {
@@ -181,16 +189,23 @@ function seed(root: string): void {
 
 describe("applyMcp", () => {
   it("writes the kept definitions with their paths rewritten, drops the unticked, leaves a server it never heard of alone, and names each on the stage", async () => {
-    const { root, cmds, runs, machine } = guest(["npx", "codebase-memory-mcp"]);
+    const { root, cmds, runs, runOpts, landed, machine } = guest(["npx", "codebase-memory-mcp"]);
     seed(root);
     const stages: string[] = [];
     const results = await applyMcp(machine, planOn(root), (s, d) => void stages.push(`${s}:${d ?? ""}`));
-    // The script runs twice detached, once to read the commands and once to write; the PATH check between them is one short exec.
-    expect(runs).toHaveLength(3);
-    expect(runs[0]).toContain("\nnode -e ");
-    expect(runs[1]).toContain("\nnode -e ");
-    expect(runs[2]).toContain("astral-sh/uv/releases");
-    expect(runs[2]).toContain("\nsetsid bash -c '");
+    // One detached run reads every config; the edit itself is this computer's, so the machine runs no node of its own.
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toContain("wsp_mcp_read 0 ");
+    expect(runs[1]).toContain("astral-sh/uv/releases");
+    expect(runs[1]).toContain("\nsetsid bash -c '");
+    expect(cmds.some(c => c.includes("node -e"))).toBe(false);
+    // The read's answer is every config whole, the servers' secrets with it, so it says its output is not a log's.
+    expect(runOpts[0]).toMatchObject({ unlogged: true });
+    expect(runOpts[1]?.unlogged).toBeUndefined();
+    // Each edited config lands beside itself and is poured over the file, so its mode and owner stand.
+    expect(landed).toEqual([join(root, ".claude-cfg/.claude.json.wsp-mcp"), join(root, ".codex/config.toml.wsp-mcp"), join(root, ".gemini/settings.json.wsp-mcp")]);
+    expect(cmds.some(c => c.includes(`cat '${join(root, ".codex/config.toml.wsp-mcp")}' > '${join(root, ".codex/config.toml")}' && rm -f`))).toBe(true);
+    expect(existsSync(join(root, ".codex/config.toml.wsp-mcp"))).toBe(false);
     const check = cmds.find(c => c.split("\n")[1]?.startsWith("if command -v"))!;
     expect(check).toBeDefined();
     expect(runs).not.toContain(check);
@@ -350,8 +365,8 @@ describe("applyMcp", () => {
 
   // A format the catalog does not have: one line per server, `name command args...`. The stage runs it with no
   // change of its own, so a fourth format is one module on the catalog entry.
-  const linesEditor: McpGuestEditor = (lib, scope, file) => {
-    const kept = lib.fs.readFileSync(file, "utf8").split("\n").filter(l => l !== "" && !scope.drop.includes(l.split(" ")[0]!));
+  const linesEditor: McpEditor = (lib, scope, before) => {
+    const kept = before.split("\n").filter(l => l !== "" && !scope.drop.includes(l.split(" ")[0]!));
     const out = kept.map(l => {
       const [name, command, ...args] = l.split(" ");
       return scope.keep.includes(name!) ? [name, lib.rewriteString(command!, true), ...args.map(a => lib.rewriteString(a, false))].join(" ") : l;
@@ -360,12 +375,11 @@ describe("applyMcp", () => {
       const line = out.find(l => l.startsWith(`${name} `));
       return line === undefined ? { name, outcome: "missing" as const } : { name, outcome: "written" as const, command: line.split(" ")[1]! };
     });
-    if (lib.write) lib.fs.writeFileSync(file, `${out.join("\n")}\n`);
-    return [...written, ...scope.drop.map(name => ({ name, outcome: "dropped" as const }))];
+    return { text: `${out.join("\n")}\n`, results: [...written, ...scope.drop.map(name => ({ name, outcome: "dropped" as const }))] };
   };
-  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), guest: String(linesEditor) };
+  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), edit: linesEditor };
 
-  it("a format the catalog gains is one module: the stage runs the module's editor on the machine and reports through it, with no format of its own", async () => {
+  it("a format the catalog gains is one module: the stage runs the module's editor over the text it read and reports through it, with no format of its own", async () => {
     const { root, cmds, machine } = guest(["alpha"]);
     mkdirSync(join(root, ".lines"));
     writeFileSync(join(root, ".lines", "servers.txt"), `alpha /opt/homebrew/bin/alpha --dir=${HOME}/x\nbeta beta-bin\nother keeper\n`);
@@ -377,17 +391,34 @@ describe("applyMcp", () => {
       { id: `${MCP_ID_PREFIX}lines/beta`, agent: "Lines", name: "beta", outcome: "skipped", note: "unticked" },
     ]);
     expect(readFileSync(join(root, ".lines", "servers.txt"), "utf8")).toBe(`alpha alpha --dir=${root}/x\nother keeper\n`);
-    // The module's editor travels inside the one script, and only the formats the plan uses do.
-    const script = cmds.find(c => c.includes("node -e"))!;
-    expect(script).toContain('startsWith(`${name} `)');
-    expect(script).not.toContain("mcp_servers");
+    // Nothing of the format reaches the machine: it reads the file out and takes the bytes back.
+    expect(cmds.some(c => c.includes("node -e"))).toBe(false);
+    expect(cmds.some(c => c.includes("mcp_servers"))).toBe(false);
+  });
+
+  it("a read whose leader was killed says so by its exit code: its output is every config whole, so no reason is built from it", async () => {
+    const { root, machine } = guest(["npx"]);
+    seed(root);
+    // What the wrapper leaves when the leader dies by a signal: the exit file holds 137, the err file is empty, and
+    // the out file holds the lines printed so far, which here is a config of the person's.
+    const printed = Buffer.from(JSON.stringify(CLAUDE), "utf8").toString("base64");
+    const killed = { ...machine, run: async (script: string, o: { deadlineMs: number }) => (script.includes("wsp_mcp_read ") ? { exitCode: 137, stdout: `${printed}\n`, stderr: "" } : machine.run(script, o)) } as unknown as Machine;
+    const stages: string[] = [];
+    const results = await applyMcp(killed, planOn(root), (s, d) => void stages.push(d ?? s));
+    expect(results.find(r => r.name === "github")?.note).toBe("the config edit did not run (exit 137)");
+    expect(printed.length).toBeGreaterThan(160);
+    for (const said of [...results.map(r => r.note ?? ""), ...stages]) {
+      expect(said).not.toContain(printed);
+      expect(said).not.toContain(printed.slice(0, 60));
+      expect(said).not.toContain("ghp_secret");
+    }
   });
 
   it("a machine that refuses the script, as the provider does over its body cap, skips every server with the words, touches no config, and does not throw", async () => {
     const { root, machine } = guest(["npx"]);
     seed(root);
     const before = readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8");
-    const refusing = { ...machine, run: async () => { throw Object.assign(new Error("Payload Too Large"), { kind: "unknown", status: 413 }); } } as unknown as Machine;
+    const refusing = { ...machine, run: async () => { throw Object.assign(new Error("Payload Too Large"), { kind: "unknown", status: 413 }); }, putBytes: machine.putBytes } as unknown as Machine;
     const stages: string[] = [];
     const results = await applyMcp(refusing, planOn(root), (s, d) => void stages.push(d ?? s));
     expect(results.map(r => r.outcome)).toEqual(Array.from({ length: 11 }, () => "skipped"));
@@ -395,6 +426,27 @@ describe("applyMcp", () => {
     expect(results.find(r => r.name === "notes")?.note).toBe("command ~/Library/Application Support/Notes/mcp is macOS-only, will not run");
     expect(stages.at(-1)).toContain("github skipped (the config edit did not run (Payload Too Large))");
     expect(readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8")).toBe(before);
+  });
+
+  it("a pour-over the machine refuses leaves no landing beside the config: those bytes are the whole file at the upload road's own mode", async () => {
+    const { root, cmds, machine } = guest(["codebase-memory-mcp"]);
+    seed(root);
+    const refusing = { ...machine, exec: async (cmd: string) => (cmd.startsWith("set -e\ncat ") ? { exitCode: 1, stdout: "", stderr: "cat: write error: No space left on device" } : machine.exec(cmd)) } as unknown as Machine;
+    const results = await applyMcp(refusing, geminiOnly(root), () => {});
+    expect(results.find(r => r.name === "memory")?.note).toBe("the edited config did not land (cat: write error: No space left on device)");
+    expect(existsSync(join(root, ".gemini", "settings.json.wsp-mcp"))).toBe(false);
+    expect(cmds.some(c => c === `rm -f '${join(root, ".gemini", "settings.json.wsp-mcp")}'`)).toBe(true);
+    // The config itself is as it was: the pour never ran.
+    expect(readFileSync(join(root, ".gemini", "settings.json"), "utf8")).toBe(GEMINI);
+  });
+
+  it("a config that is on the machine and empty did not parse; it is not a config that is not there", async () => {
+    const { root, machine } = guest(["codebase-memory-mcp"]);
+    mkdirSync(join(root, ".gemini"), { recursive: true });
+    writeFileSync(join(root, ".gemini", "settings.json"), "");
+    const results = await applyMcp(machine, geminiOnly(root), () => {});
+    expect(results.map(r => r.note)).toEqual([expect.stringContaining("did not parse"), expect.stringContaining("did not parse")]);
+    expect(results.some(r => r.note?.includes("is not on the machine"))).toBe(false);
   });
 
   it("a PATH check the machine refuses drops no server: the definitions land and the stage still closes", async () => {

@@ -299,8 +299,12 @@ export const CATALOG: readonly CatalogEntry[] = [
   // curl leads because every road below that fetches a release types it, and a base image need not ship one: a
   // bare ubuntu container has no curl, where a provider's VM image does (measured on ubuntu:24.04, 2026-09-11).
   { ...tool, id: "curl", name: "curl", bin: "curl", ...apt(15748096, "curl"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 87, images: 4, road: "unmeasured" } },
-  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: true, after: "curl", covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
-  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
+  // Node is 208 MB and nothing on a fork needs it: the wsp an agent runs there is the daemon's own binary. Both rows
+  // stay on by default, which decides only a computer that says nothing about them; what a computer ran is weighed
+  // against the used floor either way, and the npm road brings node where a ticked row walks one. pnpm goes with it:
+  // its road is npm, so a floor row for it would drag node back onto every image.
+  { ...tool, id: "node", name: "Node 22 with npm", bin: "node", installRoad: { road: "script", script: nodeInstallScript(22, NODE_RELEASES[22]) }, floor: false, after: "curl", covers: ["node@22", "nodejs"], major: { name: "Node", version: "22" }, brings: [{ bin: "npm", version: "npm --version" }], signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 73, images: 5, road: "measured" }, size: measured("unpacked", 208449536) },
+  { ...tool, id: "pnpm", name: "pnpm", bin: "pnpm", ...npm(20357120, "pnpm", "11.9.0"), floor: false, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 36, images: 3, road: "unmeasured" } },
   { ...tool, id: "uv", name: "uv", bin: "uv", installRoad: { road: "script", script: UV_INSTALL }, floor: true, after: "curl", signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 46, images: 3, road: "unmeasured" }, size: measured("unpacked", 49660896) },
   { ...tool, id: "python", name: "Python 3.12", bin: "python3", installRoad: { road: "script", script: PYTHON_INSTALL }, floor: true, after: "uv", covers: ["python@3.12"], major: { name: "Python", version: "3.12" }, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 107, images: 4, road: "unmeasured" }, size: measured("du", 108105728) },
   { ...tool, id: "git", name: "git", bin: "git", ...apt(123789312, "git"), floor: true, signIn: NO_SIGN_IN, defaultOn: true, source: { sessions: 118, images: 5, road: "unmeasured" } },

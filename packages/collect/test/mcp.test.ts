@@ -190,7 +190,7 @@ describe("mcp servers", () => {
         return { name: name!, scope: "user", transport: { kind: "stdio", command: command!, args, env: {} }, envRefs: [] };
       }),
       place: () => ({ text: "", commentsDropped: false }),
-      guest: "() => []",
+      edit: (_lib, _scope, text) => ({ text, results: [] }),
     };
     const entry: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "pi")!, id: "lines", name: "Lines", mcp: { format: lines, files: ["~/.lines/servers.txt"], scope: "one file" } };
     const host = fakeHost({ files: { "~/.lines/servers.txt": "alpha npx -y pkg\nbeta /Applications/B.app/b\n", "~/.claude.json": claudeJson() } });

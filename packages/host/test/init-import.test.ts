@@ -1078,7 +1078,7 @@ describe("importFor", () => {
       { id: "agents/claude", path: "~/.claude.json", note: "no longer on this computer" },
       { id: "agents/codex", path: "~/.codex/config.toml", note: "no longer on this computer" },
     ]);
-    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/npm/bun"]);
+    expect(imp.tools.map(t => t.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/yq", "tools/manager/npm", "tools/npm/bun"]);
     expect(imp.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
     expect(imp.agents.map(a => [a.id, a.install, a.smoke])).toEqual([
       ["agents/claude", GOLDEN_SETUP, GOLDEN_SMOKE],
@@ -1088,10 +1088,10 @@ describe("importFor", () => {
     expect(imp.baseTools).toEqual([]);
     expect(ticks(home, row({ rung: "agents", id: "agents/zed", label: "Zed" })).skippedAgents).toEqual([{ id: "agents/zed", name: "Zed", note: "no installer known" }]);
     // A ticked row the base floor covers is no step and no skip: it lands in the result as installed, by the base row's name.
-    const covered = ticks(home, row({ rung: "tools", id: "tools/brew/jq", label: "jq" }), row({ rung: "tools", id: "tools/npm/pnpm", label: "pnpm" }));
+    const covered = ticks(home, row({ rung: "tools", id: "tools/brew/jq", label: "jq" }), row({ rung: "tools", id: "tools/brew/rg", label: "ripgrep" }));
     expect(covered.tools.map(t => t.id)).not.toContain("tools/brew/jq");
     expect(covered.skippedTools!.map(s => s.id)).not.toContain("tools/brew/jq");
-    expect(covered.baseTools).toEqual([{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }, { id: "tools/npm/pnpm", label: "pnpm", note: "pnpm is part of the base" }]);
+    expect(covered.baseTools).toEqual([{ id: "tools/brew/jq", label: "jq", note: "jq is part of the base" }, { id: "tools/brew/rg", label: "ripgrep", note: "ripgrep is part of the base" }]);
   });
 
   it("carries the person's shell when zsh's rows are ticked, with the frameworks among them, and none when only bash's are", () => {

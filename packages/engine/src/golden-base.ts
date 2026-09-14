@@ -2,7 +2,7 @@
 // The base floor: what every golden gets before the person's recipe, from
 // the catalog's floor rows by each row's own road, and the versions read back
 // once they are on. It runs under the base stage ahead of the daemon, so the
-// daemon's native module compiles against the Node the agents will run.
+// daemon deploy finds the tools its own steps type.
 import { APT_INDEX, APT_UPDATE, BASE_FLOOR, installAfter, smokeOf } from "@wsp/catalog";
 import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";

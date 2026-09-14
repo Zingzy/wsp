@@ -56,7 +56,7 @@ describe("host golden recipe", () => {
     // nothing; the base floor's steps come next, and the df that closes the base stage and the setup are the last two.
     expect(builder.execLog[0]).toBe(BASE_VERSIONS_CMD);
     expect(builder.execLog[1]).toBe("rm -f /tmp/wsp-vault-*.tgz");
-    expect(builder.runLog.some(s => s.includes("nodejs.org/dist"))).toBe(true);
+    expect(builder.runLog.some(s => s.includes("astral-sh/uv/releases"))).toBe(true);
     expect(builder.execLog.at(-2)).toBe("df -Pk /root | awk 'NR==2{print $4}'");
     // The setup runs under the harness guard with the road lines, the installer's text quoted whole inside it.
     expect(builder.execLog.at(-1)).toContain(`setsid bash -c ${shellQuote([...ROAD_STEPS.script.env, GOLDEN_SETUP].join("\n"))} &`);

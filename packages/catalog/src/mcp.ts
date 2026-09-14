@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // How an agent keeps its MCP servers: one module per config format, with the
 // three things done to such a file. The collector reads its servers and the
-// install helper places one, both on this computer; the import edits it on the
-// machine, whose node runs the JavaScript the module carries. An agent entry
-// registers its format and its files. Pure text in and out: nothing here reads
-// or writes a file on this computer.
+// install helper places one, both on this computer; the import edits the text
+// it read off the machine, here, since a machine need carry no node of its own.
+// An agent entry registers its format and its files. Pure text in and out:
+// nothing here reads or writes a file.
 import type { McpServerSpec } from "@wsp/protocol";
-import { JSONC_READER, readJsonc, type Jsonc } from "./jsonc.js";
+import { readJsonc, type Jsonc } from "./jsonc.js";
 
 export type McpTransport =
   | { kind: "stdio"; command: string; args: string[]; env: Record<string, string>; cwd?: string }
@@ -29,31 +29,34 @@ export interface Placed {
 
 /** One config on the machine as its editor gets it: the kept and dropped server names, and for a format with
  * per-folder servers, the laptop folder whose servers now belong to the machine's home. */
-export interface McpGuestScope {
+export interface McpEditScope {
   keep: readonly string[];
   drop: readonly string[];
   project?: { from: string; to: string };
 }
 
-export interface McpGuestResult {
+export interface McpEditResult {
   name: string;
   outcome: "written" | "missing" | "dropped";
   /** The kept server's command as the machine will run it. */
   command?: string;
 }
 
-/** What the machine's node hands every editor. */
-export interface McpGuestLib {
-  fs: { readFileSync(file: string, encoding: "utf8"): string; writeFileSync(file: string, text: string): void };
-  /** Off, the pass only reads each kept server's command as the machine would run it. */
-  write: boolean;
+/** What every editor is handed besides the text. */
+export interface McpEditLib {
   /** A kept definition's string as the machine reads it; `command` marks the program, a bare name when it sits in a bin directory. */
   rewriteString(s: string, command: boolean): string;
 }
 
-/** Edits one config file in place on the machine: kept servers' strings rewritten, dropped ones out, every other
- * key and server kept; reports each kept and dropped name. Throws when the text is not the format. */
-export type McpGuestEditor = (lib: McpGuestLib, scope: McpGuestScope, file: string) => McpGuestResult[];
+/** What an edit came to: the file as it should stand on the machine, the text unchanged where nothing moved. */
+export interface McpEdited {
+  text: string;
+  results: McpEditResult[];
+}
+
+/** Edits one config file's text: kept servers' strings rewritten, dropped ones out, every other key and server
+ * kept; reports each kept and dropped name. Throws when the text is not the format. */
+export type McpEditor = (lib: McpEditLib, scope: McpEditScope, text: string) => McpEdited;
 
 export interface McpFormat {
   /** Every server the text defines, in one shape; text that is not the format defines none. `home` is the folder
@@ -62,8 +65,8 @@ export interface McpFormat {
   /** The file's text with the server called `name` placed, or replaced when it is already there; `text` is
    * undefined when the file does not exist yet. Throws when the text is not the format. */
   place(text: string | undefined, name: string, server: McpServerSpec): Placed;
-  /** JavaScript for the machine's node: one expression whose value is an McpGuestEditor, complete in itself. */
-  guest: string;
+  /** The edit the import runs over the text it read off the machine. */
+  edit: McpEditor;
 }
 
 export interface McpConfig {
@@ -75,18 +78,6 @@ export interface McpConfig {
   scope: string;
   /** Where an http server's sign-in lives when the agent keeps it beside its own login, for the row; absent, nothing is said. */
   httpAuth?: string;
-}
-
-type GuestFn = (...args: never[]) => unknown;
-
-/** One expression for the machine's node: `body` evaluated with `uses` declared beside it, each function as its own
- * source, so a rule is written once here and runs there. A function listed is a declaration (an arrow has no name
- * of its own there) and may only name its parameters, what it declares, and the functions listed before it. */
-function guestSource(uses: readonly GuestFn[], body: string): string {
-  const sources = uses.map(String);
-  const arrow = sources.find(src => !src.startsWith("function "));
-  if (arrow !== undefined) throw new Error(`a guest function is not a declaration: ${arrow.slice(0, 40)}`);
-  return `(() => {\n${sources.join("\n")}\nreturn ${body};\n})()`;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -122,11 +113,10 @@ function jsonServers(root: Record<string, unknown>, key: string, scope: McpServe
   });
 }
 
-/** The machine's editor for a JSON file with its servers under `key`, and per-folder servers under
- * `projects.<folder>.<key>` when the scope names a folder. The reader comes in as an argument because the
- * editor's source travels on its own, and a name from another module would not travel with it. */
-function jsonEditor(key: string, read: (text: string) => Jsonc): McpGuestEditor {
-  return (lib, scope, file) => {
+/** The editor for a JSON file with its servers under `key`, and per-folder servers under
+ * `projects.<folder>.<key>` when the scope names a folder. */
+function jsonEditor(key: string): McpEditor {
+  return (lib, scope, before) => {
     type Tree = Record<string, unknown>;
     const obj = (v: unknown): Tree | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Tree) : undefined);
     const walk = (v: unknown, command: boolean): unknown => {
@@ -139,8 +129,7 @@ function jsonEditor(key: string, read: (text: string) => Jsonc): McpGuestEditor 
       const c = obj(def)?.command;
       return typeof c === "string" ? c : Array.isArray(c) && typeof c[0] === "string" ? c[0] : undefined;
     };
-    const before = lib.fs.readFileSync(file, "utf8");
-    const root = obj(read(before).value);
+    const root = obj(readJsonc(before).value);
     if (root === undefined) throw new Error("the file is not a JSON object");
     const project = scope.project;
     const source = project === undefined ? root : obj(obj(root.projects)?.[project.from]) ?? {};
@@ -152,7 +141,7 @@ function jsonEditor(key: string, read: (text: string) => Jsonc): McpGuestEditor 
       return (to[key] = obj(to[key]) ?? {});
     };
     const moved = project === undefined ? {} : obj(obj(obj(root.projects)?.[project.to])?.[key]) ?? {};
-    const results: McpGuestResult[] = [];
+    const results: McpEditResult[] = [];
     for (const name of scope.keep) {
       const def = servers[name];
       if (def === undefined) {
@@ -168,8 +157,9 @@ function jsonEditor(key: string, read: (text: string) => Jsonc): McpGuestEditor 
       delete servers[name];
       results.push({ name, outcome: "dropped" });
     }
-    if (lib.write && JSON.stringify(read(before).value) !== JSON.stringify(root)) lib.fs.writeFileSync(file, `${JSON.stringify(root, null, 2)}\n`);
-    return results;
+    // The text stands byte for byte where nothing moved: a rewrite of its own would drop comments and reindent it.
+    const changed = JSON.stringify(readJsonc(before).value) !== JSON.stringify(root);
+    return { text: changed ? `${JSON.stringify(root, null, 2)}\n` : before, results };
   };
 }
 
@@ -204,7 +194,7 @@ function jsonFormat(shape: JsonShape): McpFormat {
       root[shape.key] = { ...(isObject(current) ? current : {}), [name]: shape.entry(server) };
       return { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: comments };
     },
-    guest: guestSource([...JSONC_READER, jsonEditor], `${jsonEditor.name}(${JSON.stringify(shape.key)}, ${readJsonc.name})`),
+    edit: jsonEditor(shape.key),
   };
 }
 
@@ -404,10 +394,9 @@ export function rewriteTomlLine(line: string, to: (value: string) => string): st
   return next + line.slice(code.length);
 }
 
-/** The machine's editor: each line belongs to the server whose header came last (its sub-tables included), so a
- * dropped server's lines go and a kept one's strings are rewritten. */
-function codexEditor(lib: McpGuestLib, scope: McpGuestScope, file: string): McpGuestResult[] {
-  const before = lib.fs.readFileSync(file, "utf8");
+/** The editor: each line belongs to the server whose header came last (its sub-tables included), so a dropped
+ * server's lines go and a kept one's strings are rewritten. */
+function codexEditor(lib: McpEditLib, scope: McpEditScope, before: string): McpEdited {
   const lines = before.split("\n");
   const owner: (string | undefined)[] = [];
   let current: string | undefined;
@@ -430,7 +419,7 @@ function codexEditor(lib: McpGuestLib, scope: McpGuestScope, file: string): McpG
     out.push(o !== undefined && keep.has(o) ? rewriteLine(line) : line);
     outOwner.push(o);
   });
-  const results: McpGuestResult[] = [];
+  const results: McpEditResult[] = [];
   for (const name of scope.keep) {
     if (!owner.includes(name)) {
       results.push({ name, outcome: "missing" });
@@ -445,13 +434,11 @@ function codexEditor(lib: McpGuestLib, scope: McpGuestScope, file: string): McpG
     results.push({ name, outcome: "written", command });
   }
   for (const name of scope.drop) results.push({ name, outcome: "dropped" });
-  const after = out.join("\n");
-  if (lib.write && after !== before) lib.fs.writeFileSync(file, after);
-  return results;
+  return { text: out.join("\n"), results };
 }
 
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server), commentsDropped: false }),
-  guest: guestSource([uncommentToml, tomlHeader, tomlStringPattern, tomlEscapes, decodeToml, encodeToml, tomlStrings, rewriteTomlLine, codexEditor], codexEditor.name),
+  edit: codexEditor,
 };
