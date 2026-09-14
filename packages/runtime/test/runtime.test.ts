@@ -3336,19 +3336,22 @@ async function helloOf(port: number): Promise<number> {
   }
 }
 
-/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox. */
+/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox and its fake machine. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
-  const { startDaemon } = await import("@wsp/daemon");
+  const { fakeProcTree } = await import("../../daemon/test/fake-proc.js");
+  const { daemonUnderTest } = await import("../../daemon/test/harness.js");
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
-  const daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, inboxQuietMs: 100, inboxPollMs: 25, portsSource: async () => [], portsIntervalMs: 25 });
+  const procRoot = fakeProcTree([]);
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
   try {
     return await fn(daemon.port);
   } finally {
     await daemon.close();
     rmSync(inboxDir, { recursive: true, force: true });
+    rmSync(procRoot, { recursive: true, force: true });
   }
 }
 
@@ -3658,7 +3661,7 @@ describe("runtime verified wake", () => {
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
       const m1 = backend.machines[0]!;
       // The route mints and nothing on this computer answers it: a container's published port on a box belongs to
-      // the computer its Docker daemon runs on, and the wake check used to read that silence as a dead guest.
+      // that box's own loopback, and the wake check used to read that silence as a dead guest.
       m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
       let asked = 0;
       m1.daemonAnswers = async () => {
@@ -4155,8 +4158,8 @@ describe("runtime golden import", () => {
     expect(frames.filter(f => !f.startsWith("uploading-files:"))).toEqual([
       "creating:sandbox from base",
       "deploying-daemon",
-      ...["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/18)`),
-      "deploying-daemon:18 installed; caches swept; 2.9 GB free",
+      ...["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"].map((label, i) => `deploying-daemon:${label} (${i + 1}/17)`),
+      "deploying-daemon:17 installed; caches swept; 2.9 GB free",
       // The stub answers the versions read with nothing, so the stage closes on the disk alone.
       "deploying-daemon:2.9 GB free",
       "applying-setup:1 file: shell 1",
@@ -5129,7 +5132,7 @@ describe("runtime golden update and the post-seal grace", () => {
   it("coverage: a kept builder a second process rehydrates from the store seals its update with the floor the first process read", async () => {
     const { backend, store, rt, clock } = started();
     const floor = [{ name: "node", version: "22.23.2" }, { name: "pnpm", version: "10.4.1" }];
-    backend.execImpl = (m, cmd) => (cmd.includes("VERSION node:") && !cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION pnpm: 10.4.1\nVERSION docker: \n", stderr: "" } : dfOk(m, cmd));
+    backend.execImpl = (m, cmd) => (cmd.includes("VERSION node:") && !cmd.includes("echo WSP_CTX") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION pnpm: 10.4.1\nVERSION cc: \n", stderr: "" } : dfOk(m, cmd));
     const b = await rt.golden.prepare();
     const { version: one } = await rt.golden.seal(b.id);
     expect(one.base).toEqual(floor);

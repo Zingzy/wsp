@@ -42,13 +42,13 @@ describe("the wsp up an init names", () => {
     // Every value the line hands over is quoted, as the unit spells the same words: a path with a space in it and a
     // port read the same way, and the person pastes the line whole.
     expect(upCommandFor(opts, { port: "4500", "ws-port": "4510" })).toBe("wsp up --port '4500' --ws-port '4510'");
-    // The line the init hands over starts the host the init built: a run told to fork containers says so again, or
-    // the host that line starts picks no provider and forks nothing.
-    const docker = { ...opts, address: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "docker", dockerHost: "tcp://10.0.0.4:2375", relay: false };
-    expect(upCommandFor(docker, { provider: "docker", "docker-host": "tcp://10.0.0.4:2375" })).toBe("wsp up --provider 'docker' --docker-host 'tcp://10.0.0.4:2375'");
-    expect(upCommandFor(docker, { listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", "no-relay": true })).toBe("wsp up --listen '0.0.0.0' --advertise 'http://10.0.0.9:4500' --no-relay");
+    // The line the init hands over starts the host the init built: a run told which provider to fork on says so
+    // again, or the host that line starts picks no provider and forks nothing.
+    const named = { ...opts, address: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "box", relay: false };
+    expect(upCommandFor(named, { provider: "box" })).toBe("wsp up --provider 'box'");
+    expect(upCommandFor(named, { listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", "no-relay": true })).toBe("wsp up --listen '0.0.0.0' --advertise 'http://10.0.0.9:4500' --no-relay");
     // Every row of the table, so one added tomorrow is spelled here too rather than dropped from the handover.
-    const all = upCommandFor(docker, { state: "s", port: "4500", "ws-port": "4510", listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "docker", "docker-host": "tcp://10.0.0.4:2375", "no-relay": true });
+    const all = upCommandFor(named, { state: "s", port: "4500", "ws-port": "4510", listen: "0.0.0.0", advertise: "http://10.0.0.9:4500", provider: "box", "no-relay": true });
     for (const flag of SERVE_FLAGS) expect(all, `--${flag.name} in the line an init hands over`).toContain(`--${flag.name}`);
     // The fork runs against the host wsp up started, so it needs the state and not the ports.
     expect(forkCommandFor(opts, {})).toBe("wsp new first");
@@ -433,9 +433,9 @@ describe("the key a run is asked for is the one its own provider reads", () => {
     expect(stripVTControlCharacters(plain.output[0]!)).toContain(SOLARI_KEY_ENV);
     expect(stripVTControlCharacters(plain.output[0]!)).not.toContain(BOX_KEY_ENV);
     // A provider that reads no key is asked for none: there is no screen to open.
-    const docker = fakeIO([], true);
-    expect(await loadHeld(docker, { env: { WSP_PROVIDER: "docker" }, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({});
-    expect(docker.output).toEqual([]);
+    const keyless = fakeIO([], true);
+    expect(await loadHeld(keyless, { env: { WSP_PROVIDER: "fake" }, cwd, home }, { anthropic: false, noSolari: "offer" })).toEqual({});
+    expect(keyless.output).toEqual([]);
   });
 
   it("puts a typed key to the picked provider's own probe, with that provider's own key header", async () => {

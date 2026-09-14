@@ -6,10 +6,12 @@
 //! `runtime init` is a workspace's first process.
 
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::Subcommand;
+use wsp_frames::numbers;
 use wsp_runtime::fetch::{Client, Reference};
 use wsp_runtime::store::Store;
 
@@ -19,6 +21,13 @@ pub(crate) enum Verb {
     Runtime {
         #[command(subcommand)]
         verb: RuntimeVerb,
+    },
+    /// The wsp a process inside this machine runs: the whole line goes to the host over this machine's own daemon.
+    /// Nothing here reads a verb or a flag, so the words the host's command line takes are the words that work.
+    #[command(disable_help_flag = true)]
+    Wsp {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        line: Vec<String>,
     },
 }
 
@@ -81,6 +90,10 @@ pub(crate) fn run(verb: Verb) -> i32 {
         Verb::Runtime { verb: RuntimeVerb::Create { root, id } } => linux::create(&root, &id),
         Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, cmd } } => linux::exec(&root, &id, cmd, timeout_ms),
         Verb::Runtime { verb: RuntimeVerb::Init { cmd } } => linux::init(&cmd),
+        Verb::Wsp { line } => {
+            let daemon = SocketAddr::from((Ipv4Addr::LOCALHOST, numbers::DEFAULT_PORT));
+            wsp_guest::run(&line, &|name| std::env::var(name).ok(), daemon, Path::new(numbers::DEFAULT_TOKEN_PATH))
+        }
     }
 }
 
@@ -189,7 +202,7 @@ mod linux {
     }
 }
 
-fn pull(image: &str, root: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+fn pull(image: &str, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let started = Instant::now();
     let source = Reference::parse(image)?;
     let store = Store::open(root)?;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The per-workspace terminal model against the real daemon: startDaemon
-// in-process, the reach client as the wire. No component renders here; the
+// The per-workspace terminal model against the real daemon: the binary on
+// loopback, the reach client as the wire. No component renders here; the
 // surfaces over this model have their own suites.
 import { waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,25 +33,25 @@ describe("WorkspaceTerminals", () => {
   }, 15_000);
 
   it("resize propagates to the daemon pty", async () => {
-    const { wt, daemon } = await boot();
+    const { wt, ptys } = await boot();
     const tab = await wt.open({ shell: "/bin/sh" });
     wt.resize(tab.ptyId, 100, 40);
-    await waitFor(() => {
-      const p = daemon.ptys.list().find(x => x.id === tab.ptyId);
+    await waitFor(async () => {
+      const p = (await ptys()).find(x => x.id === tab.ptyId);
       expect(p).toMatchObject({ cols: 100, rows: 40 });
     });
   }, 15_000);
 
   it("unbinding keeps the pty alive; close kills it", async () => {
-    const { wt, daemon } = await boot();
+    const { wt, ptys } = await boot();
     const tab = await wt.open({ shell: "/bin/sh" });
     const un = wt.bind(tab.ptyId, { data: () => {}, reset: () => {} });
     un();
-    expect(daemon.ptys.list()).toHaveLength(1);
-    expect(daemon.ptys.list()[0]!.exited).toBe(false);
+    expect(await ptys()).toHaveLength(1);
+    expect((await ptys())[0]!.exited).toBe(false);
 
     await wt.close(tab.ptyId);
-    expect(daemon.ptys.list()).toHaveLength(0);
+    expect(await ptys()).toHaveLength(0);
     expect(wt.tabs()).toHaveLength(0);
   }, 15_000);
 

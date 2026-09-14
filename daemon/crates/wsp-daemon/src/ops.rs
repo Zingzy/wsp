@@ -12,12 +12,13 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, InboxRescanReply, ManifestGetReply,
-    ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply, PtyCreateReply,
-    PtyListReply, Reply, RequestId, DAEMON_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GuestOpen, GuestOpenReply, InboxRescanReply,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply,
+    PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
+use crate::guest::SESSION_TAKEN;
 use crate::manifest::RecordInput;
 use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
@@ -37,6 +38,8 @@ pub(crate) enum Road {
 
 /// What one authed socket holds between frames.
 pub(crate) struct Conn {
+    /// The number no other socket in this daemon has, which is what the guest table and the broadcast list key on.
+    pub(crate) key: u64,
     /// Set when the auth frame named a port: only tunnel ops on it and ping are answered.
     pub(crate) scope: Option<NonZeroU16>,
     pub(crate) out: Outbound,
@@ -48,11 +51,36 @@ pub(crate) struct Conn {
     /// This socket's proc.watch, so proc.unwatch can end it before the socket does and a second watch on the same
     /// socket is not a second subscription.
     proc_watch: Mutex<Option<(u64, Arc<ProcSampler>)>>,
+    /// The one guest session this socket opened, which ends with it.
+    guest: Mutex<Option<String>>,
 }
 
 impl Conn {
-    pub(crate) fn new(scope: Option<NonZeroU16>, out: Outbound, road: Road) -> Conn {
-        Conn { scope, out, road, tunnels: Tunnels::default(), detaches: Mutex::new(Some(Vec::new())), proc_watch: Mutex::new(None) }
+    pub(crate) fn new(key: u64, scope: Option<NonZeroU16>, out: Outbound, road: Road) -> Conn {
+        Conn {
+            key,
+            scope,
+            out,
+            road,
+            tunnels: Tunnels::default(),
+            detaches: Mutex::new(Some(Vec::new())),
+            proc_watch: Mutex::new(None),
+            guest: Mutex::new(None),
+        }
+    }
+
+    pub(crate) fn guest_session(&self) -> Option<String> {
+        self.guest.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Binds this socket to the session it just opened; a socket that already holds one opens no second.
+    pub(crate) fn take_guest(&self, session: String) -> Result<(), OpError> {
+        let mut held = self.guest.lock().unwrap_or_else(|e| e.into_inner());
+        if held.is_some() {
+            return Err(OpError::coded(DaemonErrorCode::BadRequest, SESSION_TAKEN));
+        }
+        *held = Some(session);
+        Ok(())
     }
 
     fn on_close(&self, detach: Detach) {
@@ -186,6 +214,11 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         Some(name) if name == "place.leave" || name == "place.update" || MACHINE_OPS.contains(&name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
+        // The guest ops are the inbound road's: a guest runs on a machine wsp forked, never on a computer whose
+        // daemon dialled out to its host.
+        Some(name) if conn.road == Road::Link && GUEST_OPS.contains(&name) => {
+            refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
+        }
         Some(
             name @ ("pty.create"
             | "pty.attach"
@@ -211,7 +244,12 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "proc.watch"
             | "proc.unwatch"
             | "proc.inspect"
-            | "proc.kill"),
+            | "proc.kill"
+            | "guest.open"
+            | "guest.send"
+            | "guest.watch"
+            | "guest.reply"
+            | "guest.close"),
         ) => {
             // The typed frame: what the protocol's schema refuses, this refuses as a bad request.
             match serde_json::from_value::<DaemonOp>(frame.clone()) {
@@ -448,6 +486,16 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
                 Err(e) => fail(id, e.to_string()),
             }
         }
+        DaemonOp::GuestOpen { kind, token, turn_token, argv, cwd } => {
+            answer(id, ctx.guests.open(conn, GuestOpen { kind, token, turn_token, argv, cwd }).map(|session| GuestOpenReply { session }))
+        }
+        DaemonOp::GuestSend { message } => answer(id, ctx.guests.send(conn, message).map(|()| Empty {})),
+        DaemonOp::GuestWatch => {
+            ctx.guests.watch(conn);
+            ok(id)
+        }
+        DaemonOp::GuestReply { session, message } => answer(id, ctx.guests.reply(conn, &session, message).map(|()| Empty {})),
+        DaemonOp::GuestClose { session, error } => answer(id, ctx.guests.close(conn, &session, error).map(|()| Empty {})),
         DaemonOp::TunnelOpen { tunnel_id, port } => answer(id, Tunnels::open(conn, tunnel_id, port.get()).await.map(|()| Empty {})),
         DaemonOp::TunnelWrite { tunnel_id, data } => answer(id, conn.tunnels.write(&tunnel_id, lenient_base64(&data)).map(|()| Empty {})),
         DaemonOp::TunnelClose { tunnel_id } => {
@@ -537,7 +585,7 @@ mod tests {
 
     fn conn_on(scope: Option<u16>, road: Road) -> (Arc<Conn>, mpsc::UnboundedReceiver<Outgoing>) {
         let (tx, rx) = mpsc::unbounded_channel();
-        (Arc::new(Conn::new(scope.and_then(NonZeroU16::new), Outbound(tx), road)), rx)
+        (Arc::new(Conn::new(1, scope.and_then(NonZeroU16::new), Outbound(tx), road)), rx)
     }
 
     async fn reply(bench: &Bench, conn: &Arc<Conn>, frame: Value) -> Value {
@@ -621,6 +669,11 @@ mod tests {
             "proc.unwatch",
             "proc.inspect",
             "proc.kill",
+            "guest.open",
+            "guest.send",
+            "guest.watch",
+            "guest.reply",
+            "guest.close",
         ];
         let unserved: Vec<&&str> = DAEMON_OPS.iter().filter(|op| !built.contains(op)).collect();
         assert!(unserved.is_empty(), "{unserved:?}");
@@ -773,6 +826,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(refused["error"], words::NOT_ON_THIS_ROAD);
+    }
+
+    #[tokio::test]
+    async fn the_guest_ops_are_the_inbound_roads_and_the_link_is_refused_every_one() {
+        let b = bench();
+        let (link, _rx) = conn_on(None, Road::Link);
+        for op in GUEST_OPS {
+            assert_eq!(
+                reply(&b, &link, json!({"id": 1, "op": op, "session": "g0", "message": {}})).await,
+                json!({"id": 1, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}),
+                "{op}"
+            );
+        }
+        // The same socket still answers the ops that are not the guest road's.
+        assert_eq!(reply(&b, &link, json!({"id": 2, "op": "ping"})).await, json!({"id": 2, "ok": true}));
+        // And an inbound socket opens a session, which is what the link was refused.
+        let (inbound, _rx2) = conn(None);
+        let opened =
+            reply(&b, &inbound, json!({"id": 3, "op": "guest.open", "kind": "cli", "token": "", "argv": [], "cwd": "/root"})).await;
+        assert_eq!(opened["ok"], json!(true));
+        assert!(opened["session"].is_string(), "{opened}");
     }
 
     #[tokio::test]

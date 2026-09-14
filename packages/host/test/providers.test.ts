@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV } from "@wsp/protocol";
-import { BoxBackend, DockerBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, FakeBackend, LocalBackend, NoProviderBackend, SolariBackend, SshBackend, landsBytes, type MachineBackend } from "@wsp/engine";
 import { goldenRecipe, makeRuntime, optsFor, providerSlotOf, swapProvider } from "../src/cli.js";
 import { keysOf } from "../src/env-keys.js";
 import { BOX_KEY_ENV, PROVIDER_MODULES, SOLARI_KEY_ENV, isPlace, placeIdOf, placeProviders, providerBackendFor, providerEnvNames, providerEnvWith, providerEnvWithKey, providerKeyEnvs, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderModule } from "../src/providers.js";
@@ -24,22 +24,10 @@ describe("provider modules", () => {
     expect(providerBackendFor(pick({ solari: "sk-x" }))).toBeInstanceOf(SolariBackend);
   });
 
-  it("takes Docker when a person names it or asks for it by the shorthand, key or no key", () => {
-    expect(providerModule(pick({}, { WSP_PROVIDER: "docker" })).id).toBe("docker");
-    expect(providerModule(pick({}, { WSP_DOCKER: "1" })).id).toBe("docker");
-    expect(providerModule(pick({ solari: "sk-x" }, { WSP_DOCKER: "1" })).id).toBe("docker");
-    expect(providerBackendFor(pick({}, { WSP_DOCKER: "1" }))).toBeInstanceOf(DockerBackend);
-    // A shorthand that is off is off: a shell that exports WSP_DOCKER=0 asked for nothing.
-    expect(providerModule(pick({}, { WSP_DOCKER: "0" })).id).toBe("none");
-    expect(providerModule(pick({}, { WSP_DOCKER: "" })).id).toBe("none");
-  });
-
   it("a word on the command line stands in front of the environment the host started with", () => {
-    expect(providerEnvWith({ provider: "docker", dockerHost: "ssh://maya@box" }, { DOCKER_HOST: "unix:///var/run/docker.sock" })).toMatchObject({
-      WSP_PROVIDER: "docker",
-      DOCKER_HOST: "ssh://maya@box",
-    });
-    expect(providerEnvWith({}, { WSP_DOCKER: "1" })).toMatchObject({ WSP_DOCKER: "1" });
+    expect(providerEnvWith({ provider: "box" }, { WSP_PROVIDER: "solari" })).toMatchObject({ WSP_PROVIDER: "box" });
+    // No word typed leaves every variable the host started with where it was.
+    expect(providerEnvWith({}, { [FAKE_AS_ENV]: "solari" })).toMatchObject({ [FAKE_AS_ENV]: "solari" });
   });
 
   it("takes Box when a person names it, key or no key, and hands the backend the key the environment holds", () => {
@@ -79,29 +67,29 @@ describe("provider modules", () => {
   });
 
   it("every row is reachable and the last one answers for any computer", () => {
-    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["docker", "box", "fake", "solari", "none"]);
+    expect(PROVIDER_MODULES.map(m => m.id)).toEqual(["box", "fake", "solari", "none"]);
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
   it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
-    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { DOCKER_HOST: "unix:///nonexistent/docker.sock", BOX_API_KEY: "box_x" }))] as const);
+    const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { BOX_API_KEY: "box_x" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
     const modes = Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.pauseMode]));
-    expect(modes).toEqual({ docker: "memory", box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined, ssh: undefined });
+    expect(modes).toEqual({ box: "disk", solari: "memory", fake: "memory", none: undefined, local: undefined, ssh: undefined });
     for (const [, b] of all) expect(b.capabilities.pauseMode === undefined || ["memory", "disk"].includes(b.capabilities.pauseMode)).toBe(true);
     // The runtime reads the budgets only where a pause exists, so the two are declared together or not at all.
     for (const [id, b] of all) expect([id, b.lifecycle !== undefined]).toEqual([id, b.capabilities.pauseMode !== undefined]);
     // Which providers copy a machine's disk into an image, the one fact the snapshot verb reads: a fork that boots
     // cold is still snapshotted, so this row is its own and never liveCloneForks.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ docker: true, box: true, solari: true, fake: true, none: false, local: false, ssh: false });
-    // Which life a copy may be taken from is each provider's own row: Solari refuses a machine that was resumed, a
-    // container's commit and a box's named snapshot read the disk as it stands.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ docker: true, box: true, solari: false, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.diskSnapshots]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    // Which life a copy may be taken from is each provider's own row: Solari refuses a machine that was resumed,
+    // and a box's named snapshot reads the disk as it stands.
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false, ssh: false });
     // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
     // read. Each verb has its own row here, so a provider added tomorrow answers for every road rather than being
     // read off a neighbour's flag.
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ docker: true, box: true, solari: true, fake: true, none: false, local: false, ssh: false });
+    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);
@@ -109,23 +97,21 @@ describe("provider modules", () => {
   });
 
   it("the words wsp up and wsp init take land in what the run picks its provider out of", () => {
-    expect(optsFor({ state: "/tmp/wsp-providers/state.json", provider: "docker", "docker-host": "ssh://maya@127.0.0.1:2222" }).providerEnv).toMatchObject({
-      WSP_PROVIDER: "docker",
-      DOCKER_HOST: "ssh://maya@127.0.0.1:2222",
-    });
+    expect(optsFor({ state: "/tmp/wsp-providers/state.json", provider: "box" }).providerEnv).toMatchObject({ WSP_PROVIDER: "box" });
   });
 
-  it("a host told to fork containers holds the Docker module, and a key saved later swaps inside the same words", async () => {
-    const rt = makeRuntime({}, "/tmp/wsp-providers/state.json", goldenRecipe({}), { WSP_DOCKER: "1" });
+  it("a host told which provider to fork on holds that module, and a key saved later swaps inside the same words", async () => {
+    const rt = makeRuntime({}, "/tmp/wsp-providers/state.json", goldenRecipe({}), { WSP_PROVIDER: "box", [BOX_KEY_ENV]: "box_x" });
     try {
       const held = providerSlotOf(rt)!.current();
-      // Containers: a nap that keeps RAM, no public port routes, a commit that copies the disk though a fork of it
-      // boots cold, a fresh container that stands in for one a workspace is on, and sizes to offer, so the fork
-      // roads are open.
-      expect(held.capabilities).toMatchObject({ previewUrls: false, pauseMode: "memory", liveCloneForks: false, diskSnapshots: true, replacesMachine: true });
+      // A box: a nap that keeps the disk alone, a tokened route per port, a named snapshot of the disk as it
+      // stands, a fresh box that stands in for one a workspace is on, and sizes to offer, so the fork roads are open.
+      expect(held.capabilities).toMatchObject({ previewUrls: true, pauseMode: "disk", liveCloneForks: false, diskSnapshots: true, replacesMachine: true });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
+      // A cloud key saved later opens that cloud as a place and leaves the words alone: the host forks where it
+      // was told to, not where the newest key points.
       swapProvider(rt, { [SOLARI_KEY_ENV]: "slr_live_fake" });
-      expect(providerSlotOf(rt)!.current().capabilities.previewUrls).toBe(false);
+      expect(providerSlotOf(rt)!.current().capabilities.pauseMode).toBe("disk");
     } finally {
       await rt.close();
     }
@@ -155,7 +141,7 @@ describe("provider modules", () => {
     // With no provider named the key is the wired row's, and the word for it is left as it stands.
     expect(providerKeySet({}, "slr_live_fake")).toEqual({ [SOLARI_KEY_ENV]: "slr_live_fake" });
     // A row that takes no key, and a word no row answers to, take nothing.
-    expect(providerKeySet({}, "x", "docker")).toBeUndefined();
+    expect(providerKeySet({}, "x", "fake")).toBeUndefined();
     expect(providerKeySet({}, "x", "nowhere")).toBeUndefined();
   });
 
@@ -164,12 +150,12 @@ describe("provider modules", () => {
   });
 
   it("the variables a service carries are the rows' own, so a provider added brings its variable with it", () => {
-    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV]);
+    expect(providerEnvNames()).toEqual(["WSP_PROVIDER", FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV]);
     // The row a provider is added as: the list follows it, and nothing else has to be remembered for the unit its
     // host is installed as to be given the variable that selects it. Keys are not among them: a unit file carries
     // no key, and the host reads its own off the same files at every start.
     const fly: ProviderModule = { id: "fly", envNames: ["WSP_PROVIDER", "FLY_REGION"], keyEnv: "FLY_API_TOKEN", selects: env => env["FLY_API_TOKEN"] !== undefined, build: () => new NoProviderBackend() };
-    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", "WSP_DOCKER", "DOCKER_HOST", FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV, "FLY_REGION"]);
+    expect(providerEnvNames([...PROVIDER_MODULES, fly])).toEqual(["WSP_PROVIDER", FAKE_AS_ENV, FAKE_ROOT_ENV, FAKE_RECORDS_ENV, "FLY_REGION"]);
     expect(providerEnvNames()).not.toContain(BOX_KEY_ENV);
     // What a row selects on is what it names: a row reading a variable it never listed would be carried by neither.
     for (const m of PROVIDER_MODULES) for (const name of m.envNames) expect(providerEnvNames()).toContain(name);
@@ -191,7 +177,6 @@ describe("provider modules", () => {
     // What the key screen is titled and what it says to set are the row's own, declared together: a row with a
     // variable and no words for it would open a screen titled with a shell variable.
     expect(PROVIDER_MODULES.map(m => [m.id, m.keyEnv, m.keyName])).toEqual([
-      ["docker", undefined, undefined],
       ["box", BOX_KEY_ENV, "Box API key"],
       ["fake", undefined, undefined],
       ["solari", SOLARI_KEY_ENV, "Solari API key"],
@@ -201,15 +186,9 @@ describe("provider modules", () => {
   });
 
   it("the places a copy of the image can be built at are the providers this computer is set up for, each once", () => {
-    // Added by its own word: a place once that word is here, and not before. A computer with no Docker and nobody
-    // asking for it listed a docker row anyway, which New workspace then priced at the wired provider's rates.
-    expect(placeProviders({ WSP_PROVIDER: "docker" }).map(m => m.id)).toContain("docker");
-    expect(placeProviders({ WSP_DOCKER: "1" }).map(m => m.id)).toContain("docker");
-    expect(placeProviders({}).map(m => m.id)).not.toContain("docker");
-    expect(placeProviders({ [SOLARI_KEY_ENV]: "slr_live_fake" }).map(m => m.id)).not.toContain("docker");
-    // A daemon named in the shell is not somebody asking wsp for it: DOCKER_HOST is where the socket is, never
-    // whether this computer forks there.
-    expect(placeProviders({ DOCKER_HOST: "tcp://127.0.0.1:2375" }).map(m => m.id)).not.toContain("docker");
+    // Named without its key is not added: a computer nobody had typed a key on listed the row anyway, which New
+    // workspace then priced at the wired provider's rates.
+    expect(placeProviders({ WSP_PROVIDER: "box" }).map(m => m.id)).not.toContain("box");
     // A row that is no place at all, and the one that stands for no provider: neither is offered.
     expect(placeProviders({}).map(m => m.id)).not.toContain("fake");
     expect(placeProviders({}).map(m => m.id)).not.toContain("none");
@@ -225,21 +204,21 @@ describe("provider modules", () => {
   });
 
   it("the table a host builds copies through answers the wired place with the runtime's own backend and every other with its module's", () => {
-    const wired = { id: "docker" };
-    const env: Record<string, string> = { WSP_PROVIDER: "docker", [SOLARI_KEY_ENV]: "slr_live_fake" };
-    const own = new DockerBackend({});
+    const wired = { id: "box" };
+    const env: Record<string, string> = { WSP_PROVIDER: "box", [BOX_KEY_ENV]: "box_fake", [SOLARI_KEY_ENV]: "slr_live_fake" };
+    const own = new BoxBackend({ apiKey: "box_fake" });
     const places = providerPlaces(
       () => wired.id,
       own,
       () => env,
     );
-    expect(places.wired).toBe("docker");
-    expect(places.backend("docker")).toBe(own);
+    expect(places.wired).toBe("box");
+    expect(places.backend("box")).toBe(own);
     expect(places.backend("solari")).toBeInstanceOf(SolariBackend);
     // One backend per place for the host's life: a module holding machines in memory must not be made afresh.
     expect(places.backend("solari")).toBe(places.backend("solari"));
-    expect(places.backend("box")).toBeUndefined();
-    expect(places.list()).toEqual(["docker", "solari"]);
+    expect(places.backend("fake")).toBeUndefined();
+    expect(places.list()).toEqual(["box", "solari"]);
 
     // A key rotated while the host serves is read by the row that holds it: the backend built on the old one is not
     // handed out again, which is what the swap promises for the wired place and has to promise for the others.
@@ -253,8 +232,8 @@ describe("provider modules", () => {
     wired.id = "solari";
     expect(places.wired).toBe("solari");
     expect(places.backend("solari")).toBe(own);
-    expect(places.backend("docker")).toBeInstanceOf(DockerBackend);
-    expect(places.list()).toEqual(["solari", "docker"]);
+    expect(places.backend("box")).toBeInstanceOf(BoxBackend);
+    expect(places.list()).toEqual(["solari", "box"]);
   });
 
   it("lists only the places a person can name, and still answers for a host whose own module is none of them", () => {
@@ -266,7 +245,7 @@ describe("provider modules", () => {
       own,
       () => ({}),
     );
-    // Nothing added and no key here: no place at all, rather than a docker row on a computer that has no Docker.
+    // Nothing added and no key here: no place at all, rather than a row on a computer nobody set up for it.
     expect(places.list()).toEqual([]);
     expect(places.backend("none")).toBe(own);
     expect(places.backend("solari")).toBeUndefined();
@@ -298,8 +277,7 @@ describe("provider modules", () => {
     // Wired to nothing: the cloud a key alone wires, which is what wsp init offers on a computer set up for none.
     expect(providerKeyRow({})?.keyEnv).toBe(SOLARI_KEY_ENV);
     // Wired to a provider that reads no key: nothing to ask for.
-    expect(providerKeyRow({ WSP_PROVIDER: "docker" })).toBeUndefined();
-    expect(providerKeyRow({ WSP_DOCKER: "1" })).toBeUndefined();
+    expect(providerKeyRow({ WSP_PROVIDER: "fake" })).toBeUndefined();
   });
 
   it("stamps a stand-in's machines with the provider it stands in for, so no row reads the stand-in's own word", () => {

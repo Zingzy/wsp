@@ -332,30 +332,6 @@ exports[`catalog > is the seeded catalog 1`] = `
     "status": undefined,
   },
   {
-    "argument": "12 lines",
-    "configPaths": 0,
-    "covers": [
-      "docker-compose",
-    ],
-    "defaultOn": true,
-    "floor": true,
-    "id": "docker",
-    "kind": "tool",
-    "road": "script",
-    "signIn": "none",
-    "size": {
-      "bytes": 541765632,
-      "method": "df",
-      "on": "2026-09-07",
-    },
-    "source": {
-      "images": 3,
-      "road": "unmeasured",
-      "sessions": 30,
-    },
-    "status": undefined,
-  },
-  {
     "argument": "build-essential cmake ninja-build",
     "configPaths": 0,
     "covers": [
@@ -554,6 +530,30 @@ exports[`catalog > is the seeded catalog 1`] = `
       "note": "sessions counted on one Mac only; on by default for this user until a second data point",
       "road": "unmeasured",
       "sessions": 45,
+    },
+    "status": undefined,
+  },
+  {
+    "argument": "12 lines",
+    "configPaths": 0,
+    "covers": [
+      "docker-compose",
+    ],
+    "defaultOn": false,
+    "floor": false,
+    "id": "docker",
+    "kind": "tool",
+    "road": "script",
+    "signIn": "none",
+    "size": {
+      "bytes": 541765632,
+      "method": "df",
+      "on": "2026-09-07",
+    },
+    "source": {
+      "images": 3,
+      "road": "unmeasured",
+      "sessions": 30,
     },
     "status": undefined,
   },

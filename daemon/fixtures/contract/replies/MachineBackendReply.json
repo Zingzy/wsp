@@ -54,7 +54,7 @@
     }
   },
   {
-    "offer": "docker",
+    "offer": "runtime",
     "capabilities": {
       "liveCloneForks": false,
       "replacesMachine": true,

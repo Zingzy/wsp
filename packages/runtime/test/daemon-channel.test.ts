@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// One dial of one daemon for one client, against a real in-process daemon and
+// One dial of one daemon for one client, against a real daemon binary and
 // against a door that answers the upgrade with a status instead of 101.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { rootsPathIn } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
+import { fakeProcTree } from "../../daemon/test/fake-proc.js";
+import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { DaemonDoorError, DaemonTokenError, openDaemonChannel, type DaemonChannel } from "../src/daemon-channel.js";
 import { startRefusingDoor, type RefusingDoor } from "./refusing-door.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
@@ -14,15 +15,17 @@ import { until } from "./until.js";
 
 const TOKEN = "channel-token";
 
-let daemon: DaemonHandle | undefined;
+let daemon: DaemonUnderTest | undefined;
 let channel: DaemonChannel | undefined;
 let proxy: TcpProxy | undefined;
 let door: RefusingDoor | undefined;
 let inboxDir: string | undefined;
+let procRoot: string | undefined;
 
-async function startTestDaemon(): Promise<DaemonHandle> {
+async function startTestDaemon(): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-channel-inbox-"));
-  return startDaemon({ port: 0, token: TOKEN, inboxDir, rootsPath: rootsPathIn(inboxDir), portsSource: async () => [], portsIntervalMs: 1000 });
+  procRoot = fakeProcTree([]);
+  return daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, inbox: inboxDir, rootsPath: rootsPathIn(inboxDir), procRoot, portsIntervalMs: 1000 });
 }
 
 afterEach(async () => {
@@ -36,6 +39,8 @@ afterEach(async () => {
   daemon = undefined;
   if (inboxDir) rmSync(inboxDir, { recursive: true, force: true });
   inboxDir = undefined;
+  if (procRoot) rmSync(procRoot, { recursive: true, force: true });
+  procRoot = undefined;
 });
 
 describe("openDaemonChannel", () => {
@@ -57,7 +62,11 @@ describe("openDaemonChannel", () => {
   it("hands a refusal back as the daemon wrote it, with the typed code and no throw", async () => {
     daemon = await startTestDaemon();
     channel = await openDaemonChannel({ url: `ws://127.0.0.1:${daemon.port}`, token: TOKEN, onEvent: () => {} });
-    expect(await channel.send({ op: "fs.list", path: 7 })).toMatchObject({ ok: false, error: "path must be a string", code: "bad-request" });
+    // The sentence is the daemon's own; what this pins is that one arrives with its code rather than as a throw.
+    const refused = await channel.send({ op: "fs.list", path: 7 });
+    expect(refused).toMatchObject({ ok: false, code: "bad-request" });
+    expect(typeof refused["error"]).toBe("string");
+    expect(refused["error"]).not.toBe("");
   });
 
   it("a token the daemon refuses rejects as a token error carrying its 4401 sentence", async () => {

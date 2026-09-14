@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The port directory is fed by each workspace's own daemon channel, not the
-// runtime stream: one host relays for two workspaces on two in-process
-// daemons, so a port on one must never show up on the other.
+// runtime stream: one host relays for two workspaces on two daemons of their
+// own, so a port on one must never show up on the other.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
-import type { ListeningPort } from "@wsp/daemon";
 import type { WorkspaceView } from "@wsp/protocol";
+import { fakeProcTree, setListeners, type FakeListener } from "../../../packages/daemon/test/fake-proc.js";
+import { daemonUnderTest, type DaemonUnderTest } from "../../../packages/daemon/test/harness.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getBrowser, resetBrowsers } from "../src/browser/model.js";
 import type { Api, ProtocolEvent } from "../src/protocol/client.js";
@@ -33,8 +33,6 @@ const view = (id: string): WorkspaceView => ({
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
 });
-
-const listening = (port: number, pid: number | null = null): ListeningPort => ({ port, pid, inode: port, uid: 0, loopback: false });
 
 function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
   const listeners = new Set<(e: ProtocolEvent) => void>();
@@ -72,32 +70,36 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
   return { api, emit };
 }
 
+/** A guest's own fake machine: what it has listening is a row written into its tree. */
 interface Guest {
-  ports: ListeningPort[];
+  procRoot: string;
 }
 
 /** The first guest is the harness's own daemon; every one after it is a daemon of its own on the same host. */
 const guests = new Map<string, Guest>();
 let relay: RelayHarness | undefined;
-let extra: { daemon: DaemonHandle; inboxDir: string }[] = [];
+let extra: { daemon: DaemonUnderTest; inboxDir: string; procRoot: string }[] = [];
 let unwire: (() => void) | undefined;
 
+/** What one guest has listening now; the daemon watching that tree pushes the difference on its next poll. */
+const setPorts = (id: string, ports: readonly FakeListener[]): void => setListeners(guests.get(id)!.procRoot, ports);
+
 /** The harness's own workspace, on a daemon whose listening set this test owns. */
-async function firstGuest(ports: ListeningPort[]): Promise<string> {
-  const g: Guest = { ports };
-  relay = await startRelayHarness({ ports: async () => g.ports });
-  guests.set(relay.workspaceId, g);
+async function firstGuest(ports: readonly FakeListener[]): Promise<string> {
+  relay = await startRelayHarness({ ports });
+  guests.set(relay.workspaceId, { procRoot: relay.procRoot });
   return relay.workspaceId;
 }
 
 /** One more workspace on the same host, with a daemon of its own. */
-async function nextGuest(ports: ListeningPort[]): Promise<string> {
-  const g: Guest = { ports };
+async function nextGuest(ports: readonly FakeListener[]): Promise<string> {
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-ports-inbox-"));
-  const daemon = await startDaemon({ port: 0, token: HARNESS_DAEMON_TOKEN, inboxDir, portsSource: async () => g.ports, portsIntervalMs: 50 });
-  extra.push({ daemon, inboxDir });
+  const procRoot = fakeProcTree([]);
+  setListeners(procRoot, ports);
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: HARNESS_DAEMON_TOKEN, inbox: inboxDir, procRoot, portsIntervalMs: 50 });
+  extra.push({ daemon, inboxDir, procRoot });
   const id = await relay!.addWorkspace("second", `ws://127.0.0.1:${daemon.port}`);
-  guests.set(id, g);
+  guests.set(id, { procRoot });
   return id;
 }
 
@@ -112,6 +114,7 @@ afterEach(async () => {
   for (const e of extra) {
     await e.daemon.close();
     rmSync(e.inboxDir, { recursive: true, force: true });
+    rmSync(e.procRoot, { recursive: true, force: true });
   }
   extra = [];
   guests.clear();
@@ -122,8 +125,8 @@ const portsOf = (id: string) => getBrowser(id).ports().map(p => p.port);
 
 describe("port directory over the daemon link", () => {
   it("seeds from the ports.watch reply, follows port.open and port.close, and keeps workspaces apart", async () => {
-    const a = await firstGuest([listening(3000, 42)]);
-    const b = await nextGuest([listening(8080)]);
+    const a = await firstGuest([{ port: 3000, pid: 42 }]);
+    const b = await nextGuest([{ port: 8080 }]);
     const { api } = fakeApi([view(a), view(b)], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
@@ -135,34 +138,34 @@ describe("port directory over the daemon link", () => {
     expect(portsOf(b)).toEqual([8080]);
 
     // The daemon's watcher pushes a new listener without a redial.
-    guests.get(a)!.ports = [listening(3000, 42), listening(5173, 7)];
+    setPorts(a, [{ port: 3000, pid: 42 }, { port: 5173, pid: 7 }]);
     await until(() => portsOf(a).includes(5173));
     expect(portsOf(a)).toEqual([3000, 5173]);
     expect(portsOf(b)).toEqual([8080]);
 
-    guests.get(a)!.ports = [listening(5173, 7)];
+    setPorts(a, [{ port: 5173, pid: 7 }]);
     await until(() => !portsOf(a).includes(3000));
     expect(portsOf(a)).toEqual([5173]);
     expect(portsOf(b)).toEqual([8080]);
   }, 20_000);
 
   it("a listener killed and started again is listed again, even when the daemon cannot name its pid", async () => {
-    const a = await firstGuest([listening(8412, 100)]);
+    const a = await firstGuest([{ port: 8412, pid: 100 }]);
     const { api } = fakeApi([view(a)], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
     await until(() => portsOf(a).includes(8412));
 
-    guests.get(a)!.ports = [];
+    setPorts(a, []);
     await until(() => !portsOf(a).includes(8412));
 
-    guests.get(a)!.ports = [listening(8412)];
+    setPorts(a, [{ port: 8412 }]);
     await until(() => portsOf(a).includes(8412), 2000);
     expect(getBrowser(a).ports()).toEqual([{ port: 8412, pid: null, process: null }]);
   }, 20_000);
 
   it("a redial re-subscribes: ports that changed while the channel was down are reconciled", async () => {
-    const a = await firstGuest([listening(3000)]);
+    const a = await firstGuest([{ port: 3000 }]);
     const { api, emit } = fakeApi([view(a)], () => relay!);
     unwire = wireTerminals(useStore, { backoffMs: () => 30 });
     useStore.getState().bind(api);
@@ -170,7 +173,7 @@ describe("port directory over the daemon link", () => {
 
     emit({ type: "workspace.napped", workspaceId: a });
     await until(() => getTerminals(a)!.status() === "connecting");
-    guests.get(a)!.ports = [listening(4000)];
+    setPorts(a, [{ port: 4000 }]);
     await new Promise(r => setTimeout(r, 120));
 
     emit({ type: "workspace.woken", workspaceId: a, machineId: `m_${a}`, resurrected: false });

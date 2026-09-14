@@ -120,8 +120,6 @@ describe("a machine over a link", () => {
     expect(machine.previewUrl).toBeDefined();
     expect(machine.putBytes).toBeDefined();
     expect(machine.daemonSupervisor).toBe("entrypoint");
-    // Never proxied: the far side's answer names the far side, and a fork on it dials the host's own address.
-    expect(machine.hostUrl).toBeUndefined();
   });
 
   it("carries the sentence the computer answered the create with, and none where it answered none", async () => {

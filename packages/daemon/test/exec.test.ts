@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The exec op, which is the whole of what a host driving a place needs: every
 // script the runtime already sends a machine rides one of these.
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import WebSocket from "ws";
-import { EXEC_DEADLINE_EXIT, NOT_ON_THIS_ROAD } from "@wsp/protocol";
-import { runExec } from "../src/exec.js";
+import { NOT_ON_THIS_ROAD } from "@wsp/protocol";
 import { daemonUnderTest, type DaemonUnderTest } from "./harness.js";
 
 const TOKEN = "exec-token";
@@ -52,50 +51,6 @@ async function connect(port: number, auth: Record<string, unknown>): Promise<{ r
   ws.send(JSON.stringify({ id: 0, op: "auth", token: TOKEN, ...auth }));
   return { request, close: () => ws.close() };
 }
-
-describe("one command on this machine", () => {
-  it("runs under bash in the daemon's root with its environment, and answers both streams and the code", async () => {
-    // HOME is in the environment because every caller's is: the daemon hands its own, and a bash 3.2 given none
-    // reads the passwd home's .bashrc and prints whatever that file says on stderr (measured on macOS).
-    const res = await runExec(root, { HOME: root, WSP_TEST_WORD: "kept" }, 'pwd; printf "%s\\n" "$WSP_TEST_WORD"; echo bad >&2; exit 3', { timeoutMs: 5_000 });
-    expect(res.exitCode).toBe(3);
-    expect(res.stdout).toContain("kept");
-    expect(res.stderr.trim()).toBe("bad");
-    expect(res.truncated).toBe(false);
-    // The root, not the process's cwd: a place's daemon is rooted at the person's home.
-    expect(res.stdout.split("\n")[0]).toContain(root.split("/").at(-1)!);
-  });
-
-  it("kills the whole process group at the deadline and answers 124 with nothing said after the kill", async () => {
-    const pidFile = join(root, "child.pid");
-    const res = await runExec(root, process.env, `(sleep 30 & echo $! > ${pidFile}); sleep 5; echo late`, { timeoutMs: 300 });
-    expect(res.exitCode).toBe(EXEC_DEADLINE_EXIT);
-    expect(res.stdout).not.toContain("late");
-    // The child the script started is gone with the group, not left behind for the life of the machine.
-    const pid = Number(readFileSync(pidFile, "utf8").trim());
-    await new Promise(done => setTimeout(done, 200));
-    expect(() => process.kill(pid, 0)).toThrow();
-  });
-
-  it("lands the bytes a caller sends on stdin", async () => {
-    const target = join(root, "landed.txt");
-    const res = await runExec(root, process.env, `cat > ${target}`, { timeoutMs: 5_000, stdin: Buffer.from("bytes on the wire\n") });
-    expect(res.exitCode).toBe(0);
-    expect(readFileSync(target, "utf8")).toBe("bytes on the wire\n");
-  });
-
-  it("closes stdin when the caller sends none, so a command that reads it is not left waiting", async () => {
-    const res = await runExec(root, process.env, "cat; echo done", { timeoutMs: 3_000 });
-    expect(res.exitCode).toBe(0);
-    expect(res.stdout).toContain("done");
-  });
-
-  it("cuts the output at the cap and says it did", async () => {
-    const res = await runExec(root, process.env, "printf 'x%.0s' $(seq 1 5000)", { timeoutMs: 5_000, outputMax: 100 });
-    expect(res.truncated).toBe(true);
-    expect(res.stdout.length + res.stderr.length).toBeLessThanOrEqual(100);
-  });
-});
 
 describe("the exec op over the wire", () => {
   it("answers a command on an authed socket", async () => {
@@ -146,25 +101,5 @@ describe("the exec op over the wire", () => {
     } finally {
       client.close();
     }
-  });
-});
-
-describe("the byte road the runtime already writes with", () => {
-  it("carries a file's bytes under the same script the ssh road uses, and a short count leaves the target alone", async () => {
-    const target = join(root, "over-the-wire.bin");
-    const bytes = Buffer.from("a token, as it happens\n");
-    // The one script both roads write with, spelled here rather than imported: the daemon package does not reach
-    // the engine, and what this proves is that the op carries the bytes the script expects on stdin.
-    const tmp = `${target}.in`;
-    const script = ["set -e", "umask 077", `cat > ${tmp}`, `[ "$(wc -c < ${tmp} | tr -d ' ')" = ${bytes.length} ] || { rm -f ${tmp}; echo WSP_BYTES_SHORT; exit 1; }`, `mv -f ${tmp} ${target}`, "echo WSP_BYTES_OK"].join("\n");
-    const ok = await runExec(root, process.env, script, { timeoutMs: 5_000, stdin: bytes });
-    expect(ok.stdout).toContain("WSP_BYTES_OK");
-    expect(readFileSync(target, "utf8")).toBe(bytes.toString());
-
-    writeFileSync(target, "the old one\n");
-    const short = await runExec(root, process.env, script.replace(`= ${bytes.length}`, `= ${bytes.length + 1}`), { timeoutMs: 5_000, stdin: bytes });
-    expect(short.stdout).toContain("WSP_BYTES_SHORT");
-    expect(readFileSync(target, "utf8")).toBe("the old one\n");
-    expect(existsSync(tmp)).toBe(false);
   });
 });

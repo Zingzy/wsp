@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DaemonEvent, DaemonLinkStatus } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { connectDaemonLink, DaemonRequestError, type DaemonLink } from "../src/terminal/daemon-link.js";
+import { connectDaemonLink, DaemonRequestError, UNWORDED_REFUSAL, type DaemonLink } from "../src/terminal/daemon-link.js";
 import { startRefusingDoor, type RefusingDoor } from "../../../packages/runtime/test/refusing-door.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
 import { HARNESS_DAEMON_TOKEN, startRelayHarness, type RelayHarness } from "./relay-harness.js";
@@ -69,7 +69,9 @@ describe("connectDaemonLink over the host's relay", () => {
     const coded = await link.request("fs.list", { path: 7 }).catch((e: unknown) => e);
     expect(coded).toBeInstanceOf(DaemonRequestError);
     expect((coded as DaemonRequestError).code).toBe("bad-request");
-    expect((coded as DaemonRequestError).message).toBe("path must be a string");
+    // The sentence is the daemon's own; what this pins is that its own words arrive rather than the stand-in.
+    expect((coded as DaemonRequestError).message).not.toBe(UNWORDED_REFUSAL);
+    expect((coded as DaemonRequestError).message).not.toBe("");
     const plain = await link.request("pty.write", { ptyId: "nope", data: "x" }).catch((e: unknown) => e);
     expect(plain).toBeInstanceOf(DaemonRequestError);
     expect((plain as DaemonRequestError).code).toBeUndefined();

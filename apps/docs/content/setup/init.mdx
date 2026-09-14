@@ -32,7 +32,7 @@ Every agent the catalog knows that is on this computer, with what its history he
 
 ### 2. Tools
 
-The tools your agents reach for, each with why it is ticked and its download size. The default rule is use: a tool is on when your agents ran it in at least 2 sessions and 5 commands. A heavy row, over 300 MB, needs 3 sessions and 20 commands, because a heavy row costs more to be wrong about. Sixteen floor tools are always on and cannot be unticked: node, pnpm, uv, python, git, jq, ripgrep, curl, docker, build-essential, fd, sqlite3, wget, zip, xz, rsync. A project's own needs win over any rule.
+The tools your agents reach for, each with why it is ticked and its download size. The default rule is use: a tool is on when your agents ran it in at least 2 sessions and 5 commands. A heavy row, over 300 MB, needs 3 sessions and 20 commands, because a heavy row costs more to be wrong about. Fifteen floor tools are always on and cannot be unticked: curl, node, pnpm, uv, python, git, jq, ripgrep, build-essential, fd, sqlite3, wget, zip, xz, rsync. Docker is a row like any other: tick it and every image carries its 517 MB, leave it and no image does. A project's own needs win over any rule.
 
 <Image src="/init/tools.png" alt="The Tools screen: the always-on floor tools, then the You use these group with why each row is on and its size, and the disk line at the bottom" caption="Screen two. The floor tools, then the tools your sessions ran, each with why it is on. The disk line counts as you tick." />
 

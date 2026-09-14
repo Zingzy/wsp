@@ -2,7 +2,7 @@
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::validate::http_url;
-use crate::{PtyMode, RelayPort};
+use crate::{GuestKind, PtyMode, RelayPort};
 
 /// A reading is a number on the wire or nothing: serde_json writes a NaN or an infinity as null, which the
 /// protocol's number schema refuses, so a reading that is not finite travels as zero.
@@ -111,6 +111,27 @@ pub enum DaemonEvent {
     },
     #[serde(rename = "proc.snapshot")]
     ProcSnapshot { at: i64, daemon: u32, total: u64, procs: Vec<ProcEntry> },
+    /// A process inside the machine opened a session; this one goes up to the watcher alone.
+    #[serde(rename = "guest.opened", rename_all = "camelCase")]
+    GuestOpened {
+        session: String,
+        kind: GuestKind,
+        token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        turn_token: Option<String>,
+        argv: Vec<String>,
+        cwd: String,
+    },
+    /// One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down.
+    #[serde(rename = "guest.message")]
+    GuestMessage { session: String, message: serde_json::Value },
+    /// The session ended; this goes to whichever side did not end it.
+    #[serde(rename = "guest.closed")]
+    GuestClosed {
+        session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 #[cfg(test)]

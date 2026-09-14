@@ -2287,6 +2287,7 @@ dependencies = [
  "tokio-tungstenite",
  "wsp-daemon",
  "wsp-frames",
+ "wsp-guest",
  "wsp-runtime",
  "xattr",
 ]
@@ -2298,6 +2299,19 @@ dependencies = [
  "base64 0.22.1",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "wsp-guest"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "wsp-daemon",
+ "wsp-frames",
 ]
 
 [[package]]

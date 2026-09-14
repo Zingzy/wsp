@@ -9,6 +9,7 @@ mod door;
 mod exec;
 mod fs;
 mod git;
+mod guest;
 mod inbox;
 mod link;
 mod manifest;
@@ -188,6 +189,8 @@ pub(crate) struct Ctx {
     pub(crate) spotter: Mutex<relay::CallbackSpotter>,
     pub(crate) ports: ports::PortWatch,
     pub(crate) inbox: inbox::InboxWatch,
+    /// The guest sessions open on this machine, and the socket the host watches them from.
+    pub(crate) guests: guest::Guests,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
     log: SharedLog,
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
@@ -228,6 +231,7 @@ impl Ctx {
             spotter: Mutex::new(relay::CallbackSpotter::new()),
             ports,
             inbox: inbox::InboxWatch::default(),
+            guests: guest::Guests::default(),
             log: Arc::from(log),
             sys: Mutex::new(None),
             procs: Mutex::new(None),

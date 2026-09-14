@@ -1,0 +1,11 @@
+[
+  {
+    "type": "guest.message",
+    "message": {}
+  },
+  {
+    "type": "guest.message",
+    "session": 2,
+    "message": {}
+  }
+]

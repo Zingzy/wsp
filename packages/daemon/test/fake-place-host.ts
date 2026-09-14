@@ -4,12 +4,11 @@
 // this answers and nothing here fakes a signature. The bytes both sides sign
 // come from the protocol, as they do on the wire.
 import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
+import { dirname, join } from "node:path";
+import { PLACE_FILE_MODE, placeFileText, placeLinkTranscript, type PlaceFile } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket as ServerSocket } from "ws";
-import { writePlaceFile } from "../src/link.js";
 
 export interface PlacePair {
   publicKey: string;
@@ -28,6 +27,13 @@ const servers: WebSocketServer[] = [];
 export async function closeFakePlaceHosts(): Promise<void> {
   for (const s of servers.splice(0)) await new Promise<void>(done => s.close(() => done()));
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+}
+
+/** The place file at the one mode a join ever keeps it at, which is what the daemon reads it back at. */
+export function writePlaceFile(path: string, file: PlaceFile): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  writeFileSync(path, placeFileText(file), { mode: PLACE_FILE_MODE });
+  chmodSync(path, PLACE_FILE_MODE);
 }
 
 /** A place file in a folder of its own, with the private key beside it. */

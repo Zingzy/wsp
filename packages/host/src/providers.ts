@@ -7,7 +7,7 @@
 // row here and its backend in the engine; nothing above this file compares a
 // provider by name.
 
-import { BoxBackend, DockerBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
+import { BoxBackend, FakeBackend, NoProviderBackend, SolariBackend, type MachineBackend } from "@wsp/engine";
 import { FAKE_AS_ENV, FAKE_RECORDS_ENV, FAKE_ROOT_ENV, PROVIDER_KEY_WORDS, standInRecordsPath } from "@wsp/protocol";
 import type { PlaceBackends } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
@@ -27,10 +27,6 @@ export interface ProviderModule {
    * be handed them: `wsp up --service` copies whichever of them that shell held into the unit. Keys are not among
    * them: they stay out of a unit file, and the host reads them off the same .env at every start. */
   envNames: readonly string[];
-  /** A row that is a place a person adds by naming it and nothing else: `wsp add docker` is the whole of it. A row
-   * that reads a key is a place too, opened by that key, and says so by declaring keyEnv rather than a second time
-   * here; a row that is no place at all declares neither. */
-  addedByWords?: true;
   /** The variable this row reads its key from. Every layer a key is read through fills it, and the screen that
    * asks for a key says where to put it by this name. A row that needs no key names none, and names no key words
    * either: the two are declared together or not at all. */
@@ -50,28 +46,12 @@ export interface ProviderModule {
 
 /** The variable a person names a provider in, for a host started by a service or a window where no flag can reach. */
 export const PROVIDER_ENV = "WSP_PROVIDER";
-/** The shorthand for the Docker row, so a shell that already has DOCKER_HOST needs one word more. */
-export const DOCKER_ENV = "WSP_DOCKER";
-/** The daemon the Docker row dials, as the docker CLI's own variable words it. */
-export const DOCKER_HOST_ENV = "DOCKER_HOST";
 /** The Box by ASCII key. */
 export const BOX_KEY_ENV = "BOX_API_KEY";
 /** The Solari key. */
 export const SOLARI_KEY_ENV = "SOLARI_API_KEY";
 
-const on = (value: string | undefined): boolean => value !== undefined && value !== "" && value !== "0" && value.toLowerCase() !== "false";
-
 export const PROVIDER_MODULES: readonly ProviderModule[] = [
-  {
-    id: "docker",
-    // A daemon socket rather than a key: the words pick it and the socket is the person's own to point at.
-    addedByWords: true,
-    envNames: [PROVIDER_ENV, DOCKER_ENV, DOCKER_HOST_ENV],
-    // Named, or asked for by the shorthand. A person who names Docker gets it even with a cloud key saved: the
-    // machines are on their own box and the key is for another provider's.
-    selects: env => env[PROVIDER_ENV] === "docker" || on(env[DOCKER_ENV]),
-    build: env => new DockerBackend({ ...(env[DOCKER_HOST_ENV] !== undefined ? { host: env[DOCKER_HOST_ENV] } : {}) }),
-  },
   {
     id: "box",
     envNames: [PROVIDER_ENV],
@@ -135,13 +115,12 @@ export function providerEnvNames(modules: readonly ProviderModule[] = PROVIDER_M
   return [...new Set(modules.flatMap(m => m.envNames))];
 }
 
-/** How a person adds this provider as a place, and nothing where it is no place at all: a row that reads a key is
- * opened by that key, and a row that is a place without one says so on the row. `wsp add` reads this for which
- * words it takes and whether to put a key to the provider, `wsp places` reads it for whether the row is a place to
- * show, and neither compares an id. One reading off the row's own facts, so a row cannot declare that it takes a
- * key and then be added without one. */
-export function addedBy(m: ProviderModule): "key" | "words" | undefined {
-  return m.keyEnv !== undefined ? "key" : m.addedByWords === true ? "words" : undefined;
+/** How a person adds this provider as a place, and nothing where it is no place at all: a row is added by the key
+ * it declares the variable for, and a row that declares none is no place to add. `wsp add` reads this for which
+ * words it takes, `wsp places` for whether the row is a place to show, and neither compares an id. One reading off
+ * the row's own facts, and the one place a second road would be named. */
+export function addedBy(m: ProviderModule): "key" | undefined {
+  return m.keyEnv !== undefined ? "key" : undefined;
 }
 
 /** The providers a person can add as a place, in the table's own order: every row that answers for how it is added.
@@ -181,8 +160,7 @@ export function providerBackendFor(env: ProviderEnv): MachineBackend {
  * says so on itself; nothing here compares an id.
  *
  * Added is read off the road the row declares. A row opened by a key is added once that key is here, since a row
- * whose key nobody has typed is one the provider would only refuse. A row opened by its own word is added once
- * that word is here, which is what the row's own selects answers; before that it is a provider this computer
+ * whose key nobody has typed is one the provider would only refuse; before that it is a provider this computer
  * could be set up for and not one it is, and listing it put a second place on every screen beside the one the
  * person had connected, priced at the other one's rates.
  *
@@ -191,8 +169,7 @@ export function providerBackendFor(env: ProviderEnv): MachineBackend {
  * cloud nowhere on the list they stood on. */
 export function isPlace(m: ProviderModule, env: ProviderEnv): boolean {
   if (m.standsFor?.(env) !== undefined) return true;
-  if (addedBy(m) === undefined) return false;
-  return m.keyEnv === undefined ? m.selects(env) : keyIn(env, m.keyEnv) !== undefined;
+  return m.keyEnv !== undefined && keyIn(env, m.keyEnv) !== undefined;
 }
 
 /** Every provider this computer is set up for, in the table's own order. These are the places a copy of the image
@@ -287,7 +264,7 @@ export function providerEnvWithKey(env: ProviderEnv, key: string, provider?: str
  * registered key variable taken from the first layer that holds it. With no layers given the environment is the
  * only one there is, which is what a host started by a service reads. */
 export function providerEnvWith(
-  flags: { provider?: string; dockerHost?: string },
+  flags: { provider?: string },
   env: ProviderEnv = process.env,
   layers: readonly ProviderEnv[] = [env],
 ): ProviderEnv {
@@ -299,6 +276,5 @@ export function providerEnvWith(
     ...env,
     ...Object.fromEntries(keys),
     ...(flags.provider !== undefined ? { [PROVIDER_ENV]: flags.provider } : {}),
-    ...(flags.dockerHost !== undefined ? { [DOCKER_HOST_ENV]: flags.dockerHost } : {}),
   };
 }

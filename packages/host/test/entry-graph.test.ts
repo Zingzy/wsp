@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The desktop's tsup bundles everything @wsp/host's entry reaches into the Electron main script. The node daemon
-// package is the fake guest the runtime's and the web app's tests stand up in process, and it dlopens node-pty's
-// native module at import: an edge from this entry to it would load that module in every process that imports the
-// host, before app.whenReady in the packaged app. The daemon a host runs is the static binary it spawns.
+// The desktop's tsup bundles everything @wsp/host's entry reaches into the Electron main script, so an eager edge
+// from this entry is a module loaded in every process that imports the host, before app.whenReady in the packaged
+// app. This reads that graph, so a rule about what may sit on it has something to hold.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,13 +47,5 @@ describe("what importing @wsp/host loads", () => {
     const packages = eagerPackages(ENTRY);
     expect(packages).toContain("@wsp/protocol");
     expect(packages).toContain("@wsp/runtime");
-  });
-
-  it("never reaches @wsp/daemon, the test double whose module scope loads node-pty", () => {
-    expect([...eagerPackages(ENTRY)].filter(p => p === "@wsp/daemon" || p.startsWith("@wsp/daemon/"))).toEqual([]);
-  });
-
-  it("never reaches node-pty itself", () => {
-    expect([...eagerPackages(ENTRY)].filter(p => p === "node-pty")).toEqual([]);
   });
 });

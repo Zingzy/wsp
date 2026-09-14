@@ -134,7 +134,7 @@ the verbs your agents use, and the two lines that serve a host by hand:
       repeats, --remove takes it back out, and --json prints what each agent
       took
   wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
-    [--provider <name>] [--docker-host <url>] [--no-relay] [--service]
+    [--provider <name>] [--no-relay] [--service]
       serve the host in this terminal, for a host you want to watch or one that
       serves beyond this computer; --service hands the same line to this
       computer's own service manager, which starts it now and again at every
@@ -244,8 +244,6 @@ usage: wsp init [--on <place>] [--recipe <path>] [--project <path>]
   --provider           which machine provider this computer forks on; without
                        it, a key saved under a provider's own variable wires
                        that provider
-  --docker-host        the Docker daemon to dial, as DOCKER_HOST words it; this
-                       computer's own socket without it
   --yes                take every default and ask nothing, which a run off a
                        terminal needs; a login with a browser or device sign-in,
                        or one held in the Keychain, is left to the first time
@@ -575,35 +573,32 @@ usage: wsp mcp [--host <alias>]
 
 ```text
 usage: wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>]
-       [--provider <name>] [--docker-host <url>] [--no-relay] [--service]
+       [--provider <name>] [--no-relay] [--service]
   serve the host in this terminal, for a host you want to watch or one that
   serves beyond this computer; --service hands the same line to this computer's
   own service manager, which starts it now and again at every login. Every other
   line starts a host for itself when none serves
 
-  --state          the state file: this word first, else WSP_HOME's state.json,
-                   else ./.wsp/state.json when the current directory is a
-                   checkout of wsp, else state.json in the home the running host
-                   serves
-  --port           the app port (default 4400); the runtime websocket port
-                   follows 10 above it
-  --ws-port        the runtime websocket port on its own (default 4410); --port
-                   alone moves both
-  --listen         the address to bind (default 127.0.0.1, this computer alone).
-                   On any other address the page is served without the host
-                   token and every client pairs for a device token of its own
-  --advertise      the address every machine dials this host at, whatever kind
-                   it is; each kind answers for its own machines without it
-  --no-relay       serve without the tunnel, on a computer that is linked to a
-                   relay
-  --service        install the host as a launchd agent on a Mac or a systemd
-                   user unit on Linux, which serves now and again at every
-                   login. The keys are not written into it: it reads the same
-                   .env a terminal run reads, so they have to be in a file
-  --provider       which machine provider this computer forks on; without it, a
-                   key saved under a provider's own variable wires that provider
-  --docker-host    the Docker daemon to dial, as DOCKER_HOST words it; this
-                   computer's own socket without it
+  --state        the state file: this word first, else WSP_HOME's state.json,
+                 else ./.wsp/state.json when the current directory is a checkout
+                 of wsp, else state.json in the home the running host serves
+  --port         the app port (default 4400); the runtime websocket port follows
+                 10 above it
+  --ws-port      the runtime websocket port on its own (default 4410); --port
+                 alone moves both
+  --listen       the address to bind (default 127.0.0.1, this computer alone).
+                 On any other address the page is served without the host token
+                 and every client pairs for a device token of its own
+  --advertise    the address every machine dials this host at, whatever kind it
+                 is; each kind answers for its own machines without it
+  --no-relay     serve without the tunnel, on a computer that is linked to a
+                 relay
+  --service      install the host as a launchd agent on a Mac or a systemd user
+                 unit on Linux, which serves now and again at every login. The
+                 keys are not written into it: it reads the same .env a terminal
+                 run reads, so they have to be in a file
+  --provider     which machine provider this computer forks on; without it, a
+                 key saved under a provider's own variable wires that provider
 ```
 
 ## wsp down
