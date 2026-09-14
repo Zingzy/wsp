@@ -3209,6 +3209,7 @@ const DAEMON_CONTENTS = [
   "e0134bee72be55ed8349d11a9e656b61ee20ba55472be25546f0809763f99d9c",
   "9a92c0f6248b0182e5f5f7ad02c2d6e54b0809513171a390927d63bc3ee00e70",
   "46fe3b809d1bcc82d0dc644d8f300672cb72ae63c99668f6c1be1c75aa71a3f4",
+  "87a461ca21eb894d129e0d692bcbdf56f1134d6160a0e84fe52692ed36f317cd",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3303,7 +3304,11 @@ const DAEMON_CONTENTS = [
  * record holds every Rust source under crates, test code included, so two cases added beside the place link's
  * agent parsing and the pty's cwd move it while the binary a guest runs is the one version 37 named.
  * Version 39 holds a joined computer out of idle sleep no longer: the hold that watched the place file is gone and
- * the file carries no field for it, so a computer sleeps on its own schedule while it is joined. */
+ * the file carries no field for it, so a computer sleeps on its own schedule while it is joined.
+ * Version 40 dials a host at an https address: the link turns one into wss as the protocol does and speaks TLS
+ * through rustls with the root certificates baked into the binary, since a box may carry no certificate store of
+ * its own. It is the one road to a host that sits on a laptop behind a home router, which is the first address
+ * such a host writes into every place file, and until now the link refused it and the box never dialled back. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
