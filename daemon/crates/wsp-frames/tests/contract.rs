@@ -331,7 +331,6 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("xdgOpenPath", Value::from(numbers::XDG_OPEN_PATH));
     m.insert("openSocketPath", Value::from(numbers::OPEN_SOCKET_PATH));
     m.insert("guestDaemonDir", Value::from(numbers::GUEST_DAEMON_DIR));
-    m.insert("guestDaemonBin", Value::from(numbers::GUEST_DAEMON_BIN));
     m.insert("guestWspPath", Value::from(numbers::GUEST_WSP_PATH));
     m.insert("daemonOomScoreAdj", Value::from(numbers::DAEMON_OOM_SCORE_ADJ));
     m.insert("daemonNice", Value::from(numbers::DAEMON_NICE));

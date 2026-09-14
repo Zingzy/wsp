@@ -30,7 +30,7 @@ import { dirname, join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
-import { GUEST_DAEMON_BIN, shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
+import { shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
 import { LocalDaemon } from "./local-daemon.js";
 import { onPath, runningWsp, thisComputersPath, wspCommand } from "./mcp-install.js";
 
@@ -87,19 +87,19 @@ const guestCommands = (at: string): Record<string, string> => ({
   base64: `#!/bin/sh\ncase " $* " in\n  *" -d "*|*" --decode "*) /usr/bin/base64 "$@" | perl -p ${shellQuote(guestPaths(at))}; exit $?;;\nesac\nexec /usr/bin/base64 "$@"\n`,
   // What the wsp tools of a turn on a fork are started with, and what an agent shipped as a script runs under.
   node: `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`,
+  // The word a turn's launch names for its own tools, and the one a turn's shell types. A real fork answers it with
+  // the shim the deploy writes onto its PATH, two lines onto the daemon binary; a stand-in machine has no daemon of
+  // that kind, so this runs this computer's own wsp against the host the launch named, which is the host those
+  // tools would have reached anyway.
+  wsp: wspLine(),
   ...guestAgents(),
 });
 
-/** The daemon binary where a machine's own deploy keeps it, which is the wsp a turn on a fork runs: the launch
- * gives it the word wsp and the rest of the line, and the real binary carries that line to the host over the
- * machine's own daemon. A stand-in machine has no daemon of that kind, so this drops the word and runs this
- * computer's own wsp against the host the launch named, which is the host those tools would have reached anyway. */
-function stageWsp(at: string): void {
+/** This computer's own wsp, told which host to drive off the launch's own environment. */
+function wspLine(): string {
   const wsp = wspCommand(runningWsp());
-  const path = guestPath(at, GUEST_DAEMON_BIN);
   const line = [wsp.command, ...wsp.args].map(word => shellQuote(word)).join(" ");
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `#!/bin/sh\n[ "$1" = wsp ] && shift\nexec ${line} "$@" --host "$WSP_HOST_URL"\n`, { mode: 0o755 });
+  return `#!/bin/sh\nexec ${line} "$@" --host "$WSP_HOST_URL"\n`;
 }
 
 /** The agents on this machine: the ones this computer has, each run where it stands here. A stand-in machine forks
@@ -136,7 +136,6 @@ function layGuestRoot(at: string): void {
   for (const folder of GUEST_FOLDERS) mkdirSync(join(at, folder), { recursive: true });
   mkdirSync(guestBin(at), { recursive: true });
   writeFileSync(guestPaths(at), guestPathsProgram(at));
-  stageWsp(at);
   for (const [name, text] of Object.entries(guestCommands(at))) {
     const path = join(guestBin(at), name);
     writeFileSync(path, text);

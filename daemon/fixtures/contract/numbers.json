@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 35,
+  "daemonVersion": 36,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
@@ -33,7 +33,6 @@
   "xdgOpenPath": "/usr/local/bin/xdg-open",
   "openSocketPath": "/root/.wsp/open.sock",
   "guestDaemonDir": "/root/wsp-daemon",
-  "guestDaemonBin": "/root/wsp-daemon/wsp-daemon",
   "guestWspPath": "/usr/local/bin/wsp",
   "daemonOomScoreAdj": -999,
   "daemonNice": -10,

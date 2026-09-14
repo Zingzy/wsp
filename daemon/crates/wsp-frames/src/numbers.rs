@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 35;
+pub const DAEMON_VERSION: u32 = 36;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -12,9 +12,9 @@ pub const DEFAULT_MANIFEST_PATH: &str = "/root/.wsp/manifest.json";
 pub const DEFAULT_RUN_DIR: &str = "/root/.wsp/run";
 pub const DEFAULT_LOG_DIR: &str = "/root/.wsp/logs";
 pub const GUEST_DAEMON_DIR: &str = "/root/wsp-daemon";
-/// The binary in that folder, which is the wsp a process inside a machine runs, and the shim on its PATH that
-/// runs it. Written by the host's deploy; here so the two halves of the contract cannot spell them apart.
-pub const GUEST_DAEMON_BIN: &str = "/root/wsp-daemon/wsp-daemon";
+/// The wsp a process inside a machine runs: two lines the host's deploy writes onto the machine's PATH, handing
+/// the whole line to the daemon binary beside them. Here so the two halves of the contract cannot spell it apart.
+/// The binary's own path is not pinned: it sits in the bundle under one folder per chip.
 pub const GUEST_WSP_PATH: &str = "/usr/local/bin/wsp";
 pub const DAEMON_ROOTS_PATH: &str = "/root/.wsp/roots";
 pub const OPEN_SHIM_PATH: &str = "/usr/local/bin/wsp-open";
