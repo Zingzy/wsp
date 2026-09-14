@@ -1117,6 +1117,43 @@ describe("the init job, manual road", () => {
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
   });
 
+  it("a seal whose rollback could not reach the provider says on the sheet that the machine is still billing, and keeps trying it", async () => {
+    // The incident of 2026-09-14: the network went while the image was being taken, so the smoke fork never booted
+    // and no kill of the builder landed either. The stage's own sentence says what stopped the build; what became
+    // of the builder is the run's to say, and the sheet is one of the two roads a person reads it on.
+    const f = fake();
+    let down = false;
+    const made = f.backend.create.bind(f.backend);
+    const read = f.backend.get.bind(f.backend);
+    const booted: StubMachine[] = [];
+    f.backend.create = async spec => {
+      if (down) throw new Error("fetch failed");
+      const m = (await made(spec)) as StubMachine;
+      m.kill = async () => Promise.reject(new Error("fetch failed"));
+      booted.push(m);
+      return m;
+    };
+    f.backend.get = async id => (down ? Promise.reject(new Error("fetch failed")) : read(id));
+    f.backend.beforeSnapshot = () => {
+      down = true;
+    };
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    const builder = booted[0]!;
+    expect(builder.killed).toBe(false);
+    // The headline says what stopped the build and that the machine is still there, in the words a stop the person
+    // asked for uses; before this the sheet said the first half alone.
+    expect(view.error).toBe(`${NETWORK_LOST_LINE} ${STOP_LEFT_MACHINE_LINE}`);
+    const said = f.events.map(e => e.job.rows.find(r => r.kind === "machine")).filter(r => r !== undefined).map(r => r.state);
+    expect(said).toContain(INIT_ROW_STATES.retrying);
+    expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${builder.id}`, label: MACHINE_ROW_LABEL });
+  });
+
   it("one count for one build: the host's progress is the sheet's own bar, over the same rows", async () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("the daemon would not deploy")) });
     await f.jobs.start({ road: "manual" });

@@ -6025,6 +6025,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     await store.delete(BUILDERS, id);
   };
 
+  /** What a stopped build does with the record of the machine its rollback tried to take: the provider is read
+   * once, and only a machine it answers gone for loses its record. One that outlived the kill, or one the provider
+   * could not be asked about, keeps it, since a machine still running that nothing points at bills until somebody
+   * lists the account by hand; a kept record is what the next build attaches to and what the doctor sweeps. */
+  const forgetIfGone = async (entry: LiveBuilder, at: MachineBackend): Promise<void> => {
+    const gone = await at
+      .get(entry.record.id)
+      .then(m => m.state())
+      .then(state => state === "gone", (e: unknown) => isMissing(e));
+    if (gone) await forgetBuilder(entry.record.id);
+  };
+
   /** The listener one build's stages ride out on. `on` is the computer the build runs on, which is what a gap in a
    * link is matched against; `named` is whether the frames carry it, since only a copy's build is a thing that
    * computer's row reports. */
@@ -6277,7 +6289,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // sealGolden consumes the builder on every other road but a refusal; a refused
       // builder can never seal and under a two-machine cap must not outlive it.
       if (e instanceof NotFirstLifeError) await killUntilGone(at, entry.builder.machine, opts.killConfirm);
-      await forgetBuilder(entry.record.id);
+      await forgetIfGone(entry, at);
       throw e;
     }
   };
@@ -6436,7 +6448,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             await killUntilGone(at, same.builder.machine, opts.killConfirm).catch((k: unknown) => {
               detail += `; ${k instanceof Error ? k.message : String(k)}`;
             });
-            await forgetBuilder(same.record.id);
+            await forgetIfGone(same, at);
             stage("failed", detail);
             throw e;
           }
@@ -6456,8 +6468,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               onStage: stage,
             });
           } catch (e) {
-            // prepareBuilder killed the machine on its way out; the placeholder goes with it. After a stop the record is the stop's.
-            if (mine !== undefined && stopping === undefined) await forgetBuilder(mine.record.id);
+            // prepareBuilder tried to kill the machine on its way out; the placeholder goes only where it is gone. After a stop the record is the stop's.
+            if (mine !== undefined && stopping === undefined) await forgetIfGone(mine, at);
             throw e;
           }
           // A last exec that outran the kill must not leave a finished record for a machine the stop is killing.
@@ -6550,7 +6562,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             await killUntilGone(at, kept.builder.machine, opts.killConfirm).catch((k: unknown) => {
               detail += `; ${k instanceof Error ? k.message : String(k)}`;
             });
-            await forgetBuilder(kept.record.id);
+            await forgetIfGone(kept, at);
             stage("failed", detail);
             throw e;
           }
@@ -6578,7 +6590,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
               onStage: stage,
             });
           } catch (e) {
-            if (placeholder !== undefined) await forgetBuilder(placeholder.record.id);
+            // upgradeBuilder tried the kill on its way out; the placeholder goes only where the machine is gone.
+            if (placeholder !== undefined) await forgetIfGone(placeholder, at);
             throw e;
           }
           return settleBuilder(name, builder, placeholder, filedAt(place));
@@ -6937,7 +6950,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       }
     } catch (e) {
       await killUntilGone(at, entry.builder.machine, opts.killConfirm).catch(() => {});
-      await forgetBuilder(entry.record.id);
+      await forgetIfGone(entry, at);
       stage("failed", e instanceof Error ? e.message : String(e));
       throw e;
     }
