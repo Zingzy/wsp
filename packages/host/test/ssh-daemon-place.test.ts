@@ -13,8 +13,8 @@ import { promisify } from "node:util";
 import { MACHINE_LACKS_LINES, machineLacksLine, machineLacksShort, machineNeverAnswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SYSTEMD_LINE, sshDaemonPaths } from "@wsp/protocol";
 import { putBytesScript } from "@wsp/engine";
 import type { Machine } from "@wsp/engine";
-import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
-import { bundledDaemonName, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
+import { BOOT_SCRIPT, CLOUD_PLACE, JOINED, joinedPlace, CONTAINER_PLACE, DAEMON_GONE_LINE, daemonBinaryOn, daemonExecLine, daemonFlags, daemonLogCommand, guestPlace, SYSTEMD, NEEDS_SYSTEMD, deployDaemon, PREFLIGHT_OK_LINE, preflightScript, profileSourceLine, DAEMON_UNIT, daemonUnit, deployScript, removeDaemonScript, sshDaemonPlace, WSP_WORKSPACE_APPARMOR_PATH, stageDaemonBundle, stopDaemonScript, WSP_COMMAND_NODE_MAJOR } from "../src/doctor.js";
+import { daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const LOGIN = { home: "/home/maya", path: "/usr/local/bin:/usr/bin:/bin" };
 
@@ -57,6 +57,9 @@ function emptyCli(): string {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "@zingzy/wsp", version: "0.0.0" }));
   return dir;
 }
+/** One chip a guest can be, for every line that names the binary by its own path. */
+const GUEST_TARGET = GUEST_DAEMON_TARGETS[0]!;
+
 const script = (): string => deployScript(sshDaemonPlace(LOGIN), "aabbcc");
 
 describe("the place a fork keeps its daemon", () => {
@@ -68,7 +71,7 @@ describe("the place a fork keeps its daemon", () => {
     expect(cloud).toContain(`systemctl restart ${DAEMON_UNIT}`);
     expect(cloud).not.toContain("systemctl --user");
     expect(daemonFlags(CLOUD_PLACE)).toContain("0.0.0.0");
-    expect(daemonUnit(CLOUD_PLACE)).toContain("WantedBy=multi-user.target");
+    expect(daemonUnit(CLOUD_PLACE, GUEST_TARGET)).toContain("WantedBy=multi-user.target");
     // Nothing is read off the machine before the install: wsp built it and knows what is on it.
     expect(cloud).not.toContain("Node 22");
     expect(cloud).not.toContain("command -v node");
@@ -147,8 +150,8 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     expect(s).toContain(`cat > '/home/maya/.config/systemd/user/${DAEMON_UNIT}' <<'WSP_UNIT'`);
     for (const verb of ["daemon-reload", `enable ${DAEMON_UNIT}`, `restart ${DAEMON_UNIT}`]) expect(s).toContain(`systemctl --user ${verb}`);
     expect(s).toContain(`journalctl --user -u ${DAEMON_UNIT}`);
-    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain("WantedBy=default.target");
-    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain('Environment="HOME=/home/maya"');
+    expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain("WantedBy=default.target");
+    expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain('Environment="HOME=/home/maya"');
     // A login that arrives with no session bus cannot reach its own systemd at all, so the address is settled
     // before the first systemctl rather than every line failing at the bus.
     const lines = s.split("\n");
@@ -213,7 +216,7 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     const s = script();
     for (const word of ["nodejs.org", "npm install", "node_pin", "sha256sum", "curl", "NODE_VERSION", "npm_config_nodedir"]) expect(s, word).not.toContain(word);
     // The unit's PATH is the person's own plus the shim's folder; nothing of wsp's is put ahead of it.
-    expect(daemonUnit(sshDaemonPlace(LOGIN))).toContain('Environment="PATH=/home/maya/.local/bin:/usr/local/bin:/usr/bin:/bin"');
+    expect(daemonUnit(sshDaemonPlace(LOGIN), GUEST_TARGET)).toContain('Environment="PATH=/home/maya/.local/bin:/usr/local/bin:/usr/bin:/bin"');
   });
 
   it("adds its BROWSER line to the person's own login file once, behind its own name", () => {
@@ -256,17 +259,17 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
     // line, so a quote there is read as part of the path (measured on systemd 255: "path is not absolute");
     // Environment is split on whitespace, so a value with a space in it is quoted; ExecStart is a command line
     // systemd splits itself, where a double quoted word holds.
-    const unit = daemonUnit(spaced);
+    const unit = daemonUnit(spaced, GUEST_TARGET);
     expect(unit).toContain("WorkingDirectory=/home/Jane Doe/.wsp/daemon");
     expect(unit).not.toContain('WorkingDirectory="');
     expect(unit).toContain('Environment="HOME=/home/Jane Doe"');
-    expect(unit).toContain(`ExecStart=${daemonExecLine(spaced)}`);
-    expect(daemonExecLine(spaced).startsWith('"/home/Jane Doe/.wsp/daemon/wsp-daemon" --host 127.0.0.1 --port 0 --token-path "/home/Jane Doe/.wsp/daemon-token" ')).toBe(true);
-    for (const word of daemonExecLine(spaced).match(/"[^"]*"|\S+/g)!) if (word.includes("Jane")) expect(word, word).toMatch(/^"[^"]*"$/);
+    expect(unit).toContain(`ExecStart=${daemonExecLine(spaced, GUEST_TARGET)}`);
+    expect(daemonExecLine(spaced, GUEST_TARGET).startsWith(`"${daemonBinaryOn(spaced.dir, GUEST_TARGET)}" --host 127.0.0.1 --port 0 --token-path "/home/Jane Doe/.wsp/daemon-token" `)).toBe(true);
+    for (const word of daemonExecLine(spaced, GUEST_TARGET).match(/"[^"]*"|\S+/g)!) if (word.includes("Jane")) expect(word, word).toMatch(/^"[^"]*"$/);
     // A fork chose its own paths and its script is pinned byte for byte, so nothing there is quoted.
     expect(CLOUD_PLACE.quotePaths).toBe(false);
-    expect(daemonUnit(CLOUD_PLACE)).toContain("WorkingDirectory=/root/wsp-daemon");
-    expect(daemonExecLine(CLOUD_PLACE)).not.toContain('"');
+    expect(daemonUnit(CLOUD_PLACE, GUEST_TARGET)).toContain("WorkingDirectory=/root/wsp-daemon");
+    expect(daemonExecLine(CLOUD_PLACE, GUEST_TARGET)).not.toContain('"');
   });
 
   it("asks the machine before a byte of wsp's lands on it, so one that refuses keeps nothing", async () => {
@@ -418,14 +421,14 @@ describe("the place a machine reached over ssh keeps its daemon", () => {
       const home = join(dir, "home");
       const stage = join(dir, "stage");
       await stageDaemonBundle(stage, sshDaemonPlace({ home, path: LOGIN.path }), emptyBundle(), emptyCli());
-      expect(readdirSync(stage).sort()).toEqual(["wsp", ...GUEST_DAEMON_TARGETS.map(bundledDaemonName), "wsp-open"].sort());
+      expect(readdirSync(stage).sort()).toEqual(["wsp", "wsp-open"]);
       // The shim posts to the socket under this login's own folder, and is the one executable file beside the binaries.
       const shim = readFileSync(join(stage, "wsp-open"), "utf8");
       expect(shim).toContain(`--unix-socket '${home}/.wsp/open.sock'`);
       expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
-      // Each chip's binary under the name the deploy's case reads, executable, and the right one under each name.
+      // Each chip's binary under its own triple, where the wsp command beside them reads one, and executable.
       for (const target of GUEST_DAEMON_TARGETS) {
-        const bin = join(stage, bundledDaemonName(target));
+        const bin = daemonBinaryOn(stage, target);
         expect(statSync(bin).mode & 0o111).toBe(0o111);
         expect(execFileSync(bin, { encoding: "utf8" }).trim()).toBe(target.triple);
       }
@@ -496,7 +499,7 @@ describe("the place a computer joined over ssh keeps its agent", () => {
     const place = joinedPlace(LOGIN, JOIN);
     expect(place.scope).toBe("system");
     expect(place.unitPath).toBe(`/etc/systemd/system/${DAEMON_UNIT}`);
-    expect(daemonUnit(place)).toContain("WantedBy=multi-user.target");
+    expect(daemonUnit(place, GUEST_TARGET)).toContain("WantedBy=multi-user.target");
     expect(preflightScript(place)).not.toContain("enable-linger");
     expect(preflightScript(place)).not.toContain(NO_LINGER_LINE);
   });
@@ -541,7 +544,7 @@ describe("the place a computer joined over ssh keeps its agent", () => {
   });
 
   it("says so when a place it is given names no wsp to join, rather than writing a join line with nothing in it", () => {
-    expect(() => JOINED.start(sshDaemonPlace(LOGIN))).toThrow("names no wsp to join");
+    expect(() => JOINED.start(sshDaemonPlace(LOGIN), GUEST_TARGET)).toThrow("names no wsp to join");
   });
 
   it("lands whatever else that place's script reads off disk by the byte road, never in a command", async () => {

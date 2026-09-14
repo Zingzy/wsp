@@ -142,7 +142,28 @@ describe("one module per service manager", () => {
       ["systemctl", "daemon-reload"],
     ]);
     expect(systemd.holds(there)).toEqual(["systemctl", "is-enabled", `wsp-place-${theirTag}.service`]);
-    expect(systemd.forget?.(there)).toEqual([["systemctl", "disable", `wsp-place-${theirTag}.service`]]);
+    // Both systemds, the one a place writes today first: a computer joined on the road before it has its unit
+    // under that login's own, and a sweep that read the machine's alone left it there to flap under auto-restart.
+    expect(systemd.held(there)).toEqual([
+      {
+        unit: { name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` },
+        words: "systemd system unit",
+        forget: [["systemctl", "disable", `wsp-place-${theirTag}.service`]],
+        unload: [
+          ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
+          ["systemctl", "daemon-reload"],
+        ],
+      },
+      {
+        unit: { name: `wsp-place-${theirTag}.service`, path: `/home/maya/.config/systemd/user/wsp-place-${theirTag}.service` },
+        words: "systemd user unit",
+        forget: [["systemctl", "--user", "disable", `wsp-place-${theirTag}.service`]],
+        unload: [
+          ["systemctl", "--user", "disable", "--now", `wsp-place-${theirTag}.service`],
+          ["systemctl", "--user", "daemon-reload"],
+        ],
+      },
+    ]);
     // Nothing about linger: a system unit outlives every login on its own.
     expect(systemd.afterLoad?.(there)).toBeUndefined();
     expect(systemd.needsRoot?.(there)).toBe(true);
@@ -225,6 +246,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
+    held: a => [{ unit: unit(a), words: "fake service", forget: [], unload: [["fake", "unload", unit(a).name]] }],
     absent: answer => answer.output === "not held",
   };
   const run: ServiceRunner = async argv => {

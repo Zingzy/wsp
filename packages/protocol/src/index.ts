@@ -1179,10 +1179,13 @@ export function hostFromEnv(env: Readonly<Record<string, string | undefined>>): 
  * because the host stages the file and the runtime builds the launch that runs it, and neither may import the
  * other's rule. */
 export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
-/** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder,
- * because the bin reads its own version through that file (`../package.json` from the bin) and announces it in
- * every MCP handshake; a client refuses a server that names none. */
-export const wspBinIn = (dir: string): string => `${dir}/wsp/dist/bin.js`;
+/** The command sits in the bundle as npm lays the published package out, its package.json beside a dist folder and
+ * its own assets beside those, because the bin reads its own version through that file (`../package.json` from the
+ * bin) and announces it in every MCP handshake; a client refuses a server that names none. Named as a folder
+ * rather than as the bin alone, since the daemon binary the bundle carries rides in that package's assets and the
+ * command reads it there the way an installed copy reads its own. */
+export const wspPackageIn = (dir: string): string => `${dir}/wsp`;
+export const wspBinIn = (dir: string): string => `${wspPackageIn(dir)}/dist/bin.js`;
 export const GUEST_WSP_BIN = wspBinIn(GUEST_DAEMON_DIR);
 
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
@@ -3195,6 +3198,7 @@ const DAEMON_CONTENTS = [
   "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
   "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
   "352699bc2434f5b1dc84d46026499662abf3bbcc4bc701736150a90042f79368",
+  "0bec2f8329f6e46772d072acb082a83a943fe87ed31f2a83df3295069d1f6243",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3276,7 +3280,10 @@ const DAEMON_CONTENTS = [
  * daemon it joined on: the parts of the binary arrive under one upload id with the sha256 of the whole, the last is
  * checked against it, moved over the file the unit starts with the old one kept beside it, and answered, and the
  * agent then ends so its supervisor starts what landed. Nothing is swept, so the workspaces' records stay on the
- * box and the daemon that comes up reads them again. */
+ * box and the daemon that comes up reads them again. Version 35 carries the daemon binary in the bundle where the
+ * wsp command riding beside it reads one, under that command's own assets and one folder per chip, and writes the
+ * unit, the supervisor script and the AppArmor profile inside the arm for the chip the machine says it is: the
+ * binary a machine runs and the one a computer's own join looks for are one file, at one path, under one rule. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
