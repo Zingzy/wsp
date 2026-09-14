@@ -66,11 +66,10 @@ export const portScopeRefusal = (port: number | string): string => `this socket 
 export const daemonListeningLine = (host: string, port: number | string): string => `wsp-daemon listening on ${host}:${port}`;
 
 /** How often a daemon samples the machine it runs on for sys.watch and proc.watch, and so how long after the reply
- * to a watch its first sample lands. The node daemon's two samplers default to it. The Rust daemon's own
- * SAMPLER_INTERVAL_MS is the same figure and is kept so by hand: this is not in the contract's numbers yet, so
- * nothing holds the two equal but a reader, and the row belongs with the next landing in that tree. A client
- * waiting on a first reading waits two of these, since a box under load slips a tick and one interval would be a
- * race with the daemon on every reading. */
+ * to a watch its first sample lands. The node daemon's two samplers default to it, and the Rust daemon's own
+ * SAMPLER_INTERVAL_MS is held equal to it by the contract fixture set. A client waiting on a first reading waits
+ * two of these, since a box under load slips a tick and one interval would be a race with the daemon on every
+ * reading. */
 export const DAEMON_SAMPLER_INTERVAL_MS = 2_000;
 
 /** The sampler lines the daemon logs: one sampler serves every watcher, starts with the first and stops with the

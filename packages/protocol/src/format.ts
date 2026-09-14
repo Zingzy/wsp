@@ -4,6 +4,7 @@
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
 import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
 import { compareVersions } from "./semver.mjs";
@@ -1752,6 +1753,40 @@ export const CLOUD_SETUP_WORDS = {
   },
 } as const;
 
+/** What a login nobody signed in during the build is left to, and the one place those words are written: the answer
+ * that defers a browser sign-in to the workspace, and the second half of the word a sign-in that hit the build's cap
+ * ends on. */
+export const SIGN_IN_LATER = "sign in when you first need it";
+
+/** The word a sign-in that never landed during the build ends on, deferred at the picker or stopped by the cap: it
+ * says what is true of the machine and what the person does about it, in that order. */
+export const SIGN_IN_DEFERRED_WORD = `not signed in, ${SIGN_IN_LATER}`;
+
+/** One answer the sign-ins step can give, in the words its row and the counts beside it print. One entry per answer,
+ * keyed by the union itself, so a fifth cannot be offered before it is named here; the order the arrows walk them is
+ * LOGIN_CHOICES' own. This is the one home for those words: the terminal's screens and a client that draws the step
+ * itself both read them from here. */
+export interface SignInAnswer {
+  /** The row's own column, for the computer the run is reading: the copy answer names it. */
+  label(platform: "darwin" | "linux"): string;
+  /** The word a count is made of ("2 copy  1 during the build"). */
+  short: string;
+}
+
+export const SIGN_IN_ANSWERS: Record<LoginChoice, SignInAnswer> = {
+  copy: { label: platform => `copy from ${thisComputer(platform)}`, short: "copy" },
+  machine: { label: () => "sign in during the build", short: "during the build" },
+  later: { label: () => SIGN_IN_LATER, short: "when you need it" },
+  key: { label: () => "API key", short: "API key" },
+  skip: { label: () => "skip", short: "skip" },
+};
+
+/** The answers a row can be walked through, in order, with the words each shows. */
+export const signInChoices = (platform: "darwin" | "linux"): readonly { value: LoginChoice; label: string }[] => LOGIN_CHOICES.map(value => signInChoice(value, platform));
+
+/** One answer by its own name, so nothing depends on where it sits in the list. */
+export const signInChoice = (value: LoginChoice, platform: "darwin" | "linux"): { value: LoginChoice; label: string } => ({ value, label: SIGN_IN_ANSWERS[value].label(platform) });
+
 /** The state of a sign-in as a word, the one spelling the terminal's rows and the modal's rows print. */
 export const LOGIN_STATE_WORDS: Record<LoginState, string> = {
   "signed-in": "signed in",
@@ -1759,6 +1794,7 @@ export const LOGIN_STATE_WORDS: Record<LoginState, string> = {
   copied: "copied",
   "not-verified": "not verified",
   skipped: "skipped",
+  deferred: SIGN_IN_DEFERRED_WORD,
 };
 
 /** The word for a job that waits on the person rather than the machine: the answers, or a sign-in's page. */
@@ -1834,6 +1870,7 @@ export const INIT_SIGN_IN_WORDS: Record<LoginState, (platform: "darwin" | "linux
   copied: platform => `copied from ${thisComputer(platform)}`,
   "not-verified": () => "not verified",
   skipped: () => INIT_ROW_STATES.skipped,
+  deferred: () => SIGN_IN_DEFERRED_WORD,
 };
 
 /** A sign-in row's outcome as it travels: the name every client reads and, beside it, the word drawn for the
@@ -3298,11 +3335,8 @@ export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: 
   if (view.build !== undefined) return { count: n, note: view.build };
   // Only a provider bills: a computer of the person's own runs their workspaces for nothing, whatever it runs them on.
   if (view.kind === "provider") return monthUsd === undefined ? { count: n } : { count: n, note: spentThisMonth(monthUsd) };
-  return view.runsWorkspaces === true ? { count: n } : { count: n, note: AGENTS_ONLY };
+  return { count: n };
 }
-
-/** What a computer that does not run workspaces of its own runs: the person's agents, and no workspace but the one it is. */
-export const AGENTS_ONLY = "agents only";
 
 /** What a place has taken since the first of the month, the clause every surface that says it says. */
 export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this month`;
@@ -3319,15 +3353,6 @@ export function placeSpendLine(spend: { monthUsd: number; rateUsdPerHour: number
  * its workspaces have all been asleep since last month: a count of two where one charged reads as two bills. */
 export function placesSpendFoot(monthUsd: number, providers: number): string {
   return `${spentThisMonth(monthUsd)} across ${plural(providers, "provider")}`;
-}
-
-/** The doctor's word on whether this computer runs workspaces: the positive line, or the one kernel reason the
- * daemon's self check named. A place that has not yet said reads neither. */
-export function placeWorkspacesLine(view: Pick<PlaceView, "name" | "runsWorkspaces" | "workspacesBlocked">): string | undefined {
-  if (view.runsWorkspaces === undefined) return undefined;
-  if (view.runsWorkspaces) return `${view.name} runs your workspaces`;
-  // The daemon's reason names "this computer"; on a named row it is that computer, so the line says which.
-  return view.workspacesBlocked?.replace("this computer", view.name) ?? `${view.name}'s kernel cannot run wsp workspaces`;
 }
 
 /** The doctor's word on the engine a project's own containers run on here: the engine when the box has one, else
@@ -3405,10 +3430,7 @@ export const PLACES_WORDS = {
     connected: (from: string): string => `connected from ${from} · keys exchanged`,
     reading: "reading what it has",
     joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
-    cannotRunWorkspaces: "runs your agents as one workspace",
     joinedTitle: (name: string): string => `${name} joined`,
-    joinedDescription: "It runs your agents as one workspace.",
-    open: (name: string): string => `Open ${name}`,
     noApp: "No app on that computer",
     noAppLine: "In its terminal, install wsp, then join:",
     install: "npm i -g @zingzy/wsp",

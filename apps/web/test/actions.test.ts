@@ -213,7 +213,7 @@ describe("workspace actions", () => {
     // which is the same door and not a second rule: the reading is null while nothing on the list is away.
     const laptop: PlaceView = { id: "pc_laptop", kind: "computer", name: "laptop", default: false, present: false };
     const answering: PlaceView = { ...laptop, present: true };
-    const away = { ...view, kind: "place" as const, place: "pc_laptop" };
+    const away = { ...view, kind: "cloud" as const, place: "pc_laptop" };
     expect(workspaceTarget(away, null, [answering]).absent).toBeNull();
     expect(workspaceTarget(away, null, [laptop]).absent?.said).toBe("laptop is not answering");
     expect(workspaceTarget(view, { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } }, []).absent).toBeNull();

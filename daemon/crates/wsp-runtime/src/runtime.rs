@@ -319,6 +319,19 @@ pub fn alive(init: &Init) -> bool {
     identity_of(init.pid).is_ok_and(|now| now == *init)
 }
 
+/// How long the process a record names has been running. Both figures count from the same boot, so the box's own
+/// clock never enters it and a computer whose wall clock was set while a workspace ran still reads its uptime right.
+pub fn uptime_ms(init: &Init) -> io::Result<u64> {
+    let text = fs::read_to_string("/proc/uptime")?;
+    let seconds: f64 = text
+        .split_whitespace()
+        .next()
+        .and_then(|field| field.parse().ok())
+        .ok_or_else(|| io::Error::other("/proc/uptime carries no seconds"))?;
+    let booted_ms = (seconds * 1000.0).max(0.0) as u64;
+    Ok(booted_ms.saturating_sub(init.started.saturating_mul(numbers::STAT_TICK_MS)))
+}
+
 /// Field 22 of a stat line: the fields after the command name, which the parentheses close, start at the state.
 fn start_ticks(stat: &str) -> io::Result<u64> {
     let after_comm = stat.rsplit_once(')').map(|(_, rest)| rest).ok_or_else(|| io::Error::other("a stat line without a command name"))?;

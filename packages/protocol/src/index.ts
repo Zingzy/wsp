@@ -11,8 +11,8 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, threadWord, titleLine } from "./format.js";
-import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
+import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
+import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { WorkspaceGlyph, WorkspaceLook, WorkspaceTheme } from "./workspace-look.js";
@@ -227,7 +227,8 @@ export const Capabilities = z.object({
   sizes: z.array(MachineSizeOffer),
   /** The machine is the person's own, kept: its files, its sign-ins and its git checkouts outlive every turn, and
    * wsp neither made it nor throws it away. False on a fork wsp made, where a turn that wrecks the disk costs a
-   * rebuild and nothing else. What a turn's access starts at reads this, not the workspace's kind. */
+   * rebuild and nothing else. Whether the access picker names the machine on the pick that asks nothing reads this;
+   * what a thread with no access word runs at is the kind's own row, read through workspaceAccess. */
   kept: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
@@ -334,8 +335,14 @@ export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
  * machine of the person's own that wsp only reaches. A missing kind reads cloud, since every record written before
  * local workspaces existed was one. The one fact every road that varies by machine kind reads; nothing switches on
  * it outside the backend registry. */
-export const WorkspaceKind = z.enum(["cloud", "local", "ssh", "place"]);
+export const WorkspaceKind = z.enum(["cloud", "local", "ssh"]);
 export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
+
+/** Which machine a daemon's own cpu, memory and process readings describe. Wider than WorkspaceKind by one: a
+ * computer somebody joined is a place and no workspace of its own, and its daemon still reads that box for the
+ * person sitting at it. */
+export const DaemonKind = z.enum([...WorkspaceKind.options, "place"]);
+export type DaemonKind = z.infer<typeof DaemonKind>;
 
 /** Where a request to a workspace verb came from: here, this computer's own app, CLI or MCP, or relayed from a
  * machine wsp runs. A local workspace answers only `here`; today no machine has a road into the host, so nothing
@@ -853,15 +860,15 @@ export const HarnessCatalog = z.object({
    * harness added to the table names its own. Absent where the harness offers no model of its own, and the title
    * question runs on whatever the CLI would run without one. */
   smallModel: z.string().optional(),
-  /** The access a thread on a kept machine starts at: the mode whose tools reach the person as a prompt where this
-   * CLI can ask one (Claude Code's default over its control stream), else the narrowest mode that still lets a turn
-   * work, for a CLI with no road to ask (codex exec runs non-interactively, so its sandbox is the whole answer).
-   * The mode marked isDefault is what a throwaway machine runs instead, which is bypass on every row here. Absent
-   * on a harness whose CLI takes no access mode at all. */
+  /** The access a thread starts at on a kind whose row asks: the mode whose tools reach the person as a prompt where
+   * this CLI can ask one (Claude Code's default over its control stream), else the narrowest mode that still lets a
+   * turn work, for a CLI with no road to ask (codex exec runs non-interactively, so its sandbox is the whole
+   * answer). Which kinds those are is the kind table's, not this row's: workspaceAccess marks one of these two.
+   * Absent on a harness whose CLI takes no access mode at all. */
   keptMode: z.string().optional(),
-  /** This CLI's mode that runs every tool without asking anyone, as it spells it. A kept machine's picker names the
-   * machine on this one, since picking it hands that computer over for the turn. Absent on a harness whose CLI has
-   * no such mode. */
+  /** This CLI's mode that runs every tool without asking anyone, as it spells it, and what a thread starts at on
+   * every other kind. A picker on a machine the person owns names that machine on this one, since picking it hands
+   * that computer over for the turn. Absent on a harness whose CLI has no such mode. */
   bypassMode: z.string().optional(),
 });
 export type HarnessCatalog = z.infer<typeof HarnessCatalog>;
@@ -887,25 +894,6 @@ export function noMcpServersLine(harness: string): string {
 export function mcpServersBlocked(servers: Readonly<Record<string, McpServerSpec>> | undefined, takes: true | undefined, harness: string): string | null {
   if (servers === undefined || Object.keys(servers).length === 0) return null;
   return takes === true ? null : noMcpServersLine(harness);
-}
-
-/** The catalog a kept machine's composer shows and its starts are checked against: the same lists, with the default
- * mark moved from what a throwaway machine runs to keptMode, and the row's own bypassMode named after the machine it
- * is about to touch, so the pick that skips the prompts says whose computer it skips them on. One pick away, in the
- * same list, in the same order. The CLI's own word for the mode stays as the row's short form, which is what the
- * picker's button says once it is picked: the long name is read in the menu and in every line about the pick, and a
- * button that carried it crushed the model's name beside it in a narrow window (measured 2026-09-09, 316 px of row at
- * a 1200 px viewport with the right panel open). A catalog with no keptMode (a CLI that takes no access mode) comes
- * back as it went in. `machine` is the machine in words, the one phrase every local surface uses.
- */
-export function keptAccess(catalog: HarnessCatalog, machine: string): HarnessCatalog {
-  if (catalog.keptMode === undefined) return catalog;
-  const permissionModes = catalog.permissionModes.map(({ isDefault: _throwaway, ...mode }) => ({
-    ...mode,
-    ...(mode.value === catalog.keptMode ? { isDefault: true } : {}),
-    ...(mode.value === catalog.bypassMode ? { label: `${mode.label} on ${machine}`, short: mode.label } : {}),
-  }));
-  return { ...catalog, permissionModes };
 }
 
 /** Whether a rename of one of this harness's sessions is kept in its own store, as far as this catalog knows. The
@@ -1032,8 +1020,9 @@ export function startPicks(catalog: HarnessCatalog | undefined, picks: StartPick
   if (catalog !== undefined) checkedAgainst(catalog, picks, model);
   const effort = picks.effort ?? (opensThread && catalog !== undefined ? markedDefault(effortsFor(catalog, modelOf(catalog, model)))?.value : undefined);
   // The access is filled in like the other two, so what the picker shows is what the CLI is told: an unnamed access
-  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a kept
-  // machine that turned the picker's Default into bypass behind the person's back.
+  // used to reach the adapter as nothing, which every adapter here reads as its own skip-everything flag. On a
+  // machine the person owns that turned the picker's Default into bypass behind their back. The mark is on the
+  // catalog a workspace answered with, which workspaceAccess placed against that workspace's kind.
   const permissionMode = picks.permissionMode ?? (opensThread && catalog !== undefined ? markedDefault(catalog.permissionModes)?.value : undefined);
   return {
     ...(model !== undefined ? { model } : {}),
@@ -1933,13 +1922,6 @@ export function goldenImage(v: Pick<GoldenVersion, "snapshotId" | "templateId">)
   return v.templateId !== undefined ? { spec: { template: v.templateId }, marks: [] } : { spec: { fromSnapshot: v.snapshotId }, marks: ["volatile"] };
 }
 
-/** What happens to a login: copied from this computer, signed in on the machine after the build, set there as an
- * API key the tool reads, or left out. One list, read by the collector's rows, by a recipe's rows and by the words
- * `wsp recipe --signin` takes. */
-export const LOGIN_CHOICES = ["copy", "machine", "key", "skip"] as const;
-export const LoginChoice = z.enum(LOGIN_CHOICES);
-export type LoginChoice = z.infer<typeof LoginChoice>;
-
 /** What a build recorded a row installed: the version, read back off the builder once the row ran (a release's tag,
  * a package's version), and the archive's sha256 where the road hashed one. `latest` marks a row whose road installs
  * the current version wherever it runs, so the version is what that seal got and not what a copy is fixed to. The
@@ -2352,10 +2334,7 @@ export const PlaceView = z.object({
   os: z.string().optional(),
   shape: WorkspaceSize.optional(),
   diskFreeBytes: z.number().int().optional(),
-  /** Whether the computer's daemon runs workspaces here, and if not the kernel reason; the engine for a project's
-   * own containers, a road of its own. Absent on a place that has never said what it is. */
-  runsWorkspaces: z.boolean().optional(),
-  workspacesBlocked: z.string().optional(),
+  /** The engine a project's own containers run on there. Absent on a place that has never said what it is. */
   engine: z.enum(["none", "docker", "podman"]).optional(),
   present: z.boolean().optional(),
   joinedAt: z.string().optional(),
@@ -2363,8 +2342,6 @@ export const PlaceView = z.object({
   daemonVersion: z.number().int().optional(),
   /** The catalog ids of the agents that computer found on itself, as it last reported them. */
   agents: z.array(z.string()).optional(),
-  /** The workspace recorded on this computer, when the join could record one. */
-  workspaceId: z.string().optional(),
   /** A provider: its hourly rate for the default size. */
   rateUsdPerHour: z.number().optional(),
   /** Every size a workspace here may be asked for, each with this place's own rate for it, read off the backend
@@ -2373,10 +2350,9 @@ export const PlaceView = z.object({
   sizes: z.array(MachineSizeOffer).optional(),
   /** How many forks the place holds and how many more it takes, by forkRoom; absent on a place that forks nowhere. */
   forks: z.object({ running: z.number().int(), room: z.number().int() }).optional(),
-  /** Whether a workspace can be forked here at all: a provider, or a computer somebody joined that has Docker of
-   * its own. Absent or false is a computer used directly, which runs the person's agents as its own one workspace;
-   * the computer the host itself runs on is one of those whether or not it has Docker, since a copy of the image
-   * on a Docker here is the provider row's. The one fact wsp new reads to decide which road a place takes, so no
+  /** Whether a workspace can be forked here at all: a provider, or a computer somebody joined, which boots the
+   * image or it is not joined at all. False is the computer the app itself runs on, which runs threads in its own
+   * local mode and is never forked into. The one fact wsp new reads to decide which road a place takes, so no
    * line outside this list switches on a place's kind. */
   takesForks: z.boolean().optional(),
   /** Where the host expects that computer: the ssh login it was installed over, and the address its last link
@@ -2412,24 +2388,12 @@ export type PlaceDial = z.infer<typeof PlaceDial>;
  * was installed on, so both sides of the wire read the same word for it. */
 export const HERE_PLACE_ID = "here";
 
-/** The one written form of a workspace's machine on a joined computer: the id names the place the link belongs to
- * and nothing else. Written here rather than in the backend that mints it because every client reads it back to
- * say which computer a workspace stands on. */
-export const placeMachineId = (placeId: string): string => `place:${placeId}`;
-
-/** The place an id names, or nothing when the id is not one of ours: a record from another backend. */
-export function parsePlaceMachineId(id: string): string | undefined {
-  const placeId = id.startsWith("place:") ? id.slice("place:".length) : "";
-  return placeId === "" ? undefined : placeId;
-}
-
-/** Which computer a workspace stands on, by place id, however it got there: a workspace made on a joined computer
- * carries that computer's id on its record, and the workspace a joined computer itself is carries it in the
- * machine id, since its machine is the link. Undefined for everything on this computer or at a provider. Written
- * once because the host asks it to know whether anything can be asked of the machine, and the app asks it to know
- * which row of the places table a workspace belongs to. */
-export function workspacePlace(view: Pick<WorkspaceView, "place" | "machineId">): string | undefined {
-  return view.place ?? parsePlaceMachineId(view.machineId ?? "");
+/** Which computer a workspace stands on, by place id: a workspace forked on a joined computer carries that
+ * computer's id on its record. Undefined for everything on this computer or at a provider. Written once because
+ * the host asks it to know whether anything can be asked of the machine, and the app asks it to know which row of
+ * the places table a workspace belongs to. */
+export function workspacePlace(view: Pick<WorkspaceView, "place">): string | undefined {
+  return view.place;
 }
 
 /** What one row of the places list holds of the person's money: the spend it has taken since the first of the
@@ -2774,6 +2738,29 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** The host's answer on a session, and the host ending one; both are refused on a socket that never watched. */
   z.object({ id: reqId, op: z.literal("guest.reply"), session: z.string(), message: z.unknown() }),
   z.object({ id: reqId, op: z.literal("guest.close"), session: z.string(), error: z.string().optional() }),
+  /** The daemon this host deploys, landed on the computer the link runs on and started in place of the one running
+   * there. The parts arrive as machine.putBytes's do, in seq order under one upload id on one socket; the part
+   * marked last is checked against sha256, moved over the binary the unit starts and answered, and then the agent
+   * ends so whatever supervises it starts the new one. Nothing on that computer is swept: the workspaces' records
+   * stay on its disk and the daemon that comes up reads them again.
+   *
+   * The other link op, and for the same reason: a binary is bytes and never a command line, since a command sits in
+   * a world readable /proc/<pid>/cmdline while it runs. */
+  z.object({
+    id: reqId,
+    op: z.literal("place.update"),
+    uploadId: z
+      .string()
+      .min(1)
+      .max(32)
+      .regex(/^[a-z0-9]+$/),
+    seq: z.number().int().min(0),
+    last: z.boolean(),
+    data: z.string(),
+    /** Lowercase hex sha256 of the whole binary, carried on every part and read on the last: a binary that landed
+     * short would otherwise be moved over the one the unit starts, and Restart=always would loop on it. */
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
 
@@ -3045,6 +3032,25 @@ export const MachineSnapshotJobReply = z.object({ state: z.enum(["running", "don
 export type MachineSnapshotJobReply = z.infer<typeof MachineSnapshotJobReply>;
 export const MachineStateReply = z.object({ state: MachineState });
 export const MachineShapeReply = z.object({ shape: MachineShape });
+/** One workspace as the computer running it reads it, in one frame: the sizes its cgroup was written with, what it
+ * holds of them now, and where its processes, its files and its address are. Every figure is read at the moment of
+ * the ask rather than sampled, so a row drawn from it is true of that moment and of no moment since; a workspace
+ * that is not running carries the sizes and the paths and none of the live figures. cpuUsageUsec is the processor
+ * time the workspace has spent since it booted, so a rate is the difference between two readings. */
+export const MachineReading = z.object({
+  state: MachineState,
+  cpu: z.number().optional(),
+  memMb: z.number().optional(),
+  memBytes: z.number().int().nonnegative().optional(),
+  cpuUsageUsec: z.number().int().nonnegative().optional(),
+  uptimeMs: z.number().int().nonnegative().optional(),
+  procs: z.number().int().nonnegative().optional(),
+  address: z.string().optional(),
+  cgroup: z.string(),
+  upper: z.string(),
+});
+export type MachineReading = z.infer<typeof MachineReading>;
+export const MachineReadingReply = z.object({ reading: MachineReading });
 export const MachineFactsReply = z.object({ facts: MachineFacts });
 export const MachineAnswersReply = z.object({ answers: z.boolean() });
 /** The route on the place's own loopback; the host turns it into a route of its own with a forward. */
@@ -3071,17 +3077,57 @@ export const placeHoldsNoImageLine = (place: string, image: string): string =>
 export const placeHoldsForksRefusal = (place: string, names: readonly string[]): string =>
   `${place} still holds ${names.length === 1 ? "a fork" : `${names.length} forks`} (${names.join(", ")}); delete them first, then wsp remove ${place}`;
 
-/** What a fork on a joined computer whose kernel cannot run workspaces is refused with: the daemon there is the
- * workspace manager now, so a box that forks nowhere is one whose kernel the daemon's self check turned down, and
- * the reason is the one that check names. */
-export const placeForksNowhereLine = (place: string, reason?: string): string =>
-  reason === undefined ? `${place} cannot run wsp workspaces, so it takes no forks` : reason.replace("this computer", place);
+/** What a fork aimed at a place this host no longer holds a record for is refused with. Every computer on the
+ * list forks, so the only way to reach this is a record that went between the word being read and the fork being
+ * asked for: a remove, or a store another process wrote. */
+export const placeForksNowhereLine = (place: string): string => `${place} is no longer a place in this wsp, so nothing forks there`;
 
-/** What a person asking for a workspace on a place that forks nothing is told when that place already runs one: the
- * place is its own one workspace, so the line names the one there is rather than making a second. The reason is not
- * Docker, which the computer the host runs on may well have: it is that the person's own agents run there. */
-export const placeRunsOneWorkspaceLine = (place: string, workspace: string): string => `${place} runs your agents as its own one workspace, ${workspace}`;
-export const placeRunsOneWorkspaceFix = (workspace: string): string => `Use ${workspace}, or name a place that forks: wsp places.`;
+/** What a verb aimed at the bare computer a place is, rather than at a workspace forked on it, is refused with. A
+ * place holds its facts and its forks; the forks are the workspaces, so the refusal names the computer and the one
+ * road to a workspace there. */
+export const placeNotAWorkspaceLine = (place: string): string => `${place} is a computer you joined, not a workspace; its forks are the workspaces`;
+export const placeNotAWorkspaceFix = (place: string): string => `Fork one there: wsp new <name> --on ${place}.`;
+
+/** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
+ * one workspace, the one it already has; every other workspace is forked at a place. */
+export const localRunsOneLine = (workspace: string): string => `${THIS_COMPUTER} is already a workspace, ${workspace}, the only one it can be`;
+export const localRunsOneFix = (workspace: string): string => `Use ${workspace}, or name a place that forks: wsp places.`;
+
+/** What a computer's kernel must have before wsp runs workspaces on it, asked in this order so the reason a person
+ * reads is the first thing missing rather than the last. `read` answers a file's text or nothing when it is not
+ * there; `euid` is the effective user the check runs as. Nothing here touches a disk: the two sides that ask (the
+ * daemon on the box, and the join typed at it) each read their own files and share this one rule, so what the
+ * doctor says and what a create does cannot part ways. */
+export function workspacesBlockedBy(at: { platform: string; read: (path: string) => string | undefined; euid?: number }): string | undefined {
+  if (at.platform !== "linux") return "wsp runs workspaces on a Linux computer";
+  const controllers = at.read(CGROUP_CONTROLLERS_PATH);
+  if (controllers === undefined) {
+    return "this computer mounts cgroup v1 at /sys/fs/cgroup, and wsp runs workspaces on cgroup v2 alone: boot it with systemd.unified_cgroup_hierarchy=1";
+  }
+  const has = new Set(controllers.split(/\s+/));
+  for (const wanted of ["memory", "cpu"]) if (!has.has(wanted)) return `this computer's cgroup root offers no ${wanted} controller, which wsp needs to run workspaces here`;
+  const filesystems = at.read(PROC_FILESYSTEMS_PATH);
+  if (filesystems === undefined || !filesystems.split(/\s+/).includes("overlay")) {
+    return "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+  }
+  if (at.euid !== 0) return "wsp runs workspaces on this computer as root, and this daemon is not root";
+  return undefined;
+}
+
+/** The two files that check reads, named once so the daemon and the host ask the same kernel the same question. */
+export const CGROUP_CONTROLLERS_PATH = "/sys/fs/cgroup/cgroup.controllers";
+export const PROC_FILESYSTEMS_PATH = "/proc/filesystems";
+
+/** What a join of a computer whose kernel cannot boot the image is refused with, in the one sentence the daemon's
+ * own doctor named the reason in. A computer that cannot boot your image is not a place, so the join stops here
+ * and nothing is written on it. */
+export const placeCannotBootLine = (place: string, reason?: string): string =>
+  reason === undefined ? `${place} cannot run wsp workspaces, so it cannot be a place` : `${place} cannot run wsp workspaces: ${reason.replace("this computer", "it")}`;
+
+/** The one sentence a login that is not root reads when it tries to join a Linux computer. The daemon there is a
+ * system service under /etc/systemd/system, so a plain account cannot install it and nothing is written before
+ * this is said. */
+export const PLACE_NEEDS_ROOT_LINE = "joining a Linux computer needs root, since wsp installs its daemon as a system service; log in as root or use sudo";
 
 /** What a word that names no place this host holds is refused with, naming the ones it does. */
 export const noSuchPlaceRefusal = (word: string, held: readonly string[]): string => `no place named ${word}; you have ${held.join(", ")}`;
@@ -3193,7 +3239,9 @@ const DAEMON_CONTENTS = [
   "5bb58cbade0b5be39242aa419feaa7e24d82a291271d6d83a2488799005fd5a0",
   "fdfbebe6ae5c0ff581df732222b76b6540a2e4d226c5381878e125499f55180c",
   "87e30b445d1e815a4dc336b35924ed061bc30374ad7f490ec3fefb4f194b6c0f",
-  "b673f6f29e2a8cf17a694c06da3eea89d45f616c2a559dd9bbcaf59c2026cf70",
+  "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
+  "352699bc2434f5b1dc84d46026499662abf3bbcc4bc701736150a90042f79368",
+  "c65869e243db9aad3230865124c86b79032ad4d5bd1358de984acab54c600b3c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3267,11 +3315,19 @@ const DAEMON_CONTENTS = [
  * after a restart. Version 32 holds every workspace on a computer somebody keeps to a size that leaves that
  * computer a core and the smaller of half its memory and a gigabyte, a spec that names no size included: the
  * create answers the size it gave and one sentence saying so, the record holds that size, and the capacity says
- * what the workspaces there hold of the computer. Version 33 relays a guest session: a process inside the machine
- * opens one on the daemon over loopback with the daemon's own token, and the daemon carries it up the socket the
- * host already holds, so the wsp an agent runs there needs no address of this host, no TLS and no node. The binary
- * answers that word itself, and the deploy installs a two-line shim onto the machine's PATH that hands it the
- * line. */
+ * what the workspaces there hold of the computer. Version 33 answers a client on the computer itself the listing of
+ * the workspaces it holds and one reading of any of them, both read-only and both on the road that dials in; the
+ * reading carries the sizes as applied, the memory and processor time off the cgroup, the uptime, the process
+ * count, the address and the two paths, where the metrics op before it read two of those and replied with none.
+ * Version 34 takes the daemon its host deploys over the link it already holds, where a computer once kept whatever
+ * daemon it joined on: the parts of the binary arrive under one upload id with the sha256 of the whole, the last is
+ * checked against it, moved over the file the unit starts with the old one kept beside it, and answered, and the
+ * agent then ends so its supervisor starts what landed. Nothing is swept, so the workspaces' records stay on the
+ * box and the daemon that comes up reads them again. Version 35 relays a guest session: a process inside the
+ * machine opens one on the daemon over loopback with the daemon's own token, and the daemon carries it up the
+ * socket the host already holds, so the wsp an agent runs there needs no address of this host, no TLS and no node.
+ * The binary answers that word itself, and the deploy installs a two-line shim onto the machine's PATH that hands
+ * it the line. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3293,6 +3349,29 @@ export const DAEMON_ROOTS_PATH = rootsPathIn("/root");
 export function daemonVersionOf(hello: { version?: number }): number {
   return hello.version ?? 1;
 }
+
+/** The one word a place's row says while this wsp deploys a newer daemon than that computer runs, and nothing
+ * while it is level or ahead or has never reported. Both sides of the figure are already on the wire: the place
+ * sends its own version in every report and this host's is the record above, so nothing is asked for it. Read by
+ * `wsp places`, by the places table and by the doctor, so the three cannot word it three ways. */
+export function placeDaemonBehind(place: { daemonVersion?: number }): string | undefined {
+  const version = place.daemonVersion;
+  return version === undefined || version >= DAEMON_VERSION ? undefined : `daemon ${version}, host ${DAEMON_VERSION}`;
+}
+
+/** The line that moves a place onto this wsp's daemon, which is the fix half of every sentence about a place that
+ * is behind. */
+export const placeUpdateLine = (name: string): string => `wsp add ${name} --update`;
+
+/** What the doctor says about one place that is behind: the word above and the line that answers it. */
+export const placeBehindLine = (name: string, word: string): string => `${name} is behind: ${word}; ${placeUpdateLine(name)} puts this wsp's daemon on it`;
+
+/** The refusal an update gets on a place already running the daemon this wsp deploys. */
+export const placeCurrentLine = (name: string, version: number): string => `${name} already runs daemon ${version}, which is the one this wsp deploys`;
+
+/** The refusal an update gets where this wsp holds no daemon built for the chip that computer said it is. */
+export const placeNoChipLine = (name: string, platform: string, arch: string): string =>
+  `${name} says it is ${platform} ${arch}, and this wsp carries no daemon built for it`;
 
 export const DaemonEvent = z.discriminatedUnion("type", [
   /** The first frame after the auth reply: root is the
@@ -3640,9 +3719,6 @@ export const hostKeyRefusal = (url: string): string => `the host at ${url} did n
  * that computer is not, since nothing could reach it to sweep. */
 export const placeStillInstalledLine = (name: string): string => `${name} is off this host, but the agent on it is still installed; run ${PLACE_LEAVE_LINE} on that computer when it is back`;
 
-/** What a remove says about each workspace that stood on the place it took out: the record and its threads leave
- * this host, and the computer keeps its own files, since wsp never made them. */
-export const placeWorkspaceGoneLine = (name: string, id: string): string => `workspace ${name} (${id}) and its threads are gone from this host; its files on that computer are the person's own and stay`;
 
 /** What a place that is connected but has never said which port its daemon bound is refused with: a pane needs
  * that port to carry to, and only that computer knows it. */
@@ -3797,6 +3873,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Every place this host holds: this computer, the computers joined to it, and the provider it forks on.
    * Answers `{ places: PlaceView[] }`. */
   z.object({ id: reqId, op: z.literal("places.list") }),
+  /** Puts the daemon this host deploys on one place, over the link it holds or over the ssh road the install used,
+   * and waits for that computer to dial back running it. The workspaces on it are kept. Answers
+   * `{ name, from, to, road, at, note? }`. */
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
@@ -4421,7 +4501,7 @@ export type WorkspaceCreateResult = z.infer<typeof WorkspaceCreateResult>;
 
 export { needsYouLine, threadState, threadStateWord, threadWordOf, waitingLine, type ThreadState } from "./thread-state.js";
 export { MCP_SERVER_NAME, threadsFollowed } from "./wsp-tools.js";
-export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
+export { type AbsentComputer, type AwayWord, absentComputer, actionRefusal, daemonSilent, ownDaemonDown, START_DAEMON_WORD, agentsKindRefusal, agentsMayDrive, awayMsOf, composerHeldLine, computerOffline, deleteNotice, goneRefusal, MACHINE_LEFT, notAnsweringYet, screenCommandLine, type ImageMoveInput, imageMoveRefusal, isBilling, isLocalWorkspace, turnSpendWord, type KindReading, kindWords, readingRoad, type ReadingRoad, type MachineOnDelete, machineWord, needsRebuild, FORGET_NEEDS_GONE, goneRoadRefusal, reachShown, SEND_BLOCK_WORDS, type SendBlock, sendRefusal, signInRefusalLine, signInRoad, type SendRefusalKind, servesReading, workspaceAccess, WORKSPACE_KIND_WORDS, workspaceKind, type WorkspaceKindWords, workspaceState, type WorkspaceState, type WorkspaceStateInput, whereWord, workspaceStateLine, workspaceStateOf, workspaceWord, type AbsentRoad, type AbsentRoadInput, absentRoad, lastKnown, REPORTED_WORD, placeDialLine, placeNoDialLine, placeDialRoad, sshRoadOf, type PlaceDialRoad } from "./workspace-state.js";
 export * from "./exit.js";
 export * from "./format.js";
 export { psCpuSeconds } from "./ps-time.js";

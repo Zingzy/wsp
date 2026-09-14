@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // How a catalog entry is signed into on the machine: the command to run, the
 // variant that needs no browser there (the retry when the shim and the
-// callback forward did not land), the tool's own status command that proves
-// the login, and how long the tool itself waits before it gives up. Nothing
-// here reads the tool's output beyond the status lines named below.
+// callback forward did not land), and the tool's own status command that
+// proves the login. Nothing here reads the tool's output beyond the status
+// lines named below.
 import type { SignInFinish } from "@wsp/protocol";
 import { CLAUDE_CONFIG_DIR, CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
 
@@ -75,8 +75,6 @@ export type SignIn =
       keyEnv?: string;
       /** Absent when the tool has no status command: the login is then "not verified". */
       status?: StatusCheck;
-      /** What the tool itself waits for the person, measured or read from its source; absent when it never gives up. */
-      toolTimeoutMs?: number;
       note?: string;
       keys?: KeyFiles;
       /** Where this tool's login lives on the machine once signed in there or copied onto it, `~`-relative guest
@@ -146,8 +144,6 @@ export function loginStatePaths(entry: { signIn: SignIn }): string[] {
 
 /** No sign-in and nothing to say about it. */
 export const NO_SIGN_IN: SignIn = { kind: "none", sources: [] };
-
-const MIN = 60_000;
 
 /** In a subshell so its exits never cut the quiet run's own exit marker. */
 export const AWS_STATUS = `sh -c 'for p in $(aws configure list-profiles 2>/dev/null); do aws sts get-caller-identity --profile "$p" 2>/dev/null && exit 0; done; exit 1'`;
@@ -248,7 +244,6 @@ export const SIGN_IN_ROWS = {
     // Two groups of four, as gh prints it: "! First copy your one-time code: XXXX-XXXX".
     code: /\b[A-Z0-9]{4}-[A-Z0-9]{4}\b/,
     status: { command: "gh auth status", signedIn: o => /Logged in to/.test(o) && !/Failed to log in/.test(o) },
-    toolTimeoutMs: 15 * MIN,
     stateOnMachine: [".config/gh/hosts.yml"],
   },
   // Under the daemon pty DISPLAY is unset, so gcloud, gemini and railway take their paste or device flow by
@@ -276,7 +271,6 @@ export const SIGN_IN_ROWS = {
       { asks: /SSO region/, person: true },
     ],
     status: { command: AWS_STATUS, signedIn: ok(/"Arn"/) },
-    toolTimeoutMs: 10 * MIN,
     note: "the check tries every configured profile; the start URL and region it asks for are yours to type",
     stateOnMachine: [".aws"],
   },
@@ -287,15 +281,14 @@ export const SIGN_IN_ROWS = {
     finish: "callback",
     login: "wrangler login",
     status: { command: "wrangler whoami", signedIn: has(/You are logged in/) },
-    toolTimeoutMs: 2 * MIN,
     note: "needs the callback forward; CLOUDFLARE_API_TOKEN on the machine is the alternative",
     stateOnMachine: [".config/.wrangler"],
   },
   // A row's road is how the hand-off runs that login, so a road nobody measured would move a flow that works: these
   // five carry `none`, which is what they do today.
-  vercel: { kind: "oauth", sources: ["file"], finish: "none", login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, toolTimeoutMs: 15 * MIN, stateOnMachine: [".config/com.vercel.cli", ".vercel"] },
-  netlify: { kind: "oauth", sources: [], finish: "none", login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, toolTimeoutMs: 5 * MIN, stateOnMachine: [".netlify/config.json"] },
-  fly: { kind: "oauth", sources: [], finish: "none", login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, toolTimeoutMs: 15 * MIN, stateOnMachine: [".fly"] },
+  vercel: { kind: "oauth", sources: ["file"], finish: "none", login: "vercel login", status: { command: "vercel whoami", signedIn: (o, c) => c === 0 && !/No existing credentials/.test(o) }, stateOnMachine: [".config/com.vercel.cli", ".vercel"] },
+  netlify: { kind: "oauth", sources: [], finish: "none", login: "netlify login", status: { command: "netlify status", signedIn: (o, c) => c === 0 && !/Not logged in/i.test(o) }, stateOnMachine: [".netlify/config.json"] },
+  fly: { kind: "oauth", sources: [], finish: "none", login: "fly auth login", status: { command: "fly auth whoami", signedIn: ok(/@/) }, stateOnMachine: [".fly"] },
   // supabase waits for an Enter before it opens anything and has no flag for it (--yes leaves it standing); the
   // relay presses it. --no-browser prints the link at once instead and asks for a code back, which is the retry.
   supabase: {
@@ -308,7 +301,7 @@ export const SIGN_IN_ROWS = {
     status: { command: "supabase projects list", signedIn: ok() },
     stateOnMachine: [".supabase"],
   },
-  railway: { kind: "oauth", sources: [], finish: "callback", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, toolTimeoutMs: 5 * MIN, stateOnMachine: [".railway"] },
+  railway: { kind: "oauth", sources: [], finish: "callback", login: "railway login", status: { command: "railway whoami", signedIn: ok(/Logged in as/) }, stateOnMachine: [".railway"] },
   // Without --yes doppler asks before it prints anything; with it the page and the code its page asks for come at once.
   doppler: {
     kind: "oauth",
@@ -320,7 +313,6 @@ export const SIGN_IN_ROWS = {
     // other word of its shape in the output is read as the code.
     code: /(?<=Your auth code is:\s*)[a-z]+(?:_[a-z]+){2,}/,
     status: { command: "doppler me", signedIn: ok() },
-    toolTimeoutMs: 5 * MIN,
     stateOnMachine: [".doppler"],
   },
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
@@ -347,7 +339,6 @@ export const SIGN_IN_ROWS = {
       { asks: /How would you like to authenticate for this project\?/, answer: "\r" },
     ],
     status: { command: GEMINI_STATUS, signedIn: ok(), detail: geminiSource },
-    toolTimeoutMs: 5 * MIN,
     stateOnMachine: [".gemini/oauth_creds.json"],
   },
   // Both counts print on exit 0; a provider key exported on the machine is listed under Environment and counts as a login.
@@ -359,7 +350,6 @@ export const SIGN_IN_ROWS = {
     questions: [{ asks: /Select provider/, person: true }],
     status: { command: "opencode auth list", signedIn: ok(/[1-9]\d* (credentials|environment variable)/), detail: secretNamed },
     note: "OpenCode dropped its Anthropic sign-in in 1.3.0; it takes an API key there",
-    toolTimeoutMs: 5 * MIN,
     stateOnMachine: [".local/share/opencode/auth.json"],
   },
   cloudflared: { kind: "oauth", sources: ["file"], finish: "none", login: "cloudflared tunnel login", status: { command: CLOUDFLARED_STATUS, signedIn: ok() }, stateOnMachine: [".cloudflared"] },

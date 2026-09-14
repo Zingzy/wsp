@@ -24,10 +24,11 @@ use tokio::sync::Mutex;
 use wsp_frames::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineRoads,
-    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
-    MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PauseMode, PlaceCapacity, PlaceImage,
-    PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing, TemplateRow, TemplateStatus, WorkspaceSize,
+    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
+    MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
+    MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
+    PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
+    TemplateRow, TemplateStatus, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, Init, Layout, Workspace};
@@ -366,13 +367,7 @@ impl Ops {
                     },
                 })
             }
-            MachineOp::Metrics { machine_id } => {
-                let record = self.running(&machine_id)?;
-                let cgroup = self.layout.cgroup_dir(&record.id);
-                freeze::memory_current(&cgroup)?;
-                freeze::cpu_usage_usec(&cgroup)?;
-                body(Empty {})
-            }
+            MachineOp::Metrics { machine_id } => body(MachineReadingReply { reading: self.reading(&self.record(&machine_id)?) }),
             MachineOp::DaemonAnswers { machine_id, timeout_ms } => {
                 let record = self.running(&machine_id)?;
                 let result = self.exec(&record.id, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms)).await?;
@@ -867,6 +862,27 @@ impl Ops {
         }
     }
 
+    /// One workspace as this computer reads it now: the sizes its cgroup was written with, what it holds of them
+    /// this moment, and where its processes, its files and its address are. Every live figure is read where the
+    /// kernel keeps it and dropped where it cannot be had, since a workspace may stop between the listing and this
+    /// and a reading that refused for it would take the whole row with it; the sizes and the paths always answer.
+    fn reading(&self, record: &Workspace) -> MachineReading {
+        let cgroup = self.layout.cgroup_dir(&record.id);
+        let live = runtime::alive(&record.init);
+        MachineReading {
+            state: self.state_of(record),
+            cpu: record.cpu,
+            mem_mb: record.mem_mb,
+            mem_bytes: live.then(|| freeze::memory_current(&cgroup).ok()).flatten(),
+            cpu_usage_usec: live.then(|| freeze::cpu_usage_usec(&cgroup).ok()).flatten(),
+            uptime_ms: live.then(|| runtime::uptime_ms(&record.init).ok()).flatten(),
+            procs: live.then(|| freeze::pids_in(&cgroup).ok()).flatten(),
+            address: self.net.record(&record.id).ok().flatten().map(|network| network.address.to_string()),
+            cgroup: cgroup.display().to_string(),
+            upper: self.layout.upper(&record.id).display().to_string(),
+        }
+    }
+
     fn record(&self, id: &str) -> Result<Workspace, OpError> {
         bundle::read_record(&self.layout.record(id))?.ok_or_else(|| OpError::no_workspace(id))
     }
@@ -1312,6 +1328,77 @@ mod tests {
     fn a_template_id_is_the_docker_backends_tag_over_the_name() {
         assert_eq!(template_id("dev"), "wsp/dev:template");
         assert_eq!(template_id("My Golden/v2"), "wsp/my-golden-v2:template");
+    }
+
+    /// One workspace on disk as a daemon that stopped left it: its record under the run directory, its upper
+    /// directory (what a nap boots from), and the chain it mounts.
+    ///
+    /// No rootfs directory, and that is the whole of what makes this runnable by anyone: the open unmounts the
+    /// rootfs of every record whose init is gone, and umount2 resolves the path before it checks the capability,
+    /// so a path that is not there answers ENOENT to any login while one that is answers EPERM to a login that is
+    /// not root. A mounted rootfs is a thing a boot makes, not a thing a record carries, and none of what this
+    /// proves reads it.
+    fn left_on_disk(root: &Path, id: &str, chain: &Chain) {
+        let layout = Layout::new(root);
+        fs::create_dir_all(layout.upper(id)).unwrap();
+        let record = Workspace {
+            id: id.to_owned(),
+            hostname: id.to_owned(),
+            image: "ubuntu:24.04".to_owned(),
+            chain: chain.clone(),
+            labels: BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]),
+            envs: BTreeMap::new(),
+            cpu: Some(1.0),
+            mem_mb: Some(1024),
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            // A pid nothing holds: the daemon came up after the box did, so the workspace reads stopped, which
+            // under a disk pause is a nap its upper directory is waiting to be woken from.
+            init: Init { pid: i32::MAX, started: 0, boot_id: String::new() },
+            engine: false,
+        };
+        fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
+    }
+
+    /// A layer unpacked in the store, as a pull left it; the tree is the form a fork mounts.
+    fn unpacked_layer(root: &Path, bytes: &[u8]) -> Digest {
+        let digest = Digest::of(bytes);
+        let tree = root.join("layers").join("unpacked").join(digest.hex());
+        fs::create_dir_all(&tree).unwrap();
+        fs::write(tree.join("marker"), bytes).unwrap();
+        digest
+    }
+
+    #[test]
+    fn a_daemon_that_comes_up_finds_the_workspaces_it_left_and_keeps_the_layers_their_forks_mount() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // The store is opened once so its directories are there before anything is written into them.
+        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
+        let config = unpacked_layer(root, b"config of the image these forked from");
+        let layer = unpacked_layer(root, b"the layer they mount");
+        let orphan = unpacked_layer(root, b"a layer no record names");
+        let chain = Chain { config: config.clone(), layers: vec![layer.clone()] };
+        left_on_disk(root, "wsp-one", &chain);
+        left_on_disk(root, "wsp-two", &chain);
+
+        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        // The records are there and the listing names both, with the size each was created at.
+        let listed = again.list(None).unwrap();
+        assert_eq!(listed.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["wsp-one", "wsp-two"]);
+        assert!(listed.iter().all(|row| row.state == MachineState::Paused && row.size == Some(WorkspaceSize { cpu: 1.0, mem_mb: 1024 })));
+
+        // The layers both forks mount are still unpacked under the store, so a wake has something to mount; the
+        // one no record names is what the sweep at the open took.
+        for digest in [&config, &layer] {
+            assert!(again.store.unpacked(digest).is_some(), "{} went with the sweep", digest.hex());
+        }
+        assert_eq!(again.swept_at_open().unpacked, vec![orphan.clone()]);
+        assert!(!root.join("layers").join("unpacked").join(orphan.hex()).exists());
+
+        // And the upper directory each nap is waiting to be woken from is where the record left it.
+        for id in ["wsp-one", "wsp-two"] {
+            assert!(Layout::new(root).upper(id).is_dir(), "{id} lost its upper directory");
+        }
     }
 
     #[test]

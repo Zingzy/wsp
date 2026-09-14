@@ -4,7 +4,7 @@ use std::num::{NonZeroU16, NonZeroU32};
 
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout};
+use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
 use crate::{FsReadEncoding, GitDiffScope, GuestKind, ProcSignal, RequestId};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
@@ -139,11 +139,23 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// The daemon this host deploys, in parts under one upload id, and the restart the last part ends in. The other
+    /// link op: a binary travels as bytes and never as a command line.
+    #[serde(rename = "place.update", rename_all = "camelCase")]
+    PlaceUpdate {
+        #[serde(deserialize_with = "upload_word")]
+        upload_id: String,
+        seq: u64,
+        last: bool,
+        data: String,
+        #[serde(deserialize_with = "sha256_hex")]
+        sha256: String,
+    },
 }
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 32] = [
+pub const DAEMON_OPS: [&str; 33] = [
     "pty.create",
     "pty.attach",
     "pty.write",
@@ -176,6 +188,7 @@ pub const DAEMON_OPS: [&str; 32] = [
     "guest.watch",
     "guest.reply",
     "guest.close",
+    "place.update",
 ];
 
 /// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the

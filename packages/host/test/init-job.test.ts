@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowOver, initStageCount, keyRefusedLine, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -468,6 +468,34 @@ describe("the init job, manual road", () => {
       expect(initBuildRows(done.rows).rows.find(r => r.id === SIGN_IN_STAGE_ID)).toMatchObject({ state: INIT_ROW_STATES.done });
       expect(done.progress).toEqual({ done: done.progress.total, total: done.progress.total });
     }
+  });
+
+  it("a sign-in left to first use is a row the build settles without running anything, and the stage it folds into still reads done", async () => {
+    const f = fake();
+    const link = scriptedLink({ signedIn: true, hold: false, missing: false });
+    f.setLink(link);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "later", "logins/claude": "later", "logins/codex": "copy" } });
+    const building = await f.jobs.build({ firstWorkspace: "first" });
+    // The row is there from the first frame, so the count means the same thing whichever answer it carries.
+    expect(building.rows.filter(r => r.kind === "sign-in").map(r => r.id).sort()).toEqual(["sign-in/claude", "sign-in/codex", "sign-in/gh"]);
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    const gh = done.rows.find(r => r.id === "sign-in/gh")!;
+    expect(gh).toMatchObject({ kind: "sign-in", ...initSignInOutcome("deferred", "darwin") });
+    expect(gh.state).toBe(SIGN_IN_DEFERRED_WORD);
+    // Not a failure and not unrun: the person said where the sign-in happens, so the glyph draws no cross and the
+    // count reads it as a stage that ended well.
+    expect([initRowFailed(gh), initRowOver(gh)]).toEqual([false, true]);
+    expect(initBuildRows(done.rows).rows.find(r => r.id === SIGN_IN_STAGE_ID)).toMatchObject({ state: INIT_ROW_STATES.done });
+    expect(initStageCount(initBuildRows(done.rows).rows)).toMatchObject({ done: initBuildRows(done.rows).rows.filter(r => r.kind === "stage").length });
+    expect(done.progress).toEqual({ done: done.progress.total, total: done.progress.total });
+    // Nothing ran on the machine for either deferred row: the only ptys are the build's own quiet runs.
+    expect(link.ptys.map(p => p.writes[0]).filter(w => w?.startsWith("exec "))).toEqual([]);
+    expect(done.golden).toEqual({ version: 1 });
   });
 
   it("nothing a build on a Linux computer draws names a Mac: not a row, not a screen, not a line of the log", async () => {

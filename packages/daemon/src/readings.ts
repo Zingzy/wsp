@@ -9,7 +9,7 @@
 // and the words table in the protocol says the same about it for the panes
 // that cannot ask a daemon at all.
 import { platform as osPlatform } from "node:os";
-import { NOT_ON_THIS_KIND, type WorkspaceKind } from "@wsp/protocol";
+import { NOT_ON_THIS_KIND, type DaemonKind } from "@wsp/protocol";
 import type { PortSnapshotSource } from "./ports.js";
 import { LocalProcSource } from "./proc-local.js";
 import { ProcFsSource, type ProcSource } from "./proc.js";
@@ -54,26 +54,20 @@ const hostReadings: KindReadings = {
   processes: o => new LocalProcSource({ ports: o.ports }),
 };
 
-/** The one platform switch there is, inside the one kind whose machines differ: a computer the person joined runs
- * whatever they own. Every other kind knows its own system from its row. */
-const byPlatform = (o: ReadingsOptions): KindReadings => ((o.platform ?? osPlatform()) === "linux" ? procReadings : hostReadings);
-
 /** The kinds a daemon serves these two readings for. A machine over ssh runs the same daemon a fork does, on the
  * same Linux, so it reads the same /proc: the difference between the two is how the host reaches the daemon, not
  * what the daemon can see of its own machine. A daemon on a machine that is not Linux has no /proc to read and
  * refuses both with the sentence below, which is what the pane prints. */
-export const KIND_READINGS: Partial<Record<WorkspaceKind, KindReadings>> = {
+export const KIND_READINGS: Partial<Record<DaemonKind, KindReadings>> = {
   cloud: procReadings,
   ssh: procReadings,
   local: hostReadings,
-  place: {
-    metrics: o => byPlatform(o).metrics(o),
-    processes: o => byPlatform(o).processes(o),
-  },
+  // A place is Linux: the join turns down a box whose kernel cannot boot the image, so its daemon reads /proc.
+  place: procReadings,
 };
 
 /** What answers for a machine of this kind, or the refusal a pane prints in the slot. */
-export function readingsFor(kind: WorkspaceKind): KindReadings {
+export function readingsFor(kind: DaemonKind): KindReadings {
   const found = KIND_READINGS[kind];
   if (found === undefined) throw new OpError("unsupported", `${NOT_ON_THIS_KIND}: this daemon serves a ${kind} machine, which reads neither its own load nor its own processes`);
   return found;

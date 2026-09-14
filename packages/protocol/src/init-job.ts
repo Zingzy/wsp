@@ -79,9 +79,18 @@ export type InitRowKind = z.infer<typeof InitRowKind>;
 
 /** What each login came to by the time the golden sealed: a sign-in on the machine, or a copy from this computer
  * checked there with the tool's status command. `copied` is a copy nothing checked: an update re-imported it, or the
- * tool has no status command or is not on the machine. */
-export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied"]);
+ * tool has no status command or is not on the machine. `deferred` is a login nobody signed in during the build,
+ * because it was left to first use or because the sign-in that ran hit the build's cap: the build never waits on a
+ * person, so that is an outcome and not a failure. */
+export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", "skipped", "copied", "deferred"]);
 export type LoginState = z.infer<typeof LoginState>;
+
+/** What happens to a login: copied from this computer, signed in on the machine while the build runs, left to the
+ * first time the tool needs it on a workspace, set on the machine as an API key the tool reads, or left out. One
+ * list, read by the collector's rows, by a recipe's rows and by the words `wsp recipe --signin` takes. */
+export const LOGIN_CHOICES = ["copy", "machine", "later", "key", "skip"] as const;
+export const LoginChoice = z.enum(LOGIN_CHOICES);
+export type LoginChoice = z.infer<typeof LoginChoice>;
 
 /** How a sign-in finishes where nobody is at the machine's terminal, which is the app's case: `callback` for a page
  * that redirects to a port on the machine, forwarded from this computer, so no code ever comes back; `code` for a

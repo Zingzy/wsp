@@ -204,11 +204,12 @@ import {
   HERE_PLACE_ID,
   isLocalWorkspace,
   turnSpendWord,
+  placeDaemonBehind,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
-  placeRunsOneWorkspaceFix,
-  placeRunsOneWorkspaceLine,
+  localRunsOneFix,
+  localRunsOneLine,
   packageOf,
   type SealedPin,
 } from "@wsp/protocol";
@@ -457,15 +458,17 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.shape === undefined ? "" : String(p.shape.cpu),
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
-    p.runsWorkspaces === undefined ? "" : p.runsWorkspaces ? "yes" : "no",
     p.engine === undefined ? "" : p.engine,
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
+    // The one word about a computer running an older daemon than this wsp deploys, built in the protocol so this
+    // row and the app's table say it the same way; empty on a row that is level, ahead, or has never reported.
+    placeDaemonBehind(p) ?? "",
     p.build ?? "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "WORKSPACES", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "IMAGE"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "BEHIND", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -1265,17 +1268,10 @@ export async function placeNamed(client: HostClient, word: string): Promise<Plac
   return found;
 }
 
-/** The workspace a place that forks nothing already runs: the one its row names for a computer somebody joined, and
- * the local workspace for the computer the host itself is on, which the places list does not name. */
-async function workspaceOnPlace(client: HostClient, place: PlaceView): Promise<WorkspaceOut | undefined> {
-  const all = await workspaces(client);
-  return place.workspaceId !== undefined ? all.find(w => w.id === place.workspaceId) : all.find(isLocalWorkspace);
-}
-
-/** `wsp new --on` where the place forks nothing: the place is its own one workspace, so this records that workspace
- * under the name given when there is none there yet and names the one there is when there is. It never answers with
- * a workspace it did not make. */
-export async function onPlaceItself(
+/** `wsp new --on` aimed at the computer the app itself runs on, which forks nothing: its local mode is one
+ * workspace, so this records that workspace under the name given when there is none yet and names the one there is
+ * when there is. Every place on the list forks, so this is the only row that reaches here. */
+export async function onThisComputer(
   client: HostClient,
   out: Out,
   place: PlaceView,
@@ -1285,13 +1281,8 @@ export async function onPlaceItself(
   if (asked.from !== undefined || asked.size !== undefined || asked.engine === true) throw usageRefusal(`${place.name} forks nothing, so it takes no --from, --size or --engine.`, "Drop them.");
   // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads.
   if (asked.agents?.spawn === true && !agentsMayDrive("local")) throw usageRefusal(agentsKindRefusal("local"), "Drop --spawn on, or name a place that forks.");
-  const already = await workspaceOnPlace(client, place);
-  if (already !== undefined) throw usageRefusal(placeRunsOneWorkspaceLine(place.name, already.name), placeRunsOneWorkspaceFix(already.name));
-  // The extension law's one named exception: every other road here reads a fact off the row, and this reads which
-  // row it is. It stands because only the computer the host runs on can reach this line with no workspace to name.
-  // A joined computer records one at its join, and a provider never takes this road at all, so the branch is the
-  // guard for a record that went missing rather than a road a person takes.
-  if (place.id !== HERE_PLACE_ID) throw usageRefusal(placeForksNowhereLine(place.name), "Run wsp places.");
+  const already = (await workspaces(client)).find(isLocalWorkspace);
+  if (already !== undefined) throw usageRefusal(localRunsOneLine(already.name), localRunsOneFix(already.name));
   return createLocalWorkspace(client, out, name);
 }
 
@@ -2258,7 +2249,7 @@ const ConfirmIn = z.boolean().optional().describe("true deletes the machine; abs
 const PICK_INPUTS = {
   model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
   effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
-  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
+  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
 };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
 const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
@@ -2520,7 +2511,7 @@ export const VERBS: readonly Verb[] = [
     readsHere: "the agents, package managers and history it reads are this computer's own",
     usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>]`,
     about:
-      "write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=copy|machine|key|skip answers a sign-in by catalog id, key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe",
+      `write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=${LOGIN_CHOICES.join("|")} answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the workspace and key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe`,
     page: "agent",
     options: {
       out: { type: "string" },
@@ -2606,7 +2597,7 @@ export const VERBS: readonly Verb[] = [
       if (on !== undefined) {
         const place = await placeNamed(client, on);
         if (place.takesForks !== true) {
-          await onPlaceItself(client, ctx.out, place, name, { from, size, engine, agents });
+          await onThisComputer(client, ctx.out, place, name, { from, size, engine, agents });
           return 0;
         }
       }
@@ -2619,7 +2610,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; a place that forks nothing runs the person's agents as its own one workspace instead, which this records under the name given when there is none there yet and names when there is.",
+        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; the computer the app runs on forks nothing and takes its one local workspace instead, which this records under the name given when there is none there yet and names when there is.",
       input: {
         name: z.string().describe("the workspace name, which the sidebar and every other line call it by"),
         from: z.string().optional().describe("a project image: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
@@ -2636,7 +2627,7 @@ export const VERBS: readonly Verb[] = [
         const agents = agentsAsked(spawn, maxMachines, maxDepth);
         if (on !== undefined) {
           const place = await placeNamed(client, on);
-          if (place.takesForks !== true) return asJson(await onPlaceItself(client, QUIET, place, name, { from, size: word, engine, agents }));
+          if (place.takesForks !== true) return asJson(await onThisComputer(client, QUIET, place, name, { from, size: word, engine, agents }));
         }
         if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on, engine));
         const landing = await forkable(client, on);
@@ -3469,7 +3460,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
   "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
   add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",
-  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); its default without it",
+  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); without it, what a thread on that workspace starts at: every action without asking on this computer and on a machine wsp forked, asking about each one on a computer you own",
   cut: "a path inside the folder to leave behind, on top of the plan's own answer; repeats",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",

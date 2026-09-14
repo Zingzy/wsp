@@ -8,7 +8,7 @@
 // is what the host hands over for a small laptop: three agents, the tools with
 // the base locked on and the rest by calls, a manager's rows, three sign-ins.
 import { createRoot } from "react-dom/client";
-import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, KEY_REFUSED, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
+import { GOLDEN_STAGE_WORDS, INIT_ROW_STATES, initSignInOutcome, KEY_REFUSED, signInChoices, MCP_ADDED_WORD, NETWORK_LOST_LINE, SIGN_IN_OPEN_STATE, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initBuildRows, MACHINE_GONE_LINE, MACHINE_ROW_LABEL, initStageCount, initStoppedAt, keyRefusedLine, snapshotStageLine, type InitJob, type InitScreen, type InitSetup } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { RequestError, type Api } from "../../src/protocol/client";
 import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS } from "./keyRefusedJob";
@@ -24,12 +24,8 @@ const at = params.get("screen") ?? "choice";
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
 
-const SIGN_IN_CHOICES = [
-  { value: "copy", label: "copy from this Mac" },
-  { value: "machine", label: "sign in on the machine" },
-  { value: "key", label: "API key" },
-  { value: "skip", label: "skip" },
-];
+/** The answers the host sends, read off the protocol so the lab cannot drift from what a row really carries. */
+const SIGN_IN_CHOICES = [...signInChoices("darwin")];
 
 const SCREENS: InitScreen[] = [
   {
@@ -89,12 +85,13 @@ const SCREENS: InitScreen[] = [
       { id: "logins/claude", label: "Claude Code login", group: "Agents", mark: "claude", why: "Keychain", detail: ["Keychain: Claude Code-credentials", "claude auth login"], choices: SIGN_IN_CHOICES, key: { name: "ANTHROPIC_API_KEY", saved: false } },
       { id: "logins/codex", label: "Codex login", group: "Agents", mark: "codex", why: "auth.json", detail: ["~/.codex/auth.json", "codex login"], choices: SIGN_IN_CHOICES, key: { name: "OPENAI_API_KEY", saved: true } },
       { id: "logins/gh", label: "GitHub CLI login", group: "Developer CLIs", mark: "gh", why: "hosts.yml, Keychain", detail: ["~/.config/gh/hosts.yml, Keychain: gh:github.com", "gh auth login"], choices: SIGN_IN_CHOICES.filter(c => c.value !== "key") },
-      { id: "logins/gcloud", label: "Google Cloud login", group: "Developer CLIs", mark: "gcloud", detail: ["gcloud auth login"], choices: SIGN_IN_CHOICES.filter(c => c.value === "machine" || c.value === "skip") },
+      { id: "logins/gcloud", label: "Google Cloud login", group: "Developer CLIs", mark: "gcloud", detail: ["gcloud auth login"], choices: SIGN_IN_CHOICES.filter(c => c.value === "machine" || c.value === "later" || c.value === "skip") },
       { id: "logins/kube", label: "kubeconfig", group: "Developer CLIs", mark: "kube", why: "config", state: "not on the image", detail: ["~/.kube/config"], choices: SIGN_IN_CHOICES.filter(c => c.value === "skip") },
       { id: "agents/mcp/claude/github", label: "github", group: "MCP servers from your agents' configs", why: "Claude Code", detail: ["stdio: npx server-github; carries a secret: env GITHUB_TOKEN"], choices: SIGN_IN_CHOICES.filter(c => c.value === "copy" || c.value === "skip") },
     ],
     ticks: [],
-    answers: { "logins/claude": "key", "logins/codex": "machine", "logins/gh": "copy", "logins/gcloud": "skip", "logins/kube": "skip", "agents/mcp/claude/github": "skip" },
+    // gcloud sits on the default a browser-only row opens on, so the widest answer is on screen in every photograph.
+    answers: { "logins/claude": "key", "logins/codex": "machine", "logins/gh": "copy", "logins/gcloud": "later", "logins/kube": "skip", "agents/mcp/claude/github": "skip" },
     footer: [],
   },
   { id: "wsp", title: "wsp for your agents on this Mac", top: "Add wsp's MCP server and skill to the agents installed here, so they can drive your workspaces", items: [{ id: "wsp-tools/claude", label: "Claude Code", detail: ["writes ~/.claude.json"] }], ticks: ["wsp-tools/claude"], answers: {}, footer: [] },

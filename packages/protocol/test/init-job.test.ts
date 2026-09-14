@@ -34,6 +34,9 @@ import {
   initProgressState,
   initRowOver,
   initRowFailed,
+  initRowUnrun,
+  SIGN_IN_DEFERRED_WORD,
+  SIGN_IN_LATER,
   titleWithNeed,
   initSetupLines,
   initTallyLine,
@@ -313,7 +316,11 @@ describe("the words the clients print for the job", () => {
   });
 
   it("the login states have one spelling, the one the terminal and the modal both print", () => {
-    expect(LOGIN_STATE_WORDS).toEqual({ "signed-in": "signed in", "not-signed-in": "not signed in", copied: "copied", "not-verified": "not verified", skipped: "skipped" });
+    expect(LOGIN_STATE_WORDS).toEqual({ "signed-in": "signed in", "not-signed-in": "not signed in", copied: "copied", "not-verified": "not verified", skipped: "skipped", deferred: SIGN_IN_DEFERRED_WORD });
+    // The phrase the answer and the outcome share has one home, so the row the picker offers and the row a run-out
+    // leaves cannot come to say two different things.
+    expect(SIGN_IN_LATER).toBe("sign in when you first need it");
+    expect(SIGN_IN_DEFERRED_WORD).toBe(`not signed in, ${SIGN_IN_LATER}`);
   });
 
   it("a row's state words have one table, and one predicate says which of them end the row", () => {
@@ -327,8 +334,8 @@ describe("the words the clients print for the job", () => {
     expect(initRowOver({ state: "copied from this Mac" }), "a sentence nothing names").toBe(false);
     // The app's row words for a sign-in's outcome, drawn for the computer the run read: done once the machine has
     // the credential, the copy named with that computer.
-    expect(Object.fromEntries(LoginState.options.map(state => [state, INIT_SIGN_IN_WORDS[state]("darwin")]))).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this Mac", "not-verified": "not verified", skipped: "skipped" });
-    expect(Object.fromEntries(LoginState.options.map(state => [state, INIT_SIGN_IN_WORDS[state]("linux")]))).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this computer", "not-verified": "not verified", skipped: "skipped" });
+    expect(Object.fromEntries(LoginState.options.map(state => [state, INIT_SIGN_IN_WORDS[state]("darwin")]))).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this Mac", "not-verified": "not verified", skipped: "skipped", deferred: SIGN_IN_DEFERRED_WORD });
+    expect(Object.fromEntries(LoginState.options.map(state => [state, INIT_SIGN_IN_WORDS[state]("linux")]))).toEqual({ "signed-in": "done", "not-signed-in": "not signed in", copied: "copied from this computer", "not-verified": "not verified", skipped: "skipped", deferred: SIGN_IN_DEFERRED_WORD });
   });
 
   it("the sidebar's line says a machine an earlier build left is still going before it says anything about the job it is on", () => {
@@ -416,6 +423,10 @@ describe("the words the clients print for the job", () => {
     expect([initRowFailed({ state: INIT_ROW_STATES.failed }), initRowFailed({ state: INIT_SIGN_IN_WORDS["not-signed-in"]("linux"), login: "not-signed-in" }), initRowFailed({ state: INIT_ROW_STATES.done }), initRowFailed({ state: INIT_ROW_STATES.stopped })]).toEqual([true, true, false, false]);
     // The sentence alone says nothing: a row that carries no outcome is no failure, whatever its word reads.
     expect(initRowFailed({ state: "not signed in" })).toBe(false);
+    // A sign-in the build never waited out is over and is no failure: the person chose to sign in later, or the
+    // build's cap ended a wait they were not going to finish, and neither is the machine's doing.
+    const deferredRow = { state: INIT_SIGN_IN_WORDS.deferred("darwin"), login: "deferred" as const };
+    expect([initRowFailed(deferredRow), initRowOver(deferredRow), initRowUnrun(deferredRow.state)]).toEqual([false, true, false]);
     expect(CLOUD_SETUP_WORDS.build.doneTop).toBe("Your image is built; every workspace starts from it");
     const rows: InitRow[] = [
       { id: "agent/claude", kind: "agent", label: "Claude Code", state: "MCP added" },
@@ -433,6 +444,11 @@ describe("the words the clients print for the job", () => {
     expect(settled.rows[1], "a sign-in that ran out keeps the stage from reading done and hands it its own outcome").toMatchObject({ state: "not signed in", login: "not-signed-in" });
     // The count reads the same answer the cross does: a fold whose sign-in ran out is over, and it is not done.
     expect(initStageCount(settled.rows)).toEqual({ done: 1, total: 3 });
+    // A sign-in left to first use, or one the cap ended, folds as a stage that is over and done: the count and the
+    // glyph read the same answer, and a build that deferred every sign-in still reads complete.
+    const deferred = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, ...{ state: INIT_SIGN_IN_WORDS.deferred("darwin"), login: "deferred" as const } } : r)));
+    expect(deferred.rows[1]).toMatchObject({ state: "done" });
+    expect(initStageCount(deferred.rows)).toEqual({ done: 2, total: 3 });
     // The stage folds on the outcomes, so a run on a Linux computer folds where a Mac's does, on the words that computer drew.
     const linux = initBuildRows(rows.map(r => (r.id === "sign-in/gh" ? { ...r, state: INIT_SIGN_IN_WORDS.copied("linux"), login: "copied" as const } : r)));
     expect(linux.rows[1]).toMatchObject({ state: "done" });

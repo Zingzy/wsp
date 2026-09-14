@@ -13,8 +13,9 @@ use serde_json::Value;
 use wsp_frames::{
     numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GuestCliMessage, GuestOpenReply,
     MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachinePromoteReply,
-    MachineReachReply, MachineShapeReply, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply, MachineStateReply,
-    MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    MachineReachReply, MachineReadingReply, MachineShapeReply, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
+    MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS,
+    MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -187,6 +188,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "MachineShapeReply" => {
                     round_trip::<MachineShapeReply>(&sample, &at);
                 }
+                "MachineReadingReply" => {
+                    round_trip::<MachineReadingReply>(&sample, &at);
+                }
                 "MachineAnswersReply" => {
                     round_trip::<MachineAnswersReply>(&sample, &at);
                 }
@@ -238,6 +242,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineListReply",
         "MachinePromoteReply",
         "MachineReachReply",
+        "MachineReadingReply",
         "MachineShapeReply",
         "MachineSnapshotJobReply",
         "MachineSnapshotReply",
@@ -317,6 +322,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("openBodyMax", Value::from(numbers::OPEN_BODY_CAP));
     m.insert("daemonDefaultHost", Value::from(numbers::DEFAULT_HOST));
     m.insert("daemonDefaultPort", Value::from(numbers::DEFAULT_PORT));
+    m.insert("daemonSamplerIntervalMs", Value::from(numbers::SAMPLER_INTERVAL_MS));
     m.insert("daemonTokenPath", Value::from(numbers::DEFAULT_TOKEN_PATH));
     m.insert("daemonRootsPath", Value::from(numbers::DAEMON_ROOTS_PATH));
     m.insert("guestInboxDir", Value::from(numbers::DEFAULT_INBOX_DIR));

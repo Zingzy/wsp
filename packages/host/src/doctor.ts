@@ -12,7 +12,7 @@ import { join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_BIN, GUEST_DAEMON_DIR, GUEST_WSP_PATH, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_BIN, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
@@ -31,8 +31,8 @@ const execFileAsync = promisify(execFile);
  * login's, and the daemon binds loopback with the port forwarded from this computer. One value per place, read by
  * the bundle, the unit, the stop and the deploy, so no line below compares a kind. */
 export interface DaemonPlace {
-  /** Which kind of machine this daemon serves, which picks the two modules its Live rows and Processes tab read. */
-  kind: WorkspaceKind;
+  /** Which machine this daemon's own readings describe, which picks the two modules behind them. */
+  kind: DaemonKind;
   /** Where the bundle is unpacked and the daemon runs from. */
   dir: string;
   /** Where the packed bundle lands before it is unpacked. */
@@ -356,17 +356,7 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     exportEnv: ['export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"'],
     quotePaths: true,
     tokenRoad: "bytes",
-    preflight: [
-      // What holds the daemon up here is that login's own systemd, which a machine somebody owns may not have.
-      NEEDS_SYSTEMD,
-      // The daemon is one static file and asks nothing of the machine; the wsp command beside it, which every turn's
-      // agent drives this host through, still runs on node.
-      `if ! command -v node >/dev/null 2>&1 || [ "$(${NODE_MAJOR} 2>/dev/null || echo 0)" -lt ${WSP_COMMAND_NODE_MAJOR} ]; then echo ${shellQuote(NO_NODE_LINE)}; exit 1; fi`,
-      // Asked only where the machine can answer: without linger the login's own systemd stops with its last
-      // session and takes the daemon with it the moment the host's connection closes, so a deploy that skipped
-      // this would look like it worked and be gone by the next dial.
-      `if command -v loginctl >/dev/null 2>&1 && ! loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then echo ${shellQuote(NO_LINGER_LINE)}; exit 1; fi`,
-    ],
+    preflight: [...DAEMON_PREFLIGHT, NO_LINGER_CHECK],
     runDir: at.runDir,
     binDir: at.binDir,
     openShim: `${at.binDir}/wsp-open`,
@@ -399,6 +389,12 @@ export function joinedPlace(login: { home: string; path: string }, join: Omit<Da
   return {
     ...sshDaemonPlace(login),
     kind: "place",
+    // Root, and the daemon is the system's: a computer you own runs workspaces, which needs root anyway, so its
+    // agent is a service of the machine rather than of one login that has to be told to linger.
+    preflight: [...DAEMON_PREFLIGHT, NEEDS_ROOT_CHECK],
+    scope: "system",
+    unitPath: `/etc/systemd/system/${DAEMON_UNIT}`,
+    wantedBy: "multi-user.target",
     supervise: JOINED,
     join: { ...join, file: at.placeFile, log: at.placeLog },
     // The code buys a place in somebody's wsp for the ten minutes it stands: a deploy that dies between landing it
@@ -530,6 +526,23 @@ export const guestWspShim = (): string => `#!/bin/sh\nexec ${GUEST_DAEMON_BIN} w
  * whose substitution failed and exempts one inside a test. */
 const NODE_MAJOR = `node -p 'process.versions.node.split(".")[0]'`;
 
+/** What every machine wsp reaches over a login must have before a byte of wsp's lands on it: its own systemd to
+ * hold the daemon up, and a node new enough for the wsp command beside it, which every turn's agent drives its
+ * host through. The daemon itself is one static file and asks nothing. */
+const DAEMON_PREFLIGHT: readonly string[] = [
+  NEEDS_SYSTEMD,
+  `if ! command -v node >/dev/null 2>&1 || [ "$(${NODE_MAJOR} 2>/dev/null || echo 0)" -lt ${WSP_COMMAND_NODE_MAJOR} ]; then echo ${shellQuote(NO_NODE_LINE)}; exit 1; fi`,
+];
+
+/** Asked only where the machine can answer: without linger a login's own systemd stops with its last session and
+ * takes the daemon with it the moment the host's connection closes, so a deploy that skipped this would look like
+ * it worked and be gone by the next dial. */
+const NO_LINGER_CHECK = `if command -v loginctl >/dev/null 2>&1 && ! loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then echo ${shellQuote(NO_LINGER_LINE)}; exit 1; fi`;
+
+/** A join installs a system service under /etc/systemd/system, so a login that is not root reads the one sentence
+ * and the join stops with nothing written on that computer. */
+const NEEDS_ROOT_CHECK = `if [ "$(id -u)" -ne 0 ]; then echo ${shellQuote(PLACE_NEEDS_ROOT_LINE)}; exit 1; fi`;
+
 /** Keeps the binary for the chip the guest turns out to be and drops the other, by the one word the machine says
  * about itself. A chip wsp builds no daemon for ends the deploy here, before anything is started. */
 function keepDaemonForThisChip(place: DaemonPlace, targets: readonly DaemonTarget[]): string {
@@ -615,6 +628,17 @@ export function apparmorProfile(place: DaemonPlace): string {
  * is root: elsewhere a box has nothing to load it into, or no place to write it, and needs neither. The profile's
  * bytes ride base64 so nothing in it has to be quoted for the shell, and the person watching the install is told
  * it landed. */
+/** Takes the workspace profile back off, where this computer has one loaded. Guarded the way the step that wrote
+ * it is: a computer with no apparmor_parser and no file of ours never had one, and says nothing about it. */
+function apparmorOffStep(): string[] {
+  return [
+    `if [ -f ${WSP_WORKSPACE_APPARMOR_PATH} ]; then`,
+    `  command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R ${WSP_WORKSPACE_APPARMOR_PATH} 2>/dev/null || true`,
+    `  rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    "fi",
+  ];
+}
+
 function apparmorStep(place: DaemonPlace): string[] {
   const bytes = Buffer.from(apparmorProfile(place)).toString("base64");
   return [
@@ -726,6 +750,10 @@ export function removeDaemonScript(place: DaemonPlace): string {
     `${systemctl} daemon-reload 2>/dev/null || true`,
     `rm -rf ${daemonOwnedPaths(place).map(path => sh(place, path)).join(" ")}`,
     `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}${place.wsp === "shim" ? ` ${sh(place, GUEST_WSP_PATH)}` : ""}`,
+    // The profile the deploy loaded on a root install goes with the binary it names: a profile left loaded for a
+    // path nothing is at is something of wsp's still on a computer the remove said it left as it found it. Only on
+    // the scope that could write it, and unloaded before the file goes, since the kernel holds it by name.
+    ...(place.scope === "system" ? apparmorOffStep() : []),
     ...(place.profileSource === undefined
       ? []
       : [
@@ -1239,6 +1267,19 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
   return 0;
 }
 
+/** One line per place running an older daemon than this wsp deploys, each naming the line that moves it. Read
+ * before anything is forked, so the reading a person came for is printed whether or not the rest of the run stands;
+ * it dials nothing and bills nothing, since every fact on it is what that computer last reported. A host holding no
+ * places, or none behind, prints nothing. */
+export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.now()): Promise<string[]> {
+  if (rt.places === undefined) return [];
+  const places = await rt.places.list(now);
+  return places.flatMap(place => {
+    const word = placeDaemonBehind(place);
+    return word === undefined ? [] : [placeBehindLine(place.name, word)];
+  });
+}
+
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
@@ -1261,6 +1302,10 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
   try {
     io.log("doctor: proving one live workspace end to end, from your image to the machine it forks and back");
+
+    // Before the first thing that bills: a computer on an older daemon than this wsp deploys is a fact a person
+    // came here for, and a run that stops later must still have said it.
+    for (const line of await placesBehindLines(rt)) io.log(line);
 
     await timings.time("image versions made durable", () => promoteGoldens(rt, io), note => note);
     await timings.time("snapshot storage", () => cleanOrphans(rt, io, opts.yes === true, opts.statePath), note => note);

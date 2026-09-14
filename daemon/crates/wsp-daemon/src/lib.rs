@@ -129,17 +129,20 @@ pub(crate) fn frame_text(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).expect("a frame serialises")
 }
 
-/// One item on a socket's outbound channel: a frame to write, or the leave's reply, after which the loop stops.
+/// One item on a socket's outbound channel: a frame to write, or the last reply of an op that ends this daemon,
+/// after which the loop stops. A leave ends it for good; an update ends it so whatever supervises it starts the
+/// binary the host just sent.
 pub(crate) enum Outgoing {
     Text(String),
     Leave(String),
+    Restart(String),
 }
 
 impl Outgoing {
     #[cfg(test)]
     pub(crate) fn text(&self) -> &str {
         match self {
-            Outgoing::Text(t) | Outgoing::Leave(t) => t,
+            Outgoing::Text(t) | Outgoing::Leave(t) | Outgoing::Restart(t) => t,
         }
     }
 }
@@ -174,9 +177,6 @@ pub(crate) struct Listener {
     pub(crate) key: u64,
     pub(crate) out: Outbound,
 }
-
-/// How often the two samplers read the machine when no flag says otherwise, as the node daemon's do.
-const SAMPLER_INTERVAL_MS: u64 = 2000;
 
 /// What every socket's handler reads: the options as given, the root the hello announces, the ptys and their mode
 /// watcher, and every authed unscoped socket for the events the daemon pushes without being asked.
@@ -266,7 +266,7 @@ impl Ctx {
             return Ok(Arc::clone(sampler));
         }
         let kind = readings::readings_for(&self.options.kind, std::env::consts::OS)?;
-        let interval = Duration::from_millis(self.options.sys_interval_ms.unwrap_or(SAMPLER_INTERVAL_MS));
+        let interval = Duration::from_millis(self.options.sys_interval_ms.unwrap_or(numbers::SAMPLER_INTERVAL_MS));
         let sampler = sys::SysSampler::new((kind.metrics)(&self.readings_options()), interval, Arc::clone(&self.log));
         *held = Some(Arc::clone(&sampler));
         Ok(sampler)
@@ -290,7 +290,7 @@ impl Ctx {
         let opts = proc::ProcSamplerOptions {
             self_pid: std::process::id(),
             ptys,
-            interval: Duration::from_millis(self.options.proc_interval_ms.unwrap_or(SAMPLER_INTERVAL_MS)),
+            interval: Duration::from_millis(self.options.proc_interval_ms.unwrap_or(numbers::SAMPLER_INTERVAL_MS)),
             now: Arc::new(sys::now_ms),
             log: Arc::clone(&self.log),
         };

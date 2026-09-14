@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
-import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
+import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
@@ -113,10 +113,6 @@ export interface PlaceReportOptions {
   home?: string;
   env?: Readonly<Record<string, string | undefined>>;
   run?: RunningWsp;
-  /** Whether this computer's own daemon runs workspaces here, as the daemon found out by its self check rather than
-   * by looking for a command on the PATH. Absent leaves the kernel read this file makes, which is what a report
-   * taken outside the daemon has. */
-  runsWorkspaces?: boolean;
 }
 
 /** The engine a project's own containers would run on here, off the login PATH; the docker-first rule is the
@@ -129,29 +125,23 @@ function engineOnPath(path: string | undefined): PlaceEngine {
  * host's own-machine row and a joined computer's report speak alike. The authoritative gate when a fork is asked
  * for is still the daemon's self check, which mounts an overlay and makes a cgroup; this reads the same kernel
  * facts without touching anything. `runs` overrides the read when the daemon already knows the answer. */
-function selfDoctor(env: Readonly<Record<string, string | undefined>>, runs?: boolean): Pick<PlaceReport, "runsWorkspaces" | "engine"> & { workspacesBlocked?: string } {
+function selfDoctor(env: Readonly<Record<string, string | undefined>>): Pick<PlaceReport, "runsWorkspaces" | "engine"> & { workspacesBlocked?: string } {
   const engine = engineOnPath(env.PATH);
-  const blocked = runs === true ? undefined : runs === false ? "this computer's daemon cannot run workspaces here" : workspacesBlocked();
+  const blocked = workspacesBlocked();
   return { runsWorkspaces: blocked === undefined, engine, ...(blocked === undefined ? {} : { workspacesBlocked: blocked }) };
 }
 
-/** The one kernel reason this computer cannot run workspaces, read off /sys and /proc, or nothing when it can. The
- * same order and words the daemon's doctor uses. */
-function workspacesBlocked(): string | undefined {
-  if (platform() !== "linux") return "wsp runs workspaces on a Linux computer";
-  let controllers: string;
+/** The one kernel reason this computer cannot run workspaces, or nothing when it can: the protocol's rule over the
+ * files this side reads. */
+const workspacesBlocked = (): string | undefined => workspacesBlockedBy({ platform: platform(), read: readTextOr, euid: process.geteuid?.() });
+
+/** A file's text, or nothing where it is not there, which is what the rule above reads absence as. */
+function readTextOr(path: string): string | undefined {
   try {
-    controllers = readFileSync("/sys/fs/cgroup/cgroup.controllers", "utf8");
+    return readFileSync(path, "utf8");
   } catch {
-    return "this computer mounts cgroup v1 at /sys/fs/cgroup, and wsp runs workspaces on cgroup v2 alone: boot it with systemd.unified_cgroup_hierarchy=1";
+    return undefined;
   }
-  const has = new Set(controllers.split(/\s+/));
-  for (const wanted of ["memory", "cpu"]) if (!has.has(wanted)) return `this computer's cgroup root offers no ${wanted} controller, which wsp needs to run workspaces here`;
-  if (!existsSync("/proc/filesystems") || !readFileSync("/proc/filesystems", "utf8").split(/\s+/).includes("overlay")) {
-    return "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
-  }
-  if (process.geteuid?.() !== 0) return "wsp runs workspaces on this computer as root, and this daemon is not root";
-  return undefined;
 }
 
 /** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains an
@@ -172,7 +162,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     login,
     // Whether the daemon runs workspaces here, and the engine a project's own containers would run on: the read-only
     // twin of the daemon's self check, so what the doctor says and what a create does cannot part ways.
-    ...selfDoctor(env, opts.runsWorkspaces),
+    ...selfDoctor(env),
     uptimeMs: Math.max(0, Math.round(upSeconds() * 1000)),
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
@@ -201,8 +191,9 @@ export interface PlaceSweepOptions {
   uid?: number;
 }
 
-/** Which service the agent on this computer is, for the manager that holds it. */
-const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
+/** Which service the agent on this computer is, for the manager that holds it. Exported because the update road
+ * names that unit from the host, and a second spelling of it there would be a second copy of the rule. */
+export const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
 
 /** Takes wsp off this computer: the file that holds the agent up, the place file and the key, and every path the
  * daemon and the installer put under wsp's own folder here, read off the one list the ssh road's removal reads so

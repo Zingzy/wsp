@@ -13,8 +13,8 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GuestOpen, GuestOpenReply, InboxRescanReply,
-    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PortsWatchReply, PtyAttachReply, PtyCreateReply,
-    PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply,
+    PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
@@ -29,7 +29,7 @@ use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound, Outgoin
 type Detach = Box<dyn FnOnce() + Send>;
 
 /// Which road a socket came in on: dialled by a client of this machine, or opened outward by this place to its
-/// host. The leave op and the machine ops are the link's alone.
+/// host. The leave op and every machine op but the two read-only ones are the link's alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Road {
     Inbound,
@@ -193,9 +193,14 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
                 let swept = fs::blocking(move || Ok(crate::place::sweep_place_home(&home))).await.unwrap_or_default();
                 return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
             }
+            Some("place.update") => return place_update(ctx, id, &frame).await,
             Some(name) if MACHINE_OPS.contains(&name) => return Outgoing::Text(machine_answer(ctx, id, name, &frame).await),
             _ => {}
         }
+    } else if let Some(name) = op.filter(|name| MACHINE_OPS_ON_ANY_ROAD.contains(name)) {
+        // A socket that dialled in holds this daemon's token, so a person at this computer may ask it what it is
+        // running and how one workspace is doing. Both only read; the rest of the machine ops stay the link's.
+        return Outgoing::Text(machine_answer(ctx, id, name, &frame).await);
     }
     Outgoing::Text(handle_op(conn, ctx, &frame, id, op).await)
 }
@@ -203,8 +208,10 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
 async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<RequestId>, op: Option<&str>) -> String {
     match op {
         Some("ping") => ok(id),
-        // The leave op and the machine ops are the link's; one sentence for the one rule, as the node daemon says it.
-        Some(name) if name == "place.leave" || MACHINE_OPS.contains(&name) => {
+        // The two place ops and every machine op that does anything are the link's; one sentence for the one rule,
+        // as the node daemon says it. The two machine ops that only read were answered above, on whichever road
+        // they came in on.
+        Some(name) if name == "place.leave" || name == "place.update" || MACHINE_OPS.contains(&name) => {
             refuse(id, DaemonErrorCode::Forbidden, words::NOT_ON_THIS_ROAD)
         }
         // The guest ops are the inbound road's: a guest runs on a machine wsp forked, never on a computer whose
@@ -252,6 +259,53 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
         }
         Some(name) if DAEMON_OPS.contains(&name) => refuse(id, DaemonErrorCode::Unsupported, not_built(name)),
         _ => fail(id, words::unknown_op(&op_word(frame))),
+    }
+}
+
+/// The daemon the host sent, landed part by part and started in place of this one. Every part but the last is a
+/// plain reply; the last checks the bytes against the sha256 the host named, moves them over the binary this
+/// process runs from and answers where they went, and the loop then ends this daemon so its supervisor starts the
+/// one that landed. Nothing here sweeps: the workspaces' records stay on the box and the daemon that comes up
+/// reads them again.
+async fn place_update(ctx: &Arc<Ctx>, id: Option<RequestId>, frame: &Value) -> Outgoing {
+    let typed = match serde_json::from_value::<DaemonOp>(frame.clone()) {
+        Ok(typed) => typed,
+        Err(e) => return Outgoing::Text(refuse(id, DaemonErrorCode::BadRequest, e.to_string())),
+    };
+    let DaemonOp::PlaceUpdate { upload_id, seq, last, data, sha256 } = typed else {
+        return Outgoing::Text(fail(id, words::unknown_op("place.update")));
+    };
+    let home = crate::place::place_home(ctx.options.home.as_deref());
+    let bytes = lenient_base64(&data);
+    let part = crate::place::update_part(&home, &upload_id);
+    // An upload beginning is the other moment nothing is arriving, so what an earlier try left goes here too.
+    if seq == 0 {
+        let (home, upload) = (home.clone(), upload_id.clone());
+        let _ = fs::blocking(move || Ok(crate::place::sweep_updates(&home, Some(&upload)))).await;
+    }
+    let taking = {
+        let (part, upload) = (part.clone(), upload_id.clone());
+        fs::blocking(move || crate::place::take_update_part(&part, seq, &bytes, &upload).map_err(OpError::plain)).await
+    };
+    if let Err(e) = taking {
+        return Outgoing::Text(fail(id, e.message));
+    }
+    if !last {
+        return Outgoing::Text(ok(id));
+    }
+    // Its own path rather than the unit's: the binary a unit starts is the file this process was execed from, and
+    // reading it here needs neither the unit's name nor the manager that holds it.
+    let exe = match crate::place::running_daemon(std::env::current_exe()) {
+        Ok(exe) => exe,
+        Err(e) => return Outgoing::Text(fail(id, e)),
+    };
+    let landed = fs::blocking(move || crate::place::install_daemon(&exe, &part, &sha256, &upload_id).map_err(OpError::plain)).await;
+    match landed {
+        Err(e) => Outgoing::Text(fail(id, e.message)),
+        Ok((at, kept)) => {
+            ctx.log(&words::update_landed(&at));
+            Outgoing::Restart(text(&Reply::new(id, PlaceUpdateReply { at, kept })))
+        }
     }
 }
 
@@ -589,6 +643,7 @@ mod tests {
         let built = [
             "ping",
             "place.leave",
+            "place.update",
             "pty.create",
             "pty.attach",
             "pty.write",
@@ -628,17 +683,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn link_only_ops_are_forbidden_on_an_inbound_socket() {
+    async fn link_only_ops_are_forbidden_on_an_inbound_socket_but_the_two_that_only_read() {
         let b = bench();
         let (c, _rx) = conn(None);
-        assert_eq!(
-            reply(&b, &c, json!({"id": 1, "op": "place.leave"})).await,
-            json!({"id": 1, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD})
-        );
+        for op in ["place.leave", "place.update"] {
+            assert_eq!(
+                reply(&b, &c, json!({"id": 1, "op": op})).await,
+                json!({"id": 1, "ok": false, "code": "forbidden", "error": words::NOT_ON_THIS_ROAD}),
+                "{op}"
+            );
+        }
         for op in MACHINE_OPS {
+            if MACHINE_OPS_ON_ANY_ROAD.contains(&op) {
+                continue;
+            }
             assert_eq!(
                 reply(&b, &c, json!({"id": 2, "op": op})).await,
                 json!({"id": 2, "ok": false, "code": "forbidden", "error": "not on this road"}),
+                "{op}"
+            );
+        }
+        // The listing and one workspace's reading are answered on this road: a client here holds the daemon's own
+        // token and neither op drives anything. This bench holds no runtime, so the answer is the backend's.
+        for op in MACHINE_OPS_ON_ANY_ROAD {
+            assert_eq!(
+                reply(&b, &c, json!({"id": 3, "op": op, "machineId": "wsp-x"})).await,
+                json!({"id": 3, "ok": false, "error": format!("this computer's backend has no {op}")}),
                 "{op}"
             );
         }
@@ -655,9 +725,13 @@ mod tests {
                 "{op}"
             );
         }
-        // An inbound socket on the same daemon still gets the road refusal.
+        // An inbound socket on the same daemon is answered the two that read and refused the rest.
         let (inbound, _rx2) = conn(None);
-        assert_eq!(reply(&b, &inbound, json!({"id": 4, "op": "machine.list"})).await["error"], words::NOT_ON_THIS_ROAD);
+        assert_eq!(
+            reply(&b, &inbound, json!({"id": 4, "op": "machine.list"})).await["error"],
+            "this computer's backend has no machine.list"
+        );
+        assert_eq!(reply(&b, &inbound, json!({"id": 4, "op": "machine.kill"})).await["error"], words::NOT_ON_THIS_ROAD);
         let home = tempfile::tempdir().unwrap();
         let at = wsp_frames::place_daemon_paths(home.path());
         std::fs::create_dir_all(&at.wsp).unwrap();
@@ -671,6 +745,48 @@ mod tests {
         let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy()]);
         assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
         assert!(!at.place_file.exists() && !at.token_path.exists());
+    }
+
+    #[tokio::test]
+    async fn an_update_takes_its_parts_on_the_link_and_refuses_a_gap_and_bytes_the_host_did_not_name() {
+        let b = bench();
+        let (link, _rx) = conn_on(None, Road::Link);
+        let home = tempfile::tempdir().unwrap();
+        let mut options = Options::new(b._token.path());
+        options.home = Some(home.path().to_path_buf());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        // Never the sha of what this sends: the exe a landing moves over is this test binary's own, so a part that
+        // matched would replace the runner under itself. The landing is proved in place.rs against a temp file.
+        let sha = "0".repeat(64);
+        let part = |seq: u64, last: bool, data: &str| json!({"id": 9, "op": "place.update", "uploadId": "u1", "seq": seq, "last": last, "data": data, "sha256": sha});
+        let said = |out: &Outgoing| serde_json::from_str::<Value>(out.text()).unwrap();
+
+        // A part that is not the first with nothing landed drops the upload and says which part.
+        let gap = handle(&link, &ctx, &part(1, false, "AAAA").to_string()).await;
+        assert!(matches!(gap, Outgoing::Text(_)), "a refused part ended the daemon");
+        assert_eq!(said(&gap), json!({"id": 9, "ok": false, "error": words::update_out_of_order(1, 0, "u1")}));
+
+        // Every part but the last is a plain ok and lands nothing.
+        let first = handle(&link, &ctx, &part(0, false, "AAAA").to_string()).await;
+        assert_eq!(said(&first), json!({"id": 9, "ok": true}));
+        assert_eq!(std::fs::read(crate::place::update_part(home.path(), "u1")).unwrap(), vec![0, 0, 0]);
+
+        // The last part is checked against the sha256 the host named before anything is moved, and the daemon
+        // stays up when the bytes are not the ones it was promised.
+        let wrong = handle(&link, &ctx, &part(1, true, "AAAA").to_string()).await;
+        assert!(matches!(wrong, Outgoing::Text(_)), "a binary the host did not name ended the daemon");
+        assert_eq!(said(&wrong)["ok"], json!(false));
+        assert!(said(&wrong)["error"].as_str().unwrap().starts_with("the update u1 landed as sha256 "), "{}", said(&wrong));
+        assert!(!crate::place::update_part(home.path(), "u1").exists(), "the dropped upload stays on disk");
+
+        // A frame the schema refuses is a bad request, never a landing.
+        let bad = handle(
+            &link,
+            &ctx,
+            &json!({"id": 9, "op": "place.update", "uploadId": "../x", "seq": 0, "last": true, "data": "", "sha256": sha}).to_string(),
+        )
+        .await;
+        assert_eq!(said(&bad)["code"], json!("bad-request"));
     }
 
     #[cfg(target_os = "linux")]
@@ -694,13 +810,22 @@ mod tests {
         .unwrap();
         assert_eq!(lost, json!({"id": 2, "ok": false, "error": "no such workspace: wsp-x", "kind": "missing", "status": 404}));
         assert!(runtime_root.path().join("layers").is_dir(), "the store is opened under the runtime root");
-        // The same op inbound is still the road refusal.
+        // The same op inbound is answered by the same runtime, and the reading of a workspace it has not got is
+        // that workspace missing rather than the road refusal; an op that drives something is still refused.
         let (inbound, _rx2) = conn(None);
-        assert_eq!(
-            serde_json::from_str::<Value>(handle(&inbound, &ctx, &json!({"id": 3, "op": "machine.list"}).to_string()).await.text())
-                .unwrap()["error"],
-            words::NOT_ON_THIS_ROAD
-        );
+        let listed: Value =
+            serde_json::from_str(handle(&inbound, &ctx, &json!({"id": 3, "op": "machine.list"}).to_string()).await.text()).unwrap();
+        assert_eq!(listed, json!({"id": 3, "ok": true, "machines": []}));
+        let read: Value = serde_json::from_str(
+            handle(&inbound, &ctx, &json!({"id": 4, "op": "machine.metrics", "machineId": "wsp-x"}).to_string()).await.text(),
+        )
+        .unwrap();
+        assert_eq!(read, json!({"id": 4, "ok": false, "error": "no such workspace: wsp-x", "kind": "missing", "status": 404}));
+        let refused: Value = serde_json::from_str(
+            handle(&inbound, &ctx, &json!({"id": 5, "op": "machine.pause", "machineId": "wsp-x"}).to_string()).await.text(),
+        )
+        .unwrap();
+        assert_eq!(refused["error"], words::NOT_ON_THIS_ROAD);
     }
 
     #[tokio::test]
