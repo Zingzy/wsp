@@ -833,8 +833,9 @@ describe("packPlan: command guard", () => {
     return { stderr: r.stderr, status: Number(/exit=(\d+)/.exec(r.stdout)?.[1]) };
   };
   const RC = ['eval "$(starship init zsh)"', "alias ls='eza -la'", "diskbloom --quiet", 'export PATH="$HOME/tools:$PATH"', "zoxide query x", "ls", ""].join("\n");
-  /** A stub by that name that prints its call to stderr. */
-  const stub = (dir: string, name: string): void => writeFileSync(join(dir, name), `#!/bin/sh\necho real-${name} "$@" >&2\n`, { mode: 0o755 });
+  /** A stub by that name that prints its call to stderr: a link to the one script in the tree, see tool-stub.sh
+   * for why a link. */
+  const stub = (dir: string, name: string): void => symlinkSync(join(import.meta.dirname, "tool-stub.sh"), join(dir, name));
 
   it.skipIf(!existsSync("/bin/zsh"))("an rc file calling tools the image does not have ships behind one guard block naming them, so a shell on the machine starts silent; a guarded tool the rc itself puts on PATH still runs; a tool the recipe ticked is not guarded; the names land on the pack once", async () => {
     const home = laptop();

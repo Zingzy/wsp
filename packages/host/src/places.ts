@@ -20,6 +20,7 @@ import {
   JOIN_ADDRESS_LINE,
   LOOPBACK,
   PLACE_CODE_REFUSAL,
+  PLACE_LEAVE_VERB,
   fmtPrice,
   PLACE_DOOR_UNSERVED,
   PLACE_FILE_MODE,
@@ -45,6 +46,7 @@ import {
   placeDaemonPaths,
   placeUpdateLine,
   shellQuote,
+  shellLine,
   placeNoChipLine,
   MACHINE_PUT_PART_BYTES,
   workFolderIn,
@@ -58,8 +60,8 @@ import {
   wsUrlOf,
   PLACE_NEEDS_ROOT_LINE,
 } from "@wsp/protocol";
-import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
-import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
+import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
+import { newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
@@ -70,7 +72,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
-import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { advertiseWord, pairOnLoopbackLine, reachAddresses } from "./pairing.js";
@@ -140,6 +142,7 @@ export function placeWiring(statePath: string, env: ProviderEnv, advertise?: str
     dial: placeDialler(),
     log: placeLogReader(),
     update: placeUpdater(),
+    leave: placeLeaver(),
     provider: () => {
       const module = providerModule(env);
       // A row that is nowhere work can stand is no place to show: a host set up to fork nowhere has none. The row
@@ -237,7 +240,7 @@ export const deviceLeftLine = (name: string, deviceIds: readonly string[]): stri
  * the device a join bought for it where one is still on record. */
 export function removeLines(name: string, answer: { swept: readonly string[]; note?: string }, deviceIds: readonly string[] = []): string[] {
   return [
-    ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...answer.swept.map(line => `  ${line}`)]),
+    ...(answer.swept.length === 0 ? [] : [`removed from ${name}:`, ...answer.swept.map(line => sweptLine(line))]),
     ...(answer.note === undefined ? [] : [answer.note]),
     ...(deviceIds.length === 0 ? [] : [deviceLeftLine(name, deviceIds)]),
     `${name} is no longer a place in this wsp.`,
@@ -506,6 +509,43 @@ export function placeDialler(deps: { transport?: SshTransport } = {}): PlaceDial
   return async login => {
     const reach = parseSshAddress(login.ssh, login.keyPath === undefined ? {} : { keyPath: login.keyPath });
     await sshDial(reach, ...(deps.transport === undefined ? [] : [deps.transport]));
+  };
+}
+
+/** How long the leave over ssh is given. The stop it starts with is systemd's own, which waits a unit's
+ * TimeoutStopSec (90 seconds where nothing names another) before it kills what is left of a daemon writing its
+ * last frames, and the rest of the sweep follows that stop. */
+const PLACE_LEAVE_MS = 180_000;
+
+/** What the ssh client itself exits with when the login would not stand, which is the one exit that is the road
+ * talking rather than the computer at the end of it. */
+const SSH_REFUSED_EXIT = 255;
+
+/** What a computer said when the leave on it did not finish: its own last words, since a person reading why the
+ * agent is still on it needs that computer's sentence and not a reading of it. A computer that said nothing at all
+ * is one the wait ran out on, and the line says so with the wait rather than ending on a colon. */
+export const placeLeaveFailedLine = (name: string, said: { stdout: string; stderr: string }): string => {
+  const words = `${said.stdout.slice(-300)} ${said.stderr.slice(-200)}`.trim();
+  return words === ""
+    ? `${name} ran the leave and had not finished it within ${Math.round(PLACE_LEAVE_MS / 1000)}s`
+    : `${name} ran the leave and did not finish it: ${words}`;
+};
+
+/** How the agent is taken off a computer this host holds no link to, for the host that wires the runtime: the
+ * leave that computer already carries, run over the login the install used. What comes off, in what order, and
+ * what stays is that computer's own wsp, the same code a person at its terminal runs, so nothing of the sweep is
+ * spelled here. The line that starts it is the one the box itself reported for running wsp there, word for word,
+ * and what came off is read back by the rule that leave prints those lines by. */
+export function placeLeaver(deps: { transport?: SshTransport } = {}): PlaceLeaver {
+  return async req => {
+    const reach = parseSshAddress(req.ssh.ssh, req.ssh.keyPath === undefined ? {} : { keyPath: req.ssh.keyPath });
+    const line = shellLine([...req.report.wsp, PLACE_LEAVE_VERB]);
+    const said = await (deps.transport ?? sshClient)(reach, line, { timeoutMs: PLACE_LEAVE_MS });
+    // ssh's own line where the login would not stand, which is what a person would have read in their own
+    // terminal; a leave that ran and stopped carries that computer's own words instead.
+    if (said.exitCode === SSH_REFUSED_EXIT) throw new Error(sshRefusalLine(said, reach));
+    if (said.exitCode !== 0) throw new Error(placeLeaveFailedLine(req.name, said));
+    return sweptSaid(said.stdout);
   };
 }
 
@@ -1112,7 +1152,6 @@ export function placeStanding(home: string): PlaceFile | undefined {
 export async function leavePlace(home: string, run?: ServiceRunner, forPlatform: string = platform()): Promise<string[]> {
   const manager = serviceManagerFor(forPlatform);
   const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), ...(run !== undefined ? { run } : {}) });
-  await stopPlaceService({ home, ...(manager !== undefined ? { manager } : {}), ...(run !== undefined ? { run } : {}) });
   return swept.removed;
 }
 
@@ -1163,11 +1202,11 @@ export async function leaveCommand(io: CliIO, args: readonly string[], deps: { h
     return 1;
   }
   const manager = serviceManagerFor(deps.platform);
+  // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
+  // below say so.
   const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run });
-  // The agent is another process from this one, so the manager is asked to let it go here and the person reads it.
-  await stopPlaceService({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run });
   io.log(`${held.name} left the wsp at ${held.hostUrls.join(", ")}; removed:`);
-  for (const line of swept.removed) io.log(`  ${line}`);
+  for (const line of swept.removed) io.log(sweptLine(line));
   for (const line of swept.kept) io.log(line);
   io.log("The host over there still lists it until somebody runs wsp remove on it.");
   return 0;

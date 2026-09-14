@@ -85,6 +85,17 @@ describe("one module per service manager", () => {
     expect(launchd.load(at)).toEqual([["launchctl", "bootstrap", "gui/501", `/Users/z/Library/LaunchAgents/com.wsp.host.${tag}.plist`]]);
     expect(launchd.unload(at)).toEqual([["launchctl", "bootout", `gui/501/com.wsp.host.${tag}`]]);
     expect(launchd.holds(at)).toEqual(["launchctl", "print", `gui/501/com.wsp.host.${tag}`]);
+    // One domain per login, so one unit and one call: the bootout is the stop, run while the plist is still there,
+    // and launchd holds nothing beside that file to forget or to reload once it has gone.
+    expect(launchd.held(at)).toEqual([
+      {
+        unit: { name: `com.wsp.host.${tag}`, path: `/Users/z/Library/LaunchAgents/com.wsp.host.${tag}.plist` },
+        words: "launchd agent",
+        stop: [["launchctl", "bootout", `gui/501/com.wsp.host.${tag}`]],
+        forget: [],
+        reload: [],
+      },
+    ]);
     expect(launchd.afterLoad).toBeUndefined();
   });
 
@@ -115,7 +126,8 @@ describe("one module per service manager", () => {
     expect(text).not.toContain(KEY);
     expect(systemd.load(at)).toEqual([
       ["systemctl", "--user", "daemon-reload"],
-      ["systemctl", "--user", "enable", "--now", `wsp-host-${tag}.service`],
+      ["systemctl", "--user", "enable", `wsp-host-${tag}.service`],
+      ["systemctl", "--user", "restart", `wsp-host-${tag}.service`],
     ]);
     expect(systemd.unload(at)).toEqual([
       ["systemctl", "--user", "disable", "--now", `wsp-host-${tag}.service`],
@@ -135,7 +147,8 @@ describe("one module per service manager", () => {
     expect(systemd.text(planFor(there))).toContain("WantedBy=multi-user.target");
     expect(systemd.load(there)).toEqual([
       ["systemctl", "daemon-reload"],
-      ["systemctl", "enable", "--now", `wsp-place-${theirTag}.service`],
+      ["systemctl", "enable", `wsp-place-${theirTag}.service`],
+      ["systemctl", "restart", `wsp-place-${theirTag}.service`],
     ]);
     expect(systemd.unload(there)).toEqual([
       ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
@@ -148,20 +161,16 @@ describe("one module per service manager", () => {
       {
         unit: { name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` },
         words: "systemd system unit",
+        stop: [["systemctl", "stop", `wsp-place-${theirTag}.service`]],
         forget: [["systemctl", "disable", `wsp-place-${theirTag}.service`]],
-        unload: [
-          ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
-          ["systemctl", "daemon-reload"],
-        ],
+        reload: [["systemctl", "daemon-reload"]],
       },
       {
         unit: { name: `wsp-place-${theirTag}.service`, path: `/home/maya/.config/systemd/user/wsp-place-${theirTag}.service` },
         words: "systemd user unit",
+        stop: [["systemctl", "--user", "stop", `wsp-place-${theirTag}.service`]],
         forget: [["systemctl", "--user", "disable", `wsp-place-${theirTag}.service`]],
-        unload: [
-          ["systemctl", "--user", "disable", "--now", `wsp-place-${theirTag}.service`],
-          ["systemctl", "--user", "daemon-reload"],
-        ],
+        reload: [["systemctl", "--user", "daemon-reload"]],
       },
     ]);
     // Nothing about linger: a system unit outlives every login on its own.
@@ -245,7 +254,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
-    held: a => [{ unit: unit(a), words: "fake service", forget: [], unload: [["fake", "unload", unit(a).name]] }],
+    held: a => [{ unit: unit(a), words: "fake service", stop: [["fake", "unload", unit(a).name]], forget: [], reload: [] }],
     absent: answer => answer.output === "not held",
   };
   const run: ServiceRunner = async argv => {

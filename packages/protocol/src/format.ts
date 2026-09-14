@@ -3355,8 +3355,12 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
   return `${view.name} runs a project's own containers on ${view.engine}; a workspace made with --engine gets a socket to it and sees its own containers alone`;
 }
 
+/** The verb alone, for the host road that runs that leave on another computer over the line that computer said
+ * starts its own wsp: two spellings of the word would have those two agreeing by luck. */
+export const PLACE_LEAVE_VERB = "leave";
+
 /** The one line that takes wsp off a computer it is typed on. */
-export const PLACE_LEAVE_LINE = "wsp leave";
+export const PLACE_LEAVE_LINE = `wsp ${PLACE_LEAVE_VERB}`;
 
 /** What becomes of the copy of the image on a computer of the person's own when wsp comes off it, in the words
  * every screen that mentions it says. The copy sits in that computer's own workspace store, which placeOwnedPaths

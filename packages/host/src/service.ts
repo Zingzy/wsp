@@ -57,16 +57,22 @@ export interface ServiceUnit {
   path: string;
 }
 
-/** One unit a manager may be holding for a service: the file, the words a line naming it uses, and the two sets of
- * commands that take it away. A manager with more than one place to put a unit answers one of these per place, and
- * the words name which, since a person reading what a leave took needs to know which of them it came out of. */
+/** One unit a manager may be holding for a service: the file, the words a line naming it uses, and the three sets
+ * of commands that take it away, in the order the file's own removal sits among them. A manager with more than one
+ * place to put a unit answers one of these per place, and the words name which, since a person reading what a
+ * leave took needs to know which of them it came out of. */
 export interface HeldUnit {
   unit: ServiceUnit;
   words: string;
-  /** Run in order to make the manager forget it at the next login while what is running keeps running. */
+  /** Run in order to stop what is running, while the unit file is still there: a manager asked to stop a unit
+   * whose file has already gone stops nothing, and the process it started keeps running with the files it serves
+   * removed under it. */
+  stop: ReadonlyArray<readonly string[]>;
+  /** Run in order to make the manager forget it at the next login, while the file it reads that off is still
+   * there. */
   forget: ReadonlyArray<readonly string[]>;
-  /** Run in order to stop it and leave the manager holding nothing. */
-  unload: ReadonlyArray<readonly string[]>;
+  /** Run in order once the file has gone, so the manager no longer holds a unit no file names. */
+  reload: ReadonlyArray<readonly string[]>;
 }
 
 /** What a manager's command answered: its exit code, and whatever it said on either stream. */
@@ -86,10 +92,11 @@ export interface ServiceManager {
   /** Run in order to stop it and leave the manager holding nothing. */
   unload(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Every unit this manager could be holding for the address: the one it writes now first, then any a road wsp
-   * took before wrote somewhere else of this manager's. Its callers are the sweep on a computer joined as a place
-   * and the stop that follows it, which take them all, so a computer joined before a unit moved is left as clean
-   * as one joined today. The forget on each runs while its file is still there: a manager that keeps a link of its
-   * own beside that file would be left holding one that points at nothing. */
+   * took before wrote somewhere else of this manager's. Its caller is the sweep on a computer joined as a place,
+   * which takes them all, so a computer joined before a unit moved is left as clean as one joined today. The stop
+   * and the forget on each run while its file is still there: a manager asked to stop a unit whose file has gone
+   * stops nothing, and one that keeps a link of its own beside that file would be left holding one that points at
+   * nothing. */
   held(at: ServiceAddress): readonly HeldUnit[];
   /** Exits 0 when the manager holds it, non-zero when it does not. */
   holds(at: ServiceAddress): readonly string[];
@@ -164,8 +171,9 @@ const launchd: ServiceManager = {
   load: at => [["launchctl", "bootstrap", `gui/${at.uid}`, launchdUnit(at).path]],
   unload: launchdUnload,
   holds: at => ["launchctl", "print", `gui/${at.uid}/${launchdName(at)}`],
-  // One domain per login, so one file; launchd reads its units off that file alone and has nothing to forget.
-  held: at => [{ unit: launchdUnit(at), words: "launchd agent", forget: [], unload: launchdUnload(at) }],
+  // One domain per login, so one file; launchd reads its units off that file alone and has nothing to forget and
+  // nothing to reload once it has gone.
+  held: at => [{ unit: launchdUnit(at), words: "launchd agent", stop: launchdUnload(at), forget: [], reload: [] }],
   // launchctl answers 113 and says it could not find the service for a label the domain does not have; every other
   // answer is a domain it would not read or a launchctl that is not there.
   absent: answer => answer.code === 113 || /could not find service/i.test(answer.output),
@@ -189,14 +197,17 @@ const systemdUnitIn = (at: ServiceAddress, scope: SystemdScope): ServiceUnit => 
 });
 const systemdUnit = (at: ServiceAddress): ServiceUnit => systemdUnitIn(at, systemdScoped(at));
 
-/** What takes a unit away in one systemd, and what makes that systemd forget it while what runs keeps running.
- * Written once against a scope so the unit a role writes today and the one an older road wrote are torn down by
- * the same lines, told a different systemd. */
+/** What takes a unit away in one systemd: the two lines a stop of the host's own service runs while its file is
+ * still there, then the three a sweep takes a place's unit away with, in the order the file's removal sits among
+ * them. Written once against a scope so the unit a role writes today and the one an older road wrote are torn
+ * down by the same lines, told a different systemd. */
 const systemdUnload = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<readonly string[]> => [
   [...systemctlIn(scope), "disable", "--now", systemdName(at)],
   [...systemctlIn(scope), "daemon-reload"],
 ];
 const systemdForget = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<readonly string[]> => [[...systemctlIn(scope), "disable", systemdName(at)]];
+const systemdStop = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<readonly string[]> => [[...systemctlIn(scope), "stop", systemdName(at)]];
+const systemdReload = (scope: SystemdScope): ReadonlyArray<readonly string[]> => [[...systemctlIn(scope), "daemon-reload"]];
 
 const systemd: ServiceManager = {
   words: "systemd unit",
@@ -221,23 +232,29 @@ const systemd: ServiceManager = {
       `WantedBy=${systemdScoped(plan) === "user" ? "default.target" : "multi-user.target"}`,
       "",
     ].join("\n"),
+  // A restart rather than a start: an install writes the unit file over whatever was there and puts a new binary
+  // beside it, and a unit whose old process is still up would go on running the binary that was replaced. Restart
+  // starts a unit that is stopped, so the one line covers both.
   load: at => [
     [...systemctlArgs(at), "daemon-reload"],
-    [...systemctlArgs(at), "enable", "--now", systemdName(at)],
+    [...systemctlArgs(at), "enable", systemdName(at)],
+    [...systemctlArgs(at), "restart", systemdName(at)],
   ],
   unload: at => systemdUnload(at, systemdScoped(at)),
   holds: at => [...systemctlArgs(at), "is-enabled", systemdName(at)],
   // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
-  // disable while the unit file is still there takes that link with it and leaves the service running. Both
-  // scopes, the one this role writes today first: a computer joined before the place's unit became the machine's
-  // has its file under that login's own systemd, and a sweep that read one scope left it there to flap.
+  // stop and a disable while the unit file is still there take the process and that link with them, and the reload
+  // after the file has gone leaves systemd holding nothing. Both scopes, the one this role writes today first: a
+  // computer joined before the place's unit became the machine's has its file under that login's own systemd, and
+  // a sweep that read one scope left it there to flap.
   held: at => {
     const now = systemdScoped(at);
     return [now, ...SYSTEMD_SCOPES.filter(scope => scope !== now)].map(scope => ({
       unit: systemdUnitIn(at, scope),
       words: `systemd ${scope} unit`,
+      stop: systemdStop(at, scope),
       forget: systemdForget(at, scope),
-      unload: systemdUnload(at, scope),
+      reload: systemdReload(scope),
     }));
   },
   // is-enabled exits 1 both for a unit systemd does not have and for a systemctl that never reached the user bus
@@ -270,14 +287,26 @@ export function noManagerLine(platform: string): string {
 }
 
 export interface ServiceRunner {
-  (argv: readonly string[]): Promise<RunResult>;
+  /** The patience is the caller's, since what a manager is being asked for decides it; a caller that names none
+   * takes the one a command that only writes or reads gets. */
+  (argv: readonly string[], waitMs?: number): Promise<RunResult>;
 }
+
+/** What a manager's command gets to answer in: enough for a launchctl or a systemctl under load, short enough
+ * that one which never answers does not hold a verb open. */
+const MANAGER_WAIT_MS = 15_000;
+
+/** What a stop gets instead. systemd asks a unit to leave and waits its TimeoutStopSec, 90 seconds where nothing
+ * names another, before it kills what is left; a daemon writing its last frames is not a stop that failed until
+ * systemd itself says so. Killing systemctl at the shorter wait would have a leave report a stop that failed for
+ * a unit that was on its way down, and the line a person reads is what actually happened. */
+export const STOP_WAIT_MS = 100_000;
 
 /** A manager's command on this computer. A binary that is not there answers 127 with the same shape, so a Mac
  * without launchctl reads as a refusal rather than a thrown error. */
-export const systemRunner: ServiceRunner = argv =>
+export const systemRunner: ServiceRunner = (argv, waitMs = MANAGER_WAIT_MS) =>
   new Promise(resolve => {
-    execFile(argv[0]!, [...argv.slice(1)], { timeout: 15_000 }, (error, stdout, stderr) => {
+    execFile(argv[0]!, [...argv.slice(1)], { timeout: waitMs }, (error, stdout, stderr) => {
       const said = `${stdout}${stderr}`.trim();
       if (error === null) return resolve({ code: 0, output: said });
       const code = "code" in error && typeof error.code === "number" ? error.code : 127;
@@ -291,17 +320,25 @@ export interface RunFailure {
   result: RunResult;
 }
 
-async function runAll(commands: ReadonlyArray<readonly string[]>, run: ServiceRunner): Promise<RunFailure | undefined> {
+/** Runs them in order and stops at the first that refuses, which is the answer: the rest of a teardown or a load
+ * is told against a manager that has already said no. Exported because the sweep on a computer joined as a place
+ * reads the same answers out of the same lines, and a second copy of this loop there would be a second rule about
+ * what a refusal is. */
+export async function runAll(commands: ReadonlyArray<readonly string[]>, run: ServiceRunner, waitMs?: number): Promise<RunFailure | undefined> {
   for (const argv of commands) {
-    const result = await run(argv);
+    const result = await run(argv, waitMs);
     if (result.code !== 0) return { argv, result };
   }
   return undefined;
 }
 
-/** The line a failed manager command reads as: what wsp ran, its code and what it said. */
+/** The line a failed manager command reads as: what wsp ran, its code and what it said, on one line. A manager
+ * answers in as many lines as it likes, and every reader of this puts it inside a line of its own: one that a
+ * leave prints among what it took is read back off that computer by the mark in front of it, which only its first
+ * line would carry. */
 export function runFailureLine(failure: RunFailure): string {
-  const said = failure.result.output === "" ? "and said nothing" : `and said: ${failure.result.output}`;
+  const words = failure.result.output.replace(/\s+/g, " ").trim();
+  const said = words === "" ? "and said nothing" : `and said: ${words}`;
   return `${failure.argv.join(" ")} exited ${failure.result.code} ${said}`;
 }
 
