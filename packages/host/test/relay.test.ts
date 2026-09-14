@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
+import { guestDoor, type GuestOpening } from "../src/guest.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -351,6 +352,86 @@ describe("callback relay over a fake daemon link", () => {
     // The workspace goes; so does every session that was riding its link.
     await rt.workspaces.delete(ws.id);
     await until(() => dropped.includes(ws.id));
+  });
+
+  it("keeps a guest session across a nap, so the open the machine names on the redial runs its kind module once", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const token = (await rt.devices.mint("thread t1", { kind: "thread", threadId: "t1", workspaceId: ws.id, rootThreadId: "t1" }, Date.now())).deviceToken;
+    let runs = 0;
+    const kind = {
+      open: (o: GuestOpening) => {
+        runs++;
+        return { message: (m: unknown) => o.reply(m), close: () => undefined };
+      },
+    };
+    const guest = guestDoor({
+      authorize: t => rt.devices.match(t).then(device => (device === undefined ? undefined : { kind: "device", device })),
+      hostUrl: () => "http://127.0.0.1:1",
+      kinds: { mcp: kind, cli: kind },
+    });
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest, retryMs: 1, jitter: () => 0 });
+    await until(() => fake.links.length >= 1);
+    const first = fake.links[0]!;
+    await until(() => first.ops.some(x => x.op === "guest.watch"));
+    const open = { type: "guest.opened", session: "g0", kind: "cli", token, argv: ["new", "beta"], cwd: "/root" };
+    first.emit(open);
+    await until(() => runs === 1);
+
+    // The machine naps and wakes inside the span its daemon holds a session for: the process inside it is still
+    // waiting on the line it ran, so the socket that watches next is named that session again. Running the line a
+    // second time here is a second wsp new.
+    await rt.workspaces.nap(ws.id);
+    await until(() => !first.open);
+    await rt.workspaces.wake(ws.id);
+    await until(() => fake.links.length >= 2);
+    const second = fake.links[1]!;
+    await until(() => second.ops.some(x => x.op === "guest.watch"));
+    second.emit(open);
+    second.emit({ type: "guest.message", session: "g0", message: { n: 1 } });
+
+    // The session it held answers down the link that came back, and nothing opened it twice.
+    await until(() => second.ops.some(x => x.op === "guest.reply"));
+    expect(second.ops.find(x => x.op === "guest.reply")!.extra).toEqual({ session: "g0", message: { n: 1 } });
+    expect(runs).toBe(1);
+  });
+
+  it("drops the sessions of a workspace deleted while it napped, which holds no link for their end to ride", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const dropped: (string | undefined)[] = [];
+    const guest = { event: () => undefined, closeAll: (workspaceId?: string) => dropped.push(workspaceId) };
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
+    await until(() => fake.links.length >= 1);
+    await until(() => fake.links[0]!.ops.some(x => x.op === "guest.watch"));
+
+    // The nap keeps them: the machine holds its sessions and names them to whichever socket watches after the wake.
+    await rt.workspaces.nap(ws.id);
+    await until(() => !fake.links[0]!.open);
+    expect(dropped).toEqual([]);
+
+    // The delete finds no link to carry the end, and the rows are the workspace's rather than the link's.
+    await rt.workspaces.delete(ws.id);
+    await until(() => dropped.includes(ws.id));
+  });
+
+  it("drops every session it holds when the host closes, a napped workspace's with the rest", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const dropped: (string | undefined)[] = [];
+    const guest = { event: () => undefined, closeAll: (workspaceId?: string) => dropped.push(workspaceId) };
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
+    await until(() => fake.links.length >= 1);
+    await until(() => fake.links[0]!.ops.some(x => x.op === "guest.watch"));
+    await rt.workspaces.nap(ws.id);
+    await until(() => !fake.links[0]!.open);
+
+    await relay.close();
+    relay = undefined;
+    expect(dropped).toEqual([undefined]);
   });
 
   it("holds a frame that goes down while the link is between sockets, and sends it on the one that lands", async () => {

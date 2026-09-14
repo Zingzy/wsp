@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { serve } from "../src/cli.js";
 import { guestCli, guestRefusal } from "../src/guest-cli.js";
 import { guestMcp } from "../src/guest-mcp.js";
-import { guestDoor, type GuestDoor, type GuestLink } from "../src/guest.js";
+import { guestDoor, type GuestDoor, type GuestKindModule, type GuestLink } from "../src/guest.js";
 import { runningWsp } from "../src/mcp-install.js";
 import { placeWiring } from "../src/places.js";
 import type { HostHandle } from "../src/server.js";
@@ -150,8 +150,8 @@ describe("a guest session on the host", () => {
       const token = await tokenOn(workspaceId);
       door.event(link, opened({ token, kind: "mcp", argv: ["mcp"] }));
       await settled(() => sent.length === 0 || closes().length > 0 || replies().length > 0 || true);
-      // The link ended and came back: the machine's daemon still holds the session, and the guest's next frame is
-      // the only thing that can tell it nobody is on this end.
+      // The workspace went: the machine's daemon may still hold the session, and the guest's next frame is the
+      // only thing that can tell it nobody is on this end.
       door.closeAll(workspaceId);
       sent = [];
       door.event(link, { type: "guest.message", session: "g0", message: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
@@ -315,7 +315,32 @@ describe("a guest session on the host", () => {
     });
   });
 
-  it("drops every session on a link that is gone for good, and ends the next frame that arrives for one", async () => {
+  it("opens a session that takes a held one's name, since a machine that was replaced counts its sessions from the start again", async () => {
+    const token = await tokenOn(workspaceId);
+    const lines: string[][] = [];
+    const closed: number[] = [];
+    const kind: GuestKindModule = {
+      open: o => {
+        const at = lines.push([...o.argv]) - 1;
+        return { message: () => undefined, close: () => closed.push(at) };
+      },
+    };
+    const counting = guestDoor({
+      authorize: t => rt.devices.match(t).then(device => (device === undefined ? undefined : { kind: "device", device })),
+      hostUrl: () => `http://${LOOPBACK}:1`,
+      kinds: { mcp: kind, cli: kind },
+    });
+    counting.event(link, opened({ token, argv: ["threads"] }));
+    await settled(() => lines.length === 1);
+
+    // Same session name, another line: this is a fresh daemon on a fresh machine, not the session it holds.
+    counting.event(link, opened({ token, argv: ["workspaces"] }));
+    await settled(() => lines.length === 2);
+    expect(lines).toEqual([["threads"], ["workspaces"]]);
+    expect(closed).toEqual([0]);
+  });
+
+  it("drops every session of a workspace that is gone, and ends the next frame that arrives for one", async () => {
     const token = await tokenOn(workspaceId);
     door.event(link, opened({ token, kind: "mcp", argv: ["mcp"] }));
     await call(token, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "t", version: "0" } } });
