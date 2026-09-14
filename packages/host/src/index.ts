@@ -40,7 +40,7 @@ export { JoinRefused, joinCommand, placeHere, type JoinRefusalAbout } from "./pl
 export { SERVING_HOME_SH, currentHome, currentHomePointer, defaultHomeIn, homeNamed, servingHome } from "./serving-home.js";
 export { aliasFrom, defaultHost, isUrl, listHosts, noSuchHostLine, readHost, removeHost, writeHost, type HostEntry, type HostRecord, type SshLogin } from "./hosts.js";
 export { connectCommand, disconnectCommand, type ConnectOpts } from "./connect.js";
-export { addLines, hostNameHere, joinPlace, leavePlace, placeNameHere, placeStanding, placeWiring, writePlaceAwake, type JoinPlaceOptions, type JoinedPlace } from "./places.js";
+export { addLines, hostNameHere, joinPlace, leavePlace, placeNameHere, placeStanding, placeWiring, type JoinPlaceOptions, type JoinedPlace } from "./places.js";
 export { joinedAlready, placeFilePath, placeKeyPath, placeReport, readPlaceFile, writePlaceFile, type PlaceSelfReport } from "./place-report.js";
 export { DAEMON_BIN, DAEMON_TARGETS, GUEST_DAEMON_TARGETS, daemonArtifactName, daemonBinaryIn, daemonTargetHere, type DaemonTarget } from "./daemon-binary.js";
 export { setDefaultHost } from "./hosts.js";

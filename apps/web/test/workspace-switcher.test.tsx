@@ -63,7 +63,6 @@ function fakeApi(): Api {
     forget: async () => {},
     nap: async id => WORKSPACES.find(w => w.id === id)!,
     wake: async id => WORKSPACES.find(w => w.id === id)!,
-    upgrade: async id => WORKSPACES.find(w => w.id === id)!,
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s9", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),

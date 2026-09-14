@@ -203,7 +203,6 @@ pub struct PlaceFile {
     pub key_path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joined_at: Option<String>,
-    pub awake: bool,
 }
 
 impl PlaceFile {
@@ -225,16 +224,13 @@ mod tests {
 
     #[test]
     fn a_place_file_reads_as_the_protocol_parses_one_and_anything_else_is_none() {
-        let text = r#"{"placeId":"p_ab12cd34","name":"old-macbook","hostName":"zingzy-mbp","hostUrls":["http://192.168.1.20:4400"],"hostPublicKey":"MCow","keyPath":"/h/.wsp/place-key.pem","joinedAt":"1970-01-01T00:00:00.000Z","awake":false}"#;
+        let text = r#"{"placeId":"p_ab12cd34","name":"old-macbook","hostName":"zingzy-mbp","hostUrls":["http://192.168.1.20:4400"],"hostPublicKey":"MCow","keyPath":"/h/.wsp/place-key.pem","joinedAt":"1970-01-01T00:00:00.000Z"}"#;
         let file = PlaceFile::parse(text).unwrap();
-        assert_eq!((file.place_id.as_str(), file.name.as_str(), file.awake), ("p_ab12cd34", "old-macbook", false));
+        assert_eq!((file.place_id.as_str(), file.name.as_str()), ("p_ab12cd34", "old-macbook"));
         assert_eq!(file.host_urls, vec!["http://192.168.1.20:4400"]);
         assert!(PlaceFile::parse("not a place file").is_none());
-        assert!(PlaceFile::parse(r#"{"placeId":"p","name":"n","hostUrls":[],"hostPublicKey":"k","keyPath":"p","awake":false}"#).is_none());
-        assert!(PlaceFile::parse(
-            r#"{"placeId":"p","name":"n","hostName":"h","hostUrls":[1],"hostPublicKey":"k","keyPath":"p","awake":false}"#
-        )
-        .is_none());
+        assert!(PlaceFile::parse(r#"{"placeId":"p","name":"n","hostUrls":[],"hostPublicKey":"k","keyPath":"p"}"#).is_none());
+        assert!(PlaceFile::parse(r#"{"placeId":"p","name":"n","hostName":"h","hostUrls":[1],"hostPublicKey":"k","keyPath":"p"}"#).is_none());
         let without_joined_at = text.replace(r#""joinedAt":"1970-01-01T00:00:00.000Z","#, "");
         assert!(PlaceFile::parse(&without_joined_at).is_some());
     }

@@ -116,7 +116,6 @@ describe("serveRuntime capabilities", () => {
     const res = await c.request("capabilities.get");
     expect(res.ok).toBe(true);
     expect(res["capabilities"]).toEqual(backend.capabilities);
-    expect(res["capabilities"]).toMatchObject({ containers: true });
     c.close();
   });
 });

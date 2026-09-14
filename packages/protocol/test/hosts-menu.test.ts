@@ -52,40 +52,6 @@ describe("hostsMenuItems", () => {
   });
 });
 
-describe("the two rows a computer that joined another wsp adds", () => {
-  const joined: HostsView = { ...VIEW, place: { hostName: "zingzy-mbp", awake: true } };
-
-  it("appends the awake row checked from the standing and the leave row as a destructive one", () => {
-    const rows = hostsMenuItems(joined);
-    expect(rows.slice(-2).map(r => [r.label, r.checked ?? null, r.destructive ?? false])).toEqual([
-      [HOST_WORDS.place.awakeRow, true, false],
-      ["Leave zingzy-mbp's wsp", null, true],
-    ]);
-  });
-
-  it("carries on the awake row what the hold does not reach, so the row says it on hover", () => {
-    const awake = hostsMenuItems(joined).at(-2)!;
-    // A hold that lasts while the lid is open and the power is in is not what the label says, and the row can run,
-    // so the words ride the hover slot a dimmed row would carry its reason in.
-    expect(awake.hint).toBe(HOST_WORDS.place.awakeWhy);
-    expect(awake.refusal).toBeUndefined();
-    expect(hostsMenuItems(joined).at(-1)!.hint).toBeUndefined();
-  });
-
-  it("reads both rows back, and the awake row asks for the state it is not in", () => {
-    const held = hostsMenuItems(joined).slice(-2);
-    expect(held.map(r => hostMenuAction(r.id))).toEqual([{ kind: "awake", on: false }, { kind: "leave" }]);
-    const loose = hostsMenuItems({ ...VIEW, place: { hostName: "zingzy-mbp", awake: false } }).slice(-2);
-    expect(hostMenuAction(loose[0]!.id)).toEqual({ kind: "awake", on: true });
-    expect(loose[0]!.checked).toBe(false);
-  });
-
-  it("leaves the list of a computer that joined nothing exactly as it was", () => {
-    expect(hostsMenuItems({ ...VIEW })).toEqual(hostsMenuItems(VIEW));
-    expect(hostsMenuItems(VIEW)).toHaveLength(5);
-  });
-});
-
 describe("what the Where agents run table says about a computer", () => {
   const view = (over: Partial<PlaceView> = {}): PlaceView => ({ id: "p_1", kind: "computer", name: "old-macbook", default: false, present: true, engine: "none", takesForks: true, ...over });
   const now = Date.parse("2026-09-12T12:00:00.000Z");

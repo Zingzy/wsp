@@ -15,7 +15,6 @@ import type {
   UpgradeResult,
   WorkspaceLook,
   WorkspacePhase,
-  WorkspaceSize,
   WorkspaceStatus,
   WorkspaceSysEvent,
   WorkspaceView,
@@ -84,7 +83,6 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     emit(e: EventUnion): void;
     nap: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
     wake: ReturnType<typeof vi.fn<(id: string) => Promise<WorkspaceView>>>;
-    upgrade: ReturnType<typeof vi.fn<(id: string, size: WorkspaceSize) => Promise<WorkspaceView>>>;
     updateImage: ReturnType<typeof vi.fn<(id: string) => Promise<UpgradeResult>>>;
     rollbackSnapshot: ReturnType<typeof vi.fn<(version: number, name?: string) => Promise<SnapshotRollbackResult>>>;
     listSnapshots: ReturnType<typeof vi.fn<() => Promise<SnapshotLineage>>>;
@@ -100,7 +98,6 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
       projects = [...projects, taken];
       return taken;
     }),
-    upgrade: vi.fn(async (id: string, _size: WorkspaceSize) => view(id, "?", "running")),
     updateImage: vi.fn(async (id: string) => ({ workspace: { ...view(id, "?", "running"), golden: `snap_golden-v${current.head ?? 0}` }, moved: true, kept: [] })),
     capabilities: vi.fn(async () => capabilities),
     portReach: vi.fn(async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 })),
@@ -296,8 +293,7 @@ describe("machine facts", () => {
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
     const stop = (await screen.findByRole("button", { name: "Stop api" })) as HTMLButtonElement;
     expect([stop.textContent, stop.disabled, stop.title]).toEqual(["Stop", false, "Stop asking the provider to wake this workspace"]);
-    expect(document.querySelectorAll("footer button")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "resize api" })).toBeDefined();
+    expect(document.querySelectorAll("footer button")).toHaveLength(1);
   });
 
   it("a provider still starting the machine reads Waking, the word the row shows, not the phase with the provider's word beside it", async () => {
@@ -326,10 +322,8 @@ describe("machine facts", () => {
     await waitFor(() => expect(fact("reason")).toBe("idle 20 min"));
   });
 
-  it("says nothing about containers or the idle window whatever the backend reports: a fact the tab cannot act on is not a sentence on it", async () => {
-    await mount([view("ws_a", "api")], { ...CAPS, containers: false });
-    expect(document.querySelector('[data-k="containers"]')).toBeNull();
-    expect(document.body.textContent).not.toContain("containers");
+  it("says nothing about the idle window whatever the backend reports: a fact the tab cannot act on is not a sentence on it", async () => {
+    await mount([view("ws_a", "api")]);
     expect(document.body.textContent).not.toContain("The idle window is fixed");
   });
 
@@ -1031,13 +1025,12 @@ describe("where a workspace runs", () => {
 describe("gone machines", () => {
   const gone = (): WorkspaceView => ({ ...view("ws_a", "api", "gone"), gone: "machine m_ws_a_0123456789abcdef is gone at the provider: Not found" });
 
-  it("the footer offers forget in place of pause and no upgrade; confirming names what goes and calls the api once", async () => {
+  it("the footer offers forget in place of pause; confirming names what goes and calls the api once", async () => {
     const api = await mount([gone()]);
     const forget = vi.fn(async (_id: string) => {});
     api.forget = forget;
     const forgetButton = await screen.findByRole("button", { name: "Forget api" });
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
     fireEvent.click(forgetButton);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("Forget api?");
@@ -1097,87 +1090,6 @@ describe("pause and wake", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pause api" }));
     await waitFor(() => expect(useStore.getState().workspaces[0]!.phase).toBe("running"));
     expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
-  });
-});
-
-describe("upgrade", () => {
-  const openPicker = () => fireEvent.click(screen.getByRole("button", { name: "resize api" }));
-
-  it("offers the provider's sizes above the current one on both counts, the current left out, with the estimated rate", async () => {
-    await mount([view("ws_a", "api")]);
-    openPicker();
-    expect(screen.getAllByRole("button").map(b => b.textContent).filter(t => t?.includes("vCPU"))).toEqual(["4 vCPU · 8 GB", "4 vCPU · 16 GB", "8 vCPU · 16 GB", "16 vCPU · 32 GB"]);
-    expect(screen.queryByRole("button", { name: "2 vCPU · 4 GB" })).toBeNull();
-    // The new row prices the pick at the table's own rate, not the current rate scaled by vCPU.
-    expect(fact("resize-to")).toBe("4 vCPU · 8 GB · $0.22/hr");
-    fireEvent.click(screen.getByRole("button", { name: "4 vCPU · 16 GB" }));
-    expect(fact("resize-to")).toBe("4 vCPU · 16 GB · $0.30/hr");
-    expect(fact("resize-from")).toBe("2 vCPU · 4 GB · $0.11/hr");
-  });
-
-  it("paints the new size while the op runs, calls the api once, then settles on the status event", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    let resolveUpgrade!: (w: WorkspaceView) => void;
-    api.upgrade.mockImplementationOnce(() => new Promise(res => (resolveUpgrade = res)));
-    openPicker();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resize" }));
-
-    expect(fact("size")).toBe("4 vCPU · 8 GB · resizing");
-    expect(screen.getByRole("status").textContent).toBe("Resizing…");
-    expect(api.upgrade).toHaveBeenCalledTimes(1);
-    expect(api.upgrade).toHaveBeenCalledWith("ws_a", { cpu: 4, memMb: 8192 });
-
-    act(() => resolveUpgrade(view("ws_a", "api")));
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Resized."));
-
-    const w = view("ws_a", "api");
-    act(() => api.emit({ type: "workspace.status", status: { ...status(w), size: { cpu: 4, memMb: 8192 } } }));
-    // The footer ends where its content ends: no empty status line is kept under the buttons.
-    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
-    expect(fact("size")).toBe("4 vCPU · 8 GB");
-  });
-
-  it("picks a larger tier when chosen", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    openPicker();
-    fireEvent.click(screen.getByRole("button", { name: "8 vCPU · 16 GB" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resize" }));
-    await waitFor(() => expect(api.upgrade).toHaveBeenCalledWith("ws_a", { cpu: 8, memMb: 16384 }));
-  });
-
-  it("un-paints and shows the message on failure", async () => {
-    const api = await mount([view("ws_a", "api")]);
-    api.upgrade.mockRejectedValueOnce(new Error("quota exceeded"));
-    openPicker();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm resize" }));
-    await waitFor(() => expect(screen.getByText("quota exceeded")).toBeDefined());
-    expect(fact("size")).toBe("2 vCPU · 4 GB");
-  });
-
-  it("a backend that cannot resize gets no Upgrade button and no sentence about it; Pause stays, and the footer ends there", async () => {
-    await mount([view("ws_a", "api")], { ...CAPS, resize: false });
-    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
-    expect(document.querySelector('[data-k="resize-hint"]')).toBeNull();
-    expect(document.body.textContent).not.toContain("cannot resize");
-    expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
-    const footer = document.querySelector("footer")!;
-    expect(footer.querySelectorAll("button")).toHaveLength(1);
-    expect(footer.querySelector("[role=status]")).toBeNull();
-  });
-
-  it("a backend that would replace no machine gets no Upgrade button either, whatever it says about sizes", async () => {
-    // A resize replaces the machine and then asks for a new size, so the button reads the whole road: offering a
-    // picker off the size flag alone would hand a person a confirm the runtime refuses.
-    await mount([view("ws_a", "api")], { ...CAPS, resize: true, replacesMachine: false });
-    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
-    expect(document.querySelector('[data-k="resize-hint"]')).toBeNull();
-    expect(screen.getByRole("button", { name: "Pause api" })).toBeDefined();
-  });
-
-  it("a machine already at the largest size offered gets no Upgrade button either", async () => {
-    await mount([view("ws_a", "api")], { ...CAPS, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] });
-    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
-    expect(document.body.textContent).not.toContain("Largest size");
   });
 });
 
@@ -1259,7 +1171,7 @@ describe("gone machine", () => {
   const WORDS = "machine m_ws_a_0123456789abcdef is gone at the provider: Not found";
   const gone = (): WorkspaceView => ({ ...view("ws_a", "api", "gone"), gone: WORDS });
 
-  it("reads Gone with the provider's words, no rate and no nap window, offers the rebuild and neither pause, wake nor upgrade", async () => {
+  it("reads Gone with the provider's words, no rate and no nap window, offers the rebuild and neither pause nor wake", async () => {
     await mount([gone()]);
     expect(fact("state")).toBe("Gone");
     expect(fact("reason")).toBe(WORDS);
@@ -1268,7 +1180,6 @@ describe("gone machine", () => {
     expect(screen.getByRole("button", { name: "Rebuild api" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Pause api" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Wake api" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "resize api" })).toBeNull();
   });
 
   it("the rebuild asks first, then calls the api once", async () => {
@@ -1636,11 +1547,10 @@ describe("this computer as a workspace", () => {
     expect(lead().getAttribute("class")).not.toMatch(/success|destructive|rounded-full/);
   });
 
-  it("no machine buttons: this computer takes none of pause, wake, resize or forget, so the tab ends at its facts", async () => {
+  it("no machine buttons: this computer takes none of pause, wake or forget, so the tab ends at its facts", async () => {
     await mountLocal();
     expect(screen.queryByRole("button", { name: /pause|wake/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: "resize zingzy-mac" })).toBeNull();
-    expect(document.body.textContent).not.toContain("cannot resize");
+    expect(document.querySelector("footer")).toBeNull();
   });
 
   it("a cloud fork keeps every one of them", async () => {

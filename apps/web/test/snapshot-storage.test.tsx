@@ -28,7 +28,6 @@ function fakeApi(storage: SnapshotStorage | null) {
     watchStatuses: async () => [STATUS],
     nap: async () => WS,
     wake: async () => WS,
-    upgrade: async () => WS,
     capabilities: async () => CAPS,
     daemon: noDaemonApi,
     portReach: async (_id: string, port: number) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),

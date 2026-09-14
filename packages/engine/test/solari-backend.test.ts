@@ -19,11 +19,9 @@ describe("SolariBackend", () => {
     expect(b.capabilities).toEqual({
       liveCloneForks: true,
       pauseMode: "memory",
-      resize: false,
       replacesMachine: true,
       previewUrls: true,
       signedUrls: true,
-      containers: false,
       callbackRelay: true,
       diskSnapshots: true,
       // The provider answers 502 on a machine that was resumed, so a copy comes from a first life alone.

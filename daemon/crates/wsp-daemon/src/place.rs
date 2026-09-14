@@ -345,10 +345,9 @@ mod tests {
     #[test]
     fn the_report_is_read_off_the_home_and_the_words_given() {
         let home = tempfile::tempdir().unwrap();
-        let file = PlaceFile::parse(
-            r#"{"placeId":"p","name":"old-macbook","hostName":"h","hostUrls":[],"hostPublicKey":"k","keyPath":"/k","awake":false}"#,
-        )
-        .unwrap();
+        let file =
+            PlaceFile::parse(r#"{"placeId":"p","name":"old-macbook","hostName":"h","hostUrls":[],"hostPublicKey":"k","keyPath":"/k"}"#)
+                .unwrap();
         let agents = parse_agents(&["a1=sh".to_owned(), "b2=no-such-agent-command".to_owned()]);
         let argv = ["/usr/local/bin/node".to_owned(), "/opt/wsp/bin.js".to_owned()];
         let report = place_report(&ReportInput {

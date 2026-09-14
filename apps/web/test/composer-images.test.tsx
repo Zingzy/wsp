@@ -77,7 +77,6 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
     createWorkspace: async () => workspaces[0]!,
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
-    upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
     listSessions: async () => [],
     listHarnesses: async () => [TABLE_CATALOG],

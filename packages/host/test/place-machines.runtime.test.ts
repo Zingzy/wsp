@@ -366,11 +366,11 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
   }, 120_000);
 
   it("a workspace made with engine gets the box's engine through a fenced socket that sees its own containers alone, and one made without has no socket", async () => {
-    // containers is the doctor's reading of this box; where it has no engine the daemon refuses the create, which
-    // is the other half of the flag, and this case has nothing to run against.
+    // Where the box has no engine the daemon refuses the create, which is the other half of this case, and there
+    // is nothing to run the socket against.
     const docker = ["/usr/bin/docker", "/usr/local/bin/docker"].find(p => existsSync(p));
-    if (!backend.capabilities.containers || docker === undefined) {
-      console.log(`no container engine on this box (containers ${backend.capabilities.containers}); the engine case stands aside`);
+    if (docker === undefined) {
+      console.log("no container engine on this box; the engine case stands aside");
       await expect(create({ kind: "sandbox", engine: true })).rejects.toThrow(/container engine/);
       return;
     }

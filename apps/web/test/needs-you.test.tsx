@@ -60,7 +60,7 @@ function bindEvents(): (e: ProtocolEvent) => void {
   const api = {
     listWorkspaces: vi.fn(async () => []),
     watchStatuses: vi.fn(async () => []),
-    capabilities: vi.fn(async () => ({ resize: false, upgrade: false, snapshot: false })),
+    capabilities: vi.fn(async () => ({ upgrade: false, snapshot: false })),
     getGolden: vi.fn(async () => ({ versions: [] })),
     subscribe: (fn: (e: ProtocolEvent) => void) => {
       listeners.add(fn);

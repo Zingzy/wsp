@@ -29,7 +29,7 @@ function placeFile(hostUrls: string[], hostPublicKey: string, keyPem: string): {
   const home = mkdtempSync(join(tmpdir(), "wsp-link-"));
   dirs.push(home);
   const at = placeDaemonPaths(home);
-  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath: at.placeKey, joinedAt: new Date(0).toISOString(), awake: false };
+  const file: PlaceFile = { placeId: "p_ab12cd34", name: "old-macbook", hostName: "zingzy-mbp", hostUrls, hostPublicKey, keyPath: at.placeKey, joinedAt: new Date(0).toISOString() };
   writePlaceFile(at.placeFile, file);
   writeFileSync(at.placeKey, keyPem);
   return { home, file: at.placeFile };

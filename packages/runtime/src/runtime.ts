@@ -193,7 +193,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, resizesMachines, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent } from "@wsp/engine";
@@ -1115,7 +1115,8 @@ export interface Runtime {
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
      * wake itself ends with WAKE_STOPPED; a workspace with no wake in flight is answered with as it stands. */
     stopWake(id: string, origin?: Caller): Promise<WorkspaceView>;
-    upgrade(id: string, spec?: WorkspaceSpec, origin?: Caller): Promise<WorkspaceView>;
+    /** Replaces the workspace's machine with a fresh fork of the image behind it, its vaulted files carried over. */
+    upgrade(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
      * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
      * those and already on the head is returned untouched. */
@@ -2095,8 +2096,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     if (forksNoMachines(backendFor(record).capabilities)) return NO_PROVIDER_LINE;
     return providerCannotRefusal(record.name, machineWord(kind), action);
   };
-  /** The one throw every gate below goes through, so a road that reads a pair of capabilities refuses in the same
-   * sentence as one reading a single flag. */
+  /** The one throw every gate below goes through, so every capability a verb reads refuses in the same sentence. */
   const refuseUnless = (entry: LiveWorkspace, able: boolean, action: string): void => {
     if (!able) throw new Error(cannotLine(entry.record, action));
   };
@@ -4347,20 +4347,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return view(entry.record);
     },
 
-    async upgrade(id, spec, origin) {
+    async upgrade(id, origin) {
       const entry = await entryOf(id, origin);
-      // One verb, two moves, and each reads the road its own needs: a request naming a size is a resize, and reads
-      // the one thing that says a provider gives a machine a new size, which the button offering the size reads
-      // too; one naming none replaces the machine at the size it has, and needs the stand-in alone.
-      if (namesSize(spec)) refuseUnless(entry, resizesMachines(backendFor(entry.record).capabilities), "be resized");
-      else refuseCannot(entry, "replacesMachine", "have its machine replaced");
-      await entry.ws.upgrade(spec);
+      refuseCannot(entry, "replacesMachine", "have its machine replaced");
+      await entry.ws.upgrade();
       followMachine(entry);
-      entry.record.spec = {
-        ...entry.record.spec,
-        ...(spec?.envs !== undefined ? { envs: spec.envs } : {}),
-        ...(spec?.labels !== undefined ? { labels: spec.labels } : {}),
-      };
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       return view(entry.record);
@@ -4383,7 +4374,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // keeps is settled here, off the machine that is still running, before anything is replaced.
       const plan = await imageMovePlan(entry.machine, from, to);
       // The fork reads the record, so the new image is named before the machine is replaced; the vault carries the
-      // work across the way a resize does. A move that throws puts the record back, so a retry forks what the
+      // work across. A move that throws puts the record back, so a retry forks what the
       // workspace is actually running.
       entry.record.golden = to.snapshotId;
       try {

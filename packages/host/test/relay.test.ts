@@ -1639,7 +1639,7 @@ describe("localhost forwards over a fake daemon link", () => {
     const port = await freePort();
     link.emit({ type: "localhost.url", port });
     await until(() => relay!.forwards().length === 1);
-    await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    await rt.workspaces.upgrade(ws.id);
     await until(() => fake.links.length === 2 && relay!.forwards().length === 0);
     expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (not listening on the workspace after it moved to a new machine)`);
     expect(await refused(port)).toBe(true);
