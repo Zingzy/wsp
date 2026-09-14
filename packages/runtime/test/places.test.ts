@@ -32,6 +32,7 @@ import {
   readJoinToken,
   placeNoDaemonPortLine,
   placeNoLinkLine,
+  placeStillInstalledLine,
   placeDialBackLine,
   workFolderIn,
   copyStoppedLine,
@@ -43,7 +44,7 @@ import {
 import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
-import { NO_PLACE_UPDATER, newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, newPlaceKeyPair, placeSweptOverSshLine, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -89,14 +90,14 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
     backend: stubBackend(),
     store,
     adapters: {},
-    placeLinks: wiring(hostKey, opts.provider, opts.update),
+    placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
   });
@@ -671,6 +672,99 @@ describe("taking a place back out", () => {
   it("answers that nothing was removed for an id this host holds no place by", async () => {
     await serving();
     expect(await remove("p_deadbeefdeadbeef")).toMatchObject({ removed: false });
+  });
+
+  it("never logs in to a computer that joined by typing a code, which this host holds no login for", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const { hostKey } = await serving({
+      leave: async req => {
+        asked.push(req);
+        return [];
+      },
+    });
+    const { client, placeId } = await join(hostKey, { code: await code() });
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const answer = await remove(placeId);
+    expect(answer["removed"]).toBe(true);
+    expect(asked).toEqual([]);
+    expect(String(answer["note"])).toBe(placeStillInstalledLine("old-macbook"));
+  });
+});
+
+describe("taking a place back out over the login the install used", () => {
+  /** A computer this host put the agent on over ssh and then stopped hearing from: its record carries that login
+   * and no link, which is the box a remove has to reach itself. */
+  const installedAndSilent = async (leave?: PlaceLeaver): Promise<{ placeId: string; store: Store }> => {
+    const hostKey = newPlaceKeyPair();
+    const store = memoryStore();
+    let joined = "";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async req => {
+          // The shape a box that stops calling home has: its own join opens a socket and closes it while the
+          // install is still running, and nothing dials this host afterwards.
+          const { client, placeId } = await join(hostKey, { code: readJoinToken(req.code).code, name: "vps", report: report("vps") });
+          joined = placeId;
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
+          client.close();
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
+          return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner" };
+        },
+        ...(leave === undefined ? {} : { leave }),
+      },
+      placeJoinWaitMs: 60,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await expect(runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
+    return { placeId: joined, store };
+  };
+
+  it("runs the leave over that login, keeps the record until it answered, and says which road it took", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    let answer = (): void => {};
+    const answered = new Promise<void>(done => (answer = done));
+    const took = ["systemd system unit wsp-place-1234abcd.service (stopped)", "/home/maya/.wsp/place.json"];
+    const { placeId, store } = await installedAndSilent(async req => {
+      asked.push(req);
+      await answered;
+      return took;
+    });
+    const removing = runtime!.places!.remove(placeId);
+    await until(() => asked.length === 1);
+    // Still this host's while the leave runs: a box that refuses halfway is one a person can still name and try
+    // again, and a record dropped first would leave the agent on it with nothing here to reach it by.
+    expect(await store.get("places", placeId)).toBeDefined();
+    answer();
+    const removed = await removing;
+    expect(asked[0]!.ssh).toEqual({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" });
+    // The line that runs wsp on that computer rides with it, off the last thing it said about itself.
+    expect(asked[0]!.report.wsp).toEqual(report("vps").wsp);
+    expect(removed.swept).toEqual(took);
+    expect(removed.note).toBe(placeSweptOverSshLine("vps", "root@65.21.4.12"));
+    expect(await store.get("places", placeId)).toBeUndefined();
+  });
+
+  it("keeps the sentence a person has always read where the box will not answer the login, and still lets it go", async () => {
+    const { placeId, store } = await installedAndSilent(async () => {
+      throw new Error("ssh: connect to host 65.21.4.12 port 22: Connection refused");
+    });
+    const removed = await runtime!.places!.remove(placeId);
+    expect(removed.removed).toBe(true);
+    expect(removed.swept).toEqual([]);
+    expect(removed.note).toBe(placeStillInstalledLine("vps"));
+    expect(await store.get("places", placeId)).toBeUndefined();
+  });
+
+  it("says the agent is still installed on a host wired with no road to log in to one", async () => {
+    const { placeId } = await installedAndSilent();
+    const removed = await runtime!.places!.remove(placeId);
+    expect(removed.swept).toEqual([]);
+    expect(removed.note).toBe(placeStillInstalledLine("vps"));
   });
 });
 
