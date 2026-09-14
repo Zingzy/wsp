@@ -7,7 +7,7 @@ import { PassThrough, Writable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ALREADY_APPLIED } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
-import { SEAL_STEPS, StageStream, streamStages, type StageFrame } from "../src/init.js";
+import { SEAL_STEPS, StageStream, reduceStages, streamStages, type StageFrame } from "../src/init.js";
 import { UPGRADE_STEPS } from "../src/init-upgrade.js";
 
 const SPINNERS = /[◒◐◓◑]/;
@@ -183,6 +183,36 @@ describe("seal and upgrade steps", () => {
       expect(stages.slice(stages.indexOf("snapshotting"))).toEqual(["snapshotting", "promoting", "smoke-forking", "sealed"]);
       expect(steps.find(s => s.stage === "promoting")).toEqual({ stage: "promoting", start: "Saving the image", end: "Image saved", fail: "Saving the image failed" });
     }
+  });
+});
+
+describe("what a failure is charged with", () => {
+  const failed = (detail?: string, over: Partial<StageFrame> = {}): StageFrame => ({ type: "golden.stage", name: "default", stage: "failed", at: 9_000, ...(detail !== undefined ? { detail } : {}), ...over });
+
+  it("a machine the build was already on is answered for where its first stage is the only one out: the kept builder frames one stage and then the failure", () => {
+    const view = reduceStages([ev("creating", 0, "your builder from v1, kept since the save"), failed("the image was sealed before the base tools")]);
+    expect(view.machine).toBe("gone");
+    expect(view.failure).toBe("the image was sealed before the base tools");
+    expect(view.steps.find(s => s.stage === "creating")!.state).toBe("failed");
+  });
+
+  it("a frame the run pushed itself booted nothing, so the failure is charged no machine", () => {
+    const view = reduceStages([ev("creating", 0, "sandbox from base"), failed("the provider refused the create", { booted: false })]);
+    expect(view.machine).toBeUndefined();
+    expect(view.failure).toBe("the provider refused the create");
+  });
+
+  it("a machine the rollback could not remove is still named on the failure that left it", () => {
+    const view = reduceStages([ev("creating", 0, "sandbox from base"), ev("deploying-daemon", 1_000), failed("the deploy failed", { left: ["m_1"] })]);
+    expect(view.machine).toBe("left");
+    expect(view.left).toEqual(["m_1"]);
+  });
+
+  it("a failure with no sentence in it is said as the stage it stopped", () => {
+    expect(reduceStages([ev("creating", 0, "sandbox from base"), failed("")]).failure).toBe("Creating the machine failed");
+    expect(reduceStages([ev("creating", 0, "sandbox from base"), ev("deploying-daemon", 1_000), failed()]).failure).toBe("Installing the base failed");
+    // Nothing ran at all: the failure lands on the stage that was about to.
+    expect(reduceStages([failed("")]).failure).toBe("Creating the machine failed");
   });
 });
 

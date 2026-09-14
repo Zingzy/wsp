@@ -278,6 +278,10 @@ export interface StageFrame {
   waiting?: true;
   /** The machines the stage made and could not remove; they bill until something kills them again. */
   left?: string[];
+  /** Set on a frame the run itself pushed for a failure no stage of the engine's framed: the run got no further
+   * than the refusal, so the failure is charged no machine. Every other failed frame comes from a rollback that
+   * had one, whether or not the provider took the kill. */
+  booted?: false;
 }
 
 /** A golden.stage event off the runtime as the stream takes it. */
@@ -335,7 +339,6 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
   for (const f of frames) {
     if (f.name !== GOLDEN_NAME) continue;
     if (f.stage === "failed") {
-      failure = f.detail ?? "no detail given";
       const already = steps.length;
       // With nothing running the failure lands on the stage about to run: the first the frames never named.
       let failing = current;
@@ -347,8 +350,12 @@ export function reduceStages(frames: readonly StageFrame[], words: readonly Stag
         }
       }
       if (failing !== undefined) failing.state = "failed";
+      // A failure carrying no sentence is said as the stage it stopped: whoever reads this view, the terminal's
+      // block or a client's row, has one line saying why, and nobody reads a headline and a colon.
+      failure = f.detail === undefined || f.detail.trim() === "" ? (failing?.fail ?? "no detail given") : f.detail;
       // A stage already behind this one means the create answered, so a machine existed and the rollback took it.
-      machine = already === 0 || failing === undefined || SEAL_STAGES.has(failing.stage) ? undefined : (f.left?.length ?? 0) > 0 ? "left" : "gone";
+      // A run that framed the failure itself never got that far, and says so on the frame.
+      machine = f.booted === false || already === 0 || failing === undefined || SEAL_STAGES.has(failing.stage) ? undefined : (f.left?.length ?? 0) > 0 ? "left" : "gone";
       left = machine === "left" ? [...f.left!] : undefined;
       current = undefined;
       continue;
@@ -596,7 +603,7 @@ export class StageStream {
 function stageRecord(frame: StageFrame, view: StageView): Record<string, unknown> {
   const since = view.steps.find(s => s.stage === frame.stage)?.running?.since;
   const elapsedSeconds = frame.step === undefined ? undefined : Math.round(((frame.at ?? 0) - (since ?? frame.at ?? 0)) / 1000);
-  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}), ...(frame.waiting === true ? { waiting: true } : {}), ...(frame.left !== undefined ? { left: frame.left } : {}) };
+  return { event: "stage", stage: frame.stage, ...(frame.detail !== undefined ? { detail: frame.detail } : {}), ...(frame.step !== undefined ? { step: { ...frame.step, elapsedSeconds } } : {}), ...(frame.waiting === true ? { waiting: true } : {}), ...(frame.left !== undefined ? { left: frame.left } : {}), ...(frame.booted === false ? { booted: false } : {}) };
 }
 
 interface Spinner {
@@ -1390,11 +1397,15 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   } catch (e) {
     // Awaited so the listeners stay on through the line, the close and the exit: a second signal there still answers.
     if (signalled !== undefined) return await stopped(e, signalled);
+    const message = e instanceof Error ? e.message : String(e);
+    // A refusal the engine answers outside every stage's own try, the create's above all, reaches no stage, so the
+    // run frames it: a client reading the run's objects, a terminal beside a serving host and the app's sheet,
+    // has no other line saying why the build stopped. The frame says the run booted nothing, since it got no
+    // further than the refusal, and the stream charges it to a stage and draws it as it draws every other failure.
+    if (!stream.failed) stream.push({ type: "golden.stage", name: GOLDEN_NAME, stage: "failed", detail: message, booted: false });
     const view = stream.stop();
     off();
-    const message = e instanceof Error ? e.message : String(e);
     runLog.note(`failed: ${message}`);
-    if (view.failure === undefined) log.error(message, out);
     log.step(logLine(), out);
     // The machine's fate is the frames', not this run's guess: the engine's rollback says whether the kill landed.
     const became = view.machine === undefined ? "Nothing was booted." : view.machine === "gone" ? MACHINE_GONE_LINE : `The machine did not stop (${(view.left ?? []).join(", ")}); ${SWEEP}`;
