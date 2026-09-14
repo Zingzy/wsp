@@ -32,6 +32,10 @@ function relPaths(dir: string, keep: (name: string) => boolean, prefix = ""): st
 
 const isSource = (name: string): boolean => name.endsWith(".rs") || name === "Cargo.toml";
 const isFixture = (name: string): boolean => name.endsWith(".json");
+/** A crate's tests/ folder is built for a test run and never linked into the binary, so nothing under it reaches a
+ * guest and a change there must not cut a version. An inline #[cfg(test)] module stays hashed: the file holding it
+ * ships, and reading past it would cost a Rust parser here. */
+const underTests = (rel: string): boolean => /(^|\/)tests\//.test(rel);
 
 /** A file's text as the sha reads it. Two files carry the version itself, in Rust and in the fixture the Rust is
  * held to, and a sha over the version would move the moment it was recorded: the line and the key that hold it
@@ -46,15 +50,15 @@ function hashed(rel: string, text: string): string {
   return text;
 }
 
-/** What a deploy leaves on a guest and this can hash: the Rust sources the binary is built from and each crate's
- * manifest, the lock that pins every dependency, the C library the Linux builds link and the release it is pinned
- * to, the contract fixtures the binary's words, numbers and frames are held to, DAEMON_ROOTS_PATH and the
- * work-score line the daemon reads through that contract, and the scripts the host writes beside the binary,
- * whose content outlives the deploy that wrote it. */
+/** What a deploy leaves on a guest and this can hash: the Rust sources the binary is built from, each crate's
+ * manifest and none of its tests/ folder, the lock that pins every dependency, the C library the Linux builds link
+ * and the release it is pinned to, the contract fixtures the binary's words, numbers and frames are held to,
+ * DAEMON_ROOTS_PATH and the work-score line the daemon reads through that contract, and the scripts the host
+ * writes beside the binary, whose content outlives the deploy that wrote it. */
 function daemonContentSha(daemonTree: string, scripts: string[]): string {
   const h = createHash("sha256");
   const crates = join(daemonTree, "crates");
-  for (const rel of relPaths(crates, isSource)) h.update(`crates/${rel}\n${hashed(`crates/${rel}`, readFileSync(join(crates, rel), "utf8"))}\n`);
+  for (const rel of relPaths(crates, isSource).filter(rel => !underTests(rel))) h.update(`crates/${rel}\n${hashed(`crates/${rel}`, readFileSync(join(crates, rel), "utf8"))}\n`);
   for (const file of ["Cargo.toml", "Cargo.lock", "scripts/libseccomp-archive.sh"]) h.update(`${file}\n${readFileSync(join(daemonTree, file), "utf8")}\n`);
   const contract = join(daemonTree, "fixtures", "contract");
   for (const rel of relPaths(contract, isFixture)) h.update(`fixtures/contract/${rel}\n${hashed(`fixtures/contract/${rel}`, readFileSync(join(contract, rel), "utf8"))}\n`);
@@ -120,6 +124,23 @@ describe("what the recorded sha covers", () => {
     const lock = join(tree, "Cargo.lock");
     writeFileSync(lock, readFileSync(lock, "utf8").replace(/version = "(\d+)\.(\d+)\.(\d+)"/, (_m, a: string, b: string, c: string) => `version = "${a}.${b}.${Number(c) + 1}"`));
     expect(daemonContentSha(tree, deployedScripts())).not.toBe(featured);
+  });
+
+  it("stays where it is when a crate's tests/ folder moves, and moves for an inline case in the src beside it", () => {
+    const tree = copyOfDaemonTree();
+    const base = daemonContentSha(tree, deployedScripts());
+
+    const existing = join(tree, "crates", "wsp-frames", "tests", "contract.rs");
+    writeFileSync(existing, `${readFileSync(existing, "utf8")}\n#[test]\nfn added() {}\n`);
+    expect(daemonContentSha(tree, deployedScripts())).toBe(base);
+
+    writeFileSync(join(tree, "crates", "wsp-daemon", "tests", "added.rs"), "#[test]\nfn added() {}\n");
+    expect(daemonContentSha(tree, deployedScripts())).toBe(base);
+
+    // A file that ships carries its own cases, and the sha reads the file whole rather than parsing Rust.
+    const src = join(tree, "crates", "wsp-frames", "src", "lib.rs");
+    writeFileSync(src, `${readFileSync(src, "utf8")}\n#[cfg(test)]\nmod added {}\n`);
+    expect(daemonContentSha(tree, deployedScripts())).not.toBe(base);
   });
 
   it("moves when a contract fixture moves, since the words and numbers the daemon answers with are pinned there", () => {
