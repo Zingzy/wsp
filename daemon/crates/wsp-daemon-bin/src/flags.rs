@@ -67,6 +67,8 @@ pub(crate) struct Flags {
     pub(crate) mode_interval_ms: Option<u64>,
     #[arg(long, value_name = "n")]
     pub(crate) auth_deadline_ms: Option<u64>,
+    #[arg(long, value_name = "n")]
+    pub(crate) guest_unwatched_ms: Option<u64>,
     /// Turns the outbound link on: the file the join wrote, read on every attempt.
     #[arg(long, value_name = "file")]
     pub(crate) place_file: Option<PathBuf>,
@@ -133,6 +135,7 @@ impl Flags {
             proc_interval_ms: self.proc_interval_ms,
             mode_interval_ms: self.mode_interval_ms,
             auth_deadline_ms: self.auth_deadline_ms,
+            guest_unwatched_ms: self.guest_unwatched_ms,
             place_file: self.place_file,
             home: self.home,
             wsp_argv: self.wsp_argv,

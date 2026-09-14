@@ -685,7 +685,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     if (!link) return Promise.resolve();
     links.delete(id);
     link.stopped = true;
-    // The sessions on this machine end with the link: a reconnect watches again and the guests open fresh ones.
+    // The sessions on this machine end here with the link, not on it: a reconnect asks to watch and the daemon
+    // names the sessions it still holds to that socket, so the rows are made again and the guests open nothing.
     o.guest?.closeAll(id);
     woke(link, undefined);
     for (const f of allForwards(id)) {

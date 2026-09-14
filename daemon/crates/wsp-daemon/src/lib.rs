@@ -73,6 +73,8 @@ pub struct Options {
     pub proc_interval_ms: Option<u64>,
     pub mode_interval_ms: Option<u64>,
     pub auth_deadline_ms: Option<u64>,
+    /// How long a guest session stands with nobody watching it before it ends to its guest.
+    pub guest_unwatched_ms: Option<u64>,
     pub place_file: Option<PathBuf>,
     pub home: Option<PathBuf>,
     pub wsp_argv: Vec<String>,
@@ -110,6 +112,7 @@ impl Options {
             proc_interval_ms: None,
             mode_interval_ms: None,
             auth_deadline_ms: None,
+            guest_unwatched_ms: None,
             place_file: None,
             home: None,
             wsp_argv: Vec::new(),
@@ -190,7 +193,7 @@ pub(crate) struct Ctx {
     pub(crate) ports: ports::PortWatch,
     pub(crate) inbox: inbox::InboxWatch,
     /// The guest sessions open on this machine, and the socket the host watches them from.
-    pub(crate) guests: guest::Guests,
+    pub(crate) guests: Arc<guest::Guests>,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
     log: SharedLog,
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
@@ -219,6 +222,7 @@ impl Ctx {
         let manifest = manifest::ProcessManifest::load(Some(manifest_path), options.run_dir.as_deref(), options.log_dir.as_deref())?;
         let interval = options.ports_interval_ms.map_or(ports::DEFAULT_INTERVAL, Duration::from_millis);
         let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
+        let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
         let runtime = open_runtime(&options, &log);
         Ok(Ctx {
@@ -231,7 +235,7 @@ impl Ctx {
             spotter: Mutex::new(relay::CallbackSpotter::new()),
             ports,
             inbox: inbox::InboxWatch::default(),
-            guests: guest::Guests::default(),
+            guests: Arc::new(guest::Guests::new(guest_unwatched)),
             log: Arc::from(log),
             sys: Mutex::new(None),
             procs: Mutex::new(None),
