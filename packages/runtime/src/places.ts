@@ -380,11 +380,32 @@ export const NO_PLACE_UPDATER = "this runtime carries no daemon to put on a comp
 export const placeUpdateSlowLine = (name: string, seconds: number): string =>
   `${name} took the daemon and had not dialled back on it within ${seconds}s; its row reads the new version once it does`;
 
-/** What a remove says when the computer was holding no link and the host logged in to it instead. Which road the
- * sweep took is the one thing a person cannot see from here: the agent was not dialling this host, and what came
- * off that computer came off over the login the install used. */
-export const placeSweptOverSshLine = (name: string, at: string): string =>
-  `${name} was holding no link, so wsp logged in at ${at} over ssh and ran the leave there`;
+/** What a remove says about the road the sweep took, which is the one thing a person cannot see from here. Two
+ * wordings of the one fact: a computer that was dialling this host was swept over the login all the same, since
+ * the agent answering on the link is the one the service restarts and cannot take that service with it, and a
+ * computer that was holding no link had nothing but the login to reach it by. */
+export const placeSweptOverSshLine = (name: string, at: string, linked = false): string =>
+  linked
+    ? `${name} was connected, and wsp logged in at ${at} over ssh to run the leave there: what answers on the link takes the files it owns and not the service that restarts it`
+    : `${name} was holding no link, so wsp logged in at ${at} over ssh and ran the leave there`;
+
+/** Why the leave over the login on the record did not finish it, which is two different things and never one: the
+ * login itself would not stand, or that computer took the leave, ran it and stopped before it was done, in which
+ * case its own last words are the only reading of how far it got. Every sentence about the road that had to follow
+ * carries this one, since a person reading which road finished needs what the first one did. */
+export const placeLoginRoadLine = (name: string, at: string, said?: string): string =>
+  said === undefined ? `${name} did not answer the login at ${at}` : `${name} ran the leave over the login at ${at} and did not finish it (${said})`;
+
+/** What a remove says when the road that logs in did not finish it and the place swept itself over the link
+ * instead. The two roads take different things off, so which one finished is a person's to know: this one left the
+ * service that starts the agent on that computer, and nothing here can reach it to take it. */
+export const placeSweptOverLinkLine = (name: string, at: string, said?: string): string =>
+  `${placeLoginRoadLine(name, at, said)}, so it swept itself over the link: its files came off and the service that starts the agent there did not`;
+
+/** The refusal the login itself got, as against anything the computer at the end of it said: ssh would not take
+ * the login, so nothing ran there at all. The roads that log in throw this one for that case alone, and the lines
+ * a person reads about them turn on it. */
+export class PlaceLoginRefusedError extends Error {}
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -640,6 +661,21 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const loginOf = (record: PlaceRecord): PlaceLogin | undefined => {
     const ssh = sshRoadOf(record.road);
     return ssh === undefined ? undefined : { ssh, ...(record.road?.keyPath === undefined ? {} : { keyPath: record.road.keyPath }) };
+  };
+
+  /** Whether the login this host holds for a computer answers at all, over the one probe that installs nothing and
+   * leaves nothing running, bounded as every other dial of a computer is. Its point is what it saves: the leave
+   * that follows waits out systemd's own stop, which is minutes, and a computer whose ssh answers nothing would
+   * charge a person watching a button all of it. A runtime wired with no probe has nothing to say against trying,
+   * so it answers yes. */
+  const loginAnswers = async (login: PlaceLogin): Promise<boolean> => {
+    if (wiring.dial === undefined) return true;
+    try {
+      await bounded(wiring.dial(login), dialWaitMs, `ssh ${login.ssh}`);
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   /** The login an install in flight logged in over, by the place its code became; nothing for every computer no
@@ -1322,34 +1358,48 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const forks = await recording.forksOn(placeId);
       if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
       const reach = live.get(placeId)?.reach;
+      const leaver = wiring.leave;
       const login = loginOf(held);
       let swept: string[] = [];
       let note: string | undefined;
-      if (reach === undefined) {
-        // No link, but the record carries the login the install used, and that computer already holds the leave a
-        // person would run at its own terminal: the host runs it there rather than leaving an agent dialling a
-        // host that has forgotten it. A computer that will not answer the login keeps the sentence it always had.
-        note = placeStillInstalledLine(held.name);
-        if (login !== undefined && wiring.leave !== undefined) {
+      // What the road that logs in did where it did not finish the job, for the lines about the road that followed.
+      let loginRoad: { at: string; said?: string } | undefined;
+      // The leave that computer already carries, run over the login the install used, is the road a remove takes
+      // wherever this host holds one, link or no link: it stops the service holding the agent up before the files
+      // go, and what answers over the link cannot. Running it there rather than spelling it here is what keeps one
+      // copy of the sweep.
+      if (leaver !== undefined && login !== undefined) {
+        if (!(await loginAnswers(login))) {
+          // The login did not stand, so nothing ran on that computer at all.
+          loginRoad = { at: login.ssh };
+        } else {
           try {
-            swept = [...(await wiring.leave({ placeId, name: held.name, report: held.report, ssh: login }))];
-            note = placeSweptOverSshLine(held.name, login.ssh);
-          } catch {
-            // The computer did not answer the login, so the record goes as it always did and the sentence stays
-            // the one for an agent still installed on a computer this host cannot reach.
+            swept = [...(await leaver({ placeId, name: held.name, report: held.report, ssh: login }))];
+            note = placeSweptOverSshLine(held.name, login.ssh, reach !== undefined);
+          } catch (e) {
+            // Two different things, and the line a person reads says which: the login would not stand, or that
+            // computer took the leave, ran it and stopped, whose own last words ride with it.
+            loginRoad = { at: login.ssh, ...(e instanceof PlaceLoginRefusedError ? {} : { said: e instanceof Error ? e.message : String(e) }) };
           }
         }
-      } else {
-        // The sweep is the place's own: it knows its service manager and where the installer put things. The agent
-        // ends itself once it has answered, so nothing brings it back.
-        try {
-          const answer = await reach.request("place.leave");
-          swept = Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [];
-        } catch (e) {
-          note = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run ${PLACE_LEAVE_LINE} on that computer`;
-        }
-        cut(placeId, "removed from this host");
       }
+      // Either that login was never there to take or it did not finish the job, which leaves the two roads there
+      // always were: the place's own sweep over the link, and the sentence for a computer nothing here reaches.
+      if (note === undefined) {
+        if (reach === undefined) {
+          note = loginRoad?.said === undefined ? placeStillInstalledLine(held.name) : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}; ${placeStillInstalledLine(held.name)}`;
+        } else {
+          try {
+            const answer = await reach.request("place.leave");
+            swept = Array.isArray(answer["swept"]) ? (answer["swept"] as unknown[]).map(String) : [];
+            if (loginRoad !== undefined) note = placeSweptOverLinkLine(held.name, loginRoad.at, loginRoad.said);
+          } catch (e) {
+            const failed = `${held.name} was connected but did not finish the sweep: ${e instanceof Error ? e.message : String(e)}; run ${PLACE_LEAVE_LINE} on that computer`;
+            note = loginRoad === undefined ? failed : `${placeLoginRoadLine(held.name, loginRoad.at, loginRoad.said)}, and ${failed}`;
+          }
+        }
+      }
+      if (reach !== undefined) cut(placeId, "removed from this host");
       kept.delete(placeId);
       backends.delete(placeId);
       await store.delete(PLACES, placeId);
