@@ -8,7 +8,7 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { PROVIDER_ROWS } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
@@ -64,7 +64,7 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, imageByt
     lines.push(count === 0 ? `The key for ${name} is forgotten on this Mac.` : `Its ${count === 1 ? "workspace is" : `${count} workspaces are`} deleted at ${name} and the key is forgotten on this Mac.`);
     if (count > 0) lines.push(`${count === 1 ? "Its record" : "Their records"} and ${threadWord(threads)} leave this Mac.`);
   } else {
-    const stays = place.runsWorkspaces === true ? `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}` : "";
+    const stays = `, and ${imageCopyStaysLine(imageBytes === undefined ? undefined : fmtBytes(imageBytes))}`;
     lines.push(count === 0 ? `wsp comes off ${name}, which is otherwise left as it is${stays}.` : `wsp and ${held} come off ${name}, which is otherwise left as it is${stays}.`);
     if (count > 0) lines.push(`${count === 1 ? "The workspace's record" : "The workspaces' records"} and ${threadWord(threads)} leave this Mac.`);
   }
@@ -92,10 +92,10 @@ export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_CO
  * word rather than the id, so one predicate answers for both. */
 export const placeNamed = (place: PlaceView, word: string): boolean => namesPlace(place, word);
 
-/** Whether workspaces of their own can stand on this row at all: a provider forks by definition, and a computer
- * does once it has said it runs Docker. A computer that runs agents alone holds the one workspace it already is,
- * so it is never offered as somewhere to put another. */
-export const placeTakesWorkspaces = (place: PlaceView): boolean => isProviderPlace(place) || place.runsWorkspaces === true;
+/** Whether workspaces can stand on this row at all, off the one fact the row carries: a provider and a computer
+ * somebody joined both fork, and the computer the app itself runs on does not, since its local mode is the one
+ * workspace it already is. */
+export const placeTakesWorkspaces = (place: PlaceView): boolean => place.takesForks === true;
 
 /** Which row a workspace stands on, or nothing for one this list cannot place, read the protocol's one way so the
  * pane's Where row, the table's own holdings and the host's month total cannot disagree about which computer a
@@ -138,6 +138,14 @@ function ownDaemonAbsence(status: Pick<WorkspaceStatus, "reach"> | null): Absent
  * which is every caller that shows the sentence alone. */
 export function absentOf(place: PlaceView, now: number | null, here = false): AbsentComputer | null {
   return placeIsOffline(place) ? absentComputer(placeName(place, here), now === null ? null : awayMsOf(place, now)) : null;
+}
+
+/** The one word the slot beside a row's name carries. A computer that is not answering says that first: it is the
+ * more urgent of the two and nothing can be put on a computer that is off. A computer that is answering and runs an
+ * older daemon than this wsp deploys says so in the protocol's own word, the same one `wsp places` prints in its
+ * BEHIND column, so the app and the command line cannot word it twice. */
+export function placeStateWord(place: PlaceView, absent: AbsentComputer | null): string {
+  return absent?.away ?? placeDaemonBehind(place) ?? "";
 }
 
 /** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one

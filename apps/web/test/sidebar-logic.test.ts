@@ -346,7 +346,7 @@ describe("workspace row labels", () => {
     expect(daemonGoneLine("unsupported", kindWords("local"))).toBeUndefined();
     expect(daemonGoneLine("unsupported", kindWords("ssh"))).toBeUndefined();
     // The phrase a backend developer read as a status with no verb is on no row of any kind.
-    for (const kind of ["cloud", "local", "ssh", "place"] as const) {
+    for (const kind of ["cloud", "local", "ssh"] as const) {
       expect(daemonGoneLine("unsupported", kindWords(kind), NO_LINGER_LINE)).not.toBe("no daemon on it");
     }
   });
@@ -382,11 +382,11 @@ describe("workspace row labels", () => {
 
   it("a workspace whose computer is not answering reads one state on the row: the word in the slot, the silence on line three, the whole sentence on its title", () => {
     const absent = absentComputer("old-laptop", awayMsOf({ lastSeenAt: new Date(now - 38 * 60_000).toISOString() }, now));
-    const on = project({ reach: { state: "unreachable" } }, { kind: "place", machineId: "place:p_oldlaptop" });
-    // The slot names it although wsp neither pauses nor wakes a computer somebody owns: the computer is the one
-    // that is not answering, and a blank slot there was the row that said nothing beside readings of unreachable.
-    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, absent)).toBe("Unreachable");
-    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, null)).toBe("");
+    const on = project({ reach: { state: "unreachable" } }, { kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" });
+    // The computer's own silence outranks the row's word: the slot reads what the person can act on, which is the
+    // computer, and a blank slot there was the row that said nothing beside readings of unreachable.
+    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, absent)).toBe(absent!.word);
+    expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, null)).toBe("Unreachable");
     // Line three is the silence and what to do about it, and it takes the line ahead of everything else on the
     // row: nothing else there is known while that computer is not connected.
     const line = workspaceMetaLine({ project: on, absent, cost: tick(0.29), outOfMemory: undefined, nowMs: now });

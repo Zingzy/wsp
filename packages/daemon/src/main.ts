@@ -31,7 +31,7 @@ import {
   portScopeRefusal,
   unknownOpLine,
   type DaemonEvent,
-  type WorkspaceKind,
+  type DaemonKind,
 } from "@wsp/protocol";
 import { WebSocketServer, type WebSocket } from "ws";
 import { runExec } from "./exec.js";
@@ -69,7 +69,7 @@ export interface DaemonOptions {
   portsIntervalMs?: number;
   /** Which kind of machine this daemon serves, which picks the modules its Live rows and Processes tab read: a
    * guest wsp forked by default, the host itself where this computer's own workspace runs it in process. */
-  kind?: WorkspaceKind;
+  kind?: DaemonKind;
   /** The folder turns write in, whose volume this computer's disk row reads; the daemon's own root by default,
    * which for a guest is the workspace folder and for this computer is the person's home. */
   workFolder?: string;

@@ -30,8 +30,18 @@ pub const HOST_REFUSED_PLACE: &str = "the host refused this place";
 pub const NO_PLACE_FILE: &str =
     "no place file here, so there is no host to dial; wsp join <address> --code <code> makes this computer a place";
 
+/// What a socket that never asked to watch guest sessions is told when it answers or ends one.
+pub const GUEST_NOT_WATCHER: &str = "only the socket that sent guest.watch may answer or close a guest session";
+/// Why a session with nobody reading it is ended: the host has been away past the queue's cap.
+pub const GUEST_QUEUE_FULL: &str = "the host has not read this session for too long";
+
+pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
+    format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
+}
+
 /// The close reasons the link puts on a socket it ends. Not in the shared set: no client matches on a close reason.
 pub const LINK_CLOSE_STOPPING: &str = "place agent stopping";
+pub const LINK_CLOSE_UPDATING: &str = "place agent restarting on the daemon the host sent";
 pub const LINK_CLOSE_ATTEMPT_OVER: &str = "place link ending its attempt";
 pub const LINK_CLOSE_QUIET: &str = "the host went quiet";
 
@@ -97,4 +107,27 @@ pub fn link_linked(url: &str) -> String {
 
 pub fn link_quiet(url: &str, seconds: impl std::fmt::Display) -> String {
     format!("the host at {url} sent nothing for {seconds}s; cutting the link and dialling again")
+}
+
+/// What an update's parts are refused with. The parts of one upload arrive in order on one socket, so a part that
+/// is not the one waited for, a repeat or a skip alike, is an upload that starts again rather than a file with a
+/// hole in it or the same bytes twice.
+pub fn update_out_of_order(seq: u64, wanted: u64, upload_id: &str) -> String {
+    format!("part {seq} of {upload_id} arrived where part {wanted} was waited for; the update is dropped and starts again")
+}
+
+/// What a binary whose bytes are not the ones the host named is refused with. Read before anything is moved over
+/// the binary the unit starts: one that landed short would be started again and again under Restart=always.
+pub fn update_bytes_differ(upload_id: &str, wanted: &str, landed: &str) -> String {
+    format!("the update {upload_id} landed as sha256 {landed}, and the host named {wanted}; nothing was moved")
+}
+
+/// What the log says once the new binary stands where the unit starts it.
+pub fn update_landed(at: &str) -> String {
+    format!("the daemon the host sent is at {at}; this one is ending so its supervisor starts the new one")
+}
+
+/// What the agent says when it starts and finds parts of an update nothing will name again.
+pub fn update_swept(parts: usize) -> String {
+    format!("swept {parts} leftover update part(s) from a link that dropped mid-upload")
 }

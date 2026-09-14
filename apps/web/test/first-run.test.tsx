@@ -19,7 +19,7 @@ const manifest: GoldenManifest = {
 const first: WorkspaceView = { id: "ws_first", name: "first", machineId: "m_fork", phase: "running", golden: "snap_golden-v1", createdAt: "t" };
 const local: WorkspaceView = { id: "ws_local", name: "thisbox", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: "t" };
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 8, memMb: 16384 } };
-const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018 };
+const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018, takesForks: true };
 const CAPS = caps();
 
 function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; places?: PlaceView[] }) {

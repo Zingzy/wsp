@@ -34,7 +34,6 @@ import {
   fmtPercent,
   fmtSize,
   fmtUptime,
-  kindWords,
   placeDaemonPaths,
   workspaceState,
   workspaceWord,
@@ -350,7 +349,9 @@ function boxLine(box: HereBox): string[] {
     box.labels[NAME_LABEL] ?? box.id,
     box.labels[WORKSPACE_LABEL] ?? "",
     boxWord(box.state),
-    r?.cpu === undefined || r.memMb === undefined ? "" : fmtSize({ cpu: r.cpu, memMb: r.memMb }, kindWords("place").cpu),
+    // Cores, not vCPU: these are shares of a computer the person owns, which is how the protocol reads a place's
+    // own shape everywhere else.
+    r?.cpu === undefined || r.memMb === undefined ? "" : fmtSize({ cpu: r.cpu, memMb: r.memMb }, "cores"),
     r?.memBytes === undefined ? "" : fmtBytesOfTotal(r.memBytes, cap),
     r?.cpuUsageUsec === undefined ? "" : fmtDuration(r.cpuUsageUsec / 1000),
     r?.uptimeMs === undefined ? "" : fmtUptime(r.uptimeMs),

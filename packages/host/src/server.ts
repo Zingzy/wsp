@@ -16,6 +16,10 @@ import { hostFolders } from "./host-folders.js";
 import { projectBundler } from "./project-bundle.js";
 import { imageExporter } from "./image.js";
 import { projectLander } from "./project-export.js";
+import { guestCli } from "./guest-cli.js";
+import { guestMcp } from "./guest-mcp.js";
+import { guestDoor } from "./guest.js";
+import { runningWsp } from "./mcp-install.js";
 import { startCallbackRelay, systemOpener, type UrlOpener } from "./relay.js";
 import { describeStorage } from "./storage.js";
 import { VERSION } from "./version.js";
@@ -305,19 +309,33 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const homes = agentHomes(homedir());
   const { bundlerFor, createWorkspace, createLocalWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
 
-  // Before the runtime socket: the app lists and stops the relay's forwards through it.
-  const relay = startCallbackRelay({
-    runtime: rt,
-    openUrl: opts.openUrl ?? systemOpener(),
-    log,
-    ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
-    ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
-  });
   const address = opts.listen ?? LOOPBACK;
   // Reaching a loopback host already means being on this computer, so the page carries the token and the JSON
   // routes need nothing. Beyond it the page pairs for a device token first and every JSON route asks for one.
   const boundHere = isLoopback(address);
   let rtServer: RuntimeServer;
+
+  // The wsp a process inside a machine runs, served here: the tool server and the command line, on the link the
+  // relay below holds into that machine. The socket and its port are read at each call because the relay starts
+  // ahead of them, and a session's verbs dial this host's own loopback rather than the address it advertises.
+  const statePath = opts.statePath;
+  const guest =
+    statePath === undefined
+      ? undefined
+      : guestDoor({
+          authorize: token => rtServer.authorize(token),
+          hostUrl: () => `http://${authority(LOOPBACK, rtServer.port)}`,
+          kinds: { mcp: guestMcp(statePath), cli: guestCli(statePath, runningWsp()) },
+        });
+  // Before the runtime socket: the app lists and stops the relay's forwards through it.
+  const relay = startCallbackRelay({
+    runtime: rt,
+    openUrl: opts.openUrl ?? systemOpener(),
+    log,
+    ...(guest !== undefined ? { guest } : {}),
+    ...(opts.autoOpen !== undefined ? { autoOpen: opts.autoOpen } : {}),
+    ...(opts.openLine !== undefined ? { openLine: opts.openLine } : {}),
+  });
 
   // Rendered per request: wsp init saves the recipe while a host may already be serving.
   // `here` is false on the door a computer you own dials: that page carries no token and pairs for one, whatever

@@ -27,11 +27,10 @@
 
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { FakeGuest } from "@wsp/engine";
 import { DAEMON_PORT } from "@wsp/engine";
-import { GUEST_WSP_BIN, shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
+import { shellQuote, standInMachinePath, type PreviewReach } from "@wsp/protocol";
 import { LocalDaemon } from "./local-daemon.js";
 import { onPath, runningWsp, thisComputersPath, wspCommand } from "./mcp-install.js";
 
@@ -88,20 +87,19 @@ const guestCommands = (at: string): Record<string, string> => ({
   base64: `#!/bin/sh\ncase " $* " in\n  *" -d "*|*" --decode "*) /usr/bin/base64 "$@" | perl -p ${shellQuote(guestPaths(at))}; exit $?;;\nesac\nexec /usr/bin/base64 "$@"\n`,
   // What the wsp tools of a turn on a fork are started with, and what an agent shipped as a script runs under.
   node: `#!/bin/sh\nexec ${shellQuote(process.execPath)} "$@"\n`,
+  // The word a turn's launch names for its own tools, and the one a turn's shell types. A real fork answers it with
+  // the shim the deploy writes onto its PATH, two lines onto the daemon binary; a stand-in machine has no daemon of
+  // that kind, so this runs this computer's own wsp against the host the launch named, which is the host those
+  // tools would have reached anyway.
+  wsp: wspLine(),
   ...guestAgents(),
 });
 
-/** The wsp command where a machine's own bundle keeps it. A turn on a workspace whose agents may spawn is launched
- * with the wsp tools run from that path, and a stand-in machine carries no bundle, so its agent met a file that was
- * not there and had no tools at all. One line loading this computer's own command, which serves the host those
- * tools would dial anyway. Nothing where this wsp is no script on this computer (an npx cache, a packaged binary),
- * since then there is no file to load. */
-function stageWsp(at: string): void {
-  const script = wspCommand(runningWsp()).args.at(-1);
-  if (script === undefined || !script.endsWith(".js")) return;
-  const path = guestPath(at, GUEST_WSP_BIN);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `import ${JSON.stringify(pathToFileURL(script).href)};\n`);
+/** This computer's own wsp, told which host to drive off the launch's own environment. */
+function wspLine(): string {
+  const wsp = wspCommand(runningWsp());
+  const line = [wsp.command, ...wsp.args].map(word => shellQuote(word)).join(" ");
+  return `#!/bin/sh\nexec ${line} "$@" --host "$WSP_HOST_URL"\n`;
 }
 
 /** The agents on this machine: the ones this computer has, each run where it stands here. A stand-in machine forks
@@ -138,7 +136,6 @@ function layGuestRoot(at: string): void {
   for (const folder of GUEST_FOLDERS) mkdirSync(join(at, folder), { recursive: true });
   mkdirSync(guestBin(at), { recursive: true });
   writeFileSync(guestPaths(at), guestPathsProgram(at));
-  stageWsp(at);
   for (const [name, text] of Object.entries(guestCommands(at))) {
     const path = join(guestBin(at), name);
     writeFileSync(path, text);

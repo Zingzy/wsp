@@ -1,0 +1,24 @@
+[
+  {
+    "type": "guest.opened",
+    "session": "g1",
+    "kind": "mcp",
+    "token": "dev-1.tok",
+    "argv": [
+      "mcp"
+    ],
+    "cwd": "/root"
+  },
+  {
+    "type": "guest.opened",
+    "session": "g2",
+    "kind": "cli",
+    "token": "",
+    "turnToken": "9f",
+    "argv": [
+      "threads",
+      "--json"
+    ],
+    "cwd": "/root/project"
+  }
+]

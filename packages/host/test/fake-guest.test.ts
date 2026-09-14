@@ -3,11 +3,11 @@
 // machine's daemon token, and that everything it started goes when its command
 // is done.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GUEST_WSP_BIN, standInMachinePath } from "@wsp/protocol";
+import { standInMachinePath } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { closeStandInGuests, fakeGuestAt, fakeNoPortLine, guestPath, inGuestRoot } from "../src/fake-guest.js";
 import { onPath, thisComputersPath } from "../src/mcp-install.js";
@@ -164,9 +164,13 @@ describe("a stand-in machine's guest", () => {
     }
     // The runtime the tools and an agent shipped as a script are started with is this computer's own node.
     expect(readFileSync(join(bin, "node"), "utf8")).toContain(process.execPath);
-    // The wsp tools of a turn on a fork are run from the machine's own bundle, which a stand-in has none of: the
-    // agent met a file that was not there and had no tools at all.
-    expect(readFileSync(guestPath(at, GUEST_WSP_BIN), "utf8")).toMatch(/^import "file:\/\/.*\.js";$/m);
+    // A turn on a fork names the word wsp for its own tools and a stand-in carries no daemon to answer it, so the
+    // launch met nothing on the path and had no tools at all. This one runs this computer's own wsp against the
+    // host the launch named, beside the other commands a guest has and a Mac spells differently.
+    const stood = readFileSync(join(bin, "wsp"), "utf8");
+    expect(stood.split("\n")[0]).toBe("#!/bin/sh");
+    expect(stood).toContain('"$@" --host "$WSP_HOST_URL"');
+    expect(statSync(join(bin, "wsp")).mode & 0o111).toBeGreaterThan(0);
   });
 
   it("has no road to any other port, since answering with this computer's own would frame whatever runs there", async () => {

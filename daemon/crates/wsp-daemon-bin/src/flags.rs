@@ -245,6 +245,20 @@ mod tests {
     }
 
     #[test]
+    fn the_wsp_verb_hands_the_whole_line_on_untouched() {
+        let line = |args: &[&str]| match parse(args).unwrap().verb {
+            Some(Verb::Wsp { line }) => line,
+            other => panic!("expected the wsp verb, got {other:?}"),
+        };
+        assert_eq!(line(&["wsp", "threads", "--json", "--host", "x"]), ["threads", "--json", "--host", "x"]);
+        assert_eq!(line(&["wsp", "mcp"]), ["mcp"]);
+        // The flags the daemon takes are not this line's: a word that looks like one goes over as it was typed.
+        assert_eq!(line(&["wsp", "run", "t1", "--port", "9", "--", "a b"]), ["run", "t1", "--port", "9", "--", "a b"]);
+        assert_eq!(line(&["wsp", "--help"]), ["--help"]);
+        assert_eq!(line(&["wsp"]), Vec::<String>::new());
+    }
+
+    #[test]
     fn refuses_a_missing_value_a_bad_port_and_an_unknown_flag() {
         assert!(parse(&["--host"]).is_err());
         assert!(parse(&["--port", "abc"]).is_err());

@@ -17,7 +17,7 @@ import { Skeleton } from "../components/ui/skeleton.js";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table.js";
 import { cn } from "../lib/utils.js";
 import { FACT, WHERE_WORDS } from "./format.js";
-import { absentOf, isProviderPlace, placeCpuWord, placeName } from "./places.js";
+import { absentOf, isProviderPlace, placeCpuWord, placeName, placeStateWord } from "./places.js";
 
 const CELL = "font-mono text-xs tabular-nums text-foreground";
 /** The name column is the one that gives: it takes what the three fact columns and the menu leave, and cuts the
@@ -55,9 +55,9 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
   );
 }
 
-/** How many workspaces stand on this row, and the note behind it: what it has cost this month, or that the
- * computer runs agents and no workspace of its own. The count is the figure a person is reading and stands in the
- * row's own ink; the note is the muted clause the mock draws behind it. */
+/** How many workspaces stand on this row, and the note behind it: what it has cost this month, or the copy of the
+ * image being built there. The count is the figure a person is reading and stands in the row's own ink; the note
+ * is the muted clause the mock draws behind it. */
 function Workspaces({ place, count, monthUsd }: { place: PlaceView; count: number; monthUsd?: number }) {
   const parts = placeWorkspacesParts(place, count, monthUsd);
   return (
@@ -99,7 +99,7 @@ export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, a
             </span>
           ) : null}
           <span className={cn(FACT, "shrink-0")} data-k="place-state">
-            {absent?.away ?? ""}
+            {placeStateWord(place, absent)}
           </span>
           {trail}
         </span>

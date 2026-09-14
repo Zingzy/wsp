@@ -101,6 +101,8 @@ import {
   goldenHead,
   goneRefusal,
   goneRoadRefusal,
+  guestNamesWorkspaceLine,
+  guestNoFileLine,
   imageKeptLine,
   imageLine,
   imageTypeOf,
@@ -202,11 +204,12 @@ import {
   HERE_PLACE_ID,
   isLocalWorkspace,
   turnSpendWord,
+  placeDaemonBehind,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
-  placeRunsOneWorkspaceFix,
-  placeRunsOneWorkspaceLine,
+  localRunsOneFix,
+  localRunsOneLine,
   packageOf,
   type SealedPin,
 } from "@wsp/protocol";
@@ -455,15 +458,17 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.shape === undefined ? "" : String(p.shape.cpu),
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
-    p.runsWorkspaces === undefined ? "" : p.runsWorkspaces ? "yes" : "no",
     p.engine === undefined ? "" : p.engine,
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     p.default ? "default" : "",
+    // The one word about a computer running an older daemon than this wsp deploys, built in the protocol so this
+    // row and the app's table say it the same way; empty on a row that is level, ahead, or has never reported.
+    placeDaemonBehind(p) ?? "",
     p.build ?? "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "WORKSPACES", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "IMAGE"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "BEHIND", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
@@ -498,6 +503,11 @@ export interface VerbDeps {
   /** How the socket to the host is opened. dialHost by default; a caller hands in its own to count the dials a line
    * makes, which is the whole of whether a watch holds one socket or opens one per frame. */
   dial?: typeof dialHost;
+  /** Whether the caller is somewhere other than the computer this process runs on: a line or a tool call typed
+   * inside a machine and carried here over the guest road. Every rule that would read a path or resolve a folder
+   * against this computer reads it, since what such a caller names is on its own machine and answering off this
+   * one would hand it the person's files. */
+  elsewhere?: boolean;
 }
 
 /** What a person names when they record a machine of their own: where it is, and the port, key and name they give
@@ -563,6 +573,7 @@ export interface CliVerb {
   options: NonNullable<ParseArgsConfig["options"]>;
   run(ctx: VerbContext): Promise<number>;
   tool: Tool;
+  readsHere?: string;
 }
 
 /** A verb the tool door alone offers, with why the command line has no such line. */
@@ -570,6 +581,7 @@ export interface ToolOnlyVerb {
   name: string;
   tool: Tool;
   toolOnly: string;
+  readsHere?: string;
 }
 
 /** A verb the command line alone offers, with why no tool serves it: a line only a person at this terminal has any
@@ -582,6 +594,13 @@ export interface CliOnlyVerb extends Omit<CliVerb, "tool"> {
 }
 
 export type Verb = CliVerb | ToolOnlyVerb | CliOnlyVerb;
+
+/** Why a verb's work is on the computer the wsp process runs on rather than on the host it drives: it reads this
+ * computer's own package managers, agent history or terminal config. Read by the doors that serve a caller which is
+ * not on this computer, since there "this computer" would be the person's and not the machine the caller is on. */
+export function readsHere(verb: Verb): string | undefined {
+  return "readsHere" in verb ? verb.readsHere : undefined;
+}
 
 /** Whether this verb is served as a tool; a cli-only one says in its own words why not. */
 export function hasTool<V extends Verb>(verb: V): verb is Extract<V, { tool: Tool }> {
@@ -1249,17 +1268,10 @@ export async function placeNamed(client: HostClient, word: string): Promise<Plac
   return found;
 }
 
-/** The workspace a place that forks nothing already runs: the one its row names for a computer somebody joined, and
- * the local workspace for the computer the host itself is on, which the places list does not name. */
-async function workspaceOnPlace(client: HostClient, place: PlaceView): Promise<WorkspaceOut | undefined> {
-  const all = await workspaces(client);
-  return place.workspaceId !== undefined ? all.find(w => w.id === place.workspaceId) : all.find(isLocalWorkspace);
-}
-
-/** `wsp new --on` where the place forks nothing: the place is its own one workspace, so this records that workspace
- * under the name given when there is none there yet and names the one there is when there is. It never answers with
- * a workspace it did not make. */
-export async function onPlaceItself(
+/** `wsp new --on` aimed at the computer the app itself runs on, which forks nothing: its local mode is one
+ * workspace, so this records that workspace under the name given when there is none yet and names the one there is
+ * when there is. Every place on the list forks, so this is the only row that reaches here. */
+export async function onThisComputer(
   client: HostClient,
   out: Out,
   place: PlaceView,
@@ -1269,13 +1281,8 @@ export async function onPlaceItself(
   if (asked.from !== undefined || asked.size !== undefined || asked.engine === true) throw usageRefusal(`${place.name} forks nothing, so it takes no --from, --size or --engine.`, "Drop them.");
   // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads.
   if (asked.agents?.spawn === true && !agentsMayDrive("local")) throw usageRefusal(agentsKindRefusal("local"), "Drop --spawn on, or name a place that forks.");
-  const already = await workspaceOnPlace(client, place);
-  if (already !== undefined) throw usageRefusal(placeRunsOneWorkspaceLine(place.name, already.name), placeRunsOneWorkspaceFix(already.name));
-  // The extension law's one named exception: every other road here reads a fact off the row, and this reads which
-  // row it is. It stands because only the computer the host runs on can reach this line with no workspace to name.
-  // A joined computer records one at its join, and a provider never takes this road at all, so the branch is the
-  // guard for a record that went missing rather than a road a person takes.
-  if (place.id !== HERE_PLACE_ID) throw usageRefusal(placeForksNowhereLine(place.name), "Run wsp places.");
+  const already = (await workspaces(client)).find(isLocalWorkspace);
+  if (already !== undefined) throw usageRefusal(localRunsOneLine(already.name), localRunsOneFix(already.name));
   return createLocalWorkspace(client, out, name);
 }
 
@@ -1345,7 +1352,10 @@ const IMAGE_HEAD_BYTES = 12;
  * bytes, never off its name, and the caps are checked against what the files weigh before any of them is read whole,
  * so naming a video does not pull it into memory to refuse it.
  */
-export function imagesFrom(paths: readonly string[]): ImageAttachment[] {
+export function imagesFrom(paths: readonly string[], elsewhere = false): ImageAttachment[] {
+  // Before a path is resolved, let alone opened: a caller on a machine would otherwise learn from the refusals
+  // which paths exist on the person's disk, and a file that does exist would be read and sent.
+  if (elsewhere && paths.length > 0) throw usageRefusal(guestNoFileLine, "Name a file on the machine the line runs on, or none.");
   const files = paths.map(given => {
     const path = resolve(given);
     // A path this computer has nothing at, or has something other than a file at, answers in a sentence; the reader's
@@ -1399,8 +1409,11 @@ async function preferencesOf(client: HostClient): Promise<Preferences> {
 /** Where a thread goes and what the first line says it did: the workspace named, else the one holding the project the
  * caller's folder is a repo of, in that project. `named` is the caller's word for naming a workspace, for the refusal
  * outside a repo; a repo no workspace holds is refused naming both roads. Nothing is woken by asking. */
-export async function threadTarget(client: HostClient, ref: string | undefined, cwd: string | undefined, named: string): Promise<{ workspace: WorkspaceOut; project?: string; opened?: (threadId: string, folder: string) => string }> {
+export async function threadTarget(client: HostClient, ref: string | undefined, cwd: string | undefined, named: string, elsewhere = false): Promise<{ workspace: WorkspaceOut; project?: string; opened?: (threadId: string, folder: string) => string }> {
   if (ref !== undefined) return { workspace: await workspaceOf(client, ref) };
+  // The folder a caller on a machine was typed in is that machine's; walking it here would read the person's own
+  // checkouts for a git root and then pick the workspace their preferences map it to.
+  if (elsewhere) throw usageRefusal(guestNamesWorkspaceLine, "Name the workspace on the line.");
   const root = cwd === undefined ? undefined : gitRootOf(cwd);
   if (root === undefined) throw usageRefusal(noThreadTargetLine(named), "Run wsp workspaces to read the names.");
   const held = workspaceForFolder(await workspaces(client), root, await preferencesOf(client));
@@ -1460,10 +1473,10 @@ function openedLine(target: Awaited<ReturnType<typeof threadTarget>>, workspace:
  * each a thread or NOTIFY_ME. The one place both doors, the command line and the MCP server, put the token of the
  * turn they are running inside on a start: it is what the host reads NOTIFY_ME against, and there is none when the
  * caller is not a turn; the environment it is read off is the caller's, handed in, never this process's. */
-export function openingOf(env: VerbDeps["env"], workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; project?: string; notify?: readonly string[]; title?: string; images?: readonly string[] } = {}): Record<string, unknown> {
+export function openingOf(env: VerbDeps["env"], workspace: WorkspaceView, prompt: string, opts: Picks & { harness?: string; cwd?: string; project?: string; notify?: readonly string[]; title?: string; images?: readonly string[]; elsewhere?: boolean } = {}): Record<string, unknown> {
   const cwd = absoluteFolder(opts.cwd);
   const project = projectNamed(workspace, opts.project);
-  const attachments = imagesFrom(opts.images ?? []);
+  const attachments = imagesFrom(opts.images ?? [], opts.elsewhere);
   const turnToken = turnTokenOf(env);
   return {
     workspaceId: workspace.id,
@@ -1498,10 +1511,10 @@ export async function notifyOf(client: HostClient, refs: readonly string[]): Pro
  * or, on a thread whose harness never announced a session, runs the message as its first turn; under the thread's own
  * agent, with any pick named for this turn. A row from before threads had ids resumes by its session, and one with
  * neither is refused: a start naming nothing would open a new thread in silence. */
-export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, images: readonly string[] = []): Record<string, unknown> {
+export function messageTo(thread: ThreadView, prompt: string, picks: Picks = {}, images: readonly string[] = [], elsewhere = false): Record<string, unknown> {
   if (thread.threadId === undefined && thread.claudeSessionId === undefined) throw new Error(`thread ${thread.id} has no session to resume yet`);
   const target = thread.threadId !== undefined ? { thread: thread.threadId } : { resume: thread.claudeSessionId };
-  const attachments = imagesFrom(images);
+  const attachments = imagesFrom(images, elsewhere);
   return { workspaceId: thread.workspaceId, prompt, harness: thread.harness, ...target, ...(attachments.length > 0 ? { attachments } : {}), ...picksOf(picks) };
 }
 
@@ -2236,7 +2249,7 @@ const ConfirmIn = z.boolean().optional().describe("true deletes the machine; abs
 const PICK_INPUTS = {
   model: z.string().optional().describe("the model the turn runs on, by the agent's own slug (claude-sonnet-5); absent on a new thread means the catalog's default, on send the thread's own"),
   effort: z.string().optional().describe("the reasoning effort, by the agent's own word (low, medium, high, xhigh, max); absent means the agent's default, high for claude"),
-  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means the agent's default"),
+  access: z.string().optional().describe("the access mode, by the agent's own word (plan, acceptEdits, bypassPermissions); absent means what a thread on that workspace starts at, which on this computer and on a machine wsp forked is every action without asking, and on a computer you own is asking about each one"),
 };
 /** The same word on new and fork; the refusal for a size the provider does not offer names the ones it does. */
 const SizeIn = z.string().optional().describe("the machine size as <cpu>x<memGb>, like 2x4; absent takes the image's size. A size the provider does not offer is refused with the list it does, so read that list rather than guessing twice; a build wants the largest memory offered");
@@ -2464,6 +2477,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "recipe scan",
+    readsHere: "the agents, package managers and history it reads are this computer's own",
     usage: "wsp recipe scan [--project <folder>]",
     about:
       "read this computer and print every option, writing nothing: the agents, the tools with why and size, what else a package manager here has that the image could take, the commands your agents ran, and the sign-ins, each with what to do about it and one line of why; --project weighs the histories by a folder and --json prints it as one object",
@@ -2494,6 +2508,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "recipe",
+    readsHere: "the agents, package managers and history it reads are this computer's own",
     usage: `wsp recipe [--tick ${RECIPE_TICKS.join("|")}] [--set <id>=on|off] [--signin <id>=${LOGIN_CHOICES.join("|")}] [--add <id>=<command>] [--add-check <id>=<command>] [--engine] [--project <folder>] [--out <path>]`,
     about:
       `write the recipe and print it as a table: every catalog agent and tool with its tick, why it has it and what it costs on the machine, then the commands your agents ran that no catalog row carries. --tick used|installed|default names the rule that decides every tick (used, the default, ticks what your agents actually ran here); --set <id>=on|off flips a row by its catalog id, or a package this computer's own package managers have by the id wsp recipe scan gives it, which the build installs by that package's own road; --signin <id>=${LOGIN_CHOICES.join("|")} answers a sign-in by catalog id, later leaving it to the first time the tool is needed on the workspace and key bringing the key files beside a login and nothing else of it; --add <id>=<command> carries a tool neither the catalog nor this computer has, installed by that command on the machine, with --add-check <id>=<command> saying it is there; --engine marks the recipe so every workspace from its image gets the place's Docker or podman through a socket of its own (a project whose compose file needs one), and stays in the file until you edit it out; --project reads a folder's own manifests for what it takes to build and weighs the histories by it, --out says where the file goes and --json prints the table as one object. Naming --tick or --project decides every tick again; without either, what the file says stands and the flags flip rows on top of it. A sign-in answer stands either way: no rule decides one. All of them repeat. Review it, then wsp init --recipe`,
@@ -2582,7 +2597,7 @@ export const VERBS: readonly Verb[] = [
       if (on !== undefined) {
         const place = await placeNamed(client, on);
         if (place.takesForks !== true) {
-          await onPlaceItself(client, ctx.out, place, name, { from, size, engine, agents });
+          await onThisComputer(client, ctx.out, place, name, { from, size, engine, agents });
           return 0;
         }
       }
@@ -2595,7 +2610,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; a place that forks nothing runs the person's agents as its own one workspace instead, which this records under the name given when there is none there yet and names when there is.",
+        "A new workspace forked from your image's newest version, or with from, from a project image (the project already in place), booted and reachable when this returns. With on, the place it lands on by the name or id places lists; the computer the app runs on forks nothing and takes its one local workspace instead, which this records under the name given when there is none there yet and names when there is.",
       input: {
         name: z.string().describe("the workspace name, which the sidebar and every other line call it by"),
         from: z.string().optional().describe("a project image: its project's name (the newest taken of it) or its snapshot id, as snapshot returns them"),
@@ -2612,7 +2627,7 @@ export const VERBS: readonly Verb[] = [
         const agents = agentsAsked(spawn, maxMachines, maxDepth);
         if (on !== undefined) {
           const place = await placeNamed(client, on);
-          if (place.takesForks !== true) return asJson(await onPlaceItself(client, QUIET, place, name, { from, size: word, engine, agents }));
+          if (place.takesForks !== true) return asJson(await onThisComputer(client, QUIET, place, name, { from, size: word, engine, agents }));
         }
         if (from === undefined) return asJson(await createFromHead(client, QUIET, name, word, agents, on, engine));
         const landing = await forkable(client, on);
@@ -2712,7 +2727,7 @@ export const VERBS: readonly Verb[] = [
       if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
       const created = await create(client, ctx.out, source.golden, flag(ctx.flags, "name") ?? `${source.name}-fork`, flag(ctx.flags, "size"), agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth")));
       if (task === undefined) return 0;
-      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify }), true, {}, { spend: turnSpendWord(created.workspace) })) });
+      ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify, elsewhere: ctx.elsewhere }), true, {}, { spend: turnSpendWord(created.workspace) })) });
       return 0;
     },
     tool: tool({
@@ -2729,7 +2744,7 @@ export const VERBS: readonly Verb[] = [
         if (task === undefined) return asJson(created);
         let failure: string;
         try {
-          const turn = await follow(client, openingOf(deps.env, created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []) }), "agent", QUIET_TURN);
+          const turn = await follow(client, openingOf(deps.env, created.workspace, task, { harness, ...input, cwd: folder, notify: await notifyOf(client, tell ?? []), elsewhere: deps.elsewhere }), "agent", QUIET_TURN);
           const ended = turnFailure(turn);
           if (ended === undefined) return asJson({ ...created, turn: turnView(turn) });
           failure = ended;
@@ -2977,7 +2992,7 @@ export const VERBS: readonly Verb[] = [
       if (ctx.args.length > 2) throw usageRefusal(`wsp run takes a workspace and a task; ${ctx.args[2]!} reads as a third word.`, usageIs(ctx));
       const client = await ctx.client();
       const [ref, task] = await workspaceFirst(client, "run", ctx.args, "the task");
-      const target = await threadTarget(client, ref, ctx.cwd, "<workspace>");
+      const target = await threadTarget(client, ref, ctx.cwd, "<workspace>", ctx.elsewhere);
       const found = target.workspace;
       const harness = flag(ctx.flags, "agent");
       const picks = pickFlags(ctx.flags);
@@ -2986,7 +3001,7 @@ export const VERBS: readonly Verb[] = [
       const cwd = flag(ctx.flags, "cwd");
       const opened = openedLine(target, found, project, cwd);
       const woken = await awake(client, found, "send", line => ctx.io.error(line));
-      const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image") });
+      const opening = openingOf(ctx.env, woken.workspace, task, { harness, ...picks, project, cwd, notify: await notifyOf(client, flagList(ctx.flags, "notify")), title: flag(ctx.flags, "title"), images: flagList(ctx.flags, "image"), elsewhere: ctx.elsewhere });
       let started: Turn | undefined;
       try {
         if (ctx.flags["detach"] === true) await detachVerb(ctx, client, opening, {}, opened);
@@ -3002,13 +3017,13 @@ export const VERBS: readonly Verb[] = [
       output: TurnOut.shape,
       call: async ({ workspace: ref, task, agent: harness, project: named, cwd: folder, notify: tell, title, images, detach, ...input }, deps) => {
         const client = await deps.client();
-        const target = await threadTarget(client, ref, deps.cwd, "workspace");
+        const target = await threadTarget(client, ref, deps.cwd, "workspace", deps.elsewhere);
         const found = target.workspace;
         await checkedStart(client, task, harness, input, found.id);
         const project = projectNamed(found, named ?? target.project);
         const opened = openedLine(target, found, project, folder);
         const woken = await awake(client, found, "send", QUIET_LINE);
-        const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images });
+        const opening = openingOf(deps.env, woken.workspace, task, { harness, ...input, project, cwd: folder, notify: await notifyOf(client, tell ?? []), title, images, elsewhere: deps.elsewhere });
         let started: Turn | undefined;
         try {
           if (detach === true) return detachedOut(await startDetached(client, opening, "agent"), opened);
@@ -3125,8 +3140,8 @@ export const VERBS: readonly Verb[] = [
       await checkedStart(client, message, thread.harness, picks, thread.workspaceId);
       const { workspace } = await awake(client, await workspaceOf(client, thread.workspaceId), "send", line => ctx.io.error(line));
       const images = flagList(ctx.flags, "image");
-      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, images), picks);
-      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images), false, picks, { spend: turnSpendWord(workspace) })));
+      if (ctx.flags["detach"] === true) await detachVerb(ctx, client, messageTo(thread, message, picks, images, ctx.elsewhere), picks);
+      else ctx.out.emit(turnView(await followVerb(ctx, client, messageTo(thread, message, picks, images, ctx.elsewhere), false, picks, { spend: turnSpendWord(workspace) })));
       return 0;
     },
     tool: tool({
@@ -3138,8 +3153,8 @@ export const VERBS: readonly Verb[] = [
         const thread = await threadOf(client, ref);
         await checkedStart(client, message, thread.harness, input, thread.workspaceId);
         await awake(client, await workspaceOf(client, thread.workspaceId), "send", QUIET_LINE);
-        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, images), "agent"));
-        const out = turnOut(await follow(client, messageTo(thread, message, input, images), "agent", QUIET_TURN));
+        if (detach === true) return detachedOut(await startDetached(client, messageTo(thread, message, input, images, deps.elsewhere), "agent"));
+        const out = turnOut(await follow(client, messageTo(thread, message, input, images, deps.elsewhere), "agent", QUIET_TURN));
         return asText(turnText(out), out);
       },
     }),
@@ -3340,6 +3355,7 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "terminal config",
+    readsHere: "the Ghostty config it reads is the person's own, in their home on this computer",
     usage: `wsp terminal config [--scheme ${TerminalScheme.options.join("|")}]`,
     about:
       "the Ghostty config on this computer as the app's terminal pane applies it, read from ~/.config/ghostty and Application Support with its includes and theme resolved: the font and its fallbacks, the size, the colors, the cursor, the padding, the background opacity, and the blur, which is read but not applied; --scheme picks the side of a light:...,dark:... theme",
@@ -3444,7 +3460,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   agents: "the agents whose sessions for that folder travel with it, by catalog id, comma separated; every one that has them without it",
   "add-check": "<id>=<command> proving that added tool is on the machine; repeats",
   add: "<id>=<command> carrying a tool neither the catalog nor this computer has, installed by that command on the machine; repeats",
-  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); its default without it",
+  access: "how far the agent may go without asking, by the agent's own word (plan, acceptEdits, bypassPermissions); without it, what a thread on that workspace starts at: every action without asking on this computer and on a machine wsp forked, asking about each one on a computer you own",
   cut: "a path inside the folder to leave behind, on top of the plan's own answer; repeats",
   cwd: "the folder on the machine to work in; the project's folder without it",
   detach: "print the thread's id and return, leaving the reply to the thread's finished line",
@@ -3589,7 +3605,7 @@ export function jsonAsked(argv: ReadonlyArray<string>): boolean {
   return argv.slice(0, cut === -1 ? argv.length : cut).includes("--json");
 }
 
-export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "env" | "start" | "signals" | "dial">): Promise<number> {
+export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<string>, io: CliIO, statePathOf: (flag?: string) => string, deps: Pick<VerbDeps, "alsoHere" | "cwd" | "env" | "start" | "signals" | "dial" | "elsewhere">): Promise<number> {
   let flags: Flags;
   let args: string[];
   try {
@@ -3639,6 +3655,7 @@ export async function runVerb(verb: CliVerb | CliOnlyVerb, argv: ReadonlyArray<s
     ...(deps.cwd !== undefined ? { cwd: deps.cwd } : {}),
     ...(deps.start !== undefined ? { start: deps.start } : {}),
     ...(deps.signals !== undefined ? { signals: deps.signals } : {}),
+    ...(deps.elsewhere === true ? { elsewhere: true } : {}),
     client: async () => {
       if (stateNote !== undefined && !noted) {
         noted = true;

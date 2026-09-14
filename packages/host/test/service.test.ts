@@ -123,13 +123,57 @@ describe("one module per service manager", () => {
     ]);
     expect(systemd.holds(at)).toEqual(["systemctl", "--user", "is-enabled", `wsp-host-${tag}.service`]);
     expect(systemd.afterLoad?.(at)).toContain("enable-linger");
+    expect(systemd.needsRoot?.(at)).toBe(false);
+  });
+
+  it("the agent on a computer joined as a place is the machine's service, not one login's, so it needs root and asks the person for nothing after", () => {
+    const systemd = SERVICE_MANAGERS.systemd;
+    const there: ServiceAddress = { role: "place", statePath: "/home/maya/.wsp/place.json", home: "/home/maya", uid: 0 };
+    const theirTag = serviceTag(there.statePath);
+    expect(systemd.unit(there)).toEqual({ name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` });
+    // multi-user.target, not default.target: the agent holds the link open whether or not anybody is logged in.
+    expect(systemd.text(planFor(there))).toContain("WantedBy=multi-user.target");
+    expect(systemd.load(there)).toEqual([
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "enable", "--now", `wsp-place-${theirTag}.service`],
+    ]);
+    expect(systemd.unload(there)).toEqual([
+      ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
+      ["systemctl", "daemon-reload"],
+    ]);
+    expect(systemd.holds(there)).toEqual(["systemctl", "is-enabled", `wsp-place-${theirTag}.service`]);
+    // Both systemds, the one a place writes today first: a computer joined on the road before it has its unit
+    // under that login's own, and a sweep that read the machine's alone left it there to flap under auto-restart.
+    expect(systemd.held(there)).toEqual([
+      {
+        unit: { name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` },
+        words: "systemd system unit",
+        forget: [["systemctl", "disable", `wsp-place-${theirTag}.service`]],
+        unload: [
+          ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
+          ["systemctl", "daemon-reload"],
+        ],
+      },
+      {
+        unit: { name: `wsp-place-${theirTag}.service`, path: `/home/maya/.config/systemd/user/wsp-place-${theirTag}.service` },
+        words: "systemd user unit",
+        forget: [["systemctl", "--user", "disable", `wsp-place-${theirTag}.service`]],
+        unload: [
+          ["systemctl", "--user", "disable", "--now", `wsp-place-${theirTag}.service`],
+          ["systemctl", "--user", "daemon-reload"],
+        ],
+      },
+    ]);
+    // Nothing about linger: a system unit outlives every login on its own.
+    expect(systemd.afterLoad?.(there)).toBeUndefined();
+    expect(systemd.needsRoot?.(there)).toBe(true);
   });
 
   it("the platform picks the module, an unknown one gets a line naming the two that exist, and two state files never share a unit", () => {
     expect(serviceManagerFor("darwin")).toBe(SERVICE_MANAGERS.launchd);
     expect(serviceManagerFor("linux")).toBe(SERVICE_MANAGERS.systemd);
     expect(serviceManagerFor("win32")).toBeUndefined();
-    expect(noManagerLine("win32")).toBe("wsp writes no service on win32; it writes a launchd agent on darwin and a systemd user unit on linux. Run wsp up in a terminal that stays open instead.");
+    expect(noManagerLine("win32")).toBe("wsp writes no service on win32; it writes a launchd agent on darwin and a systemd unit on linux. Run wsp up in a terminal that stays open instead.");
     const other: ServiceAddress = { ...at, statePath: "/Users/z/work/.wsp/state.json" };
     expect(SERVICE_MANAGERS.launchd.unit(other).name).not.toBe(SERVICE_MANAGERS.launchd.unit(at).name);
   });
@@ -201,6 +245,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
+    held: a => [{ unit: unit(a), words: "fake service", forget: [], unload: [["fake", "unload", unit(a).name]] }],
     absent: answer => answer.output === "not held",
   };
   const run: ServiceRunner = async argv => {

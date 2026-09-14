@@ -13,6 +13,7 @@ import { platform } from "node:os";
 import { DaemonEvent, LOOPBACK, hostOf, isHttpUrl, type DaemonReachView, type ForwardEvent, type GoldenBuilderView, type PortForward } from "@wsp/protocol";
 import { plumbTunnel, realClock, tunnelFrame, type Clock, type EventUnion, type Runtime } from "@wsp/runtime";
 import { DAEMON_CONNECT_TIMEOUT_MS, connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
+import type { GuestDoor } from "./guest.js";
 
 export type UrlOpener = (url: string) => Promise<boolean>;
 
@@ -48,6 +49,9 @@ export interface RelayOptions {
   openLine?: (workspace: string, hostname: string, url: string) => string;
   /** One line per open, forward, refusal and close; never the URL. */
   log: (line: string) => void;
+  /** Where a guest session on one of these machines is served. Absent leaves the guest road off: this link is the
+   * one socket the host holds into a running workspace, so nothing else is there to watch for one. */
+  guest?: GuestDoor;
   builder?: GoldenBuilderView;
   clock?: Clock;
   /** A forward whose port the guest was never seen listening on closes after this. Default 3 min. */
@@ -122,6 +126,10 @@ interface Link {
   stopped: boolean;
   wake?: () => void;
   done: Promise<void>;
+  /** Frames waiting for the next socket, in the order they were asked for. The edge sweeps a quiet connection at
+   * about thirty seconds and the link redials under it; a guest session streaming rows across that gap would
+   * otherwise lose them, and its exit frame with them, and the process on the machine would wait for good. */
+  waiting: ((sock: DaemonSocket | undefined) => void)[];
 }
 
 interface Held {
@@ -157,6 +165,9 @@ function badGateway(sentence: string): string {
   const body = `${sentence}\n`;
   return `HTTP/1.1 502 Bad Gateway\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`;
 }
+
+/** What a guest session is answered with when the link it rode went between the ask and the answer. */
+export const linkDownLine = (workspace: string): string => `${workspace}: the daemon link is down`;
 
 /** What a laptop connection hears when the guest side refused the tunnel. */
 function refusedResponse(f: Forward): string {
@@ -213,7 +224,11 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     listeners.add(fn);
     return () => listeners.delete(fn);
   };
-  if (!rt.backend.capabilities.callbackRelay) return { forwards: () => [], list: () => [], stop: () => false, on, close: async () => {} };
+  // Whether this host forwards ports at all, which is the wired backend's own answer. The links below are not that
+  // question: they are the one socket this host holds into each running workspace, and the guest road rides them,
+  // so a host whose backend forwards nothing still holds them where a guest door was given.
+  const forwarding = rt.backend.capabilities.callbackRelay;
+  if (!forwarding && o.guest === undefined) return { forwards: () => [], list: () => [], stop: () => false, on, close: async () => {} };
 
   const urlKey = (targetId: string, port: number): string => `${targetId}:${port}`;
   const allForwards = (targetId: string): Forward[] => {
@@ -450,7 +465,23 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     emit({ type: "forward.open", forward: viewOf(f) });
   };
 
+  /** Hands every frame waiting on this link the socket that just landed, or nothing when the link has stopped for
+   * good; they were asked for in this order and they go out in it. */
+  const woke = (link: Link, sock: DaemonSocket | undefined): void => {
+    for (const waiter of link.waiting.splice(0)) waiter(sock);
+  };
+
+  /** One frame down to a machine's daemon. A link between sockets holds it until the next one lands rather than
+   * failing, since a guest session's rows and its exit frame ride this road and the machine sees no redial; a link
+   * that has stopped answers in one sentence, and the door has already dropped the sessions on it. */
+  const downward = async (link: Link, op: string, params: Record<string, unknown>): Promise<unknown> => {
+    const sock = link.sock ?? (link.stopped ? undefined : await new Promise<DaemonSocket | undefined>(hand => link.waiting.push(hand)));
+    if (sock === undefined) throw new Error(linkDownLine(link.target.name));
+    return sock.op(op, params);
+  };
+
   const tryForward = (link: Link, port: number, kind: ForwardKind): void => {
+    if (!forwarding) return;
     forward(link, port, kind).catch((e: unknown) => o.log(`${link.target.name}: not forwarding port ${port} (${e instanceof Error ? e.message : String(e)})`));
   };
 
@@ -503,6 +534,11 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
       case "localhost.url":
         tryForward(link, e.port, "url");
         return;
+      case "guest.opened":
+      case "guest.message":
+      case "guest.closed":
+        o.guest?.event({ workspaceId: link.target.id, request: (op, params) => downward(link, op, params) }, e);
+        return;
       case "tunnel.data":
       case "tunnel.end":
         // One counter mints every tunnel id here, so a frame belongs to at most one forward and the first that
@@ -552,10 +588,22 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
           sock.close();
           return;
         }
-        link.sock = sock;
         // Starts the daemon's port watcher (its listener heuristic reads it) and seeds what the guest listens on now.
         const watched = await sock.op("ports.watch");
         link.ports = new Set(portsOf(watched["ports"]));
+        // And takes the guest sessions on this machine, which go to the last socket that asked for them. A daemon
+        // deployed before the road existed answers that it has no such op, and the guests there keep the command
+        // that rides in its bundle.
+        if (o.guest !== undefined) await sock.op("guest.watch").catch(() => undefined);
+        if (link.stopped) {
+          sock.close();
+          return;
+        }
+        // The link holds the socket only once it has watched, and the frames held across the redial go out on it
+        // then: a frame that took it during the two round trips above would reach a socket the daemon does not yet
+        // hand this machine's sessions to, and come back refused as not the watcher.
+        link.sock = sock;
+        woke(link, sock);
         attempt = 0;
         resume(link, sock);
         // After resume, not before: a forward a queued event opens ahead of it reads to resume as a forward that
@@ -625,7 +673,7 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   const add = (target: Target): void => {
     if (closed || links.has(target.id)) return;
-    const link: Link = { target, ports: new Set(), stopped: false, done: Promise.resolve() };
+    const link: Link = { target, ports: new Set(), stopped: false, done: Promise.resolve(), waiting: [] };
     link.done = run(link);
     links.set(target.id, link);
   };
@@ -637,6 +685,9 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     if (!link) return Promise.resolve();
     links.delete(id);
     link.stopped = true;
+    // The sessions on this machine end with the link: a reconnect watches again and the guests open fresh ones.
+    o.guest?.closeAll(id);
+    woke(link, undefined);
     for (const f of allForwards(id)) {
       if (f.kind === "callback" || urls === "close") {
         closeForward(f, why);

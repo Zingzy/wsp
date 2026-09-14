@@ -4,8 +4,8 @@ use std::num::{NonZeroU16, NonZeroU32};
 
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, exec_timeout};
-use crate::{FsReadEncoding, GitDiffScope, ProcSignal, RequestId};
+use crate::validate::{bounded, bounded_opt, capped_list, exec_timeout, sha256_hex, upload_word};
+use crate::{FsReadEncoding, GitDiffScope, GuestKind, ProcSignal, RequestId};
 
 /// One request on an authed socket: the id the reply echoes and the op with its parameters.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,11 +110,52 @@ pub enum DaemonOp {
     },
     #[serde(rename = "place.leave")]
     PlaceLeave,
+    /// A process inside this machine opens its session; the token is the thread's, read by the host alone.
+    #[serde(rename = "guest.open", rename_all = "camelCase")]
+    GuestOpen {
+        kind: GuestKind,
+        #[serde(deserialize_with = "bounded::<_, 0, { crate::numbers::GUEST_TOKEN_MAX }>")]
+        token: String,
+        #[serde(
+            default,
+            deserialize_with = "bounded_opt::<_, { crate::numbers::GUEST_TOKEN_MAX }>",
+            skip_serializing_if = "Option::is_none"
+        )]
+        turn_token: Option<String>,
+        #[serde(deserialize_with = "capped_list::<_, { crate::numbers::GUEST_ARGV_MAX }>")]
+        argv: Vec<String>,
+        #[serde(deserialize_with = "bounded::<_, 0, { crate::numbers::GUEST_CWD_MAX }>")]
+        cwd: String,
+    },
+    #[serde(rename = "guest.send")]
+    GuestSend { message: serde_json::Value },
+    #[serde(rename = "guest.watch")]
+    GuestWatch,
+    #[serde(rename = "guest.reply")]
+    GuestReply { session: String, message: serde_json::Value },
+    #[serde(rename = "guest.close")]
+    GuestClose {
+        session: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// The daemon this host deploys, in parts under one upload id, and the restart the last part ends in. The other
+    /// link op: a binary travels as bytes and never as a command line.
+    #[serde(rename = "place.update", rename_all = "camelCase")]
+    PlaceUpdate {
+        #[serde(deserialize_with = "upload_word")]
+        upload_id: String,
+        seq: u64,
+        last: bool,
+        data: String,
+        #[serde(deserialize_with = "sha256_hex")]
+        sha256: String,
+    },
 }
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 27] = [
+pub const DAEMON_OPS: [&str; 33] = [
     "pty.create",
     "pty.attach",
     "pty.write",
@@ -142,4 +183,14 @@ pub const DAEMON_OPS: [&str; 27] = [
     "tunnel.close",
     "exec",
     "place.leave",
+    "guest.open",
+    "guest.send",
+    "guest.watch",
+    "guest.reply",
+    "guest.close",
+    "place.update",
 ];
+
+/// The five of those that belong to the road a client of this machine dials in on: a guest process's two and the
+/// host's three on the socket it holds. A daemon that dialled outward to its host serves none of them.
+pub const GUEST_OPS: [&str; 5] = ["guest.open", "guest.send", "guest.watch", "guest.reply", "guest.close"];

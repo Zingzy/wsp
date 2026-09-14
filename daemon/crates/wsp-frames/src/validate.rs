@@ -39,6 +39,30 @@ where
     Ok(list)
 }
 
+/// A string that may be absent, under the same cap when it is there.
+pub(crate) fn bounded_opt<'de, D, const MAX: usize>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<String>::deserialize(d)? {
+        None => Ok(None),
+        Some(s) if js_len(&s) <= MAX => Ok(Some(s)),
+        Some(s) => Err(de::Error::custom(format!("string must be at most {MAX} characters, got {}", js_len(&s)))),
+    }
+}
+
+/// A list of any strings under a cap on how many, which is what a zod array with only .max() takes.
+pub(crate) fn capped_list<'de, D, const MAX: usize>(d: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let list = Vec::<String>::deserialize(d)?;
+    if list.len() > MAX {
+        return Err(de::Error::custom(format!("at most {MAX} entries, got {}", list.len())));
+    }
+    Ok(list)
+}
+
 pub(crate) fn non_empty_list<'de, D>(d: D) -> Result<Vec<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -48,6 +72,31 @@ where
         return Err(de::Error::custom("at least one entry"));
     }
     Ok(list)
+}
+
+/// The protocol's upload id: one to thirty-two lowercase letters and digits. A name and never a path, since the
+/// far side keeps a file under it.
+pub(crate) fn upload_word<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = bounded::<_, 1, 32>(d)?;
+    if !s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()) {
+        return Err(de::Error::custom("an upload id is lowercase letters and digits"));
+    }
+    Ok(s)
+}
+
+/// A sha256 as the protocol spells it: sixty-four lowercase hex characters.
+pub(crate) fn sha256_hex<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(d)?;
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(de::Error::custom("a sha256 is 64 lowercase hex characters"));
+    }
+    Ok(s)
 }
 
 /// The protocol's isHttpUrl: http or https, then anything that is not whitespace or a control character.

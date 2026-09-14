@@ -2345,6 +2345,38 @@ export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
   return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
 }
 
+/** The one word the socket door closes a socket whose token names nobody with, and the one the guest door refuses a
+ * session with. Spelled once so the two roads into this host cannot drift apart in what they say. */
+export const UNAUTHORIZED = "unauthorized";
+
+/** What a guest session is refused with when it asks for a kind this host serves no module for; its own words, since
+ * a kind nobody built is not a token nobody holds. */
+export function guestNoKindLine(kind: string): string {
+  return `this host serves no ${kind} guest session`;
+}
+
+/** What the guest's next frame is answered with once the host no longer holds its session: a host that restarted, or
+ * a link that ended, leaves the machine's daemon holding a session nothing on this side can answer. */
+export const guestNoSessionLine = "the host holds no such session";
+
+/** What a line from inside a machine is told when it names a path: the path would be resolved and read on the
+ * person's computer, and the file the caller means is on the machine the line was typed on. */
+export const guestNoFileLine = "a path on this line would be read on the person's computer, not on the machine the line was typed on";
+
+/** What a line from inside a machine is told when it leaves the workspace to the folder it was typed in: that folder
+ * is on the machine, and reading it here would answer about the person's own checkouts instead. */
+export const guestNamesWorkspaceLine = "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read";
+
+/** What a line typed inside a workspace is told when it names a verb that runs at the person's own keyboard: the
+ * guest road carries the verbs an agent has business with, and the rest happen where the person is. */
+export function guestPersonsComputerLine(word: string): string {
+  return `wsp ${word} runs on the person's computer, not from a workspace`;
+}
+
+/** What a line typed inside a workspace is told when it tries to aim itself somewhere else. The host a turn's
+ * launch named is the one a line from that turn reaches, and the state file it would name is on another computer. */
+export const guestHostFlagLine = "a line from a workspace goes to the host that launched it; --host and --state are not read here";
+
 /** The one sentence a thread's own token is refused with for an act no thread may ask for, whatever the caps. */
 export function spawnActRefusal(threadId: string, act: SpawnAct): string {
   return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;
@@ -3303,11 +3335,8 @@ export function placeWorkspacesParts(view: PlaceView, count: number, monthUsd?: 
   if (view.build !== undefined) return { count: n, note: view.build };
   // Only a provider bills: a computer of the person's own runs their workspaces for nothing, whatever it runs them on.
   if (view.kind === "provider") return monthUsd === undefined ? { count: n } : { count: n, note: spentThisMonth(monthUsd) };
-  return view.runsWorkspaces === true ? { count: n } : { count: n, note: AGENTS_ONLY };
+  return { count: n };
 }
-
-/** What a computer that does not run workspaces of its own runs: the person's agents, and no workspace but the one it is. */
-export const AGENTS_ONLY = "agents only";
 
 /** What a place has taken since the first of the month, the clause every surface that says it says. */
 export const spentThisMonth = (usd: number): string => `${fmtCost(usd)} this month`;
@@ -3324,15 +3353,6 @@ export function placeSpendLine(spend: { monthUsd: number; rateUsdPerHour: number
  * its workspaces have all been asleep since last month: a count of two where one charged reads as two bills. */
 export function placesSpendFoot(monthUsd: number, providers: number): string {
   return `${spentThisMonth(monthUsd)} across ${plural(providers, "provider")}`;
-}
-
-/** The doctor's word on whether this computer runs workspaces: the positive line, or the one kernel reason the
- * daemon's self check named. A place that has not yet said reads neither. */
-export function placeWorkspacesLine(view: Pick<PlaceView, "name" | "runsWorkspaces" | "workspacesBlocked">): string | undefined {
-  if (view.runsWorkspaces === undefined) return undefined;
-  if (view.runsWorkspaces) return `${view.name} runs your workspaces`;
-  // The daemon's reason names "this computer"; on a named row it is that computer, so the line says which.
-  return view.workspacesBlocked?.replace("this computer", view.name) ?? `${view.name}'s kernel cannot run wsp workspaces`;
 }
 
 /** The doctor's word on the engine a project's own containers run on here: the engine when the box has one, else
@@ -3410,10 +3430,7 @@ export const PLACES_WORDS = {
     connected: (from: string): string => `connected from ${from} · keys exchanged`,
     reading: "reading what it has",
     joined: (os: string, agents: readonly string[]): string => `joined · ${os}${agents.length === 0 ? "" : ` · ${agents.join(", ")} found`}`,
-    cannotRunWorkspaces: "runs your agents as one workspace",
     joinedTitle: (name: string): string => `${name} joined`,
-    joinedDescription: "It runs your agents as one workspace.",
-    open: (name: string): string => `Open ${name}`,
     noApp: "No app on that computer",
     noAppLine: "In its terminal, install wsp, then join:",
     install: "npm i -g @zingzy/wsp",

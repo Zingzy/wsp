@@ -1541,6 +1541,7 @@ interface SharedFlags {
   "ssh-key"?: string;
   awake?: boolean;
   watch?: boolean;
+  update?: boolean;
   name?: string;
   relay?: string;
   host?: string;
@@ -1730,13 +1731,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   add: {
     page: "front",
-    usage: "wsp add [<provider>|user@host] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
-    about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types",
+    usage: "wsp add [<provider>|user@host|<place> --update] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+    about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types, a place with --update to put this wsp's daemon on one already in",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update)),
   },
   remove: {
     page: "front",
@@ -1947,6 +1948,7 @@ export const SHARED_OPTIONS: Options = {
   "ssh-key": { type: "string" },
   awake: { type: "boolean" },
   watch: { type: "boolean" },
+  update: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },
@@ -2069,6 +2071,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
+  { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the workspaces standing on it" },
   { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
@@ -2117,13 +2120,17 @@ function mcpPage(install: boolean): string {
  * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
  * environment the verbs run with, this process's for a real command line and its own for a test. `start` is what
  * brings a host up when none serves the state file: the one built from `run` unless a caller says otherwise, and
- * `false` for a caller that wants a line with no host to refuse rather than start one. */
+ * `false` for a caller that wants a line with no host to refuse rather than start one. `caller` is where the line was
+ * typed: the folder, which a thread with no workspace is placed by, and whether that place is somewhere other than
+ * this computer, which is what every rule that would read a path here reads. This process's own folder and here by
+ * default; a line typed inside a machine says both. */
 export async function cli(
   argv: string[],
   io: CliIO = terminalIO(),
   run: RunningWsp = runningWsp(),
   env: Readonly<Record<string, string | undefined>> = process.env,
   start: HostStarter | false = starterFor(run, env),
+  caller: { cwd?: string; elsewhere?: boolean } = {},
 ): Promise<number> {
   const starts = start === false ? {} : { start };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
@@ -2135,7 +2142,7 @@ export async function cli(
   const verb = findVerb(rest);
   if (verb !== undefined) {
     const words = verb.name.split(" ");
-    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, ...starts });
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
   }
   if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
   let values: SharedFlags;
