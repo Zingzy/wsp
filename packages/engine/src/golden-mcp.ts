@@ -2,13 +2,15 @@
 // The MCP stage on the builder. The definitions themselves arrive inside each
 // agent's config file with that agent's row, secrets included, so nothing here
 // carries a definition: the plan names which servers stay, which come out and
-// why, and the prefixes that read differently on the machine. A script on the
-// guest edits the files in place and touches no server it was not told about.
+// why, and the prefixes that read differently on the machine. The files are
+// read off the machine, edited here by the catalog format's own module, and the
+// bytes land back; the machine runs nothing of its own for it.
 import { BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW } from "@wsp/catalog";
-import type { McpFormat, McpGuestResult } from "@wsp/catalog";
+import type { McpEditLib, McpEditResult, McpFormat } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { landBytes } from "./land-bytes.js";
 import { type ToolResult, closing, freeNote, guardDeadlineMs, guardedRoad, reasonOf, roadLimitS } from "./golden-tools.js";
 import type { ExecResult, Machine } from "./machine.js";
 import type { StageListener } from "./golden.js";
@@ -128,61 +130,128 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
   };
 }
 
-// --- the guest script ------------------------------------------------------------
+// --- the files, off the machine and back ------------------------------------------
 
-/** Runs under the guest's node with the plan as its one argument. Each config is edited in place by its format's own
- * editor, which travels inside the script from the catalog module: kept servers get their strings rewritten (the
- * command to a bare name when it sits in a bin directory), dropped ones come out, every other key and server stays.
- * With `write` off nothing is written, so the same pass reads each kept server's command as the machine would run
- * it. Prints one JSON object: a result per scope in plan order, naming each server's outcome and command and never
- * its values. */
-const guestScript = (editors: readonly string[]): string => String.raw`
-const fs = require("fs");
-const plan = JSON.parse(process.argv[1]);
-function rewriteString(s, command) {
+/** How long the read of every config off the machine may take. */
+const READ_MS = 120_000;
+/** What each config's line starts with, so no text of a person's own can be read as the run's own words. */
+export const MCP_READ_MARK = "wsp-mcp";
+
+/** A call the machine never ran (refused by the provider, lost while it napped) reads as a failed one with the
+ * error's words, so the stage names it on every server and the build goes on. */
+const refused = (e: unknown): ExecResult => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) });
+
+/** Why the read did not answer, worded without a line of its output. That output is every config whole, and this
+ * sentence is every skipped server's note, the stage line, the run log and the saved result: a read that stopped
+ * says so by what it exited with. A machine that refused the call still says its own words, which are on stderr. */
+const readFailed = (res: ExecResult): string => `the config edit did not run (${reasonOf({ ...res, stdout: "" }, READ_MS / 1000)})`;
+
+/** One run reads every scope's config: the first of the scope's files that exists, base64 on one line, under the
+ * scope's place in the plan and the file's place in the scope. */
+function readConfigsCmd(scopes: readonly { files: readonly string[] }[]): string {
+  return [
+    "wsp_mcp_read() {",
+    '  i="$1"; shift; n=0',
+    '  for f in "$@"; do',
+    `    if [ -f "$f" ]; then printf '${MCP_READ_MARK} %s %s ' "$i" "$n"; base64 < "$f" | tr -d '\\n'; printf '\\n'; return 0; fi`,
+    "    n=$((n+1))",
+    "  done",
+    `  printf '${MCP_READ_MARK} %s - -\\n' "$i"`,
+    "}",
+    ...scopes.map((s, i) => `wsp_mcp_read ${i} ${s.files.map(shellQuote).join(" ")}`),
+  ].join("\n");
+}
+
+/** The config one scope points at, as it stands on the machine; nothing when none of the scope's files is there. */
+interface ScopeFile {
+  path: string;
+  text: string;
+}
+
+/** What the read printed, one entry per scope in plan order; nothing when not one line carried the mark, since the
+ * read says something about every scope it was given and a run that says nothing did not run. An empty file prints
+ * three words and is a file that is there and holds nothing, never a scope with no config on the machine. */
+function parseConfigs(stdout: string, scopes: readonly { files: readonly string[] }[]): (ScopeFile | undefined)[] | undefined {
+  const out: (ScopeFile | undefined)[] = scopes.map(() => undefined);
+  let answered = false;
+  for (const line of stdout.split("\n")) {
+    const words = line.trim().split(" ");
+    if (words[0] !== MCP_READ_MARK || words.length < 3) continue;
+    answered = true;
+    const path = scopes[Number(words[1])]?.files[Number(words[2])];
+    if (path !== undefined) out[Number(words[1])] = { path, text: Buffer.from(words[3] ?? "", "base64").toString("utf8") };
+  }
+  return answered ? out : undefined;
+}
+
+/** A kept definition's string as the machine reads it: a command right under a bin directory becomes its bare name,
+ * and a laptop prefix becomes what it stands for there, a flag's `--name=` left in front of it. */
+function rewriteString(plan: McpPlan, s: string, command: boolean): string {
   if (command) for (const d of plan.binDirs) if (s.startsWith(d) && !s.slice(d.length).includes("/")) return s.slice(d.length);
   const flag = /^--?[\w-]+=/.exec(s);
-  const head = flag ? flag[0] : "";
+  const head = flag !== null ? flag[0] : "";
   const body = s.slice(head.length);
   for (const [from, to] of plan.rewrites) if (body.startsWith(from)) return head + to + body.slice(from.length);
   return s;
 }
-function firstFile(files) {
-  for (const f of files) { try { if (fs.statSync(f).isFile()) return f; } catch {} }
-  return null;
-}
-const editors = [
-${editors.join(",\n")}
-];
-const lib = { fs, write: plan.write, rewriteString };
-const scopes = [];
-for (const agent of plan.agents) {
-  for (const scope of agent.scopes) {
-    const file = firstFile(scope.files);
-    if (file === null) { scopes.push({ file: null, results: [] }); continue; }
-    try { scopes.push({ file, results: editors[scope.editor](lib, { keep: scope.keep, drop: scope.drop.map(d => d.name), project: scope.project }, file) }); }
-    catch (e) { scopes.push({ file, error: String(e && e.message || e), results: [] }); }
-  }
-}
-process.stdout.write(JSON.stringify({ scopes }));
-`;
 
 interface ScopeOutcome {
   file: string | null;
   error?: string;
-  results: McpGuestResult[];
+  results: McpEditResult[];
 }
 
-/** The last line that parses as the script's report. */
-function parseReport(stdout: string): { scopes: ScopeOutcome[] } | undefined {
-  const line = stdout.trim().split("\n").at(-1);
-  if (line === undefined) return undefined;
-  try {
-    const v = JSON.parse(line) as { scopes?: unknown };
-    return Array.isArray(v.scopes) ? (v as { scopes: ScopeOutcome[] }) : undefined;
-  } catch {
-    return undefined;
+/** Every scope edited in plan order, each on its file's text as the scopes before it left it: two scopes of one
+ * agent share a file, and the second reads what the first wrote. The texts are what the machine should end with. */
+function editScopes(plan: McpPlan, agents: readonly McpAgentPlan[], read: readonly (ScopeFile | undefined)[]): { outcomes: ScopeOutcome[]; texts: Map<string, string> } {
+  const lib: McpEditLib = { rewriteString: (s, command) => rewriteString(plan, s, command) };
+  const texts = new Map(read.flatMap(f => (f === undefined ? [] : [[f.path, f.text] as const])));
+  const outcomes: ScopeOutcome[] = [];
+  let at = 0;
+  for (const agent of agents) {
+    for (const scope of agent.scopes) {
+      const file = read[at++];
+      if (file === undefined) {
+        outcomes.push({ file: null, results: [] });
+        continue;
+      }
+      try {
+        const edited = scope.format.edit(lib, { keep: scope.keep, drop: scope.drop.map(d => d.name), ...(scope.project !== undefined ? { project: scope.project } : {}) }, texts.get(file.path)!);
+        texts.set(file.path, edited.text);
+        outcomes.push({ file: file.path, results: edited.results });
+      } catch (e) {
+        outcomes.push({ file: file.path, error: e instanceof Error ? e.message : String(e), results: [] });
+      }
+    }
   }
+  return { outcomes, texts };
+}
+
+/** Where a config's edited bytes land before they are poured over it. */
+const landing = (path: string): string => `${path}.wsp-mcp`;
+
+/** The bytes land beside the file and are poured over it rather than put in its place: a signed upload writes a new
+ * file at the road's own mode, and a config that held a login would come back readable to anyone on the machine. */
+const pourOver = (path: string): string => `cat ${shellQuote(landing(path))} > ${shellQuote(path)} && rm -f ${shellQuote(landing(path))}`;
+
+/** Puts every config the edit changed back on the machine; the words when one of them did not land. A landing that
+ * was never poured over is swept: it holds the whole config at the upload road's own mode, and the machine it sits
+ * on is about to be sealed into an image. */
+async function landConfigs(machine: Machine, read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
+  const was = new Map(read.flatMap(f => (f === undefined ? [] : [[f.path, f.text] as const])));
+  const changed = [...texts].filter(([path, text]) => was.get(path) !== text);
+  if (changed.length === 0) return undefined;
+  const swept = async (why: string): Promise<string> => {
+    await machine.exec(`rm -f ${changed.map(([path]) => shellQuote(landing(path))).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    return `the edited config did not land (${why})`;
+  };
+  try {
+    for (const [path, text] of changed) await landBytes(machine, landing(path), new TextEncoder().encode(text), { timeoutMs: READ_MS });
+  } catch (e) {
+    return swept(e instanceof Error ? e.message : String(e));
+  }
+  const res = await machine.exec(["set -e", ...changed.map(([path]) => pourOver(path))].join("\n"), { timeoutMs: INLINE_EXEC_MS }).catch(refused);
+  return res.exitCode === 0 ? undefined : swept(reasonOf(res, INLINE_EXEC_MS / 1000));
 }
 
 interface Pending extends McpResult {
@@ -228,39 +297,6 @@ export function mcpTally(rows: readonly McpResult[]): string | undefined {
 
 const strip = (r: Pending): McpResult => ({ id: r.id, agent: r.agent, name: r.name, outcome: r.outcome, ...(r.notes.length > 0 ? { note: r.notes.join("; ") } : {}) });
 
-interface GuestScope extends Omit<McpScope, "format"> {
-  /** Index into the script's editors: the scope's format, carried once however many scopes share it. */
-  editor: number;
-}
-
-interface GuestAgent extends Omit<McpAgentPlan, "scopes"> {
-  scopes: GuestScope[];
-}
-
-/** The plan as the guest script takes it: `write` off reads, on edits; the tool rows stay on the host. */
-interface GuestPlan extends Omit<McpPlan, "tools" | "agents"> {
-  agents: GuestAgent[];
-  write: boolean;
-}
-
-/** The script with every format the agents use, each editor once, and the plan pointing each scope at its editor. */
-function guestRun(plan: McpPlan, agents: readonly McpAgentPlan[], write: boolean): { script: string; plan: GuestPlan } {
-  const editors = [...new Set(agents.flatMap(a => a.scopes.map(s => s.format.guest)))];
-  const guestAgents = agents.map(a => ({ ...a, scopes: a.scopes.map(({ format, ...scope }) => ({ ...scope, editor: editors.indexOf(format.guest) })) }));
-  return { script: guestScript(editors), plan: { agents: guestAgents, guestHome: plan.guestHome, rewrites: plan.rewrites, binDirs: plan.binDirs, write } };
-}
-
-/** An exec the machine never ran (refused by the provider, lost while it napped) reads as a failed one with the
- * error's words, so the stage names it on every server and the build goes on. */
-const refused = (e: unknown): ExecResult => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) });
-
-async function runScript(machine: Machine, plan: McpPlan, agents: readonly McpAgentPlan[], write: boolean): Promise<{ scopes: ScopeOutcome[] } | { failure: string }> {
-  const run = guestRun(plan, agents, write);
-  const res = await machine.run(`export PATH="/usr/local/bin:$PATH"\nnode -e ${shellQuote(run.script)} ${shellQuote(JSON.stringify(run.plan))}`, { deadlineMs: 120_000 }).catch(refused);
-  const report = res.exitCode === 0 ? parseReport(res.stdout) : undefined;
-  return report ?? { failure: `the config edit did not run (${reasonOf(res, 120)})` };
-}
-
 const tail = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 
 /** Why a server whose command the machine does not have is skipped: when the recipe has a tool row for that
@@ -294,9 +330,9 @@ function withoutAbsent(plan: McpPlan, read: readonly ScopeOutcome[], missing: Re
   }));
 }
 
-/** Runs the plan on the builder in two passes of the guest script: the first reads each kept server's command as
- * the machine will run it, every command is looked for on the machine's PATH, and the second writes the configs
- * with the servers whose command is neither there nor fetched on first use taken out. uv is installed by its
+/** Runs the plan on the builder in two edits of the text it read off the machine: the first says each kept server's
+ * command as the machine will run it, every command is looked for on the machine's PATH, and the second is what
+ * lands, with the servers whose command is neither there nor fetched on first use taken out. uv is installed by its
  * checksummed release when a server runs through it and it is missing. Each server is named on the stage as
  * installed or skipped with its reason; `tools` is what the tools stage did, so a skipped server can name the row
  * that would have brought its command. Nothing here fails the build. */
@@ -306,18 +342,27 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   const asRun = (command: string): string => (command.startsWith("~/") ? `${plan.guestHome}${command.slice(1)}` : command);
   const missing = new Set<string>();
   let agents = plan.agents;
-  let run = await runScript(machine, plan, agents, false);
-  if ("scopes" in run) {
-    const commands = [...new Set(run.scopes.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : []))))];
+  const scopes = plan.agents.flatMap(a => a.scopes);
+  // The answer is every config whole, the servers' env and headers with it. No backend the seal runs on carries a
+  // byte road out of a machine (a signed download URL is minted by one provider of the several), so the read goes
+  // by the road every backend has and says that its output is not a log's.
+  const res = await machine.run(readConfigsCmd(scopes), { deadlineMs: READ_MS, unlogged: true }).catch(refused);
+  let failure = res.exitCode === 0 ? undefined : readFailed(res);
+  let report: ScopeOutcome[] | undefined;
+  const files = failure === undefined ? parseConfigs(res.stdout, scopes) : undefined;
+  if (files === undefined) failure ??= readFailed(res);
+  else {
+    const first = editScopes(plan, agents, files);
+    const commands = [...new Set(first.outcomes.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : []))))];
     if (commands.length > 0) {
       const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS }).catch(refused);
       for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
     }
-    agents = withoutAbsent(plan, run.scopes, missing, asRun, tools);
-    run = await runScript(machine, plan, agents, true);
+    agents = withoutAbsent(plan, first.outcomes, missing, asRun, tools);
+    const second = editScopes(plan, agents, files);
+    report = second.outcomes;
+    failure = await landConfigs(machine, files, second.texts);
   }
-  const report = "scopes" in run ? run.scopes : undefined;
-  const failure = "failure" in run ? run.failure : undefined;
   const rows: Pending[] = [];
   let at = 0;
   for (const agent of agents) {

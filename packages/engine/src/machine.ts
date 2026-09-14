@@ -45,6 +45,10 @@ export interface RunOptions {
   onLine?: (line: string) => void;
   /** Between reads of the command's output; the backend's own pace unless a test shortens it. */
   pollMs?: number;
+  /** What this command prints is a file of the person's own, secrets and all: whoever watches the run records that
+   * it ran and what it exited with, never what it printed. The caller reads the output itself; the backend does
+   * nothing differently for it. */
+  unlogged?: boolean;
 }
 
 

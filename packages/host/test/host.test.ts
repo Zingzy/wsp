@@ -164,7 +164,7 @@ describe("wsp cli", () => {
     expect(row("java")).toMatchObject({ on: true, source: { kind: "installed", bin: true } });
     expect(row("gradle")).toMatchObject({ on: false, source: { kind: "popular" } });
     expect(logs.find(l => l.includes("Java 21"))).toMatch(/^● {2}Java 21\s+installed\s+installed here, never used\s+585 MB$/);
-    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+199 MB$/);
+    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+used\s+6 commands in 2 sessions\s+199 MB$/);
     expect(logs).toContain("  pulumi       2         2");
 
     errs.length = 0;
@@ -191,7 +191,7 @@ describe("wsp cli", () => {
     expect(logs.at(-1)).toContain("Nothing was written.");
     expect(errs[0]).toContain("Nothing leaves this computer");
     // The fixture's own rows, the same on any box.
-    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+base\s+always on the image\s+199 MB {2}on$/);
+    expect(logs.find(l => l.includes("Node 22"))).toMatch(/^● {2}Node 22 with npm\s+used\s+6 commands in 2 sessions\s+199 MB {2}on$/);
     expect(logs.find(l => l.includes("Java 21"))).toMatch(/^○ {2}Java 21\s+installed\s+installed here, never used\s+585 MB {2}off$/);
     expect(logs).toContain("  pulumi       2         2");
 

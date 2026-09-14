@@ -8,7 +8,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
 import { describeDiff, diffRecipes, isEmptyDiff } from "../src/golden-diff.js";
 import { withRecordedPins } from "../src/golden-tools.js";
-import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
+import { CATALOG_AGENTS, GOLDEN_SETUP, ROAD_MODULES, ROAD_STEPS, baseNote, catalogEntry as catalogEntryOf } from "@wsp/catalog";
 import {
   rowRoad,
   UNMEASURED_ROAD,
@@ -769,10 +769,13 @@ describe("toolInstallsFor", () => {
       // What two or more of the formulae (gh and the managers' pipx and go) share installs once, after the taps it may need.
       ["tools/brew-shared", "brew", "tools/brew-toolchain/gcc"],
       ["tools/brew/gh", "brew", "tools/brew-toolchain/gcc"],
-      ["tools/npm/bun", "npm", undefined],
-      ["tools/npm/@monid-ai/cli", "npm", undefined],
-      // bun came as an npm global, so its rows wait on that line rather than on a formula; pnpm and uv are the base's, so their rows wait on nothing.
-      ["tools/pnpm/turbo", "pnpm", undefined],
+      // Node is not on the floor, so the first row on the npm road brings it, once, ahead of them all.
+      ["tools/manager/npm", "script", undefined],
+      ["tools/npm/bun", "npm", "tools/manager/npm"],
+      ["tools/npm/@monid-ai/cli", "npm", "tools/manager/npm"],
+      ["tools/npm/pnpm", "npm", "tools/manager/npm"],
+      // bun and pnpm came as npm globals, so their rows wait on those lines rather than on a formula; uv is the base's, so its rows wait on nothing.
+      ["tools/pnpm/turbo", "pnpm", "tools/npm/pnpm"],
       ["tools/bun/eslint", "bun", "tools/npm/bun"],
       ["tools/uv/ty", "uv", undefined],
       ["tools/manager/pipx", "brew", "tools/brew-toolchain/gcc"],
@@ -821,7 +824,7 @@ describe("toolInstallsFor", () => {
       { id: "tools/brew/mas", note: "no Linux bottle" },
       { id: "tools/go/junk", note: "no module to install from" },
     ]);
-    expect(baseRows(t)).toEqual([["tools/npm/pnpm", "pnpm", "pnpm is part of the base"]]);
+    expect(baseRows(t)).toEqual([]);
     expect(t.brewfile).toBe(['tap "zingzy/tap"', 'brew "gh"', ""].join("\n"));
   });
 
@@ -841,13 +844,15 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/bun/elysia", label: "elysia" }),
       row({ rung: "tools", id: "tools/uv/ty", label: "ty" }),
     ]);
-    // The Mac's bun formula is the catalog's bun row, so it comes by the catalog's npm install and Homebrew stays off the machine.
+    // The Mac's bun formula is the catalog's bun row, so it comes by the catalog's npm install and Homebrew stays off
+    // the machine; that install runs on node, which the recipe ticked no row for, so the node step brings it.
     expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
-      ["tools/brew/bun", "npm", undefined],
+      ["tools/manager/npm", "script", undefined],
+      ["tools/brew/bun", "npm", "tools/manager/npm"],
       ["tools/bun/elysia", "bun", "tools/brew/bun"],
       ["tools/uv/ty", "uv", undefined],
     ]);
-    expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g bun$/);
+    expect(t.installs[1]!.cmd).toMatch(/\nnpm install -g bun$/);
     expect(t.brewfile).toBe("");
     expect(t.installs.find(i => i.id === "tools/bun/elysia")!.cmd).toMatch(/bun add -g elysia$/);
     expect(t.installs.find(i => i.id === "tools/uv/ty")!.cmd).toMatch(/uv tool install ty$/);
@@ -872,20 +877,24 @@ describe("toolInstallsFor", () => {
     ], table);
     expect(baseRows(t)).toEqual([
       ["tools/brew/jq", "jq", "jq is part of the base"],
-      ["tools/npm/pnpm", "pnpm", "pnpm is part of the base"],
       ["tools/brew/python@3.12", "Python 3.12", "Python 3.12 is part of the base"],
-      ["tools/brew/node", "Node 22 with npm", "Node 22 is part of the base; this Mac runs Node 24"],
       ["tools/brew/python", "Python 3.12", "Python 3.12 is part of the base; this Mac runs Python 3.14"],
       ["tools/brew/uv", "uv", "uv is part of the base"],
       ["tools/cargo/ripgrep", "ripgrep", "ripgrep is part of the base"],
     ]);
     // The plan names no computer: it carries the floor row and the version read here, so the same rows read as a
     // Linux computer's when that is what was read.
-    expect(baseRows(t, "linux").map(r => r[2])).toContain("Node 22 is part of the base; this computer runs Node 24");
-    // A row with no table entry and no version says the base row alone; a versioned row on the floor's major does too.
-    expect(baseRows(toolInstallsFor([row({ rung: "tools", id: "tools/brew/node", linux: "yes" })]))[0]![2]).toBe("Node 22 with npm is part of the base");
-    expect(baseRows(toolInstallsFor([row({ rung: "tools", id: "tools/npm/node", label: "node", version: "22.20.0" })]))[0]![2]).toBe("Node 22 with npm is part of the base");
-    expect(t.installs.map(i => i.id)).toEqual(["tools/homebrew", "tools/brew-toolchain/glibc", "tools/brew-toolchain/gcc", "tools/brew/python@3.14"]);
+    expect(baseRows(t, "linux").map(r => r[2])).toContain("Python 3.12 is part of the base; this computer runs Python 3.14");
+    // Node and pnpm are off the floor: the Mac's node formula is the node the npm road runs on, by the catalog's
+    // own script, and pnpm waits on it.
+    expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
+      ["tools/homebrew", "brew", undefined],
+      ["tools/brew-toolchain/glibc", "brew", "tools/homebrew"],
+      ["tools/brew-toolchain/gcc", "brew", "tools/brew-toolchain/glibc"],
+      ["tools/brew/python@3.14", "brew", "tools/brew-toolchain/gcc"],
+      ["tools/brew/node", "script", undefined],
+      ["tools/npm/pnpm", "npm", "tools/brew/node"],
+    ]);
     expect(t.skipped).toEqual([]);
     expect(t.brewfile).toBe('brew "python@3.14"\n');
     expect(toolUninstall(row({ rung: "tools", id: "tools/brew/jq" }), new Map())).toEqual({ note: "jq is part of the base and stays" });
@@ -967,7 +976,7 @@ exec "$0" "$@"' -- ${BREW_REAL}`);
       ["tools/manager/cargo", "script", undefined],
       ["tools/cargo/bat", "cargo", "tools/manager/cargo"],
     ]);
-    expect(t.installs[0]).toMatchObject({ label: "cargo", bin: "cargo" });
+    expect(t.installs[0]).toMatchObject({ label: "Rust with cargo", bin: "cargo" });
     expect(t.installs[0]!.cmd).toContain("static.rust-lang.org/rustup/archive/1.29.1/");
     expect(t.brewfile).toBe("");
   });
@@ -993,17 +1002,19 @@ exec "$0" "$@"' -- ${BREW_REAL}`);
 
   it("a manager the catalog carries installs by the catalog's road: bun's rows wait on an npm install of bun, and no Homebrew comes along", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/bun/eslint", label: "eslint 9.0.0", version: "9.0.0" })]);
+    // That install is itself an npm global, so the step that brings bun waits on the node step, which nothing else asked for.
     expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
-      ["tools/manager/bun", "npm", undefined],
+      ["tools/manager/npm", "script", undefined],
+      ["tools/manager/bun", "npm", "tools/manager/npm"],
       ["tools/bun/eslint", "bun", "tools/manager/bun"],
     ]);
-    expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g bun$/);
+    expect(t.installs[1]!.cmd).toMatch(/\nnpm install -g bun$/);
     expect(t.brewfile).toBe("");
   });
 
   it("no Homebrew step when no formula, tap or manager needs it; unticked rows install nothing", () => {
     const t = toolInstallsFor([row({ rung: "tools", id: "tools/npm/bun", label: "bun@1.4.0", version: "1.4.0" }), row({ rung: "tools", id: "tools/brew/gh", linux: "yes", bring: false })]);
-    expect(t.installs.map(i => i.id)).toEqual(["tools/npm/bun"]);
+    expect(t.installs.map(i => i.id)).toEqual(["tools/manager/npm", "tools/npm/bun"]);
     expect(t.brewfile).toBe("");
   });
 
@@ -1033,7 +1044,11 @@ describe("what a step shows while it runs", () => {
       new Map(),
       [{ kind: "custom", id: "just", name: "just", install: ["brew install just", "just --version"], check: "command -v just", why: "added by hand" }],
     );
-    const shown = Object.fromEntries(t.installs.map(i => [i.id, i.shown]));
+    // The node step shows its own script, one line, as the floor showed it before node left.
+    const nodeShown = t.installs.find(i => i.id === "tools/manager/npm")!.shown!;
+    expect(nodeShown).not.toContain("\n");
+    expect(nodeShown).toContain(`https://nodejs.org/dist/v${NODE_RELEASES[22].version}/`);
+    const shown = Object.fromEntries(t.installs.filter(i => i.id !== "tools/manager/npm").map(i => [i.id, i.shown]));
     expect(shown).toEqual({
       "tools/homebrew": "git clone github.com/Homebrew/brew at 6.0.21",
       "tools/brew-toolchain/glibc": "brew install glibc",
@@ -1061,17 +1076,21 @@ describe("catalog rows", () => {
     expect(t.installs.map(i => [i.id, i.manager, i.after])).toEqual([
       ["tools/apt-index", "apt", undefined],
       ["tools/catalog/swift", "script", "tools/apt-index"],
-      ["tools/catalog/playwright", "script", undefined],
-      ["tools/catalog/yarn", "script", undefined],
+      // Playwright's npm road and yarn's script both name node, which is off the floor: one step brings it for both.
+      ["tools/manager/npm", "script", undefined],
+      ["tools/catalog/playwright", "script", "tools/manager/npm"],
+      ["tools/catalog/yarn", "script", "tools/manager/npm"],
       ["tools/catalog/shellcheck", "apt", "tools/apt-index"],
     ]);
+    expect(t.installs.filter(i => i.id === "tools/manager/npm")).toHaveLength(1);
     expect(t.installs.filter(i => i.id === "tools/apt-index")).toHaveLength(1);
   });
 
   it("a ticked catalog tool this computer has no row for installs by its catalog road, named for its command; a road no golden build has run is noted", () => {
     const t = toolInstallsFor([catalog("gh"), catalog("wrangler"), catalog("ffmpeg"), catalog("kubectl"), catalog("gcloud"), catalog("tmux")]);
     expect(t.installs.map(i => [i.id, i.manager, i.after, i.bin, i.note])).toEqual([
-      ["tools/catalog/wrangler", "npm", undefined, "wrangler", UNMEASURED_ROAD],
+      ["tools/manager/npm", "script", undefined, "node", undefined],
+      ["tools/catalog/wrangler", "npm", "tools/manager/npm", "wrangler", UNMEASURED_ROAD],
       ["tools/catalog/gh", "release", undefined, "gh", UNMEASURED_ROAD],
       ["tools/apt-index", "apt", undefined, undefined, undefined],
       ["tools/catalog/ffmpeg", "apt", "tools/apt-index", "ffmpeg", UNMEASURED_ROAD],
@@ -1116,8 +1135,8 @@ describe("catalog rows", () => {
     const t = toolInstallsFor([catalog("git"), catalog("nothing", { label: "nothing" }), row({ rung: "tools", id: "tools/npm/wrangler", label: "wrangler", version: "4.1.0" })]);
     expect(baseRows(t)).toEqual([["tools/catalog/git", "git", "git is part of the base"]]);
     expect(t.skipped).toEqual([{ id: "tools/catalog/nothing", note: "not in the catalog" }]);
-    expect(t.installs.map(i => [i.id, i.manager, i.note])).toEqual([["tools/npm/wrangler", "npm", undefined]]);
-    expect(t.installs[0]!.cmd).toMatch(/\nnpm install -g wrangler@4\.1\.0$/);
+    expect(t.installs.map(i => [i.id, i.manager, i.note])).toEqual([["tools/manager/npm", "script", undefined], ["tools/npm/wrangler", "npm", undefined]]);
+    expect(t.installs[1]!.cmd).toMatch(/\nnpm install -g wrangler@4\.1\.0$/);
   });
 
   it("a catalog tool comes off through the same module: the release binary, the formula, the apt package, the npm global, the vendor's tree", () => {
@@ -1239,6 +1258,70 @@ describe("agentOwning", () => {
   });
 });
 
+describe("the node a recipe's own rows bring", () => {
+  // Node is not on the floor: a recipe row whose road runs on it brings it, once, by the catalog's own script, and
+  // a recipe that asks for nothing on node leaves the image without one.
+  const NODE_STEP = "tools/manager/npm";
+  const tool = (id: string): RecipeEntry => row({ rung: "tools", id, label: id.slice(id.lastIndexOf("/") + 1) });
+  const plan = (...ids: string[]): { id: string; after?: string }[] => toolInstallsFor(ids.map(tool)).installs.map(t => ({ id: t.id, after: t.after }));
+
+  it("runs once, ahead of every row whose road runs on it, whichever road asked", () => {
+    expect(plan("tools/npm/pnpm")).toEqual([{ id: NODE_STEP, after: undefined }, { id: "tools/npm/pnpm", after: NODE_STEP }]);
+    // Two rows on the road, and a row whose own road is another that runs on node: still one node step, first.
+    expect(plan("tools/npm/pnpm", "tools/npm/prettier", "tools/catalog/yarn")).toEqual([
+      { id: NODE_STEP, after: undefined },
+      { id: "tools/npm/pnpm", after: NODE_STEP },
+      { id: "tools/npm/prettier", after: NODE_STEP },
+      { id: "tools/catalog/yarn", after: NODE_STEP },
+    ]);
+    // bun's own install is an npm global, so the step that brings bun waits on node as its rows wait on bun.
+    expect(plan("tools/bun/eslint")).toEqual([
+      { id: NODE_STEP, after: undefined },
+      { id: "tools/manager/bun", after: NODE_STEP },
+      { id: "tools/bun/eslint", after: "tools/manager/bun" },
+    ]);
+  });
+
+  it("is the recipe's own node row when it ticked one, so the person's tick is the step and nothing installs node twice", () => {
+    expect(plan("tools/catalog/node", "tools/npm/pnpm")).toEqual([
+      { id: "tools/catalog/node", after: undefined },
+      { id: "tools/npm/pnpm", after: "tools/catalog/node" },
+    ]);
+    // The row that waits on node comes after the node row in the recipe, so the wait is read while that row is
+    // planned: what stands for npm is settled before the first row, or the node row is planned twice.
+    const one = [{ id: "tools/catalog/node", after: undefined }, { id: "tools/catalog/yarn", after: "tools/catalog/node" }];
+    expect(plan("tools/catalog/node", "tools/catalog/yarn")).toEqual(one);
+    expect(plan("tools/catalog/yarn", "tools/catalog/node")).toEqual(one);
+    expect(plan("tools/catalog/node", "tools/catalog/playwright")).toEqual([one[0], { id: "tools/catalog/playwright", after: "tools/catalog/node" }]);
+    // This Mac's own node formula is the catalog's node row, and the same holds for it.
+    expect(plan("tools/brew/node", "tools/catalog/yarn")).toEqual([{ id: "tools/brew/node", after: undefined }, { id: "tools/catalog/yarn", after: "tools/brew/node" }]);
+  });
+
+  it("is not there at all for a recipe whose rows need no node", () => {
+    expect(plan("tools/catalog/gh", "tools/uv/ruff").map(t => t.id)).toEqual(["tools/uv/ruff", "tools/catalog/gh"]);
+  });
+
+  it("is the catalog's own script: the node step and a node row install the same pinned release", () => {
+    const step = toolInstallsFor([tool("tools/npm/pnpm")]).installs.find(t => t.id === NODE_STEP)!;
+    expect(step.label).toBe("Node 22 with npm");
+    expect(step.bin).toBe("node");
+    expect(step.manager).toBe("script");
+    expect(step.cmd).toContain(nodeInstallScript(22, NODE_RELEASES[22]));
+  });
+
+  it("keeps a node the machine already has: the script prints NODE_KEPT and downloads nothing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "wsp-node-step-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, "node"), "#!/bin/sh\necho v22.23.2\n", { mode: 0o755 });
+    writeFileSync(join(dir, "curl"), '#!/bin/sh\necho "curl ran" >&2\nexit 1\n', { mode: 0o755 });
+    const script = [...ROAD_STEPS.script.env, nodeInstallScript(22, NODE_RELEASES[22])].join("\n");
+    const res = spawnSync("bash", ["-c", script], { encoding: "utf8", env: { HOME: dir, PATH: `${dir}:/usr/bin:/bin` } });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain("NODE_KEPT v22.23.2");
+    expect(res.stderr).not.toContain("curl ran");
+  });
+});
+
 describe("agentInstallsFor", () => {
   it("every known agent has a pinned installer, its version check, and the documentation it was read from", () => {
     for (const [name, a] of Object.entries(AGENT_INSTALLERS)) {
@@ -1275,16 +1358,23 @@ describe("agentInstallsFor", () => {
     expect(a.skipped).toEqual([{ id: "agents/unknown-thing", note: "no installer known" }]);
   });
 
-  it("asks for Node once, at the lowest supported pinned major that meets every ticked agent's floor, else the current LTS, and never without a floor", () => {
+  it("asks for Node once, at the lowest supported pinned major that meets every ticked agent's floor, else the current LTS, and only for the agents that run on it", () => {
     const today = new Date("2026-09-03T00:00:00Z");
-    // Node 20 left maintenance in April 2026: a Gemini-only recipe gets 22, not 20.
+    // Node 20 left maintenance in April 2026: a Gemini-only recipe gets 22, not 20. OpenCode is an npm global with
+    // no floor of its own, so it asks for node too, and the floor the two share is Gemini's.
     const gemini = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/opencode" })], CATALOG_AGENTS, today);
-    expect(gemini.node).toMatchObject({ floor: 20, version: NODE_RELEASES[22].version, agents: ["Gemini CLI"] });
+    expect(gemini.node).toMatchObject({ floor: 20, version: NODE_RELEASES[22].version, agents: ["Gemini CLI", "OpenCode"] });
     const codexOnly = agentInstallsFor([row({ rung: "agents", id: "agents/codex" })], CATALOG_AGENTS, today);
     expect(codexOnly.node).toMatchObject({ floor: 16, version: NODE_RELEASES[22].version, agents: ["Codex"] });
     const both = agentInstallsFor([row({ rung: "agents", id: "agents/gemini" }), row({ rung: "agents", id: "agents/pi" })], CATALOG_AGENTS, today);
     expect(both.node).toMatchObject({ floor: 22, version: NODE_RELEASES[22].version, agents: ["Gemini CLI", "Pi"] });
-    expect(agentInstallsFor([row({ rung: "agents", id: "agents/opencode" }), row({ rung: "agents", id: "agents/aider" })], CATALOG_AGENTS, today).node).toBeUndefined();
+    // An agent whose installer is an npm global brings node at the major the catalog's own row pins; nothing that
+    // the floor no longer carries is assumed to be there.
+    const opencode = agentInstallsFor([row({ rung: "agents", id: "agents/opencode" })], CATALOG_AGENTS, today);
+    expect(opencode.node).toMatchObject({ floor: 22, version: NODE_RELEASES[22].version, agents: ["OpenCode"] });
+    // Claude Code's installer is its vendor's own native one and Hermes takes a release: neither asks for node.
+    expect(agentInstallsFor([row({ rung: "agents", id: "agents/claude" }), row({ rung: "agents", id: "agents/hermes" })], CATALOG_AGENTS, today).node).toBeUndefined();
+    expect(agentInstallsFor([row({ rung: "agents", id: "agents/aider" })], CATALOG_AGENTS, today).node).toBeUndefined();
     expect(agentInstallsFor([row({ rung: "agents", id: "agents/pi", bring: false })], CATALOG_AGENTS, today).node).toBeUndefined();
     // While 20 was still in maintenance it was the lowest satisfying major.
     expect(nodeMajorFor(20, new Date("2026-01-15T00:00:00Z"))).toBe(20);

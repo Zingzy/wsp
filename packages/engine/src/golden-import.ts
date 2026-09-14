@@ -872,6 +872,19 @@ export function brewfileFor(entries: readonly RecipeEntry[], brew: BrewTable = n
   return out;
 }
 
+/** Where the step that brings a manager onto the machine is filed; what follows is the manager's own name. */
+export const MANAGER_STEP = "tools/manager/";
+
+/** The manager whose own toolchain an install runs on top of, when what it waits on names one: npm's node.
+ * Nothing for an install that waits on the apt index, on Homebrew, or on a row the floor carries. */
+function managerBehind(dep: string | undefined): RoadName | undefined {
+  return dep === undefined ? undefined : MANAGER_ORDER.find(m => catalogToolFor(m)?.id === dep);
+}
+
+/** What a planned row waits on: the road the row takes where it names one of its own, else what that road's module
+ * runs on top of. The one reading, so the loop that resolves a manager and the one that plans the row cannot part. */
+const depOf = (planned: PlannedRow): string | undefined => planned.after ?? ROAD_MODULES[planned.road.road].after;
+
 /** The manager rows the collector writes (`tools/<manager>/<package>`), in the order their steps run. */
 const MANAGER_ORDER: readonly ("npm" | "pnpm" | "bun" | "uv" | "pipx" | "cargo" | "go")[] = ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go"];
 
@@ -1059,11 +1072,16 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const customOf = (manager: RoadName): RecipeCustomRow[] => custom.filter(c => managerRoad(c) === manager);
   // One step per manager that has rows, unless the base carries it or it already comes along as a formula, a ticked
   // catalog row or an npm global; the step takes the manager's catalog road, or its formula when the catalog has none.
+  // npm's manager is node, which no image carries by default, so it is resolved on demand as well: whatever first
+  // runs on node asks for it, and it lands once.
   const managers = new Map<RoadName, { after: string; step?: ToolInstall; row?: { e: RecipeEntry; planned: PlannedRow } }>();
   const managerFormulae: string[] = [];
-  for (const manager of MANAGER_ORDER) {
-    if (rowsOf(manager).length + catalogRowsOf(manager).length + customOf(manager).length === 0 || baseEntryFor(manager) !== undefined) continue;
-    const own = `tools/manager/${manager}`;
+  const resolved = new Set<RoadName>();
+  const resolveManager = (manager: RoadName): void => {
+    if (resolved.has(manager)) return;
+    resolved.add(manager);
+    if (baseEntryFor(manager) !== undefined) return;
+    const own = `${MANAGER_STEP}${manager}`;
     const entry = catalogToolFor(manager);
     const formula = managerFormula(manager);
     const fromCatalog = entry === undefined ? undefined : catalog.find(c => catalogToolOf(c.e)?.id === entry.id);
@@ -1078,9 +1096,20 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     } else if (entry !== undefined) {
       const step = viaRoad(entry.installRoad, entry.bin);
       if (!("cmd" in step)) throw new Error(`${entry.id}: ${step.note}`);
-      managers.set(manager, { after: own, step: { id: own, label: manager, manager: entry.installRoad.road, ...step, bin: entry.bin } });
+      managers.set(manager, { after: own, step: { id: own, label: entry.name, manager: entry.installRoad.road, ...step, bin: entry.bin } });
     }
     else throw new Error(`${manager} is neither in the base, nor in the catalog, nor a formula`);
+  };
+  for (const manager of MANAGER_ORDER) {
+    if (rowsOf(manager).length + catalogRowsOf(manager).length + customOf(manager).length === 0) continue;
+    resolveManager(manager);
+  }
+  // A catalog row that runs on another manager's toolchain resolves that manager here and not when the row is
+  // planned: the step it brings may be a ticked row of the recipe's own, and what stands for a manager has to be
+  // settled before the first row is planned or that row is planned twice.
+  for (const { planned } of catalog) {
+    const owner = managerBehind(depOf(planned));
+    if (owner !== undefined) resolveManager(owner);
   }
   const catalogFormulae = catalog.flatMap(c => (c.planned.road.road === "brew" ? roadModule(c.planned.road).names(c.planned.road) : []));
 
@@ -1092,7 +1121,8 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last });
     for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
-  // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, the manager's step; a floor row is there already.
+  // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on
+  // it, the manager's step otherwise; a floor row is there already.
   const APT_STEP = `tools/${APT_INDEX}`;
   const afterDep = (dep: string | undefined, road: RoadName): string | undefined => {
     if (dep === APT_INDEX) {
@@ -1100,27 +1130,43 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
       return APT_STEP;
     }
     if (dep === HOMEBREW_STEP) return toolchain.last;
-    return managers.get(road)?.after;
+    // A road that names a catalog row it runs on (npm's node) waits on the manager that row is the toolchain of,
+    // whether or not the recipe has rows of that manager's own.
+    const owner = managerBehind(dep);
+    if (owner !== undefined) resolveManager(owner);
+    return bringManager(owner ?? road);
   };
   const afterRoad = (road: RoadName): string | undefined => afterDep(ROAD_MODULES[road].after, road);
+  // The manager's own steps, pushed the first time anything waits on them, so the step that brings a manager stands
+  // ahead of every row that needs it whichever road asked.
+  const brought = new Set<RoadName>();
+  function bringManager(manager: RoadName): string | undefined {
+    const brings = managers.get(manager);
+    if (brings === undefined || brought.has(manager)) return brings?.after;
+    brought.add(manager);
+    if (brings.step !== undefined) {
+      const after = afterRoad(brings.step.manager);
+      installs.push(after === undefined ? brings.step : { ...brings.step, after });
+    }
+    if (brings.row !== undefined) plan(brings.row.e, brings.row.planned);
+    return brings.after;
+  }
   const plan = (e: RecipeEntry, planned: PlannedRow): void => {
     const step = viaRoad(planned.road, planned.bin ?? packageOf(e));
     if (!("cmd" in step)) {
       skipped.push({ id: e.id, note: step.note });
       return;
     }
-    const after = afterDep(planned.after ?? ROAD_MODULES[planned.road.road].after, planned.road.road);
+    const after = afterDep(depOf(planned), planned.road.road);
     installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
-  const asManager = new Set([...managers.values()].flatMap(m => (m.row !== undefined ? [m.row.e.id] : [])));
+  const asManager = (id: string): boolean => [...managers.values()].some(m => m.row?.e.id === id);
   for (const manager of MANAGER_ORDER) {
     const rows = rowsOf(manager);
-    const fromCatalog = catalogRowsOf(manager).filter(e => !asManager.has(e.id));
+    const fromCatalog = catalogRowsOf(manager).filter(e => !asManager(e.id));
     if (rows.length + fromCatalog.length + customOf(manager).length === 0) continue;
-    const brings = managers.get(manager);
-    if (brings?.step !== undefined) installs.push(brings.step);
-    if (brings?.row !== undefined) plan(brings.row.e, brings.row.planned);
+    bringManager(manager);
     for (const e of rows) {
       const planned = rowRoad(e, table);
       if (planned !== undefined) plan(e, planned);
@@ -1133,7 +1179,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     plan(e, rowRoad(e, table)!);
   }
   // The catalog rows on every other road: Homebrew's (unless one went out as a manager's step above), apt's, a release, a vendor's, a script.
-  for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager.has(e.id)) plan(e, planned);
+  for (const { e, planned } of catalog) if (!(MANAGER_ORDER as readonly string[]).includes(planned.road.road) && !asManager(e.id)) plan(e, planned);
   // Last of all: the rows the catalog does not carry, each after the manager its line calls, so every road they
   // lean on has already run.
   installs.push(...customInstallsFor(custom, c => {
@@ -1308,6 +1354,9 @@ export const AGENT_INSTALLERS: Record<string, AgentInstaller> = agentInstallers(
 const NPM_INSTALL_LINE = /^npm install -g (?:--ignore-scripts )?(\S+?)@\S+$/m;
 const UV_INSTALL_LINE = /^uv tool install .*?([\w.-]+)==[\w.-]+$/m;
 
+/** The Node major the catalog's own row pins, for an install that runs on node and names no floor of its own. */
+const CATALOG_NODE_MAJOR = Number(catalogToolFor("node")?.major?.version ?? 0);
+
 /** The inverse of an installer, read off its install line: an npm global is
  * uninstalled, a uv tool uninstalled, Hermes's checkout and venv removed;
  * anything else (Claude Code's own installer) has no inverse and is noted. */
@@ -1363,12 +1412,18 @@ function pinnedInstaller(a: AgentEntry, pin: ToolPin | undefined): AgentInstalle
 export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readonly AgentEntry[] = CATALOG_AGENTS, now: Date = new Date()): AgentsPlan {
   const table = agentInstallers(agents);
   const out: AgentsPlan = { installs: [], skipped: [] };
+  // Node is not on the floor, so an agent whose own installer is an npm global asks for it here even where its
+  // package declares no floor of its own: the road it takes says it runs on node.
+  const onNode = new Set<string>();
   for (const e of entries) {
     if (!ticked(e) || e.rung !== "agents" || isMcpRow(e)) continue;
     const entry = agents.find(a => a.id === name(e));
     const installer = entry !== undefined ? pinnedInstaller(entry, e.pin) : table[name(e)];
-    if (installer) out.installs.push({ id: e.id, ...installer });
-    else out.skipped.push({ id: e.id, note: "no installer known" });
+    if (installer) {
+      out.installs.push({ id: e.id, ...installer });
+      const road = entry === undefined ? undefined : ROAD_MODULES[entry.installRoad.road].after;
+      if (entry === undefined ? NPM_INSTALL_LINE.test(installer.install) : managerBehind(road) !== undefined) onNode.add(e.id);
+    } else out.skipped.push({ id: e.id, note: "no installer known" });
   }
   // An agent whose floor no pinned major meets is set aside rather than installed on a Node its engines refuse.
   const pinnable = out.installs.filter(a => {
@@ -1378,10 +1433,12 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readon
   });
   out.installs = pinnable;
   const floors = out.installs.filter(a => a.node !== undefined);
-  if (floors.length > 0) {
-    const floor = Math.max(...floors.map(a => a.node!));
-    const release = NODE_RELEASES[nodeMajorFor(floor, now)!];
-    out.node = { floor, version: release.version, agents: floors.map(a => a.name), cmd: nodeInstallScript(floor, release) };
+  const needs = out.installs.filter(a => a.node !== undefined || onNode.has(a.id));
+  const floor = floors.length > 0 ? Math.max(...floors.map(a => a.node!)) : CATALOG_NODE_MAJOR;
+  const major = nodeMajorFor(floor, now);
+  if (needs.length > 0 && major !== undefined) {
+    const release = NODE_RELEASES[major];
+    out.node = { floor, version: release.version, agents: needs.map(a => a.name), cmd: nodeInstallScript(floor, release) };
   }
   return out;
 }
