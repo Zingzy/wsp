@@ -3,14 +3,14 @@ import { execFile, execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
 import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
-import { bundledDaemonName, DAEMON_TARGETS, daemonBinaryIn, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
+import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import {
   DAEMON_UNIT,
   DAEMON_UNIT_PATH,
   daemonLogCommand,
+  daemonBinaryOn,
   daemonExecLine,
   daemonFlags,
   daemonUnit,
@@ -378,6 +379,9 @@ function fakeDaemonDir(root: string, triples: readonly string[] = DAEMON_TARGETS
   return daemon;
 }
 
+/** One chip a guest can be, for every line that names the binary by its own path. */
+const GUEST_TARGET = GUEST_DAEMON_TARGETS[0]!;
+
 describe("stageDaemonBundle", () => {
   let dir: string | undefined;
   afterEach(() => {
@@ -390,19 +394,32 @@ describe("stageDaemonBundle", () => {
     const stage = join(dir, "stage");
     await stageDaemonBundle(stage, CLOUD_PLACE, fakeDaemonDir(dir), fakeCliDir(dir));
     // Exactly these: no dist, no start script, no package.json, nothing for an npm install to read.
-    expect(readdirSync(stage).sort()).toEqual(["wsp", ...GUEST_DAEMON_TARGETS.map(bundledDaemonName), "wsp-open"].sort());
+    expect(readdirSync(stage).sort()).toEqual(["wsp", "wsp-open"]);
     for (const target of GUEST_DAEMON_TARGETS) {
-      const bin = join(stage, bundledDaemonName(target));
+      const bin = daemonBinaryOn(stage, target);
       expect(statSync(bin).mode & 0o111).toBe(0o111);
-      // The right binary under each chip's name: the deploy's case reads the name off uname and keeps that file.
+      // The right binary under each chip's triple: the deploy's case reads the chip off uname and keeps that folder.
       expect(execFileSync(bin, { encoding: "utf8" }).trim()).toBe(target.triple);
     }
     // The darwin binaries stay behind: a guest is Linux, and a bundle carries what a guest can be.
-    expect(readdirSync(stage).some(name => name.includes("darwin") || name.endsWith("-arm64"))).toBe(false);
+    expect(readdirSync(dirname(daemonBinaryOn(stage, GUEST_TARGET))).length).toBe(1);
+    expect(readdirSync(join(stage, "wsp", "assets", "daemon")).sort()).toEqual(GUEST_DAEMON_TARGETS.map(t => t.triple).sort());
     // The browser shim rides along and posts to the socket the daemon's flags name.
     expect(readFileSync(join(stage, "wsp-open"), "utf8")).toBe(openShimScript(CLOUD_PLACE));
     expect(statSync(join(stage, "wsp-open")).mode & 0o111).toBe(0o111);
     expect(daemonFlags(CLOUD_PLACE)).toContain(CLOUD_PLACE.openSocket);
+  });
+
+  it("lays the daemon where the wsp command in the bundle reads one, so the box's own join finds it", async () => {
+    dir = tmp("wsp-bundle-lookup-");
+    const stage = join(dir, "stage");
+    // This computer's own chip, since the lookup under test is the one a box does for itself off its own row.
+    const here = daemonTargetHere()!;
+    await stageDaemonBundle(stage, CLOUD_PLACE, fakeDaemonDir(dir), fakeCliDir(dir), [here]);
+    // The box runs the command out of the bundle's own dist folder and asks the asset table for the daemon beside
+    // it; the bundle is that command as npm lays it out, so there is one path and not a second spelling of it.
+    expect(daemonBinaryHere(join(stage, "wsp", "dist"))).toBe(daemonBinaryOn(stage, here));
+    expect(existsSync(daemonBinaryOn(stage, here))).toBe(true);
   });
 
   it("carries the wsp command beside the daemon, whole, at the path a turn's tools are launched from", async () => {
@@ -505,10 +522,10 @@ describe("guest environment", () => {
     expect(exported).toBeGreaterThan(-1);
     expect(exported).toBeLessThan(lines.indexOf("systemctl daemon-reload"));
     // The daemon's own copy comes from its unit: a restart inherits nothing from the exec that deployed it.
-    expect(daemonUnit(CLOUD_PLACE, ".preview.example.com")).toContain("Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.preview.example.com");
+    expect(daemonUnit(CLOUD_PLACE, GUEST_TARGET, ".preview.example.com")).toContain("Environment=__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=.preview.example.com");
     // Without a suffix nothing is written: a backend with no preview edge has no host to allow.
     expect(deployScript(CLOUD_PLACE, "aabbcc")).not.toContain("VITE");
-    expect(daemonUnit()).not.toContain("VITE");
+    expect(daemonUnit(CLOUD_PLACE, GUEST_TARGET)).not.toContain("VITE");
   });
 
   it("the suffix is the preview host with the machine-and-port label cut off, and nothing on a backend without preview URLs", async () => {
@@ -534,7 +551,7 @@ describe("what a deploy that would not come up says", () => {
     // The unit printed is the unit that ran: the deploy states the dev server allowlist on it, and a near copy
     // without that line would send the next person to read a file that does not match what is on the machine.
     expect(said).toContain(`Environment=${VITE_ALLOWED_HOSTS_ENV}=.preview.example.com`);
-    expect(said).toContain(daemonUnit(CLOUD_PLACE, ".preview.example.com"));
+    expect(said).toContain(daemonUnit(CLOUD_PLACE, GUEST_TARGET, ".preview.example.com"));
     // A fork's token is written by a line of its own and a box's is landed over the byte road; no start line has it.
     expect(said).not.toContain("aabbcc");
     expect(deployFailureLine(CLOUD_PLACE, { stdout: "", stderr: "" }, ".preview.example.com")).not.toContain("aabbcc");
@@ -557,8 +574,9 @@ describe("deployScript", () => {
 
   it("the supervisor road's pid reads survive a machine that never had a daemon", async () => {
     // set -e ends a script on an assignment whose substitution failed; a live deploy died on exactly this line.
+    // One pair per chip, since the lines that start the daemon sit inside the arm for the chip they name.
     const reads = deployScript(CONTAINER_PLACE, "aabbcc").split("\n").filter(line => /^(old|sup)="\$\(cat /.test(line));
-    expect(reads).toHaveLength(2);
+    expect(reads).toHaveLength(2 * GUEST_DAEMON_TARGETS.length);
     const { stdout } = await promisify(execFile)("bash", ["-ec", `${reads.join("\n")}\necho SURVIVED`]);
     expect(stdout).toContain("SURVIVED");
   });
@@ -577,9 +595,11 @@ describe("deployScript", () => {
     const lines = script.split("\n");
     const unpack = lines.indexOf("tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
     expect(unpack).toBeGreaterThan(-1);
-    expect(lines[unpack + 1]).toBe('case "$(uname -m)" in');
-    expect(lines).toContain("  x86_64) mv -f /root/wsp-daemon/wsp-daemon-x86_64 /root/wsp-daemon/wsp-daemon; rm -f /root/wsp-daemon/wsp-daemon-aarch64 ;;");
-    expect(lines).toContain("  aarch64) mv -f /root/wsp-daemon/wsp-daemon-aarch64 /root/wsp-daemon/wsp-daemon; rm -f /root/wsp-daemon/wsp-daemon-x86_64 ;;");
+    expect(unpack).toBeLessThan(lines.indexOf('case "$(uname -m)" in'));
+    expect(lines).toContain("  x86_64)");
+    expect(lines).toContain("  aarch64)");
+    expect(lines).toContain(`rm -rf ${dirname(daemonBinaryOn(CLOUD_PLACE.dir, GUEST_DAEMON_TARGETS[1]!))}`);
+    expect(lines).toContain(`rm -rf ${dirname(daemonBinaryOn(CLOUD_PLACE.dir, GUEST_DAEMON_TARGETS[0]!))}`);
     expect(lines).toContain('  *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;');
     // Nothing is fetched, compiled or installed: the binary is the whole of the daemon.
     for (const word of ["npm install", "node_pin", "nodejs.org", "curl", "NODE_VERSION", "cc make"]) expect(script, word).not.toContain(word);
@@ -587,34 +607,39 @@ describe("deployScript", () => {
   });
 
   /** The case as the deploy runs it, under a stand-in uname, against a folder holding both chips' binaries. */
-  function pickedFor(unameSays: string): { status: number | null; said: string; left: string[]; kept: string | undefined } {
+  function pickedFor(unameSays: string): { status: number | null; said: string; left: string[]; kept: string[] } {
     const home = tmp("wsp-deploy-chip-");
     try {
       const place = sshDaemonPlace({ home, path: "/usr/bin:/bin" });
-      mkdirSync(place.dir, { recursive: true });
-      for (const target of GUEST_DAEMON_TARGETS) writeFileSync(join(place.dir, bundledDaemonName(target)), `${target.triple}\n`);
+      for (const target of GUEST_DAEMON_TARGETS) {
+        mkdirSync(dirname(daemonBinaryOn(place.dir, target)), { recursive: true });
+        writeFileSync(daemonBinaryOn(place.dir, target), `${target.triple}\n`);
+      }
+      mkdirSync(dirname(place.unitPath), { recursive: true });
       const bin = join(home, "bin");
       mkdirSync(bin);
       writeFileSync(join(bin, "uname"), `#!/bin/sh\necho ${unameSays}\n`, { mode: 0o755 });
+      // The arm hands the unit it writes to systemd, which is not a unit test's business; the file it writes is.
+      writeFileSync(join(bin, "systemctl"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
       const lines = deployScript(place, "aabbcc").split("\n");
       const from = lines.indexOf('case "$(uname -m)" in');
       const to = lines.indexOf("esac");
       expect(from).toBeGreaterThan(-1);
       const ran = spawnSync("/bin/bash", ["-ec", [...lines.slice(from, to + 1), "echo WENT_ON"].join("\n")], { encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin` } });
-      const left = readdirSync(place.dir).sort();
-      const kept = existsSync(join(place.dir, "wsp-daemon")) ? readFileSync(join(place.dir, "wsp-daemon"), "utf8").trim() : undefined;
+      const left = GUEST_DAEMON_TARGETS.filter(t => existsSync(daemonBinaryOn(place.dir, t))).map(t => t.triple);
+      const kept = left.map(triple => readFileSync(daemonBinaryOn(place.dir, GUEST_DAEMON_TARGETS.find(t => t.triple === triple)!), "utf8").trim());
       return { status: ran.status, said: `${ran.stdout}${ran.stderr}`, left, kept };
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
   }
 
-  it("on each chip the case leaves one binary under the daemon's name, the one built for that chip", () => {
+  it("on each chip the case leaves one binary, the one built for that chip, where the command beside it reads one", () => {
     for (const target of GUEST_DAEMON_TARGETS) {
       const picked = pickedFor(target.uname);
       expect(picked.status).toBe(0);
-      expect(picked.left).toEqual(["wsp-daemon"]);
-      expect(picked.kept).toBe(target.triple);
+      expect(picked.left).toEqual([target.triple]);
+      expect(picked.kept).toEqual([target.triple]);
       expect(picked.said).toContain("WENT_ON");
     }
   });
@@ -624,13 +649,16 @@ describe("deployScript", () => {
     expect(picked.status).toBe(1);
     expect(picked.said).toContain("unsupported arch: riscv64");
     expect(picked.said).not.toContain("WENT_ON");
-    expect(picked.kept).toBeUndefined();
+    // Nothing of the machine's was touched: a chip wsp builds no daemon for is left with the bundle as it landed.
+    expect(picked.left).toEqual(GUEST_DAEMON_TARGETS.map(t => t.triple));
   });
 
   it("stops the daemon holding the port before starting the new one, so an update replaces a running daemon instead of reading it as up", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     const stop = script.indexOf(stopDaemonScript());
-    expect(stop).toBeGreaterThan(script.indexOf("esac"));
+    // Inside the chip's own arm: the unit beside it names the binary by a path that carries the chip's triple.
+    expect(stop).toBeGreaterThan(script.indexOf('case "$(uname -m)" in'));
+    expect(stop).toBeLessThan(script.indexOf("esac"));
     expect(stop).toBeGreaterThan(script.indexOf("umask 077"));
     expect(stop).toBeLessThan(script.indexOf("systemctl restart"));
     // The pid is read off the socket table for the daemon's port, never matched by name.
@@ -651,7 +679,7 @@ describe("deployScript", () => {
     expect(script).not.toContain("setsid");
     expect(script).not.toContain("nohup");
     expect(script).toContain(`cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'`);
-    expect(script).toContain(daemonUnit(CLOUD_PLACE, ".preview.example.com"));
+    expect(script).toContain(daemonUnit(CLOUD_PLACE, GUEST_TARGET, ".preview.example.com"));
     const lines = script.split("\n");
     const reload = lines.indexOf("systemctl daemon-reload");
     expect(lines.indexOf(`cat > ${DAEMON_UNIT_PATH} <<'WSP_UNIT'`)).toBeLessThan(reload);
@@ -722,8 +750,8 @@ describe("deployScript", () => {
     // Both pids sit in the place's own folder, so a second place on this module keeps them where it keeps the rest.
     expect(daemonPidPath(CONTAINER_PLACE).startsWith(`${CONTAINER_PLACE.dir}/`)).toBe(true);
     expect(supervisorPidPath(CONTAINER_PLACE).startsWith(`${CONTAINER_PLACE.dir}/`)).toBe(true);
-    const supervisor = daemonSupervisorScript();
-    expect(supervisor).toContain(`  ${daemonExecLine(CONTAINER_PLACE)} >> ${DAEMON_LOG_PATH} 2>&1 &`);
+    const supervisor = daemonSupervisorScript(CONTAINER_PLACE, GUEST_TARGET);
+    expect(supervisor).toContain(`  ${daemonExecLine(CONTAINER_PLACE, GUEST_TARGET)} >> ${DAEMON_LOG_PATH} 2>&1 &`);
     // The loop is the whole point: a daemon the kernel's memory killer took comes back on its own.
     expect(supervisor).toContain("while :; do");
     expect(supervisor).toContain(`export PATH=${TOOLS_PATH}`);
@@ -736,7 +764,7 @@ describe("deployScript", () => {
   });
 
   it("the unit restarts the daemon forever, keeps a killed child from taking it, and caps the cgroup at a share of the machine", () => {
-    const unit = daemonUnit();
+    const unit = daemonUnit(CLOUD_PLACE, GUEST_TARGET);
     expect(unit).toContain("Restart=always");
     expect(unit).toContain("RestartSec=1");
     // Without this the unit gives up after five restarts in ten seconds, which is the dead machine again.
@@ -747,7 +775,7 @@ describe("deployScript", () => {
     expect(DAEMON_MEMORY_MAX_PERCENT).toBe(80);
     // Enabled with an install section, so a machine that reboots or comes back from a snapshot has its daemon.
     expect(unit).toContain("WantedBy=multi-user.target");
-    expect(unit).toContain("ExecStart=/root/wsp-daemon/wsp-daemon --host 0.0.0.0 --port 7070 --token-path /root/.wsp-daemon-token --root /root --roots-path /root/.wsp/roots --kind cloud --inbox /root/inbox --manifest /root/.wsp/manifest.json --open-socket /root/.wsp/open.sock");
+    expect(unit).toContain("ExecStart=/root/wsp-daemon/wsp/assets/daemon/x86_64-unknown-linux-musl/wsp-daemon --host 0.0.0.0 --port 7070 --token-path /root/.wsp-daemon-token --root /root --roots-path /root/.wsp/roots --kind cloud --inbox /root/inbox --manifest /root/.wsp/manifest.json --open-socket /root/.wsp/open.sock");
     // The journal, which rotates itself: nothing else on the guest bounds a log, and restarts here have no limit.
     expect(unit).toContain("StandardOutput=journal");
     expect(unit).toContain("StandardError=journal");
@@ -759,16 +787,16 @@ describe("deployScript", () => {
 
   it("every road starts the binary the bundle left in the place's own folder, with one set of flags, and never the word node", () => {
     // The unit and the supervisor read one line: the binary by its path, then the flags the place answers.
-    expect(daemonUnit()).toContain(`ExecStart=${daemonExecLine(CLOUD_PLACE)}`);
-    expect(daemonExecLine(CLOUD_PLACE)).toBe(`${GUEST_DAEMON_DIR}/wsp-daemon ${daemonFlags(CLOUD_PLACE).join(" ")}`);
-    expect(daemonSupervisorScript(CONTAINER_PLACE)).toContain(`  ${daemonExecLine(CONTAINER_PLACE)} >>`);
-    for (const text of [daemonUnit(), daemonSupervisorScript(CONTAINER_PLACE), deployScript(CLOUD_PLACE, "aabbcc")]) expect(text).not.toMatch(/\bnode\b/);
+    expect(daemonUnit(CLOUD_PLACE, GUEST_TARGET)).toContain(`ExecStart=${daemonExecLine(CLOUD_PLACE, GUEST_TARGET)}`);
+    expect(daemonExecLine(CLOUD_PLACE, GUEST_TARGET)).toBe(`${GUEST_DAEMON_DIR}/wsp/assets/daemon/${GUEST_TARGET.triple}/wsp-daemon ${daemonFlags(CLOUD_PLACE).join(" ")}`);
+    expect(daemonSupervisorScript(CONTAINER_PLACE, GUEST_TARGET)).toContain(`  ${daemonExecLine(CONTAINER_PLACE, GUEST_TARGET)} >>`);
+    for (const text of [daemonUnit(CLOUD_PLACE, GUEST_TARGET), daemonSupervisorScript(CONTAINER_PLACE, GUEST_TARGET), deployScript(CLOUD_PLACE, "aabbcc")]) expect(text).not.toMatch(/\bnode\b/);
     // The flags name every file the daemon reads or writes, so nothing is left to a default the guest may not have.
     expect(daemonFlags(CLOUD_PLACE)).toEqual(["--host", "0.0.0.0", "--port", "7070", "--token-path", "/root/.wsp-daemon-token", "--root", "/root", "--roots-path", "/root/.wsp/roots", "--kind", "cloud", "--inbox", "/root/inbox", "--manifest", "/root/.wsp/manifest.json", "--open-socket", "/root/.wsp/open.sock"]);
     // A login's own place quotes each path, since a home may carry a space; the flags and the words stay bare.
     const login = sshDaemonPlace({ home: "/home/maya doe", path: "/usr/bin:/bin" });
-    expect(daemonUnit(login)).toContain(
-      `ExecStart="/home/maya doe/.wsp/daemon/wsp-daemon" --host 127.0.0.1 --port 0 --token-path "/home/maya doe/.wsp/daemon-token" --root "/home/maya doe" --roots-path "/home/maya doe/.wsp/roots" --kind ssh --inbox "/home/maya doe/.wsp/inbox" --manifest "/home/maya doe/.wsp/manifest.json" --open-socket "/home/maya doe/.wsp/open.sock" --port-file "/home/maya doe/.wsp/daemon.port"`,
+    expect(daemonUnit(login, GUEST_TARGET)).toContain(
+      `ExecStart="${daemonBinaryOn(login.dir, GUEST_TARGET)}" --host 127.0.0.1 --port 0 --token-path "/home/maya doe/.wsp/daemon-token" --root "/home/maya doe" --roots-path "/home/maya doe/.wsp/roots" --kind ssh --inbox "/home/maya doe/.wsp/inbox" --manifest "/home/maya doe/.wsp/manifest.json" --open-socket "/home/maya doe/.wsp/open.sock" --port-file "/home/maya doe/.wsp/daemon.port"`,
     );
   });
 
@@ -781,16 +809,16 @@ describe("deployScript", () => {
   });
 
   it("the unit states the environment the daemon hands to every pty, since a restart inherits none of the deploy's", () => {
-    const unit = daemonUnit();
+    const unit = daemonUnit(CLOUD_PLACE, GUEST_TARGET);
     expect(unit).toContain(`Environment=PATH=${TOOLS_PATH}`);
     for (const [name, value] of Object.entries(GUEST_USER_ENV)) expect(unit).toContain(`Environment=${name}=${value}`);
     expect(GUEST_USER_ENV["HOME"]).toBe("/root");
   });
 
   it("a fork's unit reads the environment a backend could not hand over at create off the engine's file, and may lack it; a login's unit reads no root file", () => {
-    expect(daemonUnit()).toContain(`EnvironmentFile=-${DAEMON_ENV_FILE}`);
+    expect(daemonUnit(CLOUD_PLACE, GUEST_TARGET)).toContain(`EnvironmentFile=-${DAEMON_ENV_FILE}`);
     expect(DAEMON_ENV_FILE).toBe("/etc/wsp/daemon.env");
-    expect(daemonUnit(sshDaemonPlace({ home: "/home/maya", path: "/usr/bin:/bin" }))).not.toContain("EnvironmentFile");
+    expect(daemonUnit(sshDaemonPlace({ home: "/home/maya", path: "/usr/bin:/bin" }), GUEST_TARGET)).not.toContain("EnvironmentFile");
   });
 
 });
@@ -868,7 +896,7 @@ describe("deployDaemon", () => {
       expect(stub.execLog.join("\n")).not.toMatch(/rm -rf[^\n]*\/root\/\.(npm|cache)/);
       expect(uploads).toHaveLength(1);
       const bundle = gunzipSync(uploads[0]!).toString("latin1");
-      for (const target of GUEST_DAEMON_TARGETS) expect(bundle).toContain(bundledDaemonName(target));
+      for (const target of GUEST_DAEMON_TARGETS) expect(bundle).toContain(target.triple);
       expect(bundle).not.toContain("start.mjs");
 
       // On a backend with a preview edge the script carries the edge's host suffix, read off this machine's URL.

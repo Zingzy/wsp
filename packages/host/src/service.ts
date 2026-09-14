@@ -57,6 +57,18 @@ export interface ServiceUnit {
   path: string;
 }
 
+/** One unit a manager may be holding for a service: the file, the words a line naming it uses, and the two sets of
+ * commands that take it away. A manager with more than one place to put a unit answers one of these per place, and
+ * the words name which, since a person reading what a leave took needs to know which of them it came out of. */
+export interface HeldUnit {
+  unit: ServiceUnit;
+  words: string;
+  /** Run in order to make the manager forget it at the next login while what is running keeps running. */
+  forget: ReadonlyArray<readonly string[]>;
+  /** Run in order to stop it and leave the manager holding nothing. */
+  unload: ReadonlyArray<readonly string[]>;
+}
+
 /** What a manager's command answered: its exit code, and whatever it said on either stream. */
 export interface RunResult {
   code: number;
@@ -73,12 +85,12 @@ export interface ServiceManager {
   load(at: ServiceAddress): ReadonlyArray<readonly string[]>;
   /** Run in order to stop it and leave the manager holding nothing. */
   unload(at: ServiceAddress): ReadonlyArray<readonly string[]>;
-  /** Run in order to make the manager forget it at the next login while what is running keeps running. A manager
-   * that reads its units off files alone has none of these: taking the file away is the whole of it. Its one caller
-   * is the sweep on a computer joined as a place, which runs inside the service it is taking away: the file has to
-   * go before the stop, and a manager that keeps a link of its own beside that file would be left holding one that
-   * points at nothing. */
-  forget?(at: ServiceAddress): ReadonlyArray<readonly string[]>;
+  /** Every unit this manager could be holding for the address: the one it writes now first, then any a road wsp
+   * took before wrote somewhere else of this manager's. Its callers are the sweep on a computer joined as a place
+   * and the stop that follows it, which take them all, so a computer joined before a unit moved is left as clean
+   * as one joined today. The forget on each runs while its file is still there: a manager that keeps a link of its
+   * own beside that file would be left holding one that points at nothing. */
+  held(at: ServiceAddress): readonly HeldUnit[];
   /** Exits 0 when the manager holds it, non-zero when it does not. */
   holds(at: ServiceAddress): readonly string[];
   /** Whether a non-zero `holds` answer is this manager saying it does not have the unit. A manager that is not on
@@ -119,6 +131,7 @@ const xml = (value: string): string => value.replaceAll("&", "&amp;").replaceAll
 
 const launchdName = (at: ServiceAddress): string => `com.wsp.${roleWord(at)}.${serviceTag(at.statePath)}`;
 const launchdUnit = (at: ServiceAddress): ServiceUnit => ({ name: launchdName(at), path: join(at.home, "Library", "LaunchAgents", `${launchdName(at)}.plist`) });
+const launchdUnload = (at: ServiceAddress): ReadonlyArray<readonly string[]> => [["launchctl", "bootout", `gui/${at.uid}/${launchdName(at)}`]];
 
 const launchd: ServiceManager = {
   words: "launchd agent",
@@ -149,8 +162,10 @@ const launchd: ServiceManager = {
       "",
     ].join("\n"),
   load: at => [["launchctl", "bootstrap", `gui/${at.uid}`, launchdUnit(at).path]],
-  unload: at => [["launchctl", "bootout", `gui/${at.uid}/${launchdName(at)}`]],
+  unload: launchdUnload,
   holds: at => ["launchctl", "print", `gui/${at.uid}/${launchdName(at)}`],
+  // One domain per login, so one file; launchd reads its units off that file alone and has nothing to forget.
+  held: at => [{ unit: launchdUnit(at), words: "launchd agent", forget: [], unload: launchdUnload(at) }],
   // launchctl answers 113 and says it could not find the service for a label the domain does not have; every other
   // answer is a domain it would not read or a launchctl that is not there.
   absent: answer => answer.code === 113 || /could not find service/i.test(answer.output),
@@ -158,15 +173,30 @@ const launchd: ServiceManager = {
 
 const systemdName = (at: ServiceAddress): string => `wsp-${roleWord(at)}-${serviceTag(at.statePath)}.service`;
 
+/** The two systemds a unit of wsp's can sit in: the machine's own, and the login's. */
+const SYSTEMD_SCOPES = ["system", "user"] as const;
+type SystemdScope = (typeof SYSTEMD_SCOPES)[number];
+
 /** Which systemd a role's unit belongs to. The agent on a computer joined as a place is the machine's service: a
  * place runs workspaces, which needs root, so its unit sits under /etc/systemd/system and outlives every login.
  * The host is the person's own and stays in their login's systemd. Read once, by every line below that differs. */
-const systemdScoped = (at: ServiceAddress): "system" | "user" => (roleWord(at) === "place" ? "system" : "user");
-const systemctlArgs = (at: ServiceAddress): string[] => (systemdScoped(at) === "user" ? ["systemctl", "--user"] : ["systemctl"]);
-const systemdUnit = (at: ServiceAddress): ServiceUnit => ({
+const systemdScoped = (at: ServiceAddress): SystemdScope => (roleWord(at) === "place" ? "system" : "user");
+const systemctlIn = (scope: SystemdScope): string[] => (scope === "user" ? ["systemctl", "--user"] : ["systemctl"]);
+const systemctlArgs = (at: ServiceAddress): string[] => systemctlIn(systemdScoped(at));
+const systemdUnitIn = (at: ServiceAddress, scope: SystemdScope): ServiceUnit => ({
   name: systemdName(at),
-  path: systemdScoped(at) === "user" ? join(at.home, ".config", "systemd", "user", systemdName(at)) : join("/etc/systemd/system", systemdName(at)),
+  path: scope === "user" ? join(at.home, ".config", "systemd", "user", systemdName(at)) : join("/etc/systemd/system", systemdName(at)),
 });
+const systemdUnit = (at: ServiceAddress): ServiceUnit => systemdUnitIn(at, systemdScoped(at));
+
+/** What takes a unit away in one systemd, and what makes that systemd forget it while what runs keeps running.
+ * Written once against a scope so the unit a role writes today and the one an older road wrote are torn down by
+ * the same lines, told a different systemd. */
+const systemdUnload = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<readonly string[]> => [
+  [...systemctlIn(scope), "disable", "--now", systemdName(at)],
+  [...systemctlIn(scope), "daemon-reload"],
+];
+const systemdForget = (at: ServiceAddress, scope: SystemdScope): ReadonlyArray<readonly string[]> => [[...systemctlIn(scope), "disable", systemdName(at)]];
 
 const systemd: ServiceManager = {
   words: "systemd unit",
@@ -195,14 +225,21 @@ const systemd: ServiceManager = {
     [...systemctlArgs(at), "daemon-reload"],
     [...systemctlArgs(at), "enable", "--now", systemdName(at)],
   ],
-  unload: at => [
-    [...systemctlArgs(at), "disable", "--now", systemdName(at)],
-    [...systemctlArgs(at), "daemon-reload"],
-  ],
+  unload: at => systemdUnload(at, systemdScoped(at)),
   holds: at => [...systemctlArgs(at), "is-enabled", systemdName(at)],
   // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
-  // disable while the unit file is still there takes that link with it and leaves the service running.
-  forget: at => [[...systemctlArgs(at), "disable", systemdName(at)]],
+  // disable while the unit file is still there takes that link with it and leaves the service running. Both
+  // scopes, the one this role writes today first: a computer joined before the place's unit became the machine's
+  // has its file under that login's own systemd, and a sweep that read one scope left it there to flap.
+  held: at => {
+    const now = systemdScoped(at);
+    return [now, ...SYSTEMD_SCOPES.filter(scope => scope !== now)].map(scope => ({
+      unit: systemdUnitIn(at, scope),
+      words: `systemd ${scope} unit`,
+      forget: systemdForget(at, scope),
+      unload: systemdUnload(at, scope),
+    }));
+  },
   // is-enabled exits 1 both for a unit systemd does not have and for a systemctl that never reached the user bus
   // ("Failed to connect to bus: No medium found" on a box without one), so the word it printed is the answer and
   // the code is not.

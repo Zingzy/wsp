@@ -60,7 +60,7 @@ import {
 } from "../src/places.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
-import { SERVICE_MANAGERS, type RunResult, type ServiceManager, type ServiceRunner } from "../src/service.js";
+import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
@@ -163,10 +163,15 @@ async function freePort(): Promise<number> {
 /** The systemd this computer's real one stands in for in these tests: the module as it is, with the machine's unit
  * folder under the test's own home. Where a place's unit actually lands is pinned on the module itself, in
  * service.test.ts; nothing here writes into the real /etc. */
-const unitsUnder = (home: string): ServiceManager => ({
-  ...SERVICE_MANAGERS.systemd,
-  unit: at => ({ name: SERVICE_MANAGERS.systemd.unit(at).name, path: join(home, "etc-systemd-system", SERVICE_MANAGERS.systemd.unit(at).name) }),
-});
+const unitsUnder = (home: string): ServiceManager => {
+  // The machine's own folder moved under this test's home; a login's folder already sits under the home it is handed.
+  const here = (unit: ServiceUnit): ServiceUnit => (unit.path.startsWith("/etc/") ? { name: unit.name, path: join(home, "etc-systemd-system", unit.name) } : unit);
+  return {
+    ...SERVICE_MANAGERS.systemd,
+    unit: at => here(SERVICE_MANAGERS.systemd.unit(at)),
+    held: at => SERVICE_MANAGERS.systemd.held(at).map(held => ({ ...held, unit: here(held.unit) })),
+  };
+};
 
 /** The one token a join line carries, for the host a test started: the code that host will spend and the
  * fingerprint of the key it will prove. */
@@ -594,10 +599,41 @@ describe("taking wsp off the computer it is typed on", () => {
     // nothing has been stopped yet, which is what lets the sweep answer the host before it dies.
     expect(existsSync(unit.path)).toBe(false);
     expect(swept.removed[0]).toContain(unit.name);
-    // The agent is the machine's service, so its systemctl is the machine's and carries no --user.
-    expect(runner.ran).toEqual([["systemctl", "disable", unit.name]]);
+    // The agent is the machine's service, so its own systemctl carries no --user; the login's is asked too, since
+    // a computer joined before the unit became the machine's has its file there and nothing else would take it.
+    expect(runner.ran).toEqual([
+      ["systemctl", "disable", unit.name],
+      ["systemctl", "--user", "disable", unit.name],
+    ]);
     await stopPlaceService({ home, manager, run: runner.run, uid: 0 });
-    expect(runner.ran.at(-2)).toEqual(["systemctl", "disable", "--now", unit.name]);
+    // Both systemds are told to stop it, the machine's own first: an agent installed on the road before this one
+    // runs under that login's, and a stop told the machine's alone leaves it up and restarting with nothing to serve.
+    expect(runner.ran.slice(2)).toEqual([
+      ["systemctl", "disable", "--now", unit.name],
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "--user", "disable", "--now", unit.name],
+      ["systemctl", "--user", "daemon-reload"],
+    ]);
+  });
+
+  it("takes the unit a computer joined on the older road left in that login's own systemd, and names the scope", async () => {
+    const home = tmp("leave-user-scope");
+    const manager = unitsUnder(home);
+    const runner = fakeRunner();
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    const at: ServiceAddress = { role: "place", statePath: placeFilePath(home), home, uid: 0 };
+    const name = SERVICE_MANAGERS.systemd.unit(at).name;
+    // Only the login's own systemd holds one: a join before the place's unit became the machine's wrote it there,
+    // and the machine's folder is empty, which is the whole of what the sweep used to look at.
+    const login = join(home, ".config", "systemd", "user", name);
+    mkdirSync(dirname(login), { recursive: true });
+    writeFileSync(login, "[Unit]\n");
+    expect(existsSync(manager.unit(at).path)).toBe(false);
+    const swept = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
+    expect(existsSync(login)).toBe(false);
+    expect(swept.removed).toContain(`systemd user unit ${name}`);
+    // That login's own systemd is the one told to forget it: a machine-scoped disable never reaches this unit.
+    expect(runner.ran).toContainEqual(["systemctl", "--user", "disable", name]);
   });
 
   it("takes nothing off a computer that took nothing: the sweep is every path named and no more", async () => {
@@ -802,15 +838,15 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     const install = placeInstaller({ backend: x86.backend as never, ...assets(tmp("chip-x86"), [X86]) });
     expect(await install({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, x86.stage)).toMatchObject({ name: "box" });
     const deploy = x86.ran.find(script => script.includes("uname -m"))!;
-    expect(deploy).toContain(`x86_64) mv -f`);
-    expect(deploy).not.toContain("aarch64)");
+    expect(deploy).toContain(`  ${X86.uname})`);
+    expect(deploy).not.toContain(ARM.uname);
     // And the reverse, from a host holding the arm one alone: nothing here is this computer's chip either way.
     const arm = fakeBox("aarch64");
     const armInstall = placeInstaller({ backend: arm.backend as never, ...assets(tmp("chip-arm"), [ARM]) });
     expect(await armInstall({ address: "maya@box", code: "7QK3M2VD", hostUrls: ["http://192.168.1.20:4400"] }, arm.stage)).toMatchObject({ name: "box" });
     const armDeploy = arm.ran.find(script => script.includes("uname -m"))!;
-    expect(armDeploy).toContain(`aarch64) mv -f`);
-    expect(armDeploy).not.toContain("x86_64)");
+    expect(armDeploy).toContain(`  ${ARM.uname})`);
+    expect(armDeploy).not.toContain(X86.uname);
   });
 
   it("names the chip it picked on the install line, so a wrong one is read rather than worked out later", async () => {
@@ -866,8 +902,8 @@ describe("the install over ssh marks its steps off the lines the deploy prints",
     // Every other case here hands the installer an arch. This one answers the real read script over a transport,
     // so the road from what the box printed to the chip arm in its deploy script is proved end to end.
     const cases = [
-      { said: "x86_64", arm: "x86_64) mv -f", gone: "aarch64)" },
-      { said: "aarch64", arm: "aarch64) mv -f", gone: "x86_64)" },
+      { said: "x86_64", arm: "  x86_64)", gone: "aarch64" },
+      { said: "aarch64", arm: "  aarch64)", gone: "x86_64" },
     ] as const;
     for (const { said, arm, gone } of cases) {
       const ran: string[] = [];

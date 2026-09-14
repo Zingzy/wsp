@@ -645,7 +645,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             case "workspaces.upgrade":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, undefined, origin)) });
+              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.upgrade(msg.workspaceId, origin)) });
               return;
             case "workspaces.updateImage": {
               const moved = await rt.workspaces.updateImage(msg.workspaceId, origin);

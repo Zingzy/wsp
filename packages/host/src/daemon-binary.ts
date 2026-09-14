@@ -24,9 +24,10 @@ export const DAEMON_TARGETS: readonly DaemonTarget[] = [
   { triple: "x86_64-apple-darwin", platform: "darwin", arch: "x64", uname: "x86_64" },
 ];
 
-/** The targets a guest can be: every Linux row. A deploy carries all of them where the host has not read the
+/** The targets a guest can be: every Linux row. A bundle carries all of them where the host has not read the
  * machine's own word for its chip, which is every fork of an image, since nothing answers there until the daemon
- * does; the ssh roads read it off the machine first and carry the one row it names. */
+ * does, and the deploy drops the ones the machine is not; the ssh roads read the chip off the machine first and
+ * carry the one row it names. */
 export const GUEST_DAEMON_TARGETS: readonly DaemonTarget[] = DAEMON_TARGETS.filter(t => t.platform === "linux");
 
 /** The binary's name, on every machine and in every folder that carries one. */
@@ -50,9 +51,6 @@ export function daemonBinaryIn(dir: string, triple: string): string {
 
 /** The name the release workflow uploads a target's binary under, as an artifact and as a release asset. */
 export const daemonArtifactName = (triple: string): string => `${DAEMON_BIN}-${triple}`;
-
-/** The name a Linux binary travels under in a guest's bundle, by the chip word the deploy reads off uname. */
-export const bundledDaemonName = (target: DaemonTarget): string => `${DAEMON_BIN}-${target.uname}`;
 
 export const noDaemonBuildLine = (platform: string, arch: string): string =>
   `wsp builds no daemon for ${platform} ${arch}, so this computer cannot serve its own workspace or join a wsp as a place`;

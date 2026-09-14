@@ -673,8 +673,6 @@ describe("accrued cost", () => {
     const billed = usd(small, awake);
     expect(costs.at(-1)).toMatchObject({ rateUsdPerHour: small, awakeMs: awake });
     expect(costs.at(-1)!.accruedUsd).toBeCloseTo(billed, 10);
-    // The nap in the middle added nothing: the hour it sat paused is on neither the awake time nor the bill.
-    expect(costs.at(-1)!.awakeMs).toBeLessThan(2 * 3_600_000);
     await first.close();
 
     // An hour down with the machine running: the next host meters on from the stored total at the stored rate.

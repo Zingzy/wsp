@@ -1115,7 +1115,8 @@ export interface Runtime {
     /** Stops a wake that is asking the provider again on its own, and answers with the record it leaves behind. The
      * wake itself ends with WAKE_STOPPED; a workspace with no wake in flight is answered with as it stands. */
     stopWake(id: string, origin?: Caller): Promise<WorkspaceView>;
-    upgrade(id: string, spec?: WorkspaceSpec, origin?: Caller): Promise<WorkspaceView>;
+    /** Replaces the workspace's machine with a fresh fork of the image behind it, its vaulted files carried over. */
+    upgrade(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Moves the workspace onto its golden's head version, carrying its files across. Refused in one sentence when
      * the machine is not running, the image is a project golden, or no golden knows the image; a workspace past
      * those and already on the head is returned untouched. */
@@ -4343,16 +4344,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return view(entry.record);
     },
 
-    async upgrade(id, spec, origin) {
+    async upgrade(id, origin) {
       const entry = await entryOf(id, origin);
       refuseCannot(entry, "replacesMachine", "have its machine replaced");
-      await entry.ws.upgrade(spec);
+      await entry.ws.upgrade();
       followMachine(entry);
-      entry.record.spec = {
-        ...entry.record.spec,
-        ...(spec?.envs !== undefined ? { envs: spec.envs } : {}),
-        ...(spec?.labels !== undefined ? { labels: spec.labels } : {}),
-      };
       await persist(entry.record);
       bus.emit({ type: "workspace.upgraded", workspaceId: id, machineId: entry.record.machineId });
       return view(entry.record);

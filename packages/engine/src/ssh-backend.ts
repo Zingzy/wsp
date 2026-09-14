@@ -3,10 +3,10 @@
 // already exists, the person's own, dialled with their own key. It sits behind
 // the same MachineBackend seam the Solari and local backends do, so the runtime
 // never learns which kind it holds. Nothing here creates, forks, pauses or
-// snapshots: every capability behind those is false, so each road
-// refuses by capability before it reaches this file. exec and run carry one
-// script over the ssh client, which is the only thing here that knows the
-// machine is not in this process.
+// snapshots: every capability behind those is false, so each road refuses by
+// capability before it reaches this file. exec and run carry one script over
+// the ssh client, which is the only thing here that knows the machine is not
+// in this process.
 
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
