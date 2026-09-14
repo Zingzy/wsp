@@ -42,7 +42,6 @@ function fakeApi(workspaces: WorkspaceView[], portReach: Api["portReach"] = mint
     watchStatuses: async () => [],
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
-    upgrade: async id => workspaces.find(w => w.id === id)!,
     capabilities: async () => (caps()),
     portReach,
     daemon: noDaemonApi,

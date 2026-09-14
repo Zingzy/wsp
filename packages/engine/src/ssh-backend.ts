@@ -2,11 +2,11 @@
 // The backend for a workspace on a machine reached over ssh: a machine that
 // already exists, the person's own, dialled with their own key. It sits behind
 // the same MachineBackend seam the Solari and local backends do, so the runtime
-// never learns which kind it holds. Nothing here creates, forks, pauses,
-// snapshots or resizes: every capability behind those is false, so each road
-// refuses by capability before it reaches this file. exec and run carry one
-// script over the ssh client, which is the only thing here that knows the
-// machine is not in this process.
+// never learns which kind it holds. Nothing here creates, forks, pauses or
+// snapshots: every capability behind those is false, so each road refuses by
+// capability before it reaches this file. exec and run carry one script over
+// the ssh client, which is the only thing here that knows the machine is not
+// in this process.
 
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync } from "node:fs";
@@ -579,11 +579,9 @@ export interface SshBackendOptions {
 export class SshBackend implements MachineBackend {
   readonly capabilities: Capabilities = {
     liveCloneForks: false,
-    resize: false,
     replacesMachine: false, // the machine is the person's own: wsp made it no image and throws it away for nothing
     previewUrls: false,
     signedUrls: false,
-    containers: false,
     callbackRelay: false,
     diskSnapshots: false,
     snapshotsAnyLife: false,

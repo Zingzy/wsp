@@ -452,11 +452,9 @@ impl Ops {
             capabilities: Capabilities {
                 live_clone_forks: false,
                 pause_mode: Some(PauseMode::Disk),
-                resize: false,
                 replaces_machine: true,
                 preview_urls: false,
                 signed_urls: false,
-                containers: engine::socket_of(&crate::doctor::read_facts()).is_ok(),
                 callback_relay: true,
                 disk_snapshots: true,
                 snapshots_any_life: true,
@@ -1193,10 +1191,8 @@ mod tests {
         let facts = ops.backend_facts();
         assert_eq!(facts.offer, "runtime");
         assert_eq!(facts.capabilities.pause_mode, Some(PauseMode::Disk));
-        assert!(!facts.capabilities.live_clone_forks && !facts.capabilities.resize && !facts.capabilities.preview_urls);
+        assert!(!facts.capabilities.live_clone_forks && !facts.capabilities.preview_urls);
         assert!(!facts.capabilities.signed_urls && !facts.capabilities.kept);
-        // Containers read true exactly where this box has an engine with its socket: the doctor's reading.
-        assert_eq!(facts.capabilities.containers, engine::socket_of(&crate::doctor::read_facts()).is_ok());
         assert!(facts.capabilities.replaces_machine && facts.capabilities.callback_relay && facts.capabilities.disk_snapshots);
         assert!(facts.capabilities.snapshots_any_life && facts.capabilities.snapshot_listing && facts.capabilities.templates);
         assert_eq!(facts.capabilities.sizes.len(), 2);

@@ -139,7 +139,7 @@ fn place_file(host_urls: &[&str], host_public_key: &str, key_pem: &str) -> Place
     std::fs::create_dir_all(&at.wsp).unwrap();
     let file = json!({
         "placeId": "p_ab12cd34", "name": "old-macbook", "hostName": "zingzy-mbp", "hostUrls": host_urls,
-        "hostPublicKey": host_public_key, "keyPath": at.place_key, "joinedAt": "1970-01-01T00:00:00.000Z", "awake": false,
+        "hostPublicKey": host_public_key, "keyPath": at.place_key, "joinedAt": "1970-01-01T00:00:00.000Z",
     });
     std::fs::write(&at.place_file, format!("{}\n", serde_json::to_string_pretty(&file).unwrap())).unwrap();
     std::fs::write(&at.place_key, key_pem).unwrap();

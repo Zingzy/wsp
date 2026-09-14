@@ -18,11 +18,9 @@ describe("local backend", () => {
     const backend = new LocalBackend({ root });
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
-      resize: false,
       replacesMachine: false,
       previewUrls: false,
       signedUrls: false,
-      containers: false,
       callbackRelay: false,
       diskSnapshots: false,
       snapshotsAnyLife: false,

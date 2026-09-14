@@ -107,7 +107,6 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
       }
       return row;
     }),
-    upgrade: async id => view(id, "?", "running"),
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s_x", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),

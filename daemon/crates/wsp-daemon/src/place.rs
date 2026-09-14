@@ -325,13 +325,29 @@ mod tests {
         assert!(!on_path("sh", ""));
     }
 
+    /// A place's daemon runs unattended under a service unit: a word that is not a pair costs the report one agent
+    /// row, and refusing the flag would cost the person the whole computer until somebody edits its unit.
+    #[test]
+    fn a_word_that_is_not_an_id_command_pair_is_dropped_and_the_rest_of_the_list_stands() {
+        let read =
+            parse_agents(&["a1=sh".to_owned(), "broken".to_owned(), "=no-id".to_owned(), "no-command=".to_owned(), "b2=bash".to_owned()]);
+        assert_eq!(
+            read,
+            vec![AgentBin { id: "a1".to_owned(), bin: "sh".to_owned() }, AgentBin { id: "b2".to_owned(), bin: "bash".to_owned() }]
+        );
+        // The command may carry an = of its own; only the first one splits the word.
+        assert_eq!(
+            parse_agents(&["a1=sh -c echo a=b".to_owned()]),
+            vec![AgentBin { id: "a1".to_owned(), bin: "sh -c echo a=b".to_owned() }]
+        );
+    }
+
     #[test]
     fn the_report_is_read_off_the_home_and_the_words_given() {
         let home = tempfile::tempdir().unwrap();
-        let file = PlaceFile::parse(
-            r#"{"placeId":"p","name":"old-macbook","hostName":"h","hostUrls":[],"hostPublicKey":"k","keyPath":"/k","awake":false}"#,
-        )
-        .unwrap();
+        let file =
+            PlaceFile::parse(r#"{"placeId":"p","name":"old-macbook","hostName":"h","hostUrls":[],"hostPublicKey":"k","keyPath":"/k"}"#)
+                .unwrap();
         let agents = parse_agents(&["a1=sh".to_owned(), "b2=no-such-agent-command".to_owned()]);
         let argv = ["/usr/local/bin/node".to_owned(), "/opt/wsp/bin.js".to_owned()];
         let report = place_report(&ReportInput {

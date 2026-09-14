@@ -1197,11 +1197,9 @@ const PLACE_FACTS = {
   capabilities: {
     liveCloneForks: false,
     pauseMode: "memory",
-    resize: false,
     replacesMachine: true,
     previewUrls: false,
     signedUrls: false,
-    containers: false,
     callbackRelay: true,
     diskSnapshots: true,
     snapshotsAnyLife: false,

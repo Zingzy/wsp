@@ -360,7 +360,7 @@ describe("idle policy in the runtime", () => {
     await rt.workspaces.wake(ws.id);
     fc.advance(WINDOW);
     await napping(rt, ws.id);
-    await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    await rt.workspaces.upgrade(ws.id);
     expect(await phaseOf(rt, ws.id)).toBe("running");
     fc.advance(WINDOW);
     await napping(rt, ws.id);

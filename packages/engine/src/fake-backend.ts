@@ -273,10 +273,6 @@ export class FakeBackend implements MachineBackend {
     this.capabilities = {
       liveCloneForks: true,
       pauseMode: "memory",
-      // No provider in this table gives a machine that exists a new size, so neither does this one: a fixture that
-      // offered a size upgrade would put a control in front of a tester that no person has, and the confusion it
-      // caused would be read as the product's.
-      resize: false,
       replacesMachine: true,
       // A machine is reachable at a port only where a guest was wired, which is what puts a terminal, a process
       // list and live readings on a fixture's fork instead of six ways of saying unreachable.
@@ -284,7 +280,6 @@ export class FakeBackend implements MachineBackend {
       // No signed URL either way: the daemon a guest carries is the caller's to start, so nothing here tries to
       // put one on a machine by landing bytes on it.
       signedUrls: false,
-      containers: true,
       callbackRelay: false,
       diskSnapshots: true,
       // The stand-in copies whatever it is asked for: nothing here refuses a machine for having been woken.

@@ -38,7 +38,6 @@ function fakeApi(record: Preferences, file: TerminalConfig | null = FILE) {
     watchStatuses: async () => [],
     nap: async () => view("ws_a", "api"),
     wake: async () => view("ws_a", "api"),
-    upgrade: async () => view("ws_a", "api"),
     capabilities: async () => CAPS,
     startSession: async o => ({ id: "s1", workspaceId: o.workspaceId, harness: "claude", status: "running" }),
     portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: 0 }),

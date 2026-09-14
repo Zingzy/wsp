@@ -275,7 +275,7 @@ describe("ssh workspace", () => {
     const ws = await rt.workspaces.createSsh("dev@box");
     const cannot = (action: string): string => undrivenRefusal("box", OVER_SSH, action);
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(cannot("be paused"));
-    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4, memMb: 8192 })).rejects.toThrow(cannot("be resized"));
+    await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(cannot("have its machine replaced"));
     await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(cannot("be rebuilt"));
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow(cannot("move to a newer image"));
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(cannot("be snapshotted"));

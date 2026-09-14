@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The road a pane really takes: a real daemon, a runtime whose stub machines
-// answer with a daemon's address, a served host socket, and the page's own
-// client over it. Nothing here fakes the relay; a test that goes live has
-// driven a pty through two sockets.
+// The road a pane really takes: a real daemon binary, a runtime whose stub
+// machines answer with a daemon's address, a served host socket, and the
+// page's own client over it. Nothing here fakes the relay; a test that goes
+// live has driven a pty through two sockets.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startDaemon, type DaemonHandle, type DaemonOptions, type ListeningPort } from "@wsp/daemon";
-import { rootsPathIn } from "@wsp/protocol";
-import { createRuntime, memoryStore, serveRuntime, type Runtime, type RuntimeServer } from "@wsp/runtime";
+import { PtyListReply, rootsPathIn, type PtyListEntry } from "@wsp/protocol";
+import { connectDaemon, createRuntime, memoryStore, serveRuntime, type DaemonReach, type Runtime, type RuntimeServer } from "@wsp/runtime";
+import { fakeProcTree, setListeners, writeSys, type FakeListener, type FakeProc, type FakeSys } from "../../../packages/daemon/test/fake-proc.js";
+import { daemonUnderTest, type DaemonArgs, type DaemonUnderTest } from "../../../packages/daemon/test/harness.js";
 import { stubBackend, tokenGuest, type StubBackend } from "../../../packages/runtime/test/stub-backend.js";
 import { makeApi, ProtocolClient, type Api } from "../src/protocol/client.js";
 
@@ -22,7 +23,11 @@ export const HARNESS_DAEMON_TOKEN = DAEMON_TOKEN;
 export interface RelayHarness {
   api: Api;
   client: ProtocolClient;
-  daemon: DaemonHandle;
+  daemon: DaemonUnderTest;
+  /** The fake machine the daemon reads: a listener written here is a port.open on its next poll. */
+  procRoot: string;
+  /** The ptys the guest's daemon holds, asked over the wire the way a client asks. */
+  ptys(): Promise<PtyListEntry[]>;
   runtime: Runtime;
   server: RuntimeServer;
   backend: StubBackend;
@@ -41,23 +46,32 @@ export interface RelayHarnessOptions {
   tokenPath?: string;
   /** Where the host dials instead of the daemon: a refusing door, a proxy, a port nothing listens on. */
   road?: (daemonPort: number) => string;
-  /** What the daemon reports as listening, read on every sweep. */
-  ports?: () => Promise<ListeningPort[]>;
-  /** Anything else the guest's daemon is started with: a fake /proc tree, a scripted sys source, an open socket. */
-  daemonOptions?: DaemonOptions;
+  /** What is listening on the guest to begin with; a test writes more into procRoot as it goes. */
+  ports?: readonly FakeListener[];
+  /** The processes the guest is running, which the Processes tab reads. */
+  procs?: readonly FakeProc[];
+  /** The load the guest reports, which the Machine tab's Live rows read. */
+  sys?: FakeSys;
+  /** Anything else the guest's daemon is started with: its root, an open socket, a sampling clock. */
+  daemonArgs?: DaemonArgs;
 }
 
 export async function startRelayHarness(opts: RelayHarnessOptions = {}): Promise<RelayHarness> {
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-relay-inbox-"));
-  // Its roots file goes in a folder this test owns: the option's default names the guest's /root, another user's folder here.
-  const daemon = await startDaemon({
+  // The machine this daemon reads is a fake /proc tree: darwin has none, and a listener is a row written into it.
+  const procRoot = fakeProcTree([...(opts.procs ?? [])]);
+  if (opts.sys !== undefined) writeSys(procRoot, opts.sys);
+  if (opts.ports !== undefined) setListeners(procRoot, opts.ports);
+  // Its roots file goes in a folder this test owns: the flag's default names the guest's /root, another user's folder here.
+  const daemon = await daemonUnderTest({
+    host: "127.0.0.1",
     port: 0,
     ...(opts.tokenPath !== undefined ? { tokenPath: opts.tokenPath } : { token: opts.daemonToken ?? DAEMON_TOKEN }),
-    inboxDir,
+    inbox: inboxDir,
     rootsPath: rootsPathIn(inboxDir),
-    portsSource: opts.ports ?? (async () => []),
+    procRoot,
     portsIntervalMs: 50,
-    ...opts.daemonOptions,
+    ...opts.daemonArgs,
   });
 
   const backend = stubBackend();
@@ -80,10 +94,20 @@ export async function startRelayHarness(opts: RelayHarnessOptions = {}): Promise
   const client = new ProtocolClient({ url: `ws://127.0.0.1:${server.port}`, token: HOST_TOKEN });
   await client.connect();
 
+  // A link of this test's own to the guest's daemon, for what a test reads of the daemon rather than of the page.
+  let own: DaemonReach | undefined;
+  const ptys = async (): Promise<PtyListEntry[]> => {
+    own ??= connectDaemon({ previewUrl: `ws://127.0.0.1:${daemon.port}`, token: opts.daemonToken ?? DAEMON_TOKEN, onEvent: () => {} });
+    await own.ready;
+    return PtyListReply.parse(await own.request("pty.list")).ptys;
+  };
+
   return {
     api: makeApi(client),
     client,
     daemon,
+    procRoot,
+    ptys,
     runtime,
     server,
     backend,
@@ -93,11 +117,13 @@ export async function startRelayHarness(opts: RelayHarnessOptions = {}): Promise
     },
     addWorkspace: add,
     async close() {
+      own?.close();
       client.close();
       await server.close();
       await runtime.close();
       await daemon.close();
       rmSync(inboxDir, { recursive: true, force: true });
+      rmSync(procRoot, { recursive: true, force: true });
     },
   };
 }

@@ -27,11 +27,11 @@ const fakeClick = (): [MenuItem: import("electron").MenuItem, window: undefined,
 describe("contextMenuTemplate", () => {
   it("gives a row that can run its hint as the hover text, and a dimmed row's reason still wins the slot", () => {
     const rows: ContextMenuItem[] = [
-      { id: "awake", label: "Stay awake while joined", group: "place", enabled: true, checked: false, hint: "while the lid is open and it is plugged in" },
-      { id: "rebuild", label: "Rebuild machine", group: "place", enabled: false, refusal: "this one answers", hint: "never read" },
+      { id: "nap", label: "Pause workspace", group: "state", enabled: true, checked: false, hint: "a nap keeps the memory and bills nothing" },
+      { id: "rebuild", label: "Rebuild machine", group: "state", enabled: false, refusal: "this one answers", hint: "never read" },
     ];
     const template = contextMenuTemplate(rows, vi.fn());
-    expect(template[0]).toMatchObject({ enabled: true, toolTip: "while the lid is open and it is plugged in" });
+    expect(template[0]).toMatchObject({ enabled: true, toolTip: "a nap keeps the memory and bills nothing" });
     expect(template[1]).toMatchObject({ enabled: false, toolTip: "this one answers" });
     expect(parseContextMenuItems(rows)).toEqual(rows);
     expect(() => parseContextMenuItems([{ id: "x", label: "x", group: "g", enabled: true, hint: 3 }])).toThrow("menu:context: not a list of items");

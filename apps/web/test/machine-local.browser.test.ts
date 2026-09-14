@@ -65,7 +65,7 @@ describe.skipIf(renderSkipped !== undefined)("the machine tab of this computer l
     expect(await lead.evaluate(el => el.tagName.toLowerCase())).toBe("svg");
     // Nothing wsp does not drive: no awake meter, no auto-nap row, no rate, no accrued, no chart, no lineage.
     for (const k of ["awake", "idle", "rate", "accrued", "machine", "golden"]) expect(await page!.locator(`[data-k=${k}]`).count()).toBe(0);
-    for (const word of ["Usage", "Lineage", "forks from no image", "containers", "idle window", "cannot resize"]) expect(await page!.locator(`text=${word}`).count()).toBe(0);
+    for (const word of ["Usage", "Lineage", "forks from no image", "idle window"]) expect(await page!.locator(`text=${word}`).count()).toBe(0);
     expect(await page!.locator("[data-slot=badge]").count()).toBe(0);
     expect(await page!.locator("footer").count()).toBe(0);
     // The Live rows read this computer's own modules, so the figures sit in the slot the kind's word used to hold,

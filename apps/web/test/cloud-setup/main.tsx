@@ -260,10 +260,7 @@ const api: Api = {
   wake: async () => {
     throw new Error("none");
   },
-  upgrade: async () => {
-    throw new Error("none");
-  },
-  capabilities: async () => (caps({ resize: false, containers: false, templates: true })),
+  capabilities: async () => (caps({ templates: true })),
   daemon: noDaemonApi,
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   startSession: async () => ({ id: "s1", workspaceId: "ws", harness: "claude", status: "running" }),

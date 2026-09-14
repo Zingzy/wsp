@@ -36,7 +36,6 @@ const goldens: ProjectGolden[] = [
 
 const listeners = new Set<(e: EventUnion) => void>();
 const api: Api = {
-  upgrade: async () => workspace,
   capabilities: async () => (caps()),
   portReach: async (_id, port) => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, expiresAt: Date.now() + 3_600_000 }),
   daemon: noDaemonApi,

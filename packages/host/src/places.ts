@@ -800,8 +800,6 @@ export interface JoinFlags {
   code?: string;
   codeFile?: string;
   name?: string;
-  /** Hold this computer out of idle sleep while it is joined, from the moment it joins. */
-  awake?: boolean;
 }
 
 export interface JoinDeps {
@@ -1011,7 +1009,6 @@ export interface JoinPlaceOptions {
    * place, off the one `name` below: `wsp remove` finds the token a computer still holds by that name, so the two
    * cannot be two words. An ask rather than a name, so no caller can pass a second one. */
   client?: boolean;
-  awake?: boolean;
   /** The wsp this computer runs, which the daemon reports as the line a turn's agent is given: this process's own
    * unless the caller runs behind a shim, as the app does. */
   wsp?: RunningWsp;
@@ -1074,7 +1071,6 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
     hostPublicKey: joined.hostPublicKey,
     keyPath: key,
     joinedAt: new Date(now()).toISOString(),
-    awake: opts.awake === true,
   };
   writePlaceFile(file, placeFile);
   io.log(joinedLine(name, address));
@@ -1109,16 +1105,6 @@ export async function joinPlace(io: CliIO, opts: JoinPlaceOptions): Promise<Join
 /** The place file as it stands on this computer, or nothing when it belongs to no wsp. */
 export function placeStanding(home: string): PlaceFile | undefined {
   return readPlaceFile(placeFilePath(home));
-}
-
-/** Flips whether this computer is held out of idle sleep while it is joined, keeping every other field. The agent
- * watches the file, so this write is the whole of the toggle and nothing is restarted. */
-export function writePlaceAwake(home: string, awake: boolean): PlaceFile {
-  const held = placeStanding(home);
-  if (held === undefined) throw new Error(NOTHING_TO_LEAVE_LINE);
-  const moved: PlaceFile = { ...held, awake };
-  writePlaceFile(placeFilePath(home), moved);
-  return moved;
 }
 
 /** The sweep a computer runs on itself, and the lines naming what it took. The host's own remove asks the agent for
@@ -1157,7 +1143,6 @@ export async function joinCommand(io: CliIO, args: readonly string[], flags: Joi
     code,
     hostKey,
     ...(flags.name !== undefined ? { name: flags.name } : {}),
-    ...(flags.awake === true ? { awake: true } : {}),
     platform: deps.platform,
     ...(deps.manager !== undefined ? { manager: deps.manager } : {}),
     ...(deps.uid !== undefined ? { uid: deps.uid } : {}),

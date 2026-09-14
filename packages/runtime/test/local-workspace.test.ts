@@ -338,7 +338,7 @@ describe("local workspace", () => {
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(cannot);
     // A computer is running while the host is: the wake every thread road sends first is a no-op, not a refusal.
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
-    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4, memMb: 8192 })).rejects.toThrow(cannot);
+    await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(cannot);
     await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(cannot);
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow(cannot);
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow(undrivenRefusal("mac", machineWord("local"), "be snapshotted"));
@@ -356,7 +356,7 @@ describe("local workspace", () => {
       ["workspaces.get", () => rt.workspaces.get(ws.id, "relayed")],
       ["workspaces.nap", () => rt.workspaces.nap(ws.id, "relayed")],
       ["workspaces.wake", () => rt.workspaces.wake(ws.id, "relayed")],
-      ["workspaces.upgrade", () => rt.workspaces.upgrade(ws.id, { cpu: 4 }, "relayed")],
+      ["workspaces.upgrade", () => rt.workspaces.upgrade(ws.id, "relayed")],
       ["workspaces.updateImage", () => rt.workspaces.updateImage(ws.id, "relayed")],
       ["workspaces.rebuild", () => rt.workspaces.rebuild(ws.id, "relayed")],
       ["workspaces.rename", () => rt.workspaces.rename(ws.id, "mac2", "relayed")],

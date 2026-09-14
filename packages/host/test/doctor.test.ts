@@ -6,9 +6,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { gunzipSync } from "node:zlib";
-import { startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { WebSocketServer } from "ws";
 import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
+import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
@@ -954,7 +954,7 @@ describe("deployDaemon", () => {
 });
 
 describe("connectDaemonSocket", () => {
-  let daemon: DaemonHandle | undefined;
+  let daemon: DaemonUnderTest | undefined;
   let socket: DaemonSocket | undefined;
   let inboxDir: string | undefined;
   afterEach(async () => {
@@ -968,13 +968,14 @@ describe("connectDaemonSocket", () => {
 
   async function startLocalDaemon(): Promise<{ url: string; token: string }> {
     inboxDir = tmp("wsp-doctor-inbox-");
-    daemon = await startDaemon({
+    daemon = await daemonUnderTest({
       host: "127.0.0.1",
       port: 0,
       token: "secret-token",
-      inboxDir,
+      inbox: inboxDir,
       inboxQuietMs: 50,
       inboxPollMs: 25,
+      manifest: join(inboxDir, "manifest.json"),
     });
     return { url: `http://127.0.0.1:${daemon.port}/?pt_token=ignored`, token: "secret-token" };
   }

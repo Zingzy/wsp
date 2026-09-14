@@ -3117,9 +3117,8 @@ describe("runtime upgrade vault", () => {
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-      const upgraded = await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      const upgraded = await rt.workspaces.upgrade(ws.id);
       expect(upgraded.machineId).toBe("m2");
-      expect(backend.machines[1]!.spec.cpu).toBe(4);
       const tar = tarCmds.find(c => c.startsWith("m1:"));
       expect(tar).toContain("'root/notes.md'");
       expect(tar).toContain("'root/.claude-cfg'");
@@ -3199,7 +3198,7 @@ describe("runtime machine context", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
       expect(docOf(writes(backend, backend.machines[0]!)[0]!)).toContain("- Golden: version not recorded.");
-      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      await rt.workspaces.upgrade(ws.id);
       expect(writes(backend, backend.machines[1]!)).toHaveLength(1);
       expect(docOf(writes(backend, backend.machines[1]!)[0]!)).toContain("- Workspace: task-1.");
 
@@ -3237,7 +3236,7 @@ describe("runtime guest hostname", () => {
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
-      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+      await rt.workspaces.upgrade(ws.id);
       expect(hostnameCmds(backend.machines[1]!)).toEqual(["hostname task-1 && echo task-1 > /etc/hostname"]);
     } finally {
       vi.unstubAllGlobals();
@@ -3337,19 +3336,22 @@ async function helloOf(port: number): Promise<number> {
   }
 }
 
-/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox. */
+/** A real daemon on a loopback port for the runtime to ping, torn down with its inbox and its fake machine. */
 async function withDaemon<T>(fn: (port: number) => Promise<T>): Promise<T> {
-  const { startDaemon } = await import("@wsp/daemon");
+  const { fakeProcTree } = await import("../../daemon/test/fake-proc.js");
+  const { daemonUnderTest } = await import("../../daemon/test/harness.js");
   const { mkdtempSync, rmSync } = await import("node:fs");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const inboxDir = mkdtempSync(join(tmpdir(), "wsp-wake-inbox-"));
-  const daemon = await startDaemon({ port: 0, token: TOKEN, inboxDir, inboxQuietMs: 100, inboxPollMs: 25, portsSource: async () => [], portsIntervalMs: 25 });
+  const procRoot = fakeProcTree([]);
+  const daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, inbox: inboxDir, inboxQuietMs: 100, inboxPollMs: 25, procRoot, portsIntervalMs: 25 });
   try {
     return await fn(daemon.port);
   } finally {
     await daemon.close();
     rmSync(inboxDir, { recursive: true, force: true });
+    rmSync(procRoot, { recursive: true, force: true });
   }
 }
 
@@ -3949,9 +3951,9 @@ describe("runtime workspace size", () => {
       expect(pushed.status.size).toEqual({ cpu: 2, memMb: 2048 });
 
       backend.machines[1]!.previewUrl = undefined;
-      await rt.workspaces.upgrade(ws.id, { cpu: 4 });
-      expect(backend.machines[2]!.spec).toMatchObject({ cpu: 4, memMb: 2048 });
-      expect((await rt.status.list())[0]!.size).toEqual({ cpu: 4, memMb: 2048 });
+      await rt.workspaces.upgrade(ws.id);
+      expect(backend.machines[2]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
+      expect((await rt.status.list())[0]!.size).toEqual({ cpu: 2, memMb: 2048 });
     } finally {
       vi.unstubAllGlobals();
     }
@@ -4072,7 +4074,7 @@ describe("runtime fork kind", () => {
     expect(backend.machines[1]!.spec.kind).toBe("desktop");
     expect(woken.screen).toEqual({ streamUrl: "wss://stub/stream/m2" });
 
-    const upgraded = await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    const upgraded = await rt.workspaces.upgrade(ws.id);
     expect(backend.machines[2]!.spec.kind).toBe("desktop");
     expect(upgraded.screen).toEqual({ streamUrl: "wss://stub/stream/m3" });
   });
@@ -5755,7 +5757,7 @@ describe("create idempotency keys", () => {
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
-    await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    await rt.workspaces.upgrade(ws.id);
     const [first, second] = backend.machines.map(m => m.spec.idempotencyKey);
     expect(backend.machines[0]!.killed).toBe(true);
     expect(second).not.toBe(first);
@@ -7053,8 +7055,8 @@ describe("a workspace behind the golden's head", () => {
     expect(backend.machines[0]!.killed).toBe(false);
   });
 
-  // The move replaces the machine the way a resize does, and that kills before it forks: a create the provider
-  // refuses leaves the workspace machineless whichever of the two asked for it. What the move owes is the record:
+  // The move replaces the machine, and that kills before it forks: a create the provider
+  // refuses leaves the workspace machineless whichever road asked for it. What the move owes is the record:
   // the image it names must be the one the workspace is on, so the rebuild that follows restores that version.
   it("a move that fails leaves the record on the image the workspace came from, so the rebuild after it forks that one", async () => {
     const { backend, store, rt } = await seeded();

@@ -13,10 +13,24 @@ a key.
 Node 22 or newer and pnpm.
 
 ```sh
+cd daemon && cargo build --release && cd ..
+node packages/wspx/scripts/daemon-binary.mjs   # this computer's daemon, where the host and the suite read it
 pnpm install && pnpm build
 pnpm test                    # no key needed, creates nothing
 pnpm -r exec tsc --noEmit
 ```
+
+The daemon is Rust and nothing in a node build makes it. The host spawns it
+for this computer's own workspace and every test that needs a running daemon
+drives that same binary, so the two lines above come first. The toolchain is
+the one `daemon/rust-toolchain.toml` names.
+
+On Linux the daemon wsp ships is one static musl binary, and the placing step
+refuses a gnu one, so the build line is the musl road the ci workflow takes:
+`musl-tools` and `gperf` installed, `daemon/scripts/libseccomp-archive.sh musl`
+run, then `LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release
+--target x86_64-unknown-linux-musl -p wsp-daemon-bin` in `daemon/`, and
+`--triple x86_64-unknown-linux-musl` on the placing line.
 
 On a small computer run vitest by file:
 `pnpm exec vitest run --minWorkers=1 --maxWorkers=1 <files>`. The live

@@ -105,7 +105,7 @@ The Linux AppImage needs the run bit before it starts: `chmod +x wsp-*.AppImage`
 
 ## What is next
 
-Your own computer as a workspace, so agents can start each other locally as well as in the cloud. Spaces: one workspace at a time in the sidebar, with its own tint. Images in threads. Pi and Gemini threads.
+Spaces: one workspace at a time in the sidebar, with its own tint. Images in threads. Pi and Gemini threads.
 
 ## Building from source
 

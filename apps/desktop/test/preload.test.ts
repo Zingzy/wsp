@@ -41,15 +41,13 @@ describe("the preload's bridge", () => {
   });
 
   it("carries the first launch's calls, each on its own channel", async () => {
-    const wsp = (await bridge()) as DesktopBridge & { agents(): Promise<unknown>; install(ids: string[]): Promise<unknown>; finish(): Promise<void>; join(ask: { address: string; code: string }): Promise<unknown> };
+    const wsp = (await bridge()) as DesktopBridge & { agents(): Promise<unknown>; install(ids: string[]): Promise<unknown>; finish(): Promise<void> };
     await wsp.agents();
     expect(invoke).toHaveBeenLastCalledWith("onboarding:agents");
     await wsp.install(["claude", "codex"]);
     expect(invoke).toHaveBeenLastCalledWith("onboarding:install", ["claude", "codex"]);
     await wsp.finish();
     expect(invoke).toHaveBeenLastCalledWith("onboarding:finish");
-    await wsp.join({ address: "192.168.1.20:7788", code: "QW4K7PZX" });
-    expect(invoke).toHaveBeenLastCalledWith("onboarding:join", { address: "192.168.1.20:7788", code: "QW4K7PZX" });
   });
 
   it("says when a terminal has focus and hands back the chords the shell stood aside from, unsubscribing with the same listener", async () => {
@@ -103,18 +101,5 @@ describe("the hosts the window can move between", () => {
     expect(opened).toBe(1);
     stop();
     expect(off).toHaveBeenLastCalledWith("hosts:connect-open", expect.any(Function));
-    const first = wsp as DesktopBridge & { join(ask: { address: string; code: string }): Promise<unknown> };
-    await first.join({ address: "192.168.1.20:4420", code: "QW4K7PZX" });
-    expect(invoke).toHaveBeenLastCalledWith("onboarding:join", { address: "192.168.1.20:4420", code: "QW4K7PZX" });
-  });
-
-  it("carries what this computer is to the wsp it joined, leaving it and the awake hold, each on its own channel", async () => {
-    const wsp = await bridge();
-    await wsp.place?.();
-    expect(invoke).toHaveBeenLastCalledWith("place:standing");
-    await wsp.leaveWsp?.();
-    expect(invoke).toHaveBeenLastCalledWith("place:leave");
-    await wsp.setStayAwake?.(true);
-    expect(invoke).toHaveBeenLastCalledWith("place:awake", true);
   });
 });

@@ -69,7 +69,6 @@ function fakeApi(sessions: SessionView[] = THREADS) {
     watchStatuses: vi.fn(async () => []),
     nap: vi.fn(async () => workspace),
     wake: vi.fn(async () => workspace),
-    upgrade: vi.fn(async () => workspace),
     capabilities: vi.fn(async () => (caps())),
     startSession: vi.fn(async () => ({ id: "s1", workspaceId: "ws_a", harness: "claude", status: "running" as const })),
     portReach: vi.fn(async () => ({ url: "https://x", expiresAt: 0 })),

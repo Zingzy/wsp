@@ -19,11 +19,9 @@ interface Sent {
 const CAPABILITIES: Capabilities = {
   liveCloneForks: false,
   pauseMode: "memory",
-  resize: false,
   replacesMachine: true,
   previewUrls: false,
   signedUrls: false,
-  containers: false,
   callbackRelay: true,
   diskSnapshots: true,
   snapshotsAnyLife: false,

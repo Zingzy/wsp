@@ -55,7 +55,6 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     watchStatuses: async () => [],
     nap: async () => workspace,
     wake: async () => workspace,
-    upgrade: async () => workspace,
     capabilities: async () => (caps()),
     startSession: async o => {
       started.push(o);

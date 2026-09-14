@@ -148,7 +148,6 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: 
     createWorkspace: async () => ws,
     nap: async () => ws,
     wake: async () => ws,
-    upgrade: async () => ws,
     capabilities: async () => (caps()),
     listSessions: async () => rows,
     listHarnesses: async () => [TABLE_CATALOG],

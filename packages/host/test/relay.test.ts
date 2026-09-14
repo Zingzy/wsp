@@ -5,11 +5,12 @@ import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { OPEN_SHIM_SCRIPT as DAEMON_SHIM_SCRIPT, OPEN_SHIM_PATH as DAEMON_SHIM_PATH, startDaemon, type DaemonHandle } from "@wsp/daemon";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
 import type { ForwardEvent } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { fakeProcTree } from "../../daemon/test/fake-proc.js";
+import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { CLOUD_PLACE, DAEMON_CONNECT_TIMEOUT_MS, OPEN_SHIM_PATH, connectDaemonSocket, openShimScript, type ConnectOptions, type DaemonSocket } from "../src/doctor.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
@@ -235,11 +236,9 @@ function refused(port: number, host = "127.0.0.1"): Promise<boolean> {
   );
 }
 
-describe("the shim the host ships is the daemon's", () => {
-  it("script and BROWSER path match the daemon package byte for byte, and the engine's seal probe reads the same path", () => {
-    expect(openShimScript(CLOUD_PLACE)).toBe(DAEMON_SHIM_SCRIPT);
-    expect(OPEN_SHIM_PATH).toBe(DAEMON_SHIM_PATH);
-    expect(BROWSER_SHIM_PATH).toBe(DAEMON_SHIM_PATH);
+describe("the shim the host ships", () => {
+  it("names the path the engine's seal probe reads", () => {
+    expect(BROWSER_SHIM_PATH).toBe(OPEN_SHIM_PATH);
   });
 });
 
@@ -1162,22 +1161,26 @@ describe("callback relay over a fake daemon link", () => {
 });
 
 describe("callback relay end to end through a real daemon", () => {
-  let daemon: DaemonHandle | undefined;
+  let daemon: DaemonUnderTest | undefined;
   let relay: CallbackRelay | undefined;
   let guest: Server | undefined;
   let dir: string | undefined;
+  /** The fake machine the daemon reads its listening ports off: darwin has no /proc/net/tcp. */
+  let procRoot: string | undefined;
   afterEach(async () => {
     await relay?.close();
     await daemon?.close();
     await new Promise<void>(r => (guest ? guest.close(() => r()) : r()));
     if (dir) rmSync(dir, { recursive: true, force: true });
-    relay = daemon = guest = dir = undefined;
+    if (procRoot) rmSync(procRoot, { recursive: true, force: true });
+    relay = daemon = guest = dir = procRoot = undefined;
   });
 
   it("shim post in the guest opens on the laptop and the callback rides the tunnel back to the guest listener", { timeout: 15_000 }, async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-relay-e2e-"));
     const sockPath = join(dir, "open.sock");
-    daemon = await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, openSocketPath: sockPath, portsSource: async () => [] });
+    procRoot = fakeProcTree([]);
+    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: sockPath, procRoot });
     const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
     await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
 
@@ -1636,7 +1639,7 @@ describe("localhost forwards over a fake daemon link", () => {
     const port = await freePort();
     link.emit({ type: "localhost.url", port });
     await until(() => relay!.forwards().length === 1);
-    await rt.workspaces.upgrade(ws.id, { cpu: 4 });
+    await rt.workspaces.upgrade(ws.id);
     await until(() => fake.links.length === 2 && relay!.forwards().length === 0);
     expect(lines).toContain(`task-1: stopped forwarding localhost:${port} (not listening on the workspace after it moved to a new machine)`);
     expect(await refused(port)).toBe(true);
@@ -1678,21 +1681,25 @@ describe("localhost forwards over a fake daemon link", () => {
 });
 
 describe("localhost forwards end to end through a real daemon", () => {
-  let daemon: DaemonHandle | undefined;
+  let daemon: DaemonUnderTest | undefined;
   let relay: CallbackRelay | undefined;
   let guest: Server | undefined;
   let dir: string | undefined;
+  /** The fake machine the daemon reads its listening ports off: darwin has no /proc/net/tcp. */
+  let procRoot: string | undefined;
   afterEach(async () => {
     await relay?.close();
     await daemon?.close();
     await new Promise<void>(r => (guest ? guest.close(() => r()) : r()));
     if (dir) rmSync(dir, { recursive: true, force: true });
-    relay = daemon = guest = dir = undefined;
+    if (procRoot) rmSync(procRoot, { recursive: true, force: true });
+    relay = daemon = guest = dir = procRoot = undefined;
   });
 
   it("a URL printed in a workspace pty forwards its port; a request here reaches the guest listener; stop closes it", { timeout: 15_000 }, async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-forward-e2e-"));
-    daemon = await startDaemon({ host: "127.0.0.1", port: 0, token: TOKEN, openSocketPath: join(dir, "open.sock"), portsSource: async () => [] });
+    procRoot = fakeProcTree([]);
+    daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: join(dir, "open.sock"), procRoot });
     const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
     const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
 
@@ -1759,7 +1766,7 @@ describe("localhost forwards end to end through a real daemon", () => {
     await until(() => !linked, 5000);
     expect(relay.forwards()).toMatchObject([{ port, kind: "url" }]);
     for (let i = 0; i < 50 && daemon === undefined; i++) {
-      daemon = await startDaemon({ host: "127.0.0.1", port: daemonPort, token: TOKEN, portsSource: async () => [] }).catch(() => undefined);
+      daemon = await daemonUnderTest({ host: "127.0.0.1", port: daemonPort, token: TOKEN, procRoot }).catch(() => undefined);
       if (daemon === undefined) await new Promise(r => setTimeout(r, 100));
     }
     expect(daemon).toBeDefined();

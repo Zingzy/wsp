@@ -166,13 +166,10 @@ describe("BoxBackend declarations", () => {
     expect(backend.capabilities).toEqual({
       liveCloneForks: false,
       pauseMode: "disk",
-      resize: false,
-      // A box that exists keeps the class its create picked, and a fresh one deployed from the snapshot stands in
-      // for one that is gone: the pair the resize gate and the rebuild gate read apart.
+      // A fresh box deployed from the snapshot stands in for one that is gone, which is what the rebuild gate reads.
       replacesMachine: true,
       previewUrls: true,
       signedUrls: false,
-      containers: true,
       callbackRelay: true,
       diskSnapshots: true,
       // A box's named snapshot is the disk as it stands, so one that stopped and booted again saves the same.

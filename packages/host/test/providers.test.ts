@@ -34,7 +34,7 @@ describe("provider modules", () => {
     expect(providerModule(pick({}, { WSP_PROVIDER: "box" })).id).toBe("box");
     expect(providerModule(pick({ solari: "sk-x" }, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).id).toBe("box");
     expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" }))).toBeInstanceOf(BoxBackend);
-    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true, containers: true });
+    expect(providerBackendFor(pick({}, { WSP_PROVIDER: "box", BOX_API_KEY: "box_x" })).capabilities).toMatchObject({ pauseMode: "disk", previewUrls: true });
   });
 
   it("takes the module that answers out of memory when a harness names it, and never otherwise", async () => {
@@ -71,7 +71,7 @@ describe("provider modules", () => {
     expect(PROVIDER_MODULES.at(-1)!.selects(pick())).toBe(true);
   });
 
-  it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk, replaces a machine and resizes one", () => {
+  it("every registered backend, and the two kinds outside the registry, declares a pause mode and a lifecycle together or neither, and says on its own whether it copies a disk and replaces a machine", () => {
     // Built the way the host builds them, with fake picks: a key that looks fake, a daemon nothing dials.
     const built = PROVIDER_MODULES.map(m => [m.id, m.build(pick({ solari: "sk-ant-x" }, { BOX_API_KEY: "box_x" }))] as const);
     const all: readonly (readonly [string, MachineBackend])[] = [...built, ["local", new LocalBackend({ root: "/tmp/wsp-providers" })], ["ssh", new SshBackend()]];
@@ -87,10 +87,9 @@ describe("provider modules", () => {
     // and a box's named snapshot reads the disk as it stands.
     expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.snapshotsAnyLife]))).toEqual({ box: true, solari: false, fake: true, none: false, local: false, ssh: false });
     // Which providers stand a fresh machine in for one a workspace is on, the fact the rebuild and the image move
-    // read, and which give a machine a new size, the fact the resize reads. Each verb has its own row here, so a
-    // provider added tomorrow answers for every road rather than being read off a neighbour's flag.
+    // read. Each verb has its own row here, so a provider added tomorrow answers for every road rather than being
+    // read off a neighbour's flag.
     expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.replacesMachine]))).toEqual({ box: true, solari: true, fake: true, none: false, local: false, ssh: false });
-    expect(Object.fromEntries(all.map(([id, b]) => [id, b.capabilities.resize]))).toEqual({ box: false, solari: false, fake: false, none: false, local: false, ssh: false });
     for (const [, b] of all) if (b.lifecycle !== undefined) {
       expect(b.lifecycle.budgets.wakeAttempts).toBeGreaterThanOrEqual(1);
       expect(b.lifecycle.budgets.daemonAnswersMs).toBeGreaterThan(0);
@@ -106,9 +105,8 @@ describe("provider modules", () => {
     try {
       const held = providerSlotOf(rt)!.current();
       // A box: a nap that keeps the disk alone, a tokened route per port, a named snapshot of the disk as it
-      // stands, a fresh box that stands in for one a workspace is on, no new size for a box that exists, and sizes
-      // to offer, so the fork roads are open.
-      expect(held.capabilities).toMatchObject({ previewUrls: true, pauseMode: "disk", liveCloneForks: false, diskSnapshots: true, replacesMachine: true, resize: false });
+      // stands, a fresh box that stands in for one a workspace is on, and sizes to offer, so the fork roads are open.
+      expect(held.capabilities).toMatchObject({ previewUrls: true, pauseMode: "disk", liveCloneForks: false, diskSnapshots: true, replacesMachine: true });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
       // A cloud key saved later opens that cloud as a place and leaves the words alone: the host forks where it
       // was told to, not where the newest key points.

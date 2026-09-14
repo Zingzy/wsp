@@ -47,16 +47,6 @@ describe("the provider a workspace's view names", () => {
 });
 
 describe("each verb that moves a machine reads its own capability", () => {
-  it("a provider that gives a machine a new size resizes, though its forks boot cold", async () => {
-    const { rt, backend } = await setup();
-    forksBootCold(backend);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
-    const resized = await rt.workspaces.upgrade(ws.id, { cpu: 4, memMb: 8192 });
-    expect(resized.machineId).toBe("m2");
-    expect(backend.machines.map(m => [m.spec.cpu, m.killed])).toEqual([[2, true], [4, false]]);
-    await rt.close();
-  });
-
   it("a provider that stands a fresh machine in for another moves a workspace onto a newer image, though its forks boot cold", async () => {
     const { rt, backend, store } = await setup();
     forksBootCold(backend);
@@ -77,44 +67,13 @@ describe("each verb that moves a machine reads its own capability", () => {
     await rt.close();
   });
 
-  it("a provider that stands a machine in but gives no new size replaces one at the size it has and refuses a size", async () => {
-    // The shape both providers here declare: no road to a new size, a fresh fork that stands in for a machine. So
-    // the one verb answers twice, by what the request names.
+  it("a provider that stands no machine in refuses the replacement, and the machine is untouched", async () => {
     const { rt, backend } = await setup();
-    backend.capabilities.resize = false;
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
-    const replaced = await rt.workspaces.upgrade(ws.id);
-    expect(replaced.machineId).toBe("m2");
-    expect(backend.machines.map(m => [m.spec.cpu, m.killed])).toEqual([[2, true], [2, false]]);
-    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4 })).rejects.toThrow(providerCannotRefusal("api", MACHINE_WSP_FORKS, "be resized"));
-    // And with neither road, the replacement is refused in the words of the move that was asked for.
     backend.capabilities.replacesMachine = false;
     await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(providerCannotRefusal("api", MACHINE_WSP_FORKS, "have its machine replaced"));
-    expect(backend.machines).toHaveLength(2);
-    await rt.close();
-  });
-
-  it("a provider offering a new size but standing no machine in refuses the resize: the gate reads the whole road", async () => {
-    // The half a caller cannot read off the size flag alone. The app's Upgrade button reads the same one reading,
-    // so nothing offers a size here that the confirm would refuse.
-    const { rt, backend } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
-    backend.capabilities.replacesMachine = false;
-    expect(backend.capabilities.resize).toBe(true);
-    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4, memMb: 8192 })).rejects.toThrow(providerCannotRefusal("api", MACHINE_WSP_FORKS, "be resized"));
-    expect(backend.machines.map(m => m.killed)).toEqual([false]);
-    await rt.close();
-  });
-
-  it("a provider short of one road refuses that verb alone: the other two run", async () => {
-    const { rt, backend } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
-    backend.capabilities.resize = false;
-    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4 })).rejects.toThrow(providerCannotRefusal("api", MACHINE_WSP_FORKS, "be resized"));
     // The machine is untouched: the gate refused before the engine was asked.
     expect(backend.machines.map(m => m.killed)).toEqual([false]);
-    await rt.workspaces.updateImage(ws.id);
-    await rt.workspaces.rebuild(ws.id);
     await rt.close();
   });
 });
@@ -123,12 +82,11 @@ describe("what a refusal calls a machine wsp forks", () => {
   it("names the provider's limit, never this computer", async () => {
     const { rt, backend } = await setup();
     const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
-    backend.capabilities.resize = false;
     backend.capabilities.replacesMachine = false;
     backend.capabilities.diskSnapshots = false;
     delete backend.capabilities.pauseMode;
     const gates = [
-      ["be resized", () => rt.workspaces.upgrade(ws.id, { cpu: 4 })],
+      ["have its machine replaced", () => rt.workspaces.upgrade(ws.id)],
       ["move to a newer image", () => rt.workspaces.updateImage(ws.id)],
       ["be rebuilt", () => rt.workspaces.rebuild(ws.id)],
       ["be snapshotted", () => rt.workspaces.snapshot(ws.id)],
@@ -149,15 +107,14 @@ describe("what a refusal calls a machine wsp forks", () => {
     // move one name that rather than the machine.
     backend.capabilities.sizes = [];
     backend.capabilities.replacesMachine = false;
-    backend.capabilities.resize = false;
     await expect(rt.workspaces.rebuild(ws.id)).rejects.toThrow(NO_PROVIDER_LINE);
-    await expect(rt.workspaces.upgrade(ws.id, { cpu: 4 })).rejects.toThrow(NO_PROVIDER_LINE);
+    await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(NO_PROVIDER_LINE);
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow(NO_PROVIDER_LINE);
     await rt.close();
     // And the row itself, over the same records: a host restarted without its provider env holds cloud workspaces
     // it can say nothing else about, and none of the three tells a person their fork is their own computer.
     const restarted = createRuntime({ backend: new NoProviderBackend(), store, adapters: {} });
-    for (const run of [() => restarted.workspaces.rebuild(ws.id), () => restarted.workspaces.upgrade(ws.id, { cpu: 4 }), () => restarted.workspaces.updateImage(ws.id)]) {
+    for (const run of [() => restarted.workspaces.rebuild(ws.id), () => restarted.workspaces.upgrade(ws.id), () => restarted.workspaces.updateImage(ws.id)]) {
       const said = await run().then(() => "", (e: unknown) => (e as Error).message);
       expect([said, said.includes("which wsp does not run")]).toEqual([NO_PROVIDER_LINE, false]);
     }

@@ -10,9 +10,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fireEvent, render, screen } from "@testing-library/react";
-import type { ListeningPort } from "@wsp/daemon";
 import type { WorkspaceView } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setListeners, type FakeListener } from "../../../packages/daemon/test/fake-proc.js";
 import type { Api } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { SignInBanner } from "../src/shell/SignInBanner.js";
@@ -160,13 +160,13 @@ describe("wiring ties a bar to the daemon channel that announced it", () => {
     unwire = relay = dir = undefined;
   });
 
-  const listening = (port: number): ListeningPort => ({ port, pid: null, inode: port, uid: 0, loopback: true });
+  const listening = (port: number): FakeListener => ({ port, loopback: true });
 
   it("a shim post becomes a bar keyed to its callback port, gone when that port stops listening", async () => {
     dir = mkdtempSync(join(tmpdir(), "wsp-banner-"));
     const sockPath = join(dir, "open.sock");
-    let ports: ListeningPort[] = [listening(8976), listening(3000)];
-    relay = await startRelayHarness({ ports: async () => ports, daemonOptions: { openSocketPath: sockPath } });
+    relay = await startRelayHarness({ ports: [listening(8976), listening(3000)], daemonArgs: { openSocket: sockPath } });
+    const setPorts = (rows: FakeListener[]): void => setListeners(relay!.procRoot, rows);
     const id = relay.workspaceId;
     const key = `${id}:8976`;
     const workspaces = [view(id, "task-1")];
@@ -186,12 +186,12 @@ describe("wiring ties a bar to the daemon channel that announced it", () => {
     expect(pages()).toEqual({ [key]: { workspaceId: id, url: URL_A, port: 8976 } });
 
     // Another listener going away is not this sign-in ending.
-    ports = [listening(8976)];
+    setPorts([listening(8976)]);
     await new Promise(r => setTimeout(r, 250));
     expect(Object.keys(pages())).toEqual([key]);
 
     // The callback fired and its listener closed: the daemon's port.close ends the bar with it.
-    ports = [];
+    setPorts([]);
     const gone = Date.now() + 5000;
     while (pages()[key] !== undefined) {
       if (Date.now() > gone) throw new Error("bar outlived its port");

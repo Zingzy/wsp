@@ -14,19 +14,17 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import type { DaemonEvent } from "@wsp/protocol";
 import { LinkBackend, OWNER_LABEL, type ExecResult, type Machine, type MachineSpec } from "@wsp/engine";
 import { connectDaemon } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, placePair, testPlaceFile } from "../../daemon/test/fake-place-host.js";
-import { spawnDaemon, type DaemonUnderTest } from "../../daemon/test/harness.js";
+import { daemonBin, spawnDaemon, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { deployDaemon } from "../src/doctor.js";
 import { linkOver } from "./machine-link.js";
 
 const RUNTIME_LIVE = process.env["WSP_RUNTIME_LIVE"] === "1";
-const RUNTIME_BIN = process.env["WSP_DAEMON_BIN"] ?? fileURLToPath(new URL("../../../daemon/target/release/wsp-daemon", import.meta.url));
 /** This run's own label, so two suites on one box never list or kill each other's workspaces. */
 const LIVE_OWNER = `live-665-${process.pid}`;
 const CGROUPS = "/sys/fs/cgroup/wsp";
@@ -81,7 +79,7 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     root = ownDir("wsp-runtime-root-");
     const tokenPath = join(home, "token");
     writeFileSync(tokenPath, "link-token\n");
-    daemon = await spawnDaemon(RUNTIME_BIN, { host: "127.0.0.1", port: 0, tokenPath, kind: "place", root: home, home, placeFile: file, rootsPath: join(home, "roots"), runtimeRoot: root }, { startMs: 20_000 });
+    daemon = await spawnDaemon(daemonBin(), { host: "127.0.0.1", port: 0, tokenPath, kind: "place", root: home, home, placeFile: file, rootsPath: join(home, "roots"), runtimeRoot: root }, { startMs: 20_000 });
     const socket = await host.socket;
     backend = await LinkBackend.open(linkOver(socket as unknown as WebSocket));
     expect(backend.capabilities.pauseMode).toBe("disk");
@@ -368,11 +366,11 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
   }, 120_000);
 
   it("a workspace made with engine gets the box's engine through a fenced socket that sees its own containers alone, and one made without has no socket", async () => {
-    // containers is the doctor's reading of this box; where it has no engine the daemon refuses the create, which
-    // is the other half of the flag, and this case has nothing to run against.
+    // Where the box has no engine the daemon refuses the create, which is the other half of this case, and there
+    // is nothing to run the socket against.
     const docker = ["/usr/bin/docker", "/usr/local/bin/docker"].find(p => existsSync(p));
-    if (!backend.capabilities.containers || docker === undefined) {
-      console.log(`no container engine on this box (containers ${backend.capabilities.containers}); the engine case stands aside`);
+    if (docker === undefined) {
+      console.log("no container engine on this box; the engine case stands aside");
       await expect(create({ kind: "sandbox", engine: true })).rejects.toThrow(/container engine/);
       return;
     }

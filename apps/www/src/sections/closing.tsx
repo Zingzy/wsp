@@ -7,7 +7,6 @@ import { AUTHOR, DOCS, EMAIL, INSTALL, ISSUES, NPM, README, RELEASES, REPO, SOLA
 import { Wordmark } from "./nav";
 
 const NEXT = [
-  "Your own computer as a workspace, so agents start each other locally too",
   "Spaces: one workspace at a time in the sidebar, with its own tint",
   "Images in threads",
   "Pi and Gemini threads",

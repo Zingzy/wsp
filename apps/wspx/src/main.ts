@@ -353,7 +353,7 @@ usage:
                                to a running workspace; presets: zsh, neovim, tmux
   wspx nap <id>                pause a workspace
   wspx wake <id>               resume a workspace (resurrects if it vanished)
-  wspx upgrade <id> [--cpu N]  vault files, replace with a fresh golden fork
+  wspx upgrade <id>            vault files, replace with a fresh golden fork
   wspx rm <id>                 kill a workspace
   wspx reap                    kill this setup's unclaimed machines and orphans; list the rest
   wspx demo                    end-to-end showpiece with a timing table
@@ -364,7 +364,6 @@ async function main(): Promise<void> {
     args: process.argv.slice(2),
     options: {
       cpu: { type: "string" },
-      mem: { type: "string" },
       preset: { type: "string", multiple: true },
       help: { type: "boolean", short: "h" },
     },
@@ -433,11 +432,8 @@ async function main(): Promise<void> {
       return;
     }
     case "upgrade": {
-      if (!rest[0]) throw new Error("usage: wspx upgrade <id> [--cpu N]");
-      const w = await rt.workspaces.upgrade(rest[0], {
-        ...(cpu ? { cpu } : {}),
-        ...(values.mem !== undefined ? { memMb: Number(values.mem) } : {}),
-      });
+      if (!rest[0]) throw new Error("usage: wspx upgrade <id>");
+      const w = await rt.workspaces.upgrade(rest[0]);
       log(`${w.id} upgraded, now on ${w.machineId}`);
       return;
     }

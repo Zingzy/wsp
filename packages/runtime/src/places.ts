@@ -407,10 +407,10 @@ export function newPlaceKeyPair(): PlaceKeyPair {
 /** A signature over the bytes both sides build from one function; ed25519 takes no digest name. The host signs its
  * half with its own key here, and wsp join signs a joining computer's half with the key it just made.
  *
- * The other copy of this pair is `signPlaceBytes` and `verifyPlaceBytes` in `packages/daemon/src/link.ts`, which is
- * the place's half. The boundary that forces it: the protocol is the one package both sides import and it is
- * bundled into the browser, so it can hold no node crypto. What could drift, the bytes that are signed and the
- * encodings they are sent in, is in the protocol (`placeLinkTranscript`, `PlaceSignature`, `PlacePublicKey`). */
+ * The place's half of this pair is the daemon's, in Rust; the two are held together by the vectors under
+ * daemon/fixtures, which packages/daemon's suite regenerates here and the daemon's own test reads. What could
+ * drift, the bytes that are signed and the encodings they are sent in, is in the protocol
+ * (`placeLinkTranscript`, `PlaceSignature`, `PlacePublicKey`). */
 export function signPlaceBytes(privateKeyPem: string, bytes: Uint8Array): string {
   return signBytes(null, bytes, createPrivateKey(privateKeyPem)).toString("base64");
 }
