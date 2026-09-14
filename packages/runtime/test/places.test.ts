@@ -44,7 +44,7 @@ import {
 import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
-import { NO_PLACE_UPDATER, newPlaceKeyPair, placeSweptOverSshLine, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -750,8 +750,10 @@ describe("taking a place back out over the login the install used", () => {
   });
 
   it("keeps the sentence a person has always read where the box will not answer the login, and still lets it go", async () => {
+    // The refusal the road throws when the login itself would not stand, which is the one it throws for that
+    // alone: nothing ran on that computer, so nothing of it is said to have.
     const { placeId, store } = await installedAndSilent(async () => {
-      throw new Error("ssh: connect to host 65.21.4.12 port 22: Connection refused");
+      throw new PlaceLoginRefusedError("ssh: connect to host 65.21.4.12 port 22: Connection refused");
     });
     const removed = await runtime!.places!.remove(placeId);
     expect(removed.removed).toBe(true);
@@ -760,11 +762,158 @@ describe("taking a place back out over the login the install used", () => {
     expect(await store.get("places", placeId)).toBeUndefined();
   });
 
+  it("says the leave ran there and stopped in that computer's own words, which is not the same as a login that would not stand", async () => {
+    const said = "vps ran the leave and had not finished it within 180s";
+    const { placeId } = await installedAndSilent(async () => {
+      throw new Error(said);
+    });
+    const removed = await runtime!.places!.remove(placeId);
+    // The login stood and the leave ran: how far it got is that computer's to say, and a line reading that it did
+    // not answer would be telling a person something that did not happen.
+    expect(removed.note).toBe(`${placeLoginRoadLine("vps", "root@65.21.4.12", said)}; ${placeStillInstalledLine("vps")}`);
+    expect(removed.note).not.toContain("did not answer the login");
+    expect(removed.note).toContain(said);
+  });
+
   it("says the agent is still installed on a host wired with no road to log in to one", async () => {
     const { placeId } = await installedAndSilent();
     const removed = await runtime!.places!.remove(placeId);
     expect(removed.swept).toEqual([]);
     expect(removed.note).toBe(placeStillInstalledLine("vps"));
+  });
+
+  /** The same box, still dialling this host: its record carries the install's login and the link is up, which is
+   * the computer a remove used to sweep over the link alone. The box it holds is that computer's own socket, for
+   * a test that has to drop the link mid-remove the way the stop on it does. */
+  const installedAndLinked = async (
+    leave: PlaceLeaver,
+    over: { box?: WsClient; dial?: PlaceDialler } = {},
+  ): Promise<{ placeId: string; overLink: string[]; askedOverLink: string[]; store: Store }> => {
+    const hostKey = newPlaceKeyPair();
+    const askedOverLink: string[] = [];
+    const overLink = ["/home/maya/.wsp/place.json", "/home/maya/.wsp/daemon-token"];
+    const store = memoryStore();
+    let joined = "";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        ...(over.dial === undefined ? {} : { dial: over.dial }),
+        install: async req => {
+          const { client, placeId } = await join(hostKey, { code: readJoinToken(req.code).code, name: "vps", report: report("vps") });
+          joined = placeId;
+          over.box = client;
+          sockets.push(client.ws);
+          // The agent as it answers a leave on the link: it sweeps the files it owns and says what it took.
+          client.ws.on("message", raw => {
+            const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
+            if (frame.op !== "place.leave") return;
+            askedOverLink.push("place.leave");
+            client.ws.send(JSON.stringify({ id: frame.id, ok: true, swept: overLink }));
+          });
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
+          return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner" };
+        },
+        leave,
+      },
+      placeJoinWaitMs: 60,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now());
+    return { placeId: joined, overLink, askedOverLink, store };
+  };
+
+  it("takes that road on a computer that is holding a link too, since what answers there cannot take its own service", async () => {
+    const asked: PlaceLeaveRequest[] = [];
+    const took = ["systemd system unit wsp-place-1234abcd.service (stopped)", "/home/maya/.wsp/place.json"];
+    const { placeId, askedOverLink } = await installedAndLinked(async req => {
+      asked.push(req);
+      return took;
+    });
+    const removed = await runtime!.places!.remove(placeId);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.ssh).toEqual({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" });
+    // The agent on the link is never asked: its sweep leaves the unit that restarts it, and a second sweep after
+    // the box's own leave would be a second copy of what came off.
+    expect(askedOverLink).toEqual([]);
+    expect(removed.swept).toEqual(took);
+    expect(removed.note).toBe(placeSweptOverSshLine("vps", "root@65.21.4.12", true));
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
+  });
+
+  it("falls back to the sweep on the link where that login will not answer, so the files still come off", async () => {
+    const { placeId, overLink, askedOverLink } = await installedAndLinked(async () => {
+      throw new PlaceLoginRefusedError("ssh: connect to host 65.21.4.12 port 22: Connection refused");
+    });
+    const removed = await runtime!.places!.remove(placeId);
+    expect(askedOverLink).toEqual(["place.leave"]);
+    expect(removed.swept).toEqual(overLink);
+    // Which road finished it, since the two take different things off: this one left the unit that restarts the
+    // agent on that computer, and a person reading the files that came off would have read the rest into it.
+    expect(removed.note).toBe(placeSweptOverLinkLine("vps", "root@65.21.4.12"));
+  });
+
+  it("lets go of a computer whose own leave dropped the link under it, which is what the stop on that unit does", async () => {
+    const took = ["systemd system unit wsp-place-1234abcd.service (stopped)", "/home/maya/.wsp/place.json"];
+    const box: { box?: WsClient } = {};
+    const { placeId, store, askedOverLink } = await installedAndLinked(async req => {
+      // The shape the road makes on a linked box: the leave stops the unit, so the daemon dies and the link drops
+      // while this host is still waiting on the answer that comes back over ssh.
+      box.box?.close();
+      await until(async () => (await placesOf()).find(p => p.id === req.placeId)?.present === false);
+      return took;
+    }, box);
+    const removed = await runtime!.places!.remove(placeId);
+    expect(removed.swept).toEqual(took);
+    expect(removed.note).toBe(placeSweptOverSshLine("vps", "root@65.21.4.12", true));
+    expect(askedOverLink).toEqual([]);
+    // The record goes and stays gone: the link's own close handler writes the row it last saw, and a write that
+    // landed after the removal would put a place this host no longer holds back in the list.
+    expect(await store.get("places", placeId)).toBeUndefined();
+    await new Promise(done => setTimeout(done, 200));
+    expect(await store.get("places", placeId)).toBeUndefined();
+    expect((await placesOf()).some(p => p.id === placeId)).toBe(false);
+  });
+
+  it("takes the link road at once where the login does not answer the probe, rather than waiting out the leave", async () => {
+    let asked = 0;
+    const dialled: PlaceLogin[] = [];
+    const { placeId, overLink, askedOverLink } = await installedAndLinked(
+      async () => {
+        asked += 1;
+        // A leave the probe should never reach: this one would hold the remove for as long as ssh is black-holed.
+        await new Promise(done => setTimeout(done, 5_000));
+        return [];
+      },
+      {
+        dial: async login => {
+          dialled.push(login);
+          throw new Error("ssh: connect to host 65.21.4.12 port 22: Operation timed out");
+        },
+      },
+    );
+    const started = Date.now();
+    const removed = await runtime!.places!.remove(placeId);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(dialled).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
+    expect(asked).toBe(0);
+    expect(askedOverLink).toEqual(["place.leave"]);
+    expect(removed.swept).toEqual(overLink);
+    expect(removed.note).toBe(placeSweptOverLinkLine("vps", "root@65.21.4.12"));
+  });
+
+  it("carries that computer's own words into the note where the leave ran there and stopped, and still sweeps over the link", async () => {
+    const said = "vps ran the leave and did not finish it: Failed to stop: Unit is masked.";
+    const { placeId, overLink, askedOverLink } = await installedAndLinked(async () => {
+      throw new Error(said);
+    });
+    const removed = await runtime!.places!.remove(placeId);
+    expect(askedOverLink).toEqual(["place.leave"]);
+    expect(removed.swept).toEqual(overLink);
+    expect(removed.note).toBe(placeSweptOverLinkLine("vps", "root@65.21.4.12", said));
+    expect(removed.note).not.toContain("did not answer the login");
   });
 });
 
