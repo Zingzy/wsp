@@ -324,12 +324,11 @@ export class ProtocolClient {
   #failAll(e: Error): void { for (const p of this.#pending.values()) p.reject(e); this.#pending.clear(); }
 }
 
-/** What a remove took: whether a computer of that id was there, what the sweep took off it, what its workspaces
- * said as they went, and the one line for a computer that was not connected to sweep. */
+/** What a remove took: whether a computer of that id was there, what the sweep took off it, and the one line for a
+ * computer that was not connected to sweep. */
 export interface PlaceRemoved {
   removed: boolean;
   swept: string[];
-  dropped: string[];
   note?: string;
 }
 

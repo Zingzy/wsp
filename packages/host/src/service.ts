@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The host as a service of this computer's own manager: a launchd agent on a
-// Mac, a systemd user unit on Linux. One module per manager, and adding one is
+// Mac, a systemd unit on Linux. One module per manager, and adding one is
 // its entry in SERVICE_MANAGERS and its module here; nothing outside this file
 // decides by a manager's name. The unit file holds no key: a service reads the
 // same .env a terminal run reads, so nothing secret lands in ~/Library.
@@ -85,8 +85,12 @@ export interface ServiceManager {
    * PATH, or one that never reached the thing it asks, answers non-zero too and that is not the same sentence: wsp
    * leaves a service it cannot read alone rather than throwing away the file that names it. */
   absent(answer: RunResult): boolean;
-  /** One line a person still has to act on after the load, for what this manager alone asks. */
-  afterLoad?(at: ServiceAddress): string;
+  /** One line a person still has to act on after the load, for what this manager alone asks; nothing where this
+   * manager leaves them none. */
+  afterLoad?(at: ServiceAddress): string | undefined;
+  /** Whether this service must be installed by root, which is a fact of where this manager puts the unit. A
+   * manager that writes every unit under the person's own home answers false and needs no entry. */
+  needsRoot?(at: ServiceAddress): boolean;
 }
 
 /** One service per state file: the manager's names carry the first eight hex of that path's digest, so two state
@@ -153,10 +157,19 @@ const launchd: ServiceManager = {
 };
 
 const systemdName = (at: ServiceAddress): string => `wsp-${roleWord(at)}-${serviceTag(at.statePath)}.service`;
-const systemdUnit = (at: ServiceAddress): ServiceUnit => ({ name: systemdName(at), path: join(at.home, ".config", "systemd", "user", systemdName(at)) });
+
+/** Which systemd a role's unit belongs to. The agent on a computer joined as a place is the machine's service: a
+ * place runs workspaces, which needs root, so its unit sits under /etc/systemd/system and outlives every login.
+ * The host is the person's own and stays in their login's systemd. Read once, by every line below that differs. */
+const systemdScoped = (at: ServiceAddress): "system" | "user" => (roleWord(at) === "place" ? "system" : "user");
+const systemctlArgs = (at: ServiceAddress): string[] => (systemdScoped(at) === "user" ? ["systemctl", "--user"] : ["systemctl"]);
+const systemdUnit = (at: ServiceAddress): ServiceUnit => ({
+  name: systemdName(at),
+  path: systemdScoped(at) === "user" ? join(at.home, ".config", "systemd", "user", systemdName(at)) : join("/etc/systemd/system", systemdName(at)),
+});
 
 const systemd: ServiceManager = {
-  words: "systemd user unit",
+  words: "systemd unit",
   unit: systemdUnit,
   text: plan =>
     [
@@ -175,21 +188,21 @@ const systemd: ServiceManager = {
       `StandardError=append:${plan.logPath}`,
       "",
       "[Install]",
-      "WantedBy=default.target",
+      `WantedBy=${systemdScoped(plan) === "user" ? "default.target" : "multi-user.target"}`,
       "",
     ].join("\n"),
   load: at => [
-    ["systemctl", "--user", "daemon-reload"],
-    ["systemctl", "--user", "enable", "--now", systemdName(at)],
+    [...systemctlArgs(at), "daemon-reload"],
+    [...systemctlArgs(at), "enable", "--now", systemdName(at)],
   ],
   unload: at => [
-    ["systemctl", "--user", "disable", "--now", systemdName(at)],
-    ["systemctl", "--user", "daemon-reload"],
+    [...systemctlArgs(at), "disable", "--now", systemdName(at)],
+    [...systemctlArgs(at), "daemon-reload"],
   ],
-  holds: at => ["systemctl", "--user", "is-enabled", systemdName(at)],
+  holds: at => [...systemctlArgs(at), "is-enabled", systemdName(at)],
   // systemd enables a unit by a symlink beside its file, so the file alone is not the whole of what it holds: a
   // disable while the unit file is still there takes that link with it and leaves the service running.
-  forget: at => [["systemctl", "--user", "disable", systemdName(at)]],
+  forget: at => [[...systemctlArgs(at), "disable", systemdName(at)]],
   // is-enabled exits 1 both for a unit systemd does not have and for a systemctl that never reached the user bus
   // ("Failed to connect to bus: No medium found" on a box without one), so the word it printed is the answer and
   // the code is not.
@@ -197,8 +210,10 @@ const systemd: ServiceManager = {
     const said = answer.output.trim().split("\n").at(-1)?.trim() ?? "";
     return said === "disabled" || said === "not-found" || /no such file or directory/i.test(said);
   },
-  // A user unit runs while the person is logged in and no longer, which is what default.target means.
-  afterLoad: () => "It comes back at every login; `loginctl enable-linger` keeps it up between them.",
+  // A user unit runs while the person is logged in and no longer, which is what default.target means; the system
+  // unit a place installs is the machine's and has nothing left for the person to do.
+  afterLoad: at => (systemdScoped(at) === "user" ? "It comes back at every login; `loginctl enable-linger` keeps it up between them." : undefined),
+  needsRoot: at => systemdScoped(at) === "system",
 };
 
 export const SERVICE_MANAGERS: { readonly [K in ServiceKind]: ServiceManager } = { launchd, systemd };

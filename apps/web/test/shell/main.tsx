@@ -60,7 +60,7 @@
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, keptAccess, THEME_PRESETS, THIS_COMPUTER, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -158,14 +158,14 @@ const sessions: SessionView[] = [
 // Two agents the composer can start a thread on, so its picker draws a coloured mark and a monochrome one. Codex
 // carries the effort lists its app-server reports, each model with the effort that model runs at, so the effort
 // picker draws its default against a pick rather than against the binary.
-// The access modes are the CLI's own list, and keptAccess turns it into the kept-machine list the runtime hands out
-// for a workspace on this computer: the mode the harness asks in marked, and bypass named after the machine it would
-// touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per machine.
+// The access modes are the CLI's own list, and workspaceAccess turns it into the list the runtime hands out for a
+// workspace on this computer: the mode a thread here starts at marked, and bypass named after the machine it would
+// touch. One list serves every workspace here, which is what a fixture can do; the runtime decides per workspace.
 const ACCESS_MODES = [
   { value: "default", label: "Default", description: "Asks in the chat about each action that needs permission" },
   { value: "acceptEdits", label: "Accept edits", description: "Edits files without asking; asks about commands that need permission" },
   { value: "plan", label: "Plan", description: "Reads and plans only; changes nothing" },
-  { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking", isDefault: true },
+  { value: "bypassPermissions", label: "Bypass", description: "Runs every action without asking" },
 ];
 // ?efforts=1 gives the claude row the effort levels and context windows the runtime's table lists for it, so the
 // composer's row carries the effort picker beside the others and is as wide as it gets.
@@ -174,7 +174,7 @@ const CLAUDE_EFFORTS = ["Low", "Medium", "High", "Extra high", "Max"].map(label 
 const CLAUDE_CONTEXT_WINDOWS = [{ value: "200k", label: "200k" }, { value: "1m", label: "1M", isDefault: true }];
 
 const catalogs: HarnessCatalog[] = [
-  keptAccess(
+  workspaceAccess(
     {
       harness: "claude",
       label: "Claude Code",
@@ -200,7 +200,7 @@ const catalogs: HarnessCatalog[] = [
         { name: "help", control: "docs" },
       ],
     },
-    THIS_COMPUTER,
+    "local",
   ),
   {
     harness: "codex",
@@ -548,8 +548,8 @@ if (settings) useStore.setState({ settingsOpen: true });
 if (params.get("places") === "1") {
   useStore.setState({
     places: [
-      { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, workspaceId: "ws_a" },
-      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, runsWorkspaces: true, engine: "docker", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, workspaceId: "ws_b", forks: { running: 0, room: 3 } },
+      { id: "p_here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 10, memMb: 16384 }, diskFreeBytes: 210_000_000_000, takesForks: false },
+      { id: "p_hetzner", kind: "computer", name: "hetzner", default: false, present: true, takesForks: true, engine: "docker", shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 38_000_000_000, forks: { running: 0, room: 3 } },
       // The worst row the detail draws: a computer away with a login on its record and the longest refusal ssh
       // hands back, which is the line that used to push the table past the card it sits in.
       {
@@ -561,11 +561,11 @@ if (params.get("places") === "1") {
         lastSeenAt: new Date(Date.now() - 2 * 3_600_000).toISOString(),
         shape: { cpu: 10, memMb: 16384 },
         diskFreeBytes: 353_100_000_000,
-        workspaceId: "ws_c",
+        takesForks: true,
         road: { ssh: "root@65.21.4.12" },
         dialled: { at: new Date(Date.now() - 20 * 60_000).toISOString(), answered: false, said: "ssh: connect to host 65.21.4.12 port 22: Connection refused" },
       },
-      { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, workspaceId: "ws_d", rateUsdPerHour: 0.018 },
+      { id: "p_ascii", kind: "provider", name: "ascii", default: false, present: true, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40_000_000_000, takesForks: true, rateUsdPerHour: 0.018 },
     ],
   });
 }

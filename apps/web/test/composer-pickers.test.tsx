@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, keptAccess, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, DEFAULT_PREFERENCES, accessReachLine, applyPreferencesPatch, codexNotSignedInLine, workspaceAccess, OVER_SSH, THIS_COMPUTER, type HarnessCatalog, type PreferencesPatch, type SessionAccessOutcome, type SessionEvent, type SessionView, type WorkspaceView } from "@wsp/protocol";
 
 vi.mock("../src/components/ui/menu.js", () => {
   const Ctx = createContext<{ open: boolean; set: (open: boolean) => void }>({ open: false, set: () => {} });
@@ -592,20 +592,20 @@ describe("composer pickers", () => {
     expect(picker("permissionMode")?.textContent).toBe("Permissions: Plan");
   });
 
-  it("on a kept machine the access button wears the mode's short form and its menu row names the machine", async () => {
-    const kept = keptAccess({ ...CLAUDE, keptMode: "plan", bypassMode: "bypassPermissions" }, THIS_COMPUTER);
+  it("on a computer the person owns the access button wears the mode's short form and its menu row names the machine", async () => {
+    const kept = workspaceAccess({ ...CLAUDE, keptMode: "plan", bypassMode: "bypassPermissions" }, "ssh");
     const { api } = fixtureApi({ table: [kept] });
     await setup(api);
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("plan"));
     expect(picker("permissionMode")?.textContent).toBe("Permissions: Plan");
     fireEvent.click(picker("permissionMode")!);
-    expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${THIS_COMPUTER}`);
+    expect(option("bypassPermissions")?.textContent).toContain(`Bypass on ${OVER_SSH}`);
     fireEvent.click(option("bypassPermissions")!);
     await waitFor(() => expect(pickerValue("permissionMode")).toBe("bypassPermissions"));
     // The button leads with what it sets and then says the CLI's word; whose computer it is stays in the menu and
     // in the button's accessible name. A chip reading `Default` alone named nothing a person could look for.
     expect(picker("permissionMode")?.textContent).toBe("Permissions: Bypass");
-    expect(picker("permissionMode")?.getAttribute("aria-label")).toBe(`Permissions: Bypass on ${THIS_COMPUTER}`);
+    expect(picker("permissionMode")?.getAttribute("aria-label")).toBe(`Permissions: Bypass on ${OVER_SSH}`);
   });
 
   it("says what a pick does to the turn running now, over the list, while a turn runs and not before", async () => {

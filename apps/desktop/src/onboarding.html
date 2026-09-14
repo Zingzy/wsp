@@ -186,10 +186,13 @@
       /** Draws one refusal in a slot: what happened in the destructive ink, then what to do in the foreground ink,
        * with the shell's own words, where there are any, on the title. */
       function refuse(slot, happened, fix, said) {
-        const what = document.createElement("span");
-        what.className = "fix";
-        what.textContent = fix;
-        slot.replaceChildren(`${happened} `, what);
+        if (fix === "") slot.replaceChildren(happened);
+        else {
+          const what = document.createElement("span");
+          what.className = "fix";
+          what.textContent = fix;
+          slot.replaceChildren(`${happened} `, what);
+        }
         if (said === undefined) slot.removeAttribute("title");
         else slot.title = said;
       }

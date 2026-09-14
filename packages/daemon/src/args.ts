@@ -5,7 +5,7 @@
 // DaemonArgs, daemonArgv writes DaemonArgs back out, and daemonOptions is the
 // one reading from those words to what startDaemon takes.
 import { homedir } from "node:os";
-import type { WorkspaceKind } from "@wsp/protocol";
+import type { DaemonKind } from "@wsp/protocol";
 import type { DaemonOptions } from "./main.js";
 import { placeSelfReport, sweepPlaceHome } from "./place.js";
 
@@ -15,7 +15,7 @@ export interface DaemonArgs {
   tokenPath?: string;
   root?: string;
   rootsPath?: string;
-  kind?: WorkspaceKind;
+  kind?: DaemonKind;
   workFolder?: string;
   inbox?: string;
   inboxQuietMs?: number;

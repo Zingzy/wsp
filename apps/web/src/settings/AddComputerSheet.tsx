@@ -170,7 +170,7 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
   // The road's own sentence, and after it on every road what a closed lid does to work already running there,
   // which is the question this sheet is opened with. One description rather than a second paragraph beside it: the
   // sheet names its description to a screen reader, and a second one would take that name off this sentence.
-  const said = reported && joined !== undefined ? (joined.runsWorkspaces === true ? MINE.runsWorkspaces : WORDS.joinedDescription) : road === "app" ? WORDS.description : MINE.ssh.description;
+  const said = reported && joined !== undefined ? MINE.runsWorkspaces : road === "app" ? WORDS.description : MINE.ssh.description;
   const description = `${said} ${WORDS.whileAsleep}`;
   const footNote = joined !== undefined ? undefined : stages !== null ? { word: MINE.ssh.running } : road === "app" ? { kbd: "esc", word: MINE.app.escCloses } : { kbd: "↵", word: MINE.ssh.adds };
   const sshHeld = login.trim() === "" ? MINE.ssh.loginFirst : api?.addComputerOverSsh === undefined ? MINE.ssh.noRoad : undefined;
@@ -233,17 +233,6 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
           <Button variant="outline" onClick={onClose}>
             {sshTyping ? MINE.cancel : WORDS.close}
           </Button>
-          {reported && joined !== undefined && joined.workspaceId !== undefined ? (
-            <Button
-              data-k="open-place"
-              onClick={() => {
-                select(joined.workspaceId!);
-                onClose();
-              }}
-            >
-              {WORDS.open(joined.name)}
-            </Button>
-          ) : null}
           {sshTyping ? (
             // The reason it is held stands in the slot under the field it waits on; the keycap's own drawing is
             // the button's.
@@ -269,7 +258,7 @@ function AppRoad({ place, address, code, said, expired, arrived, reported, relay
       : [
           { word: WORDS.connected(arrived.from), state: "done" },
           ...(reported && place !== undefined
-            ? [{ word: WORDS.joined(place.os ?? "", place.agents ?? []), state: "done" as const }, ...(place.runsWorkspaces === true ? [] : [{ word: place.workspacesBlocked ?? WORDS.cannotRunWorkspaces, state: "done" as const }])]
+            ? [{ word: WORDS.joined(place.os ?? "", place.agents ?? []), state: "done" as const }]
             : [{ word: WORDS.reading, state: "running" as const }]),
         ];
   return (

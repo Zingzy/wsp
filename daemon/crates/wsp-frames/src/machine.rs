@@ -241,11 +241,9 @@ pub struct Capabilities {
     pub live_clone_forks: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pause_mode: Option<PauseMode>,
-    pub resize: bool,
     pub replaces_machine: bool,
     pub preview_urls: bool,
     pub signed_urls: bool,
-    pub containers: bool,
     pub callback_relay: bool,
     pub disk_snapshots: bool,
     /// A copy may be taken from any life of the machine, not only its first; false where the provider refuses a

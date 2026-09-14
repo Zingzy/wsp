@@ -100,9 +100,9 @@ function Header({ workspace, status }: { workspace: WorkspaceView; status: Works
   const verbs = useWorkspaceVerbs();
   const places = usePlaces();
   const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), verbs, false), "copy-id");
-  // On a joined computer the machine is the link, so the id is this host's own row key rather than anything a
-  // provider would look up: the corner holds nothing there, and the Where row names the computer instead.
-  const shown = workspacePlace({ machineId }) === undefined ? machineId : null;
+  // A fork on a computer somebody joined carries no id a provider would look up: the corner holds nothing there,
+  // and the Where row names the computer instead.
+  const shown = workspacePlace(workspace) === undefined ? machineId : null;
   return (
     <div className={cn("flex items-center gap-2 border-b border-border/60 py-2", PANE_INSET)}>
       <MachineLead workspace={workspace} />

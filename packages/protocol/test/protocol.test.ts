@@ -153,9 +153,9 @@ describe("a copy of the image beside the record", () => {
     expect(copyStoppedLine("no room today")).toBe("the build stopped · no room today");
     expect(copyStoppedLine()).toBe("the build stopped");
     expect(copyStoppedLine("fetch failed")).toBe(`the build stopped · ${NETWORK_LOST_LINE}`);
-    const box: PlaceView = { id: "p_1", kind: "computer", name: "box", default: false, runsWorkspaces: true, build: copyBuildingLine("creating") };
+    const box: PlaceView = { id: "p_1", kind: "computer", name: "box", default: false, takesForks: true, build: copyBuildingLine("creating") };
     expect(placeWorkspacesParts(box, 2)).toEqual({ count: "2", note: copyBuildingLine("creating") });
-    const provider: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, build: copyStoppedLine("no room") };
+    const provider: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, takesForks: true, build: copyStoppedLine("no room") };
     expect(placeWorkspacesParts(provider, 1, 0.41)).toEqual({ count: "1", note: copyStoppedLine("no room") });
     expect(placeWorkspacesParts({ ...provider, build: undefined }, 1, 0.41)).toEqual({ count: "1", note: "$0.41 this month" });
   });

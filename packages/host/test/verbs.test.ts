@@ -9,7 +9,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, placeRunsOneWorkspaceFix, placeRunsOneWorkspaceLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, lastTargetLine, markedDefault, NO_SUCH_TURN, noLastTargetLine, noProjectLine, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -230,16 +230,16 @@ describe("wsp verbs over the host", () => {
     expect(listed.io.lines[0]!.split("\n").slice(1).every(r => r.includes("alpha"))).toBe(true);
   });
 
-  it("new on the place this computer is records it as that place's one workspace, and names that workspace when there is one", async () => {
+  it("new on the computer the app runs on records its one local workspace, and names that workspace when there is one", async () => {
     const { code, io } = await run("new", "mac", "--on", HERE);
     expect(code).toBe(0);
     expect(io.lines).toHaveLength(1);
     expect(io.lines[0]).toMatch(/^created mac ws_[0-9a-f]{8} \(this computer\)$/);
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
-    // A place that forks nothing runs one workspace, so a second is refused naming the one there is.
+    // Local mode is one workspace, so a second is refused naming the one there is.
     const again = await run("new", "other", "--on", HERE);
     expect(again.code).toBe(EXIT_CODES.usage);
-    expect(again.io.errors[0]).toBe(`wsp new: ${placeRunsOneWorkspaceLine(HERE, "mac")}. ${placeRunsOneWorkspaceFix("mac")}`);
+    expect(again.io.errors[0]).toBe(`wsp new: ${localRunsOneLine("mac")}. ${localRunsOneFix("mac")}`);
     // A word that names no place is refused with the ones there are.
     const nowhere = await run("new", "x", "--on", "srv");
     expect(nowhere.code).toBe(EXIT_CODES.usage);
@@ -1931,8 +1931,11 @@ describe("wsp verbs over the host", () => {
     const level = markedDefault(effortsFor(harnessCatalog("claude")!, markedDefault(harnessCatalog("claude")!.models) ?? null))!.value;
     expect(claude.starts.at(-1)).toMatchObject({ model: shown, effort: level });
     // The access is named too, and named explicitly: an unnamed one reached the adapter as nothing, which every
-    // adapter here reads as its own skip-everything flag, so the picker's word and the CLI's flag could differ.
-    const access = markedDefault(harnessCatalog("claude")!.permissionModes)!.value;
+    // adapter here reads as its own skip-everything flag, so the picker's word and the CLI's flag could differ. It
+    // is read off the workspace's own catalog, the list the composer draws, since which mode a start with no flag
+    // runs at belongs to the kind of workspace the thread is on.
+    const [alpha] = await rt.workspaces.list();
+    const access = markedDefault((await rt.harnesses.list(alpha!.id)).find(c => c.harness === "claude")!.permissionModes)!.value;
     expect(access).toBe("bypassPermissions");
     expect(claude.starts.at(-1)!.permissionMode).toBe(access);
     const [, thread] = await rt.sessions.list();
@@ -1949,6 +1952,21 @@ describe("wsp verbs over the host", () => {
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--model", "claude-sonnet-5", "--access", "bypassPermissions");
     expect(forked.code).toBe(0);
     expect(claude.starts.at(-1)).toMatchObject({ model: "claude-sonnet-5", permissionMode: "bypassPermissions", effort: level });
+  });
+
+  it("a thread on this computer runs every action without asking when the line names no access, and at the word the line names when it does", async () => {
+    await run("new", "mac", "--on", HERE);
+    const bare = await run("run", "mac", "write the notes");
+    expect(bare.code).toBe(0);
+    // The owner's word for his own computer: a thread here does what a session he starts in his own terminal does.
+    expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
+    const picked = await run("run", "mac", "--access", "plan", "read the notes");
+    expect(picked.code).toBe(0);
+    expect(claude.starts.at(-1)!.permissionMode).toBe("plan");
+    // The command line reads it off the same catalog the app's composer draws, so neither holds a default of its own.
+    const [mac] = await rt.workspaces.list();
+    const shown = (await rt.harnesses.list(mac!.id)).find(c => c.harness === "claude")!;
+    expect(markedDefault(shown.permissionModes)?.value).toBe("bypassPermissions");
   });
 
   it("a model, effort or access mode the agent's catalog does not list is refused with that list, in the composer's words, and nothing starts", async () => {

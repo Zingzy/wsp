@@ -127,17 +127,20 @@ pub(crate) fn frame_text(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).expect("a frame serialises")
 }
 
-/// One item on a socket's outbound channel: a frame to write, or the leave's reply, after which the loop stops.
+/// One item on a socket's outbound channel: a frame to write, or the last reply of an op that ends this daemon,
+/// after which the loop stops. A leave ends it for good; an update ends it so whatever supervises it starts the
+/// binary the host just sent.
 pub(crate) enum Outgoing {
     Text(String),
     Leave(String),
+    Restart(String),
 }
 
 impl Outgoing {
     #[cfg(test)]
     pub(crate) fn text(&self) -> &str {
         match self {
-            Outgoing::Text(t) | Outgoing::Leave(t) => t,
+            Outgoing::Text(t) | Outgoing::Leave(t) | Outgoing::Restart(t) => t,
         }
     }
 }

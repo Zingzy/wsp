@@ -6,10 +6,10 @@
 // its login shell for the PATH a turn runs under; this report reads the
 // environment it was started with, which on a service unit is what the unit
 // stated.
-import { accessSync, constants, existsSync, lstatSync, rmSync, statfsSync } from "node:fs";
+import { accessSync, constants, existsSync, lstatSync, readFileSync, rmSync, statfsSync } from "node:fs";
 import { arch, cpus, hostname, platform, release, totalmem, type as osType, userInfo } from "node:os";
 import { delimiter, join } from "node:path";
-import { DAEMON_VERSION, engineWord, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
+import { DAEMON_VERSION, engineWord, placeOwnedPaths, workFolderIn, workspacesBlockedBy } from "@wsp/protocol";
 import type { AgentBin } from "./args.js";
 import { readPlaceFile, type PlaceSelfReport } from "./link.js";
 
@@ -48,6 +48,22 @@ function diskFree(folder: string): number | undefined {
   }
 }
 
+/** Whether this computer's kernel runs wsp workspaces, and the one reason when it does not: the protocol's rule
+ * over the files read here, which is the same rule the join typed at this computer reads. */
+function selfDoctor(): { runsWorkspaces: boolean; workspacesBlocked?: string } {
+  const blocked = workspacesBlockedBy({ platform: platform(), read: readTextOr, euid: process.geteuid?.() });
+  return { runsWorkspaces: blocked === undefined, ...(blocked === undefined ? {} : { workspacesBlocked: blocked }) };
+}
+
+/** A file's text, or nothing where it is not there, which is what the rule above reads absence as. */
+function readTextOr(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
 /** What this computer says about itself on every link, read at each dial rather than once: a laptop gains a
  * Docker, loses a disk and is renamed under wsp rather than by it. */
 export function placeSelfReport(input: PlaceSelfReportInput): PlaceSelfReport {
@@ -62,9 +78,9 @@ export function placeSelfReport(input: PlaceSelfReportInput): PlaceSelfReport {
     shape: { cpu: cpus().length, memMb: Math.round(totalmem() / (1024 * 1024)) },
     ...(free !== undefined ? { diskFreeBytes: free } : {}),
     login: { HOME: input.home, USER: userInfo().username, PATH: env["PATH"] ?? "" },
-    // This node agent runs the person's agents over its link and does not run workspaces; the daemon that does is
-    // the one binary, which builds its own report. The engine is what a project's own containers would run on here.
-    runsWorkspaces: false,
+    // The self check that decides whether this computer can be a place at all, by the protocol's one rule over the
+    // kernel facts read here. A host turns down a join whose report says no, in the sentence this names.
+    ...selfDoctor(),
     engine: engineWord(onPath("docker", env["PATH"]), onPath("podman", env["PATH"])),
     daemonVersion: DAEMON_VERSION,
     wsp: [...input.wspArgv],

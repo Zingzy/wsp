@@ -175,17 +175,19 @@ describe("what a workspace's kind changes about its words", () => {
   });
 
   it("a machine wsp drives has a state, a bill and an image; this computer has none of the three and its row reads its own size", () => {
-    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs." });
+    // access is what a thread here runs at when nobody names one: a fork costs a rebuild and nothing else, and this
+    // computer is the person's own, so both run every action; the computers somebody owns and works on ask first.
+    expect(kindWords("cloud")).toEqual({ machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: "a provider", driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: expect.any(Function) }, panel: "Where it runs, its projects and what it costs.", access: "bypass" });
     // This computer's load is read where it runs, in the host's own process, so its Live rows stand whether or not
     // the daemon its terminal and its processes ride ever started. A folder is
     // already on this computer, so an import registers its path and copies nothing. Its row's second line is its
     // cores and memory in the size line a fork's row reads, in its own word for a cpu, since its cores are not virtual.
-    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing." });
+    expect(kindWords("local")).toEqual({ machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: "machine is left as it is", done: expect.any(Function) }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" });
     // A machine over ssh is the person's own too: wsp neither forks it, pauses it, resizes it nor pays for it. It
     // carries the same daemon a fork does, put there under the person's own login, so it serves the panes, reads
     // its own load off its own /proc and lists its own processes, and a folder is copied onto it the way one is
     // copied onto a fork. Its cpus are cores like this computer's, though its words win over any size today.
-    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing." });
+    expect(kindWords("ssh")).toEqual({ machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: "daemon, its unit and its login line come off the machine, which is otherwise left as it is", done: expect.any(Function) }, panel: "What the computer is running, its projects and how it is doing.", access: "asks" });
     // Only the machines wsp forks run agents that could drive this host: this computer answers no request relayed
     // from a machine, and a machine somebody already owns is handed no wsp to drive one with.
     expect(agentsMayDrive("cloud")).toBe(true);
@@ -214,14 +216,14 @@ describe("what a workspace's kind changes about its words", () => {
     // The computer the host runs on is read where it runs. Every other machine answers for itself over the link a
     // pane holds, and the processes of every kind, this computer's included, are read on that machine.
     expect(readingRoad("local", "metrics")).toBe("host");
-    for (const kind of ["cloud", "ssh", "place"] as const) expect(readingRoad(kind, "metrics")).toBe("daemon");
-    for (const kind of ["cloud", "local", "ssh", "place"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
+    for (const kind of ["cloud", "ssh"] as const) expect(readingRoad(kind, "metrics")).toBe("daemon");
+    for (const kind of ["cloud", "local", "ssh"] as const) expect(readingRoad(kind, "processes")).toBe("daemon");
     // Whichever road it is read on, a kind that answers a reading is a kind whose slot waits for a figure.
-    for (const kind of ["cloud", "local", "ssh", "place"] as const) expect(servesReading(kind, "metrics")).toBe(true);
+    for (const kind of ["cloud", "local", "ssh"] as const) expect(servesReading(kind, "metrics")).toBe(true);
   });
 
   it("every kind has a row in the table, so adding one is a row here and nothing else", () => {
-    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "place", "ssh"]);
+    expect(Object.keys(WORKSPACE_KIND_WORDS).sort()).toEqual(["cloud", "local", "ssh"]);
   });
 
   it("the delete sentence says what the delete does to this kind's machine, the ssh sweep included", () => {
@@ -327,7 +329,6 @@ describe("where a workspace runs, in the person's words", () => {
   });
 
   it("names the computer this host holds a row for by the name it was given, above the provider that computer forks with, and a fork whose record names no provider by what it is", () => {
-    expect(whereWord({ kind: "place", machineId: "pl_7" }, "vps")).toBe("vps");
     expect(whereWord({ kind: "cloud", provider: "docker", machineId: "fk_dkr_1" }, "vps")).toBe("vps");
     expect(whereWord({ kind: "cloud", machineId: "fk_slr_1" })).toBe("a provider");
     expect(whereWord({ kind: "ssh", machineId: "ssh://dev@box:22" })).toBe("ssh://dev@box:22");

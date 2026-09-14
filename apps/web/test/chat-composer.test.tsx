@@ -637,14 +637,14 @@ describe("composer while the workspace is not live", () => {
   /** The composer on a workspace whose computer went quiet, by the road the places list takes: the row for its
    * computer stops answering while the record still says running. */
   async function onSilentComputer() {
-    const onPlace: WorkspaceView = { ...workspace, kind: "place", machineId: "place:p_oldlaptop" };
+    const onPlace: WorkspaceView = { ...workspace, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" };
     const fixture = fixtureApi([onPlace]);
     await setup(fixture.api);
     act(() =>
       useStore.setState({
         places: [
           { id: "here", kind: "computer", name: "this-mac", default: false, present: true },
-          { id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString(), workspaceId: WS },
+          { id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString() },
         ],
       }),
     );
@@ -698,7 +698,7 @@ describe("composer while the workspace is not live", () => {
       useStore.setState({
         places: [
           { id: "here", kind: "computer", name: "this-mac", default: false, present: true },
-          { id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: true, lastSeenAt: new Date().toISOString(), workspaceId: WS },
+          { id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: true, lastSeenAt: new Date().toISOString() },
         ],
       }),
     );
