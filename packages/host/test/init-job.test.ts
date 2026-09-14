@@ -7,16 +7,21 @@
 // this computer's readers, the Keychain and the builder's terminal link are
 // faked, and the callback relay is a stub that opens nothing; the runtime and
 // the run are the real ones.
+import { EventEmitter } from "node:events";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
+import { PassThrough } from "node:stream";
+import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, STOP_LEFT_MACHINE_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, STOP_LEFT_MACHINE_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
+import { buildBesideHost, type DoorClient } from "../src/init-beside.js";
 import { InitJobs, type InitJobDeps } from "../src/init-job.js";
+import type { InitIO } from "../src/init.js";
 import { loadRecipe, saveSmallRecipe, smallRecipePath } from "../src/recipe-file.js";
 import { workspaceRoads } from "../src/server.js";
 import type { AgentHere } from "../src/agents-here.js";
@@ -67,6 +72,44 @@ function downFor(backend: StubBackend, times: number, pick: (m: StubMachine) => 
     return m;
   };
   return { first: () => hit[0]! };
+}
+
+/** wsp init at a terminal beside a serving host, on that host's job: what the person reads, and the code the run
+ * ends on. The socket between the two has its own test, so the door here is wired straight to the job. */
+function besideRun(jobs: InitJobs): { code: Promise<number>; text(): string } {
+  const output = new PassThrough();
+  const said: string[] = [];
+  output.on("data", (c: Buffer) => said.push(c.toString()));
+  const io: InitIO = { input: new PassThrough(), output, stderr: output, isTTY: false, env: {}, open: async () => false, signals: new EventEmitter(), exit: () => {} };
+  return { code: buildBesideHost({ client: inProcessDoor(jobs), io, yes: true }), text: () => stripVTControlCharacters(said.join("")) };
+}
+
+function inProcessDoor(jobs: InitJobs): DoorClient {
+  const watching = new Set<(frame: Record<string, unknown>) => void>();
+  jobs.on(e => {
+    if (e.type !== "init.job") return;
+    for (const fn of [...watching]) fn({ ...e });
+  });
+  return {
+    request: async <T extends Record<string, unknown>>(op: string, params: Record<string, unknown> = {}): Promise<T> => {
+      const job =
+        op === "init.start"
+          ? await jobs.start(params as { road: InitRoad })
+          : op === "init.build"
+            ? await jobs.build(params)
+            : op === "init.signInCode"
+              ? await jobs.signInCode(params as { tool: string; code: string })
+              : await jobs.cancel();
+      return { job } as unknown as T;
+    },
+    events: async () => {},
+    onFrame: fn => {
+      watching.add(fn);
+      return () => watching.delete(fn);
+    },
+    closed: new Promise<void>(() => {}),
+    closeWords: () => "the host serving this state went away",
+  };
 }
 
 const dirs: string[] = [];
@@ -777,6 +820,43 @@ describe("the init job, manual road", () => {
     expect(failed.lines!.at(-1)).toBe(view.error);
     expect(JSON.stringify(view.rows)).not.toContain("fetch failed");
     expect(view.rows.find(r => r.id === "stage/snapshotting")!.state).toBe(INIT_ROW_STATES.waiting);
+  });
+
+  it("a create the provider refused ends the terminal on the provider's own sentence, not on the last line the run happened to print", async () => {
+    const f = fake();
+    // The refusal a trial Box account answered a create with on 2026-09-14, word for word: it lands before the
+    // machine exists, which is the one failure the build has no stage frame of its own for.
+    const refusal = "Trial Box compute is limited to 25 hours total. Stopping, forking, or resuming does not reset that allowance.";
+    f.backend.create = async () => Promise.reject(new Error(refusal));
+    // The road a terminal beside a serving host takes: the recipe its own screens wrote, then this job's build.
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    const run = besideRun(f.jobs);
+    expect(await run.code).toBe(1);
+    const terminal = run.text();
+    // The one line the person reads for why the build stopped.
+    expect(terminal).toContain(`${CLOUD_SETUP_WORDS.build.failed}: ${refusal}`);
+    // The run's sign-off is not a reason: it stood in for one because it was the last line the run said.
+    expect(terminal).not.toContain("Run wsp init again");
+    // The create never answered, so nothing is said of a machine.
+    expect(terminal).not.toContain(MACHINE_GONE_LINE);
+    expect(f.backend.machines).toEqual([]);
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    expect(view.error).toBe(refusal);
+    // The stage that stopped ends its block on the refusal, so the row read on its own says why as well.
+    const creating = view.rows.find(r => r.id === "stage/creating")!;
+    expect(creating.state).toBe(INIT_ROW_STATES.failed);
+    expect(creating.lines!.at(-1)).toBe(refusal);
+  });
+
+  it("a refusal with no sentence in it leaves the stage that stopped, so the line is never a headline and a colon", async () => {
+    const f = fake();
+    f.backend.create = async () => Promise.reject(new Error(""));
+    saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
+    const run = besideRun(f.jobs);
+    expect(await run.code).toBe(1);
+    expect(run.text()).toContain(`${CLOUD_SETUP_WORDS.build.failed}: Creating the machine failed`);
+    expect(f.jobs.view()!.error).toBe("Creating the machine failed");
   });
 
   it("a build waiting on the account's machine cap says so on the stage's own row and carries the wait in its block", async () => {
