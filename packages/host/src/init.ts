@@ -219,6 +219,11 @@ const DEFAULT_RETRY = { waitMs: 30_000, attempts: 20 };
 /** What to do about a machine this computer could not get the provider to kill, whichever road left it: the stop
  * on a signal and the failure that rolled back both end on it, so a person reads one answer for one machine. */
 export const SWEEP = "the next wsp or wsp init on this computer stops it, or stop it from the Solari console.";
+/** The wizard's last line when the seal failed and its rollback could not get the provider to take the builder: it
+ * is still up and still billing, so the id is named here rather than the outro saying it is gone. Its record is
+ * kept beside it, so the next run takes up that same builder rather than booting a second one, and the sweep ends
+ * it at six hours if nobody runs one. */
+export const sealFailedMachineLeftLine = (builderId: string): string => `Seal failed and the machine did not stop (${builderId}); it stays recorded, so wsp init again takes up that builder, and the sweep stops it once it is six hours old.`;
 /** The stage a wait on the account's machine cap belongs to: the machine is what there is no room for. */
 const CAP_WAIT_STAGE = "creating";
 const dim = (s: string): string => styleText("dim", s);
@@ -1536,15 +1541,19 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     const refused = error instanceof SnapshotFailedError ? error : undefined;
     const stays = refused !== undefined && refused.builderState !== "gone";
     const staysLine = refused?.builderState === "unread" ? sealFailedBuilderUnreadLine : sealFailedBuilderStaysLine;
+    // The record is the runtime's own word on what became of the machine: it drops one only where the provider read
+    // it gone, so a builder still recorded is a builder still running, whatever the rollback tried.
+    const stillUp = !stays && (await rt.golden.builders()).some(b => b.id === builder.id);
     io.json?.({
       event: "seal-failed",
       builder: builder.id,
       message,
       recipe: small.path,
       ...(refused !== undefined ? { builderState: refused.builderState, attempts: refused.attempts, provider: refused.answer } : {}),
+      ...(stillUp ? { left: builder.id } : {}),
       ...(stays ? { attachCommand, rateUsdPerHour: builderRate } : {}),
     });
-    outro(stays ? staysLine(builder.id, builderRate, attachCommand) : refused !== undefined ? SEAL_FAILED_BUILDER_GONE_LINE : SEAL_FAILED_LINE, out);
+    outro(stays ? staysLine(builder.id, builderRate, attachCommand) : stillUp ? sealFailedMachineLeftLine(builder.id) : refused !== undefined ? SEAL_FAILED_BUILDER_GONE_LINE : SEAL_FAILED_LINE, out);
     await closeRuntime();
     return { ...result, code: 1 };
   }

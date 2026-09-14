@@ -918,10 +918,20 @@ export class InitJobs implements InitDoor {
         s.error = text("message") ?? CLOUD_SETUP_WORDS.keys.refusedSaved;
         if (record["refused"] === true) s.keyRefused = true;
         break;
-      case "seal-failed":
+      case "seal-failed": {
         s.phase = "failed";
-        this.fail(s, text("message") ?? "the seal failed");
+        // The stage that failed already wrote the headline; what it cannot say is what became of the builder, since
+        // a seal may keep it, take it or leave it running. Only the last one is news: it is said in the words a
+        // stop the person asked for uses, and the machine's own row carries the retries under it.
+        const left = text("left");
+        const said = text("message") ?? "the seal failed";
+        if (left === undefined) this.fail(s, said);
+        else {
+          s.error = initFailedLine(s.error ?? said, "left");
+          this.sweep(left);
+        }
         break;
+      }
       case "stopped": {
         // The run's own word for a stop the person asked for: it names the stage it was at and what became of the
         // machine, which is the one thing the screen must not invent a second version of. Where the provider would
