@@ -182,6 +182,21 @@ export interface PlaceSweep {
  * left a wsp keeps the files its threads wrote. */
 export const placeKeptLine = (folder: string): string => `${folder} stays: the work your threads did there is yours`;
 
+/** What a leave puts in front of each thing it took, and the one rule a host reading that leave back over ssh
+ * tells those lines by. The sentences a person reads around them (which wsp this computer left, what stays, what
+ * the host still has to be told) carry none, so the computer that prints them and the host that reads them back
+ * tell the two apart the same way. */
+const SWEPT_INDENT = "  ";
+export const sweptLine = (took: string): string => `${SWEPT_INDENT}${took}`;
+
+/** What a leave said it took, off everything that computer printed. Whatever else it said is a person's to read
+ * at that terminal and no part of what came off. */
+export const sweptSaid = (said: string): string[] =>
+  said
+    .split("\n")
+    .filter(line => line.startsWith(SWEPT_INDENT) && line.trim() !== "")
+    .map(line => line.trim());
+
 export interface PlaceSweepOptions {
   home?: string;
   /** Which manager holds the place's unit; this computer's own unless a caller hands another, and a caller that

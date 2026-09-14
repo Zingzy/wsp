@@ -332,9 +332,13 @@ export async function runAll(commands: ReadonlyArray<readonly string[]>, run: Se
   return undefined;
 }
 
-/** The line a failed manager command reads as: what wsp ran, its code and what it said. */
+/** The line a failed manager command reads as: what wsp ran, its code and what it said, on one line. A manager
+ * answers in as many lines as it likes, and every reader of this puts it inside a line of its own: one that a
+ * leave prints among what it took is read back off that computer by the mark in front of it, which only its first
+ * line would carry. */
 export function runFailureLine(failure: RunFailure): string {
-  const said = failure.result.output === "" ? "and said nothing" : `and said: ${failure.result.output}`;
+  const words = failure.result.output.replace(/\s+/g, " ").trim();
+  const said = words === "" ? "and said nothing" : `and said: ${words}`;
   return `${failure.argv.join(" ")} exited ${failure.result.code} ${said}`;
 }
 

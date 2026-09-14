@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import type { PlaceStaging, PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -58,9 +58,11 @@ import {
   placeUpdateFailedLine,
   placeUpdateScript,
   placeUpdater,
+  placeLeaver,
+  placeLeaveFailedLine,
   updatedLines,
 } from "../src/places.js";
-import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, writePlaceFile } from "../src/place-report.js";
+import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
@@ -633,6 +635,17 @@ describe("taking wsp off the computer it is typed on", () => {
     writeFileSync(unit.path, "[Unit]\n");
     const swept = await sweepPlace({ home, manager, run: refusing, uid: 0 });
     expect(swept.removed[0]).toBe(`systemd system unit ${unit.name} (systemctl stop ${unit.name} exited 5 and said: Failed to stop: Unit is masked.)`);
+    // A manager answers in as many lines as it likes, and this line is one thing among what a leave took: a host
+    // reading that leave back over ssh reads the lines by the mark in front of them, which only the first of a
+    // wrapped line would carry.
+    const wordy: ServiceRunner = argv =>
+      argv[1] === "stop" || argv[2] === "stop" ? Promise.resolve({ code: 5, output: "Failed to stop:\n  Unit is masked.\n  See systemctl status." }) : runner.run(argv);
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    mkdirSync(dirname(unit.path), { recursive: true });
+    writeFileSync(unit.path, "[Unit]\n");
+    const wrapped = await sweepPlace({ home, manager, run: wordy, uid: 0 });
+    expect(wrapped.removed[0]).toBe(`systemd system unit ${unit.name} (systemctl stop ${unit.name} exited 5 and said: Failed to stop: Unit is masked. See systemctl status.)`);
+    expect(sweptSaid(wrapped.removed.map(line => sweptLine(line)).join("\n"))).toEqual(wrapped.removed);
     // The file goes all the same: a person running a leave has decided this computer is out of that wsp, and a
     // unit file left behind is what brings the agent back at the next boot.
     expect(existsSync(unit.path)).toBe(false);
@@ -1483,6 +1496,106 @@ describe("the update over the ssh road, where the link is down", () => {
   it("says what the box printed when its agent did not come back up", () => {
     expect(placeUpdateFailedLine("spoo", "Job for wsp-place-1234abcd.service failed")).toContain("spoo took the daemon and its agent did not come back up");
     expect(placeNoUpdateRoadLine("spoo")).toContain("switch it on and run the line again");
+  });
+});
+
+describe("the leave over the ssh road, on a computer that is holding no link", () => {
+  /** One ssh child, as the transport sees it: the dial it was given and the line it was asked to run. */
+  const leaver = (answer: { exitCode: number; stdout?: string; stderr?: string }) => {
+    const asked: { reach: SshReach; script: string }[] = [];
+    const transport: SshTransport = async (reach, script) => {
+      asked.push({ reach, script });
+      return { exitCode: answer.exitCode, stdout: answer.stdout ?? "", stderr: answer.stderr ?? "" };
+    };
+    return { asked, leave: placeLeaver({ transport }) };
+  };
+
+  /** The line that box said starts its own wsp, which is the one this road runs the leave with. */
+  const WSP = ["/usr/bin/node", "/home/maya/.wsp/daemon/wsp/dist/bin.js"];
+
+  const reportOf = (over: Partial<PlaceReport> = {}): PlaceReport => ({
+    name: "vps",
+    platform: "linux",
+    arch: "x64",
+    os: "Ubuntu 24.04",
+    shape: { cpu: 2, memMb: 7747 },
+    login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
+    runsWorkspaces: true,
+    engine: "none",
+    daemonVersion: DAEMON_VERSION,
+    agents: [],
+    wsp: WSP,
+    dialed: "http://192.168.1.20:4400",
+    ...over,
+  });
+
+  const asking = (report: PlaceReport = reportOf()) => ({
+    placeId: "p_1",
+    name: "vps",
+    report,
+    ssh: { ssh: "root@65.21.4.12:2222", keyPath: "/Users/lena/.ssh/hetzner" },
+  });
+
+  it("runs the leave that computer already carries, over the login on the record, and spells no sweep of its own", async () => {
+    const { asked, leave } = leaver({ exitCode: 0 });
+    await leave(asking());
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.reach).toMatchObject({ user: "root", host: "65.21.4.12", port: 2222, keyPath: "/Users/lena/.ssh/hetzner" });
+    // The line the box itself reported for running wsp there, word for word, with the verb off its one spelling.
+    expect(asked[0]!.script).toBe(`${WSP.join(" ")} ${PLACE_LEAVE_VERB}`);
+    // What comes off that computer and in what order is its own leave's: a manager command or a path written from
+    // here would be a second copy of the sweep, one that ages the day the unit scheme or the path list moves.
+    expect(asked[0]!.script).not.toContain("systemctl");
+    expect(asked[0]!.script).not.toContain("rm ");
+    const at = placeDaemonPaths("/home/maya");
+    for (const path of [at.placeFile, at.placeKey, at.tokenPath, at.inbox]) expect(asked[0]!.script).not.toContain(path);
+  });
+
+  it("reads back what that leave said it took, and none of the sentences a person reads around them", async () => {
+    const home = tmp("leave-over-ssh");
+    const at = placeDaemonPaths(home);
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "vps", hostName: "zingzy-mbp", hostUrls: ["http://192.168.1.20:4400"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    writeFileSync(placeKeyPath(home), "key");
+    writeFileSync(at.tokenPath, "token");
+    mkdirSync(at.inbox, { recursive: true });
+    const io = captured();
+    expect(await leaveCommand(io, [], { home, run: fakeRunner().run, platform: "linux" })).toBe(0);
+    // The box's own leave, printed as that computer would print it: this road reads it back by the one rule that
+    // leave marks what it took with, so the two cannot drift apart.
+    const { leave } = leaver({ exitCode: 0, stdout: `${io.lines.join("\n")}\n` });
+    const swept = await leave(asking());
+    expect(swept).toContain(placeFilePath(home));
+    expect(swept).toContain(at.tokenPath);
+    // The work folder is the person's and stayed; which wsp the computer left and what the host still has to be
+    // told are its terminal's to say, not things that came off it.
+    expect(swept.some(line => line.includes("stays: the work your threads did there is yours"))).toBe(false);
+    expect(swept.some(line => line.includes("left the wsp at"))).toBe(false);
+    expect(swept.some(line => line.includes("wsp remove"))).toBe(false);
+  });
+
+  it("hands back ssh's own line where the login will not stand, so the remove says the agent is still installed", async () => {
+    const said = "ssh: connect to host 65.21.4.12 port 22: Connection refused";
+    const { leave } = leaver({ exitCode: 255, stderr: `debug1: Reading configuration data\n${said}\n` });
+    await expect(leave(asking())).rejects.toThrow(said);
+    await expect(leave(asking())).rejects.not.toThrow(/debug/);
+  });
+
+  it("carries that computer's own words where the leave ran there and stopped, rather than ssh's", async () => {
+    const { leave } = leaver({ exitCode: 1, stdout: "this computer is not a place in any wsp, so there is nothing to leave\n" });
+    await expect(leave(asking())).rejects.toThrow(placeLeaveFailedLine("vps", { stdout: "this computer is not a place in any wsp, so there is nothing to leave\n", stderr: "" }));
+    await expect(leave(asking())).rejects.not.toThrow(/refused the login over ssh/);
+  });
+
+  it("says the wait ran out where that computer answered nothing at all, rather than ending on a colon", async () => {
+    const { leave } = leaver({ exitCode: 124 });
+    await expect(leave(asking())).rejects.toThrow("vps ran the leave and had not finished it within 180s");
+    expect(placeLeaveFailedLine("vps", { stdout: "", stderr: "" })).not.toMatch(/:$/);
+  });
+
+  it("runs whatever line that computer said starts its wsp, including the bare word a box with none falls back to", async () => {
+    const { asked, leave } = leaver({ exitCode: 0 });
+    await leave(asking(reportOf({ wsp: ["wsp"] })));
+    expect(asked[0]!.script).toBe(`wsp ${PLACE_LEAVE_VERB}`);
   });
 });
 

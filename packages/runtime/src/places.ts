@@ -149,6 +149,10 @@ export interface PlaceWiring {
   /** How the daemon this host deploys is put on a computer that is already a place. The host wires it because the
    * binary and the table of chips it is picked from are the host's, as the installer above is. */
   update?: PlaceUpdater;
+  /** How the agent is taken off a computer this host is holding no link to, over the login the install used.
+   * Absent on a runtime served without the ssh road, where a remove of a computer that is not connected says the
+   * agent is still installed and leaves it to the person at that computer. */
+  leave?: PlaceLeaver;
 }
 
 /** One login over ssh as this host holds it: the address in the spelling a person would type back, and the key file
@@ -189,6 +193,20 @@ export interface PlaceUpdateLanded {
 /** How the daemon this host deploys is put on a computer already joined. Absent on a runtime served without it,
  * where a place stays on the daemon it has. */
 export type PlaceUpdater = (req: PlaceUpdateRequest) => Promise<PlaceUpdateLanded>;
+
+/** What one leave over the ssh road is told: which computer, what it last said about itself (its own line for
+ * running wsp there is in that report), and the login it was installed over. */
+export interface PlaceLeaveRequest {
+  placeId: string;
+  name: string;
+  report: PlaceReport;
+  ssh: PlaceLogin;
+}
+
+/** How the agent comes off a computer this host holds no link to: the leave that computer already carries, run
+ * over the login the install used. Answers the lines it said it took; throws the road's own sentence where the
+ * computer will not answer, which leaves the remove saying the agent is still installed. */
+export type PlaceLeaver = (req: PlaceLeaveRequest) => Promise<readonly string[]>;
 
 /** What the door answers a person who asked for one: the versions either side of the move, the road it took, where
  * it landed, and the sentence for a computer that had not dialled back on the new daemon before the wait ran out. */
@@ -361,6 +379,12 @@ export const NO_PLACE_UPDATER = "this runtime carries no daemon to put on a comp
  * Nothing has failed: the unit restarts it and the row moves on its next link. */
 export const placeUpdateSlowLine = (name: string, seconds: number): string =>
   `${name} took the daemon and had not dialled back on it within ${seconds}s; its row reads the new version once it does`;
+
+/** What a remove says when the computer was holding no link and the host logged in to it instead. Which road the
+ * sweep took is the one thing a person cannot see from here: the agent was not dialling this host, and what came
+ * off that computer came off over the login the install used. */
+export const placeSweptOverSshLine = (name: string, at: string): string =>
+  `${name} was holding no link, so wsp logged in at ${at} over ssh and ran the leave there`;
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -609,6 +633,14 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * about how the computer was reached, and every later dial, update and read of its log rides this login. */
   const withRoad = (record: PlaceRecord, login: PlaceLogin | undefined): PlaceRecord =>
     login === undefined ? record : { ...record, road: { ...record.road, ssh: login.ssh, ...(login.keyPath !== undefined ? { keyPath: login.keyPath } : {}) } };
+
+  /** The login this host holds for a computer, as every road that logs in to one takes it: the address in the
+   * spelling a person would type and the key file the add named beside it, off the record's own road. Nothing
+   * where the record carries none, which is a computer that joined by typing a code. */
+  const loginOf = (record: PlaceRecord): PlaceLogin | undefined => {
+    const ssh = sshRoadOf(record.road);
+    return ssh === undefined ? undefined : { ssh, ...(record.road?.keyPath === undefined ? {} : { keyPath: record.road.keyPath }) };
+  };
 
   /** The login an install in flight logged in over, by the place its code became; nothing for every computer no
    * install is putting the agent on right now, whose record already carries whatever road it has. */
@@ -1149,7 +1181,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // only that there was nowhere to dial. Both halves are taken off that one reading rather than asked again.
       const road = placeDialRoad({ present: linked !== undefined, road: held.road });
       const link = road === "link" ? linked : undefined;
-      const ssh = road === "ssh" ? sshRoadOf(held.road) : undefined;
+      const ssh = road === "ssh" ? loginOf(held) : undefined;
       if (link !== undefined) {
         // The link's own heartbeat op: the cheapest frame that proves the computer at the other end is still
         // answering, rather than that this host is still holding a socket to it.
@@ -1160,9 +1192,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
         }
       } else if (ssh !== undefined && wiring.dial !== undefined) {
-        const login = { ssh, ...(held.road?.keyPath !== undefined ? { keyPath: held.road.keyPath } : {}) };
         try {
-          await bounded(wiring.dial(login), dialWaitMs, `ssh ${ssh}`);
+          await bounded(wiring.dial(ssh), dialWaitMs, `ssh ${ssh.ssh}`);
           dialled = { at: stamp, answered: true, roundTripMs: took() };
         } catch (e) {
           dialled = { at: stamp, answered: false, said: e instanceof Error ? e.message : String(e) };
@@ -1263,13 +1294,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (from >= DAEMON_VERSION) throw new Error(placeCurrentLine(held.name, from));
       if (wiring.update === undefined) throw new Error(NO_PLACE_UPDATER);
       const link = live.get(placeId)?.reach;
-      const ssh = held.road?.ssh;
+      const ssh = loginOf(held);
       const landed = await wiring.update({
         placeId,
         name: held.name,
         report: held.report,
         ...(link === undefined ? {} : { link }),
-        ...(ssh === undefined ? {} : { ssh: { ssh, ...(held.road?.keyPath === undefined ? {} : { keyPath: held.road.keyPath }) } }),
+        ...(ssh === undefined ? {} : { ssh }),
       });
       // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
       // about itself then is the only reading that proves the new daemon is the one running there.
@@ -1291,10 +1322,24 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const forks = await recording.forksOn(placeId);
       if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
       const reach = live.get(placeId)?.reach;
+      const login = loginOf(held);
       let swept: string[] = [];
       let note: string | undefined;
-      if (reach === undefined) note = placeStillInstalledLine(held.name);
-      else {
+      if (reach === undefined) {
+        // No link, but the record carries the login the install used, and that computer already holds the leave a
+        // person would run at its own terminal: the host runs it there rather than leaving an agent dialling a
+        // host that has forgotten it. A computer that will not answer the login keeps the sentence it always had.
+        note = placeStillInstalledLine(held.name);
+        if (login !== undefined && wiring.leave !== undefined) {
+          try {
+            swept = [...(await wiring.leave({ placeId, name: held.name, report: held.report, ssh: login }))];
+            note = placeSweptOverSshLine(held.name, login.ssh);
+          } catch {
+            // The computer did not answer the login, so the record goes as it always did and the sentence stays
+            // the one for an agent still installed on a computer this host cannot reach.
+          }
+        }
+      } else {
         // The sweep is the place's own: it knows its service manager and where the installer put things. The agent
         // ends itself once it has answered, so nothing brings it back.
         try {
