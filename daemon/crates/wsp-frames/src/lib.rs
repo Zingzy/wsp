@@ -7,6 +7,7 @@
 mod auth;
 mod enums;
 mod event;
+mod guest;
 mod id;
 mod machine;
 pub mod numbers;
@@ -20,6 +21,7 @@ pub mod words;
 pub use auth::DaemonAuthRequest;
 pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, ProcSignal, PtyMode, WorkspaceKind};
 pub use event::{DaemonEvent, ProcEntry, Usage};
+pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
 pub use id::RequestId;
 pub use machine::{
     BackendFacts, BackendPricing, BaseTemplates, Capabilities, DaemonSupervisor, ExecResult, Lifecycle, LifecycleBudgets,
@@ -41,5 +43,5 @@ pub use reply::{
     ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply,
     PtyListEntry, PtyListReply, Reply, True,
 };
-pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS};
+pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use validate::{is_http_url, RelayPort};

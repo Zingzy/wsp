@@ -183,7 +183,7 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(auth.port, Outbound(tx), Road::Inbound));
+    let conn = Arc::new(Conn::new(ctx.next_key(), auth.port, Outbound(tx), Road::Inbound));
     serve_authed(ws, &ctx, conn, rx, None).await;
 }
 
@@ -210,7 +210,7 @@ pub(crate) async fn serve_authed<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let key = ctx.next_key();
+    let key = conn.key;
     if conn.scope.is_none() {
         ctx.add_authed(key, conn.out.clone());
     }
@@ -266,6 +266,7 @@ where
     // The client is gone; the ptys and the watchers keep running. Only this socket's subscriptions and tunnels die
     // with it.
     ctx.remove_authed(key);
+    ctx.guests.socket_closed(key);
     conn.close();
     let reason = match ended {
         Ended::Peer => None,

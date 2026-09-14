@@ -2345,6 +2345,38 @@ export function agentsOffRefusal(workspace: string, act: SpawnAct): string {
   return `agents on ${workspace} may not ${SPAWN_ACTS[act]}; turn it on with wsp workspaces agents ${workspace} --spawn on`;
 }
 
+/** The one word the socket door closes a socket whose token names nobody with, and the one the guest door refuses a
+ * session with. Spelled once so the two roads into this host cannot drift apart in what they say. */
+export const UNAUTHORIZED = "unauthorized";
+
+/** What a guest session is refused with when it asks for a kind this host serves no module for; its own words, since
+ * a kind nobody built is not a token nobody holds. */
+export function guestNoKindLine(kind: string): string {
+  return `this host serves no ${kind} guest session`;
+}
+
+/** What the guest's next frame is answered with once the host no longer holds its session: a host that restarted, or
+ * a link that ended, leaves the machine's daemon holding a session nothing on this side can answer. */
+export const guestNoSessionLine = "the host holds no such session";
+
+/** What a line from inside a machine is told when it names a path: the path would be resolved and read on the
+ * person's computer, and the file the caller means is on the machine the line was typed on. */
+export const guestNoFileLine = "a path on this line would be read on the person's computer, not on the machine the line was typed on";
+
+/** What a line from inside a machine is told when it leaves the workspace to the folder it was typed in: that folder
+ * is on the machine, and reading it here would answer about the person's own checkouts instead. */
+export const guestNamesWorkspaceLine = "a line from a workspace names the workspace it means, since the folder it was typed in is not one this host can read";
+
+/** What a line typed inside a workspace is told when it names a verb that runs at the person's own keyboard: the
+ * guest road carries the verbs an agent has business with, and the rest happen where the person is. */
+export function guestPersonsComputerLine(word: string): string {
+  return `wsp ${word} runs on the person's computer, not from a workspace`;
+}
+
+/** What a line typed inside a workspace is told when it tries to aim itself somewhere else. The host a turn's
+ * launch named is the one a line from that turn reaches, and the state file it would name is on another computer. */
+export const guestHostFlagLine = "a line from a workspace goes to the host that launched it; --host and --state are not read here";
+
 /** The one sentence a thread's own token is refused with for an act no thread may ask for, whatever the caps. */
 export function spawnActRefusal(threadId: string, act: SpawnAct): string {
   return `this request came out of thread ${threadWord(threadId)} on a machine, and a thread may only ${SPAWN_ACTS_ALLOWED.map(a => SPAWN_ACTS[a]).join(", ")}, never ${SPAWN_ACTS[act]}`;

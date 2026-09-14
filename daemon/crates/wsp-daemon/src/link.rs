@@ -315,7 +315,7 @@ impl Link {
     async fn hold(&self, ws: Socket, url: &str) -> Ended {
         self.log(&words::link_linked(url));
         let (tx, rx) = mpsc::unbounded_channel();
-        let conn = Arc::new(Conn::new(None, Outbound(tx), Road::Link));
+        let conn = Arc::new(Conn::new(self.ctx.next_key(), None, Outbound(tx), Road::Link));
         door::serve_authed(ws, &self.ctx, conn, rx, Some(self.quiet)).await
     }
 }

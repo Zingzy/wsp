@@ -11,7 +11,7 @@ import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -34,6 +34,8 @@ import {
   previewHostSuffix,
   VITE_ALLOWED_HOSTS_ENV,
   deployFailureLine,
+  guestWspShim,
+  removeDaemonScript,
   GUEST_ENVS,
   claudeEnvs,
   CLOUD_PLACE,
@@ -415,21 +417,46 @@ describe("stageDaemonBundle", () => {
     const stage = join(dir, "stage");
     // This computer's own chip, since the lookup under test is the one a box does for itself off its own row.
     const here = daemonTargetHere()!;
-    await stageDaemonBundle(stage, CLOUD_PLACE, fakeDaemonDir(dir), fakeCliDir(dir), [here]);
+    await stageDaemonBundle(stage, sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" }), fakeDaemonDir(dir), fakeCliDir(dir), [here]);
     // The box runs the command out of the bundle's own dist folder and asks the asset table for the daemon beside
     // it; the bundle is that command as npm lays it out, so there is one path and not a second spelling of it.
     expect(daemonBinaryHere(join(stage, "wsp", "dist"))).toBe(daemonBinaryOn(stage, here));
     expect(existsSync(daemonBinaryOn(stage, here))).toBe(true);
   });
 
-  it("carries the wsp command beside the daemon, whole, at the path a turn's tools are launched from", async () => {
+  it("gives a fork two lines onto the binary the bundle carries, written on the machine where the chip is known", async () => {
     dir = tmp("wsp-bundle-cli-");
+    const daemonDir = fakeDaemonDir(dir);
+    const stage = join(dir, "stage");
+    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, fakeCliDir(dir));
+
+    // A fork carries no node and no packed command; the binaries ride under that command's own assets all the same,
+    // one folder per chip, and the deploy drops the ones the machine is not.
+    expect(existsSync(join(stage, "wsp", "dist", "bin.js"))).toBe(false);
+    for (const target of GUEST_DAEMON_TARGETS) expect(existsSync(daemonBinaryOn(stage, target))).toBe(true);
+
+    // The shim is written in the arm for the chip, since the path it names carries that chip's target triple.
+    const script = deployScript(CLOUD_PLACE, "aabbcc");
+    for (const target of GUEST_DAEMON_TARGETS) {
+      expect(guestWspShim(CLOUD_PLACE, target)).toBe(`#!/bin/sh\nexec ${daemonBinaryOn(CLOUD_PLACE.dir, target)} wsp "$@"\n`);
+      expect(script).toContain(guestWspShim(CLOUD_PLACE, target));
+    }
+    expect(script).toContain(`chmod 0755 ${GUEST_WSP_PATH}`);
+    expect(GUEST_WSP_PATH).toBe("/usr/local/bin/wsp");
+    expect(script.split("\n")).toContain(`tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
+    // And it goes when the rest of wsp does.
+    expect(removeDaemonScript(CLOUD_PLACE)).toContain(GUEST_WSP_PATH);
+  });
+
+  it("carries the wsp command whole where the place says a machine somebody owns still runs it on node", async () => {
+    dir = tmp("wsp-bundle-node-cli-");
     const daemonDir = fakeDaemonDir(dir);
     // The published build is split across chunk files bin.js imports by name, so the folder travels whole.
     const cliDir = fakeCliDir(dir);
+    const place = sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" });
 
     const stage = join(dir, "stage");
-    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir, cliDir);
+    await stageDaemonBundle(stage, place, daemonDir, cliDir);
 
     expect(readFileSync(join(stage, "wsp", "dist", "bin.js"), "utf8")).toContain("./chunk-1.js");
     expect(existsSync(join(stage, "wsp", "dist", "chunk-1.js"))).toBe(true);
@@ -438,12 +465,9 @@ describe("stageDaemonBundle", () => {
     // names no version, and an MCP server announcing none is refused its handshake.
     expect(JSON.parse(readFileSync(join(stage, "wsp", "package.json"), "utf8"))).toMatchObject({ version: "9.9.9" });
     expect(existsSync(join(stage, "wsp", "tsup.config.ts"))).toBe(false);
-    // Where it lands on a fork is the protocol's one reading, which the runtime builds the launch from, and it is
-    // under the folder the place unpacks the bundle into.
-    expect(GUEST_WSP_BIN).toBe(`${GUEST_DAEMON_DIR}/wsp/dist/bin.js`);
-    expect(existsSync(join(stage, relative(GUEST_DAEMON_DIR, GUEST_WSP_BIN)))).toBe(true);
-    expect(CLOUD_PLACE.dir).toBe(GUEST_DAEMON_DIR);
-    expect(deployScript(CLOUD_PLACE, "aabbcc").split("\n")).toContain(`tar -xzf ${GUEST_DAEMON_DIR}.tgz -C ${GUEST_DAEMON_DIR}`);
+    expect(existsSync(join(stage, relative(place.dir, wspBinIn(place.dir))))).toBe(true);
+    // Nothing installs a shim there: the word wsp on that computer is the person's own to spell.
+    expect(deployScript(place, "aabbcc")).not.toContain(GUEST_WSP_PATH);
   });
 
   it("the wsp command in the bundle answers an MCP handshake with its version, run from where the bundle puts it", async () => {
@@ -452,8 +476,9 @@ describe("stageDaemonBundle", () => {
     const stage = join(dir, "stage");
     // The real command bundle on purpose, since the bug was in the built bin's own reading of its version: it needs
     // packages/wspx built, which the gate does before any test runs; the fork's path is the protocol's, under the stage.
-    await stageDaemonBundle(stage, CLOUD_PLACE, daemonDir);
-    const bin = join(stage, relative(GUEST_DAEMON_DIR, GUEST_WSP_BIN));
+    const place = sshDaemonPlace({ home: "/home/maya", path: "/usr/bin" });
+    await stageDaemonBundle(stage, place, daemonDir);
+    const bin = join(stage, relative(place.dir, wspBinIn(place.dir)));
     const { version } = JSON.parse(readFileSync(join(assetDir("cli"), "package.json"), "utf8")) as { version: string };
     const home = join(dir, "guest-home");
     mkdirSync(home, { recursive: true });

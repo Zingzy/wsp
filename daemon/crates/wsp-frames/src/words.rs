@@ -30,6 +30,15 @@ pub const HOST_REFUSED_PLACE: &str = "the host refused this place";
 pub const NO_PLACE_FILE: &str =
     "no place file here, so there is no host to dial; wsp join <address> --code <code> makes this computer a place";
 
+/// What a socket that never asked to watch guest sessions is told when it answers or ends one.
+pub const GUEST_NOT_WATCHER: &str = "only the socket that sent guest.watch may answer or close a guest session";
+/// Why a session with nobody reading it is ended: the host has been away past the queue's cap.
+pub const GUEST_QUEUE_FULL: &str = "the host has not read this session for too long";
+
+pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
+    format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
+}
+
 /// The close reasons the link puts on a socket it ends. Not in the shared set: no client matches on a close reason.
 pub const LINK_CLOSE_STOPPING: &str = "place agent stopping";
 pub const LINK_CLOSE_UPDATING: &str = "place agent restarting on the daemon the host sent";

@@ -11,10 +11,11 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, MachineAnswersReply,
-    MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachinePromoteReply, MachineReachReply,
-    MachineReadingReply, MachineShapeReply, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply, MachineStateReply,
-    MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GuestCliMessage, GuestOpenReply,
+    MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachinePromoteReply,
+    MachineReachReply, MachineReadingReply, MachineShapeReply, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
+    MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS,
+    MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -134,6 +135,9 @@ fn every_event_frame_reads_as_the_protocol_does() {
         "browser.open",
         "callback.port",
         "daemon.hello",
+        "guest.closed",
+        "guest.message",
+        "guest.opened",
         "inbox.file",
         "localhost.url",
         "port.close",
@@ -214,6 +218,12 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
+                "GuestOpenReply" => {
+                    round_trip::<GuestOpenReply>(&sample, &at);
+                }
+                "GuestCliMessage" => {
+                    round_trip::<GuestCliMessage>(&sample, &at);
+                }
                 other => panic!("{at}: no reply type here reads {other}"),
             }
         }
@@ -222,6 +232,8 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
     seen.sort();
     let mut expected = vec![
         "DaemonErrorResponse",
+        "GuestCliMessage",
+        "GuestOpenReply",
         "MachineAnswersReply",
         "MachineBackendReply",
         "MachineCapacityReply",
@@ -260,6 +272,9 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("portScopeRefusal", words::port_scope_refusal("{port}"));
     m.insert("notOnThisRoad", words::NOT_ON_THIS_ROAD.to_owned());
     m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
+    m.insert("guestNotWatcher", words::GUEST_NOT_WATCHER.to_owned());
+    m.insert("guestQueueFull", words::GUEST_QUEUE_FULL.to_owned());
+    m.insert("guestNoDaemon", words::guest_no_daemon_line("{port}"));
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
     m.insert("listening", words::listening_line("{host}", "{port}"));
     m.insert("sysSamplerStarted", words::SYS_SAMPLER_STARTED.to_owned());
@@ -284,6 +299,11 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     let mut m = BTreeMap::new();
     m.insert("daemonVersion", Value::from(numbers::DAEMON_VERSION));
     m.insert("execBodyMax", Value::from(numbers::EXEC_BODY_MAX));
+    m.insert("guestMessageCapBytes", Value::from(numbers::GUEST_MESSAGE_CAP_BYTES));
+    m.insert("guestQueueCapFrames", Value::from(numbers::GUEST_QUEUE_CAP_FRAMES));
+    m.insert("guestTokenMax", Value::from(numbers::GUEST_TOKEN_MAX));
+    m.insert("guestArgvMax", Value::from(numbers::GUEST_ARGV_MAX));
+    m.insert("guestCwdMax", Value::from(numbers::GUEST_CWD_MAX));
     m.insert("execOutputMax", Value::from(numbers::EXEC_OUTPUT_MAX));
     m.insert("execTimeoutDefaultMs", Value::from(numbers::EXEC_TIMEOUT_DEFAULT_MS));
     m.insert("execDeadlineExit", Value::from(numbers::EXEC_DEADLINE_EXIT));
@@ -311,6 +331,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("xdgOpenPath", Value::from(numbers::XDG_OPEN_PATH));
     m.insert("openSocketPath", Value::from(numbers::OPEN_SOCKET_PATH));
     m.insert("guestDaemonDir", Value::from(numbers::GUEST_DAEMON_DIR));
+    m.insert("guestWspPath", Value::from(numbers::GUEST_WSP_PATH));
     m.insert("daemonOomScoreAdj", Value::from(numbers::DAEMON_OOM_SCORE_ADJ));
     m.insert("daemonNice", Value::from(numbers::DAEMON_NICE));
     m.insert("workOomScoreAdj", Value::from(numbers::WORK_OOM_SCORE_ADJ));

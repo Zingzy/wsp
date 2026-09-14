@@ -1,0 +1,19 @@
+[
+  {
+    "type": "guest.opened",
+    "session": "g1",
+    "kind": "mcp",
+    "token": "t",
+    "argv": [
+      "mcp"
+    ]
+  },
+  {
+    "type": "guest.opened",
+    "session": "g1",
+    "kind": "shell",
+    "token": "t",
+    "argv": [],
+    "cwd": "/root"
+  }
+]

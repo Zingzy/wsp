@@ -30,6 +30,11 @@ export const HTTP_URL_MAX = 8192;
  * Too Large above 16 KiB (a 17,176 byte launch body was refused on 2026-09-06). Anything larger goes to the guest in
  * more than one exec or through an upload. */
 export const EXEC_BODY_MAX = 16 * 1024;
+/** The thread token and the turn token a guest session opens with; the daemon relays both and reads neither. */
+export const GUEST_TOKEN_MAX = 512;
+/** Words in one guest command line, and the length of the folder it runs in. */
+export const GUEST_ARGV_MAX = 256;
+export const GUEST_CWD_MAX = 4096;
 /** How much of a detached command's output one poll exec reads; a full read is followed by another at once. */
 export const EXEC_CHUNK_BYTES = 262_144;
 /** How long a turn may do nothing at all before the runtime cuts it: no byte on its stream, no message from the
@@ -1187,6 +1192,11 @@ export const GUEST_DAEMON_DIR = "/root/wsp-daemon";
 export const wspPackageIn = (dir: string): string => `${dir}/wsp`;
 export const wspBinIn = (dir: string): string => `${wspPackageIn(dir)}/dist/bin.js`;
 export const GUEST_WSP_BIN = wspBinIn(GUEST_DAEMON_DIR);
+/** The wsp a process inside a fork runs, and the one word a launch names it by: two lines the deploy writes onto
+ * the machine's PATH, handing the whole line to the daemon binary beside them, which carries it to the host over
+ * the socket the host already holds to this machine's daemon. The binary's own path is not named here: it sits in
+ * the bundle under one folder per chip, and only the machine says which chip it is. */
+export const GUEST_WSP_PATH = "/usr/local/bin/wsp";
 
 /** The token a client puts on its requests, off its own environment; nothing when it is not running inside a turn. */
 export function turnTokenOf(env: Readonly<Record<string, string | undefined>>): string | undefined {
@@ -2637,6 +2647,10 @@ export type DaemonExecRequest = z.infer<typeof DaemonExecRequest>;
 export const DaemonExecReply = z.object({ exitCode: z.number().int(), stdout: z.string(), stderr: z.string(), truncated: z.boolean() });
 export type DaemonExecReply = z.infer<typeof DaemonExecReply>;
 
+/** What a guest session carries: the tool server's JSON-RPC messages, or one command line and its streams. */
+export const GuestKind = z.enum(["mcp", "cli"]);
+export type GuestKind = z.infer<typeof GuestKind>;
+
 export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
@@ -2707,6 +2721,26 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   /** Sweeps wsp off this computer and answers what it took, then the agent exits: the one op whose handler belongs
    * to the link a place opened and not to the daemon's own switch. */
   z.object({ id: reqId, op: z.literal("place.leave") }),
+  /** A process inside this machine opens a guest session: the tool server, or one command line. The daemon relays
+   * it up the socket the host holds and reads nothing of what rides here; the token is the thread's, and the host
+   * is what reads it. Sent on the inbound road alone, since no guest runs on a computer somebody owns. */
+  z.object({
+    id: reqId,
+    op: z.literal("guest.open"),
+    kind: GuestKind,
+    /** The thread's token off WSP_HOST_TOKEN, "" when the launch carried none; the host reads it, the daemon never does. */
+    token: z.string().max(GUEST_TOKEN_MAX),
+    turnToken: z.string().max(GUEST_TOKEN_MAX).optional(),
+    argv: z.array(z.string()).max(GUEST_ARGV_MAX),
+    cwd: z.string().max(GUEST_CWD_MAX),
+  }),
+  /** One message from the guest process on the session its socket opened. */
+  z.object({ id: reqId, op: z.literal("guest.send"), message: z.unknown() }),
+  /** The host asks to be handed every guest session this daemon opens; the last socket to ask is where they go. */
+  z.object({ id: reqId, op: z.literal("guest.watch") }),
+  /** The host's answer on a session, and the host ending one; both are refused on a socket that never watched. */
+  z.object({ id: reqId, op: z.literal("guest.reply"), session: z.string(), message: z.unknown() }),
+  z.object({ id: reqId, op: z.literal("guest.close"), session: z.string(), error: z.string().optional() }),
   /** The daemon this host deploys, landed on the computer the link runs on and started in place of the one running
    * there. The parts arrive as machine.putBytes's do, in seq order under one upload id on one socket; the part
    * marked last is checked against sha256, moved over the binary the unit starts and answered, and then the agent
@@ -2732,6 +2766,18 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   }),
 ]);
 export type DaemonRequest = z.infer<typeof DaemonRequest>;
+
+/** The reply to guest.open: the id both sides name the session by. Every other guest op answers the empty ok. */
+export const GuestOpenReply = z.object({ session: z.string() });
+export type GuestOpenReply = z.infer<typeof GuestOpenReply>;
+
+/** What a cli session's messages carry: text for one of the two streams, then the code the line ended with. A tool
+ * server session carries the harness's own JSON-RPC, which has no shape of ours. */
+export const GuestCliMessage = z.union([
+  z.object({ stream: z.enum(["out", "err"]), text: z.string() }),
+  z.object({ exit: z.number().int() }),
+]);
+export type GuestCliMessage = z.infer<typeof GuestCliMessage>;
 
 // --- machines over a place link -------------------------------------------
 //
@@ -3199,6 +3245,7 @@ const DAEMON_CONTENTS = [
   "e527369ddf63dcc38642a26caca0cd2f72f50e9be8b06f76d7cb7c93c349d826",
   "352699bc2434f5b1dc84d46026499662abf3bbcc4bc701736150a90042f79368",
   "0bec2f8329f6e46772d072acb082a83a943fe87ed31f2a83df3295069d1f6243",
+  "5ef12ef8bf31cdb5ebbdd7ef56113fc447876b63dbabd073752a802491db5fab",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3283,7 +3330,11 @@ const DAEMON_CONTENTS = [
  * box and the daemon that comes up reads them again. Version 35 carries the daemon binary in the bundle where the
  * wsp command riding beside it reads one, under that command's own assets and one folder per chip, and writes the
  * unit, the supervisor script and the AppArmor profile inside the arm for the chip the machine says it is: the
- * binary a machine runs and the one a computer's own join looks for are one file, at one path, under one rule. */
+ * binary a machine runs and the one a computer's own join looks for are one file, at one path, under one rule.
+ * Version 36 relays a guest session: a process inside the machine opens one on the daemon over loopback with the
+ * daemon's own token, and the daemon carries it up the socket the host already holds, so the wsp an agent runs
+ * there needs no address of this host, no TLS and no node. The binary answers that word itself, and the deploy
+ * writes a two-line shim onto the machine's PATH, in the same arm as the unit, that hands it the line. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3380,6 +3431,21 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("localhost.url"), port: RelayPort }),
   SysSample,
   ProcSnapshot,
+  /** A process inside the machine opened a guest session. Pushed to the socket that sent guest.watch alone, never
+   * broadcast: the host is the only reader of the token it carries. */
+  z.object({
+    type: z.literal("guest.opened"),
+    session: z.string(),
+    kind: GuestKind,
+    token: z.string(),
+    turnToken: z.string().optional(),
+    argv: z.array(z.string()),
+    cwd: z.string(),
+  }),
+  /** One message on a session, travelling either way: a guest's up to the watcher, the host's answer back down. */
+  z.object({ type: z.literal("guest.message"), session: z.string(), message: z.unknown() }),
+  /** The session ended; this reaches whichever side did not end it. */
+  z.object({ type: z.literal("guest.closed"), session: z.string(), error: z.string().optional() }),
 ]);
 export type DaemonEvent = z.infer<typeof DaemonEvent>;
 
