@@ -1761,11 +1761,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * this host at is handed in, since a command that dials needs it on its line and one that rides the machine's
      * own daemon does not. */
     wspMcp: (entry: LiveWorkspace, hostUrl: string) => McpServerSpec | undefined;
-    /** Where a turn on this workspace's machine dials this host, which the kind answers because the address is a
-     * fact about its machines and not about this computer's network cards: a container reaches the computer its
-     * daemon runs on through the gateway it was given a name for, a machine somewhere else reaches this host at
-     * the address it advertises. None leaves that turn without a token, since one with nowhere to go opens
-     * nothing. What the person named with --advertise stands above every answer here. */
+    /** Where a turn on this workspace's machine dials this host, which the kind answers because whether there is
+     * an address at all is a fact about its machines: a fork somewhere else reaches this host where it answers, a
+     * turn beside the host reaches it nowhere and needs to. None leaves that turn without a token, since one with
+     * nowhere to go opens nothing. What the person named with --advertise stands above every answer here. */
     hostUrl: (entry: LiveWorkspace) => string | undefined;
     /** Whether this machine's daemon can be dialled at all, asked before a road is opened so nothing mints a preview
      * route to find out: a cloud fork needs one, this computer's daemon is on it. Read as truthy, the way the reach
@@ -1929,21 +1928,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // no host of its own, it opens a session on this machine's daemon and the daemon carries it up the socket
       // this host already holds, so no address goes on the end of this line where every other kind's still does.
       wspMcp: () => ({ command: "wsp", args: ["mcp"] }),
-      // A machine whose backend knows a road back to this computer takes it, whatever this host advertises: a
-      // container on this computer's own daemon dials the gateway, where a LAN address of this computer may reach
-      // nothing from inside it. Only where the host bound the wildcard, which is what a port here says: a host on
-      // one address does not answer on the gateway's. Every other fork dials the address the host advertises.
-      hostUrl: entry => {
-        const reach = opts.agents?.reach;
-        return (reach?.port === undefined ? undefined : entry.machine.hostUrl?.(reach.port)) ?? reach?.url;
-      },
+      hostUrl: () => opts.agents?.reach?.url,
       hasDaemon: entry => Boolean(entry.machine.previewUrl),
       daemonRoad: cloudRoad,
       scratch: () => GUEST_TMP,
       daemonVersion: entry => helloVersion(entry),
       dropped: async () => {},
       // The bundle is the host's to wire; whether it can reach a given machine is canDeployDaemon's reading, since
-      // one kind's machines can differ about it (a container on a Docker daemon mints no signed URL).
+      // one kind's machines can differ about it (a container a box's runtime boots mints no signed URL).
       ...(opts.goldenRecipe?.deployDaemon !== undefined ? { deployDaemon: async (entry: LiveWorkspace) => cloudDeploy(entry) } : {}),
       import: (entry, o, report) => copyImport(entry, o, report),
       roots: (entry, dests) => writeRoots(entry, dests),
@@ -2833,10 +2825,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The daemon answering is what proves a resumed guest serves; resume() returning does not (a zombie reports
    * running for 10+ minutes while exec and the edge 502). Asked over the machine's own road where it has one and
    * through the edge where the route is the only way in, since the two readings of one machine's reach would
-   * otherwise disagree: a container's published port is on the loopback of the computer its Docker daemon runs on,
-   * and a host that is not that computer would fail this check on a live guest, which on a backend whose wake
-   * takes one attempt throws the container away and forks the golden again. A machine with neither road has
-   * nothing to ask, so the check falls back to the shape comparison. */
+   * otherwise disagree: a container's published port is on the loopback of the box that runs it, and a host that
+   * is not that computer would fail this check on a live guest, which on a backend whose wake takes one attempt
+   * throws the container away and forks the golden again. A machine with neither road has nothing to ask, so the
+   * check falls back to the shape comparison. */
   const pingDaemon = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const machine = entry.machine;
     const answersMs = lifecycleOf(entry).budgets.daemonAnswersMs;

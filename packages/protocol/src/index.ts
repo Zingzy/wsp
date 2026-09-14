@@ -2919,8 +2919,9 @@ export const BackendFacts = z.object({
 export type BackendFacts = z.infer<typeof BackendFacts>;
 
 /** One machine as the place hands it over: the handle's fields, and which optional roads the handle carries, so the
- * client builds a machine whose optional methods are present exactly where the place's are. hostUrl is never
- * carried: the place's answer names the place, and a fork on it dials the host at the address the host advertises. */
+ * client builds a machine whose optional methods are present exactly where the place's are. Where a fork dials the
+ * host is not among them: the place's answer names the place, and a fork on it dials the address the host
+ * advertises. */
 export const MachineHandle = z.object({
   id: z.string(),
   kind: MachineKind,
@@ -3246,6 +3247,7 @@ const DAEMON_CONTENTS = [
   "352699bc2434f5b1dc84d46026499662abf3bbcc4bc701736150a90042f79368",
   "0bec2f8329f6e46772d072acb082a83a943fe87ed31f2a83df3295069d1f6243",
   "5ef12ef8bf31cdb5ebbdd7ef56113fc447876b63dbabd073752a802491db5fab",
+  "e0134bee72be55ed8349d11a9e656b61ee20ba55472be25546f0809763f99d9c",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3334,7 +3336,9 @@ const DAEMON_CONTENTS = [
  * Version 36 relays a guest session: a process inside the machine opens one on the daemon over loopback with the
  * daemon's own token, and the daemon carries it up the socket the host already holds, so the wsp an agent runs
  * there needs no address of this host, no TLS and no node. The binary answers that word itself, and the deploy
- * writes a two-line shim onto the machine's PATH, in the same arm as the unit, that hands it the line. */
+ * writes a two-line shim onto the machine's PATH, in the same arm as the unit, that hands it the line.
+ * Version 37 answers no op differently: the contract fixture a reply is held to no longer names a provider nothing
+ * can serve, and a fixture's bytes are in the sha whatever they say. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

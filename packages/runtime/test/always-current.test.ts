@@ -15,24 +15,24 @@ import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 
-/** Three providers over three stubs, as the host's table hands them down: docker, the one this host forks on and
+/** Three providers over three stubs, as the host's table hands them down: the stand-in this host forks on and
  * seals at, and two more it holds a key for, each marking its snapshot ids so which place's copy a fork names is
  * read off the id; beside them a provider that forks nothing. The door is wired so a create names its place and
  * the rows are read the way wsp places and the app read them. */
 function providers() {
-  const docker = stubBackend("docker");
+  const fake = stubBackend("fake");
   const solari = stubBackend("solari");
   const box = stubBackend("box");
-  for (const b of [docker, solari, box]) b.execImpl = dfOk;
+  for (const b of [fake, solari, box]) b.execImpl = dfOk;
   const none = new NoProviderBackend();
-  const at: Record<string, StubBackend | NoProviderBackend> = { docker, solari, box, none };
-  const places: PlaceBackends = { wired: "docker", backend: p => at[p], list: () => Object.keys(at) };
-  const wiring: PlaceWiring = { hostKey: newPlaceKeyPair(), provider: () => ({ id: "docker", rateUsdPerHour: 0 }), here: () => ({ name: "this-mac" }), hostName: () => "this-mac" };
+  const at: Record<string, StubBackend | NoProviderBackend> = { fake, solari, box, none };
+  const places: PlaceBackends = { wired: "fake", backend: p => at[p], list: () => Object.keys(at) };
+  const wiring: PlaceWiring = { hostKey: newPlaceKeyPair(), provider: () => ({ id: "fake", rateUsdPerHour: 0 }), here: () => ({ name: "this-mac" }), hostName: () => "this-mac" };
   // How often this computer was read for a copy's recipe: once per build that ran, never for one that did not.
   const composed = { count: 0 };
   const store = memoryStore();
   const rt = createRuntime({
-    backend: docker,
+    backend: fake,
     store,
     adapters: {},
     goldenRecipe: recipeWith(),
@@ -59,7 +59,7 @@ function providers() {
     return rt.golden.seal(b.id);
   };
   const head = async (): Promise<string> => goldenHead(await rt.golden.get())!.snapshotId;
-  return { docker, solari, box, rt, store, composed, frames, row, current, seal, head };
+  return { fake, solari, box, rt, store, composed, frames, row, current, seal, head };
 }
 
 /** Holds a stub's creates until released: a build blocked on its first machine, so what happens beside it is read
@@ -77,10 +77,10 @@ function held(stub: StubBackend): () => void {
 
 describe("a place is always current", () => {
   it("a cut moves the record's hash and every other place that runs workspaces builds its copy behind the seal, one build each; a seal that moves nothing builds nothing; a live fork keeps what it booted", async () => {
-    const { docker, solari, box, rt, current, seal, head } = providers();
+    const { fake, solari, box, rt, current, seal, head } = providers();
     await seal();
     await until(async () => (await current("solari")) && (await current("box")), 5000);
-    expect([docker.snapshots.length, solari.snapshots.length, box.snapshots.length]).toEqual([1, 1, 1]);
+    expect([fake.snapshots.length, solari.snapshots.length, box.snapshots.length]).toEqual([1, 1, 1]);
     // A fork at solari takes solari's own copy, which its snapshot id says.
     const made = await rt.workspaces.create({ golden: await head(), name: "x", on: "solari" });
     expect(made.golden).toContain("solari-");
@@ -91,7 +91,7 @@ describe("a place is always current", () => {
     // The next recipe moves it: every other place follows, one build each, and the fork stays on what it booted.
     await seal("h2");
     await until(async () => (await current("solari")) && (await current("box")), 5000);
-    expect([docker.snapshots.length, solari.snapshots.length, box.snapshots.length]).toEqual([3, 2, 2]);
+    expect([fake.snapshots.length, solari.snapshots.length, box.snapshots.length]).toEqual([3, 2, 2]);
     const kept = await rt.workspaces.get(made.id);
     expect([kept.golden, kept.machineId]).toEqual([made.golden, made.machineId]);
     await rt.close();
@@ -129,7 +129,7 @@ describe("a place is always current", () => {
     await until(async () => (await row("solari")).build?.startsWith(copyStoppedLine()) === true, 5000);
     expect((await row("solari")).build).toContain("no room at solari today");
     await until(async () => current("box"), 5000);
-    expect((await rt.image.get()).copies.map(c => c.place).sort()).toEqual(["box", "docker"]);
+    expect((await rt.image.get()).copies.map(c => c.place).sort()).toEqual(["box", "fake"]);
     solari.create = create;
     const { built } = await rt.image.build({ place: "solari" });
     expect(built).toBe(true);

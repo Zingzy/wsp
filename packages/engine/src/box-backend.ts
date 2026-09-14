@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The backend for Box by ASCII: a persistent Ubuntu VM per box, billed while
 // it runs and free while stopped. It sits behind the same MachineBackend seam
-// as Solari and Docker. A nap is a stop that snapshots the disk and kills every
-// process; a wake is a resume onto a fresh machine that streams the disk back
+// Solari does. A nap is a stop that snapshots the disk and kills every process;
+// a wake is a resume onto a fresh machine that streams the disk back
 // in, so the id and the hosted route hold and the address does not. A golden
 // version is a named snapshot, which is already durable, so promoting one is a
 // second reading of the same name. Everything Box does differently from Solari

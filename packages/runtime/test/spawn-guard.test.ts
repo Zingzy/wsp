@@ -229,40 +229,6 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("a fork whose machine knows a road home is told that address, not the one this host advertises", async () => {
-    const held = heldAdapter({ takesMcpServers: true });
-    const backend = stubBackend();
-    // A container on this computer's own Docker daemon: it reaches this computer through the gateway it was given
-    // a name for, where a LAN address of this computer may be a route it has none of.
-    backend.machineHostUrl = port => `http://host.docker.internal:${port}`;
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://192.168.1.20:4700", port: 4700 } }, backend);
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: AGENTS_ON });
-    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("http://host.docker.internal:4700");
-    expect(held.launches[0]!.env[HOST_TOKEN_ENV]).toMatch(/\S/);
-    // The tools take no address at all: the word on the machine's PATH opens a session on that machine's own daemon,
-    // which the host is already holding the socket to, so nothing on this line says where this host answers.
-    expect(held.launches[0]!.mcpServers?.[MCP_SERVER_NAME]).toEqual({ command: "wsp", args: ["mcp"] });
-    held.end(0);
-    await handle.finished;
-    await rt.close();
-  });
-
-  it("a host bound to one address tells the fork that address, whatever road its machine knows", async () => {
-    const held = heldAdapter();
-    const backend = stubBackend();
-    backend.machineHostUrl = port => `http://host.docker.internal:${port}`;
-    // No port on the reach is the host saying it bound one address: it answers there and not on the gateway's, so
-    // the machine's own road is not a road to this host at all.
-    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://192.168.1.20:4700" } }, backend);
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: AGENTS_ON });
-    const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
-    expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("http://192.168.1.20:4700");
-    held.end(0);
-    await handle.finished;
-    await rt.close();
-  });
-
   it("a fork whose machine knows none is told the address this host advertises", async () => {
     const held = heldAdapter();
     const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://192.168.1.20:4700", port: 4700 } });
@@ -274,11 +240,9 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
-  it("the address the person named stands above what the machine's own backend knows", async () => {
+  it("the address the person named stands above the one this host bound", async () => {
     const held = heldAdapter();
-    const backend = stubBackend();
-    backend.machineHostUrl = port => `http://host.docker.internal:${port}`;
-    const rt = runtimeWith({ claude: held.factory }, { reach: { advertise: "https://box.example", url: "http://192.168.1.20:4700", port: 4700 } }, backend);
+    const rt = runtimeWith({ claude: held.factory }, { reach: { advertise: "https://box.example", url: "http://192.168.1.20:4700", port: 4700 } });
     const ws = await rt.workspaces.create({ golden: "snap_g", name: "lead", agents: AGENTS_ON });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     expect(held.launches[0]!.env[HOST_URL_ENV]).toBe("https://box.example");

@@ -293,7 +293,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
       },
       {
-        offer: "docker",
+        offer: "runtime",
         capabilities: {
           liveCloneForks: false,
           resize: false,

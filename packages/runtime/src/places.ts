@@ -1179,7 +1179,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.engine !== undefined ? { engine: here.engine } : {}),
           present: true,
           // This computer is where the person's own agents run, never something the host forks into: a copy of the
-          // image on a Docker here is the provider row's, which is the one that says it forks.
+          // image on a runtime here is that place's own row, which is the one that says it forks.
           takesForks: false,
         },
         ...held.map(r => {

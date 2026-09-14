@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
 import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
@@ -129,6 +129,12 @@ export interface DaemonJoin {
 
 /** The supervisor's name for the daemon, the one string the unit file, the stop, the start and the log read. */
 export const DAEMON_UNIT = "wsp-daemon.service";
+
+/** Where a sealed image keeps the script that keeps its daemon running. The machine's own boot runs it when it is
+ * there, so a fork of a sealed image starts its daemon with nothing dialling in, and the deploy is what writes it.
+ * The path is the image's rather than the place's: the runtime that boots the image reads the same path to decide
+ * whether there is a supervisor to exec. */
+export const GUEST_SUPERVISOR_PATH = "/root/wsp-daemon/supervise.sh";
 
 /** Where a machine with no service manager keeps the daemon's output, and the size the supervisor truncates it at.
  * A container has no journal, and nothing else on it would bound a file. The path is the image's rather than the
@@ -325,9 +331,9 @@ export const CLOUD_PLACE: DaemonPlace = {
 };
 
 /** The same place under the other supervision, for a machine whose only process that outlives an exec is its own
- * PID 1: a container on a Docker daemon. Every path is a fork's, since it is the same image; what differs is what
- * keeps the daemon up, and that a supervisor already watching sleeps a second before it restarts, so the wait for
- * the port is longer. */
+ * PID 1, which is every workspace a box's own runtime boots. Every path is a fork's, since it is the same image;
+ * what differs is what keeps the daemon up, and that a supervisor already watching sleeps a second before it
+ * restarts, so the wait for the port is longer. */
 export const CONTAINER_PLACE: DaemonPlace = { ...CLOUD_PLACE, supervise: BOOT_SCRIPT, upTries: 40 };
 
 /** The place a guest wsp made keeps its daemon, by what that machine answered keeps a process running on it. The

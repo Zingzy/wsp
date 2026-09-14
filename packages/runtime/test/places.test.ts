@@ -85,7 +85,7 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   daemonVersion: 17,
   agents: [],
   wsp: ["/home/maya/.npm-global/bin/wsp"],
-  dialed: "http://host.docker.internal:14621",
+  dialed: "http://192.168.1.20:14621",
   ...over,
 });
 
