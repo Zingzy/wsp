@@ -13,7 +13,11 @@ publish = false
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt", "net", "time", "io-util", "macros", "sync", "fs", "process"] }
-tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake", "connect"] }
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake", "connect", "rustls-tls-webpki-roots"] }
+# The provider rustls builds a client config from. tokio-tungstenite's feature turns none on, so without this the
+# provider would come from whatever else in the tree happens to ask for one, and a wss dial would panic in
+# ClientConfig::builder() the day that changes rather than fail to build.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 subtle = "2"
 base64 = "0.22"

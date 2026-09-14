@@ -142,6 +142,10 @@ export interface PlaceWiring {
    * calling home. Nothing is installed and nothing is left running: it answers or it throws the road's own line.
    * Absent on a runtime served without the ssh road, where a computer that is not linked can only be waited for. */
   dial?: PlaceDialler;
+  /** The end of the agent's own log on a computer that took it and has not dialled back, over the road it was
+   * installed on. Absent on a runtime served without the ssh road, where a wait that runs out has only its own
+   * sentence to give. */
+  log?: PlaceLogReader;
   /** How the daemon this host deploys is put on a computer that is already a place. The host wires it because the
    * binary and the table of chips it is picked from are the host's, as the installer above is. */
   update?: PlaceUpdater;
@@ -151,6 +155,10 @@ export interface PlaceWiring {
  * was one. Throws with the road's own sentence (ssh's line on the ssh road), which is what a person reads in place
  * of a wsp-shaped refusal. */
 export type PlaceDialler = (login: { ssh: string; keyPath?: string }) => Promise<void>;
+
+/** The last lines the agent wrote on a computer, read over the login it was installed over. Answers nothing where
+ * there is no log to read, which is a fact about that computer and not a reason to stop. */
+export type PlaceLogReader = (login: { ssh: string; keyPath?: string }) => Promise<readonly string[]>;
 
 /** What one update is told: which computer, what it last said about itself (its chip picks the binary), the link
  * this host is holding where it holds one, and the login it was installed over where the record holds one. Which
@@ -500,6 +508,15 @@ const DIAL_MS = 20_000;
 /** How long a computer has to dial back after its own join wrote its place file. A join that landed and a link
  * that never arrives is a network between the two, which is what the sentence says. */
 const JOIN_WAIT_MS = 90_000;
+
+/** What the box itself said while that wait ran out, where this host holds a login to it and the road to read it:
+ * the agent's log names the address it could not dial and why. A read that will not take adds nothing, since the
+ * sentence above it is the one the person came for. */
+async function boxSaid(wiring: PlaceWiring, installed: PlaceInstalled): Promise<readonly string[]> {
+  if (wiring.log === undefined || installed.ssh === undefined) return [];
+  const login = { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) };
+  return await wiring.log(login).catch(() => []);
+}
 
 /** How long a computer that took an update has to come back up running it. The unit restarts the daemon within
  * seconds and its link backs off from two, so a minute is the row reading the new version as the ticket asks
@@ -1065,6 +1082,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
             clearTimeout(timer);
             woken(id);
           };
+        }).catch(async (e: unknown) => {
+          // The host still holds the road it installed over, and the agent on that computer has been writing why
+          // its dial does not land every ten seconds. Its own sentence beats a person guessing at routes.
+          throw new Error([e instanceof Error ? e.message : String(e), ...(await boxSaid(wiring, installed))].join("\n"));
         });
         const found = await recordOf(placeId);
         if (found === undefined) throw new Error(placeNoLinkLine(installed.name));
@@ -1079,8 +1100,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
-        // against the line it belongs to rather than under the list.
-        stage(step, "failed", e instanceof Error ? e.message : String(e));
+        // against the line it belongs to rather than under the list. One line of it: a note is printed after the
+        // step's own marker at a terminal and inside one span in the sheet, and what a failure says beyond its
+        // first line rides the throw, which both roads print whole.
+        stage(step, "failed", (e instanceof Error ? e.message : String(e)).split("\n")[0]!);
         throw e;
       } finally {
         awaiting.delete(code);

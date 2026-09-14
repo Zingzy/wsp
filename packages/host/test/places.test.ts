@@ -34,6 +34,8 @@ import {
   placeDaemonFlags,
   placeInstaller,
   placeDialler,
+  placeLogReader,
+  PLACE_LOG_TAIL,
   preparePlaceHome,
   joinPlace,
   addableProviders,
@@ -769,6 +771,50 @@ describe("dialling a box whose agent stopped calling home", () => {
     const { asked, dial } = dialler({ exitCode: 0 });
     await dial({ ssh: "root@65.21.4.12:2222" });
     expect(asked[0]!.reach.port).toBe(2222);
+  });
+});
+
+describe("what a box that took the agent and did not dial back says for itself", () => {
+  /** One ssh child, as the transport sees it: the dial it was given and the script it was asked to run. */
+  const reader = (answer: { exitCode: number; stdout?: string }) => {
+    const asked: { reach: SshReach; script: string }[] = [];
+    const transport: SshTransport = async (reach, script) => {
+      asked.push({ reach, script });
+      return { exitCode: answer.exitCode, stdout: answer.stdout ?? "", stderr: "" };
+    };
+    return { asked, read: placeLogReader({ transport }) };
+  };
+
+  const SAID = [
+    "https://h645d7f8a8d48cbd6.example could not be dialled: not an http address",
+    "http://100.129.175.77:4420 did not answer in 10s",
+  ];
+
+  it("reads the end of the agent's own log over the login the install used, at the path the box's own HOME names", async () => {
+    const { asked, read } = reader({ exitCode: 0, stdout: `${SAID.join("\n")}\n` });
+    expect(await read({ ssh: "root@spoo" })).toEqual(SAID);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.reach).toEqual({ user: "root", host: "spoo", port: 22 });
+    // $HOME rather than a home read here: the login's own home is the box's reading of it, and one ssh child is
+    // what a person waiting on a wait that already ran out can afford.
+    expect(asked[0]!.script).toBe(`tail -n ${PLACE_LOG_TAIL} "${placeDaemonPaths("$HOME").placeLog}" 2>/dev/null`);
+  });
+
+  it("hands back nothing where the box has no log yet, leaving the wait's own sentence as it stands", async () => {
+    const { read } = reader({ exitCode: 1 });
+    expect(await read({ ssh: "root@spoo" })).toEqual([]);
+  });
+
+  it("keeps the last ten lines and no more, which is what reads under one sentence", async () => {
+    const lines = Array.from({ length: 40 }, (_, i) => `line ${i}`);
+    const { read } = reader({ exitCode: 0, stdout: `${lines.join("\n")}\n` });
+    expect(await read({ ssh: "root@spoo" })).toEqual(lines.slice(-PLACE_LOG_TAIL));
+  });
+
+  it("carries the key file the add was given, since every ssh child here runs with BatchMode on", async () => {
+    const { asked, read } = reader({ exitCode: 0, stdout: "linked\n" });
+    await read({ ssh: "root@spoo:2222", keyPath: "/Users/lena/.ssh/hetzner" });
+    expect(asked[0]!.reach).toEqual({ user: "root", host: "spoo", port: 2222, keyPath: "/Users/lena/.ssh/hetzner" });
   });
 });
 
