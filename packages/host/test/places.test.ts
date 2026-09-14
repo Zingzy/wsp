@@ -13,7 +13,7 @@ import { WebSocketServer } from "ws";
 import WebSocket from "ws";
 import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import type { PlaceStaging, PlaceUpdateRequest } from "@wsp/runtime";
+import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
@@ -1499,7 +1499,7 @@ describe("the update over the ssh road, where the link is down", () => {
   });
 });
 
-describe("the leave over the ssh road, on a computer that is holding no link", () => {
+describe("the leave over the ssh road, which a remove takes wherever this host holds a login", () => {
   /** One ssh child, as the transport sees it: the dial it was given and the line it was asked to run. */
   const leaver = (answer: { exitCode: number; stdout?: string; stderr?: string }) => {
     const asked: { reach: SshReach; script: string }[] = [];
@@ -1578,12 +1578,17 @@ describe("the leave over the ssh road, on a computer that is holding no link", (
     const { leave } = leaver({ exitCode: 255, stderr: `debug1: Reading configuration data\n${said}\n` });
     await expect(leave(asking())).rejects.toThrow(said);
     await expect(leave(asking())).rejects.not.toThrow(/debug/);
+    // The refusal of the login itself, as its own kind: nothing ran on that computer, and the line a remove reads
+    // out turns on telling that from a leave that ran there and stopped.
+    await expect(leave(asking())).rejects.toBeInstanceOf(PlaceLoginRefusedError);
   });
 
   it("carries that computer's own words where the leave ran there and stopped, rather than ssh's", async () => {
     const { leave } = leaver({ exitCode: 1, stdout: "this computer is not a place in any wsp, so there is nothing to leave\n" });
     await expect(leave(asking())).rejects.toThrow(placeLeaveFailedLine("vps", { stdout: "this computer is not a place in any wsp, so there is nothing to leave\n", stderr: "" }));
     await expect(leave(asking())).rejects.not.toThrow(/refused the login over ssh/);
+    // The login stood, so this is not the refusal kind: what came back is that computer talking.
+    await expect(leave(asking())).rejects.not.toBeInstanceOf(PlaceLoginRefusedError);
   });
 
   it("says the wait ran out where that computer answered nothing at all, rather than ending on a colon", async () => {
@@ -1596,6 +1601,40 @@ describe("the leave over the ssh road, on a computer that is holding no link", (
     const { asked, leave } = leaver({ exitCode: 0 });
     await leave(asking(reportOf({ wsp: ["wsp"] })));
     expect(asked[0]!.script).toBe(`wsp ${PLACE_LEAVE_VERB}`);
+  });
+
+  it("brings back a sweep that stopped the agent and disabled it while its unit file stood, and reloaded once it had gone", async () => {
+    const home = tmp("leave-road-unit");
+    const manager = unitsUnder(home);
+    const runner = fakeRunner();
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "vps", hostName: "zingzy-mbp", hostUrls: ["http://192.168.1.20:4400"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    const unit = manager.unit({ role: "place", statePath: placeFilePath(home), home, uid: 0 });
+    mkdirSync(dirname(unit.path), { recursive: true });
+    writeFileSync(unit.path, "[Unit]\n");
+    // What the manager was asked, and whether the unit file was still there when it was asked: the removal is the
+    // one step of the order that runs no command, and a sweep that took the file first leaves systemd restarting
+    // an agent with nothing to serve.
+    const seen: { argv: string[]; unitThere: boolean }[] = [];
+    const watching: ServiceRunner = argv => {
+      seen.push({ argv: [...argv], unitThere: existsSync(unit.path) });
+      return runner.run(argv);
+    };
+    // The computer at the end of the road, running the leave it already carries: the sweep is that computer's own
+    // and this host reads back what it printed by the one mark those lines carry.
+    const said = await sweepPlace({ home, manager, run: watching, uid: 0 });
+    expect(seen).toEqual([
+      { argv: ["systemctl", "stop", unit.name], unitThere: true },
+      { argv: ["systemctl", "disable", unit.name], unitThere: true },
+      { argv: ["systemctl", "daemon-reload"], unitThere: false },
+      { argv: ["systemctl", "--user", "stop", unit.name], unitThere: false },
+      { argv: ["systemctl", "--user", "disable", unit.name], unitThere: false },
+    ]);
+    const printed = ["vps left the wsp at http://192.168.1.20:4400; removed:", ...said.removed.map(line => sweptLine(line)), ...said.kept];
+    const { leave } = leaver({ exitCode: 0, stdout: `${printed.join("\n")}\n` });
+    // What came back over the road names the unit among what went, so a person reading a remove sees the service
+    // go and not only the files.
+    expect(await leave(asking())).toContain(`systemd system unit ${unit.name} (stopped)`);
+    expect(await leave(asking())).toContain(placeFilePath(home));
   });
 });
 
