@@ -33,9 +33,15 @@ export const GUEST_DAEMON_TARGETS: readonly DaemonTarget[] = DAEMON_TARGETS.filt
 /** The binary's name, on every machine and in every folder that carries one. */
 export const DAEMON_BIN = "wsp-daemon";
 
-/** The row for the machine this process runs on, or nothing on a platform wsp builds no daemon for. */
-export function daemonTargetHere(platform: string = process.platform, arch: string = process.arch): DaemonTarget | undefined {
+/** The row for a machine that says it is this platform and this chip, in node's own words for both, or nothing
+ * where wsp builds no daemon for it. What a place's report is read through, since a place is another computer. */
+export function daemonTargetFor(platform: string, arch: string): DaemonTarget | undefined {
   return DAEMON_TARGETS.find(t => t.platform === platform && t.arch === arch);
+}
+
+/** The row for the machine this process runs on, or nothing on a platform wsp builds no daemon for. */
+export function daemonTargetHere(): DaemonTarget | undefined {
+  return daemonTargetFor(process.platform, process.arch);
 }
 
 /** Where a target's binary sits inside the daemon asset. */

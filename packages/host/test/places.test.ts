@@ -3,7 +3,7 @@
 // real ws server holding a real ed25519 pair, so the handshake typed on a
 // computer is the one a host answers; the service manager is a fake runner,
 // since installing a launchd agent is not this test's business.
-import { createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
+import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,9 +11,9 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, JOIN_NO_KEY_REFUSAL, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonPaths, placeLinkTranscript, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import type { PlaceStaging } from "@wsp/runtime";
+import type { PlaceStaging, PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
 import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
@@ -50,8 +50,16 @@ import {
   ADD_LOOPBACK_REFUSAL,
   advertisedLoopbackRefusal,
   hostKeyHere,
+  UPDATE_FLAGS_REFUSAL,
+  placeNoUpdateRoadLine,
+  placeUnit,
+  PLACE_NO_KEEP_LINE,
+  placeUpdateFailedLine,
+  placeUpdateScript,
+  placeUpdater,
+  updatedLines,
 } from "../src/places.js";
-import { placeFilePath, placeKeyPath, placeLogPath, placeReport, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
+import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
@@ -303,6 +311,20 @@ describe("the table wsp places prints", () => {
     expect(printed[0]).toContain("IMAGE");
     expect(printed[1]).toContain("building your image · creating the machine");
     expect(printed[2]).not.toContain("building");
+  });
+
+  it("says on the row that a computer runs an older daemon than this wsp deploys, in one word naming both versions", () => {
+    const printed = placeLines([
+      { ...rows[1]!, daemonVersion: DAEMON_VERSION - 5 },
+      { ...rows[0]!, id: "p_2", name: "laptop", daemonVersion: DAEMON_VERSION },
+    ]);
+    expect(printed[0]).toContain("BEHIND");
+    expect(printed[1]).toContain(`daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}`);
+    // The word is the protocol's own, so this row and the app's table cannot say it two ways.
+    expect(printed[1]).toContain(placeDaemonBehind({ daemonVersion: DAEMON_VERSION - 5 })!);
+    // A computer on this wsp's own daemon says nothing in that column, and neither does one that never reported.
+    expect(printed[2]).not.toContain("daemon");
+    expect(placeLines([rows[2]!])[1]).not.toContain("daemon");
   });
 
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
@@ -1175,6 +1197,224 @@ describe("what wsp add asks the host for", () => {
     expect(io.lines.join("\n")).toContain("wsp join http://127.0.0.1:");
     // A door that would not open still leaves the key readable here, so the line it prints names one.
     expect(io.lines.join("\n")).toContain(hostKeyHere(opts.statePath));
+  });
+});
+
+describe("wsp add <place> --update", () => {
+  /** A host holding one joined computer, answering the two ops the flag sends and keeping what it was asked. */
+  const updateClient = (
+    answer: Record<string, unknown> | Error,
+    places: PlaceView[] = [{ id: "p_1", kind: "computer", name: "spoo", default: true, joinedAt: new Date(0).toISOString(), daemonVersion: DAEMON_VERSION - 1 }],
+  ): { dial: NonNullable<Parameters<typeof addCommand>[4]>["dial"]; asked: { op: string; params?: Record<string, unknown> }[] } => {
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    return {
+      asked,
+      dial: () =>
+        Promise.resolve({
+          request: (op: string, params?: Record<string, unknown>) => {
+            asked.push({ op, ...(params === undefined ? {} : { params }) });
+            if (op === "places.list") return Promise.resolve({ places } as never);
+            if (op === "places.update") return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer as never);
+            return Promise.reject(new Error(`unexpected op ${op}`));
+          },
+          events: () => Promise.resolve(),
+          onFrame: () => () => {},
+          closed: Promise.resolve(),
+          closeWords: () => "",
+          close: () => {},
+          drop: () => {},
+        } as never),
+    };
+  };
+
+  const updateDeps = (dial: NonNullable<Parameters<typeof addCommand>[4]>["dial"]): Parameters<typeof addCommand>[4] => ({
+    dial,
+    now: () => 0,
+    run: fakeRunner().run,
+    platform: "linux",
+    checkKey: async () => ({ state: "taken" }),
+  });
+
+  it("names the place by the word wsp places prints and asks the host to move it, then says both versions and the road", async () => {
+    const home = tmp("update-place");
+    const io = captured();
+    const fake = updateClient({ name: "spoo", from: 27, to: DAEMON_VERSION, road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" });
+    expect(await addCommand(io, opts(home), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
+    // The id off the listing, never the word the person typed: two computers may share a name and the host keys by id.
+    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1" });
+    expect(io.lines.join("\n")).toContain(`spoo: daemon 27 to ${DAEMON_VERSION}, over the link`);
+    expect(io.lines.join("\n")).toContain("/home/maya/.wsp/daemon/wsp-daemon");
+    // Where the one it replaced was kept, which is the first thing to look at on a box that will not come up.
+    expect(io.lines.join("\n")).toContain("the old one     /home/maya/.wsp/daemon/wsp-daemon.old");
+    // A daemon that answered no kept path simply says nothing of it rather than an empty row.
+    expect(updatedLines({ name: "spoo", from: 27, to: 34, road: "link", at: "/x" }).some(line => line.includes("the old one"))).toBe(false);
+  });
+
+  it("says the note when the computer took the daemon and had not dialled back on it yet", async () => {
+    const io = captured();
+    const fake = updateClient({ name: "spoo", from: 27, to: 27, road: "ssh", at: "/home/maya/.wsp/daemon/wsp-daemon", note: "spoo took the daemon and had not dialled back on it within 60s; its row reads the new version once it does" });
+    expect(await addCommand(io, opts(tmp("update-slow")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
+    expect(io.lines.join("\n")).toContain("over the ssh road");
+    expect(io.lines.join("\n")).toContain("had not dialled back on it within 60s");
+  });
+
+  it("refuses a word no place answers to in the line the person typed, never in the remove's", async () => {
+    const io = captured();
+    const fake = updateClient(new Error("never asked"));
+    expect(await addCommand(io, opts(tmp("update-none")), ["laptop"], { update: true }, updateDeps(fake.dial))).toBe(1);
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list"]);
+    expect(io.errors[0]).toContain(placeUpdateLine("laptop"));
+    expect(io.errors[0]).toContain("It holds spoo.");
+    expect(io.errors[0]).not.toContain("wsp remove");
+  });
+
+  it("names the ids when two computers share the word, since ids tell them apart", async () => {
+    const io = captured();
+    const two: PlaceView[] = [
+      { id: "p_1", kind: "computer", name: "spoo", default: true, joinedAt: new Date(0).toISOString() },
+      { id: "p_2", kind: "computer", name: "spoo", default: false, joinedAt: new Date(0).toISOString() },
+    ];
+    const fake = updateClient(new Error("never asked"), two);
+    expect(await addCommand(io, opts(tmp("update-two")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(1);
+    expect(io.errors[0]).toContain("p_1, p_2");
+    expect(io.errors[0]).toContain(placeUpdateLine("spoo"));
+  });
+
+  it("refuses the flag with no place named, and beside the flags a join takes", async () => {
+    const io = captured();
+    const fake = updateClient(new Error("never asked"));
+    await expect(addCommand(io, opts(tmp("update-bare")), [], { update: true }, updateDeps(fake.dial))).rejects.toThrow(/takes the place/);
+    const beside = captured();
+    expect(await addCommand(beside, opts(tmp("update-flags")), ["spoo"], { update: true, name: "other" }, updateDeps(fake.dial))).toBe(1);
+    expect(beside.errors).toEqual([UPDATE_FLAGS_REFUSAL]);
+    // Nothing was dialled for either: both are read off the line before a socket is opened.
+    expect(fake.asked).toEqual([]);
+  });
+});
+
+describe("which binary an update carries and how it travels", () => {
+  /** A daemon asset holding one binary per target, each with its own bytes, as a release stages it. */
+  const daemonDir = (): string => {
+    const dir = tmp("update-asset");
+    for (const target of GUEST_DAEMON_TARGETS) {
+      const at = daemonBinaryIn(dir, target.triple);
+      mkdirSync(join(at, ".."), { recursive: true });
+      writeFileSync(at, `a daemon for ${target.uname}`);
+    }
+    return dir;
+  };
+
+  /** A link that keeps every frame it was sent and answers the last part with where the binary landed. */
+  const fakeLink = (): { link: NonNullable<PlaceUpdateRequest["link"]>; frames: Record<string, unknown>[] } => {
+    const frames: Record<string, unknown>[] = [];
+    return {
+      frames,
+      link: {
+        request: (op: string, params?: Record<string, unknown>) => {
+          frames.push({ op, ...params });
+          return Promise.resolve(params?.["last"] === true ? { at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } : {});
+        },
+      } as never,
+    };
+  };
+
+  const reportOf = (over: Partial<PlaceReport> = {}): PlaceReport => ({
+    name: "spoo",
+    platform: "linux",
+    arch: "x64",
+    os: "Ubuntu 24.04",
+    shape: { cpu: 2, memMb: 7747 },
+    login: { HOME: "/home/maya", USER: "maya", PATH: "/usr/bin" },
+    runsWorkspaces: true,
+    engine: "none",
+    daemonVersion: 27,
+    agents: [],
+    wsp: ["/home/maya/.wsp/daemon/wsp/dist/bin.js"],
+    dialed: "http://192.168.1.20:4400",
+    ...over,
+  });
+
+  it("picks the binary by the chip that computer said it is, never this one's, and sends it as bytes under one upload id", async () => {
+    const dir = daemonDir();
+    const { link, frames } = fakeLink();
+    const landed = await placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "arm64" }), link });
+    // Both paths come off the last part's own reply, so the line names what that computer actually did.
+    expect(landed).toEqual({ road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" });
+    // The chip the box said, so a host on x64 deploys to an arm64 box the binary that box can run.
+    const wanted = readFileSync(daemonBinaryIn(dir, "aarch64-unknown-linux-musl"));
+    expect(Buffer.concat(frames.map(f => Buffer.from(String(f["data"]), "base64")))).toEqual(wanted);
+    expect(frames.every(f => f["op"] === "place.update")).toBe(true);
+    expect(new Set(frames.map(f => f["uploadId"]))).toHaveProperty("size", 1);
+    // Every part carries the sha256 of the whole, which is what the last part is checked against before anything
+    // is moved over the binary the unit starts.
+    expect(new Set(frames.map(f => f["sha256"]))).toEqual(new Set([createHash("sha256").update(wanted).digest("hex")]));
+    expect(frames.map(f => f["seq"])).toEqual([...frames.keys()]);
+    expect(frames.at(-1)!["last"]).toBe(true);
+    // Never a command line: a command sits in a world readable /proc/<pid>/cmdline while it runs.
+    expect(frames.some(f => typeof f["cmd"] === "string")).toBe(false);
+  });
+
+  it("refuses a chip this wsp builds no daemon for, and a computer with no link and no login, before a byte moves", async () => {
+    const dir = daemonDir();
+    const { link, frames } = fakeLink();
+    await expect(placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf({ arch: "riscv64" }), link })).rejects.toThrow(
+      placeNoChipLine("spoo", "linux", "riscv64"),
+    );
+    await expect(placeUpdater({ daemonDir: dir })({ placeId: "p_1", name: "spoo", report: reportOf() })).rejects.toThrow(placeNoUpdateRoadLine("spoo"));
+    expect(frames).toEqual([]);
+  });
+
+  it("says which file is missing where this command carries no daemon for that chip at all", async () => {
+    const { link } = fakeLink();
+    const empty = tmp("update-no-asset");
+    await expect(placeUpdater({ daemonDir: empty })({ placeId: "p_1", name: "spoo", report: reportOf(), link })).rejects.toThrow(/wsp-daemon binary missing/);
+  });
+});
+
+describe("the update over the ssh road, where the link is down", () => {
+  const HOME = "/home/maya";
+  const UNIT = placeUnit(HOME);
+
+  it("names the unit and its scope through the manager that writes them, never by spelling either here", () => {
+    const at = placeService(HOME, 0);
+    const manager = SERVICE_MANAGERS.systemd;
+    expect(UNIT.name).toBe(manager.unit(at).name);
+    // A place's unit is the machine's since #750's ruling, so it is driven with no --user and read the same way.
+    expect(manager.needsRoot?.(at)).toBe(true);
+    expect(UNIT.systemctl).toEqual(["systemctl"]);
+    expect(UNIT.journalctl).toEqual(["journalctl"]);
+  });
+
+  it("moves the landed binary over the path the unit itself names, keeps the old one and restarts, sweeping nothing", () => {
+    const landed = `${placeDaemonPaths(HOME).putDir}/wsp-daemon`;
+    const script = placeUpdateScript(HOME, landed);
+    // The path is read back out of systemd rather than worked out here: the join wrote that unit with whatever
+    // path the wsp on that computer resolved.
+    expect(script).toContain(`systemctl show -p ExecStart --value ${shellQuote(UNIT.name)}`);
+    expect(script).toContain("PLACE_NO_UNIT");
+    // A keep that failed ends the update, as the link road's own install does: a box is never left on the new
+    // daemon with no way back to the one it ran.
+    expect(script).toContain(`cp -f "$exe" "$exe.old" || { echo ${PLACE_NO_KEEP_LINE}; exit 1; }`);
+    expect(script).not.toContain(`"$exe.old" 2>/dev/null || true`);
+    // A move, never a write into a running executable.
+    expect(script).toContain(`mv -f ${shellQuote(landed)} "$exe"`);
+    expect(script).not.toMatch(/cat > "\$exe"|> "\$exe"/);
+    expect(script).toContain(`systemctl restart ${shellQuote(UNIT.name)}`);
+    // The old port file goes before the restart, never after: a Type=simple restart returns as the process forks,
+    // so a daemon that binds quickly would have its own fresh port file removed and the wait below would read a
+    // daemon that is up as one that never came.
+    expect(script.indexOf(`rm -f ${shellQuote(placeDaemonPaths(HOME).portFile)}`)).toBeLessThan(script.indexOf("restart"));
+    expect(script).toContain("PLACE_UPDATED");
+    expect(script).toContain("PLACE_UPDATE_DOWN");
+    // Nothing of the person's and nothing of the workspaces is touched: an update is not a leave.
+    for (const path of placeOwnedPaths(HOME).filter(at => at !== placeDaemonPaths(HOME).portFile)) expect(script).not.toContain(`rm -rf ${path}`);
+    expect(script).not.toContain("place.json");
+  });
+
+  it("says what the box printed when its agent did not come back up", () => {
+    expect(placeUpdateFailedLine("spoo", "Job for wsp-place-1234abcd.service failed")).toContain("spoo took the daemon and its agent did not come back up");
+    expect(placeNoUpdateRoadLine("spoo")).toContain("switch it on and run the line again");
   });
 });
 

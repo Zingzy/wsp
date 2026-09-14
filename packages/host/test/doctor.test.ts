@@ -11,7 +11,7 @@ import { WebSocketServer } from "ws";
 import { GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { DAEMON_MEMORY_MAX_PERCENT, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, signInRefusalLine, type HarnessCatalogAnswer, type PlaceCapacity } from "@wsp/protocol";
+import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -46,6 +46,7 @@ import {
   localDoctor,
   localPrompt,
   promoteGoldens,
+  placesBehindLines,
   roomLeft,
   sshDaemonPlace,
   stageDaemonBundle,
@@ -286,6 +287,27 @@ describe("roomLeft", () => {
     expect(await roomLeft(counting({}))).toBe("");
     expect(await roomLeft({ capacity: () => Promise.reject(new Error("link gone")) })).toBe("");
     expect(await roomLeft({})).toBe("");
+  });
+});
+
+describe("the doctor's line for a place behind this wsp", () => {
+  const listing = (places: Partial<PlaceView>[]) => ({ places: { list: async () => places as PlaceView[] } }) as never;
+
+  it("names each computer running an older daemon than this wsp deploys, with the flag that moves it", async () => {
+    const lines = await placesBehindLines(listing([
+      { id: "p_1", kind: "computer", name: "spoo", default: true, daemonVersion: DAEMON_VERSION - 5 },
+      { id: "p_2", kind: "computer", name: "laptop", default: false, daemonVersion: DAEMON_VERSION },
+    ]));
+    expect(lines).toEqual([`spoo is behind: daemon ${DAEMON_VERSION - 5}, host ${DAEMON_VERSION}; wsp add spoo --update puts this wsp's daemon on it`]);
+    // One line per computer, and the fix half is a command a person can type.
+    expect(lines[0]).toContain(placeUpdateLine("spoo"));
+  });
+
+  it("says nothing where every place is level, where none has reported, and on a host holding no places at all", async () => {
+    expect(await placesBehindLines(listing([{ id: "p_1", kind: "computer", name: "spoo", default: true, daemonVersion: DAEMON_VERSION }]))).toEqual([]);
+    expect(await placesBehindLines(listing([{ id: "solari", kind: "provider", name: "solari", default: false }]))).toEqual([]);
+    expect(await placesBehindLines(listing([]))).toEqual([]);
+    expect(await placesBehindLines({} as never)).toEqual([]);
   });
 });
 

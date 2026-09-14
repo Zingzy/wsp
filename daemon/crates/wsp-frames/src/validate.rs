@@ -50,6 +50,31 @@ where
     Ok(list)
 }
 
+/// The protocol's upload id: one to thirty-two lowercase letters and digits. A name and never a path, since the
+/// far side keeps a file under it.
+pub(crate) fn upload_word<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = bounded::<_, 1, 32>(d)?;
+    if !s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()) {
+        return Err(de::Error::custom("an upload id is lowercase letters and digits"));
+    }
+    Ok(s)
+}
+
+/// A sha256 as the protocol spells it: sixty-four lowercase hex characters.
+pub(crate) fn sha256_hex<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(d)?;
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+        return Err(de::Error::custom("a sha256 is 64 lowercase hex characters"));
+    }
+    Ok(s)
+}
+
 /// The protocol's isHttpUrl: http or https, then anything that is not whitespace or a control character.
 pub fn is_http_url(url: &str) -> bool {
     let bytes = url.as_bytes();

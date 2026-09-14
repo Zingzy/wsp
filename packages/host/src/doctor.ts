@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset, stagedAsset } from "./assets.js";
@@ -1273,6 +1273,19 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
   return 0;
 }
 
+/** One line per place running an older daemon than this wsp deploys, each naming the line that moves it. Read
+ * before anything is forked, so the reading a person came for is printed whether or not the rest of the run stands;
+ * it dials nothing and bills nothing, since every fact on it is what that computer last reported. A host holding no
+ * places, or none behind, prints nothing. */
+export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.now()): Promise<string[]> {
+  if (rt.places === undefined) return [];
+  const places = await rt.places.list(now);
+  return places.flatMap(place => {
+    const word = placeDaemonBehind(place);
+    return word === undefined ? [] : [placeBehindLine(place.name, word)];
+  });
+}
+
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
@@ -1295,6 +1308,10 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
   try {
     io.log("doctor: proving one live workspace end to end, from your image to the machine it forks and back");
+
+    // Before the first thing that bills: a computer on an older daemon than this wsp deploys is a fact a person
+    // came here for, and a run that stops later must still have said it.
+    for (const line of await placesBehindLines(rt)) io.log(line);
 
     await timings.time("image versions made durable", () => promoteGoldens(rt, io), note => note);
     await timings.time("snapshot storage", () => cleanOrphans(rt, io, opts.yes === true, opts.statePath), note => note);
