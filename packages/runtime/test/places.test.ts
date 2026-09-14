@@ -43,7 +43,7 @@ import {
 import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
-import { NO_PLACE_UPDATER, newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, newPlaceKeyPair, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend } from "./stub-backend.js";
@@ -705,7 +705,7 @@ describe("dialling a computer that stopped answering", () => {
 
   it("logs in over the road the computer was installed on when it is holding no link, and says the computer is on", async () => {
     const hostKey = newPlaceKeyPair();
-    const logins: { ssh: string; keyPath?: string }[] = [];
+    const logins: PlaceLogin[] = [];
     let box: WsClient | undefined;
     runtime = createRuntime({
       backend: stubBackend(),
@@ -739,7 +739,7 @@ describe("dialling a computer that stopped answering", () => {
 
   it("dials with the key file the add was given, since every ssh child runs with BatchMode on", async () => {
     const hostKey = newPlaceKeyPair();
-    const logins: { ssh: string; keyPath?: string }[] = [];
+    const logins: PlaceLogin[] = [];
     let box: WsClient | undefined;
     runtime = createRuntime({
       backend: stubBackend(),
@@ -981,7 +981,7 @@ describe("putting the agent on a computer over ssh", () => {
 
   it("puts the agent's own last lines under that sentence, read over the login the install used", async () => {
     const hostKey = newPlaceKeyPair();
-    const asked: { ssh: string; keyPath?: string }[] = [];
+    const asked: PlaceLogin[] = [];
     const said = ["https://h645d7f8a8d48cbd6.example could not be dialled: not an http address", "http://100.129.175.77:4420 did not answer in 10s"];
     runtime = createRuntime({
       backend: stubBackend(),
@@ -1028,6 +1028,47 @@ describe("putting the agent on a computer over ssh", () => {
       (e: unknown) => e as Error,
     );
     expect(failed?.message).toBe(placeNoLinkLine("box"));
+  });
+
+  it("keeps the login the install used on the record when the computer never dials back, which is the box that needs it most", async () => {
+    const hostKey = newPlaceKeyPair();
+    const store = memoryStore();
+    const asked: PlaceUpdateRequest[] = [];
+    let joined = "";
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async req => {
+          // The shape a box that never comes back has: its own join opens a socket and closes it while the install's
+          // ssh command is still running, and the unit that join wrote never dials this host at all.
+          const { client, placeId } = await join(hostKey, { code: readJoinToken(req.code).code, name: "vps", report: report("vps", { daemonVersion: DAEMON_VERSION - 1 }) });
+          joined = placeId;
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === true));
+          client.close();
+          await until(async () => (await placesOf()).some(p => p.id === placeId && p.present === false));
+          return { name: "vps", ssh: "root@65.21.4.12", sshKeyPath: "/Users/lena/.ssh/hetzner" };
+        },
+        update: async req => {
+          asked.push(req);
+          return { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" };
+        },
+      },
+      placeJoinWaitMs: 60,
+      placeUpdateWaitMs: 60,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await expect(runtime.places!.add({ address: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner", hostUrls: DOOR }, Date.now())).rejects.toThrow(placeNoLinkLine("vps"));
+    // The wait's outcome says nothing about what road this host was handed, so the record holds the login either way.
+    const held = (await store.get("places", joined)) as { road?: { ssh?: string; keyPath?: string } };
+    expect(held.road).toMatchObject({ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" });
+    // And the road that puts a daemon on that computer takes it: the one box that needs the update road is the one
+    // whose agent could not dial.
+    const updated = await runtime.places!.update(joined);
+    expect(updated.road).toBe("ssh");
+    expect(asked.map(r => r.ssh)).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
   });
 
 });
