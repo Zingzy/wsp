@@ -123,13 +123,57 @@ describe("one module per service manager", () => {
     ]);
     expect(systemd.holds(at)).toEqual(["systemctl", "--user", "is-enabled", `wsp-host-${tag}.service`]);
     expect(systemd.afterLoad?.(at)).toContain("enable-linger");
+    expect(systemd.needsRoot?.(at)).toBe(false);
+  });
+
+  it("the agent on a computer joined as a place is the machine's service, not one login's, so it needs root and asks the person for nothing after", () => {
+    const systemd = SERVICE_MANAGERS.systemd;
+    const there: ServiceAddress = { role: "place", statePath: "/home/maya/.wsp/place.json", home: "/home/maya", uid: 0 };
+    const theirTag = serviceTag(there.statePath);
+    expect(systemd.unit(there)).toEqual({ name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` });
+    // multi-user.target, not default.target: the agent holds the link open whether or not anybody is logged in.
+    expect(systemd.text(planFor(there))).toContain("WantedBy=multi-user.target");
+    expect(systemd.load(there)).toEqual([
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "enable", "--now", `wsp-place-${theirTag}.service`],
+    ]);
+    expect(systemd.unload(there)).toEqual([
+      ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
+      ["systemctl", "daemon-reload"],
+    ]);
+    expect(systemd.holds(there)).toEqual(["systemctl", "is-enabled", `wsp-place-${theirTag}.service`]);
+    // Both systemds, the one a place writes today first: a computer joined on the road before it has its unit
+    // under that login's own, and a sweep that read the machine's alone left it there to flap under auto-restart.
+    expect(systemd.held(there)).toEqual([
+      {
+        unit: { name: `wsp-place-${theirTag}.service`, path: `/etc/systemd/system/wsp-place-${theirTag}.service` },
+        words: "systemd system unit",
+        forget: [["systemctl", "disable", `wsp-place-${theirTag}.service`]],
+        unload: [
+          ["systemctl", "disable", "--now", `wsp-place-${theirTag}.service`],
+          ["systemctl", "daemon-reload"],
+        ],
+      },
+      {
+        unit: { name: `wsp-place-${theirTag}.service`, path: `/home/maya/.config/systemd/user/wsp-place-${theirTag}.service` },
+        words: "systemd user unit",
+        forget: [["systemctl", "--user", "disable", `wsp-place-${theirTag}.service`]],
+        unload: [
+          ["systemctl", "--user", "disable", "--now", `wsp-place-${theirTag}.service`],
+          ["systemctl", "--user", "daemon-reload"],
+        ],
+      },
+    ]);
+    // Nothing about linger: a system unit outlives every login on its own.
+    expect(systemd.afterLoad?.(there)).toBeUndefined();
+    expect(systemd.needsRoot?.(there)).toBe(true);
   });
 
   it("the platform picks the module, an unknown one gets a line naming the two that exist, and two state files never share a unit", () => {
     expect(serviceManagerFor("darwin")).toBe(SERVICE_MANAGERS.launchd);
     expect(serviceManagerFor("linux")).toBe(SERVICE_MANAGERS.systemd);
     expect(serviceManagerFor("win32")).toBeUndefined();
-    expect(noManagerLine("win32")).toBe("wsp writes no service on win32; it writes a launchd agent on darwin and a systemd user unit on linux. Run wsp up in a terminal that stays open instead.");
+    expect(noManagerLine("win32")).toBe("wsp writes no service on win32; it writes a launchd agent on darwin and a systemd unit on linux. Run wsp up in a terminal that stays open instead.");
     const other: ServiceAddress = { ...at, statePath: "/Users/z/work/.wsp/state.json" };
     expect(SERVICE_MANAGERS.launchd.unit(other).name).not.toBe(SERVICE_MANAGERS.launchd.unit(at).name);
   });
@@ -141,11 +185,10 @@ describe("one module per service manager", () => {
     expect(serviceEnv({ PATH: "/usr/bin", WSP_HOME: "" })).toEqual({ PATH: "/usr/bin" });
     expect(serviceEnv({}).PATH).toContain("/usr/bin");
     // Every variable a provider is named in travels: the shell that installed the service is gone by the time it runs.
-    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "docker", WSP_DOCKER: "1", DOCKER_HOST: "tcp://10.0.0.4:2375" })).toEqual({
+    expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "box", WSP_FAKE_AS: "solari" })).toEqual({
       PATH: "/usr/bin",
-      WSP_PROVIDER: "docker",
-      WSP_DOCKER: "1",
-      DOCKER_HOST: "tcp://10.0.0.4:2375",
+      WSP_PROVIDER: "box",
+      WSP_FAKE_AS: "solari",
     });
     expect(serviceEnv({ PATH: "/usr/bin", WSP_PROVIDER: "" })).toEqual({ PATH: "/usr/bin" });
   });
@@ -202,6 +245,7 @@ function fakeService(over: Partial<ServiceDeps> = {}): {
     load: a => [["fake", "load", unit(a).name]],
     unload: a => [["fake", "unload", unit(a).name]],
     holds: a => ["fake", "holds", unit(a).name],
+    held: a => [{ unit: unit(a), words: "fake service", forget: [], unload: [["fake", "unload", unit(a).name]] }],
     absent: answer => answer.output === "not held",
   };
   const run: ServiceRunner = async argv => {
@@ -464,9 +508,9 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // A Solari key in the same shell is not what this service would read, so it is not what it is refused over.
     const boxWithSolari = { ...box, SOLARI_API_KEY: KEY };
     expect(keyOnlyInThisShell(sources(boxWithSolari), boxWithSolari)).toContain("BOX_API_KEY");
-    // Containers read no key at all: nothing is lost by starting without this shell, so there is no line.
-    const docker = { WSP_PROVIDER: "docker", SOLARI_API_KEY: KEY };
-    expect(keyOnlyInThisShell(sources(docker), docker)).toBeUndefined();
+    // A provider that reads no key loses nothing by starting without this shell, so there is no line.
+    const keyless = { WSP_PROVIDER: "fake", SOLARI_API_KEY: KEY };
+    expect(keyOnlyInThisShell(sources(keyless), keyless)).toBeUndefined();
   });
 
   it("keeps a keyless host up: nothing asks for a key, and no line says one went missing", async () => {
@@ -511,7 +555,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
 
   it("the unit runs the wsp up the person typed: every flag that shapes a serving host is in ExecStart, read back by the same parse", async () => {
     keyInFile();
-    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--ws-port", "4433", "--provider", "docker", "--docker-host", "tcp://10.0.0.4:2375", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
+    const typed = ["up", "--service", "--state", statePath, "--listen", "0.0.0.0", "--port", "4407", "--ws-port", "4433", "--provider", "box", "--advertise", "http://10.0.0.9:4407", "--no-relay"];
     // Every flag of the table is in that line, so a row added to it and forgotten here fails rather than passing quietly.
     for (const flag of SERVE_FLAGS) expect(typed, `--${flag.name} is in the line this case types`).toContain(`--${flag.name}`);
     const asked = optsFor(parseArgs({ args: typed, options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
@@ -527,17 +571,16 @@ describe("wsp up --service, wsp down and wsp status", () => {
       "--ws-port", "4433",
       "--listen", "0.0.0.0",
       "--advertise", "http://10.0.0.9:4407",
-      "--provider", "docker",
-      "--docker-host", "tcp://10.0.0.4:2375",
+      "--provider", "box",
       "--no-relay",
     ]);
     // The words as the manager reads them, not only as argv: systemd takes one line, and each word is quoted there.
     expect(SERVICE_MANAGERS.systemd.text(fake.plans[0]!)).toContain(
-      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--ws-port' '4433' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'docker' '--docker-host' 'tcp://10.0.0.4:2375' '--no-relay'`,
+      `ExecStart='${process.execPath}' '${argv[1]!}' 'up' '--state' '${statePath}' '--port' '4407' '--ws-port' '4433' '--listen' '0.0.0.0' '--advertise' 'http://10.0.0.9:4407' '--provider' 'box' '--no-relay'`,
     );
     // The line in the unit is a line wsp reads: parsed again, it asks for exactly what the person asked for.
     const again = optsFor(parseArgs({ args: argv.slice(2), options: SHARED_OPTIONS, allowPositionals: true }).values, process.env);
-    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.dockerHost, o.relay];
+    const serving = (o: ServeAsked): unknown => [o.statePath, o.port, o.wsPort, o.address, o.advertise, o.provider, o.relay];
     expect(serving(again)).toEqual(serving(asked));
     // Only a word the person typed is spelled back, read the one way everything reads it: spaces are no address,
     // and a trailing slash is not part of one. Without --advertise the unit carries none, and every kind of

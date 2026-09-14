@@ -89,7 +89,7 @@ describe("wsp new --on", () => {
   const hostOf = (sent: Record<string, unknown>[]): Parameters<typeof createFromHead>[0] =>
     ({
       request: async (op: string, params?: Record<string, unknown>) => {
-        if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, runsWorkspaces: true, present: true, takesForks: true }] };
+        if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, present: true, takesForks: true }] };
         if (op === "golden.get") return { manifest: { name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_head" }] } };
         sent.push({ op, ...params });
         if (op === "workspaces.landing") return { place: "p_1", name: "srv", capabilities: { sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }] } };

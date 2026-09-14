@@ -868,7 +868,6 @@ describe("toolInstallsFor", () => {
       row({ rung: "tools", id: "tools/brew/python", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/uv", linux: "yes" }),
       row({ rung: "tools", id: "tools/cargo/ripgrep", label: "ripgrep", version: "14.1.0" }),
-      row({ rung: "tools", id: "tools/brew/docker-compose", linux: "yes" }),
       row({ rung: "tools", id: "tools/brew/python@3.14", linux: "yes" }),
     ], table);
     expect(baseRows(t)).toEqual([
@@ -879,7 +878,6 @@ describe("toolInstallsFor", () => {
       ["tools/brew/python", "Python 3.12", "Python 3.12 is part of the base; this Mac runs Python 3.14"],
       ["tools/brew/uv", "uv", "uv is part of the base"],
       ["tools/cargo/ripgrep", "ripgrep", "ripgrep is part of the base"],
-      ["tools/brew/docker-compose", "Docker engine and compose", "Docker engine and compose is part of the base"],
     ]);
     // The plan names no computer: it carries the floor row and the version read here, so the same rows read as a
     // Linux computer's when that is what was read.

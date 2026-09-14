@@ -837,9 +837,9 @@ describe("wsp init, interactive", () => {
     await f.press(KEY.enter);
     await f.until("Tools  2/3");
     // Nothing here and nothing ticked: the base rows still come, and every other row is on the screen at its size.
-    // Sixteen base rows fold behind the visible two, and the why column is cut to the screen's width.
-    expect(f.text()).toMatch(/• fd\s+base\s+always on th[^\n]*?\s+3 MB\n/);
-    expect(f.text()).toContain("On: 16 tools, 1.5 GB");
+    // Fifteen base rows fold behind the visible ones, and the why column is cut to the screen's width.
+    expect(f.text()).toMatch(/• sqlite3\s+base\s+always on th[^\n]*?\s+3 MB\n/);
+    expect(f.text()).toContain("On: 15 tools, 1003 MB");
     // No formula, no sign-in and no agent here that takes the wsp tools: none of those three screens is shown.
     await f.press(KEY.enter);
     await f.until(BOOT);
@@ -870,9 +870,11 @@ describe("wsp init, the project the run is for", () => {
     await f.until("Agents");
     await f.press(KEY.enter);
     await f.until("Tools  2/5");
-    // Go is off in the catalog and never used here; the folder's own go.mod put it on the machine, in its own group.
-    expect(f.text()).toMatch(/▾ Your project needs\s+1 of 1\s+239 MB/);
+    // Go and Docker are both off in the catalog and neither was used here; the folder's own go.mod and compose.yaml
+    // put each on the machine, in their own group.
+    expect(f.text()).toMatch(/▾ Your project needs\s+2 of 2\s+756 MB/);
     expect(f.text()).toMatch(/● +Go +project +go\.mod needs[^\n]*? +239 MB/);
+    expect(f.text()).toMatch(/● +Docker engine and compose +project +compose\.yaml nee[^\n]*? +517 MB/);
     await f.press(KEY.enter);
     await throughScreens(f, ["Sign-ins", "wsp for your agents"]);
     await f.until(BOOT);
@@ -988,12 +990,12 @@ describe("wsp init, the summary-first screens", () => {
     // Screen two is the list itself: the base as bullets under the title, then a group per why, every row with its
     // count and its size, the totals and the Disk line under them. Nothing is hidden behind a key.
     expect(two).toMatch(/^◆  Tools  2\/5\n┃ {2}Tools from your usage\n┃ {2}You can change this later\.\n┃ {2}search/);
-    expect(two).toMatch(/▾ Always on the image\s+16\s+1\.5 GB\n┃\s+• Docker engine and compose\s+base\s+always on the image\s+517 MB\n/);
+    expect(two).toMatch(/▾ Always on the image\s+15\s+1003 MB\n┃\s+• C toolchain with cmake and ninja\s+base\s+always on the image\s+469 MB\n/);
     expect(two).toMatch(/▾ You use these\s+1 of 2\s+239 MB\n┃\s+○ Go\s+used\s+below the floor, 2 commands in 1[^\n]*?239 MB\n┃\s+● Cloudflare Wrangler\s+used\s+40 commands in 3 sessions\s+239 MB\n/);
     // This Mac's npm global the catalog does not carry is no row here: the catalog is the Tools screen, the Also screen is its.
     expect(two).toMatch(/▾ Installed here, never used\s+2 of 2\s+54 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n┃\s+● yq\s+installed\s+installed here, never used\s+14 MB\n/);
     expect(two).not.toContain("tsx");
-    expect(two).toMatch(/On: 19 tools, 1\.8 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
+    expect(two).toMatch(/On: 18 tools, 1\.3 GB\n┃ {2}on when used in 2 sessions and 5 commands; heavy rows 3 and 20\n┃ {2}Disk: [\d.]+ GB of 15\.2 GB on the 20 GB builder\n┗ {2}space on or off • ← → fold • enter next • esc back/);
     expect(two).not.toContain("adjust");
     expect(two).not.toContain("every row on this screen that can be ticked");
     // Typing narrows the rows to a match; space unticks yq and the totals follow it.
@@ -1224,7 +1226,7 @@ describe("wsp init, the summary-first screens", () => {
     expect(saved.get("agents/mcp/claude/github")).toMatchObject({ bring: false, choice: "skip" });
     expect(saved.get("agents/mcp/claude/notes")).toMatchObject({ bring: true });
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
-    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "docker", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
+    expect(small.rows.filter(r => r.on).map(r => r.id)).toEqual(["claude", "codex", "curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "yq", "hermes", "wrangler"]);
     expect(small.rows.find(r => r.id === "gh")).toMatchObject({ signIn: "machine" });
     expect(small.rows.find(r => r.id === "go")).not.toHaveProperty("signIn");
     // --yes answers every row with the word its screen would have opened on: the same map signInItems hands the screen.

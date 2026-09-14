@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { daemonListeningLine, type WorkspaceKind } from "@wsp/protocol";
+import { daemonListeningLine } from "@wsp/protocol";
 import { daemonBinaryHere } from "../../host/src/assets.js";
 
 /** An agent to look for on the place's PATH at every link, as catalog id and command name. */
@@ -25,7 +25,9 @@ export interface DaemonArgs {
   tokenPath?: string;
   root?: string;
   rootsPath?: string;
-  kind?: WorkspaceKind;
+  /** Any word: the daemon refuses a kind it does not serve at the watch, in the sentence the pane prints, and the
+   * words it serves are its own rather than the protocol's workspace kinds (a place is not one of those). */
+  kind?: string;
   workFolder?: string;
   inbox?: string;
   inboxQuietMs?: number;

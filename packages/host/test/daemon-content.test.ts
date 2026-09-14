@@ -13,12 +13,15 @@ import { fileURLToPath } from "node:url";
 import { DAEMON_CONTENT_SHA, DAEMON_ROOTS_PATH, DAEMON_VERSION, workScoreLine } from "@wsp/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLOUD_PLACE, daemonUnit, deployScript, openShimScript } from "../src/doctor.js";
+import { GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 
 const DAEMON_TREE = fileURLToPath(new URL("../../../daemon/", import.meta.url));
 // A fixed hex token: the deploy writes the token it is given, and which one cannot be what moves the sha.
 const TOKEN = "aabbcc";
 // The suffixed script carries every line the bare one has and two of its own.
 const SUFFIX = ".preview.example.com";
+// One chip a guest can be: the unit names the binary by a path that carries the chip's target triple.
+const GUEST_TARGET = GUEST_DAEMON_TARGETS[0]!;
 
 /** Every file under a folder, relative and sorted, so the walk reads the same whatever the folder's own path is. */
 function relPaths(dir: string, keep: (name: string) => boolean, prefix = ""): string[] {
@@ -63,7 +66,7 @@ function daemonContentSha(daemonTree: string, scripts: string[]): string {
 
 // A fork's place, which is what a golden is built under: the sha pins what lands on a guest, and a
 // machine somebody owns carries its own place and no golden.
-const deployedScripts = (): string[] => [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, TOKEN, SUFFIX), daemonUnit(CLOUD_PLACE)];
+const deployedScripts = (): string[] => [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, TOKEN, SUFFIX), daemonUnit(CLOUD_PLACE, GUEST_TARGET)];
 
 describe("the daemon version names the content the host deploys", () => {
   it("holds the recorded sha, so a changed daemon cannot ship under a version no machine reads as behind", () => {
@@ -163,6 +166,6 @@ describe("what the recorded sha covers", () => {
     const rust = join(tree, "crates", "wsp-frames", "src", "numbers.rs");
     writeFileSync(rust, readFileSync(rust, "utf8").replace(/pub const DAEMON_VERSION: u32 = \d+;/, "pub const DAEMON_VERSION: u32 = 999;"));
     expect(daemonContentSha(tree, deployedScripts())).toBe(base);
-    expect(daemonContentSha(DAEMON_TREE, [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, "ddeeff", SUFFIX), daemonUnit(CLOUD_PLACE)])).not.toBe(daemonContentSha(DAEMON_TREE, deployedScripts()));
+    expect(daemonContentSha(DAEMON_TREE, [openShimScript(CLOUD_PLACE), deployScript(CLOUD_PLACE, "ddeeff", SUFFIX), daemonUnit(CLOUD_PLACE, GUEST_TARGET)])).not.toBe(daemonContentSha(DAEMON_TREE, deployedScripts()));
   });
 });

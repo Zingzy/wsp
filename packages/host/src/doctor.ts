@@ -8,15 +8,15 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
-import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_SUPERVISOR_PATH, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, type SnapshotStorage, type WorkspaceKind } from "@wsp/protocol";
+import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
+import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
-import { assetDir, assetName, assetProof, copyAsset } from "./assets.js";
-import { bundledDaemonName, DAEMON_BIN, daemonBinaryIn, GUEST_DAEMON_TARGETS, type DaemonTarget } from "./daemon-binary.js";
+import { assetDir, assetName, assetProof, copyAsset, stagedAsset } from "./assets.js";
+import { daemonBinaryIn, GUEST_DAEMON_TARGETS, type DaemonTarget } from "./daemon-binary.js";
 import { ANTHROPIC_KEY, KEY_LAYER_WORDS } from "./env-keys.js";
 import { describeDeleted, describeOrphanOffer, describeOrphans, describeStorage } from "./storage.js";
 import type { CliIO } from "./cli.js";
@@ -31,8 +31,8 @@ const execFileAsync = promisify(execFile);
  * login's, and the daemon binds loopback with the port forwarded from this computer. One value per place, read by
  * the bundle, the unit, the stop and the deploy, so no line below compares a kind. */
 export interface DaemonPlace {
-  /** Which kind of machine this daemon serves, which picks the two modules its Live rows and Processes tab read. */
-  kind: WorkspaceKind;
+  /** Which machine this daemon's own readings describe, which picks the two modules behind them. */
+  kind: DaemonKind;
   /** Where the bundle is unpacked and the daemon runs from. */
   dir: string;
   /** Where the packed bundle lands before it is unpacked. */
@@ -65,6 +65,11 @@ export interface DaemonPlace {
   preflight: readonly string[];
   /** Where a run's script, streams and exit code live on this machine. */
   runDir: string;
+  /** Which wsp a process on this machine runs: the shim to the daemon binary, which carries a line to the host over
+   * this machine's own daemon, or the node command bundled beside it, which dials a host of its own. A fork takes
+   * the shim and needs no node; a computer somebody owns keeps the bundle until the command line story there says
+   * what runs on it. */
+  wsp: "shim" | "bundle";
   /** Where the browser shim and its xdg-open name go; a folder already on the machine's own PATH. */
   binDir: string;
   openShim: string;
@@ -125,6 +130,12 @@ export interface DaemonJoin {
 /** The supervisor's name for the daemon, the one string the unit file, the stop, the start and the log read. */
 export const DAEMON_UNIT = "wsp-daemon.service";
 
+/** Where a sealed image keeps the script that keeps its daemon running. The machine's own boot runs it when it is
+ * there, so a fork of a sealed image starts its daemon with nothing dialling in, and the deploy is what writes it.
+ * The path is the image's rather than the place's: the runtime that boots the image reads the same path to decide
+ * whether there is a supervisor to exec. */
+export const GUEST_SUPERVISOR_PATH = "/root/wsp-daemon/supervise.sh";
+
 /** Where a machine with no service manager keeps the daemon's output, and the size the supervisor truncates it at.
  * A container has no journal, and nothing else on it would bound a file. The path is the image's rather than the
  * place's, as GUEST_SUPERVISOR_PATH is: the image's own first process runs that script and writes this file, so
@@ -142,7 +153,7 @@ export const daemonPidPath = (place: DaemonPlace): string => `${place.dir}/daemo
  * comes back a second later. It states its environment rather than inheriting one, the way the unit does: a boot
  * hands it nothing. It never execs the daemon, so the loop keeps control of the restart; the container's PID 1
  * reaps what the daemon leaves behind. */
-export function daemonSupervisorScript(place: DaemonPlace = CONTAINER_PLACE, previewHostSuffix?: string): string {
+export function daemonSupervisorScript(place: DaemonPlace, target: DaemonTarget, previewHostSuffix?: string): string {
   return [
     "#!/bin/sh",
     `echo $$ > ${supervisorPidPath(place)}`,
@@ -152,7 +163,7 @@ export function daemonSupervisorScript(place: DaemonPlace = CONTAINER_PLACE, pre
     `cd ${place.dir}`,
     "while :; do",
     `  [ -f ${DAEMON_LOG_PATH} ] && [ "$(wc -c < ${DAEMON_LOG_PATH})" -gt ${DAEMON_LOG_MAX_BYTES} ] && : > ${DAEMON_LOG_PATH}`,
-    `  ${daemonExecLine(place)} >> ${DAEMON_LOG_PATH} 2>&1 &`,
+    `  ${daemonExecLine(place, target)} >> ${DAEMON_LOG_PATH} 2>&1 &`,
     // The daemon's own pid, written here because a container ships no socket tools: it is how a deploy stops the
     // daemon it is replacing, and the supervisor puts the new one up a second later.
     `  echo $! > ${daemonPidPath(place)}`,
@@ -168,8 +179,9 @@ export function daemonSupervisorScript(place: DaemonPlace = CONTAINER_PLACE, pre
  * only lasting process is its own boot gets a script that loop-restarts the daemon. Each reads the place it is
  * given, so the same module serves a fork's root unit and the unit under somebody's own login. */
 export interface DaemonSupervision {
-  /** The lines that leave the daemon running, the old one stopped first. */
-  start: (place: DaemonPlace, previewHostSuffix?: string) => string[];
+  /** The lines that leave the daemon running, the old one stopped first. Written for one chip, since every line
+   * that names the binary names the path the bundle left it at, which carries that chip's target triple. */
+  start: (place: DaemonPlace, target: DaemonTarget, previewHostSuffix?: string) => string[];
   /** The lines that wait for it and answer DAEMON_UP or DAEMON_DOWN. */
   up: (place: DaemonPlace) => string[];
   /** What the daemon has printed lately, for a deploy that has to say why the port never came up. */
@@ -181,9 +193,9 @@ export interface DaemonSupervision {
  * 2026-09-08): the redirect this replaced truncated the file on every deploy, and an appended one under
  * Restart=always with no start limit has no end. */
 export const SYSTEMD: DaemonSupervision = {
-  start: (place, previewHostSuffix) => [
+  start: (place, target, previewHostSuffix) => [
     stopDaemonScript(place),
-    `cat > ${sh(place, place.unitPath)} <<'WSP_UNIT'\n${daemonUnit(place, previewHostSuffix)}WSP_UNIT`,
+    `cat > ${sh(place, place.unitPath)} <<'WSP_UNIT'\n${daemonUnit(place, target, previewHostSuffix)}WSP_UNIT`,
     `${systemctlIn(place)} daemon-reload`,
     // Enabled as well as started: a machine that reboots or comes back from a snapshot brings the daemon with it.
     `${systemctlIn(place)} enable ${DAEMON_UNIT}`,
@@ -217,8 +229,8 @@ export const NEEDS_SYSTEMD = `if ! command -v systemctl >/dev/null 2>&1; then ec
  * is its PID 1. Nothing here asks a service manager anything, and nothing reads a socket table: a container image
  * ships neither ss nor curl. */
 export const BOOT_SCRIPT: DaemonSupervision = {
-  start: (place, previewHostSuffix) => [
-    `cat > ${GUEST_SUPERVISOR_PATH} <<'WSP_SUPERVISOR'\n${daemonSupervisorScript(place, previewHostSuffix)}WSP_SUPERVISOR`,
+  start: (place, target, previewHostSuffix) => [
+    `cat > ${GUEST_SUPERVISOR_PATH} <<'WSP_SUPERVISOR'\n${daemonSupervisorScript(place, target, previewHostSuffix)}WSP_SUPERVISOR`,
     `chmod 0755 ${GUEST_SUPERVISOR_PATH}`,
     // The daemon being replaced is stopped by the pid the supervisor recorded: a container image ships no socket
     // tools, so nothing here can read the port's holder the way the unit road does.
@@ -296,6 +308,7 @@ export const CLOUD_PLACE: DaemonPlace = {
   root: "/root",
   make: [GUEST_DIR, "/root/inbox"],
   exportEnv: [EXEC_ENV],
+  wsp: "shim",
   quotePaths: false,
   tokenRoad: "script",
   preflight: [],
@@ -318,9 +331,9 @@ export const CLOUD_PLACE: DaemonPlace = {
 };
 
 /** The same place under the other supervision, for a machine whose only process that outlives an exec is its own
- * PID 1: a container on a Docker daemon. Every path is a fork's, since it is the same image; what differs is what
- * keeps the daemon up, and that a supervisor already watching sleeps a second before it restarts, so the wait for
- * the port is longer. */
+ * PID 1, which is every workspace a box's own runtime boots. Every path is a fork's, since it is the same image;
+ * what differs is what keeps the daemon up, and that a supervisor already watching sleeps a second before it
+ * restarts, so the wait for the port is longer. */
 export const CONTAINER_PLACE: DaemonPlace = { ...CLOUD_PLACE, supervise: BOOT_SCRIPT, upTries: 40 };
 
 /** The place a guest wsp made keeps its daemon, by what that machine answered keeps a process running on it. The
@@ -344,22 +357,13 @@ export function sshDaemonPlace(login: { home: string; path: string }): DaemonPla
     rootsPath: at.rootsPath,
     root: login.home,
     make: [at.dir, at.inbox, at.binDir, at.unitDir],
+    wsp: "bundle",
     // A login that arrives without its own session manager's address cannot talk to its systemd at all, and every
     // line below would fail at the bus rather than at the thing it was doing.
     exportEnv: ['export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"'],
     quotePaths: true,
     tokenRoad: "bytes",
-    preflight: [
-      // What holds the daemon up here is that login's own systemd, which a machine somebody owns may not have.
-      NEEDS_SYSTEMD,
-      // The daemon is one static file and asks nothing of the machine; the wsp command beside it, which every turn's
-      // agent drives this host through, still runs on node.
-      `if ! command -v node >/dev/null 2>&1 || [ "$(${NODE_MAJOR} 2>/dev/null || echo 0)" -lt ${WSP_COMMAND_NODE_MAJOR} ]; then echo ${shellQuote(NO_NODE_LINE)}; exit 1; fi`,
-      // Asked only where the machine can answer: without linger the login's own systemd stops with its last
-      // session and takes the daemon with it the moment the host's connection closes, so a deploy that skipped
-      // this would look like it worked and be gone by the next dial.
-      `if command -v loginctl >/dev/null 2>&1 && ! loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then echo ${shellQuote(NO_LINGER_LINE)}; exit 1; fi`,
-    ],
+    preflight: [...DAEMON_PREFLIGHT, NO_LINGER_CHECK],
     runDir: at.runDir,
     binDir: at.binDir,
     openShim: `${at.binDir}/wsp-open`,
@@ -392,6 +396,12 @@ export function joinedPlace(login: { home: string; path: string }, join: Omit<Da
   return {
     ...sshDaemonPlace(login),
     kind: "place",
+    // Root, and the daemon is the system's: a computer you own runs workspaces, which needs root anyway, so its
+    // agent is a service of the machine rather than of one login that has to be told to linger.
+    preflight: [...DAEMON_PREFLIGHT, NEEDS_ROOT_CHECK],
+    scope: "system",
+    unitPath: `/etc/systemd/system/${DAEMON_UNIT}`,
+    wantedBy: "multi-user.target",
     supervise: JOINED,
     join: { ...join, file: at.placeFile, log: at.placeLog },
     // The code buys a place in somebody's wsp for the ten minutes it stands: a deploy that dies between landing it
@@ -452,12 +462,23 @@ export function daemonFlags(place: DaemonPlace): string[] {
   ];
 }
 
-/** The line a unit or a supervisor script starts the daemon with: the binary the deploy left in the place's own
- * folder, then its flags. A path is double quoted where the place quotes paths, which both sh and systemd read as
+/** The daemon asset inside a bundle, whether it is still being staged here or unpacked on the machine: the bundle
+ * is the wsp command as npm lays it out, so the binaries ride in that command's own assets folder and the asset
+ * table's rule is the whole of the path. */
+const bundleDaemonDir = (dir: string): string => stagedAsset(wspPackageIn(dir), "daemon");
+
+/** The binary a machine of one chip runs, out of the bundle's own layout. The unit, the supervisor script, the
+ * AppArmor profile and the `wsp join` that computer runs for itself all reach this one file, and none of them
+ * spells the path a second way: the command in the bundle reads it through the same asset table a command
+ * installed from npm reads its own by. */
+export const daemonBinaryOn = (bundleDir: string, target: DaemonTarget): string => daemonBinaryIn(bundleDaemonDir(bundleDir), target.triple);
+
+/** The line a unit or a supervisor script starts the daemon with: the binary the bundle left for this machine's
+ * chip, then its flags. A path is double quoted where the place quotes paths, which both sh and systemd read as
  * one word. */
-export function daemonExecLine(place: DaemonPlace): string {
+export function daemonExecLine(place: DaemonPlace, target: DaemonTarget): string {
   const word = (w: string): string => (place.quotePaths && w.startsWith("/") ? `"${w}"` : w);
-  return [`${place.dir}/${DAEMON_BIN}`, ...daemonFlags(place)].map(word).join(" ");
+  return [daemonBinaryOn(place.dir, target), ...daemonFlags(place)].map(word).join(" ");
 }
 
 /** The shim posts to the socket the daemon opens; the protocol names both paths, so the daemon and this agree. */
@@ -495,43 +516,83 @@ export async function stageDaemonBundle(
   // machine asks the same question before the confirm, so nothing bills while this is what stops the deploy.
   const missing = missingBundleFile(daemonDir, cliDir, targets);
   if (missing !== undefined) throw new Error(missing);
-  const binaries = targets.map(target => ({ target, from: daemonBinaryIn(daemonDir, target.triple) }));
   mkdirSync(stageDir, { recursive: true });
-  // Every chip the machine may turn out to be, which is both of them where the host has not read the machine's own
-  // word for it yet; the deploy keeps the one the machine names.
-  for (const { target, from } of binaries) {
-    const to = join(stageDir, bundledDaemonName(target));
-    cpSync(from, to);
+  // The wsp of a machine somebody owns is the packed node command, laid out as npm lays it so the command reads its
+  // own assets by the table. A fork's is two lines onto the binary in that same layout, written on the machine and
+  // not here: the path it names carries the chip, and only the machine says which chip it is.
+  if (place.wsp === "bundle") copyAsset("cli", cliDir, wspPackageIn(stageDir));
+  // The binaries go in that command's own assets, which is where it reads one: every chip the machine may turn out
+  // to be, which is both of them where the host has not read the machine's own word for it yet, and the deploy
+  // drops the ones it is not. One layout for the bundle and for the join that computer runs on itself.
+  for (const target of targets) {
+    const to = daemonBinaryOn(stageDir, target);
+    mkdirSync(dirname(to), { recursive: true });
+    cpSync(daemonBinaryIn(daemonDir, target.triple), to);
     chmodSync(to, 0o755);
   }
-  // The wsp command rides with the daemon so every machine that has one has wsp under the place's own folder, with
-  // no install of its own and nothing on the image: it is what a turn's own agent runs to reach back into this host.
-  // Copied by the asset's own rule, so what a fork gets is what the packed command carries and nothing more.
-  copyAsset("cli", cliDir, join(stageDir, "wsp"));
   writeFileSync(join(stageDir, "wsp-open"), openShimScript(place), { mode: 0o755 });
 }
 
 /** The least node the wsp command in the bundle runs on, which is the one thing a machine somebody owns still has
- * to carry: the daemon beside it is a static binary and asks for nothing. A machine wsp built carries the floor's. */
+ * to carry: the daemon beside it is a static binary and asks for nothing. */
 export const WSP_COMMAND_NODE_MAJOR = 22;
+
+/** The whole of the wsp a fork carries: two lines handing the line to the binary the bundle left for this machine's
+ * chip, which opens a session on this machine's own daemon. Written on the machine, in the arm of the case that
+ * knows the chip, since the path it names carries that chip's target triple. */
+export const guestWspShim = (place: DaemonPlace, target: DaemonTarget): string => `#!/bin/sh\nexec ${daemonBinaryOn(place.dir, target)} wsp "$@"\n`;
 
 /** How a node is asked which major it is. Not read into a variable, since `set -e` ends a script on an assignment
  * whose substitution failed and exempts one inside a test. */
 const NODE_MAJOR = `node -p 'process.versions.node.split(".")[0]'`;
 
-/** Keeps the binary for the chip the guest turns out to be and drops the other, by the one word the machine says
- * about itself. A chip wsp builds no daemon for ends the deploy here, before anything is started. */
-function keepDaemonForThisChip(place: DaemonPlace, targets: readonly DaemonTarget[]): string {
-  const file = (name: string): string => sh(place, `${place.dir}/${name}`);
+/** What every machine wsp reaches over a login must have before a byte of wsp's lands on it: its own systemd to
+ * hold the daemon up, and a node new enough for the wsp command beside it, which every turn's agent drives its
+ * host through. The daemon itself is one static file and asks nothing. */
+const DAEMON_PREFLIGHT: readonly string[] = [
+  NEEDS_SYSTEMD,
+  `if ! command -v node >/dev/null 2>&1 || [ "$(${NODE_MAJOR} 2>/dev/null || echo 0)" -lt ${WSP_COMMAND_NODE_MAJOR} ]; then echo ${shellQuote(NO_NODE_LINE)}; exit 1; fi`,
+];
+
+/** Asked only where the machine can answer: without linger a login's own systemd stops with its last session and
+ * takes the daemon with it the moment the host's connection closes, so a deploy that skipped this would look like
+ * it worked and be gone by the next dial. */
+const NO_LINGER_CHECK = `if command -v loginctl >/dev/null 2>&1 && ! loginctl show-user "$(id -un)" -p Linger 2>/dev/null | grep -q 'Linger=yes'; then echo ${shellQuote(NO_LINGER_LINE)}; exit 1; fi`;
+
+/** A join installs a system service under /etc/systemd/system, so a login that is not root reads the one sentence
+ * and the join stops with nothing written on that computer. */
+const NEEDS_ROOT_CHECK = `if [ "$(id -u)" -ne 0 ]; then echo ${shellQuote(PLACE_NEEDS_ROOT_LINE)}; exit 1; fi`;
+
+/** Everything the deploy can only do once the machine has said which chip it is, by the one word the machine says
+ * about itself: the binaries for every other chip go, and the daemon is put up against the one that is left. The
+ * unit, the supervisor script and the AppArmor profile each name that binary by its path, which carries the chip's
+ * target triple, so they are written in the arm rather than above it: nothing asks a fork what it is before the
+ * bundle lands, and this is where the machine answers. A chip wsp builds no daemon for ends the deploy here,
+ * before anything is started. */
+function onTheChipItIs(place: DaemonPlace, targets: readonly DaemonTarget[], previewHostSuffix?: string): string[] {
   return [
     'case "$(uname -m)" in',
-    ...targets.map(target => {
-      const others = targets.filter(t => t !== target).map(t => file(bundledDaemonName(t)));
-      return `  ${target.uname}) mv -f ${file(bundledDaemonName(target))} ${file(DAEMON_BIN)}${others.length === 0 ? "" : `; rm -f ${others.join(" ")}`} ;;`;
+    ...targets.flatMap(target => {
+      const others = targets.filter(t => t !== target).map(t => sh(place, dirname(daemonBinaryOn(place.dir, t))));
+      return [
+        `  ${target.uname})`,
+        ...(others.length === 0 ? [] : [`rm -rf ${others.join(" ")}`]),
+        // The wsp on this machine's PATH, where the place carries the shim rather than the packed command: two
+        // lines onto the binary just named, so a fork needs nothing on its image to answer the word.
+        ...(place.wsp !== "shim"
+          ? []
+          : [`cat > ${sh(place, GUEST_WSP_PATH)} <<'WSP_SHIM'\n${guestWspShim(place, target)}WSP_SHIM`, `chmod 0755 ${sh(place, GUEST_WSP_PATH)}`]),
+        // The profile a box needs before its workspaces can isolate, where AppArmor is enforcing; written once the
+        // binary it names is in place, and only on a root install, since a login-scoped daemon owns no /etc and
+        // runs its workspaces under the person's own login instead.
+        ...(place.scope === "system" ? apparmorStep(place, target) : []),
+        ...place.supervise.start(place, target, previewHostSuffix),
+        "  ;;",
+      ];
     }),
     '  *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;;',
     "esac",
-  ].join("\n");
+  ];
 }
 
 /** Vite reads this list of extra allowed hosts from the environment (8.2.2, measured 2026-09-05); without it every
@@ -549,7 +610,7 @@ export const daemonLogCommand = (place: DaemonPlace = CLOUD_PLACE, lines = 50): 
  * share of the machine, not a figure, because every terminal the daemon opens sits in its cgroup. Output goes to
  * the journal, the one store on the machine that bounds itself. The environment is stated here rather than
  * inherited: a restart at boot or after a kill inherits nothing from the exec that deployed the daemon. */
-export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?: string): string {
+export function daemonUnit(place: DaemonPlace, target: DaemonTarget, previewHostSuffix?: string): string {
   return [
     "[Unit]",
     "Description=wsp daemon",
@@ -565,7 +626,7 @@ export function daemonUnit(place: DaemonPlace = CLOUD_PLACE, previewHostSuffix?:
     ...(previewHostSuffix !== undefined ? [`Environment=${VITE_ALLOWED_HOSTS_ENV}=${previewHostSuffix}`] : []),
     // The place's own file, where it has one: missing everywhere else, which the dash says is fine.
     ...(place.envFile !== undefined ? [`EnvironmentFile=-${place.envFile}`] : []),
-    `ExecStart=${daemonExecLine(place)}`,
+    `ExecStart=${daemonExecLine(place, target)}`,
     "Restart=always",
     "RestartSec=1",
     `MemoryMax=${DAEMON_MEMORY_MAX_PERCENT}%`,
@@ -588,11 +649,11 @@ export const WSP_WORKSPACE_APPARMOR = "wsp-workspace";
  * default there). It attaches to the daemon binary, which is what clones a workspace, and carries the one rule
  * that restriction reads, the road Ubuntu's own podman profile takes. A box without AppArmor enforcing never sees
  * it written. */
-export function apparmorProfile(place: DaemonPlace): string {
+export function apparmorProfile(place: DaemonPlace, target: DaemonTarget): string {
   return [
     "abi <abi/4.0>,",
     "include <tunables/global>",
-    `profile ${WSP_WORKSPACE_APPARMOR} ${place.dir}/${DAEMON_BIN} flags=(default_allow) {`,
+    `profile ${WSP_WORKSPACE_APPARMOR} ${daemonBinaryOn(place.dir, target)} flags=(default_allow) {`,
     "  userns,",
     `  include if exists <local/${WSP_WORKSPACE_APPARMOR}>`,
     "}",
@@ -604,8 +665,19 @@ export function apparmorProfile(place: DaemonPlace): string {
  * is root: elsewhere a box has nothing to load it into, or no place to write it, and needs neither. The profile's
  * bytes ride base64 so nothing in it has to be quoted for the shell, and the person watching the install is told
  * it landed. */
-function apparmorStep(place: DaemonPlace): string[] {
-  const bytes = Buffer.from(apparmorProfile(place)).toString("base64");
+/** Takes the workspace profile back off, where this computer has one loaded. Guarded the way the step that wrote
+ * it is: a computer with no apparmor_parser and no file of ours never had one, and says nothing about it. */
+function apparmorOffStep(): string[] {
+  return [
+    `if [ -f ${WSP_WORKSPACE_APPARMOR_PATH} ]; then`,
+    `  command -v apparmor_parser >/dev/null 2>&1 && apparmor_parser -R ${WSP_WORKSPACE_APPARMOR_PATH} 2>/dev/null || true`,
+    `  rm -f ${WSP_WORKSPACE_APPARMOR_PATH}`,
+    "fi",
+  ];
+}
+
+function apparmorStep(place: DaemonPlace, target: DaemonTarget): string[] {
+  const bytes = Buffer.from(apparmorProfile(place, target)).toString("base64");
   return [
     'if command -v apparmor_parser >/dev/null 2>&1 && [ -w /etc/apparmor.d ] && [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ]; then',
     `  printf %s '${bytes}' | base64 -d > ${WSP_WORKSPACE_APPARMOR_PATH}`,
@@ -667,11 +739,6 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     ...place.exportEnv,
     `mkdir -p ${place.make.map(dir => sh(place, dir)).join(" ")}`,
     `tar -xzf ${sh(place, place.bundle)} -C ${sh(place, place.dir)}`,
-    keepDaemonForThisChip(place, targets),
-    // The profile a box needs before its workspaces can isolate, where AppArmor is enforcing; written once the
-    // binary it names is in place, and only on a root install, since a login-scoped daemon owns no /etc and runs
-    // its workspaces under the person's own login instead.
-    ...(place.scope === "system" ? apparmorStep(place) : []),
     // Both names: only some tools read BROWSER; the rest exec xdg-open by name, and the place's bin folder is first on PATH.
     // BROWSER itself is set by the daemon for its ptys, by the profile file for login shells, and in a fork's envs
     // only when its golden was sealed with the shim (claudeEnvs), never on a machine that may lack the file.
@@ -693,7 +760,7 @@ export function deployScript(place: DaemonPlace, token: string, previewHostSuffi
     // A fork is root's alone, so its token is written here; a machine somebody else may hold an account on gets
     // it over the byte road before this runs, since a command sits in a world readable /proc/<pid>/cmdline.
     ...(place.tokenRoad === "script" ? [writeDaemonTokenScript(token, place.tokenPath)] : []),
-    ...place.supervise.start(place, previewHostSuffix),
+    ...onTheChipItIs(place, targets, previewHostSuffix),
     ...place.supervise.up(place)
   ].join("\n");
 }
@@ -711,7 +778,11 @@ export function removeDaemonScript(place: DaemonPlace): string {
     `rm -f ${sh(place, place.unitPath)}`,
     `${systemctl} daemon-reload 2>/dev/null || true`,
     `rm -rf ${daemonOwnedPaths(place).map(path => sh(place, path)).join(" ")}`,
-    `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}`,
+    `rm -f ${sh(place, place.openShim)} ${sh(place, `${place.binDir}/xdg-open`)}${place.wsp === "shim" ? ` ${sh(place, GUEST_WSP_PATH)}` : ""}`,
+    // The profile the deploy loaded on a root install goes with the binary it names: a profile left loaded for a
+    // path nothing is at is something of wsp's still on a computer the remove said it left as it found it. Only on
+    // the scope that could write it, and unloaded before the file goes, since the kernel holds it by name.
+    ...(place.scope === "system" ? apparmorOffStep() : []),
     ...(place.profileSource === undefined
       ? []
       : [
@@ -823,9 +894,9 @@ export const DAEMON_DEPLOYED_LINE = `daemon v${DAEMON_VERSION}`;
  * on it when they stopped, which on a joined computer is its own `wsp join`. Named so the next person runs them on
  * the machine rather than working out what wsp ran there first. The token is never among them: it is landed over
  * the byte road or written by a line of its own, and no supervision's start lines carry it. */
-export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string }, previewHostSuffix?: string): string {
+export function deployFailureLine(place: DaemonPlace, res: { stdout: string; stderr: string }, previewHostSuffix?: string, targets: readonly DaemonTarget[] = GUEST_DAEMON_TARGETS): string {
   const said = `daemon deploy failed: ${res.stdout.slice(-300)} ${res.stderr.slice(-200)}`.trim();
-  return [said, "it stopped in these commands, which run on that computer:", ...place.supervise.start(place, previewHostSuffix)].join("\n");
+  return [said, "it stopped in these commands, which run on that computer:", ...onTheChipItIs(place, targets, previewHostSuffix)].join("\n");
 }
 
 /** Upload and start the daemon on a machine, replacing one already running there; returns the token it starts
@@ -869,7 +940,7 @@ export async function deployDaemon(
     const suffix = await previewHostSuffix(machine);
     const res = await machine.run(deployScript(place, token, suffix, targets), { deadlineMs: 180_000, ...(opts.onLine !== undefined ? { onLine: opts.onLine } : {}) });
     if (res.exitCode !== 0 || !res.stdout.includes("DAEMON_UP")) {
-      throw new Error(deployFailureLine(place, res, suffix));
+      throw new Error(deployFailureLine(place, res, suffix, targets));
     }
     const port = Number(new RegExp(`${DAEMON_PORT_LINE} (\\d+)`).exec(res.stdout)?.[1] ?? 0);
     return { token, ...(port > 0 ? { port } : {}) };
@@ -1225,6 +1296,19 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
   return 0;
 }
 
+/** One line per place running an older daemon than this wsp deploys, each naming the line that moves it. Read
+ * before anything is forked, so the reading a person came for is printed whether or not the rest of the run stands;
+ * it dials nothing and bills nothing, since every fact on it is what that computer last reported. A host holding no
+ * places, or none behind, prints nothing. */
+export async function placesBehindLines(rt: Pick<Runtime, "places">, now = Date.now()): Promise<string[]> {
+  if (rt.places === undefined) return [];
+  const places = await rt.places.list(now);
+  return places.flatMap(place => {
+    const word = placeDaemonBehind(place);
+    return word === undefined ? [] : [placeBehindLine(place.name, word)];
+  });
+}
+
 export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
@@ -1247,6 +1331,10 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
 
   try {
     io.log("doctor: proving one live workspace end to end, from your image to the machine it forks and back");
+
+    // Before the first thing that bills: a computer on an older daemon than this wsp deploys is a fact a person
+    // came here for, and a run that stops later must still have said it.
+    for (const line of await placesBehindLines(rt)) io.log(line);
 
     await timings.time("image versions made durable", () => promoteGoldens(rt, io), note => note);
     await timings.time("snapshot storage", () => cleanOrphans(rt, io, opts.yes === true, opts.statePath), note => note);

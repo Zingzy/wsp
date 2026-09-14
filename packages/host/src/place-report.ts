@@ -8,7 +8,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
-import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
+import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
@@ -113,10 +113,6 @@ export interface PlaceReportOptions {
   home?: string;
   env?: Readonly<Record<string, string | undefined>>;
   run?: RunningWsp;
-  /** Whether this computer's own daemon runs workspaces here, as the daemon found out by its self check rather than
-   * by looking for a command on the PATH. Absent leaves the kernel read this file makes, which is what a report
-   * taken outside the daemon has. */
-  runsWorkspaces?: boolean;
 }
 
 /** The engine a project's own containers would run on here, off the login PATH; the docker-first rule is the
@@ -129,29 +125,23 @@ function engineOnPath(path: string | undefined): PlaceEngine {
  * host's own-machine row and a joined computer's report speak alike. The authoritative gate when a fork is asked
  * for is still the daemon's self check, which mounts an overlay and makes a cgroup; this reads the same kernel
  * facts without touching anything. `runs` overrides the read when the daemon already knows the answer. */
-function selfDoctor(env: Readonly<Record<string, string | undefined>>, runs?: boolean): Pick<PlaceReport, "runsWorkspaces" | "engine"> & { workspacesBlocked?: string } {
+function selfDoctor(env: Readonly<Record<string, string | undefined>>): Pick<PlaceReport, "runsWorkspaces" | "engine"> & { workspacesBlocked?: string } {
   const engine = engineOnPath(env.PATH);
-  const blocked = runs === true ? undefined : runs === false ? "this computer's daemon cannot run workspaces here" : workspacesBlocked();
+  const blocked = workspacesBlocked();
   return { runsWorkspaces: blocked === undefined, engine, ...(blocked === undefined ? {} : { workspacesBlocked: blocked }) };
 }
 
-/** The one kernel reason this computer cannot run workspaces, read off /sys and /proc, or nothing when it can. The
- * same order and words the daemon's doctor uses. */
-function workspacesBlocked(): string | undefined {
-  if (platform() !== "linux") return "wsp runs workspaces on a Linux computer";
-  let controllers: string;
+/** The one kernel reason this computer cannot run workspaces, or nothing when it can: the protocol's rule over the
+ * files this side reads. */
+const workspacesBlocked = (): string | undefined => workspacesBlockedBy({ platform: platform(), read: readTextOr, euid: process.geteuid?.() });
+
+/** A file's text, or nothing where it is not there, which is what the rule above reads absence as. */
+function readTextOr(path: string): string | undefined {
   try {
-    controllers = readFileSync("/sys/fs/cgroup/cgroup.controllers", "utf8");
+    return readFileSync(path, "utf8");
   } catch {
-    return "this computer mounts cgroup v1 at /sys/fs/cgroup, and wsp runs workspaces on cgroup v2 alone: boot it with systemd.unified_cgroup_hierarchy=1";
+    return undefined;
   }
-  const has = new Set(controllers.split(/\s+/));
-  for (const wanted of ["memory", "cpu"]) if (!has.has(wanted)) return `this computer's cgroup root offers no ${wanted} controller, which wsp needs to run workspaces here`;
-  if (!existsSync("/proc/filesystems") || !readFileSync("/proc/filesystems", "utf8").split(/\s+/).includes("overlay")) {
-    return "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
-  }
-  if (process.geteuid?.() !== 0) return "wsp runs workspaces on this computer as root, and this daemon is not root";
-  return undefined;
 }
 
 /** What this computer says about itself on every link. Read at each dial rather than once: a laptop gains an
@@ -172,7 +162,7 @@ export function placeReport(opts: PlaceReportOptions): PlaceSelfReport {
     login,
     // Whether the daemon runs workspaces here, and the engine a project's own containers would run on: the read-only
     // twin of the daemon's self check, so what the doctor says and what a create does cannot part ways.
-    ...selfDoctor(env, opts.runsWorkspaces),
+    ...selfDoctor(env),
     uptimeMs: Math.max(0, Math.round(upSeconds() * 1000)),
     daemonVersion: DAEMON_VERSION,
     wsp: wspArgvOf(opts.run ?? runningWsp()),
@@ -201,12 +191,18 @@ export interface PlaceSweepOptions {
   uid?: number;
 }
 
-/** Which service the agent on this computer is, for the manager that holds it. */
-const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
+/** Which service the agent on this computer is, for the manager that holds it. Exported because the update road
+ * names that unit from the host, and a second spelling of it there would be a second copy of the rule. */
+export const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
 
-/** Takes wsp off this computer: the file that holds the agent up, the place file and the key, and every path the
+/** Takes wsp off this computer: every file that holds the agent up, the place file and the key, and every path the
  * daemon and the installer put under wsp's own folder here, read off the one list the ssh road's removal reads so
  * nothing is named twice and nothing is guessed. The work folder stays, and the line says so.
+ *
+ * Every scope the manager could be holding a unit in, not only the one a join writes today: a computer joined
+ * before the place's unit became the machine's own has its file under that login's systemd, and a sweep that read
+ * one scope left that unit behind to come back under auto-restart with nothing to serve. Each line names the scope
+ * it came out of, so a person reads which of the two the leave took.
  *
  * It does not ask the manager to stop anything, and that is the whole of the order here: on the road the host asks
  * for, the process running this sweep IS the agent, and a manager told to stop it kills it before it can answer.
@@ -222,13 +218,15 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
   if (manager !== undefined) {
     const address = placeService(home, opts.uid);
     const run = opts.run ?? systemRunner;
-    // The manager forgets it at the next login first, while the unit file it reads that off is still there; then the
-    // file goes. Either way round the service keeps running, which is what lets the sweep answer before it stops.
-    for (const argv of manager.forget?.(address) ?? []) await run(argv);
-    const unit = manager.unit(address);
-    if (existsSync(unit.path)) {
-      rmSync(unit.path, { force: true });
-      removed.push(`${manager.words} ${unit.name}`);
+    for (const held of manager.held(address)) {
+      // The manager forgets it at the next login first, while the unit file it reads that off is still there; then
+      // the file goes. Either way round the service keeps running, which is what lets the sweep answer before it
+      // stops. Asked of every scope whether a file is there or not: a scope can hold the link that enables a unit
+      // whose file has already gone, and that link is what would start it again.
+      for (const argv of held.forget) await run(argv);
+      if (!existsSync(held.unit.path)) continue;
+      rmSync(held.unit.path, { force: true });
+      removed.push(`${held.words} ${held.unit.name}`);
     }
   }
   // The daemon on this computer is this process, so there is no second unit of its own; the paths are the ones
@@ -278,11 +276,15 @@ function unsourced(place: DaemonPlace): string | undefined {
 
 /** Asks this computer's manager to stop the agent, once the caller has nothing left to say: on the host's own road
  * this stops the very process that ran the sweep, so nothing after it is guaranteed to run. Its file and whatever
- * the manager held beside it are already gone by then, so no login brings it back. */
+ * the manager held beside it are already gone by then, so no login brings it back.
+ *
+ * Every scope the sweep just took a file out of, for the same reason it read them all: an agent installed on the
+ * older road is running under that login's own systemd, and a stop told the machine's would leave it up and
+ * restarting with no place file to serve. */
 export async function stopPlaceService(opts: PlaceSweepOptions = {}): Promise<void> {
   const home = opts.home ?? homedir();
   const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
   if (manager === undefined) return;
   const run = opts.run ?? systemRunner;
-  for (const argv of manager.unload(placeService(home, opts.uid))) await run(argv);
+  for (const held of manager.held(placeService(home, opts.uid))) for (const argv of held.unload) await run(argv);
 }

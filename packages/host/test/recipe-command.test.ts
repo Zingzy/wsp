@@ -181,8 +181,8 @@ describe("wsp recipe", () => {
     expect(rowOf(saved, "docker")).toMatchObject({ on: true, source: { kind: "project", why: "compose.yaml needs Docker" } });
     // Rust is not on the floor, so the table shows it under its own group with the file that asked.
     expect(allRows(answer).find(r => r.id === "rust")).toMatchObject({ on: true, group: PROJECT_GROUP, why: "Cargo.toml needs Rust" });
-    // Docker is on the floor, so it stays in the base, where it installs whatever anyone ticks.
-    expect(allRows(answer).find(r => r.id === "docker")).toMatchObject({ on: true, group: BASE_GROUP });
+    // Docker is no row of the floor's, so the folder's own need is what puts it on, in the project's own group.
+    expect(allRows(answer).find(r => r.id === "docker")).toMatchObject({ on: true, group: "Your project needs" });
     // The manifests add to the rule, they do not stand in for it: a row no manifest named is still the rule's call.
     expect(rowOf(saved, "go")).toMatchObject({ on: false });
     // A folder whose manifests name nothing the catalog carries leaves every tick to the rule.

@@ -10,6 +10,7 @@ mod door;
 mod exec;
 mod fs;
 mod git;
+mod guest;
 mod inbox;
 mod link;
 mod manifest;
@@ -128,17 +129,20 @@ pub(crate) fn frame_text(value: &impl serde::Serialize) -> String {
     serde_json::to_string(value).expect("a frame serialises")
 }
 
-/// One item on a socket's outbound channel: a frame to write, or the leave's reply, after which the loop stops.
+/// One item on a socket's outbound channel: a frame to write, or the last reply of an op that ends this daemon,
+/// after which the loop stops. A leave ends it for good; an update ends it so whatever supervises it starts the
+/// binary the host just sent.
 pub(crate) enum Outgoing {
     Text(String),
     Leave(String),
+    Restart(String),
 }
 
 impl Outgoing {
     #[cfg(test)]
     pub(crate) fn text(&self) -> &str {
         match self {
-            Outgoing::Text(t) | Outgoing::Leave(t) => t,
+            Outgoing::Text(t) | Outgoing::Leave(t) | Outgoing::Restart(t) => t,
         }
     }
 }
@@ -186,6 +190,8 @@ pub(crate) struct Ctx {
     pub(crate) spotter: Mutex<relay::CallbackSpotter>,
     pub(crate) ports: ports::PortWatch,
     pub(crate) inbox: inbox::InboxWatch,
+    /// The guest sessions open on this machine, and the socket the host watches them from.
+    pub(crate) guests: guest::Guests,
     /// Where the daemon's lines go: stderr in the binary, a test's own list otherwise.
     log: SharedLog,
     /// The two samplers, built on the first watch so a daemon nobody asks reads nothing; one each for the daemon.
@@ -226,6 +232,7 @@ impl Ctx {
             spotter: Mutex::new(relay::CallbackSpotter::new()),
             ports,
             inbox: inbox::InboxWatch::default(),
+            guests: guest::Guests::default(),
             log: Arc::from(log),
             sys: Mutex::new(None),
             procs: Mutex::new(None),

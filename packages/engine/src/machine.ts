@@ -104,16 +104,11 @@ export interface Machine {
   readonly daemonTokenPath?: string;
   /** Optional: whether the daemon inside the guest is listening, asked over the road this machine's own calls take
    * rather than by dialling a route from here. Present where a route this computer dials is not the truth about
-   * the guest: a container's published port lands on the loopback of the computer its Docker daemon runs on, which
-   * is not always the one asking, and a host that is not that computer reads silence off a live daemon. Absent
-   * leaves the reach to previewUrl, which on a backend with a public edge is the same road a client takes. The
-   * caller's bound is the whole call's, as it is on exec and putBytes. */
+   * the guest: a container's published port lands on the loopback of the box that runs it, which is not always the
+   * one asking, and a host that is not that computer reads silence off a live daemon. Absent leaves the reach to
+   * previewUrl, which on a backend with a public edge is the same road a client takes. The caller's bound is the
+   * whole call's, as it is on exec and putBytes. */
   daemonAnswers?(opts?: { timeoutMs?: number }): Promise<boolean>;
-  /** Optional: where a process inside this machine dials the computer this host runs on, for the port that host
-   * listens on. Only a backend whose machines have a road back to it answers: a container on this computer's own
-   * daemon is created with a name for the gateway it reaches this computer through. Absent leaves the address the
-   * host advertises, which is what a machine somewhere else dials. */
-  hostUrl?(port: number): string;
   /** Optional: bytes onto the machine on a backend that mints no signed upload URL. `landBytes` is what reads it,
    * so no caller picks between the two roads itself. */
   putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void>;

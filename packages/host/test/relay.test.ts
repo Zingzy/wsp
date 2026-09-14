@@ -73,6 +73,7 @@ function fakeConnect(): {
   slowDial?: () => Promise<void>;
   pushDuringDial?: Record<string, unknown>;
   slowWatch?: () => Promise<void>;
+  slowGuestWatch?: () => Promise<void>;
 } {
   const links: FakeLink[] = [];
   const targets: string[] = [];
@@ -88,6 +89,9 @@ function fakeConnect(): {
     pushDuringDial: undefined as Record<string, unknown> | undefined,
     /** When set, the ports.watch reply waits on it, the way the real one waits on the daemon's own port poll. */
     slowWatch: undefined as (() => Promise<void>) | undefined,
+    /** The same for guest.watch, which is the second of the two round trips a fresh socket makes before the daemon
+     * hands it this machine's sessions. */
+    slowGuestWatch: undefined as (() => Promise<void>) | undefined,
     async connect(o: ConnectOptions): Promise<DaemonSocket> {
       if (fake.refuseDials) throw new Error("connect ECONNREFUSED edge");
       targets.push(o.url);
@@ -106,6 +110,7 @@ function fakeConnect(): {
             if (fake.slowWatch) await fake.slowWatch();
             return { ok: true, ports: link.ports.map(port => ({ port, pid: null, inode: port, uid: 0, loopback: true })) };
           }
+          if (op === "guest.watch" && fake.slowGuestWatch) await fake.slowGuestWatch();
           return { ok: true };
         },
         close() {
@@ -314,6 +319,155 @@ describe("callback relay over a fake daemon link", () => {
     });
     return { rt, fake, opened, lines };
   }
+
+  it("takes the guest sessions on each machine it links, hands their frames to the door and answers back down the link", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const heard: { workspaceId: string; type: string }[] = [];
+    const dropped: string[] = [];
+    const guest = {
+      event: (link: { workspaceId: string; request(op: string, params: Record<string, unknown>): Promise<unknown> }, e: { type: string; session?: string }) => {
+        heard.push({ workspaceId: link.workspaceId, type: e.type });
+        if (e.type === "guest.opened") void link.request("guest.reply", { session: e.session, message: { exit: 0 } });
+      },
+      closeAll: (workspaceId: string) => dropped.push(workspaceId),
+    };
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
+    await until(() => fake.links.length >= 1);
+    const link = fake.links[0]!;
+    // The watch goes on the one socket the host holds into a running workspace, after the port watch that seeds it.
+    await until(() => link.ops.some(x => x.op === "guest.watch"));
+    expect(link.ops.map(x => x.op)).toEqual(["ports.watch", "guest.watch"]);
+
+    link.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "dev-1.tok", argv: ["threads"], cwd: "/root" });
+    link.emit({ type: "guest.message", session: "g0", message: { n: 1 } });
+    link.emit({ type: "guest.closed", session: "g0" });
+    await until(() => heard.length === 3);
+    expect(heard).toEqual([ws.id, ws.id, ws.id].map((workspaceId, at) => ({ workspaceId, type: ["guest.opened", "guest.message", "guest.closed"][at]! })));
+    await until(() => link.ops.some(x => x.op === "guest.reply"));
+    expect(link.ops.find(x => x.op === "guest.reply")!.extra).toEqual({ session: "g0", message: { exit: 0 } });
+
+    // The workspace goes; so does every session that was riding its link.
+    await rt.workspaces.delete(ws.id);
+    await until(() => dropped.includes(ws.id));
+  });
+
+  it("holds a frame that goes down while the link is between sockets, and sends it on the one that lands", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    let answer: ((op: string, params: Record<string, unknown>) => Promise<unknown>) | undefined;
+    const guest = {
+      event: (link: { request(op: string, params: Record<string, unknown>): Promise<unknown> }) => (answer = link.request),
+      closeAll: () => {},
+    };
+    const clock = fakeClock();
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock, connect: fake.connect, guest, retryMs: 1, jitter: () => 0 });
+    await until(() => fake.links.length >= 1);
+    const first = fake.links[0]!;
+    await until(() => first.ops.some(x => x.op === "guest.watch"));
+    first.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
+    await until(() => answer !== undefined);
+
+    // The edge sweeps the socket; the machine sees no redial, so a row it is streaming has to wait rather than
+    // fail into a rejection nobody reads. The wait below lets the link's loop see the close and drop the socket.
+    first.drop();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    let landed = false;
+    const sending = answer!("guest.reply", { session: "g0", message: { exit: 0 } }).then(() => (landed = true));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(landed, "the frame waits for the next socket instead of failing").toBe(false);
+
+    clock.advance(10_000);
+    await until(() => fake.links.length >= 2);
+    const second = fake.links[1]!;
+    await until(() => second.ops.some(x => x.op === "guest.watch"));
+    await sending;
+    expect(second.ops.find(x => x.op === "guest.reply")!.extra).toEqual({ session: "g0", message: { exit: 0 } });
+    // And it went out after the watch, so the daemon was already handing this machine's sessions to that socket.
+    expect(second.ops.map(x => x.op)).toEqual(["ports.watch", "guest.watch", "guest.reply"]);
+  });
+
+  it("holds a frame that goes down while the fresh socket is still watching, so none reaches it ahead of the watch", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    let answer: ((op: string, params: Record<string, unknown>) => Promise<unknown>) | undefined;
+    const guest = {
+      event: (link: { request(op: string, params: Record<string, unknown>): Promise<unknown> }) => (answer = link.request),
+      closeAll: () => {},
+    };
+    const clock = fakeClock();
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock, connect: fake.connect, guest, retryMs: 1, jitter: () => 0 });
+    await until(() => fake.links.length >= 1);
+    const first = fake.links[0]!;
+    await until(() => first.ops.some(x => x.op === "guest.watch"));
+    first.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
+    await until(() => answer !== undefined);
+
+    // The redial's watch is held open, so what follows runs inside the window between the socket landing and the
+    // daemon handing it this machine's sessions. A frame that took the socket there would come back refused as not
+    // the watcher, and the door swallows that rejection.
+    let watching: (() => void) | undefined;
+    fake.slowGuestWatch = () => new Promise<void>(go => (watching = go));
+    first.drop();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    clock.advance(10_000);
+    await until(() => fake.links.length >= 2 && watching !== undefined);
+    const second = fake.links[1]!;
+
+    let landed = false;
+    const sending = answer!("guest.reply", { session: "g0", message: { exit: 0 } }).then(() => (landed = true));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(landed, "the frame waits for the watch rather than going out ahead of it").toBe(false);
+    expect(second.ops.map(x => x.op)).toEqual(["ports.watch", "guest.watch"]);
+
+    fake.slowGuestWatch = undefined;
+    watching!();
+    await sending;
+    // It went out after both watches, so the daemon was already handing this machine's sessions to that socket.
+    expect(second.ops.map(x => x.op)).toEqual(["ports.watch", "guest.watch", "guest.reply"]);
+  });
+
+  it("holds the link open for the guest road on a host whose backend forwards no ports at all", async () => {
+    const { rt, backend } = relayRuntime("http://guest.test");
+    backend.capabilities.callbackRelay = false;
+    const fake = fakeConnect();
+    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const heard: { workspaceId: string; type: string }[] = [];
+    const guest = {
+      event: (link: { workspaceId: string; request(op: string, params: Record<string, unknown>): Promise<unknown> }, e: { type: string; session?: string }) => {
+        heard.push({ workspaceId: link.workspaceId, type: e.type });
+        if (e.type === "guest.opened") void link.request("guest.reply", { session: e.session, message: { stream: "out", text: "rows\n" } });
+      },
+      closeAll: () => {},
+    };
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
+    await until(() => fake.links.length >= 1);
+    const link = fake.links[0]!;
+    await until(() => link.ops.some(x => x.op === "guest.watch"));
+    link.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
+    await until(() => heard.length > 0);
+    expect(heard).toEqual([{ workspaceId: ws.id, type: "guest.opened" }]);
+    // And the host's answer goes back down that same link, which is the whole of what a fork's wsp waits on.
+    await until(() => link.ops.some(x => x.op === "guest.reply"));
+    expect(link.ops.find(x => x.op === "guest.reply")!.extra).toEqual({ session: "g0", message: { stream: "out", text: "rows\n" } });
+    // Nothing is forwarded there: a printed local URL opens no listener on this computer.
+    link.emit({ type: "localhost.url", port: 5173 });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(relay.forwards()).toEqual([]);
+  });
+
+  it("leaves the guest road off where no door was given, so a link with nobody to serve a session asks for none", async () => {
+    const { rt } = relayRuntime("http://guest.test");
+    const fake = fakeConnect();
+    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect });
+    await until(() => fake.links.length >= 1);
+    await until(() => fake.links[0]!.ops.some(x => x.op === "ports.watch"));
+    expect(fake.links[0]!.ops.map(x => x.op)).toEqual(["ports.watch"]);
+  });
 
   it("an event pushed while the dial is still open is acted on once the socket is recorded, not dropped", async () => {
     const port = await freePort();

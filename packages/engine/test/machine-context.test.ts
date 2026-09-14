@@ -63,7 +63,7 @@ const PROBE_OUT = [
   "VERSION node: v22.23.2",
   "VERSION npm: 10.9.4",
   "VERSION python3: Python 3.12.13",
-  "VERSION docker: ",
+  "VERSION cc: ",
   "AGENT claude",
   "AGENT codex",
   "AGENT gemini",
@@ -141,7 +141,7 @@ describe("the probe", () => {
     const cmd = probeCommand();
     expect(cmd).toContain('echo "VERSION node: $(node --version 2>/dev/null | head -n 1)"');
     expect(cmd).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
-    expect(cmd).toContain('echo "VERSION docker compose: $(docker compose version 2>/dev/null | head -n 1)"');
+    expect(cmd).toContain('echo "VERSION unzip: $(unzip -v 2>/dev/null | head -n 1)"');
     expect(cmd.split("\n").filter(l => l.startsWith("export PATH="))).toHaveLength(1);
   });
 });
@@ -174,12 +174,12 @@ describe("the facts", () => {
     const next = mergeFacts(undefined, result({
       base: [
         { id: "base/node", label: "Node 22 with npm", outcome: "installed", bytes: 0 },
-        { id: "base/docker", label: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" },
+        { id: "base/fd", label: "fd", outcome: "failed", note: "E: Unable to locate package fd-find" },
       ],
       tools: [{ id: "tools/brew/x", label: "x", outcome: "failed", note: "Error: no bottle" }],
     }));
     expect(next.tools).toEqual([
-      { id: "base/docker", label: "Docker engine and compose", note: "E: Unable to locate package docker-compose-v2" },
+      { id: "base/fd", label: "fd", note: "E: Unable to locate package fd-find" },
       { id: "tools/brew/x", label: "x", note: "Error: no bottle" },
     ]);
   });
@@ -285,8 +285,8 @@ describe("the document", () => {
 
 describe("the document's base line", () => {
   it("names the base floor's versions when the probe read them, and says nothing when it read none", () => {
-    const doc = renderMachineContext({ probe: probeOf({ versions: [{ name: "node", version: "22.23.2" }, { name: "python3", version: "3.12.13" }, { name: "docker compose", version: "2.29.2" }] }), facts: FACTS });
-    expect(doc).toContain("- On every wsp machine: node 22.23.2, python3 3.12.13, docker compose 2.29.2.");
+    const doc = renderMachineContext({ probe: probeOf({ versions: [{ name: "node", version: "22.23.2" }, { name: "python3", version: "3.12.13" }, { name: "unzip", version: "6.00" }] }), facts: FACTS });
+    expect(doc).toContain("- On every wsp machine: node 22.23.2, python3 3.12.13, unzip 6.00.");
     expect(renderMachineContext({ probe: probeOf(), facts: FACTS })).not.toContain("On every wsp machine");
     // The prefix a guest reads is the one the install put it at: the line says it from the same constant.
     expect(renderMachineContext({ probe: probeOf({ has: new Set(["brew"]) }), facts: FACTS })).toContain("- Homebrew is at /home/linuxbrew/.linuxbrew.");

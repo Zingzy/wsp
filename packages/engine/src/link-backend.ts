@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // One computer's machines, driven from another. The backend and every machine
-// it hands back sit behind the same seam the Docker, Solari, local and ssh
+// it hands back sit behind the same seam the Solari, box, local and ssh
 // backends do, and each call is one frame on a link somebody else holds: this
 // module imports no socket library and knows nothing about how a place is
 // reached. What the far side answers is what the far side's own backend
@@ -230,7 +230,7 @@ export class LinkMachine implements Machine {
     return this.ask(MachineUrlReply, "machine.uploadUrl", { path }).then(r => r.url);
   }
 
-  /** The place answers the route on its own loopback, which is where its Docker daemon published the port; the
+  /** The place answers the route on its own loopback, which is where its own runtime published the port; the
    * forward turns it into a port on this computer's. No token and no expiry: the road is this host's alone. */
   private async routeTo(port: number): Promise<PreviewReach> {
     const { reach } = await this.ask(MachineReachReply, "machine.previewUrl", { port });

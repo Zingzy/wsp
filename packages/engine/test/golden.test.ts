@@ -1431,7 +1431,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
     const checks = plain.inline.filter(c => c.cmd.includes('echo "missing'));
     expect(checks).toHaveLength(1);
-    expect(checks[0]!.cmd).toContain(`for b in 'curl' 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'docker' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
+    expect(checks[0]!.cmd).toContain(`for b in 'curl' 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
   });
 
   it("two tap roads whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
@@ -1813,7 +1813,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:18 installed; caches swept, 700 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:17 installed; caches swept, 700 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 5 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.
@@ -2158,11 +2158,11 @@ describe("golden import stages", () => {
   });
 
   it("a base floor row that failed reaches the ledger and the sealed version with its name, outcome and reason, one shape with the tools stage", async () => {
-    const { backend, fetch } = backendFor([["apt-get install -y -qq docker.io", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package docker-compose-v2" }]]);
+    const { backend, fetch } = backendFor([["apt-get install -y -qq fd-find", { exitCode: 100, stdout: "", stderr: "E: Unable to locate package fd-find" }]]);
     const builder = await prepareBuilder({ backend, setup: "true", fetch, import: importOf() });
-    const docker = { id: "base/docker", name: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" };
-    expect(builder.import?.missingTools).toEqual([docker]);
-    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.missingTools).toEqual([docker]);
+    const fd = { id: "base/fd", name: "fd", outcome: "failed", note: "E: Unable to locate package fd-find" };
+    expect(builder.import?.missingTools).toEqual([fd]);
+    expect((await sealGolden(builder, { backend, hostId: "h1", smoke: "true" })).version.missingTools).toEqual([fd]);
   });
 
   it("the rc calls the pack silenced land on the ledger and the seal stamps them on the version, with the stage line naming them; a pack that silenced nothing leaves both without", async () => {

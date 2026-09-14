@@ -35,9 +35,9 @@ function twoPlaces() {
   const other = stubBackend();
   other.execImpl = dfOk;
   const places = (wired: StubBackend): PlaceBackends => ({
-    wired: "docker",
-    backend: place => (place === "docker" ? wired : place === "solari" ? other : undefined),
-    list: () => ["docker", "solari"],
+    wired: "box",
+    backend: place => (place === "box" ? wired : place === "solari" ? other : undefined),
+    list: () => ["box", "solari"],
   });
   return { other, places };
 }
@@ -198,7 +198,7 @@ describe("building the image at a second place", () => {
     // One image, two copies, one hash.
     const view = await rt.image.get();
     expect(view.copies.map(c => [c.place, c.version, c.hash])).toEqual([
-      ["docker", 1, record.hash],
+      ["box", 1, record.hash],
       ["solari", 1, record.hash],
     ]);
     await rt.close();
@@ -231,7 +231,7 @@ describe("building the image at a second place", () => {
     const { backend, other, rt, composed } = await sealedAtWired();
     const made = [backend.machines.length, other.machines.length];
     const asked = composed.count;
-    expect(await rt.image.build({ place: "docker" })).toMatchObject({ built: false, copy: { place: "docker", version: 1 } });
+    expect(await rt.image.build({ place: "box" })).toMatchObject({ built: false, copy: { place: "box", version: 1 } });
     await expect(rt.image.build({ place: "nowhere" })).rejects.toMatchObject({ kind: "missing" });
     expect([backend.machines.length, other.machines.length]).toEqual(made);
     expect(composed.count).toBe(asked);
@@ -241,16 +241,16 @@ describe("building the image at a second place", () => {
   it("a place that forks nothing and copies no disk takes no copy of the image, and is refused before anything boots", async () => {
     const none = new NoProviderBackend();
     const places = (wired: StubBackend): PlaceBackends => ({
-      wired: "docker",
-      backend: place => (place === "docker" ? wired : place === "here" ? none : undefined),
-      list: () => ["docker", "here"],
+      wired: "box",
+      backend: place => (place === "box" ? wired : place === "here" ? none : undefined),
+      list: () => ["box", "here"],
     });
     const { rt, composed } = started({ places });
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
     await expect(rt.image.build({ place: "here" })).rejects.toMatchObject({ kind: "conflict", message: placeBuildsNoImageLine("here") });
     expect(composed.count).toBe(0);
-    expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["docker"]);
+    expect((await rt.image.get()).copies.map(c => c.place)).toEqual(["box"]);
     await rt.close();
   });
 
@@ -293,7 +293,7 @@ describe("building the image at a second place", () => {
     backend.execImpl = dfOk;
     const rt = createRuntime({ backend, store, adapters: {}, goldenRecipe: recipeWith(), hostId: "h1", places: places(backend) });
     const view = await rt.image.get();
-    expect(view.copies.map(c => c.place)).toEqual(["docker"]);
+    expect(view.copies.map(c => c.place)).toEqual(["box"]);
     expect(other.machines.length).toBe(0);
     await rt.close();
   });
@@ -370,13 +370,13 @@ describe("the image's own seal at a place that is not the provider this host for
     expect(own.every(f => f.place === undefined)).toBe(true);
     // The provider this host forks on is the one other place that runs workspaces: its copy is built there behind
     // the seal, from the record, and the record stays where it was sealed.
-    await until(async () => (await rt.image.get()).copies.some(c => c.place === "docker" && c.hash === image.hash), 5000);
+    await until(async () => (await rt.image.get()).copies.some(c => c.place === "box" && c.hash === image.hash), 5000);
     expect(backend.machines.length).toBeGreaterThan(0);
-    expect(frames.filter(f => f.place !== undefined).every(f => f.place === "docker")).toBe(true);
+    expect(frames.filter(f => f.place !== undefined).every(f => f.place === "box")).toBe(true);
     expect((await store.get("images", "default")) as SealedImage).toMatchObject({ version: 1, place: "solari" });
-    expect((await store.keys("goldens")).sort()).toEqual([copyKey("docker", "default"), copyKey("solari", "default")]);
+    expect((await store.keys("goldens")).sort()).toEqual([copyKey("box", "default"), copyKey("solari", "default")]);
     expect((await rt.image.get()).copies.map(c => [c.place, c.hash])).toEqual([
-      ["docker", image.hash],
+      ["box", image.hash],
       ["solari", image.hash],
     ]);
     await rt.close();
@@ -396,7 +396,7 @@ describe("where an image build goes", () => {
     const named = await rt.golden.buildPlace("solari");
     expect([named.place, named.name, named.backend]).toEqual(["solari", "solari", other]);
     const unnamed = await rt.golden.buildPlace();
-    expect([unnamed.place, unnamed.name, unnamed.backend]).toEqual(["docker", "docker", backend]);
+    expect([unnamed.place, unnamed.name, unnamed.backend]).toEqual(["box", "box", backend]);
     await expect(rt.golden.buildPlace("nowhere")).rejects.toMatchObject({ kind: "missing", message: expect.stringContaining("no place named nowhere") });
     await rt.close();
   });

@@ -55,8 +55,7 @@ const VERSIONS_OUT = [
   "VERSION jq: jq-1.7.1",
   "VERSION rg: ripgrep 14.1.0 (rev 4649aa9700)",
   "VERSION curl: curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0",
-  "VERSION docker: Docker version 27.5.1, build 9f9e405",
-  "VERSION docker compose: Docker Compose version v2.29.2",
+  "VERSION cc: cc (Debian 12.2.0-14) 12.2.0",
   "",
 ].join("\n");
 
@@ -75,7 +74,6 @@ describe("the base floor's plan", () => {
       ["base/git", "apt", "base/apt-index", "git"],
       ["base/jq", "apt", "base/apt-index", "jq"],
       ["base/ripgrep", "apt", "base/apt-index", "rg"],
-      ["base/docker", "script", "base/apt-index", "docker"],
       ["base/build-essential", "apt", "base/apt-index", "cc"],
       ["base/fd", "script", "base/apt-index", "fd"],
       ["base/sqlite3", "apt", "base/apt-index", "sqlite3"],
@@ -84,7 +82,7 @@ describe("the base floor's plan", () => {
       ["base/xz", "apt", "base/apt-index", "xz"],
       ["base/rsync", "apt", "base/apt-index", "rsync"],
     ]);
-    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "Docker engine and compose", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
   });
 
@@ -123,18 +121,16 @@ describe("the base floor's plan", () => {
     expect(cmd("base/python")).toMatch(/\nuv python install 3\.12\nln -sfn "\$\(uv python find --managed-python 3\.12\)" \/usr\/local\/bin\/python3$/);
     expect(cmd("base/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
     expect(cmd("base/jq")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq jq$/);
-    const docker = cmd("base/docker");
-    expect(docker).toContain("\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq docker.io\n");
-    expect(docker).toContain('curl -o /tmp/docker-compose "https://github.com/docker/compose/releases/download/v5.5.1/docker-compose-linux-$arch"');
-    expect(docker).toContain('echo "$sha  /tmp/docker-compose" | sha256sum -c - >/dev/null');
-    expect(docker).toMatch(/\ninstall -D -m 0755 \/tmp\/docker-compose \/usr\/libexec\/docker\/cli-plugins\/docker-compose\nrm -f \/tmp\/docker-compose$/);
+    // The one floor row whose road is a script over apt: Debian ships the binary under another name and the step
+    // puts the name agents type on PATH.
+    expect(cmd("base/fd")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq fd-find\nln -sfn \/usr\/bin\/fdfind \/usr\/local\/bin\/fd$/);
   });
 });
 
 describe("a download that fails", () => {
   it("every base step that downloads runs under the one curl function, which fails loud on an HTTP error, and types no flags of its own", () => {
     const downloads = baseInstalls().filter(t => /\bcurl +-/.test(t.cmd));
-    expect(downloads.map(t => t.id)).toEqual(["base/node", "base/uv", "base/python", "base/docker"]);
+    expect(downloads.map(t => t.id)).toEqual(["base/node", "base/uv", "base/python"]);
     for (const t of downloads) {
       const run = guardedRoad(t.manager, t.cmd);
       expect(run, t.id).toContain(CURL_NET);
@@ -158,15 +154,15 @@ describe("a download that fails", () => {
 });
 
 describe("the versions read", () => {
-  it("asks each floor command for its version on the tools PATH, npm with node and compose with docker", () => {
+  it("asks each floor command for its version on the tools PATH, npm with node and unzip with zip", () => {
     expect(BASE_VERSIONS_CMD).toMatch(/^export PATH=\/root\/\.local\/bin:/);
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION node: $(node --version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION npm: $(npm --version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION rg: $(rg --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION docker compose: $(docker compose version 2>/dev/null | head -n 1)"');
+    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION unzip: $(unzip -v 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION git: $(git --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(21);
+    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(19);
   });
 
   it("keeps the version number out of each tool's own wording, and leaves out a command that printed nothing", () => {
@@ -180,15 +176,14 @@ describe("the versions read", () => {
       { name: "jq", version: "1.7.1" },
       { name: "rg", version: "14.1.0" },
       { name: "curl", version: "8.5.0" },
-      { name: "docker", version: "27.5.1" },
-      { name: "docker compose", version: "2.29.2" },
+      { name: "cc", version: "12.2.0" },
     ]);
-    expect(parseVersions("VERSION node: v22.23.2\nVERSION docker: \nVERSION rg: no digits here\nnoise\n")).toEqual([{ name: "node", version: "22.23.2" }]);
+    expect(parseVersions("VERSION node: v22.23.2\nVERSION zip: \nVERSION rg: no digits here\nnoise\n")).toEqual([{ name: "node", version: "22.23.2" }]);
     expect(parseVersions("")).toEqual([]);
   });
 
   it("the stage line names each version with what its install cost, and a floor entry that did not land by its reason", () => {
-    const versions = parseVersions(VERSIONS_OUT).filter(v => v.name !== "docker" && v.name !== "docker compose");
+    const versions = parseVersions(VERSIONS_OUT).filter(v => v.name !== "cc");
     const line = versionsLine(versions, [
       { id: "base/node", label: "Node 22 with npm", outcome: "installed", bytes: 250 * 1024 * 1024 },
       { id: "base/pnpm", label: "pnpm", outcome: "installed", bytes: 30 * 1024 * 1024 },
@@ -199,9 +194,9 @@ describe("the versions read", () => {
       { id: "base/jq", label: "jq", outcome: "installed", bytes: 2 * 1024 * 1024 },
       { id: "base/ripgrep", label: "ripgrep", outcome: "installed", bytes: 6 * 1024 * 1024 },
       { id: "base/curl", label: "curl", outcome: "installed", bytes: 0 },
-      { id: "base/docker", label: "Docker engine and compose", outcome: "failed", note: "E: Unable to locate package docker-compose-v2" },
+      { id: "base/fd", label: "fd", outcome: "failed", note: "E: Unable to locate package fd-find" },
     ]);
-    expect(line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0 (30 MB), uv 0.12.9 (42 MB), python3 3.12.13 (70 MB), git 2.43.0, jq 1.7.1 (2 MB), rg 14.1.0 (6 MB), curl 8.5.0; Docker engine and compose failed (E: Unable to locate package docker-compose-v2)");
+    expect(line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0 (30 MB), uv 0.12.9 (42 MB), python3 3.12.13 (70 MB), git 2.43.0, jq 1.7.1 (2 MB), rg 14.1.0 (6 MB), curl 8.5.0; fd failed (E: Unable to locate package fd-find)");
     expect(versionsLine([], [])).toBe("");
   });
 });
@@ -214,7 +209,7 @@ describe("installBase", () => {
         free -= 250;
         return { exitCode: 0, stdout: "NODE_HAVE v18.20.4\nNODE_INSTALLED v22.23.2\n", stderr: "" };
       }
-      if (script.includes("apt-get install -y -qq docker.io")) {
+      if (script.includes("apt-get install -y -qq build-essential cmake ninja-build")) {
         free -= 400;
         return ok;
       }
@@ -223,10 +218,10 @@ describe("installBase", () => {
     }, () => mb(free));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
-    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/18)");
-    expect(stages).toContain("deploying-daemon:Node 22 with npm (4/18)");
-    expect(stages).toContain("deploying-daemon:Docker engine and compose (11/18)");
-    expect(stages).toContain("deploying-daemon:rsync (18/18)");
+    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/17)");
+    expect(stages).toContain("deploying-daemon:Node 22 with npm (4/17)");
+    expect(stages).toContain("deploying-daemon:C toolchain with cmake and ninja (11/17)");
+    expect(stages).toContain("deploying-daemon:rsync (17/17)");
     expect(stages.every(s => s.startsWith("deploying-daemon"))).toBe(true);
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
@@ -239,8 +234,7 @@ describe("installBase", () => {
       ["base/git", "installed", 0],
       ["base/jq", "installed", 0],
       ["base/ripgrep", "installed", 0],
-      ["base/docker", "installed", 400 * 1024 * 1024],
-      ["base/build-essential", "installed", 0],
+      ["base/build-essential", "installed", 400 * 1024 * 1024],
       ["base/fd", "installed", 0],
       ["base/sqlite3", "installed", 0],
       ["base/wget", "installed", 0],
@@ -248,10 +242,10 @@ describe("installBase", () => {
       ["base/xz", "installed", 0],
       ["base/rsync", "installed", 0],
     ]);
-    expect(out.line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, docker 27.5.1 (400 MB), docker compose 2.29.2");
+    expect(out.line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, cc 12.2.0 (400 MB)");
     // Once against the image as it arrives, once after the floor ran: the first says what there is nothing to do for.
     expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(2);
-    expect(g.ran).toHaveLength(19);
+    expect(g.ran).toHaveLength(18);
   });
 
   it("reads df once between installs, and sizes an install after the rescue from the reading the cleanup left", async () => {
@@ -281,7 +275,6 @@ describe("installBase", () => {
       ["base/git", "installed", 0],
       ["base/jq", "installed", 0],
       ["base/ripgrep", "installed", 0],
-      ["base/docker", "installed", 0],
       ["base/build-essential", "installed", 0],
       ["base/fd", "installed", 0],
       ["base/sqlite3", "installed", 0],
@@ -291,8 +284,8 @@ describe("installBase", () => {
       ["base/rsync", "installed", 0],
     ]);
     // One read before the loop; the rescue's sweep reads before and after itself and the loop reads once more after
-    // it; one after each of the eighteen installs; the closing sweep and line read three more.
-    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(25);
+    // it; one after each of the seventeen installs; the closing sweep and line read three more.
+    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(24);
   });
 
   it("a step that fails is named on the stage and in the line, and what waited on it is skipped by its name", async () => {
@@ -312,7 +305,6 @@ describe("installBase", () => {
       ["base/git", "skipped", "apt index did not install"],
       ["base/jq", "skipped", "apt index did not install"],
       ["base/ripgrep", "skipped", "apt index did not install"],
-      ["base/docker", "skipped", "apt index did not install"],
       ["base/build-essential", "skipped", "apt index did not install"],
       ["base/fd", "skipped", "apt index did not install"],
       ["base/sqlite3", "skipped", "apt index did not install"],
@@ -321,38 +313,39 @@ describe("installBase", () => {
       ["base/xz", "skipped", "apt index did not install"],
       ["base/rsync", "skipped", "apt index did not install"],
     ]);
-    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; curl skipped (apt index did not install); Node 22 with npm skipped (curl did not install); pnpm skipped (Node 22 with npm did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); Docker engine and compose skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
-    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 16 skipped: curl, git, jq, ripgrep, Docker engine and compose, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); Node 22 with npm, uv (curl did not install); pnpm (Node 22 with npm did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
+    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; curl skipped (apt index did not install); Node 22 with npm skipped (curl did not install); pnpm skipped (Node 22 with npm did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
+    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 15 skipped: curl, git, jq, ripgrep, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); Node 22 with npm, uv (curl did not install); pnpm (Node 22 with npm did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
   });
 
   it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {
-    const g = guest(script => (script.includes("apt-get install -y -qq docker.io") ? { exitCode: 100, stdout: "Reading package lists...\n", stderr: "E: Unable to locate package docker.io\n" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
+    const g = guest(script => (script.includes("apt-get install -y -qq fd-find") ? { exitCode: 100, stdout: "Reading package lists...\n", stderr: "E: Unable to locate package fd-find\n" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
     const out = await installBase(g.machine, () => {});
-    expect(out.tools.find(t => t.id === "base/docker")).toMatchObject({ outcome: "failed", note: "E: Unable to locate package docker.io" });
-    expect(out.line).toBe("node 22.23.2; Docker engine and compose failed (E: Unable to locate package docker.io)");
+    expect(out.tools.find(t => t.id === "base/fd")).toMatchObject({ outcome: "failed", note: "E: Unable to locate package fd-find" });
+    expect(out.line).toBe("node 22.23.2; fd failed (E: Unable to locate package fd-find)");
   });
 
   it("a floor row the provider's image already satisfies reads as on the machine and installs nothing; what waited on it still runs", async () => {
-    // The Box image ships systemd and Docker: apt-get install docker.io failed on every Box golden, and the row read
-    // failed while the tool was there. curl and git ride along to prove an apt row counts the same.
-    const onImage = ["VERSION docker: Docker version 27.5.1, build 9f9e405", "VERSION docker compose: Docker Compose version v2.29.2", "VERSION curl: curl 8.5.0", "VERSION git: git version 2.43.0", ""].join("\n");
+    // A row the image already satisfies read failed while the tool was there, since its install is not idempotent.
+    // The row taken here promises a second command too, so both have to answer before the row counts as carried;
+    // curl and git ride along to prove an apt row counts the same.
+    const onImage = ["VERSION zip: Zip 3.0 (July 5th 2008)", "VERSION unzip: UnZip 6.00 of 20 April 2009", "VERSION curl: curl 8.5.0", "VERSION git: git version 2.43.0", ""].join("\n");
     const g = guest(script => (script.includes("VERSION node:") ? { exitCode: 0, stdout: VERSIONS_OUT, stderr: "" } : undefined), () => mb(3000), onImage);
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
     const row = (id: string) => out.tools.find(t => t.id === id);
-    expect(row("base/docker")).toEqual({ id: "base/docker", label: "Docker engine and compose", outcome: "installed", note: ALREADY_ON_MACHINE });
+    expect(row("base/zip")).toEqual({ id: "base/zip", label: "zip and unzip", outcome: "installed", note: ALREADY_ON_MACHINE });
     expect(row("base/curl")).toMatchObject({ outcome: "installed", note: ALREADY_ON_MACHINE });
     expect(row("base/git")).toMatchObject({ outcome: "installed", note: ALREADY_ON_MACHINE });
     // Nothing was typed for them, and the rows that waited on curl and on the index ran all the same.
-    expect(g.ran.some(script => script.includes("apt-get install -y -qq docker.io"))).toBe(false);
+    expect(g.ran.some(script => script.includes("apt-get install -y -qq zip unzip"))).toBe(false);
     expect(g.ran.some(script => script.includes("apt-get install -y -qq git"))).toBe(false);
     expect(row("base/node")).toMatchObject({ outcome: "installed" });
     expect(g.ran.some(script => script.includes("nodejs.org/dist"))).toBe(true);
     // The floor keeps its catalog order whether a row ran or the image had it, and the line says which were there.
     expect(out.tools.map(t => t.id)).toEqual(["base/login-path", "base/apt-index", ...BASE_FLOOR.map(e => `base/${e.id}`)]);
     // The words are true whichever road put the tool there: the provider's image, or an earlier run of this stage.
-    expect(out.line).toContain("already on the machine: curl, git, Docker engine and compose");
-    expect(stages.some(s => s.includes("Docker engine and compose ("))).toBe(false);
+    expect(out.line).toContain("already on the machine: curl, git, zip and unzip");
+    expect(stages.some(s => s.includes("zip and unzip ("))).toBe(false);
   });
 
   it("a floor row that pins a major runs when the image carries another, and the apt index is left out when no apt row needs it", async () => {
@@ -372,9 +365,9 @@ describe("installBase", () => {
   });
 
   it("an install that exits 0 without its command on PATH is a failure, not a version", async () => {
-    const g = guest(script => (script.includes("for b in") && script.includes("command -v") ? { exitCode: 0, stdout: "missing docker\n", stderr: "" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
+    const g = guest(script => (script.includes("for b in") && script.includes("command -v") ? { exitCode: 0, stdout: "missing fd\n", stderr: "" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
     const out = await installBase(g.machine, () => {});
-    expect(out.tools.find(t => t.id === "base/docker")).toMatchObject({ outcome: "failed", note: "docker is not on PATH after the install" });
-    expect(out.line).toBe("node 22.23.2; Docker engine and compose failed (docker is not on PATH after the install)");
+    expect(out.tools.find(t => t.id === "base/fd")).toMatchObject({ outcome: "failed", note: "fd is not on PATH after the install" });
+    expect(out.line).toBe("node 22.23.2; fd failed (fd is not on PATH after the install)");
   });
 });

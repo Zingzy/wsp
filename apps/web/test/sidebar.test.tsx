@@ -110,8 +110,8 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
 }
 
 const PLACES: PlaceView[] = [
-  { id: "here", kind: "computer", name: "studio.local", default: false, runsWorkspaces: false, engine: "none", present: true },
-  { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018 },
+  { id: "here", kind: "computer", name: "studio.local", default: false, engine: "none", present: true, takesForks: false },
+  { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018, takesForks: true },
 ];
 
 beforeEach(() => {

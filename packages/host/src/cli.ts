@@ -570,8 +570,6 @@ export interface ServeAsked extends ListenAsked {
   advertise?: string;
   /** The machine provider this host forks on, as `--provider` named it. */
   provider?: string;
-  /** The Docker daemon this host dials, as `--docker-host` named it. */
-  dockerHost?: string;
   /** Whether a box linked to a relay runs its connector; false is `--no-relay`. */
   relay?: boolean;
 }
@@ -593,7 +591,6 @@ export const SERVE_FLAGS: readonly ServeFlag[] = [
   { name: "listen", option: { type: "string" }, words: a => ["--listen", a.address] },
   { name: "advertise", option: { type: "string" }, words: a => (a.advertise === undefined ? [] : ["--advertise", a.advertise]) },
   { name: "provider", option: { type: "string" }, words: a => (a.provider === undefined ? [] : ["--provider", a.provider]) },
-  { name: "docker-host", option: { type: "string" }, words: a => (a.dockerHost === undefined ? [] : ["--docker-host", a.dockerHost]) },
   { name: "no-relay", option: { type: "boolean" }, words: a => (a.relay === false ? ["--no-relay"] : []) },
 ];
 
@@ -616,16 +613,13 @@ export interface SharedOpts extends ServeAsked {
  * environment cannot send wsp host connect to one folder and --host to another. It is also what the provider words
  * stand in front of, so one run picks its folder and its provider out of the same environment. */
 export function optsFor(
-  values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "docker-host" | "no-relay">,
+  values: Pick<SharedFlags, "port" | "ws-port" | "listen" | "advertise" | "state" | "provider" | "no-relay">,
   env: Readonly<Record<string, string | undefined>> = process.env,
   note: (line: string) => void = () => {},
 ): SharedOpts {
   const asked = portsAsked({ port: values.port, wsPort: values["ws-port"], listen: values.listen });
   const advertise = advertiseWord(values.advertise);
-  const provider = {
-    ...(values.provider !== undefined ? { provider: values.provider } : {}),
-    ...(values["docker-host"] !== undefined ? { dockerHost: values["docker-host"] } : {}),
-  };
+  const provider = values.provider !== undefined ? { provider: values.provider } : {};
   return {
     ...asked,
     ...(advertise !== undefined ? { advertise } : {}),
@@ -1547,12 +1541,12 @@ interface SharedFlags {
   "ssh-key"?: string;
   awake?: boolean;
   watch?: boolean;
+  update?: boolean;
   name?: string;
   relay?: string;
   host?: string;
   "no-relay"?: boolean;
   provider?: string;
-  "docker-host"?: string;
 }
 
 /** What a word of the shared parse does with --host. `aimed`: the line runs against the host it names. `refused`:
@@ -1591,7 +1585,7 @@ function aimPick(opts: SharedOpts, values: SharedFlags): { statePath: string } &
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     page: "agent",
-    usage: "wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--docker-host <url>] [--no-relay] [--service]",
+    usage: "wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--no-relay] [--service]",
     about: "serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. Every other line starts a host for itself when none serves",
     json: false,
     host: "refused",
@@ -1737,13 +1731,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   add: {
     page: "front",
-    usage: "wsp add [<provider>|user@host] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
-    about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types",
+    usage: "wsp add [<provider>|user@host|<place> --update] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+    about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types, a place with --update to put this wsp's daemon on one already in",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"])),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update)),
   },
   remove: {
     page: "front",
@@ -1954,6 +1948,7 @@ export const SHARED_OPTIONS: Options = {
   "ssh-key": { type: "string" },
   awake: { type: "boolean" },
   watch: { type: "boolean" },
+  update: { type: "boolean" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },
@@ -2068,7 +2063,6 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "no-relay", on: ["up"], says: "serve without the tunnel, on a computer that is linked to a relay" },
   { name: "service", on: ["up"], says: "install the host as a launchd agent on a Mac or a systemd user unit on Linux, which serves now and again at every login. The keys are not written into it: it reads the same .env a terminal run reads, so they have to be in a file" },
   { name: "provider", on: ["up", "init"], says: "which machine provider this computer forks on; without it, a key saved under a provider's own variable wires that provider" },
-  { name: "docker-host", on: ["up", "init"], says: "the Docker daemon to dial, as DOCKER_HOST words it; this computer's own socket without it" },
   { name: "code", on: ["host connect", "join"], says: "the code the other computer printed: wsp host pair for a host, wsp add for a place" },
   { name: "code-file", on: ["join"], says: "read the code off this file and delete the file before dialing, so a code never sits on a disk" },
   { name: "awake", on: ["join"], says: "hold this computer out of idle sleep while it is joined, for as long as the agent runs" },
@@ -2077,6 +2071,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "relay", on: ["host connect"], says: "reach that host through your relay by the name it has there, instead of giving an address" },
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
+  { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the workspaces standing on it" },
   { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
@@ -2125,13 +2120,17 @@ function mcpPage(install: boolean): string {
  * again; the desktop's bundled command hands in its shim, the npm command the default reading. `env` is the
  * environment the verbs run with, this process's for a real command line and its own for a test. `start` is what
  * brings a host up when none serves the state file: the one built from `run` unless a caller says otherwise, and
- * `false` for a caller that wants a line with no host to refuse rather than start one. */
+ * `false` for a caller that wants a line with no host to refuse rather than start one. `caller` is where the line was
+ * typed: the folder, which a thread with no workspace is placed by, and whether that place is somewhere other than
+ * this computer, which is what every rule that would read a path here reads. This process's own folder and here by
+ * default; a line typed inside a machine says both. */
 export async function cli(
   argv: string[],
   io: CliIO = terminalIO(),
   run: RunningWsp = runningWsp(),
   env: Readonly<Record<string, string | undefined>> = process.env,
   start: HostStarter | false = starterFor(run, env),
+  caller: { cwd?: string; elsewhere?: boolean } = {},
 ): Promise<number> {
   const starts = start === false ? {} : { start };
   // One reading for every road out of this process, and the sentence about it said once: a verb, a command and the
@@ -2143,7 +2142,7 @@ export async function cli(
   const verb = findVerb(rest);
   if (verb !== undefined) {
     const words = verb.name.split(" ");
-    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: process.cwd(), env, ...starts });
+    return runVerb(verb, [...words, ...common, ...rest.slice(words.length)], io, chooseState, { alsoHere, cwd: caller.cwd ?? process.cwd(), env, ...starts, ...(caller.elsewhere === true ? { elsewhere: true } : {}) });
   }
   if (rest[0] === MCP_COMMAND) return mcp(io, [...common, ...rest.slice(1)], chooseState, run, env, starts);
   let values: SharedFlags;

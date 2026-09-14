@@ -19,6 +19,8 @@ import {
   PLACE_KEY_REFUSAL,
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
+  DAEMON_VERSION,
+  placeCurrentLine,
   forkRoom,
   placeLinkTranscript,
   joinToken,
@@ -27,6 +29,7 @@ import {
   noSuchPlaceRefusal,
   placeHoldsForksRefusal,
   placeForksNowhereLine,
+  placeCannotBootLine,
   placeNoDaemonPortLine,
   placeNoLinkLine,
   placeStillInstalledLine,
@@ -81,8 +84,6 @@ export interface PlaceRecord {
   joinedAt: string;
   lastSeenAt: string;
   report: PlaceReport;
-  /** The workspace recorded on this computer at join, where the join could record one. */
-  workspaceId?: string;
   /** What the backend this computer offers said about itself the last time it was linked. Kept on the record so a
    * fork standing on this place can be held at host start, before the computer has dialled in: the capabilities,
    * the sizes and the budgets a road reads are facts about that computer, not about this moment's socket. */
@@ -120,7 +121,6 @@ export interface HerePlace {
   name: string;
   os?: string;
   shape?: WorkspaceSize;
-  runsWorkspaces?: boolean;
   engine?: "none" | "docker" | "podman";
   diskFreeBytes?: number;
 }
@@ -142,12 +142,47 @@ export interface PlaceWiring {
    * calling home. Nothing is installed and nothing is left running: it answers or it throws the road's own line.
    * Absent on a runtime served without the ssh road, where a computer that is not linked can only be waited for. */
   dial?: PlaceDialler;
+  /** How the daemon this host deploys is put on a computer that is already a place. The host wires it because the
+   * binary and the table of chips it is picked from are the host's, as the installer above is. */
+  update?: PlaceUpdater;
 }
 
 /** One dial of a computer over the login this host holds for it, with the key file the add was given where there
  * was one. Throws with the road's own sentence (ssh's line on the ssh road), which is what a person reads in place
  * of a wsp-shaped refusal. */
 export type PlaceDialler = (login: { ssh: string; keyPath?: string }) => Promise<void>;
+
+/** What one update is told: which computer, what it last said about itself (its chip picks the binary), the link
+ * this host is holding where it holds one, and the login it was installed over where the record holds one. Which
+ * of the two roads it takes is the updater's own reading, since only it knows what each can carry. */
+export interface PlaceUpdateRequest {
+  placeId: string;
+  name: string;
+  report: PlaceReport;
+  link?: DaemonReach;
+  ssh?: { ssh: string; keyPath?: string };
+}
+
+/** What an update answers: which road carried the binary, where it landed on that computer, and where the one it
+ * replaced was kept, which is the first thing to look at on a box whose daemon will not come up. */
+export interface PlaceUpdateLanded {
+  road: "link" | "ssh";
+  at: string;
+  kept?: string;
+}
+
+/** How the daemon this host deploys is put on a computer already joined. Absent on a runtime served without it,
+ * where a place stays on the daemon it has. */
+export type PlaceUpdater = (req: PlaceUpdateRequest) => Promise<PlaceUpdateLanded>;
+
+/** What the door answers a person who asked for one: the versions either side of the move, the road it took, where
+ * it landed, and the sentence for a computer that had not dialled back on the new daemon before the wait ran out. */
+export interface PlaceUpdated extends PlaceUpdateLanded {
+  name: string;
+  from: number;
+  to: number;
+  note?: string;
+}
 
 /** What one install is told: where to log in, what to call the computer, the single-use code it spends on this
  * host, and the addresses that computer is to dial it at, in the order its link tries them. The addresses are the
@@ -181,20 +216,11 @@ export interface PlaceInstalled {
 export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
-/** The two roads into the runtime a place needs, handed in because both are the runtime's own: a joined computer
- * becomes a workspace at its join, and those workspaces go when the place does. */
+/** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks,
+ * and a remove refuses to take the place out from under them. */
 export interface PlaceRecording {
-  /** Records one workspace on the place; answers its id, and the notice where a name was already held. */
-  record(place: PlaceRecord): Promise<{ workspaceId?: string; notice?: string }>;
-  /** Drops every workspace standing on this place by the ordinary delete road; answers the lines it printed, in
-   * that kind's own words for what a delete does to a machine. */
-  drop(placeId: string): Promise<string[]>;
-  /** Moves the login and the shape of the workspace standing on this place onto what it just reported. A computer
-   * somebody owns is upgraded, re-installed and given new tools under wsp rather than by it, so what a turn there
-   * runs under is read again at every link and not once at the join. */
-  refresh(place: PlaceRecord): Promise<void>;
-  /** The names of the forks standing on this place: machines wsp made there, which a remove refuses to take the
-   * place out from under. The workspace the place itself is is not one of them. */
+  /** The names of the forks standing on this place: the machines wsp made there, which are the only workspaces a
+   * place carries. */
   forksOn(placeId: string): Promise<string[]>;
 }
 
@@ -218,6 +244,9 @@ export interface PlaceDoorOptions {
   copyBuild?: (placeId: string) => string | undefined;
   /** How long a computer has to dial back after its join before an install gives up on it. */
   joinWaitMs?: number;
+  /** How long a computer that took an update has to dial back running it before the row is answered with what it
+   * still reads; tests shrink it. */
+  updateWaitMs?: number;
   /** How long one dial of a computer gets before it is an answer of its own. The bound is the runtime's and not
    * the backend's: a road that hangs rather than refusing must still answer the person who pressed the button. */
   dialWaitMs?: number;
@@ -295,6 +324,9 @@ export interface PlaceDoor {
   /** The home the place's login lands in, which every path a turn there is built from. */
   homeOf(placeId: string): Promise<string | undefined>;
   list(now: number): Promise<PlaceView[]>;
+  /** Puts the daemon this host deploys on one place and waits for it to dial back running it. Refuses in one
+   * sentence a place this host does not hold, one already on this daemon, and a runtime wired with no updater. */
+  update(placeId: string): Promise<PlaceUpdated>;
   remove(placeId: string): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
@@ -306,6 +338,14 @@ export interface PlaceDoor {
 /** The one refusal for a runtime served without places wired, so the ops answer plainly rather than pretending
  * this host holds none. */
 export const NO_PLACE_DOOR = "this runtime holds no places; the host that serves the app wires them";
+
+/** The refusal an update gets on a runtime wired with no road to put a daemon on a computer. */
+export const NO_PLACE_UPDATER = "this runtime carries no daemon to put on a computer; the host that serves the app wires one";
+
+/** What the answer says about a computer that took the daemon and had not come back on it before the wait ran out.
+ * Nothing has failed: the unit restarts it and the row moves on its next link. */
+export const placeUpdateSlowLine = (name: string, seconds: number): string =>
+  `${name} took the daemon and had not dialled back on it within ${seconds}s; its row reads the new version once it does`;
 
 /** A place that runs no workspaces: a joined computer whose doctor said no, or a provider with nothing to fork on.
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
@@ -324,7 +364,6 @@ export interface PlaceAdded {
 export interface PlaceRemoved {
   removed: boolean;
   swept: string[];
-  dropped: string[];
   note?: string;
 }
 
@@ -462,6 +501,14 @@ const DIAL_MS = 20_000;
  * that never arrives is a network between the two, which is what the sentence says. */
 const JOIN_WAIT_MS = 90_000;
 
+/** How long a computer that took an update has to come back up running it. The unit restarts the daemon within
+ * seconds and its link backs off from two, so a minute is the row reading the new version as the ticket asks
+ * rather than a wait a person sits through; a computer slower than that is answered with what it still reads and
+ * the reason. */
+const UPDATE_WAIT_MS = 60_000;
+/** How often the record is read while that wait runs. */
+const UPDATE_POLL_MS = 500;
+
 export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const { store, devices, wiring, recording } = opts;
   const clockNow = opts.now ?? Date.now;
@@ -515,6 +562,20 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const found = await store.get(PLACES, placeId);
     return isPlaceRecord(found) ? found : undefined;
   };
+  /** The version the place reports once it has dialled back, or what it still reads when the wait runs out. The
+   * record is what a link writes its report onto, so this reads the one fact every other row reads. */
+  const untilDaemonVersion = async (placeId: string, from: number, waitMs: number): Promise<number> => {
+    const until = clockNow() + waitMs;
+    for (;;) {
+      const version = (await recordOf(placeId))?.report.daemonVersion ?? from;
+      if (version >= DAEMON_VERSION || clockNow() >= until) return version;
+      await new Promise(resolve => {
+        const timer = setTimeout(resolve, UPDATE_POLL_MS);
+        timer.unref?.();
+      });
+    }
+  };
+
   /** The one write of a place record: the store and the memory the sync roads read both move, so a backend answered
    * without a read is never answered off a record the store has moved past. */
   const keep = async (record: PlaceRecord): Promise<void> => {
@@ -670,7 +731,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * that has not yet said what it forks with shows nothing in that column and is asked behind the listing, and one
    * that does not answer in time shows nothing rather than a guess. */
   const forksOf = async (record: PlaceRecord): Promise<{ running: number; room: number } | undefined> => {
-    const linked = live.has(record.id) && record.report.runsWorkspaces;
+    const linked = live.has(record.id);
     const backend = linked ? door.backendOf(record.id) : undefined;
     if (backend === undefined) {
       if (linked) void door.forkingBackend(record.id).catch(() => undefined);
@@ -700,18 +761,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     os: record.report.os,
     shape: record.report.shape,
     ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
-    runsWorkspaces: record.report.runsWorkspaces,
-    ...(record.report.workspacesBlocked !== undefined ? { workspacesBlocked: record.report.workspacesBlocked } : {}),
     engine: record.report.engine,
     present: live.has(record.id),
     joinedAt: record.joinedAt,
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
-    // A joined computer forks where its own daemon runs workspaces, which is the daemon's self check, not an engine
-    // of its own; a box whose kernel that check turns down runs the person's agents as its own one workspace.
-    takesForks: record.report.runsWorkspaces === true,
-    ...(record.workspaceId !== undefined ? { workspaceId: record.workspaceId } : {}),
+    // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
+    // every computer on this list forks.
+    takesForks: true,
     // Field by field rather than spread: the key file on the record is a path on this computer and no client's
     // business, and a road copied whole would hand it over.
     ...(record.road === undefined ? {} : { road: { ...(record.road.ssh !== undefined ? { ssh: record.road.ssh } : {}), ...(record.road.from !== undefined ? { from: record.road.from } : {}) } }),
@@ -723,12 +781,22 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
   });
 
+  /** Whether this computer can be a place at all, by the daemon's own self check, and the one sentence when it
+   * cannot. Read on the join and on every link after it: a box is turned down the moment it says its kernel no
+   * longer boots the image, rather than staying a forking place nothing can fork on. */
+  const cannotBoot = (report: PlaceReport): string | undefined =>
+    report.runsWorkspaces ? undefined : placeCannotBootLine(report.name, report.workspacesBlocked);
+
   const door: PlaceDoor = {
     async join(req, from, at) {
       // The key and the report are read before the code is spent, so a join that was never going to stand does not
       // cost the person their code.
       if (!readsAsEd25519(req.publicKey)) throw new Error(PLACE_BAD_KEY_REFUSAL);
       const taken = takenReport(req.report);
+      // A computer that cannot boot the image is not a place: the daemon's own doctor says why in one sentence and
+      // the join stops on it, before the code is spent and before a record exists.
+      const blocked = cannotBoot(taken);
+      if (blocked !== undefined) throw new Error(blocked);
       if (!(await devices.spend(req.code, at))) return undefined;
       // Eight bytes: the id keys the store, so two places that drew the same one would be one record and the older
       // computer's link would replace the newer's on every dial.
@@ -738,9 +806,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await keep(record);
       // Last added is the default, which is what makes the computer somebody just joined the one a verb means.
       await markDefault(id);
-      const recorded = await recording.record(record);
-      const held: PlaceRecord = recorded.workspaceId === undefined ? record : { ...record, workspaceId: recorded.workspaceId };
-      if (recorded.workspaceId !== undefined) await keep(held);
       // One code buys the place and, when the app asked, the token the joining computer's own window holds: the
       // person's intent was one act. The socket stays the place link and is bound to no device.
       const client = req.client === undefined ? undefined : await devices.admit(req.client.name, at);
@@ -748,7 +813,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // An install that handed this computer the code is waiting on the link it will open next.
       const waiting = awaiting.get(req.code);
       if (waiting !== undefined) waiting.placeId = id;
-      emit({ type: "place.joined", place: viewOf(held, id), from });
+      emit({ type: "place.joined", place: viewOf(record, id), from });
       return {
         reply: {
           placeId: id,
@@ -759,7 +824,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(client === undefined ? {} : { device: { deviceId: client.deviceId, deviceToken: client.deviceToken } }),
         },
         expect,
-        ...(recorded.notice !== undefined ? { notice: recorded.notice } : {}),
       };
     },
 
@@ -776,13 +840,22 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async prove(placeId, signature, expect, report) {
       const held = await recordOf(placeId);
       if (held === undefined || !verifyPlaceBytes(held.publicKey, expect, signature)) return { refusal: PLACE_KEY_REFUSAL };
-      // The report on this frame is the one the record and the workspace take, on a join's second frame and on every
-      // relink alike, so it is read by the same rule the join's own frame was.
+      // The report on this frame is the one the record takes, on a join's second frame and on every relink alike,
+      // so it is read by the same rule the join's own frame was.
+      let taken: PlaceReport;
       try {
-        return { report: takenReport(report) };
+        taken = takenReport(report);
       } catch (e) {
         return { refusal: e instanceof Error ? e.message : String(e) };
       }
+      const blocked = cannotBoot(taken);
+      if (blocked === undefined) return { report: taken };
+      // A box that can no longer boot the image stops being reachable here and says why: the link is cut, the row
+      // keeps the sentence where every other refusal of a dial is kept, and nothing attaches.
+      await keep({ ...held, dialled: { at: new Date(clockNow()).toISOString(), answered: false, said: blocked } });
+      cut(placeId, blocked);
+      emit({ type: "place.absent", placeId });
+      return { refusal: blocked };
     },
 
     async attach(placeId, socket, report, from, at) {
@@ -799,9 +872,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // the link that arrived: the computer is here now, and a refusal from before it came back is not news.
       const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
       await keep(moved);
-      // What a turn there runs under is this link's report and not the join's: a person installs a tool on their own
-      // computer and the next link is where wsp learns it.
-      await recording.refresh(moved);
       const reach = connectDaemon({
         socket,
         onEvent: e => {
@@ -820,12 +890,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // Before anything else this attach does: a request held over the gap is sent again on this socket, and the
       // stage waiting on it was told to wait rather than told the computer was gone.
       woken(placeId, true);
-      // A computer that says it no longer forks is taken at its word at once: what it said before is not a fact
-      // about the computer that is here now. One that says it does is asked what it forks with behind the attach
-      // and not in front of it, so the link is held whether or not that answer comes and the first listing after a
-      // join carries the room it has left.
-      if (!moved.report.runsWorkspaces) backends.delete(placeId);
-      else void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
+      // What the computer forks with is asked behind the attach and not in front of it, so the link is held whether
+      // or not that answer comes and the first listing after a join carries the room it has left.
+      void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
       socket.once("close", () => {
         const mine = live.get(placeId);
         if (mine?.socket !== socket) return;
@@ -879,9 +946,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (at !== undefined) return at;
       }
       const name = record?.name ?? placeId;
-      if (record === undefined || !record.report.runsWorkspaces) {
+      if (record === undefined) {
         backends.delete(placeId);
-        throw new PlaceForksNowhereError(placeForksNowhereLine(name, record?.report.workspacesBlocked));
+        throw new PlaceForksNowhereError(placeForksNowhereLine(name));
       }
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -1008,7 +1075,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         if (installed.ssh !== undefined) await keep(held);
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
-        stage("join", "done", `workspaces ${held.report.runsWorkspaces ? "yes" : "no"} · engine ${held.report.engine}`);
+        stage("join", "done", `engine ${held.report.engine}`);
         return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
@@ -1109,11 +1176,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           ...(here.os !== undefined ? { os: here.os } : {}),
           ...(here.shape !== undefined ? { shape: here.shape } : {}),
           ...(here.diskFreeBytes !== undefined ? { diskFreeBytes: here.diskFreeBytes } : {}),
-          ...(here.runsWorkspaces !== undefined ? { runsWorkspaces: here.runsWorkspaces } : {}),
           ...(here.engine !== undefined ? { engine: here.engine } : {}),
           present: true,
           // This computer is where the person's own agents run, never something the host forks into: a copy of the
-          // image on a Docker here is the provider row's, which is the one that says it forks.
+          // image on a runtime here is that place's own row, which is the one that says it forks.
           takesForks: false,
         },
         ...held.map(r => {
@@ -1139,9 +1205,38 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ];
     },
 
+    async update(placeId) {
+      const held = await recordOf(placeId);
+      if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
+      const from = held.report.daemonVersion;
+      // Read before a byte is picked up: a place already on this daemon is told so rather than sent it again, and
+      // the row it is told about is the one the list prints.
+      if (from >= DAEMON_VERSION) throw new Error(placeCurrentLine(held.name, from));
+      if (wiring.update === undefined) throw new Error(NO_PLACE_UPDATER);
+      const link = live.get(placeId)?.reach;
+      const ssh = held.road?.ssh;
+      const landed = await wiring.update({
+        placeId,
+        name: held.name,
+        report: held.report,
+        ...(link === undefined ? {} : { link }),
+        ...(ssh === undefined ? {} : { ssh: { ssh, ...(held.road?.keyPath === undefined ? {} : { keyPath: held.road.keyPath }) } }),
+      });
+      // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
+      // about itself then is the only reading that proves the new daemon is the one running there.
+      const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
+      return {
+        ...landed,
+        name: held.name,
+        from,
+        to,
+        ...(to >= DAEMON_VERSION ? {} : { note: placeUpdateSlowLine(held.name, Math.round((opts.updateWaitMs ?? UPDATE_WAIT_MS) / 1000)) }),
+      };
+    },
+
     async remove(placeId) {
       const held = await recordOf(placeId);
-      if (held === undefined) return { removed: false, swept: [], dropped: [] };
+      if (held === undefined) return { removed: false, swept: [] };
       // The forks on it are wsp's own machines and the person's to delete: a place taken out from under them would
       // leave containers on that computer nothing here can name again.
       const forks = await recording.forksOn(placeId);
@@ -1161,8 +1256,6 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         }
         cut(placeId, "removed from this host");
       }
-      // The workspaces standing on it go by the ordinary delete road, so their threads and transcripts go with them.
-      const dropped = await recording.drop(placeId);
       kept.delete(placeId);
       backends.delete(placeId);
       await store.delete(PLACES, placeId);
@@ -1170,7 +1263,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       woken(placeId, false);
       closedAt.delete(placeId);
       emit({ type: "place.removed", placeId });
-      return { removed: true, swept, dropped, ...(note !== undefined ? { note } : {}) };
+      return { removed: true, swept, ...(note !== undefined ? { note } : {}) };
     },
 
     find: async ref => (await records()).filter(r => r.id === ref || r.name === ref),

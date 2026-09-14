@@ -29,6 +29,7 @@ import {
   RuntimeRequest,
   THREAD_OPS,
   TICKET_ORIGIN,
+  UNAUTHORIZED,
   WS_PATH,
   WorkspaceListing,
   WorkspaceOut,
@@ -259,7 +260,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
       tickets.delete(ticketParam); // single-use, spent even when expired
       const origin = ticket === undefined ? undefined : TICKET_ORIGIN[ticket.purpose];
       if (ticket === undefined || origin === undefined || now() > ticket.expiresAt) {
-        ws.close(4401, "unauthorized");
+        ws.close(4401, UNAUTHORIZED);
         return;
       }
       stamped = origin;
@@ -306,7 +307,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
     /** Remembers the socket under the device that authed it, so a revoke can cut it. */
     const bind = (device: DeviceView): void => {
       me = { kind: "device", device };
-      bound = { deviceId: device.id, cut: () => ws.close(4401, "unauthorized") };
+      bound = { deviceId: device.id, cut: () => ws.close(4401, UNAUTHORIZED) };
       held.add(bound);
     };
 
@@ -322,7 +323,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
           parsed = JSON.parse(String(raw));
         } catch {
           send({ id: null, ok: false, error: "invalid json" });
-          if (!authed) ws.close(4401, "unauthorized");
+          if (!authed) ws.close(4401, UNAUTHORIZED);
           return;
         }
         // The door for a socket holding a thread's own token, read off the op's name before its own shape is: shut,
@@ -337,7 +338,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         const req2 = RuntimeRequest.safeParse(parsed);
         if (!req2.success) {
           send({ id: (parsed as { id?: string | number }).id ?? null, ok: false, error: req2.error.message });
-          if (!authed) ws.close(4401, "unauthorized");
+          if (!authed) ws.close(4401, UNAUTHORIZED);
           return;
         }
         const msg = req2.data;
@@ -345,12 +346,12 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
         if (!authed) {
           const refuse = (error: string): void => {
             send({ id: msg.id, ok: false, error, kind: "auth" });
-            ws.close(4401, "unauthorized");
+            ws.close(4401, UNAUTHORIZED);
           };
           // The second frame of a place's handshake, and the only frame this socket may send once its first one was
           // answered: anything else is a socket asking for a second identity.
           if (proving !== undefined) {
-            if (msg.op !== "place.prove") return refuse("unauthorized");
+            if (msg.op !== "place.prove") return refuse(UNAUTHORIZED);
             const { placeId, expect } = proving;
             proving = undefined;
             // The door reads the signature and the report this frame carries, and answers the report it will take
@@ -367,7 +368,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             await places().attach(placeId, ws, proved.report, from, now());
             return;
           }
-          if (deciding) return refuse("unauthorized");
+          if (deciding) return refuse(UNAUTHORIZED);
           deciding = true;
           if (msg.op === "place.join" || msg.op === "place.auth") {
             // A computer joining or dialling back in. The door answers its challenge and says which bytes the next
@@ -386,7 +387,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             send({ id: msg.id, ok: true, ...opened.reply, ...(opened.notice !== undefined ? { notice: opened.notice } : {}) });
             return;
           }
-          if (msg.op === "place.prove") return refuse("unauthorized");
+          if (msg.op === "place.prove") return refuse(UNAUTHORIZED);
           if (msg.op === "pair.redeem") {
             // A runtime with no device door, and a store that failed, both read as a code this host is not
             // holding: the caller is unauthenticated, so one refusal for every reason tells it nothing.
@@ -399,9 +400,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
             send({ id: msg.id, ok: true, deviceId: paired.deviceId, deviceToken: paired.deviceToken });
             return;
           }
-          if (msg.op !== "auth") return refuse("unauthorized");
+          if (msg.op !== "auth") return refuse(UNAUTHORIZED);
           const who = await whoIs(msg.token).catch(() => undefined);
-          if (who === undefined) return refuse("unauthorized");
+          if (who === undefined) return refuse(UNAUTHORIZED);
           authed = true;
           if (who.kind === "device") {
             bind(who.device);
@@ -459,6 +460,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               }
               send({ id: msg.id, ok: true, places: await places().list(now()) });
               return;
+            case "places.update": {
+              if (!ownRoad()) {
+                send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                return;
+              }
+              send({ id: msg.id, ok: true, ...(await places().update(msg.placeId)) });
+              return;
+            }
             case "places.remove": {
               if (!ownRoad()) {
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });

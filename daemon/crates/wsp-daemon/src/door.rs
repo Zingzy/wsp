@@ -183,7 +183,7 @@ pub(crate) async fn serve(mut tcp: TcpStream, ctx: Arc<Ctx>) {
         return;
     }
     let (tx, rx) = mpsc::unbounded_channel();
-    let conn = Arc::new(Conn::new(auth.port, Outbound(tx), Road::Inbound));
+    let conn = Arc::new(Conn::new(ctx.next_key(), auth.port, Outbound(tx), Road::Inbound));
     serve_authed(ws, &ctx, conn, rx, None).await;
 }
 
@@ -193,6 +193,7 @@ pub(crate) enum Ended {
     Peer,
     Quiet,
     Leave,
+    Restart,
 }
 
 /// The one loop every authed socket runs, inbound or the link a place opened: the hello first, then each frame
@@ -209,7 +210,7 @@ pub(crate) async fn serve_authed<S>(
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let key = ctx.next_key();
+    let key = conn.key;
     if conn.scope.is_none() {
         ctx.add_authed(key, conn.out.clone());
     }
@@ -244,11 +245,17 @@ where
                                 break Ended::Peer;
                             }
                         }
-                        // The leave's reply goes out whole before the daemon stops: the host reads what was swept.
+                        // The reply goes out whole before the daemon stops: the host reads what was swept, or where
+                        // the binary it sent landed.
                         Some(Outgoing::Leave(t)) => {
                             let _ = ws.send(Message::text(t)).await;
                             let _ = ws.flush().await;
                             break Ended::Leave;
+                        }
+                        Some(Outgoing::Restart(t)) => {
+                            let _ = ws.send(Message::text(t)).await;
+                            let _ = ws.flush().await;
+                            break Ended::Restart;
                         }
                     }
                 }
@@ -259,15 +266,19 @@ where
     // The client is gone; the ptys and the watchers keep running. Only this socket's subscriptions and tunnels die
     // with it.
     ctx.remove_authed(key);
+    ctx.guests.socket_closed(key);
     conn.close();
     let reason = match ended {
         Ended::Peer => None,
         Ended::Quiet => Some(words::LINK_CLOSE_QUIET),
         Ended::Leave => Some(words::LINK_CLOSE_STOPPING),
+        Ended::Restart => Some(words::LINK_CLOSE_UPDATING),
     };
     let frame = reason.map(|reason| CloseFrame { code: CloseCode::Normal, reason: reason.into() });
     let _ = timeout(CLOSE_WAIT, ws.close(frame)).await;
-    if ended == Ended::Leave {
+    // Both endings stop this process. What differs is what happens next on that computer: after a leave nothing
+    // brings it back, and after an update its supervisor starts the binary that landed.
+    if ended == Ended::Leave || ended == Ended::Restart {
         ctx.stop.notify_one();
     }
     ended
