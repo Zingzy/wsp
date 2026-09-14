@@ -70,7 +70,7 @@ import WebSocket from "ws";
 import type { CliIO } from "./cli.js";
 import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
-import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
+import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
 import { publicHostname } from "./relay-link.js";
 import { advertiseWord, pairOnLoopbackLine, reachAddresses } from "./pairing.js";
@@ -1112,7 +1112,6 @@ export function placeStanding(home: string): PlaceFile | undefined {
 export async function leavePlace(home: string, run?: ServiceRunner, forPlatform: string = platform()): Promise<string[]> {
   const manager = serviceManagerFor(forPlatform);
   const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), ...(run !== undefined ? { run } : {}) });
-  await stopPlaceService({ home, ...(manager !== undefined ? { manager } : {}), ...(run !== undefined ? { run } : {}) });
   return swept.removed;
 }
 
@@ -1163,9 +1162,9 @@ export async function leaveCommand(io: CliIO, args: readonly string[], deps: { h
     return 1;
   }
   const manager = serviceManagerFor(deps.platform);
+  // The agent is another process from this one, so the sweep stops it before taking its unit file, and the lines
+  // below say so.
   const swept = await sweepPlace({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run });
-  // The agent is another process from this one, so the manager is asked to let it go here and the person reads it.
-  await stopPlaceService({ home, ...(manager !== undefined ? { manager } : {}), run: deps.run });
   io.log(`${held.name} left the wsp at ${held.hostUrls.join(", ")}; removed:`);
   for (const line of swept.removed) io.log(`  ${line}`);
   for (const line of swept.kept) io.log(line);

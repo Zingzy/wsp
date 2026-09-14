@@ -15,7 +15,7 @@ import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from 
 import { dirname } from "node:path";
 import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { serviceManagerFor, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
+import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
 
 /** Where a place keeps the file naming the wsp it belongs to, the private key it proves itself with, and the
  * agent's log, since nobody is watching a terminal. All three sit in wsp's own folder under the person's home,
@@ -202,15 +202,17 @@ export const placeService = (home: string, uid?: number): ServiceAddress => ({ r
  * Every scope the manager could be holding a unit in, not only the one a join writes today: a computer joined
  * before the place's unit became the machine's own has its file under that login's systemd, and a sweep that read
  * one scope left that unit behind to come back under auto-restart with nothing to serve. Each line names the scope
- * it came out of, so a person reads which of the two the leave took.
+ * it came out of and says what the manager answered when it was told to stop it, so a person reads which of the
+ * two the leave took and whether anything of it is still running.
  *
- * It does not ask the manager to stop anything, and that is the whole of the order here: on the road the host asks
- * for, the process running this sweep IS the agent, and a manager told to stop it kills it before it can answer.
- * The unit file goes first, so nothing brings the agent back at the next login however this ends; stopPlaceService
- * is the line that stops what is running, and its caller runs it once it has nothing left to say.
+ * The agent is stopped before its unit file goes, and the manager is reloaded after: a manager asked to stop a
+ * unit whose file has already gone stops nothing, and the agent kept running with the place file and the log it
+ * writes removed under it, until somebody restarted it by hand. This runs on the computer being left, where the
+ * agent is another process from this one; the host's own road asks the agent to sweep itself over the link.
  *
- * Nothing here fails the leave: a manager that will not answer leaves its own line unsaid and the files still go,
- * since a person running this has already decided this computer is out of that wsp. */
+ * Nothing here fails the leave: a manager that refuses says so in its own line, which carries what it answered
+ * rather than the word the leave was after, and the files still go, since a person running this has already
+ * decided this computer is out of that wsp. */
 export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSweep> {
   const home = opts.home ?? homedir();
   const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
@@ -219,14 +221,20 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
     const address = placeService(home, opts.uid);
     const run = opts.run ?? systemRunner;
     for (const held of manager.held(address)) {
-      // The manager forgets it at the next login first, while the unit file it reads that off is still there; then
-      // the file goes. Either way round the service keeps running, which is what lets the sweep answer before it
-      // stops. Asked of every scope whether a file is there or not: a scope can hold the link that enables a unit
-      // whose file has already gone, and that link is what would start it again.
-      for (const argv of held.forget) await run(argv);
+      // What is running goes first, then the link the manager would start it again by, both while the unit file
+      // they name is still there; then the file, then the reload that leaves the manager holding nothing. Asked of
+      // every scope whether a file is there or not: a scope can hold the link that enables a unit whose file has
+      // already gone, and that link is what would start it again.
+      const stopRefused = await runAll(held.stop, run, STOP_WAIT_MS);
+      const forgetRefused = await runAll(held.forget, run);
       if (!existsSync(held.unit.path)) continue;
       rmSync(held.unit.path, { force: true });
-      removed.push(`${held.words} ${held.unit.name}`);
+      const reloadRefused = await runAll(held.reload, run);
+      // What the manager answered, not what it was asked for: a stop that refused leaves the agent running, and a
+      // line saying it was stopped would be the one thing a person reading a leave cannot check. The first refusal
+      // of the three names its own command, so the line says which step it was.
+      const refused = stopRefused ?? forgetRefused ?? reloadRefused;
+      removed.push(`${held.words} ${held.unit.name} (${refused === undefined ? "stopped" : runFailureLine(refused)})`);
     }
   }
   // The daemon on this computer is this process, so there is no second unit of its own; the paths are the ones
@@ -272,19 +280,4 @@ function unsourced(place: DaemonPlace): string | undefined {
   if (kept.length === held.split("\n").length) return undefined;
   writeFileSync(file, kept.join("\n"));
   return `${line} (out of ${file})`;
-}
-
-/** Asks this computer's manager to stop the agent, once the caller has nothing left to say: on the host's own road
- * this stops the very process that ran the sweep, so nothing after it is guaranteed to run. Its file and whatever
- * the manager held beside it are already gone by then, so no login brings it back.
- *
- * Every scope the sweep just took a file out of, for the same reason it read them all: an agent installed on the
- * older road is running under that login's own systemd, and a stop told the machine's would leave it up and
- * restarting with no place file to serve. */
-export async function stopPlaceService(opts: PlaceSweepOptions = {}): Promise<void> {
-  const home = opts.home ?? homedir();
-  const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
-  if (manager === undefined) return;
-  const run = opts.run ?? systemRunner;
-  for (const held of manager.held(placeService(home, opts.uid))) for (const argv of held.unload) await run(argv);
 }

@@ -60,7 +60,7 @@ import {
   placeUpdater,
   updatedLines,
 } from "../src/places.js";
-import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, stopPlaceService, sweepPlace, writePlaceFile } from "../src/place-report.js";
+import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
@@ -470,6 +470,22 @@ describe("a computer joining a wsp", () => {
     await expect(joinCommand(captured(), [other.url], { code: codeFor(other, "X") }, joinDepsFor(tmp("join-other"), fakeRunner().run))).rejects.toMatchObject({ name: "JoinRefused", about: "host" });
   });
 
+  it("restarts the unit it just wrote rather than starting it, so an agent that survived runs the binary that landed", async () => {
+    const home = tmp("join-restart");
+    const host = await fakeHost();
+    const runner = fakeRunner();
+    expect(await joinCommand(captured(), [host.url], { code: codeFor(host, "7QK3M2VD") }, joinDepsFor(home, runner.run))).toBe(0);
+    const unit = SERVICE_MANAGERS.systemd.unit({ role: "place", statePath: placeFilePath(home), home, uid: 0 }).name;
+    // enable without --now and then restart: a start leaves a process from an earlier unit of this name running
+    // the binary it was started with, which is what an install over the old one landed on, and a restart on a unit
+    // that is stopped starts it.
+    expect(runner.ran).toEqual([
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "enable", unit],
+      ["systemctl", "restart", unit],
+    ]);
+  });
+
   it("refuses a second join on a computer that already belongs to a wsp", async () => {
     const home = tmp("join-again");
     const host = await fakeHost();
@@ -566,7 +582,8 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(said).toContain("old-macbook left the wsp at");
     expect(said).toContain("stays: the work your threads did there is yours");
     expect(said).toContain("wsp remove");
-    // The manager was asked to let the agent go, which is what a person running this wants to see.
+    // The manager was asked to stop the agent and to forget it, which is what a person running this wants to see.
+    expect(runner.ran.some(argv => argv.includes("stop"))).toBe(true);
     expect(runner.ran.some(argv => argv.includes("disable"))).toBe(true);
   });
 
@@ -576,7 +593,7 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(io.errors).toEqual([NOTHING_TO_LEAVE_LINE]);
   });
 
-  it("makes the manager forget the agent and takes its file, and stops nothing until the caller says so", async () => {
+  it("stops the agent in both scopes before its unit file goes, reloads the manager after, and says it stopped it", async () => {
     const home = tmp("leave-order");
     const manager = unitsUnder(home);
     const runner = fakeRunner();
@@ -585,25 +602,43 @@ describe("taking wsp off the computer it is typed on", () => {
     mkdirSync(dirname(unit.path), { recursive: true });
     writeFileSync(unit.path, "[Unit]\n");
     const swept = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
-    // The file is gone and the link systemd keeps beside it was taken with it, so no start brings the agent back;
-    // nothing has been stopped yet, which is what lets the sweep answer the host before it dies.
-    expect(existsSync(unit.path)).toBe(false);
-    expect(swept.removed[0]).toContain(unit.name);
-    // The agent is the machine's service, so its own systemctl carries no --user; the login's is asked too, since
-    // a computer joined before the unit became the machine's has its file there and nothing else would take it.
+    // The stop and the disable come while the file is still there: a manager asked to stop a unit whose file has
+    // gone stops nothing, and the agent kept running with the place file it serves removed under it. The reload
+    // follows the removal, so systemd is left holding no unit at all. The agent is the machine's service, so its
+    // own systemctl carries no --user; the login's is asked too, since a computer joined before the unit became
+    // the machine's has its file there and nothing else would take it.
     expect(runner.ran).toEqual([
+      ["systemctl", "stop", unit.name],
       ["systemctl", "disable", unit.name],
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "--user", "stop", unit.name],
       ["systemctl", "--user", "disable", unit.name],
     ]);
-    await stopPlaceService({ home, manager, run: runner.run, uid: 0 });
-    // Both systemds are told to stop it, the machine's own first: an agent installed on the road before this one
-    // runs under that login's, and a stop told the machine's alone leaves it up and restarting with nothing to serve.
-    expect(runner.ran.slice(2)).toEqual([
-      ["systemctl", "disable", "--now", unit.name],
-      ["systemctl", "daemon-reload"],
-      ["systemctl", "--user", "disable", "--now", unit.name],
-      ["systemctl", "--user", "daemon-reload"],
-    ]);
+    // The file is gone and the link systemd keeps beside it was taken with it, so no start brings the agent back,
+    // and the line a person reads says what a leave that left the process running never could.
+    expect(existsSync(unit.path)).toBe(false);
+    expect(swept.removed[0]).toBe(`systemd system unit ${unit.name} (stopped)`);
+  });
+
+  it("says what the manager answered when the stop refused, and still takes the file", async () => {
+    const home = tmp("leave-stop-refused");
+    const manager = unitsUnder(home);
+    const runner = fakeRunner();
+    // Every command answered as it would be, except the stop: this is a unit systemd will not let go of, which is
+    // the one case where a line reading (stopped) would be telling a person something they cannot check.
+    const refusing: ServiceRunner = argv => (argv[1] === "stop" || argv[2] === "stop" ? Promise.resolve({ code: 5, output: "Failed to stop: Unit is masked." }) : runner.run(argv));
+    writePlaceFile(placeFilePath(home), { placeId: "p_1", name: "box", hostName: "zingzy-mbp", hostUrls: ["http://x"], hostPublicKey: "k", keyPath: placeKeyPath(home), joinedAt: new Date(0).toISOString() });
+    const unit = manager.unit({ role: "place", statePath: placeFilePath(home), home, uid: 0 });
+    mkdirSync(dirname(unit.path), { recursive: true });
+    writeFileSync(unit.path, "[Unit]\n");
+    const swept = await sweepPlace({ home, manager, run: refusing, uid: 0 });
+    expect(swept.removed[0]).toBe(`systemd system unit ${unit.name} (systemctl stop ${unit.name} exited 5 and said: Failed to stop: Unit is masked.)`);
+    // The file goes all the same: a person running a leave has decided this computer is out of that wsp, and a
+    // unit file left behind is what brings the agent back at the next boot.
+    expect(existsSync(unit.path)).toBe(false);
+    // And the rest of the teardown was still told: the refusal is this scope's line, not the end of the sweep.
+    expect(runner.ran).toContainEqual(["systemctl", "disable", unit.name]);
+    expect(runner.ran).toContainEqual(["systemctl", "daemon-reload"]);
   });
 
   it("takes the unit a computer joined on the older road left in that login's own systemd, and names the scope", async () => {
@@ -621,7 +656,7 @@ describe("taking wsp off the computer it is typed on", () => {
     expect(existsSync(manager.unit(at).path)).toBe(false);
     const swept = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
     expect(existsSync(login)).toBe(false);
-    expect(swept.removed).toContain(`systemd user unit ${name}`);
+    expect(swept.removed).toContain(`systemd user unit ${name} (stopped)`);
     // That login's own systemd is the one told to forget it: a machine-scoped disable never reaches this unit.
     expect(runner.ran).toContainEqual(["systemctl", "--user", "disable", name]);
   });
@@ -1608,7 +1643,6 @@ describe("the sweep a joined computer runs on itself", () => {
     // The sweep is given the manager the join wrote its unit with, so it looks under this test's home and not the machine's.
     const manager = unitsUnder(home);
     const { removed } = await sweepPlace({ home, manager, run: runner.run, uid: 0 });
-    await stopPlaceService({ home, manager, run: runner.run, uid: 0 });
     expect(readdirSync(unitDir)).toEqual([]);
     expect(existsSync(placeFilePath(home))).toBe(false);
     expect(existsSync(placeKeyPath(home))).toBe(false);
