@@ -48,8 +48,14 @@ export const PID_MAX = 4_194_304;
 
 /** One guest message's JSON: a thread's whole transcript is the largest thing that rides the guest road. */
 export const GUEST_MESSAGE_CAP_BYTES = 4 * 1024 * 1024;
-/** Frames one guest session may hold while no watcher is attached; past it the session is closed to the guest. */
+/** Frames one guest session may hold while no watcher is attached: its guest's messages and its close, since the
+ * frame it opened with rides a field of its own and is named to every watcher that arrives. Past the cap the
+ * session is closed to the guest. */
 export const GUEST_QUEUE_CAP_FRAMES = 256;
+/** How long a guest session stands with nobody watching it. Every watcher that arrives is told the sessions the
+ * machine holds, so a host that restarted picks them back up; past this span nobody is coming and the session ends
+ * to its guest, rather than leaving the process inside the machine waiting for the life of the workspace. */
+export const GUEST_UNWATCHED_MS = 10 * 60 * 1_000;
 /** The four sentences a socket is closed 4401 with before its auth frame passes. */
 export const DAEMON_TOKEN_REFUSED = "daemon token refused; the host holds the current one";
 export const DAEMON_FIRST_FRAME_NOT_AUTH = "the first frame must be auth";
@@ -94,5 +100,8 @@ export const hostRefusedLine = (url: string, refusal: string): string => `${url}
 export const GUEST_NOT_WATCHER = "only the socket that sent guest.watch may answer or close a guest session";
 /** Why a session with nobody reading it is ended: the host has been away past the queue's cap. */
 export const GUEST_QUEUE_FULL = "the host has not read this session for too long";
+/** Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
+ * agent that ran the line can run it again against a host that is there. */
+export const GUEST_UNWATCHED = "the host stopped watching; run it again";
 /** What a guest process prints when nothing answers on its own machine's daemon port. */
 export const guestNoDaemonLine = (port: number | string): string => `this machine's wsp daemon is not answering on 127.0.0.1:${port}`;

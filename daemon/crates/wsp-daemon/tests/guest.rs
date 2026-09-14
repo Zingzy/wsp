@@ -25,6 +25,12 @@ struct Running {
 }
 
 async fn start() -> Running {
+    started(None).await
+}
+
+/// The same daemon with its unwatched span cut to something a test can wait out; the span itself is ten minutes,
+/// which no case can sit through.
+async fn started(unwatched_ms: Option<u64>) -> Running {
     let mut token = tempfile::NamedTempFile::new().unwrap();
     writeln!(token, "{TOKEN}").unwrap();
     let root = tempfile::tempdir().unwrap();
@@ -33,6 +39,7 @@ async fn start() -> Running {
     options.port = 0;
     options.root = Some(root.path().to_path_buf());
     options.manifest_path = Some(root.path().join("manifest.json"));
+    options.guest_unwatched_ms = unwatched_ms;
     let daemon = Daemon::bind(options).await.unwrap();
     let addr = daemon.local_addr();
     tokio::spawn(daemon.run());
@@ -93,6 +100,13 @@ impl Client {
                 return read;
             }
             self.seen.push_back(read);
+        }
+    }
+
+    /// Nothing at all within the span, which is how a case reads that a session was left alone.
+    async fn quiet_for(&mut self, span: Duration) {
+        if let Ok(frame) = tokio::time::timeout(span, self.ws.next()).await {
+            panic!("nothing was due on this socket, and {frame:?} arrived");
         }
     }
 
@@ -192,8 +206,8 @@ async fn a_queue_past_its_cap_ends_the_session_to_the_guest() {
     let d = start().await;
     let mut guest = Client::connect(d.addr).await;
     let session = opened(&mut guest, "cli").await;
-    // The open is the first frame held, so the cap is reached by one fewer message than the cap itself.
-    for n in 0..numbers::GUEST_QUEUE_CAP_FRAMES - 1 {
+    // The frame a session opened with rides its own row, so the queue is the guest's messages alone.
+    for n in 0..numbers::GUEST_QUEUE_CAP_FRAMES {
         assert_eq!(guest.request("guest.send", json!({ "message": n })).await["ok"], json!(true), "message {n}");
     }
     guest.request("guest.send", json!({ "message": "one too many" })).await;
@@ -253,8 +267,82 @@ async fn the_guest_socket_going_ends_its_session_upward_and_a_watcher_going_does
     guest.request("guest.send", json!({ "message": { "held": true } })).await;
     let mut second = Client::connect(d.addr).await;
     second.request("guest.watch", json!({})).await;
+    assert_eq!(second.next_event().await["type"], "guest.opened");
     assert_eq!(second.next_event().await, json!({ "type": "guest.message", "session": session, "message": { "held": true } }));
 
     guest.close().await;
     assert_eq!(second.next_event().await, json!({ "type": "guest.closed", "session": session }));
+}
+
+/// The span a case waits out, and what it waits after it: a daemon under a loaded machine takes a tick to spawn
+/// the sweep and write the frame, and three of the span is long enough for that and short enough for a suite.
+const UNWATCHED_MS: u64 = 250;
+
+#[tokio::test]
+async fn every_open_session_is_told_again_to_the_watcher_that_arrives_next() {
+    let d = start().await;
+    let mut host = Client::connect(d.addr).await;
+    host.request("guest.watch", json!({})).await;
+    let mut guest = Client::connect(d.addr).await;
+    let session = opened(&mut guest, "mcp").await;
+    assert_eq!(host.next_event().await["type"], "guest.opened");
+
+    // The host went, restarted and asked to watch again: it holds no row for this session, so the session it is
+    // now carrying has to be named to it, whole, or its next message reaches a host that closes it.
+    host.close().await;
+    let mut second = Client::connect(d.addr).await;
+    second.request("guest.watch", json!({})).await;
+    assert_eq!(
+        second.next_event().await,
+        json!({ "type": "guest.opened", "session": session, "kind": "mcp", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
+    );
+    // And the session is the one the guest still holds: the new watcher's answer reaches it.
+    second.request("guest.reply", json!({ "session": session, "message": { "exit": 0 } })).await;
+    assert_eq!(guest.next_event().await["message"], json!({ "exit": 0 }));
+}
+
+#[tokio::test]
+async fn a_session_nobody_watches_past_the_span_ends_to_its_guest() {
+    let d = started(Some(UNWATCHED_MS)).await;
+    let mut host = Client::connect(d.addr).await;
+    host.request("guest.watch", json!({})).await;
+    let mut guest = Client::connect(d.addr).await;
+    let session = opened(&mut guest, "cli").await;
+    assert_eq!(host.next_event().await["type"], "guest.opened");
+
+    // The watcher goes and none arrives: the guest is waiting on an answer nothing can give it, and the span is
+    // what tells it so, in one sentence it prints before exiting.
+    host.close().await;
+    assert_eq!(guest.next_event().await, json!({ "type": "guest.closed", "session": session, "error": words::GUEST_UNWATCHED }));
+    // The row went with the frame: a watcher arriving later hears nothing of it and cannot answer it.
+    let mut late = Client::connect(d.addr).await;
+    late.request("guest.watch", json!({})).await;
+    let refused = late.request("guest.reply", json!({ "session": session, "message": {} })).await;
+    assert_eq!((refused["ok"].clone(), refused["code"].clone()), (json!(false), json!("not-found")));
+}
+
+#[tokio::test]
+async fn a_session_opened_with_nobody_watching_is_on_the_same_clock() {
+    let d = started(Some(UNWATCHED_MS)).await;
+    let mut guest = Client::connect(d.addr).await;
+    let session = opened(&mut guest, "cli").await;
+    assert_eq!(guest.next_event().await, json!({ "type": "guest.closed", "session": session, "error": words::GUEST_UNWATCHED }));
+}
+
+#[tokio::test]
+async fn a_session_with_a_watcher_never_hears_the_span() {
+    let d = started(Some(UNWATCHED_MS)).await;
+    let mut host = Client::connect(d.addr).await;
+    host.request("guest.watch", json!({})).await;
+    let mut guest = Client::connect(d.addr).await;
+    opened(&mut guest, "cli").await;
+    assert_eq!(host.next_event().await["type"], "guest.opened");
+
+    guest.quiet_for(Duration::from_millis(UNWATCHED_MS * 3)).await;
+    // And a watcher that leaves and is replaced inside the span takes the session off the clock with it.
+    host.close().await;
+    let mut second = Client::connect(d.addr).await;
+    second.request("guest.watch", json!({})).await;
+    assert_eq!(second.next_event().await["type"], "guest.opened");
+    guest.quiet_for(Duration::from_millis(UNWATCHED_MS * 3)).await;
 }

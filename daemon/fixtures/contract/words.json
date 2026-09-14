@@ -11,6 +11,7 @@
   "notOnThisKind": "not on this kind",
   "guestNotWatcher": "only the socket that sent guest.watch may answer or close a guest session",
   "guestQueueFull": "the host has not read this session for too long",
+  "guestUnwatched": "the host stopped watching; run it again",
   "guestNoDaemon": "this machine's wsp daemon is not answering on 127.0.0.1:{port}",
   "hostKeyRefusal": "the host at {url} did not prove the key this computer learned at join; nothing was sent to it",
   "listening": "wsp-daemon listening on {host}:{port}",

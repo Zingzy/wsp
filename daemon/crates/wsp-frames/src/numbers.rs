@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 41;
+pub const DAEMON_VERSION: u32 = 42;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -58,8 +58,14 @@ pub const OPEN_URL_MAX: usize = 8192;
 
 /// One guest message's JSON: a thread's whole transcript is the largest thing that rides this road.
 pub const GUEST_MESSAGE_CAP_BYTES: usize = 4 * 1024 * 1024;
-/// Frames one guest session may hold while no watcher is attached; past it the session is closed to the guest.
+/// Frames one guest session may hold while no watcher is attached: its guest's messages and its close, since the
+/// frame it opened with rides a field of its own and is named to every watcher that arrives. Past the cap the
+/// session is closed to the guest.
 pub const GUEST_QUEUE_CAP_FRAMES: usize = 256;
+/// How long a guest session stands with nobody watching it. Every watcher that arrives is told the sessions this
+/// machine holds, so a host that restarted picks them back up; past this span nobody is coming, and the session
+/// ends to its guest rather than leaving the process inside the machine waiting for the life of the workspace.
+pub const GUEST_UNWATCHED_MS: u64 = 10 * 60 * 1000;
 /// The thread token and the turn token a guest session opens with; the daemon never reads either.
 pub const GUEST_TOKEN_MAX: usize = 512;
 /// Words in one guest command line, and the length of the folder it runs in.

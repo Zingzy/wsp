@@ -274,6 +274,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
     m.insert("guestNotWatcher", words::GUEST_NOT_WATCHER.to_owned());
     m.insert("guestQueueFull", words::GUEST_QUEUE_FULL.to_owned());
+    m.insert("guestUnwatched", words::GUEST_UNWATCHED.to_owned());
     m.insert("guestNoDaemon", words::guest_no_daemon_line("{port}"));
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
     m.insert("listening", words::listening_line("{host}", "{port}"));
@@ -301,6 +302,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("execBodyMax", Value::from(numbers::EXEC_BODY_MAX));
     m.insert("guestMessageCapBytes", Value::from(numbers::GUEST_MESSAGE_CAP_BYTES));
     m.insert("guestQueueCapFrames", Value::from(numbers::GUEST_QUEUE_CAP_FRAMES));
+    m.insert("guestUnwatchedMs", Value::from(numbers::GUEST_UNWATCHED_MS));
     m.insert("guestTokenMax", Value::from(numbers::GUEST_TOKEN_MAX));
     m.insert("guestArgvMax", Value::from(numbers::GUEST_ARGV_MAX));
     m.insert("guestCwdMax", Value::from(numbers::GUEST_CWD_MAX));

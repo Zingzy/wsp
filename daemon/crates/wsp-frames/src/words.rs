@@ -34,6 +34,9 @@ pub const NO_PLACE_FILE: &str =
 pub const GUEST_NOT_WATCHER: &str = "only the socket that sent guest.watch may answer or close a guest session";
 /// Why a session with nobody reading it is ended: the host has been away past the queue's cap.
 pub const GUEST_QUEUE_FULL: &str = "the host has not read this session for too long";
+/// Why a session is ended once nobody has watched it for a whole span: the guest prints this and exits, so the
+/// agent that ran the line can run it again against a host that is there.
+pub const GUEST_UNWATCHED: &str = "the host stopped watching; run it again";
 
 pub fn guest_no_daemon_line(port: impl std::fmt::Display) -> String {
     format!("this machine's wsp daemon is not answering on 127.0.0.1:{port}")
