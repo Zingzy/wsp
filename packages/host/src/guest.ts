@@ -75,13 +75,10 @@ interface Held {
   /** The road back down to this session's guest, as the last link that named the session left it: a link that
    * dropped and redialled is a new road to the same session, and the answers go down whichever one is there. */
   link: GuestLink;
-  /** The frame the session opened with. A machine that was replaced counts its session ids from the start again,
-   * so it is what tells a session named again from a different session under a name this host already holds.
-   * Nothing on the wire names a daemon's life, so two sessions can still read alike: a guest with no turn token,
-   * running the same line from the same folder under the same token on a rebuilt machine while this host still
-   * holds the earlier session, is taken for that session and its own line never runs. A turn's guest carries the
-   * turn's token and cannot be mistaken this way. */
-  opening: string;
+  /** The run of the machine's daemon that named this session. A machine that was rebuilt counts its session
+   * names from the start again, so the name alone says nothing: this and the name together are what tell a
+   * session named again from a different session under a name this host already holds. */
+  life: string;
   session?: GuestSession;
   queued: unknown[];
   ended: boolean;
@@ -102,6 +99,17 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
     held.ended = true;
     open.delete(keyOf(held.workspaceId, session));
     down(held.link, "guest.close", { session, ...(error !== undefined ? { error } : {}) });
+  };
+
+  /** Rows whose guests are gone: each is dropped and whatever it held open is closed, with nothing sent down a
+   * link. Both callers are machines that are not coming back, so there is nobody on the end to tell. */
+  const dropRows = (match: (held: Held) => boolean): void => {
+    for (const [key, held] of [...open]) {
+      if (!match(held)) continue;
+      open.delete(key);
+      held.ended = true;
+      held.session?.close();
+    }
   };
 
   const opened = async (e: Extract<DaemonEvent, { type: "guest.opened" }>, held: Held): Promise<void> => {
@@ -142,23 +150,19 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
       switch (e.type) {
         case "guest.opened": {
           const key = keyOf(link.workspaceId, e.session);
-          const opening = JSON.stringify(e);
           const holding = open.get(key);
-          if (holding !== undefined) {
-            // The session is already running here and the machine is naming it to the socket that watches now:
-            // it answers down that link from here and runs nothing again, which is what keeps the side effect of
-            // a command line whose reply was still in flight from landing a second time.
-            if (holding.opening === opening) {
-              holding.link = link;
-              return;
-            }
-            // Not the frame the row opened with, so not that session: the machine behind this link was replaced
-            // and counts its sessions from the start again. The row it named over goes.
-            holding.ended = true;
-            open.delete(key);
-            holding.session?.close();
+          // The run that named the row is the run naming it now, so this is that session, named to the socket
+          // that watches today: it answers down this link from here and runs nothing again, which is what keeps
+          // the side effect of a command line whose reply was still in flight from landing a second time.
+          if (holding?.life === e.life) {
+            holding.link = link;
+            return;
           }
-          const held: Held = { workspaceId: link.workspaceId, link, opening, queued: [], ended: false };
+          // Not a session this host holds under a name of that run. A row on this workspace from another run is
+          // a session that died with the machine it ran on, since a rebuilt machine is what starts the names
+          // over: those rows go here, whichever names they hold, before this one is opened.
+          dropRows(held => held.workspaceId === link.workspaceId && held.life !== e.life);
+          const held: Held = { workspaceId: link.workspaceId, life: e.life, link, queued: [], ended: false };
           open.set(key, held);
           // The read of a token is a promise; a throw out of it closes the session rather than the link.
           void opened(e, held).catch(() => endHere(held, e.session, UNAUTHORIZED));
@@ -192,12 +196,7 @@ export function guestDoor(o: GuestDoorOptions): GuestDoor {
       }
     },
     closeAll(workspaceId) {
-      for (const [key, held] of [...open]) {
-        if (workspaceId !== undefined && held.workspaceId !== workspaceId) continue;
-        open.delete(key);
-        held.ended = true;
-        held.session?.close();
-      }
+      dropRows(held => workspaceId === undefined || held.workspaceId === workspaceId);
     },
   };
 }

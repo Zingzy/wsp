@@ -54,9 +54,10 @@ describe("a guest session on the host", () => {
   const errText = (): string => replies().filter((m): m is { stream: string; text: string } => (m as { stream?: string }).stream === "err").map(m => m.text).join("");
   const exitCode = (): number | undefined => replies().map(m => (m as { exit?: number }).exit).find(code => code !== undefined);
 
-  const opened = (o: { token: string; kind?: "mcp" | "cli"; argv?: string[] }): DaemonEvent => ({
+  const opened = (o: { token: string; kind?: "mcp" | "cli"; argv?: string[]; life?: string; session?: string }): DaemonEvent => ({
     type: "guest.opened",
-    session: "g0",
+    session: o.session ?? "g0",
+    life: o.life ?? "life-1",
     kind: o.kind ?? "cli",
     token: o.token,
     turnToken: "turn-1",
@@ -315,29 +316,74 @@ describe("a guest session on the host", () => {
     });
   });
 
-  it("opens a session that takes a held one's name, since a machine that was replaced counts its sessions from the start again", async () => {
-    const token = await tokenOn(workspaceId);
-    const lines: string[][] = [];
-    const closed: number[] = [];
+  /** A door of its own over a kind that counts what it opens and what it closes, which is what every case about
+   * a session named twice reads its answer off. */
+  const countingDoor = (lines: string[][], closed: number[]): GuestDoor => {
     const kind: GuestKindModule = {
       open: o => {
         const at = lines.push([...o.argv]) - 1;
         return { message: () => undefined, close: () => closed.push(at) };
       },
     };
-    const counting = guestDoor({
+    return guestDoor({
       authorize: t => rt.devices.match(t).then(device => (device === undefined ? undefined : { kind: "device", device })),
       hostUrl: () => `http://${LOOPBACK}:1`,
       kinds: { mcp: kind, cli: kind },
     });
-    counting.event(link, opened({ token, argv: ["threads"] }));
+  };
+
+  it("runs a session named again by the run that opened it once, however alike a later one would read", async () => {
+    const token = await tokenOn(workspaceId);
+    const lines: string[][] = [];
+    const closed: number[] = [];
+    const counting = countingDoor(lines, closed);
+    counting.event(link, opened({ token, argv: ["new", "beta"] }));
     await settled(() => lines.length === 1);
 
-    // Same session name, another line: this is a fresh daemon on a fresh machine, not the session it holds.
-    counting.event(link, opened({ token, argv: ["workspaces"] }));
+    // The link dropped and the machine named the session it still holds to the socket that watches now. The same
+    // run said it, so it is that session: running the line again here is a second wsp new.
+    counting.event(link, opened({ token, argv: ["new", "beta"] }));
+    counting.event(link, opened({ token, argv: ["new", "beta"] }));
+
+    // A name this run has not used yet, sent after those two and opened through the same token read: by the time
+    // its line is here, a line either of them had opened would be here too, so two lines is the whole answer.
+    counting.event(link, opened({ token, argv: ["threads"], session: "g1" }));
     await settled(() => lines.length === 2);
-    expect(lines).toEqual([["threads"], ["workspaces"]]);
+    expect(lines).toEqual([["new", "beta"], ["threads"]]);
+    expect(closed).toEqual([]);
+  });
+
+  it("ends a held session and runs the new one when another run of the machine's daemon names that name", async () => {
+    const token = await tokenOn(workspaceId);
+    const lines: string[][] = [];
+    const closed: number[] = [];
+    const counting = countingDoor(lines, closed);
+    counting.event(link, opened({ token, argv: ["new", "beta"] }));
+    await settled(() => lines.length === 1);
+
+    // The machine was rebuilt under this host and its daemon counts session names from the start again. The line
+    // reads exactly like the one still held here, so nothing but the run it names tells the two apart: a person's
+    // shell running the same line from the same folder carries no turn token to differ by.
+    counting.event(link, opened({ token, argv: ["new", "beta"], life: "life-2" }));
+    await settled(() => lines.length === 2);
+    expect(lines).toEqual([["new", "beta"], ["new", "beta"]]);
     expect(closed).toEqual([0]);
+  });
+
+  it("ends every session of the run before it, not only the one whose name the new run took", async () => {
+    const token = await tokenOn(workspaceId);
+    const lines: string[][] = [];
+    const closed: number[] = [];
+    const counting = countingDoor(lines, closed);
+    counting.event(link, opened({ token, argv: ["threads"] }));
+    counting.event(link, opened({ token, argv: ["workspaces"], session: "g1" }));
+    await settled(() => lines.length === 2);
+
+    // g0 under a new run says the machine those two ran on is gone; g1 is never named again, and a row left
+    // standing for it holds its session open for the life of this host.
+    counting.event(link, opened({ token, argv: ["threads"], life: "life-2" }));
+    await settled(() => lines.length === 3);
+    expect(closed).toEqual([0, 1]);
   });
 
   it("drops every session of a workspace that is gone, and ends the next frame that arrives for one", async () => {

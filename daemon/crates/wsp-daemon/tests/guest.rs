@@ -126,6 +126,15 @@ async fn opened(client: &mut Client, kind: &str) -> String {
     reply["session"].as_str().unwrap().to_owned()
 }
 
+/// The life off an opened frame, for the cases that spell the whole frame: the marker is minted at the bind and
+/// no case can know it in advance. That it is one marker for a daemon and another for the next bind is what the
+/// case below proves.
+fn life_of(event: &Value) -> Value {
+    let life = event["life"].as_str().unwrap_or_else(|| panic!("an opened frame carries a life: {event}"));
+    assert!(!life.is_empty(), "an opened frame's life is not empty: {event}");
+    Value::from(life)
+}
+
 #[tokio::test]
 async fn a_session_reaches_the_watcher_whole_and_its_answer_reaches_the_guest() {
     let d = start().await;
@@ -137,7 +146,7 @@ async fn a_session_reaches_the_watcher_whole_and_its_answer_reaches_the_guest() 
     let event = host.next_event().await;
     assert_eq!(
         event,
-        json!({ "type": "guest.opened", "session": session, "kind": "cli", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
+        json!({ "type": "guest.opened", "session": session, "life": life_of(&event), "kind": "cli", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
     );
     guest.request("guest.send", json!({ "message": { "hello": 1 } })).await;
     assert_eq!(host.next_event().await, json!({ "type": "guest.message", "session": session, "message": { "hello": 1 } }));
@@ -241,9 +250,10 @@ async fn a_guest_that_goes_with_nobody_watching_leaves_its_close_for_the_next_wa
 
     let mut host = Client::connect(d.addr).await;
     host.request("guest.watch", json!({})).await;
+    let event = host.next_event().await;
     assert_eq!(
-        host.next_event().await,
-        json!({ "type": "guest.opened", "session": session, "kind": "mcp", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
+        event,
+        json!({ "type": "guest.opened", "session": session, "life": life_of(&event), "kind": "mcp", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
     );
     assert_eq!(host.next_event().await, json!({ "type": "guest.closed", "session": session }));
     // The row went with the frame: a second watcher hears the session once and no more.
@@ -285,17 +295,22 @@ async fn every_open_session_is_told_again_to_the_watcher_that_arrives_next() {
     host.request("guest.watch", json!({})).await;
     let mut guest = Client::connect(d.addr).await;
     let session = opened(&mut guest, "mcp").await;
-    assert_eq!(host.next_event().await["type"], "guest.opened");
+    let first = host.next_event().await;
+    assert_eq!(first["type"], "guest.opened");
 
     // The host went, restarted and asked to watch again: it holds no row for this session, so the session it is
     // now carrying has to be named to it, whole, or its next message reaches a host that closes it.
     host.close().await;
     let mut second = Client::connect(d.addr).await;
     second.request("guest.watch", json!({})).await;
+    let again = second.next_event().await;
     assert_eq!(
-        second.next_event().await,
-        json!({ "type": "guest.opened", "session": session, "kind": "mcp", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
+        again,
+        json!({ "type": "guest.opened", "session": session, "life": life_of(&again), "kind": "mcp", "token": "dev-1.tok", "turnToken": "9f", "argv": ["threads", "--json"], "cwd": "/root" })
     );
+    // The same daemon is still running it, so the marker is the one the first watcher heard: that pair is what
+    // the host tells this session from a session of the same name on a machine that was rebuilt.
+    assert_eq!(again["life"], first["life"]);
     // And the session is the one the guest still holds: the new watcher's answer reaches it.
     second.request("guest.reply", json!({ "session": session, "message": { "exit": 0 } })).await;
     assert_eq!(guest.next_event().await["message"], json!({ "exit": 0 }));
@@ -345,4 +360,30 @@ async fn a_session_with_a_watcher_never_hears_the_span() {
     second.request("guest.watch", json!({})).await;
     assert_eq!(second.next_event().await["type"], "guest.opened");
     guest.quiet_for(Duration::from_millis(UNWATCHED_MS * 3)).await;
+}
+
+#[tokio::test]
+async fn every_session_of_one_daemon_carries_the_same_life_and_another_bind_carries_another() {
+    let d = start().await;
+    let mut host = Client::connect(d.addr).await;
+    host.request("guest.watch", json!({})).await;
+    let mut first = Client::connect(d.addr).await;
+    opened(&mut first, "cli").await;
+    let one = host.next_event().await;
+    let mut second = Client::connect(d.addr).await;
+    opened(&mut second, "mcp").await;
+    let two = host.next_event().await;
+    assert_eq!(life_of(&one), life_of(&two));
+
+    // Another bind is another run of the daemon, which is what a rebuilt machine gives the host. It counts its
+    // sessions from the start again, so the name says nothing and the marker is the whole of what tells the two
+    // apart: a host still holding g0 from before must read this one as a session of its own.
+    let other = start().await;
+    let mut watcher = Client::connect(other.addr).await;
+    watcher.request("guest.watch", json!({})).await;
+    let mut guest = Client::connect(other.addr).await;
+    let session = opened(&mut guest, "cli").await;
+    let third = watcher.next_event().await;
+    assert_eq!((one["session"].as_str(), session.as_str()), (Some("g0"), "g0"));
+    assert_ne!(life_of(&third), life_of(&one));
 }

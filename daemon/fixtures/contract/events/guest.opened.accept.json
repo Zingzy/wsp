@@ -2,6 +2,7 @@
   {
     "type": "guest.opened",
     "session": "g1",
+    "life": "3f2a9c1b7e40d581",
     "kind": "mcp",
     "token": "dev-1.tok",
     "argv": [
@@ -12,6 +13,7 @@
   {
     "type": "guest.opened",
     "session": "g2",
+    "life": "3f2a9c1b7e40d581",
     "kind": "cli",
     "token": "",
     "turnToken": "9f",

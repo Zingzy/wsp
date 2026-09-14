@@ -497,7 +497,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     const parsed = DaemonEvent.safeParse(raw);
     if (!parsed.success) {
       // A relay event that fails the wire shape (a port outside 1024..65535, say) is dropped with a line, never acted on.
-      if (raw["type"] === "browser.open" || raw["type"] === "callback.port" || raw["type"] === "localhost.url") o.log(`${link.target.name}: ignored a malformed ${String(raw["type"])} event from the workspace`);
+      // A guest's open is here because the process inside the machine is waiting on it and hears nothing when it goes.
+      if (raw["type"] === "browser.open" || raw["type"] === "callback.port" || raw["type"] === "localhost.url" || raw["type"] === "guest.opened") o.log(`${link.target.name}: ignored a malformed ${String(raw["type"])} event from the workspace`);
       return;
     }
     const e = parsed.data;

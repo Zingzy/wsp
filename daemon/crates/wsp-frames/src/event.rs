@@ -115,6 +115,10 @@ pub enum DaemonEvent {
     #[serde(rename = "guest.opened", rename_all = "camelCase")]
     GuestOpened {
         session: String,
+        /// The run of the daemon that named this session. Session names start from the beginning on every run, so
+        /// this and the name together are what a host tells a session it already holds from a session of the same
+        /// name on a machine that was rebuilt under it.
+        life: String,
         kind: GuestKind,
         token: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]

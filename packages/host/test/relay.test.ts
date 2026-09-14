@@ -341,7 +341,7 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => link.ops.some(x => x.op === "guest.watch"));
     expect(link.ops.map(x => x.op)).toEqual(["ports.watch", "guest.watch"]);
 
-    link.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "dev-1.tok", argv: ["threads"], cwd: "/root" });
+    link.emit({ type: "guest.opened", session: "g0", life: "life-1", kind: "cli", token: "dev-1.tok", argv: ["threads"], cwd: "/root" });
     link.emit({ type: "guest.message", session: "g0", message: { n: 1 } });
     link.emit({ type: "guest.closed", session: "g0" });
     await until(() => heard.length === 3);
@@ -375,7 +375,7 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => fake.links.length >= 1);
     const first = fake.links[0]!;
     await until(() => first.ops.some(x => x.op === "guest.watch"));
-    const open = { type: "guest.opened", session: "g0", kind: "cli", token, argv: ["new", "beta"], cwd: "/root" };
+    const open = { type: "guest.opened", session: "g0", life: "life-1", kind: "cli", token, argv: ["new", "beta"], cwd: "/root" };
     first.emit(open);
     await until(() => runs === 1);
 
@@ -448,7 +448,7 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => fake.links.length >= 1);
     const first = fake.links[0]!;
     await until(() => first.ops.some(x => x.op === "guest.watch"));
-    first.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
+    first.emit({ type: "guest.opened", session: "g0", life: "life-1", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
     await until(() => answer !== undefined);
 
     // The edge sweeps the socket; the machine sees no redial, so a row it is streaming has to wait rather than
@@ -484,7 +484,7 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => fake.links.length >= 1);
     const first = fake.links[0]!;
     await until(() => first.ops.some(x => x.op === "guest.watch"));
-    first.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
+    first.emit({ type: "guest.opened", session: "g0", life: "life-1", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
     await until(() => answer !== undefined);
 
     // The redial's watch is held open, so what follows runs inside the window between the socket landing and the
@@ -528,7 +528,7 @@ describe("callback relay over a fake daemon link", () => {
     await until(() => fake.links.length >= 1);
     const link = fake.links[0]!;
     await until(() => link.ops.some(x => x.op === "guest.watch"));
-    link.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
+    link.emit({ type: "guest.opened", session: "g0", life: "life-1", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
     await until(() => heard.length > 0);
     expect(heard).toEqual([{ workspaceId: ws.id, type: "guest.opened" }]);
     // And the host's answer goes back down that same link, which is the whole of what a fork's wsp waits on.
@@ -753,7 +753,7 @@ describe("callback relay over a fake daemon link", () => {
     expect(lines.join("\n")).not.toMatch(/redirect_uri|state=|oauth2/);
   });
 
-  it("a port outside 1024..65535 or not an integer is refused with one line and never ends the process", async () => {
+  it("a port outside 1024..65535, and an open with no run named, are refused with one line and never end the process", async () => {
     const { lines, link } = await setup();
     const rejections: unknown[] = [];
     const onRejection = (e: unknown) => rejections.push(e);
@@ -761,12 +761,16 @@ describe("callback relay over a fake daemon link", () => {
     try {
       for (const port of [70000, 65536, 1.5, -1, 0]) link.emit({ type: "callback.port", port });
       link.emit({ type: "browser.open", url: AUTH(70000), port: 70000 });
+      // A daemon from before a session carried the run that named it: the open cannot be read here, and the
+      // process inside the machine is waiting on an answer, so the drop is said rather than silent.
+      link.emit({ type: "guest.opened", session: "g0", kind: "cli", token: "t", argv: ["threads"], cwd: "/root" });
       await new Promise(r => setTimeout(r, 200));
       expect(rejections).toEqual([]);
       expect(relay!.forwards()).toEqual([]);
       expect(lines).toEqual([
         ...[70000, 65536, 1.5, -1, 0].map(() => "task-1: ignored a malformed callback.port event from the workspace"),
         "task-1: ignored a malformed browser.open event from the workspace",
+        "task-1: ignored a malformed guest.opened event from the workspace",
       ]);
     } finally {
       process.off("unhandledRejection", onRejection);
