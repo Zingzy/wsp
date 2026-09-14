@@ -3212,6 +3212,7 @@ const DAEMON_CONTENTS = [
   "87a461ca21eb894d129e0d692bcbdf56f1134d6160a0e84fe52692ed36f317cd",
   "8308517d14718d8b82e1e129f1e48a8a511aa9fdaae26b60c900b6280fa85051",
   "a51cf26e554a02935fda02942869ddd7251b41e84625e500336c7ce171a4d667",
+  "c2f00944a79a850450b11b4610b93ac4894b7da39282755a9bfef55776a11dff",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3318,7 +3319,11 @@ const DAEMON_CONTENTS = [
  * with and names every session it holds to whatever socket asks to watch next, so a host that restarted picks them
  * back up instead of closing the first message it cannot place, and a session nobody has watched for ten minutes
  * ends to its guest with one sentence, so the process inside the machine prints it and exits rather than waiting
- * for the life of the workspace. */
+ * for the life of the workspace.
+ * Version 43 names the run of the daemon that opened a guest session: every opened frame carries a marker minted
+ * once per start, so the host tells a session it still holds from a session of the same name on a machine that
+ * was rebuilt under it, whose names count from the start again. Without it a guest carrying no turn token, running
+ * the same line from the same folder under the same token, was glued to the earlier session's output. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3423,6 +3428,10 @@ export const DaemonEvent = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("guest.opened"),
     session: z.string(),
+    /** The run of the machine's daemon that named this session. Session names count from the start on every run,
+     * so a machine rebuilt under this host hands it a name it may still hold; this and the name together are what
+     * a session already open here is told from a new one of the same name. */
+    life: z.string(),
     kind: GuestKind,
     token: z.string(),
     turnToken: z.string().optional(),

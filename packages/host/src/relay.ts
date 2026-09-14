@@ -473,7 +473,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
 
   /** One frame down to a machine's daemon. A link between sockets holds it until the next one lands rather than
    * failing, since a guest session's rows and its exit frame ride this road and the machine sees no redial; a link
-   * that has stopped answers in one sentence, and the door has already dropped the sessions on it. */
+   * that has stopped answers in one sentence. The sessions on a stopped link stand where the machine is coming
+   * back, so what that sentence costs is the one frame, not the session. */
   const downward = async (link: Link, op: string, params: Record<string, unknown>): Promise<unknown> => {
     const sock = link.sock ?? (link.stopped ? undefined : await new Promise<DaemonSocket | undefined>(hand => link.waiting.push(hand)));
     if (sock === undefined) throw new Error(linkDownLine(link.target.name));
@@ -496,7 +497,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     const parsed = DaemonEvent.safeParse(raw);
     if (!parsed.success) {
       // A relay event that fails the wire shape (a port outside 1024..65535, say) is dropped with a line, never acted on.
-      if (raw["type"] === "browser.open" || raw["type"] === "callback.port" || raw["type"] === "localhost.url") o.log(`${link.target.name}: ignored a malformed ${String(raw["type"])} event from the workspace`);
+      // A guest's open is here because the process inside the machine is waiting on it and hears nothing when it goes.
+      if (raw["type"] === "browser.open" || raw["type"] === "callback.port" || raw["type"] === "localhost.url" || raw["type"] === "guest.opened") o.log(`${link.target.name}: ignored a malformed ${String(raw["type"])} event from the workspace`);
       return;
     }
     const e = parsed.data;
@@ -681,13 +683,16 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
   /** why closes the callback forward; url forwards pause across a nap or a new machine (their servers stay
    * bound here, the idle clock stops) and close for good only when the workspace or the host goes. */
   const drop = (id: string, why: string, urls: "pause" | "close", back = "the wake"): Promise<void> => {
+    // The sessions on this machine outlive the link where a machine is coming back: the next socket to watch is
+    // named every session the machine still holds, and the door answers those down the link that named them
+    // rather than running what they opened a second time. A workspace that is gone and a host that is closing are
+    // the two ends nothing comes back from, and the rows go with them. Before the link is looked for, since a
+    // workspace deleted while it napped holds none and its sessions are the workspace's rather than the link's.
+    if (urls === "close") o.guest?.closeAll(id);
     const link = links.get(id);
     if (!link) return Promise.resolve();
     links.delete(id);
     link.stopped = true;
-    // The sessions on this machine end here with the link, not on it: a reconnect asks to watch and the daemon
-    // names the sessions it still holds to that socket, so the rows are made again and the guests open nothing.
-    o.guest?.closeAll(id);
     woke(link, undefined);
     for (const f of allForwards(id)) {
       if (f.kind === "callback" || urls === "close") {
@@ -778,6 +783,8 @@ export function startCallbackRelay(o: RelayOptions): CallbackRelay {
     close: async () => {
       closed = true;
       for (const un of detaches) un();
+      // Every session this door holds, not only those of a linked workspace: one that napped holds no link.
+      o.guest?.closeAll();
       await Promise.all([...links.keys()].map(id => drop(id, "the host is closing", "close")));
     },
   };

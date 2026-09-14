@@ -49,8 +49,21 @@ struct State {
 pub(crate) struct Guests {
     state: Mutex<State>,
     ids: AtomicU64,
+    /// What every session this run of the daemon opens is named by, beside its own name. Session names count from
+    /// the start on every run, so a machine rebuilt under a host hands it names that host may still hold; the
+    /// marker is what tells the two apart, and it travels in the opened frame the host picks its sessions up by.
+    life: String,
     /// How long a session stands with nobody watching it before it ends to its guest.
     unwatched: Duration,
+}
+
+/// A marker for one run of this daemon. Random rather than counted or clocked: a machine rebuilt in the same
+/// second is a different life and must read as one.
+fn fresh_life() -> String {
+    let mut bytes = [0u8; 8];
+    // Without the system's randomness there is no marker, and the sessions of two runs would read as one.
+    getrandom::fill(&mut bytes).expect("the system gives random bytes");
+    format!("{:016x}", u64::from_le_bytes(bytes))
 }
 
 fn lock(state: &Mutex<State>) -> MutexGuard<'_, State> {
@@ -85,7 +98,7 @@ impl State {
 
 impl Guests {
     pub(crate) fn new(unwatched: Duration) -> Guests {
-        Guests { state: Mutex::default(), ids: AtomicU64::new(0), unwatched }
+        Guests { state: Mutex::default(), ids: AtomicU64::new(0), life: fresh_life(), unwatched }
     }
 
     /// One session per socket: a second open on the same socket is the client's own mistake, not a second session.
@@ -95,6 +108,7 @@ impl Guests {
         conn.take_guest(session.clone())?;
         let opened = DaemonEvent::GuestOpened {
             session: session.clone(),
+            life: self.life.clone(),
             kind: open.kind,
             token: open.token,
             turn_token: open.turn_token,
