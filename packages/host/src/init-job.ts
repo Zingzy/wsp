@@ -826,12 +826,15 @@ export class InitJobs implements InitDoor {
         const stage = text("stage");
         if (stage === undefined) return;
         const step = record["step"] as GoldenStep | undefined;
-        s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), at });
-        // The failure's sentence stands from the frame that failed, so the view drawn on it already closes the stage's
-        // block with what the head says; the raw detail stays in the frame and reaches no screen. What became of the
-        // machine is read off the frames rather than guessed here, and is said in the words a stop the person asked
-        // for uses: a build that booted a machine never ends without saying whether it is still billing.
-        if (stage === "failed") this.fail(s, text("detail") ?? "no detail given", reduceStages(s.frames, STAGE_WORDS).machine);
+        s.frames.push({ type: "golden.stage", name: GOLDEN_NAME, stage, ...(text("detail") !== undefined ? { detail: text("detail")! } : {}), ...(step !== undefined ? { step: { label: step.label, command: step.command } } : {}), ...(record["booted"] === false ? { booted: false } : {}), at });
+        // The failure's sentence and what became of the machine are both read off the frames, never guessed here or
+        // spelled a second way: the sentence is the one the view's own block closes the stage with, so a failure
+        // that named no reason still says which stage stopped, and the machine is said in the words a stop the
+        // person asked for uses, since a build that booted one never ends without saying whether it still bills.
+        if (stage === "failed") {
+          const framed = reduceStages(s.frames, STAGE_WORDS);
+          this.fail(s, framed.failure ?? "no detail given", framed.machine);
+        }
         // The provider having no room is not the stage working: the next frame off it, cap or not, says so again.
         s.slotWait = record["waiting"] === true ? stage : undefined;
         // A machine the stage made and could not remove bills on, whether the person stopped the build or it failed
