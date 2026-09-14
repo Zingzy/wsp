@@ -253,13 +253,15 @@ describe("interactive golden: prepare then seal", () => {
     expect(builder.machine.streamUrl).toBeUndefined();
     expect(daemonOn).toEqual(["m1"]);
     expect(sansBase(stages)).toEqual(["creating:sandbox from base", "deploying-daemon", "installing-harness", "ready"]);
-    // The floor goes on before the daemon: the login shell's PATH, then node, so the daemon's native module compiles against it.
+    // The floor goes on before the daemon: the login shell's PATH first, then the rows the deploy's own steps type.
     const floor = ran.filter(r => r.id === "m1").map(r => r.script);
     expect(floor.findIndex(s => s.includes("> /etc/profile.d/wsp-golden.sh"))).toBe(0);
-    // The index and curl lead, since the Node install fetches its release with curl and an image need not ship one.
+    // The index and curl lead, since the roads below fetch a release with curl and an image need not ship one.
     expect(floor.findIndex(s => s.includes("apt-get update -qq"))).toBe(1);
     expect(floor.findIndex(s => s.includes("apt-get install -y -qq curl"))).toBe(2);
-    expect(floor.findIndex(s => s.includes("nodejs.org/dist"))).toBe(3);
+    expect(floor.findIndex(s => s.includes("astral-sh/uv/releases"))).toBe(3);
+    // Node is not on the floor any more: nothing in the base stage fetches it.
+    expect(floor.some(s => s.includes("nodejs.org/dist"))).toBe(false);
     expect(timeline).toEqual(["create m1"]); // alive and waiting for the person
   });
 
@@ -1114,8 +1116,8 @@ describe("golden import stages", () => {
     expect(inlineCmds).toContain("test -x /usr/local/bin/wsp-open");
     for (const i of inline) {
       expect(i.timeoutMs, i.cmd).toBeLessThanOrEqual(INLINE_EXEC_MS);
-      // The base floor's versions read is ten --version calls, inline and bounded like the rest.
-      if (i.cmd.includes('echo "VERSION node:')) continue;
+      // The base floor's versions read is a --version call per row, inline and bounded like the rest.
+      if (i.cmd.includes('echo "VERSION curl:')) continue;
       expect(i.cmd, "a long command ran inline").not.toMatch(/setsid bash -c|tar |the-setup|--version/);
     }
   });
@@ -1272,12 +1274,13 @@ describe("golden import stages", () => {
     const road = cmds.find(c => c.includes("repos/cli/cli/releases/latest"))!;
     expect(road).toContain(`install -m 0755 "$bin" "/usr/local/bin/$name"`);
     expect(road).toContain("go install '\\''github.com/cli/cli/v2/cmd/gh@latest'\\''");
-    expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'gh'; do`);
+    expect(inline.filter(c => c.cmd.includes('echo "missing')).at(-1)!.cmd).toContain(`for b in 'node' 'gh'; do`);
     expect(results[0]!.tools).toEqual([
+      { id: "tools/manager/npm", label: "Node 22 with npm", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/npm/wrangler", label: "wrangler", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/gh", label: "GitHub CLI", outcome: "installed", note: UNMEASURED_ROAD, road: { kind: "release", from: "gh_2.86.0_linux_amd64.tar.gz", sha256: "b".repeat(64), tag: "v2.86.0" }, ms: expect.any(Number), bytes: 0, pin: { tag: "v2.86.0", sha256: "b".repeat(64) } },
     ]);
-    expect(stages).toContain(`installing-tools:2 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
+    expect(stages).toContain(`installing-tools:3 installed (GitHub CLI from its release (${UNMEASURED_ROAD})); caches swept; 2.9 GB free`);
   });
 
   it("after the checks the stage reads every installed row's version back in one run: a package road's pin is what its line printed, a release keeps the tag and sum its own line said, a road that installs latest is marked so, and one line names them all", async () => {
@@ -1382,11 +1385,12 @@ describe("golden import stages", () => {
     expect(cmds.some(c => c.includes("npm install -g wrangler@4.1.0"))).toBe(true);
     const tmuxNote = `${UNMEASURED_ROAD}; 3.5a asked, installed by apt at its current version`;
     expect(results[0]!.tools).toEqual([
+      { id: "tools/manager/npm", label: "Node 22 with npm", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/wrangler", label: "Cloudflare Wrangler", outcome: "installed", note: UNMEASURED_ROAD, ms: expect.any(Number), bytes: 0 },
       { id: "tools/apt-index", label: "apt index", outcome: "installed", ms: expect.any(Number), bytes: 0 },
       { id: "tools/catalog/tmux", label: "tmux", outcome: "installed", note: tmuxNote, ms: expect.any(Number), bytes: 0 },
     ]);
-    expect(stages).toContain(`installing-tools:3 installed (Cloudflare Wrangler (${UNMEASURED_ROAD}), tmux (${tmuxNote})); caches swept; 2.9 GB free`);
+    expect(stages).toContain(`installing-tools:4 installed (Cloudflare Wrangler (${UNMEASURED_ROAD}), tmux (${tmuxNote})); caches swept; 2.9 GB free`);
   });
 
   it("the tally names every install once: a tool carrying both a road and a note keeps its notes inside its own brackets, so no note reads as a nameless tool", async () => {
@@ -1431,7 +1435,7 @@ describe("golden import stages", () => {
     await prepareBuilder({ backend: plain.backend, setup: "true", fetch: plain.fetch, onStage: stageRecorder().onStage, import: importOf() });
     const checks = plain.inline.filter(c => c.cmd.includes('echo "missing'));
     expect(checks).toHaveLength(1);
-    expect(checks[0]!.cmd).toContain(`for b in 'curl' 'node' 'pnpm' 'uv' 'python3' 'git' 'jq' 'rg' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
+    expect(checks[0]!.cmd).toContain(`for b in 'curl' 'uv' 'python3' 'git' 'jq' 'rg' 'cc' 'fd' 'sqlite3' 'wget' 'zip' 'xz' 'rsync'; do`);
   });
 
   it("two tap roads whose go module is named otherwise land under the row's command and pass the check: the road is kept, on the fake guest end to end", async () => {
@@ -1813,7 +1817,7 @@ describe("golden import stages", () => {
     expect(at("brew cleanup -s --prune=all")).toBeLessThan(sweepsAt[2]!);
     expect(sweepsAt[2]).toBeLessThan(cmds.indexOf("echo ok"));
     // Each closing line carries what the sweep gave back and the df reading the stage left.
-    expect(stages).toContain("deploying-daemon:17 installed; caches swept, 700 MB back; 3.6 GB free");
+    expect(stages).toContain("deploying-daemon:15 installed; caches swept, 700 MB back; 3.6 GB free");
     expect(stages).toContain("installing-harness:Claude Code, Codex installed; caches swept, 700 MB back; 4.3 GB free");
     expect(stages).toContain("installing-tools:3 installed; caches swept, 700 MB back; 5 GB free");
     // A sweep that fails is named, and the build goes on to the next stage.
@@ -2444,10 +2448,10 @@ describe("golden import stages", () => {
     });
 
     it("the seal records the floor read on the builder, an upgrade's fork carries its head's, and a version without one is refused before any machine boots", async () => {
-      const read = "VERSION node: v22.23.2\nVERSION npm: 10.9.4\nVERSION jq: jq-1.7.1\n";
-      const { backend, created } = recordingBackend({}, { exec: cmd => (cmd.includes("VERSION node:") && !cmd.includes("WSP_CTX") ? { exitCode: 0, stdout: read, stderr: "" } : cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd === "echo ok" ? REACH_OK : ok) });
+      const read = "VERSION curl: curl 8.5.0\nVERSION jq: jq-1.7.1\n";
+      const { backend, created } = recordingBackend({}, { exec: cmd => (cmd.includes("VERSION curl:") && !cmd.includes("WSP_CTX") ? { exitCode: 0, stdout: read, stderr: "" } : cmd === FREE_KB_CMD ? { exitCode: 0, stdout: `${mb(3000)}\n`, stderr: "" } : cmd === "echo ok" ? REACH_OK : ok) });
       const fetch: typeof globalThis.fetch = async () => new Response(null, { status: 200 });
-      const floor = [{ name: "node", version: "22.23.2" }, { name: "npm", version: "10.9.4" }, { name: "jq", version: "1.7.1" }];
+      const floor = [{ name: "curl", version: "8.5.0" }, { name: "jq", version: "1.7.1" }];
       const builder = await prepareBuilder({ backend, setup: "true" });
       expect(builder.base).toEqual(floor);
       const v1 = await sealGolden(builder, { backend, hostId: "h1", smoke: "true" });

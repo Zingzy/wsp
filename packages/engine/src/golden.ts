@@ -800,7 +800,7 @@ export async function prepareBuilder(opts: PrepareBuilderOptions): Promise<Build
   try {
     const size = await sizeBuilt(machine, asked);
     stage("deploying-daemon");
-    // The floor goes on before the daemon: the wsp command the bundle carries beside it runs on the floor's node.
+    // The floor goes on before the daemon: the deploy's own steps type the tools it puts there.
     const base = await installBase(machine, stage);
     const deployed = opts.deployDaemon ? await opts.deployDaemon(machine) : undefined;
     const detail = closing(base.line, typeof deployed === "string" ? deployed : undefined, await freeNote(machine));

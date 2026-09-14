@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { APT_INDEX, BASE_FLOOR, CURL_NET, NODE_RELEASES, ROAD_STEPS, UV_INSTALL, installAfter } from "@wsp/catalog";
+import { APT_INDEX, BASE_FLOOR, CURL_NET, ROAD_STEPS, UV_INSTALL, installAfter } from "@wsp/catalog";
 import { PRELUDE } from "../src/dotfiles-presets.js";
 import { ALREADY_ON_MACHINE, BASE_VERSIONS_CMD, baseInstalls, carriedByImage, installBase, parseVersions, versionsLine } from "../src/golden-base.js";
 import { TOOLS_PATH } from "../src/golden-import.js";
@@ -46,9 +46,6 @@ function recorder() {
 }
 
 const VERSIONS_OUT = [
-  "VERSION node: v22.23.2",
-  "VERSION npm: 10.9.4",
-  "VERSION pnpm: 11.9.0",
   "VERSION uv: uv 0.12.9",
   "VERSION python3: Python 3.12.13",
   "VERSION git: git version 2.43.0",
@@ -67,8 +64,6 @@ describe("the base floor's plan", () => {
       // curl leads the floor: the roads below that fetch a release type it, and a container image ships none.
       ["base/apt-index", "apt", undefined, undefined],
       ["base/curl", "apt", "base/apt-index", "curl"],
-      ["base/node", "script", "base/curl", "node"],
-      ["base/pnpm", "npm", "base/node", "pnpm"],
       ["base/uv", "script", "base/curl", "uv"],
       ["base/python", "script", "base/uv", "python3"],
       ["base/git", "apt", "base/apt-index", "git"],
@@ -82,7 +77,9 @@ describe("the base floor's plan", () => {
       ["base/xz", "apt", "base/apt-index", "xz"],
       ["base/rsync", "apt", "base/apt-index", "rsync"],
     ]);
-    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(plan.map(t => t.label)).toEqual(["login shell PATH", "apt index", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "C toolchain with cmake and ninja", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    // Node is not on the floor: a recipe row that runs on it brings it in the tools stage instead.
+    expect(plan.some(t => t.cmd.includes("nodejs.org/dist"))).toBe(false);
     expect(BASE_FLOOR.map(e => `base/${e.id}`)).toEqual(plan.filter(t => t.bin !== undefined).map(t => t.id));
   });
 
@@ -112,12 +109,8 @@ describe("the base floor's plan", () => {
       expect(t.cmd, t.id).toMatch(/\nexport PATH=\/root\/\.local\/bin:\/usr\/local\/sbin:\/usr\/local\/bin:/);
       expect(t.cmd, t.id).not.toMatch(/curl[^\n]*\|\s*(ba)?sh/);
     }
-    const node = cmd("base/node");
-    expect(node).toContain(`if [ "\${node_major:-0}" -ge 22 ]; then echo "NODE_KEPT $node_have"; exit 0; fi`);
-    expect(node).toContain(`https://nodejs.org/dist/v${NODE_RELEASES[22].version}/`);
-    expect(node).toContain("sha256sum -c");
-    expect(cmd("base/pnpm")).toMatch(/\nnpm install -g pnpm@11\.9\.0$/);
     expect(cmd("base/uv")).toContain("astral-sh/uv/releases/download/");
+    expect(cmd("base/uv")).toContain("sha256sum -c");
     expect(cmd("base/python")).toMatch(/\nuv python install 3\.12\nln -sfn "\$\(uv python find --managed-python 3\.12\)" \/usr\/local\/bin\/python3$/);
     expect(cmd("base/apt-index")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get update -qq$/);
     expect(cmd("base/jq")).toMatch(/\nexport DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq jq$/);
@@ -130,7 +123,7 @@ describe("the base floor's plan", () => {
 describe("a download that fails", () => {
   it("every base step that downloads runs under the one curl function, which fails loud on an HTTP error, and types no flags of its own", () => {
     const downloads = baseInstalls().filter(t => /\bcurl +-/.test(t.cmd));
-    expect(downloads.map(t => t.id)).toEqual(["base/node", "base/uv", "base/python"]);
+    expect(downloads.map(t => t.id)).toEqual(["base/uv", "base/python"]);
     for (const t of downloads) {
       const run = guardedRoad(t.manager, t.cmd);
       expect(run, t.id).toContain(CURL_NET);
@@ -154,22 +147,19 @@ describe("a download that fails", () => {
 });
 
 describe("the versions read", () => {
-  it("asks each floor command for its version on the tools PATH, npm with node and unzip with zip", () => {
+  it("asks each floor command for its version on the tools PATH, unzip with zip, and nothing of the node that left it", () => {
     expect(BASE_VERSIONS_CMD).toMatch(/^export PATH=\/root\/\.local\/bin:/);
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION node: $(node --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION npm: $(npm --version 2>/dev/null | head -n 1)"');
+    expect(BASE_VERSIONS_CMD).not.toContain("VERSION node:");
+    expect(BASE_VERSIONS_CMD).not.toContain("VERSION npm:");
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION rg: $(rg --version 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION unzip: $(unzip -v 2>/dev/null | head -n 1)"');
     expect(BASE_VERSIONS_CMD).toContain('echo "VERSION git: $(git --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(19);
+    expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(16);
   });
 
   it("keeps the version number out of each tool's own wording, and leaves out a command that printed nothing", () => {
     expect(parseVersions(VERSIONS_OUT)).toEqual([
-      { name: "node", version: "22.23.2" },
-      { name: "npm", version: "10.9.4" },
-      { name: "pnpm", version: "11.9.0" },
       { name: "uv", version: "0.12.9" },
       { name: "python3", version: "3.12.13" },
       { name: "git", version: "2.43.0" },
@@ -185,8 +175,6 @@ describe("the versions read", () => {
   it("the stage line names each version with what its install cost, and a floor entry that did not land by its reason", () => {
     const versions = parseVersions(VERSIONS_OUT).filter(v => v.name !== "cc");
     const line = versionsLine(versions, [
-      { id: "base/node", label: "Node 22 with npm", outcome: "installed", bytes: 250 * 1024 * 1024 },
-      { id: "base/pnpm", label: "pnpm", outcome: "installed", bytes: 30 * 1024 * 1024 },
       { id: "base/uv", label: "uv", outcome: "installed", bytes: 42 * 1024 * 1024 },
       { id: "base/python", label: "Python 3.12", outcome: "installed", bytes: 70 * 1024 * 1024 },
       { id: "base/apt-index", label: "apt index", outcome: "installed" },
@@ -196,7 +184,7 @@ describe("the versions read", () => {
       { id: "base/curl", label: "curl", outcome: "installed", bytes: 0 },
       { id: "base/fd", label: "fd", outcome: "failed", note: "E: Unable to locate package fd-find" },
     ]);
-    expect(line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0 (30 MB), uv 0.12.9 (42 MB), python3 3.12.13 (70 MB), git 2.43.0, jq 1.7.1 (2 MB), rg 14.1.0 (6 MB), curl 8.5.0; fd failed (E: Unable to locate package fd-find)");
+    expect(line).toBe("uv 0.12.9 (42 MB), python3 3.12.13 (70 MB), git 2.43.0, jq 1.7.1 (2 MB), rg 14.1.0 (6 MB), curl 8.5.0; fd failed (E: Unable to locate package fd-find)");
     expect(versionsLine([], [])).toBe("");
   });
 });
@@ -213,22 +201,20 @@ describe("installBase", () => {
         free -= 400;
         return ok;
       }
-      if (script.startsWith("export PATH=") && script.includes("VERSION node:")) return { exitCode: 0, stdout: VERSIONS_OUT, stderr: "" };
+      if (script.startsWith("export PATH=") && script.includes("VERSION curl:")) return { exitCode: 0, stdout: VERSIONS_OUT, stderr: "" };
       return undefined;
     }, () => mb(free));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
-    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/17)");
-    expect(stages).toContain("deploying-daemon:Node 22 with npm (4/17)");
-    expect(stages).toContain("deploying-daemon:C toolchain with cmake and ninja (11/17)");
-    expect(stages).toContain("deploying-daemon:rsync (17/17)");
+    expect(stages[0]).toBe("deploying-daemon:login shell PATH (1/15)");
+    expect(stages).toContain("deploying-daemon:uv (4/15)");
+    expect(stages).toContain("deploying-daemon:C toolchain with cmake and ninja (9/15)");
+    expect(stages).toContain("deploying-daemon:rsync (15/15)");
     expect(stages.every(s => s.startsWith("deploying-daemon"))).toBe(true);
     expect(out.tools.map(t => [t.id, t.outcome, t.bytes])).toEqual([
       ["base/login-path", "installed", 0],
       ["base/apt-index", "installed", 0],
       ["base/curl", "installed", 0],
-      ["base/node", "installed", 250 * 1024 * 1024],
-      ["base/pnpm", "installed", 0],
       ["base/uv", "installed", 0],
       ["base/python", "installed", 0],
       ["base/git", "installed", 0],
@@ -242,10 +228,10 @@ describe("installBase", () => {
       ["base/xz", "installed", 0],
       ["base/rsync", "installed", 0],
     ]);
-    expect(out.line).toBe("node 22.23.2 (250 MB), npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, cc 12.2.0 (400 MB)");
+    expect(out.line).toBe("uv 0.12.9, python3 3.12.13, git 2.43.0, jq 1.7.1, rg 14.1.0, curl 8.5.0, cc 12.2.0 (400 MB)");
     // Once against the image as it arrives, once after the floor ran: the first says what there is nothing to do for.
-    expect(g.cmds.filter(c => c.includes("VERSION node:"))).toHaveLength(2);
-    expect(g.ran).toHaveLength(18);
+    expect(g.cmds.filter(c => c.includes("VERSION curl:"))).toHaveLength(2);
+    expect(g.ran).toHaveLength(16);
   });
 
   it("reads df once between installs, and sizes an install after the rescue from the reading the cleanup left", async () => {
@@ -268,8 +254,6 @@ describe("installBase", () => {
       ["base/login-path", "installed", 0],
       ["base/apt-index", "installed", 0],
       ["base/curl", "installed", 0],
-      ["base/node", "installed", 250 * 1024 * 1024],
-      ["base/pnpm", "installed", 0],
       ["base/uv", "installed", 0],
       ["base/python", "installed", 0],
       ["base/git", "installed", 0],
@@ -284,12 +268,12 @@ describe("installBase", () => {
       ["base/rsync", "installed", 0],
     ]);
     // One read before the loop; the rescue's sweep reads before and after itself and the loop reads once more after
-    // it; one after each of the seventeen installs; the closing sweep and line read three more.
-    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(24);
+    // it; one after each of the fifteen installs; the closing sweep and line read three more.
+    expect(g.cmds.filter(c => c === FREE_KB_CMD)).toHaveLength(22);
   });
 
   it("a step that fails is named on the stage and in the line, and what waited on it is skipped by its name", async () => {
-    const g = guest(script => (script.includes("apt-get update -qq") ? { exitCode: 100, stdout: "", stderr: "E: Could not get lock /var/lib/apt/lists/lock" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\nVERSION npm: 10.9.4\nVERSION pnpm: 11.9.0\nVERSION uv: uv 0.12.9\nVERSION python3: Python 3.12.13\n", stderr: "" } : undefined));
+    const g = guest(script => (script.includes("apt-get update -qq") ? { exitCode: 100, stdout: "", stderr: "E: Could not get lock /var/lib/apt/lists/lock" } : script.includes("VERSION curl:") ? { exitCode: 0, stdout: "VERSION uv: uv 0.12.9\nVERSION python3: Python 3.12.13\n", stderr: "" } : undefined));
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
     // The index leads the floor now, so an index that fails takes curl with it, and the roads that fetch a release
@@ -298,8 +282,6 @@ describe("installBase", () => {
       ["base/login-path", "installed", undefined],
       ["base/apt-index", "failed", "E: Could not get lock /var/lib/apt/lists/lock"],
       ["base/curl", "skipped", "apt index did not install"],
-      ["base/node", "skipped", "curl did not install"],
-      ["base/pnpm", "skipped", "Node 22 with npm did not install"],
       ["base/uv", "skipped", "curl did not install"],
       ["base/python", "skipped", "uv did not install"],
       ["base/git", "skipped", "apt index did not install"],
@@ -313,12 +295,12 @@ describe("installBase", () => {
       ["base/xz", "skipped", "apt index did not install"],
       ["base/rsync", "skipped", "apt index did not install"],
     ]);
-    expect(out.line).toBe("node 22.23.2, npm 10.9.4, pnpm 11.9.0, uv 0.12.9, python3 3.12.13; curl skipped (apt index did not install); Node 22 with npm skipped (curl did not install); pnpm skipped (Node 22 with npm did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
-    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 15 skipped: curl, git, jq, ripgrep, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); Node 22 with npm, uv (curl did not install); pnpm (Node 22 with npm did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
+    expect(out.line).toBe("uv 0.12.9, python3 3.12.13; curl skipped (apt index did not install); uv skipped (curl did not install); Python 3.12 skipped (uv did not install); git skipped (apt index did not install); jq skipped (apt index did not install); ripgrep skipped (apt index did not install); C toolchain with cmake and ninja skipped (apt index did not install); fd skipped (apt index did not install); sqlite3 skipped (apt index did not install); wget skipped (apt index did not install); zip and unzip skipped (apt index did not install); xz skipped (apt index did not install); rsync skipped (apt index did not install)");
+    expect(stages).toContain("deploying-daemon:1 installed, 1 failed: apt index (E: Could not get lock /var/lib/apt/lists/lock), 13 skipped: curl, git, jq, ripgrep, C toolchain with cmake and ninja, fd, sqlite3, wget, zip and unzip, xz, rsync (apt index did not install); uv (curl did not install); Python 3.12 (uv did not install); caches swept; 2.9 GB free");
   });
 
   it("a floor step that fails is recorded by the last line its installer wrote, not a generic one", async () => {
-    const g = guest(script => (script.includes("apt-get install -y -qq fd-find") ? { exitCode: 100, stdout: "Reading package lists...\n", stderr: "E: Unable to locate package fd-find\n" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
+    const g = guest(script => (script.includes("apt-get install -y -qq fd-find") ? { exitCode: 100, stdout: "Reading package lists...\n", stderr: "E: Unable to locate package fd-find\n" } : script.includes("VERSION curl:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
     const out = await installBase(g.machine, () => {});
     expect(out.tools.find(t => t.id === "base/fd")).toMatchObject({ outcome: "failed", note: "E: Unable to locate package fd-find" });
     expect(out.line).toBe("node 22.23.2; fd failed (E: Unable to locate package fd-find)");
@@ -329,7 +311,7 @@ describe("installBase", () => {
     // The row taken here promises a second command too, so both have to answer before the row counts as carried;
     // curl and git ride along to prove an apt row counts the same.
     const onImage = ["VERSION zip: Zip 3.0 (July 5th 2008)", "VERSION unzip: UnZip 6.00 of 20 April 2009", "VERSION curl: curl 8.5.0", "VERSION git: git version 2.43.0", ""].join("\n");
-    const g = guest(script => (script.includes("VERSION node:") ? { exitCode: 0, stdout: VERSIONS_OUT, stderr: "" } : undefined), () => mb(3000), onImage);
+    const g = guest(script => (script.includes("VERSION curl:") ? { exitCode: 0, stdout: VERSIONS_OUT, stderr: "" } : undefined), () => mb(3000), onImage);
     const { stages, stage } = recorder();
     const out = await installBase(g.machine, stage);
     const row = (id: string) => out.tools.find(t => t.id === id);
@@ -339,8 +321,8 @@ describe("installBase", () => {
     // Nothing was typed for them, and the rows that waited on curl and on the index ran all the same.
     expect(g.ran.some(script => script.includes("apt-get install -y -qq zip unzip"))).toBe(false);
     expect(g.ran.some(script => script.includes("apt-get install -y -qq git"))).toBe(false);
-    expect(row("base/node")).toMatchObject({ outcome: "installed" });
-    expect(g.ran.some(script => script.includes("nodejs.org/dist"))).toBe(true);
+    expect(row("base/uv")).toMatchObject({ outcome: "installed" });
+    expect(g.ran.some(script => script.includes("astral-sh/uv/releases"))).toBe(true);
     // The floor keeps its catalog order whether a row ran or the image had it, and the line says which were there.
     expect(out.tools.map(t => t.id)).toEqual(["base/login-path", "base/apt-index", ...BASE_FLOOR.map(e => `base/${e.id}`)]);
     // The words are true whichever road put the tool there: the provider's image, or an earlier run of this stage.
@@ -349,23 +331,23 @@ describe("installBase", () => {
   });
 
   it("a floor row that pins a major runs when the image carries another, and the apt index is left out when no apt row needs it", async () => {
-    const older = ["VERSION node: v20.11.1", "VERSION npm: 10.2.4", "VERSION python3: Python 3.11.2", "VERSION uv: uv 0.12.9", ""].join("\n");
-    // Node 22 and Python 3.12 are what the floor promises: an image on another major is not a floor that is there.
+    const older = ["VERSION python3: Python 3.11.2", "VERSION uv: uv 0.12.9", ""].join("\n");
+    // Python 3.12 is what the floor promises: an image on another major is not a floor that is there.
     expect([...carriedByImage(parseVersions(older))]).toEqual(["uv"]);
-    expect([...carriedByImage(parseVersions("VERSION node: v22.1.0\nVERSION npm: 10.9.4\n"))]).toEqual(["node"]);
-    // node promises npm too, so a node with no npm beside it is not the floor's row.
-    expect([...carriedByImage(parseVersions("VERSION node: v22.1.0\n"))]).toEqual([]);
+    expect([...carriedByImage(parseVersions("VERSION python3: Python 3.12.1\nVERSION uv: uv 0.12.9\n"))]).toEqual(["uv", "python"]);
+    // zip promises unzip too, so a zip with no unzip beside it is not the floor's row.
+    expect([...carriedByImage(parseVersions("VERSION zip: Zip 3.0\n"))]).toEqual([]);
     // The index is read for the rows that wait on it; an image that carries every one of them is read for nothing.
     const waitingOnApt = BASE_FLOOR.filter(e => installAfter(e) === APT_INDEX).map(e => e.id);
     expect(baseInstalls(new Set(waitingOnApt)).some(t => t.id === "base/apt-index")).toBe(false);
     expect(baseInstalls(new Set(waitingOnApt.slice(1))).some(t => t.id === "base/apt-index")).toBe(true);
     // A row whose own dependency the image carries waits on nothing rather than on a step the plan no longer holds.
-    expect(baseInstalls(new Set(["curl"])).find(t => t.id === "base/node")).not.toHaveProperty("after");
+    expect(baseInstalls(new Set(["curl"])).find(t => t.id === "base/uv")).not.toHaveProperty("after");
     expect(baseInstalls(new Set(["curl"])).find(t => t.id === "base/git")).toMatchObject({ after: "base/apt-index" });
   });
 
   it("an install that exits 0 without its command on PATH is a failure, not a version", async () => {
-    const g = guest(script => (script.includes("for b in") && script.includes("command -v") ? { exitCode: 0, stdout: "missing fd\n", stderr: "" } : script.includes("VERSION node:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
+    const g = guest(script => (script.includes("for b in") && script.includes("command -v") ? { exitCode: 0, stdout: "missing fd\n", stderr: "" } : script.includes("VERSION curl:") ? { exitCode: 0, stdout: "VERSION node: v22.23.2\n", stderr: "" } : undefined));
     const out = await installBase(g.machine, () => {});
     expect(out.tools.find(t => t.id === "base/fd")).toMatchObject({ outcome: "failed", note: "fd is not on PATH after the install" });
     expect(out.line).toBe("node 22.23.2; fd failed (fd is not on PATH after the install)");

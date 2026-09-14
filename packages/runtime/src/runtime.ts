@@ -3203,11 +3203,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         console.warn(`exec log for ${machine.id} failed, its execs go on unlogged: ${e instanceof Error ? e.message : String(e)}`);
       }
     };
-    const reported = async (cmd: string, call: () => Promise<ExecResult>): Promise<ExecResult> => {
+    const reported = async (cmd: string, call: () => Promise<ExecResult>, unlogged = false): Promise<ExecResult> => {
       const t0 = Date.now();
       try {
         const res = await call();
-        report({ machineId: machine.id, cmd, ms: Date.now() - t0, ...res });
+        // A command that says its answer is the person's own file is recorded as having run and exited; what it
+        // printed is that file, and a log kept on their disk is no place for it.
+        report({ machineId: machine.id, cmd, ms: Date.now() - t0, ...(unlogged ? { exitCode: res.exitCode } : res) });
         return res;
       } catch (e) {
         report({ machineId: machine.id, cmd, ms: Date.now() - t0, error: e instanceof Error ? e.message : String(e) });
@@ -3216,7 +3218,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
     const exec = (cmd: string, o?: { timeoutMs?: number }): Promise<ExecResult> => reported(cmd, () => machine.exec(cmd, o));
     // A run is one command to the log, however many execs carry it.
-    const run = (script: string, o: RunOptions): Promise<ExecResult> => reported(script, () => machine.run(script, o));
+    const run = (script: string, o: RunOptions): Promise<ExecResult> => reported(script, () => machine.run(script, o), o.unlogged === true);
     return new Proxy(machine, {
       get(target, prop) {
         if (prop === "exec") return exec;

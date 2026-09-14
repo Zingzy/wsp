@@ -97,7 +97,7 @@ describe("the tools screen", () => {
   it("the base as bullets under the title, the rest grouped by why it is here, the why column and the size beside each", () => {
     const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "wrangler", source: { kind: "used", sessions: 3, calls: 40 } }), row({ id: "go", on: false, source: { kind: "used", sessions: 1, calls: 2 } })] };
     const items = tableItems(recipeTable(recipe, CATALOG_TOOLS), recipe, FIXTURE, 4, true, "darwin");
-    expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["C toolchain with cmake and ninja", "curl", "Node 22 with npm", "pnpm", "uv", "Python 3.12", "git", "jq", "ripgrep", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
+    expect(items.filter(i => i.lock === "on").map(i => i.label)).toEqual(["C toolchain with cmake and ninja", "curl", "uv", "Python 3.12", "git", "jq", "ripgrep", "fd", "sqlite3", "wget", "zip and unzip", "xz", "rsync"]);
     expect([...new Set(items.map(i => i.group))]).toEqual([undefined, USED_GROUP, HERE_GROUP, CATALOG_GROUP]);
     expect(items.filter(i => i.group === HERE_GROUP).map(i => i.label)).toEqual(["GitHub CLI", "yq"]);
     expect(items.filter(i => i.group === USED_GROUP).map(i => i.label)).toEqual(["Go", "Cloudflare Wrangler"]);
@@ -107,7 +107,9 @@ describe("the tools screen", () => {
     expect(text(by("wrangler").why)).toBe("used       40 commands in 3 sessions");
     expect(text(by("gh").hint)).toBe("40 MB");
     expect(text(by("op").hint)).toBe("41 MB");
-    expect(by("node").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
+    expect(by("curl").detail).toEqual(["ships in 5 lab images; on by default in the catalog; on every machine", "part of the base on every machine"]);
+    // Node is a row like any other now: nothing locks it on, and its detail reads as the catalog's evidence.
+    expect(by("node").lock).toBeUndefined();
     expect(by("go").detail).toEqual(["your agents used it in 1 session (2 calls)", "about 239 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     expect(by("java").detail[0]).toBe("ships in 4 lab images; on request");
   });
@@ -120,20 +122,20 @@ describe("the tools screen", () => {
     expect(text(go.why)).toBe("project    go.mod needs Go");
     expect(go.detail).toEqual(["go.mod needs Go", "about 239 MB installed on the machine (measured 2026-09-07); no row here; installed by its brew road"]);
     // A floor row the project also named says so under the cursor, even though the base is what puts it on the machine.
-    const based = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "pnpm"), row({ id: "pnpm", source: { kind: "project", why: "pnpm-lock.yaml needs pnpm" } })] };
-    const pnpm = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true, "darwin").find(i => i.id === "pnpm")!;
-    expect(pnpm.detail[0]).toBe("pnpm-lock.yaml needs pnpm; on every machine");
+    const based = { ...RECIPE, rows: [...RECIPE.rows.filter(r => r.id !== "git"), row({ id: "git", source: { kind: "project", why: "the project is a git repository" } })] };
+    const git = tableItems(recipeTable(based, CATALOG_TOOLS), based, FIXTURE, 4, true, "darwin").find(i => i.id === "git")!;
+    expect(git.detail[0]).toBe("the project is a git repository; on every machine");
   });
 
   it("ticks go back onto the recipe: a floor row stays on however the list left it, and an entry the recipe never named gets a row on the catalog's evidence", () => {
     const tools = withTools(RECIPE, new Set(["gh", "go"]));
-    expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "go"]);
+    expect(tools.rows.filter(r => r.kind === "tool" && r.on).map(r => r.id)).toEqual(["curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh", "go"]);
     expect(tools.rows.find(r => r.id === "go")).toEqual({ id: "go", kind: "tool", on: true, source: { kind: "popular", sessions: 9, images: 4 }, size: 250752891 });
     expect(tools.rows.filter(r => r.kind === "agent")).toEqual(RECIPE.rows.filter(r => r.kind === "agent"));
     const agents = withAgents(RECIPE, new Set(["codex", "pi"]));
     expect(agents.rows.filter(r => r.kind === "agent").map(r => [r.id, r.on])).toEqual([["claude", false], ["codex", true], ["gemini", false], ["opencode", false], ["pi", true], ["hermes", false]]);
     const both = withPicked(RECIPE, new Set(["codex", "gh"]));
-    expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh"]);
+    expect(both.rows.filter(r => r.on).map(r => r.id)).toEqual(["codex", "curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync", "gh"]);
   });
 });
 
@@ -354,7 +356,7 @@ describe("the agents screen drawn", () => {
 
 describe("the tools screen drawn", () => {
   const recipe = { ...RECIPE, rows: [...RECIPE.rows, row({ id: "go", source: { kind: "used", sessions: 3, calls: 40 } })] };
-  const three = slice("node", "gh", "go");
+  const three = slice("ripgrep", "gh", "go");
   const open = (o: ReturnType<typeof streams>) => {
     const rows = recipeTable(recipe, three);
     return tableScreen({
@@ -380,10 +382,10 @@ describe("the tools screen drawn", () => {
     expect(t).toContain("◆  Tools  2/6");
     expect(t).toContain(`┃  ${TOOLS_TOP}`);
     expect(t).toContain(`┃  ${LATER_LINE}`);
-    expect(t).toMatch(/▾ Always on the image\s+1\s+199 MB\n┃\s+• Node 22 with npm\s+base\s+always on the image\s+199 MB\n/);
+    expect(t).toMatch(/▾ Always on the image\s+1\s+4 MB\n┃\s+• ripgrep\s+base\s+always on the image\s+4 MB\n/);
     expect(t).toMatch(/▾ You use these\s+1 of 1\s+239 MB\n┃\s+● Go\s+used\s+40 commands in 3 sessions\s+239 MB\n/);
     expect(t).toMatch(/▾ Installed here, never used\s+1 of 1\s+40 MB\n┃\s+● GitHub CLI\s+installed\s+installed here, never used\s+40 MB\n/);
-    expect(t).toContain("On: 3 tools, 478 MB");
+    expect(t).toContain("On: 3 tools, 284 MB");
     expect(t).toContain("Disk: 1.4 GB of 15.2 GB on the 20 GB builder");
     expect(t).toContain("┗  space on or off • ← → fold • enter next • esc back");
     // The two lines he struck out are gone with the all row.
@@ -397,10 +399,10 @@ describe("the tools screen drawn", () => {
     o.input.write(KEY.space);
     await settle();
     expect(o.text()).toMatch(/○ Go/);
-    expect(o.text()).toContain("On: 2 tools, 239 MB");
+    expect(o.text()).toContain("On: 2 tools, 45 MB");
     o.input.write(KEY.enter);
     const r = await p;
-    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "node"]);
+    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "ripgrep"]);
   });
 
   it("a row the agent added sits in its own group, on, and leaving it unticked takes it off the recipe", () => {
@@ -426,7 +428,7 @@ describe("the tools screen drawn", () => {
     await settle(20);
     o.input.write(KEY.enter);
     const r = await p;
-    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "go", "node"]);
+    expect(r.kind === "next" && [...r.ticks].sort()).toEqual(["gh", "go", "ripgrep"]);
 
     const b = streams();
     const back = open(b);

@@ -20,11 +20,8 @@ describe("the catalog's MCP configs", () => {
     expect((catalogEntry("pi") as { mcp?: unknown }).mcp).toBeUndefined();
   });
 
-  it("every module's guest editor is one JavaScript expression that stands alone: it evaluates to a function with nothing else in scope", () => {
-    for (const format of new Set<McpFormat>(MCP_AGENTS.map(a => a.mcp.format))) {
-      const editor: unknown = new Function(`return ${format.guest}`)();
-      expect(typeof editor).toBe("function");
-    }
+  it("every module carries the edit the import runs over the text it read off the machine", () => {
+    for (const format of new Set<McpFormat>(MCP_AGENTS.map(a => a.mcp.format))) expect(typeof format.edit).toBe("function");
   });
 });
 

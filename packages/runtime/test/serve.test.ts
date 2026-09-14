@@ -403,7 +403,7 @@ describe("serveRuntime golden wizard ops", () => {
     expect(backend.machines[0]!.spec).toMatchObject({ kind: "desktop", template: "default", envs: { ANTHROPIC_API_KEY: "k" } });
     expect(backend.machines[0]!.spec.labels).toMatchObject({ wsp: "1", "wsp-builder": "1" });
     // The base stage's steps run first, the harness install is the last thing on the builder, under the harness guard.
-    expect(backend.machines[0]!.execLog.filter(c => c.includes("nodejs.org/dist"))).toHaveLength(1);
+    expect(backend.machines[0]!.execLog.filter(c => c.includes("apt-get install -y -qq git"))).toHaveLength(1);
     expect(backend.machines[0]!.execLog.at(-1)).toMatch(/\nsetsid bash -c 'set -euo pipefail\n[^]*\ncurl install' &\n/);
     // the builder is not a workspace
     expect((await c.request("workspaces.list"))["workspaces"]).toEqual([]);

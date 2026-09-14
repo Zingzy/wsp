@@ -177,7 +177,7 @@ exports[`catalog > is the seeded catalog 1`] = `
       "nodejs",
     ],
     "defaultOn": true,
-    "floor": true,
+    "floor": false,
     "id": "node",
     "kind": "tool",
     "major": {
@@ -202,7 +202,7 @@ exports[`catalog > is the seeded catalog 1`] = `
     "argument": "pnpm@11.9.0",
     "configPaths": 0,
     "defaultOn": true,
-    "floor": true,
+    "floor": false,
     "id": "pnpm",
     "kind": "tool",
     "road": "npm",

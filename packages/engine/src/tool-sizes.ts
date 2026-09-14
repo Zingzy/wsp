@@ -7,10 +7,13 @@
 // members once; Homebrew's toolchain is one line; a row nothing measured counts
 // at a stated default for its kind. Nothing here runs a command: the host reads
 // the Mac's Homebrew and hands the table in.
-import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, catalogToolOf, formulaOf, isTap, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
+import { AGENT_INSTALLERS, BREW_TOOLCHAIN, CATALOG_PREFIX, CUSTOM_PREFIX, MACOS_ONLY_FORMULAE, MANAGER_STEP, agentInstallsFor, catalogToolOf, formulaOf, isTap, managerFormula, packageOf, toolInstallsFor, type BrewFormula, type BrewTable, type RecipeEntry, type ToolSource } from "./golden-import.js";
 import { MIB, catalogEntry, catalogToolByRoad, catalogToolFor, isRoad, sizeBytes, type RoadName } from "@wsp/catalog";
 import { BREW_ID_PREFIX, toolRowPrefix, type RecipeCustomRow } from "@wsp/protocol";
 import { TOOLS_DISK_FLOOR } from "./golden-tools.js";
+
+/** The command the catalog's Node row puts on the machine; the one name this file asks the catalog for it by. */
+const NODE_BIN = "node";
 
 /** Root disk asked for every builder and fork, Solari's cap: a 4 GB root filled during the tools stage and
  * five agents failed to install on it (measured 2026-09-05). */
@@ -231,8 +234,8 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
   }
   // A manager's own step: its formula's closure when Homebrew installs it, else the catalog row's measurement.
   for (const t of plan.installs) {
-    if (!t.id.startsWith("tools/manager/")) continue;
-    const manager = t.label as RoadName;
+    if (!t.id.startsWith(MANAGER_STEP)) continue;
+    const manager = t.id.slice(MANAGER_STEP.length) as RoadName;
     const formula = t.manager === "brew" ? managerFormula(manager) : undefined;
     if (formula !== undefined) {
       for (const m of closureOf(formula, brew)) members.add(m);
@@ -254,6 +257,10 @@ export function estimateDisk(ticked: readonly RecipeEntry[], files: number, brew
     if (size === undefined) assume(e);
     else agents += size;
   }
+  // Node is not on the floor: an agent whose engines floor asks for one brings it in the harness stage, unless a row
+  // on the tools plan already puts it there. Either way the image carries one, counted once.
+  const node = catalogToolFor(NODE_BIN);
+  if (node !== undefined && agentInstallsFor(ticked).node !== undefined && !plan.installs.some(t => t.bin === NODE_BIN)) tools += sizeBytes(node.size) ?? 0;
   const total = files + toolchain + tools + agents + assumed;
   return { files, toolchain, tools, agents, unknown, assumed, total, room: DISK_ROOM_BYTES, over: Math.max(0, total - DISK_ROOM_BYTES) };
 }

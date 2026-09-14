@@ -39,7 +39,7 @@ describe("wsp recipe scan", () => {
     expect(scan.tick).toBe("used");
     expect(scan.at).toBe("2026-09-06T03:00:00.000Z");
     expect(scan.agents.map(r => r.id).sort()).toEqual(["claude", "codex", "gemini", "hermes", "opencode", "pi"]);
-    expect(scan.tools.find(r => r.id === "node")).toMatchObject({ on: true });
+    expect(scan.tools.find(r => r.id === "curl")).toMatchObject({ on: true });
     expect(scan.tools.find(r => r.id === "java")).toMatchObject({ on: false, why: "installed here, never used" });
     expect(scan.commands.map(c => c.name)).toEqual(["pulumi"]);
     expect(scan.signIns.map(r => r.id)).toEqual(["claude", "gh", "wrangler"]);
@@ -67,7 +67,7 @@ describe("wsp recipe scan", () => {
 
   it("carries what to do with every row and one line of why, so an agent applies the rest and asks about the delta", async () => {
     const scan = await runScan(laptop(), {}, quiet, at);
-    expect(scan.tools.find(r => r.id === "node")?.recommended).toEqual({ value: "on", why: "always on the image" });
+    expect(scan.tools.find(r => r.id === "curl")?.recommended).toEqual({ value: "on", why: "always on the image" });
     expect(scan.tools.find(r => r.id === "java")?.recommended).toEqual({ value: "off", why: "installed here, never used" });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
     for (const row of scan.signIns) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);

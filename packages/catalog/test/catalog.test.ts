@@ -39,7 +39,7 @@ describe("catalog", () => {
     expect(catalogToolFor("rustup")?.id).toBe("rust");
     expect(catalogToolFor("rustup-init")?.id).toBe("rust");
     expect(baseEntryFor("cargo")).toBeUndefined();
-    expect(baseEntryFor("npm")?.id).toBe("node");
+    expect(baseEntryFor("npm")).toBeUndefined();
     expect(catalogToolFor("claude")).toBeUndefined();
   });
 
@@ -498,7 +498,7 @@ describe("catalog", () => {
 
   it("seeds every golden with the base floor: the entries flagged for it, in catalog order, each default-on by a pinned road", () => {
     // curl leads: a base image need not ship one, and every road below that fetches a release types it.
-    expect(BASE_FLOOR.map(e => e.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
     expect(BASE_FLOOR).toEqual(CATALOG.filter(e => e.kind === "tool" && e.floor));
     for (const e of BASE_FLOOR) {
       expect(e.defaultOn, e.id).toBe(true);
@@ -508,10 +508,18 @@ describe("catalog", () => {
       const dep = installAfter(e);
       if (dep !== undefined && dep !== "apt-index") expect(BASE_FLOOR.findIndex(x => x.id === dep), e.id).toBeLessThan(BASE_FLOOR.indexOf(e));
     }
-    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn && !e.floor).map(e => e.id)).toEqual(["gh", "agent-browser"]);
-    // The npm road runs on the floor's node, an apt package on the index read once, a script on what its entry names.
-    expect(BASE_FLOOR.map(e => installAfter(e))).toEqual(["apt-index", "curl", "node", "curl", "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
-    expect(BASE_FLOOR.find(e => e.id === "node")!.brings).toEqual([{ bin: "npm", version: "npm --version" }]);
+    expect(CATALOG.filter(e => e.kind === "tool" && e.defaultOn && !e.floor).map(e => e.id)).toEqual(["node", "pnpm", "gh", "agent-browser"]);
+    // An apt package runs on the index read once, a script on what its entry names.
+    expect(BASE_FLOOR.map(e => installAfter(e))).toEqual(["apt-index", "curl", "uv", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index", "apt-index"]);
+    // Node and pnpm are rows a recipe ticks: an image whose recipe asks for neither carries no node at all, and the
+    // npm road brings node itself where a ticked row walks it.
+    const node = catalogEntry("node") as ToolEntry;
+    expect([node.floor, node.defaultOn]).toEqual([false, true]);
+    expect(node.brings).toEqual([{ bin: "npm", version: "npm --version" }]);
+    expect(installAfter(node)).toBe("curl");
+    const pnpm = catalogEntry("pnpm") as ToolEntry;
+    expect([pnpm.floor, pnpm.defaultOn]).toEqual([false, true]);
+    expect(installAfter(pnpm)).toBe("node");
     // Docker is a row a person ticks and never the floor's: half a gigabyte on every image that carries it, and a
     // guest whose kernel has no overlayfs cannot start it. Its engine is by apt, so its script waits on the index
     // read as the apt rows do.
@@ -538,31 +546,29 @@ describe("catalog", () => {
     // stage like any other.
     expect(catalogToolFor("docker-compose")?.id).toBe("docker");
     expect(baseEntryFor("docker-compose")).toBeUndefined();
-    expect(baseEntryFor("pnpm")?.id).toBe("pnpm");
-    expect(baseEntryFor("node")?.id).toBe("node");
-    expect(baseEntryFor("node@22")?.id).toBe("node");
-    expect(baseEntryFor("node@24")).toBeUndefined();
+    expect(catalogToolFor("pnpm")?.id).toBe("pnpm");
+    expect(baseEntryFor("pnpm")).toBeUndefined();
+    expect(catalogToolFor("node@22")?.id).toBe("node");
+    expect(baseEntryFor("node")).toBeUndefined();
+    expect(catalogToolFor("node@24")).toBeUndefined();
     expect(baseEntryFor("python@3.14")).toBeUndefined();
     expect(baseEntryFor("git")?.id).toBe("git");
-    expect(baseEntryFor("npm")?.id).toBe("node");
+    expect(catalogToolFor("npm")?.id).toBe("node");
+    expect(baseEntryFor("npm")).toBeUndefined();
     expect(baseEntryFor("gh")).toBeUndefined();
     expect(baseEntryFor("agent-browser")).toBeUndefined();
   });
 
   it("a covered row's note names the computer that was read and both majors when it runs another one, and the base row alone otherwise", () => {
-    const node = baseEntryFor("node")!;
     const python = baseEntryFor("python")!;
-    expect(baseNote(node, "24.1.0", "darwin")).toBe("Node 22 is part of the base; this Mac runs Node 24");
-    expect(baseNote(node, "v22.23.2", "darwin")).toBe("Node 22 with npm is part of the base");
-    expect(baseNote(node, undefined, "darwin")).toBe("Node 22 with npm is part of the base");
     expect(baseNote(python, "3.14.0", "darwin")).toBe("Python 3.12 is part of the base; this Mac runs Python 3.14");
-    expect(baseNote(python, "3.12.7", "darwin")).toBe("Python 3.12 is part of the base");
+    expect(baseNote(python, "v3.12.7", "darwin")).toBe("Python 3.12 is part of the base");
+    expect(baseNote(python, undefined, "darwin")).toBe("Python 3.12 is part of the base");
     // A note built on a Linux computer names that computer: the platform read, never the one the sentence was written for.
-    expect(baseNote(node, "24.1.0", "linux")).toBe("Node 22 is part of the base; this computer runs Node 24");
     expect(baseNote(python, "3.14.0", "linux")).toBe("Python 3.12 is part of the base; this computer runs Python 3.14");
-    expect(baseNote(node, "v22.23.2", "linux")).toBe("Node 22 with npm is part of the base");
+    expect(baseNote(python, "3.12.7", "linux")).toBe("Python 3.12 is part of the base");
     // Only a row that pins a major has one to compare; the rest name the base row whatever version was read here.
-    expect(baseNote(baseEntryFor("pnpm")!, "10.0.0", "darwin")).toBe("pnpm is part of the base");
+    expect(baseNote(baseEntryFor("uv")!, "10.0.0", "darwin")).toBe("uv is part of the base");
     expect(baseNote(baseEntryFor("jq")!, "1.6", "linux")).toBe("jq is part of the base");
   });
 
@@ -610,7 +616,7 @@ describe("catalog", () => {
 
   it("carries the tier 1 rows the lab sandboxes ship: the cheap universal ones on the floor, the rest on request", () => {
     // curl leads: a base image need not ship one, and every road below that fetches a release types it.
-    expect(BASE_FLOOR.map(e => e.id)).toEqual(["curl", "node", "pnpm", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
+    expect(BASE_FLOOR.map(e => e.id)).toEqual(["curl", "uv", "python", "git", "jq", "ripgrep", "build-essential", "fd", "sqlite3", "wget", "zip", "xz", "rsync"]);
     expect(installLine(catalogEntry("build-essential")!)).toBe("export DEBIAN_FRONTEND=noninteractive\napt-get install -y -qq build-essential cmake ninja-build");
     expect((catalogEntry("build-essential") as ToolEntry).brings).toEqual([{ bin: "cmake", version: "cmake --version" }, { bin: "ninja", version: "ninja --version" }]);
     expect(catalogToolFor("make")?.id).toBe("build-essential");
@@ -688,8 +694,8 @@ describe("catalog", () => {
     expect(swift).toContain("ln -sfn /opt/swift/usr/bin/swift /usr/local/bin/swift");
     expect(installAfter(catalogEntry("swift") as ToolEntry)).toBe(APT_INDEX);
     expect(catalogToolFor("swiftc")?.id).toBe("swift");
-    // The browser: Playwright's own Chromium at the Playwright the render tests import, on the floor's node; the row
-    // answers to the package names a project depends on.
+    // The browser: Playwright's own Chromium at the Playwright the render tests import, on the node its npm road
+    // brings; the row answers to the package names a project depends on.
     expect(installLine(catalogEntry("playwright")!)).toBe("export DEBIAN_FRONTEND=noninteractive\nnpm install -g playwright@1.62.1\nplaywright install --with-deps chromium");
     expect(installAfter(catalogEntry("playwright") as ToolEntry)).toBe("node");
     expect(catalogToolFor("chromium")?.id).toBe("playwright");

@@ -157,9 +157,10 @@ describe("estimateDisk", () => {
     const est = estimateDisk(ticked, files, TABLE);
     expect(est.files).toBe(files);
     expect(est.toolchain).toBe(BREW_TOOLCHAIN_BYTES);
-    // ffmpeg + x264 + openssl@3 + ca-certificates (openssl@3's own row adds nothing new) + llvm@21 + zstd, all from this Mac.
-    expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120 + 2048000) * 1024);
-    // The agents run on the base's Node 22, which is the base floor's cost, not theirs.
+    // ffmpeg + x264 + openssl@3 + ca-certificates (openssl@3's own row adds nothing new) + llvm@21 + zstd, all from
+    // this Mac, and the Node the Gemini CLI's engines floor asks for, which is no longer part of the base.
+    expect(est.tools).toBe((102400 + 20480 + 30720 + 1024 + 5120 + 2048000) * 1024 + sizeBytes(catalogEntry("node")!.size)!);
+    // The agents' own bytes; the Node they run on is a tool row's, counted once above.
     expect(est.agents).toBe((673 + 189) * MIB);
     expect(est.unknown).toEqual([]);
     expect(est.assumed).toBe(0);
@@ -171,7 +172,8 @@ describe("estimateDisk", () => {
   it("no Homebrew formula, no toolchain; an npm row and an agent nobody measured are named as unknown", () => {
     const est = estimateDisk([row({ id: "tools/npm/left-pad", label: "left-pad" }), row({ id: "tools/npm/bun", label: "bun" }), { ...row({ id: "agents/aider", label: "Aider" }), rung: "agents" as const }, { ...row({ id: "agents/zed", label: "Zed" }), rung: "agents" as const }], 0, TABLE);
     expect(est.toolchain).toBe(0);
-    expect(est.tools).toBe(sizeBytes(catalogEntry("bun")!.size)!);
+    // The npm rows bring node along, once, as the plan's own step.
+    expect(est.tools).toBe(sizeBytes(catalogEntry("bun")!.size)! + sizeBytes(catalogEntry("node")!.size)!);
     // Zed has no installer, so nothing of it lands on the machine and nothing is unknown about it.
     expect(est.unknown).toEqual(["left-pad", "Aider"]);
     // The unknown rows still count, each at its kind's default, and the total carries them.
@@ -180,11 +182,18 @@ describe("estimateDisk", () => {
     expect(est.total).toBe(est.tools + est.assumed);
   });
 
-  it("no agent brings a Node of its own: the base's 22 meets every pinned floor", () => {
+  it("an agent whose engines floor asks for Node brings one, counted once beside the agents' own bytes", () => {
+    const node = sizeBytes(catalogEntry("node")!.size)!;
     const codex = { ...row({ id: "agents/codex" }), rung: "agents" as const };
     expect(estimateDisk([codex], 0, TABLE).agents).toBe(455 * MIB);
+    expect(estimateDisk([codex], 0, TABLE).tools).toBe(node);
     const pi = { ...row({ id: "agents/pi" }), rung: "agents" as const };
     expect(estimateDisk([codex, pi], 0, TABLE).agents).toBe((455 + 165) * MIB);
+    expect(estimateDisk([codex, pi], 0, TABLE).tools).toBe(node);
+    // A ticked row that already brings node is the one that counts: the harness stage keeps what the tools stage put there.
+    expect(estimateDisk([codex, row({ id: "tools/npm/pnpm", label: "pnpm" })], 0, TABLE).tools).toBe(node + sizeBytes(catalogEntry("pnpm")!.size)!);
+    // Claude Code's installer is its vendor's native one, so a recipe with it alone carries no node.
+    expect(estimateDisk([{ ...row({ id: "agents/claude" }), rung: "agents" as const }], 0, TABLE).tools).toBe(0);
   });
 
   it("a manager the plan pulls in as a formula counts that formula from this Mac, and so does the toolchain it needs", () => {

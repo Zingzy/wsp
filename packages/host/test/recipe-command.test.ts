@@ -75,8 +75,8 @@ describe("wsp recipe", () => {
     const table = await runRecipe(laptop(), { out }, quiet, at);
     const row = (id: string) => allRows(table).find(r => r.id === id)!;
     expect(table.tick).toBe("used");
-    // node is on every image whatever a rule says, so the renderer puts it in the base group and says so.
-    expect(row("node")).toMatchObject({ on: true, why: "always on the image", base: true, group: BASE_GROUP });
+    // Node is off the floor now, so it is a row like any other: this computer's one call is under the floor.
+    expect(row("node")).toMatchObject({ on: false, why: "below the floor, 1 command in 1 session", base: false, group: USED_GROUP });
     expect(row("gh")).toMatchObject({ on: true, why: "5 commands in 2 sessions", group: USED_GROUP });
     expect(row("java")).toMatchObject({ on: false, why: "installed here, never used", group: HERE_GROUP, size: 613280230 });
     // A tool the catalog ships on but nobody here ran is off under this rule; only use ticks a row.

@@ -60,9 +60,8 @@ const PROBE_OUT = [
   "HAS brew",
   "HAS golden-path",
   "HAS wsp-open",
-  "VERSION node: v22.23.2",
-  "VERSION npm: 10.9.4",
   "VERSION python3: Python 3.12.13",
+  "VERSION uv: uv 0.12.9",
   "VERSION cc: ",
   "AGENT claude",
   "AGENT codex",
@@ -111,7 +110,7 @@ describe("the probe", () => {
     expect(probe.overlay).toBe(false);
     expect([...probe.has]).toEqual(["tmux", "fish", "brew", "golden-path", "wsp-open"]);
     // The base floor's versions, each as its number; a command that printed nothing is not there.
-    expect(probe.versions).toEqual([{ name: "node", version: "22.23.2" }, { name: "npm", version: "10.9.4" }, { name: "python3", version: "3.12.13" }]);
+    expect(probe.versions).toEqual([{ name: "python3", version: "3.12.13" }, { name: "uv", version: "0.12.9" }]);
     expect(probe.agents).toEqual(CONTEXT_AGENTS.map(a => a.id));
     expect(probe.secrets).toEqual(["OPENAI_API_KEY", "GH_TOKEN"]);
     expect(probe.shell).toBe("zsh");
@@ -139,7 +138,7 @@ describe("the probe", () => {
 
   it("asks the base floor's commands for their versions on the tools PATH", () => {
     const cmd = probeCommand();
-    expect(cmd).toContain('echo "VERSION node: $(node --version 2>/dev/null | head -n 1)"');
+    expect(cmd).toContain('echo "VERSION uv: $(uv --version 2>/dev/null | head -n 1)"');
     expect(cmd).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
     expect(cmd).toContain('echo "VERSION unzip: $(unzip -v 2>/dev/null | head -n 1)"');
     expect(cmd.split("\n").filter(l => l.startsWith("export PATH="))).toHaveLength(1);
