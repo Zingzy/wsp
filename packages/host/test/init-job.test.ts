@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { basename, join, relative } from "node:path";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -973,6 +973,40 @@ describe("the init job, manual road", () => {
     expect(said).toContain(INIT_ROW_STATES.retrying);
     expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${outage.first().id}`, state: INIT_ROW_STATES.gone });
     expect(f.backend.machines.filter(m => !m.killed)).toHaveLength(0);
+  });
+
+  it("a failure whose rollback the provider refused ends on the still-billing sentence the terminal beside a host prints", async () => {
+    const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
+    downFor(f.backend, 2);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    expect(view.phase).toBe("failed");
+    // The terminal beside a host prints this sentence and the failed row's own line, and neither may say a machine
+    // that is still billing went away.
+    expect(view.error).toBe(`${NETWORK_LOST_LINE} ${STOP_LEFT_MACHINE_LINE}`);
+    expect(view.error).not.toContain(MACHINE_GONE_LINE);
+    expect(view.rows.find(r => r.id === "stage/deploying-daemon")!.detail).toBe(view.error);
+  });
+
+  it("the sheet's rows close the base tools stage's block on the still-billing sentence, over the machine's own row", async () => {
+    const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
+    const outage = downFor(f.backend, 2);
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
+    await f.jobs.build({ firstWorkspace: "e2e" });
+    await f.settled();
+    const view = f.jobs.view()!;
+    const failed = view.rows.find(r => r.kind === "stage" && r.state === INIT_ROW_STATES.failed)!;
+    expect(failed.label).toBe(GOLDEN_STAGE_WORDS["deploying-daemon"]);
+    // The block the sheet opens says what the head says, so the row and the machine's row under it tell one story.
+    expect(failed.lines!.at(-1)).toBe(`${NETWORK_LOST_LINE} ${STOP_LEFT_MACHINE_LINE}`);
+    expect(JSON.stringify(view.rows)).not.toContain(MACHINE_GONE_LINE);
+    expect(view.rows.find(r => r.kind === "machine")).toMatchObject({ id: `machine/${outage.first().id}`, label: MACHINE_ROW_LABEL });
   });
 
   it("a seal whose rollback the provider refused leaves the smoke fork retrying, and the kill lands when the network returns", async () => {
