@@ -3324,7 +3324,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
    * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
   const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
-    const dests = [projectHeld(entry.record.project).path];
+    // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
+    // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
+    // workspace here, each in a copy of the project folder at a path of its own.
+    const sharing = [...live.values()].filter(e => e.record.machineId === entry.record.machineId);
+    const dests = [...new Set(sharing.flatMap(e => [projectHeld(e.record.project).path, checkoutOf(e.record)]))];
     // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
     // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
     await moduleOf(entry.record.kind)
@@ -4563,6 +4567,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     attach(record, machine);
     try {
       await moduleOf("local").landProject(live.get(record.id)!, project, () => {});
+      // The folder is this computer's own and sits outside the daemon's home root, so the daemon is told about it
+      // here as the clone road tells it about a copy: without this every file, diff and push op on a workspace of
+      // this kind is refused for a path outside the root.
+      await writeDaemonRoots(live.get(record.id)!);
       await persist(record);
     } catch (e) {
       // A copy whose record never landed is a folder nobody can name: it goes with the create that made it.
@@ -5047,10 +5055,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // against the branch its project starts from, and a project that named none leaves it to the checkout.
       const parent = entry.record.parentWorkspaceId === undefined ? undefined : live.get(entry.record.parentWorkspaceId);
       const base = (parent === undefined ? undefined : await branchOn(parent)) ?? projectHeld(entry.record.project).base;
-      const at = { ...(base !== undefined ? { base } : {}) };
+      const against = base === undefined ? {} : { base };
       return withDaemon(entry, async ask => {
-        const push = GitPushReply.parse(await ask({ op: "git.push", cwd, ...at }));
-        const asked = { op: "git.pr", cwd, ...at, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) };
+        const push = GitPushReply.parse(await ask({ op: "git.push", cwd, ...against }));
+        const asked = { op: "git.pr", cwd, ...against, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) };
         // The push has landed by here, so a machine with no command line for the host is not a failed bring back:
         // the branch is on the remote and the sentence rides back as the note beside it.
         const opened = await ask(asked).catch((e: unknown) => {

@@ -521,6 +521,9 @@ describe("wsp verbs over the host", () => {
     expect(plain.code).toBe(0);
     const forks = (await rt.workspaces.list()).filter(w => w.id !== alpha!.id);
     expect(forks.map(w => [w.name, w.golden])).toEqual([["alpha-fork", alpha!.golden]]);
+    // A fork is a child of the workspace it was forked from: the record says so, and a bring back from it reads
+    // that parent's own branch as the base its work lands in.
+    expect(forks[0]!.parentWorkspaceId).toBe(alpha!.id);
     expect(plain.io.lines).toEqual([`created alpha-fork ${forks[0]!.id} with ${forks[0]!.project.name} at ${forks[0]!.project.path}`]);
 
     const sent = await run("fork", alpha!.id, "--name", "worker", "--send", "build it");

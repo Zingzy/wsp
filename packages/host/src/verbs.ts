@@ -952,6 +952,14 @@ const MACHINE_DOWN: ReadonlySet<WorkspaceState> = new Set<WorkspaceState>(["paus
 /** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
  * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
  * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
+export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<Woken> {
+  const before = workspaceState({ phase: workspace.phase });
+  if (before === "gone") throw new Error(goneRefusal(action, workspace.gone));
+  if (before !== "running") tell(`waking ${workspace.name}`);
+  const woken = (await client.request<{ workspace: WorkspaceOut }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
+  return { workspace: woken, woke: MACHINE_DOWN.has(before) && workspaceState({ phase: woken.phase }) === "running" };
+}
+
 /** The bring back over the wire, one road for the command line and the tool. */
 async function broughtBack(client: HostClient, workspaceId: string, title?: string, body?: string): Promise<BringBackResult> {
   return BringBackResult.parse(
@@ -972,14 +980,6 @@ function broughtBackLine(name: string, back: BringBackResult): string {
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n");
-}
-
-export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<Woken> {
-  const before = workspaceState({ phase: workspace.phase });
-  if (before === "gone") throw new Error(goneRefusal(action, workspace.gone));
-  if (before !== "running") tell(`waking ${workspace.name}`);
-  const woken = (await client.request<{ workspace: WorkspaceOut }>("workspaces.wake", { workspaceId: workspace.id })).workspace;
-  return { workspace: woken, woke: MACHINE_DOWN.has(before) && workspaceState({ phase: woken.phase }) === "running" };
 }
 
 /** What a launch owes the machine it woke when its thread never got going. Sleeping is automatic by window, and a
@@ -1250,7 +1250,7 @@ export async function createFor(
   out: Out,
   project: Pick<ProjectView, "id" | "name" | "computer">,
   name: string,
-  asked: { from?: string; size?: string; agents?: Partial<WorkspaceAgents>; engine?: boolean } = {},
+  asked: { from?: string; size?: string; agents?: Partial<WorkspaceAgents>; engine?: boolean; parent?: string } = {},
 ): Promise<WorkspaceCreateResult> {
   // A project worked in place is its own folder, so the words a fork takes have nothing to act on: they are
   // refused here in the runtime's own sentence, before the landing is even read.
@@ -1276,6 +1276,7 @@ export async function createFor(
       ...chosen,
       ...(asked.agents !== undefined ? { agents: asked.agents } : {}),
       ...(asked.engine === true ? { engine: true } : {}),
+      ...(asked.parent !== undefined ? { parent: asked.parent } : {}),
     });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
     // The folder this workspace actually holds the project in: the project's own where it is worked in place, and
@@ -2844,7 +2845,7 @@ export const VERBS: readonly Verb[] = [
       const picks = pickFlags(ctx.flags);
       if (task !== undefined) await checkedStart(client, task, harness, picks, source.id);
       const asked = agentsAsked(flag(ctx.flags, "spawn"), flag(ctx.flags, "max-machines"), flag(ctx.flags, "max-depth"));
-      const created = await createFor(client, ctx.out, await projectOf(client, source.project.id), flag(ctx.flags, "name") ?? `${source.name}-fork`, { ...(flag(ctx.flags, "size") !== undefined ? { size: flag(ctx.flags, "size")! } : {}), ...(asked !== undefined ? { agents: asked } : {}) });
+      const created = await createFor(client, ctx.out, await projectOf(client, source.project.id), flag(ctx.flags, "name") ?? `${source.name}-fork`, { parent: source.id, ...(flag(ctx.flags, "size") !== undefined ? { size: flag(ctx.flags, "size")! } : {}), ...(asked !== undefined ? { agents: asked } : {}) });
       if (task === undefined) return 0;
       ctx.out.emit({ turn: turnView(await followVerb(ctx, client, openingOf(ctx.env, created.workspace, task, { harness, ...picks, cwd: flag(ctx.flags, "cwd"), notify, elsewhere: ctx.elsewhere }), true, {}, { spend: turnSpendWord(created.workspace) })) });
       return 0;
@@ -2860,7 +2861,7 @@ export const VERBS: readonly Verb[] = [
         const source = await workspaceOf(client, ref);
         if (task !== undefined) await checkedStart(client, task, harness, input, source.id);
         const asked = agentsAsked(spawn, maxMachines, maxDepth);
-        const created = await createFor(client, QUIET, await projectOf(client, source.project.id), name ?? `${source.name}-fork`, { ...(word !== undefined ? { size: word } : {}), ...(asked !== undefined ? { agents: asked } : {}) });
+        const created = await createFor(client, QUIET, await projectOf(client, source.project.id), name ?? `${source.name}-fork`, { parent: source.id, ...(word !== undefined ? { size: word } : {}), ...(asked !== undefined ? { agents: asked } : {}) });
         if (task === undefined) return asJson(created);
         let failure: string;
         try {
