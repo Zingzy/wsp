@@ -253,7 +253,7 @@ describe("store creations", () => {
   const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
   const HETZNER_PLACE: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, engine: "docker", present: true, takesForks: true };
   /** The project every create here is made of: a repo on the computer that clones it, so the work goes there. */
-  const PROJECT_ON_HETZNER: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+  const PROJECT_ON_HETZNER: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" };
 
   const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
     type: "workspace.creating",
@@ -810,8 +810,8 @@ describe("store connection", () => {
 });
 
 describe("the projects a workspace is made of", () => {
-  const SPOO: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
-  const WSP: ProjectView = { id: "pr_2", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: "t" };
+  const SPOO: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" };
+  const WSP: ProjectView = { id: "pr_2", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", remote: "https://github.com/dev/wsp.git", defaultBranch: "main", memoryKey: "-Users-dev-wsp", memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory", createdAt: "t" };
 
   it("are read at bind and kept by the two project events: one added shows, one removed goes, and an id nothing holds leaves the list as it was", async () => {
     const { api } = fakeApi([view("ws_a")], []);

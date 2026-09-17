@@ -1261,6 +1261,7 @@ mod tests {
             engine: false,
             copy: None,
             shares: Vec::new(),
+            binds: Vec::new(),
         }
     }
 

@@ -25,7 +25,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use wsp_frames::{
-    words, BackendFacts, BackendPricing, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
+    words, BackendFacts, BackendPricing, Bind, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
     MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply,
     MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode,
@@ -231,6 +231,13 @@ impl Unfinished {
     }
 }
 
+/// What one create mounts into the workspace, kept together from the create to the record: the computer's logins
+/// and the folders of its own it binds.
+struct Mounted {
+    shares: Vec<Share>,
+    binds: Vec<Bind>,
+}
+
 impl Ops {
     /// Opens the root, sweeps the creates that never finished, reads the box, marks every workspace whose init is
     /// gone as stopped (a reboot, or a daemon that was not there when the init died, leaves its record, its upper
@@ -251,13 +258,16 @@ impl Ops {
             fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
         }
         // The logins directory is made before any sign-in on this computer asks for it, and only this login may
-        // read it: what lands under it is the person's own sign-in for every workspace here.
-        let logins = layout.logins();
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&logins)
-            .map_err(|e| OpError::plain(format!("{}: {e}", logins.display())))?;
+        // read it: what lands under it is the person's own sign-in for every workspace here. The projects
+        // directory is made the same way and for the same reason: a project's checkout and its agent's memory are
+        // the person's, and an add binds a project's own folder under it into the workspace that clones into it.
+        for dir in [layout.logins(), layout.projects()] {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&dir)
+                .map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
+        }
         // Before anything reads the run directory as a list of workspaces: what a create that died left is not
         // one, and a copy that was still being made is not a copy.
         let unfinished = sweep_unfinished(&layout)?;
@@ -496,6 +506,7 @@ impl Ops {
             // Nothing boots from a name here, so there is no name to offer for a kind.
             base_templates: None,
             logins: Some(self.layout.logins().to_string_lossy().into_owned()),
+            projects: Some(self.layout.projects().to_string_lossy().into_owned()),
         }
     }
 
@@ -598,6 +609,7 @@ impl Ops {
         // Before the claim and before anything is mounted: a source this daemon does not share out is refused,
         // and a refusal here costs nothing to take back.
         let shares = self.shares_of(&spec)?;
+        let binds = self.binds_of(&spec)?;
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
             None => format!("wsp-{}", random_word()),
@@ -636,7 +648,7 @@ impl Ops {
             None => None,
         };
         let notice = notices([size.clamped.clone(), copy.as_ref().and_then(|made| self.plain_copy_notice(made))]);
-        match self.build(&id, &spec, &size, copy.clone(), shares).await {
+        match self.build(&id, &spec, &size, copy.clone(), Mounted { shares, binds }).await {
             Ok(record) => Ok(noticed(self.handle(&record, None, None), notice)),
             Err(e) => {
                 // A workspace that would not come up is ours and nobody else's: nothing of it stays behind, the
@@ -691,6 +703,8 @@ impl Ops {
     }
 
     /// The logins a create asks for, held to one rule: a file under the directory this daemon shares them out of.
+    /// (The two lists a create carries travel together from here to the record, so the boot mounts what the
+    /// create was given and a wake mounts what the record kept.)
     /// A source anywhere else on the box is refused, since a bind mount lands on the workspace's own files and is
     /// the one thing a slip cannot be taken back; so is one that is there and is not a file, which the boot would
     /// otherwise pass over without a word. A source that is not there yet is a login nobody has signed in on this
@@ -711,6 +725,30 @@ impl Ops {
                     share.source
                 )));
             }
+        }
+        Ok(asked)
+    }
+
+    /// The folders a create asks to have mounted into the workspace, held to one rule: a directory under the
+    /// projects directory this daemon keeps the checkouts and their memory in. A bind mount lands on the
+    /// workspace's own files and is the one thing a slip cannot be taken back, so nothing else on the box is bound,
+    /// and a source that is there and is not a directory is refused rather than passed over without a word. A
+    /// source that is not there yet is made: an add binds a project's own folder before it has cloned into it.
+    fn binds_of(&self, spec: &MachineSpec) -> Result<Vec<Bind>, OpError> {
+        let projects = self.layout.projects();
+        let asked = spec.binds.clone().unwrap_or_default();
+        for bind in &asked {
+            let at = Path::new(&bind.source);
+            let under =
+                wsp_frames::is_plain_path(&bind.source) && at.strip_prefix(&projects).is_ok_and(|rest| rest.iter().next().is_some());
+            if !under || (at.exists() && !at.is_dir()) {
+                return Err(OpError::plain(format!(
+                    "a folder bound into a workspace is a directory under {}, and {} is not one",
+                    projects.display(),
+                    bind.source
+                )));
+            }
+            fs::create_dir_all(at).map_err(|e| OpError::plain(format!("{}: {e}", at.display())))?;
         }
         Ok(asked)
     }
@@ -758,7 +796,7 @@ impl Ops {
         spec: &MachineSpec,
         size: &SizeOnBox,
         copy: Option<CopyMade>,
-        shares: Vec<Share>,
+        mounted: Mounted,
     ) -> Result<Workspace, OpError> {
         let engine = spec.engine == Some(true);
         if engine {
@@ -778,7 +816,8 @@ impl Ops {
             init: Init { pid: 0, started: 0, boot_id: String::new() },
             engine,
             copy,
-            shares,
+            shares: mounted.shares,
+            binds: mounted.binds,
         };
         self.boot(record).await
     }
@@ -808,6 +847,12 @@ impl Ops {
             bundle::empty_file(&bundle::inside(&self.layout.rootfs(&id), &share.target)?)?;
             shares.push(share.clone());
         }
+        // The folders of the computer's own this workspace was made with, bound where it reads them: made here
+        // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
+        // workspace mounts under one of them never reaches the computer.
+        for bind in &record.binds {
+            bundle::bind_into(Path::new(&bind.source), &bundle::inside(&self.layout.rootfs(&id), &bind.target)?)?;
+        }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {
             fs::create_dir_all(dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
@@ -830,6 +875,7 @@ impl Ops {
             etc: &self.layout.etc(&id),
             engine: engine_dir.as_deref(),
             shares: &shares,
+            binds: &record.binds,
             compose_project: compose_name.as_deref(),
         };
         bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
@@ -1310,6 +1356,7 @@ mod tests {
             etc: Path::new("/tmp"),
             engine: None,
             shares: &[],
+            binds: &[],
             compose_project: None,
         });
         // One core of every period, and a third of the box's four gigabytes.
@@ -1335,6 +1382,7 @@ mod tests {
             engine: false,
             copy: None,
             shares: Vec::new(),
+            binds: Vec::new(),
         }
     }
 
@@ -1430,7 +1478,7 @@ mod tests {
         assert!(ops.create_with_room(bare_spec(), Some(1)).await.is_err());
     }
 
-    /// A spec asking for nothing at all: the kind, and no image, size, copy or login.
+    /// A spec asking for nothing at all: the kind, and no image, size, copy, login or folder of the computer's.
     fn bare_spec() -> MachineSpec {
         MachineSpec {
             kind: MachineKind::Sandbox,
@@ -1447,6 +1495,7 @@ mod tests {
             engine: None,
             copy: None,
             shares: None,
+            binds: None,
         }
     }
 
@@ -1663,6 +1712,7 @@ mod tests {
             engine: false,
             copy: None,
             shares: Vec::new(),
+            binds: Vec::new(),
         };
         fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
     }
@@ -1704,6 +1754,7 @@ mod tests {
             idempotency_key: None,
             engine: None,
             copy: None,
+            binds: None,
             shares: Some(vec![Share { source: source.display().to_string(), target: "/root/.codex/auth.json".to_owned() }]),
         }
     }
@@ -1736,6 +1787,48 @@ mod tests {
         assert!(ops.shares_of(&MachineSpec { shares: None, ..asking_for(&logins) }).unwrap().is_empty());
         // What this computer says about itself names the same directory, which is what the host fills a create from.
         assert_eq!(ops.backend_facts().logins, Some(logins.display().to_string()));
+    }
+
+    /// A spec asking for one folder of the computer's own to be bound in, with the source spelled as given.
+    fn binding(source: &Path) -> MachineSpec {
+        MachineSpec {
+            binds: Some(vec![Bind {
+                source: source.display().to_string(),
+                target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
+                read_only: false,
+            }]),
+            shares: None,
+            ..asking_for(source)
+        }
+    }
+
+    #[test]
+    fn a_folder_bound_into_a_workspace_is_a_directory_under_this_daemons_root_and_nowhere_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let projects = ops.layout.projects();
+        // The open made the projects directory, and only this login reads what lands under it: a project's
+        // checkout and its agent's memory are the person's.
+        assert!(projects.is_dir());
+        assert_eq!(fs::metadata(&projects).unwrap().permissions().mode() & 0o777, 0o700);
+        // A folder the add has not written yet is made, since the add binds this directory before it has cloned
+        // anything into it.
+        let memory = projects.join("pr_1/memory");
+        assert_eq!(ops.binds_of(&binding(&memory)).unwrap().len(), 1);
+        assert!(memory.is_dir());
+        // Anywhere else on the box, the projects directory itself and a directory beside it: each refused in one
+        // sentence naming where a bound folder lives. A file is refused rather than passed over, since a boot
+        // mounting a directory over it would fail without a word here.
+        let file = projects.join("pr_1/a-file");
+        fs::write(&file, b"x").unwrap();
+        for outside in [dir.path().join("root/.ssh"), ops.layout.logins(), projects.clone(), projects.join("../copies"), file] {
+            let refused = ops.binds_of(&binding(&outside)).unwrap_err().message;
+            assert!(refused.contains(&projects.display().to_string()) && refused.ends_with("is not one"), "{outside:?}: {refused}");
+        }
+        // A create that asks for none binds none, and what this computer says about itself names the directory a
+        // host fills one from.
+        assert!(ops.binds_of(&MachineSpec { binds: None, ..binding(&memory) }).unwrap().is_empty());
+        assert_eq!(ops.backend_facts().projects, Some(projects.display().to_string()));
     }
 
     #[test]
