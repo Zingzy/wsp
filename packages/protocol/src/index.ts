@@ -3576,6 +3576,7 @@ const DAEMON_CONTENTS = [
   "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
   "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
   "4453f856251c047172490b84c8502f74b6a1d25744f6878a382ac32fe45f2c46",
+  "4605e734f4735405ddefd0478583032757ca8ad0b2dc8ce9a14e92789c2800a0",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3714,7 +3715,10 @@ const DAEMON_CONTENTS = [
  * after a real quiet window read off its published ports and its commands, and the reading carries how long it has
  * been quiet; a service bound to loopback inside answers through the published port; a create the box has no room for
  * is refused in one sentence naming the quietest workspace; root inside drops the standard capability list and sees
- * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace. */
+ * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace.
+ * Version 50 adds the git road out of a workspace: a push of the branch the copy is on with a refusal to push the
+ * base, the pull request opened or found through the signed-in host command line on the computer and its state read
+ * back, three operations behind one trait with one module per host. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
