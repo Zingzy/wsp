@@ -113,3 +113,17 @@ export const GUEST_QUEUE_FULL = "the host has not read this session for too long
 export const GUEST_UNWATCHED = "the host stopped watching; run it again";
 /** What a guest process prints when nothing answers on its own machine's daemon port. */
 export const guestNoDaemonLine = (port: number | string): string => `this machine's wsp daemon is not answering on 127.0.0.1:${port}`;
+
+/** What a bring back on the branch the work started from is refused with: wsp makes no branch and pushes no base,
+ * so the commits move onto a branch of their own first. */
+export const onBaseRefusal = (base: string): string =>
+  `this workspace is on ${base}, the branch it started from; move the commits onto a branch of their own and bring back again`;
+/** What a bring back in a checkout that is on no branch at all is refused with. */
+export const NOT_ON_A_BRANCH = "this workspace is not on a branch, so there is nothing to bring back yet";
+/** What a bring back of a branch the base already holds every commit of is refused with. */
+export const nothingAheadLine = (branch: string, base: string): string => `${branch} has no commits that ${base} lacks, so there is nothing to bring back`;
+/** What a bring back in a checkout with nowhere to push is refused with. */
+export const NO_REMOTE = "this project has no remote to push to";
+/** What the pull request is answered with where the git host's own command line is not on the machine: the push
+ * stands, so the bring back carries this beside it as a note rather than failing. */
+export const noHostCliLine = (host: string): string => `no signed-in command line for ${host} is on this computer; the branch is pushed and the pull request waits for one`;

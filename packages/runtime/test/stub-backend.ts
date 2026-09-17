@@ -7,15 +7,27 @@ import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { LocalBackend, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, type Caller, type ProjectView } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, scopeOf, type Caller, type ProjectView } from "@wsp/protocol";
 import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 
+/** The branch the stub guest's checkout is on, and the remote's copy of it: what a workspace forked from such a
+ * guest starts on, and what a bring back from it measures against. A guest that answered nothing to the branch
+ * read would be a machine that did not say, which a fork refuses. */
+export const GUEST_BRANCH = "work";
+
+/** What every stub guest answers whatever else it is told: the branch read, since a create with a parent makes it
+ * before it mints anything. Written once here so a test that wants another answer overrides that one line. */
+export const guestBranchAnswer = (cmd: string): ExecResult | undefined =>
+  cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: `${GUEST_BRANCH}\norigin/${GUEST_BRANCH}\n`, stderr: "" } : undefined;
+
 /** An execImpl for a guest that has a daemon: the runtime's token write lands and everything else is silently
  * fine. Written once here, since a reach, a channel and a relay all need the same guest to exist. */
 export const tokenGuest = (_m: unknown, cmd: string): ExecResult =>
-  cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+  cmd.includes(DAEMON_TOKEN_PATH)
+    ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" }
+    : (guestBranchAnswer(cmd) ?? { exitCode: 0, stdout: "", stderr: "" });
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -143,7 +155,7 @@ export function stubBackend(mark?: string): StubBackend {
     templates,
     promoted,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
-    execImpl: (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" }),
+    execImpl: (_m, cmd) => guestBranchAnswer(cmd) ?? { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" },
     async create(spec: MachineSpec): Promise<Machine> {
       if (spec.template !== undefined && !BUILTIN_TEMPLATES.has(spec.template) && templates.get(spec.template)?.status !== "ready") {
         throw Object.assign(new Error(`TemplateNotReady ${spec.template}`), { kind: "missing", status: 404 });
@@ -307,13 +319,18 @@ export function tempRepo(): string {
  * projectOn, so the project a test never names is still a real record with a real computer behind it. */
 export async function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, origin?: Caller): Promise<CreatedWorkspace> {
   const { on, project, ...rest } = o;
-  const id = project ?? (await projectOn(rt, on)).id;
+  // A thread works on its own project alone, so a fork a thread asks for is of the project its own workspace
+  // holds; a test that means another names it. Read here rather than in every case, since a fresh project per
+  // call is what a test that never names one gets.
+  const scope = scopeOf(origin);
+  const own = scope === undefined ? undefined : (await rt.workspaces.get(scope.workspaceId, origin)).project.id;
+  const id = project ?? own ?? (await projectOn(rt, on)).id;
   return rt.workspaces.create({ ...rest, project: id }, origin);
 }
 
 export type CreateOn = Omit<CreateWorkspaceOptions, "project"> & { project?: string; on?: string };
 type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
-type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create"> };
+type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create" | "get"> };
 
 /** The computer this suite is running on, in the two words every line that names this computer takes. Read rather
  * than written down: the landing gate runs on a Mac and ci runs on Linux, and a literal here would pin the word

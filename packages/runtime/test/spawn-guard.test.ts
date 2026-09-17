@@ -21,6 +21,7 @@ import { HERE_PLACE_ID,
   spawnCapRefusal,
   spawnDepthRefusal,
   noWorkspaceRefusal,
+  spawnProjectRefusal,
   spawnReachRefusal,
   threadWord,
   type Caller,
@@ -129,6 +130,46 @@ describe("agents spawning agents", () => {
     await rt.close();
   });
 
+  it("a thread's fork is a child of its own workspace, holding its project and starting on the branch it is on", async () => {
+    const held = heldAdapter();
+    const backend = stubBackend();
+    backend.execImpl = (_m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
+    const project = await projectOn(rt);
+    const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const child = await createOn(rt, { project: project.id, golden: "snap_g", name: "helper" }, asThread(scope));
+    expect(child.parentWorkspaceId).toBe(ws.id);
+    expect(child.project.id).toBe(project.id);
+    // The clone inside the child starts where its parent stands now, not where the project starts.
+    expect(backend.machines[1]!.execLog.find(cmd => cmd.includes("git clone"))).toContain("--branch pricing-page");
+    held.end(0);
+    await rt.close();
+  });
+
+  it("a thread works on its own project alone: another project's create and another project's workspace are both refused by it", async () => {
+    const held = heldAdapter();
+    const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } });
+    const mine = await projectOn(rt);
+    const other = await projectOn(rt);
+    const ws = await createOn(rt, { project: mine.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
+    const theirs = await createOn(rt, { project: other.id, golden: "snap_g", name: "docs", agents: AGENTS_ON });
+    const opener = await rt.sessions.start(ws.id, { prompt: "lead" });
+    const rootThread = opener.view().threadId!;
+    const scope: ThreadScope = { kind: "thread", threadId: rootThread, workspaceId: ws.id, rootThreadId: rootThread };
+    const line = spawnProjectRefusal(rootThread, mine.name, other.name);
+    await expect(createOn(rt, { project: other.id, golden: "snap_g", name: "elsewhere" }, asThread(scope))).rejects.toThrow(line);
+    await expect(rt.sessions.start(theirs.id, { prompt: "hi" }, asThread(scope))).rejects.toThrow(line);
+    await expect(rt.workspaces.get(theirs.id, asThread(scope))).rejects.toThrow(line);
+    await expect(rt.workspaces.bringBack({ workspaceId: theirs.id }, asThread(scope))).rejects.toThrow(line);
+    // Its own workspace is still its own, and the listing shows that one and no other project's.
+    expect((await rt.workspaces.list(asThread(scope))).map(w => w.name)).toEqual(["lead"]);
+    held.end(0);
+    await rt.close();
+  });
+
   it("the machine past the cap is refused with the sentence naming the root and the count", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const ws = await createOn(rt, { golden: "snap_g", name: "lead", agents: { spawn: true, maxMachines: 2, maxDepth: 1 } });
@@ -193,7 +234,8 @@ describe("agents spawning agents", () => {
   it("a thread reaches the workspace it runs on and the ones its root forked, and no other", async () => {
     const rt = runtimeWith({ claude: heldAdapter().factory });
     const mine = await createOn(rt, { golden: "snap_g", name: "mine", agents: AGENTS_ON });
-    const theirs = await createOn(rt, { golden: "snap_g", name: "theirs", agents: AGENTS_ON });
+    // The other workspace holds the same project, so what hides it is the tree rule and nothing else.
+    const theirs = await createOn(rt, { project: mine.project.id, golden: "snap_g", name: "theirs", agents: AGENTS_ON });
     const scope: ThreadScope = { kind: "thread", threadId: "t_root", workspaceId: mine.id, rootThreadId: "t_root" };
     const forked = await createOn(rt, { golden: "snap_g", name: "ours" }, asThread(scope));
     expect((await rt.workspaces.get(forked.id, asThread(scope))).name).toBe("ours");

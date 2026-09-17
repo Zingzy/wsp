@@ -38,6 +38,9 @@ pub enum DaemonErrorCode {
     NotAGitRepo,
     BadRequest,
     Forbidden,
+    /// No command line for the git host this remote names is on this computer, so the pull request waits; the push
+    /// itself went through, which is why a client reads this as a note beside the push rather than as a failure.
+    NoHostCli,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +72,15 @@ pub enum FsEntryType {
     File,
     Dir,
     Symlink,
+}
+
+/// Where a pull request stands, in the three words every host of them has: open, merged, or closed unmerged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PullRequestState {
+    Open,
+    Merged,
+    Closed,
 }
 
 /// The slave termios ICANON bit as a word: line when set, raw when not.
