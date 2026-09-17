@@ -18,6 +18,7 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
+import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
 import { recentThreads, useThreadHistory } from "../src/shell/threadHistory.js";
@@ -473,31 +474,39 @@ describe("the card the space arrows put up", () => {
     }
   });
 
-  it("stays the cross-workspace jump in Spaces, where the Tab pair is the space's own threads", async () => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, sidebarMode: "spaces" } });
+  it("is the same jump the Tab pair makes: the sidebar draws one body, so both chords walk the workspaces", async () => {
     await mountShell();
     const restore = asDesktopShell();
     try {
       tab();
-      await settle();
-      expect(useWorkspaceSwitcher.getState().open).toBe(false);
+      await waitFor(() => expect(overlay()).not.toBeNull());
+      expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
+      release();
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
       spaceArrow("ArrowRight");
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(cardIds()).toEqual(["ws_a", "ws_b", "ws_c"]);
       releaseSpaceArrow();
-      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_b"));
+      await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_c"));
     } finally {
       restore();
     }
   });
 });
 
-describe("the thread switcher in Spaces", () => {
+describe("the thread switcher", () => {
   const thread = (id: string, title: string, minutesAgo: number): SessionView => ({ ...session(`s_${id}`, "ws_a", title, Date.now() - minutesAgo * 60_000), threadId: id });
   const SIX = [1, 2, 3, 4, 5, 6].map(n => thread(`thr_${n}`, `thread ${n}`, n));
 
-  async function mountSpaces(threads: SessionView[]): Promise<() => void> {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
+  /** The walk as every road runs it: the command with the keys a chord would be holding, which is what the
+   * dispatcher passes it and what the palette's own row runs with none. No chord carries it now that the sidebar
+   * draws one body and the Tab pair walks the workspaces. */
+  const threadStep = (mods: { shiftKey?: boolean } = {}): void => {
+    act(() => runShellCommand(mods.shiftKey === true ? "thread.previous" : "thread.next", { workspaceId: useStore.getState().selectedId, toggleSidebar: () => {} }, ["Control"]));
+  };
+
+  async function mountThreads(threads: SessionView[]): Promise<() => void> {
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
     useThreadHistory.setState({ recent: [] });
     useStore.getState().bind({ ...fakeApi(), listSessions: async () => threads });
     render(
@@ -515,11 +524,11 @@ describe("the thread switcher in Spaces", () => {
   const threadCards = (): string[] => [...document.querySelectorAll<HTMLElement>("[data-thread-card]")].map(el => el.dataset["threadCard"]!);
   const highlightedThread = (): string | null => document.querySelector<HTMLElement>("[data-thread-card][aria-selected=true]")?.dataset["threadCard"] ?? null;
 
-  it("held, the chord puts up the last five threads opened, the open one first and the one before it highlighted; tab walks on and letting go lands there", async () => {
-    const restore = await mountSpaces(SIX);
+  it("held, the walk puts up the last five threads opened, the open one first and the one before it highlighted; tab walks on and letting go lands there", async () => {
+    const restore = await mountThreads(SIX);
     try {
       for (const id of ["thr_6", "thr_5", "thr_4", "thr_3", "thr_2", "thr_1"]) visit(id);
-      tab();
+      threadStep();
       await waitFor(() => expect(overlay()).not.toBeNull());
       // Five cards, most recent first, and no picture well on any: the threads all share one page.
       expect(threadCards()).toEqual(["thr_1", "thr_2", "thr_3", "thr_4", "thr_5"]);
@@ -529,12 +538,12 @@ describe("the thread switcher in Spaces", () => {
       expect(document.querySelector("[data-thread-card='thr_2'] [data-card-thread]")?.textContent).toBe("Claude Code · the-project · you");
       // Nothing moves until the hold is let go.
       expect(useStore.getState().selectedThreadId).toBe("thr_1");
-      tab();
+      threadStep();
       await waitFor(() => expect(highlightedThread()).toBe("thr_3"));
-      tab({ shiftKey: true });
+      threadStep({ shiftKey: true });
       await waitFor(() => expect(highlightedThread()).toBe("thr_2"));
-      tab();
-      tab();
+      threadStep();
+      threadStep();
       await waitFor(() => expect(highlightedThread()).toBe("thr_4"));
       release();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
@@ -546,13 +555,13 @@ describe("the thread switcher in Spaces", () => {
   });
 
   it("a tap switches to the thread before this one, and a second tap comes back, without the overlay ever painting", async () => {
-    const restore = await mountSpaces(SIX);
+    const restore = await mountThreads(SIX);
     vi.useFakeTimers();
     try {
       visit("thr_3");
       visit("thr_5");
       act(() => {
-        tab();
+        threadStep();
       });
       act(() => {
         release();
@@ -563,7 +572,7 @@ describe("the thread switcher in Spaces", () => {
       });
       expect(overlay()).toBeNull();
       act(() => {
-        tab();
+        threadStep();
       });
       act(() => {
         release();
@@ -571,7 +580,7 @@ describe("the thread switcher in Spaces", () => {
       expect(useStore.getState().selectedThreadId).toBe("thr_5");
       // Shift and a tap is the far end of the five.
       act(() => {
-        tab({ shiftKey: true });
+        threadStep({ shiftKey: true });
       });
       act(() => {
         release();
@@ -584,22 +593,22 @@ describe("the thread switcher in Spaces", () => {
     }
   });
 
-  it("with no thread open, as right after a space switch, a tap lands on the most recently opened thread and the hold starts there; Shift starts at the far end", async () => {
-    const restore = await mountSpaces(SIX);
+  it("with no thread open, as right after a workspace switch, a tap lands on the most recently opened thread and the hold starts there; Shift starts at the far end", async () => {
+    const restore = await mountThreads(SIX);
     try {
       visit("thr_3");
       visit("thr_5");
-      // The workspace alone, the way goToWorkspace leaves it after a switch between spaces.
+      // The workspace alone, the way goToWorkspace leaves it after a switch between workspaces.
       act(() => useStore.getState().select("ws_a"));
       expect(useStore.getState().selectedThreadId).toBeNull();
-      tab();
+      threadStep();
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(threadCards()).toEqual(["thr_5", "thr_3", "thr_1", "thr_2", "thr_4"]);
       expect(highlightedThread()).toBe("thr_5");
       release();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_5"));
       act(() => useStore.getState().select("ws_a"));
-      tab({ shiftKey: true });
+      threadStep({ shiftKey: true });
       release();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
     } finally {
@@ -608,10 +617,10 @@ describe("the thread switcher in Spaces", () => {
   });
 
   it("threads never opened follow the ones that were, in the sidebar's order, and one thread alone puts nothing up", async () => {
-    const restore = await mountSpaces(SIX.slice(0, 3));
+    const restore = await mountThreads(SIX.slice(0, 3));
     try {
       visit("thr_2");
-      tab();
+      threadStep();
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(threadCards()).toEqual(["thr_2", "thr_1", "thr_3"]);
       escape();
@@ -621,10 +630,10 @@ describe("the thread switcher in Spaces", () => {
       restore();
     }
     cleanup();
-    const alone = await mountSpaces(SIX.slice(0, 1));
+    const alone = await mountThreads(SIX.slice(0, 1));
     try {
       visit("thr_1");
-      tab();
+      threadStep();
       await settle();
       expect(useWorkspaceSwitcher.getState().open).toBe(false);
       expect(useStore.getState().selectedThreadId).toBe("thr_1");
