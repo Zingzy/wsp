@@ -13,6 +13,19 @@ export function underProject(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
+/** The folder Claude Code keeps one project's sessions and memory under, its projects directory name: the resolved
+ * path with every character outside A-Z a-z 0-9 replaced by a dash. Two paths that differ only in a character the
+ * rule replaces collide under one key, which is the CLI's own behaviour and not something to work around. It sits
+ * here because the collector reads it for the memory row, the runtime hands it to a launch as the project's key and
+ * the engine moves a project's state by it, and none of the three may own the rule.
+ * The machine's own copy of this rule is the engine's KEY_PY, for the one place nothing can run this. */
+export const claudeProjectKey = (path: string): string => path.replace(/[^A-Za-z0-9]/g, "-");
+
+/** Where Claude Code keeps one project's own memory under a state home: the keyed projects folder, and `memory`
+ * inside it. Written once here: the collector reads it on this computer, the runtime binds it into a workspace at
+ * the guest's state home and the engine finds it after a move. */
+export const claudeMemoryDir = (stateHome: string, key: string): string => `${stateHome.replace(/\/+$/, "")}/projects/${key}/memory`;
+
 /** A folder's own name, its last segment: what a project is called, what the import dialog and the register line
  * call the folder, and what a permission prompt names a file by. */
 export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;

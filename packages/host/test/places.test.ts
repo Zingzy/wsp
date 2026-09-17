@@ -1977,3 +1977,209 @@ describe("which manager holds the agent's unit", () => {
     expect(own.errors.join("\n")).not.toContain("writes no service");
   });
 });
+
+describe("wsp add <folder> --on <computer>: the menu before anything travels", () => {
+  const FOLDER = "/Users/dev/spoo-landing";
+  const PLAN = {
+    source: FOLDER,
+    remote: "https://github.com/spoo-me/frontend.git",
+    branch: "refactor/dashboard-polish",
+    defaultBranch: "main",
+    unpushed: { commits: 2, base: "9f1c2e4aa11b0c3d4e5f60718293a4b5c6d7e8f9" },
+    uncommitted: 4,
+    memory: { key: "-Users-dev-spoo-landing", files: 5, bytes: 28_000 },
+    files: [
+      { path: ".env.local", dir: false, bytes: 4096, kind: "config", row: { id: "next", name: "Next" }, ticked: true },
+      { path: "node_modules", dir: true, bytes: 2_600_000_000, kind: "rebuilt", row: { id: "node", name: "Node" }, ticked: false },
+      { path: ".git-credentials", dir: false, bytes: 300, kind: "never", row: { id: "logins", name: "logins" }, ticked: false },
+      { path: "docs", dir: true, bytes: 18_000_000, kind: "unknown", ticked: false },
+    ],
+    remembered: false,
+  };
+  /** The computers a host lists: this one, which works a folder where it sits, and a box that clones. */
+  const PLACES: PlaceView[] = [
+    { id: "here", kind: "computer", name: "studio.local", default: false, present: true },
+    { id: "p_1", kind: "computer", name: "spoo", default: true },
+  ];
+  const project = {
+    id: "pr_1",
+    name: "spoo-landing",
+    computer: "p_1",
+    source: { kind: "folder", path: FOLDER },
+    path: "/root/spoo-landing",
+    remote: PLAN.remote,
+    defaultBranch: "main",
+    memoryKey: PLAN.memory.key,
+    memoryDir: "/var/lib/wsp/projects/pr_1/memory",
+    createdAt: new Date(0).toISOString(),
+  };
+
+  /** A host answering the menu and the add, keeping what it was asked. */
+  const menuClient = (): { dial: NonNullable<Parameters<typeof addCommand>[4]>["dial"]; asked: { op: string; params?: Record<string, unknown> }[] } => {
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    return {
+      asked,
+      dial: () =>
+        Promise.resolve({
+          request: (op: string, params?: Record<string, unknown>) => {
+            asked.push({ op, ...(params === undefined ? {} : { params }) });
+            if (op === "project.seed.plan") return Promise.resolve({ plan: PLAN } as never);
+            if (op === "projects.add") return Promise.resolve({ project } as never);
+            if (op === "places.list") return Promise.resolve({ places: PLACES } as never);
+            return Promise.reject(new Error(`unexpected op ${op}`));
+          },
+          events: () => Promise.resolve(),
+          onFrame: () => () => {},
+          closed: Promise.resolve(),
+          closeWords: () => "",
+          close: () => {},
+          drop: () => {},
+        } as never),
+    };
+  };
+
+  const menuDeps = (dial: NonNullable<Parameters<typeof addCommand>[4]>["dial"]): Parameters<typeof addCommand>[4] => ({
+    dial,
+    now: () => 0,
+    run: fakeRunner().run,
+    platform: "darwin",
+    checkKey: async () => ({ state: "taken" }),
+    ...noBoxSignIn,
+  });
+
+  it("prints the menu and sends nothing until the person says what travels", async () => {
+    const home = tmp("add-seed-menu");
+    const { dial, asked } = menuClient();
+    const io = captured();
+    expect(await addCommand(io, opts(home), [FOLDER], { on: "spoo" }, menuDeps(dial))).toBe(0);
+    const printed = io.lines.join("\n");
+    // Every row with its size and the words its catalogue row ends in, widest first, and the ticks the catalogue decided.
+    expect(printed).toContain("[x]  .env.local");
+    expect(printed).toContain("rebuilt on the box");
+    expect(printed).toContain("never travels");
+    expect(printed).toContain("not in the catalogue");
+    expect(printed).toContain("2.4 GB");
+    // What stays here, and the two lines that send it.
+    expect(printed).toContain("nothing was sent");
+    expect(printed).toContain("4 uncommitted changes stay on this computer");
+    expect(printed).toContain("--yes");
+    // The computer's own kind is read first, then the menu, and nothing was recorded.
+    expect(asked.map(a => a.op)).toEqual(["places.list", "project.seed.plan"]);
+  });
+
+  it("with --yes it sends the ticks the catalogue decided, and the keeps and cuts move them", async () => {
+    const home = tmp("add-seed-yes");
+    for (const [flags, files] of [
+      [{ on: "spoo", yes: true }, [".env.local"]],
+      [{ on: "spoo", yes: true, cut: [".env.local"] }, []],
+      [{ on: "spoo", yes: true, keep: ["docs"] }, [".env.local", "docs"]],
+    ] as const) {
+      const { dial, asked } = menuClient();
+      expect(await addCommand(captured(), opts(home), [FOLDER], { ...flags }, menuDeps(dial))).toBe(0);
+      expect(asked.find(a => a.op === "projects.add")?.params).toMatchObject({ source: FOLDER, on: "spoo", seed: { files, memory: true, commits: true } });
+    }
+  });
+
+  it("the two words that leave the memory and the patch here, and the one that remembers the ticks", async () => {
+    const home = tmp("add-seed-flags");
+    const { dial, asked } = menuClient();
+    expect(await addCommand(captured(), opts(home), [FOLDER], { on: "spoo", yes: true, noMemory: true, noCommits: true, remember: true }, menuDeps(dial))).toBe(0);
+    expect(asked.find(a => a.op === "projects.add")?.params).toMatchObject({ seed: { files: [".env.local"], memory: false, commits: false, remember: true } });
+  });
+
+  it("refuses to carry a login by name, whatever was kept", async () => {
+    const home = tmp("add-seed-login");
+    const { dial, asked } = menuClient();
+    const io = captured();
+    await expect(addCommand(io, opts(home), [FOLDER], { on: "spoo", yes: true, keep: [".git-credentials"] }, menuDeps(dial))).rejects.toThrow(/never travels in a seed/);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "project.seed.plan"]);
+  });
+
+  it("draws and sends the ticks a remembered choice put on the plan, not the catalogue's own", async () => {
+    const home = tmp("add-seed-remembered");
+    // What the host answers once a choice was remembered for this folder: their ticks on the same rows.
+    const remembered = { ...PLAN, remembered: true, files: PLAN.files.map(f => ({ ...f, ticked: f.path === "docs" })) };
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const dial = (): Promise<never> =>
+      Promise.resolve({
+        request: (op: string, params?: Record<string, unknown>) => {
+          asked.push({ op, ...(params === undefined ? {} : { params }) });
+          if (op === "project.seed.plan") return Promise.resolve({ plan: remembered } as never);
+          if (op === "projects.add") return Promise.resolve({ project } as never);
+          if (op === "places.list") return Promise.resolve({ places: PLACES } as never);
+          return Promise.reject(new Error(`unexpected op ${op}`));
+        },
+        events: () => Promise.resolve(),
+        onFrame: () => () => {},
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+    const io = captured();
+    expect(await addCommand(io, opts(home), [FOLDER], { on: "spoo" }, menuDeps(dial))).toBe(0);
+    // The menu reads their ticks: the config row they unticked is unticked and the folder they kept is ticked.
+    expect(io.lines.join("\n")).toContain("[ ]  .env.local");
+    expect(io.lines.join("\n")).toContain("[x]  docs/");
+    // And --yes sends those, not the catalogue's.
+    const sent = menuClient();
+    expect(await addCommand(captured(), opts(home), [FOLDER], { on: "spoo", yes: true }, menuDeps(dial))).toBe(0);
+    expect(asked.filter(a => a.op === "projects.add").at(-1)?.params).toMatchObject({ seed: { files: ["docs"] } });
+    void sent;
+  });
+
+  it("a folder onto this computer is worked where it sits, so no menu is read and nothing is asked about it", async () => {
+    const home = tmp("add-seed-here");
+    const { dial, asked } = menuClient();
+    // The computer the app runs on, named by the word its own row carries.
+    expect(await addCommand(captured(), opts(home), [FOLDER], { on: "here" }, menuDeps(dial))).toBe(0);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add", "places.list"]);
+  });
+
+  it("a folder with no computer named is a project here and reads no menu at all", async () => {
+    const home = tmp("add-seed-here");
+    const { dial, asked } = menuClient();
+    expect(await addCommand(captured(), opts(home), [FOLDER], {}, menuDeps(dial))).toBe(0);
+    expect(asked.map(a => a.op)).toEqual(["projects.add", "places.list"]);
+  });
+});
+
+describe("wsp add <owner/repo>: a repo the computer's own command line clones", () => {
+  it("is a project's source like any other word that names one, and never a provider or an address", async () => {
+    const home = tmp("add-owner-repo");
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const project = {
+      id: "pr_2",
+      name: "frontend",
+      computer: "p_1",
+      source: { kind: "github", repo: "spoo-me/frontend" },
+      path: "/root/frontend",
+      remote: "https://github.com/spoo-me/frontend.git",
+      defaultBranch: "main",
+      memoryKey: "-root-frontend",
+      memoryDir: "/root/.claude-cfg/projects/-root-frontend/memory",
+      createdAt: new Date(0).toISOString(),
+    };
+    const dial = (): Promise<never> =>
+      Promise.resolve({
+        request: (op: string, params?: Record<string, unknown>) => {
+          asked.push({ op, ...(params === undefined ? {} : { params }) });
+          if (op === "projects.add") return Promise.resolve({ project } as never);
+          if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "spoo", default: true }] } as never);
+          return Promise.reject(new Error(`unexpected op ${op}`));
+        },
+        events: () => Promise.resolve(),
+        onFrame: () => () => {},
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+    const io = captured();
+    expect(await addCommand(io, opts(home), ["spoo-me/frontend"], { on: "spoo" }, { ...systemPlaceDeps, dial })).toBe(0);
+    // It reaches the host as the word that was typed, and no menu is read: only a folder here has one.
+    expect(asked.map(a => a.op)).toEqual(["projects.add", "places.list"]);
+    expect(asked[0]?.params).toMatchObject({ source: "spoo-me/frontend", on: "spoo" });
+    expect(io.lines.join("\n")).toContain("frontend pr_2");
+  });
+});

@@ -114,7 +114,7 @@ const PLACES: PlaceView[] = [
 ];
 /** What the dialog makes a workspace of: one project on the computer these tests fork at. */
 const PROJECTS: ProjectView[] = [
-  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" },
+  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-root-spoo-landing", memoryDir: "/var/lib/wsp/projects/pr_1/memory", createdAt: "t" },
 ];
 
 beforeEach(() => {

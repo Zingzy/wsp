@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { addedProjectLine, ADD_FORMS_LINE, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -20,6 +20,10 @@ const project = (over: Partial<ProjectView>): ProjectView => ({
   computer: "here",
   source: folderSource("/Users/dev/wsp"),
   path: "/Users/dev/wsp",
+  remote: "https://github.com/dev/wsp.git",
+  defaultBranch: "main",
+  memoryKey: "-Users-dev-wsp",
+  memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory",
   createdAt: "2026-09-17T00:00:00.000Z",
   ...over,
 });
@@ -37,6 +41,12 @@ describe("what one word to wsp add names", () => {
     // A path is a path first: a folder somebody called repo.git is theirs on this computer, not a url.
     expect(sourceKind("/Users/me/repo.git")).toBe("folder");
     expect(() => sourceKind("spoo")).toThrow(ADD_FORMS_LINE);
+    // owner/repo is the word the host's own command line takes; the host in front of it names the other host.
+    expect(sourceKind("spoo-me/frontend")).toBe("github");
+    expect(sourceKind("gitlab.com/dev/thing")).toBe("gitlab");
+    // The record keeps the word that command reads: no host in front of it and no .git after it.
+    expect(projectSourceOf("gitlab.com/dev/thing.git", "gitlab")).toEqual({ kind: "gitlab", repo: "dev/thing" });
+    expect(projectSourceOf("spoo-me/frontend", "github")).toEqual({ kind: "github", repo: "spoo-me/frontend" });
   });
 
   it("a project is named by its repo's last word without .git, or by the folder's own name", () => {
@@ -53,9 +63,14 @@ describe("what one word to wsp add names", () => {
   });
 
   it("which sources a computer takes is its kind's own row, so no road decides it for itself", () => {
+    // A computer that clones takes a repo any of the three ways it can be named, and a folder on this computer,
+    // which it clones from that folder's own remote and seeds what git ignores onto.
     expect(kindWords("local").projectSources).toEqual(["folder"]);
-    expect(kindWords("cloud").projectSources).toEqual(["git"]);
+    expect(kindWords("cloud").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("ssh").projectSources).toEqual([]);
+    // Working the folder where it sits is its own word: a computer that clones takes a folder as a source and
+    // still holds a copy of it, so the two cannot be read off one list.
+    expect([kindWords("local").worksInPlace, kindWords("cloud").worksInPlace, kindWords("ssh").worksInPlace]).toEqual([true, false, false]);
   });
 
   it("the refusals name the project, the folder and the computer", () => {
@@ -100,7 +115,18 @@ describe("what a computer is called in a row", () => {
   });
 
   it("the line a recorded project answers with names the computer the same way, and says the command that makes its workspace", () => {
-    const project = { id: "pr_1", name: "spoo-landing", computer: "pl_box", source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+    const project = {
+      id: "pr_1",
+      name: "spoo-landing",
+      computer: "pl_box",
+      source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" },
+      path: "/root/spoo-landing",
+      remote: "https://github.com/dev/spoo.git",
+      defaultBranch: "main",
+      memoryKey: "-root-spoo-landing",
+      memoryDir: "/var/lib/wsp/projects/pr_1/memory",
+      createdAt: "t",
+    };
     expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin")).toBe(
       'spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing inside a workspace of it\nmake one with: wsp new \'spoo-landing\' "<what you are working on>"',
     );
