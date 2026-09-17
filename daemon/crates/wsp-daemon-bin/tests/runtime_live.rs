@@ -6,6 +6,12 @@
 //! reaches a workspace at a published port, a workspace reaches its box, a registry and nothing of its
 //! neighbours; then this computer's own: a workspace made of the box's directories, the project it was given as
 //! a copy, and the pause that stops it and the wake that boots it over what it wrote.
+//!
+//! What a case writes inside a workspace goes under one of the workspace's own overlays, `/var/tmp` by habit,
+//! and never under `/root`: that home is the box's own, shared by every workspace on it, so a file written there
+//! is a file the box carries after the run. What a case pulls onto the box's engine it removes at its end, and
+//! what it leaves running there wears `LIVE_LABEL`, so a run that died can be swept by one filter. A box this
+//! suite ran on reads as it did before, which is the one thing a computer somebody is using asks of it.
 #![cfg(target_os = "linux")]
 
 use std::fs;
@@ -61,8 +67,17 @@ fn bin() -> PathBuf {
     std::env::var("WSP_RUNTIME_BIN").map_or_else(|_| PathBuf::from(env!("CARGO_BIN_EXE_wsp-daemon")), PathBuf::from)
 }
 
-/// What every workspace here runs to answer a line on its port 7070, from every address it has: the base image
-/// carries perl and nothing else that listens.
+/// The label every container this suite makes on the box's engine wears, whatever workspace made it: the fence
+/// stamps its own workspace label on each, and this one is what a person sweeping the box after a run that died
+/// looks for, since a compose stack's containers are named after a project and not after this suite.
+const LIVE_LABEL: &str = "wsp.live";
+
+/// Where a case lands the box's own compose plugin inside a workspace: one of the directories the docker command
+/// line reads plugins from, under the overlay of the box's /usr, so it is the workspace's own upper and not a
+/// write into the box's home. Under /root it would land in the home every workspace on the box shares, and the
+/// box would carry it after the run.
+const COMPOSE_PLUGIN_INSIDE: &str = "/usr/local/lib/docker/cli-plugins/docker-compose";
+
 /// The address every case that wants a listener on every address the workspace has asks for, and the one a dev
 /// server started with no address of its own binds: from the box the workspace's own address answers nothing at
 /// that one, and its published port answers all the same, since the listener out here dials from inside the
@@ -353,8 +368,25 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     if !live() {
         return;
     }
+    let patience = wsp_runtime::runtime::STOP_PATIENCE;
+    // What a stop that asked and was answered costs: the processes end themselves and the wait ends with them,
+    // so the figure is the workspace's own shutdown and not the deadline. Read against a fifth of the patience,
+    // since a stop that runs anywhere near the deadline is the fault this bounds, whatever ran inside.
+    let prompt = patience / 5;
     let mut w = World::open().await;
     let id = w.create(spec(json!({ "memMb": 1024 }))).await;
+
+    // First with nothing inside but the boot, which is the shape a workspace nobody has run anything in has and
+    // the one the box measured at the whole patience: the boot command took the signal only once it started with
+    // an empty mask, since this init blocks the forwarded set for itself and a child inherits that mask.
+    let started = Instant::now();
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    let bare = started.elapsed();
+    eprintln!("stop with nothing inside but the boot: {} ms, patience {} s", bare.as_millis(), patience.as_secs());
+    assert_eq!(w.state(&id).await, "paused");
+    assert!(bare < prompt, "the boot command did not take the signal: {} ms of a {} s patience", bare.as_millis(), patience.as_secs());
+    w.ok("machine.resume", json!({ "machineId": id })).await;
+
     // A process that traps the signal and writes what it holds where the saved layer keeps it: /var is one of the
     // workspace's own overlays, and the box's /root, which every workspace on it shares, is not.
     let trapping = "nohup sh -c 'trap \"echo trapped > /var/tmp/stopped; exit 0\" TERM; while :; do sleep 1; done' > /dev/null 2>&1 & sleep 0.5; echo started";
@@ -366,13 +398,11 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     let started = Instant::now();
     w.ok("machine.pause", json!({ "machineId": id })).await;
     let took = started.elapsed();
-    eprintln!(
-        "stop with a process that traps SIGTERM: {} ms, patience {} s",
-        took.as_millis(),
-        wsp_runtime::runtime::STOP_PATIENCE.as_secs()
-    );
+    eprintln!("stop with a process that traps SIGTERM: {} ms, patience {} s", took.as_millis(), patience.as_secs());
     assert_eq!(w.state(&id).await, "paused");
-    assert!(took < wsp_runtime::runtime::STOP_PATIENCE, "the stop took its whole patience: {} ms", took.as_millis());
+    // Under a fifth of it, not merely under it: the trap's own loop sleeps a second at a time, and everything
+    // else here is the kernel's.
+    assert!(took < prompt, "the stop took {} ms of a {} s patience", took.as_millis(), patience.as_secs());
     // The line is in the saved layer, so the process was asked to end and had the time to write: an init
     // signalled first would have taken it down with the namespace before it could.
     assert_eq!(fs::read_to_string(&saved).unwrap().trim(), "trapped");
@@ -387,8 +417,12 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     assert_eq!(code, 0);
     let started = Instant::now();
     w.ok("machine.pause", json!({ "machineId": id })).await;
-    eprintln!("stop with a process that ignores SIGTERM: {} ms", started.elapsed().as_millis());
+    let deaf_took = started.elapsed();
+    eprintln!("stop with a process that ignores SIGTERM: {} ms", deaf_took.as_millis());
     assert_eq!(w.state(&id).await, "paused");
+    // The whole patience, and only here: what ended this one is the kill road, which is the difference between a
+    // workspace that answered the signal and one that would not.
+    assert!(deaf_took >= patience, "the kill road was not what ended it: {} ms", deaf_took.as_millis());
     assert!(!Path::new(CGROUPS).join(&id).exists(), "a workspace that ignored the signal kept its cgroup");
     // Nothing here is ever frozen: a pause on a stopped workspace is what a second pause meets.
     let twice = w.ask("machine.pause", json!({ "machineId": id })).await;
@@ -575,16 +609,32 @@ async fn lists_by_our_labels_and_answers_the_size_the_listing_carries() {
         return;
     }
     let mut w = World::open().await;
-    let id = w.create(spec(json!({ "cpu": 2, "memMb": 1024, "labels": { "wsp-owner": live_owner(), "row": "yes" } }))).await;
+    // The size this box gives, read off the box rather than written down: it keeps a core and two thirds of its
+    // memory for itself, so a workspace asking for two cores on a two core box is listed at one, and one asking
+    // for nothing is listed at the box's own ceiling.
+    let capacity = w.ok("machine.capacity", json!({})).await;
+    let cores = capacity["cores"].as_f64().unwrap();
+    let ceiling_cpu = (cores - 1.0).max(1.0);
+    let ceiling_mb = capacity["machineMemMb"].as_u64().unwrap();
+    let asked_mb = ceiling_mb.min(1024);
+    let id = w.create(spec(json!({ "cpu": 2, "memMb": asked_mb, "labels": { "wsp-owner": live_owner(), "row": "yes" } }))).await;
     let other = w.create(spec(json!({ "labels": { "wsp-owner": live_owner(), "row": "no" } }))).await;
     let rows = w.ok("machine.list", json!({ "labels": { "wsp-owner": live_owner(), "row": "yes" } })).await;
     assert_eq!(
         rows["machines"],
-        json!([{ "id": id, "state": "running", "labels": { "wsp": "1", "wsp-owner": live_owner(), "row": "yes" }, "size": { "cpu": 2.0, "memMb": 1024 } }])
+        json!([{
+            "id": id,
+            "state": "running",
+            "labels": { "wsp": "1", "wsp-owner": live_owner(), "row": "yes" },
+            "size": { "cpu": ceiling_cpu.min(2.0), "memMb": asked_mb },
+        }])
     );
     let all = w.ok("machine.list", json!({ "labels": { "wsp-owner": live_owner() } })).await;
     assert_eq!(all["machines"].as_array().unwrap().len(), 2);
-    assert!(all["machines"].as_array().unwrap().iter().any(|m| m["id"] == other && m.get("size").is_none()));
+    let listed = all["machines"].as_array().unwrap().iter().find(|m| m["id"] == other).unwrap();
+    // Never absent: a workspace with no cap of its own could hold the box, so the create writes the ceiling into
+    // the record and every later reader sees the size the box gave.
+    assert_eq!(listed["size"], json!({ "cpu": ceiling_cpu, "memMb": ceiling_mb }), "{listed}");
     w.close().await;
 }
 
@@ -636,9 +686,9 @@ async fn puts_bytes_where_they_belong_and_serves_no_signed_url() {
     let bytes: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
     let half = bytes.len() / 2;
     let b64 = |part: &[u8]| base64_of(part);
-    w.ok("machine.putBytes", json!({ "machineId": id, "path": "/root/wsp daemon/bundle.tgz", "uploadId": "u665", "seq": 0, "last": false, "data": b64(&bytes[..half]) })).await;
-    w.ok("machine.putBytes", json!({ "machineId": id, "path": "/root/wsp daemon/bundle.tgz", "uploadId": "u665", "seq": 1, "last": true, "data": b64(&bytes[half..]) })).await;
-    let (code, out, _) = w.exec(&id, "sha256sum '/root/wsp daemon/bundle.tgz'; stat -c %s '/root/wsp daemon/bundle.tgz'").await;
+    w.ok("machine.putBytes", json!({ "machineId": id, "path": "/var/tmp/wsp daemon/bundle.tgz", "uploadId": "u665", "seq": 0, "last": false, "data": b64(&bytes[..half]) })).await;
+    w.ok("machine.putBytes", json!({ "machineId": id, "path": "/var/tmp/wsp daemon/bundle.tgz", "uploadId": "u665", "seq": 1, "last": true, "data": b64(&bytes[half..]) })).await;
+    let (code, out, _) = w.exec(&id, "sha256sum '/var/tmp/wsp daemon/bundle.tgz'; stat -c %s '/var/tmp/wsp daemon/bundle.tgz'").await;
     assert_eq!(code, 0);
     assert!(out.starts_with(&sha256_hex(&bytes)), "{out}");
     assert!(out.trim().ends_with("300000"));
@@ -760,9 +810,19 @@ async fn a_pid_the_kernel_reused_after_the_init_died_is_not_the_workspace() {
     let paused = w.ask("machine.pause", json!({ "machineId": id })).await;
     assert_eq!(paused["ok"], false, "{paused}");
     assert!(paused["error"].as_str().unwrap().contains("is already paused"), "{paused}");
+    // A reading of a workspace whose init is gone is its record's own: the state it reads as, the sizes its
+    // cgroup was written with and its paths, and none of the live figures, the quiet clock included. The op takes
+    // the record rather than a running workspace, which is what lets a row be drawn for a stopped one at all.
     let metrics = w.ask("machine.metrics", json!({ "machineId": id })).await;
-    assert_eq!(metrics["ok"], false, "{metrics}");
-    assert!(metrics["error"].as_str().unwrap().contains("is stopped"), "{metrics}");
+    assert_eq!(metrics["ok"], true, "{metrics}");
+    assert_eq!(metrics["reading"]["state"], "paused", "{metrics}");
+    for figure in ["memBytes", "cpuUsageUsec", "uptimeMs", "procs", "quietForMs"] {
+        assert!(metrics["reading"].get(figure).is_none(), "{figure} in {metrics}");
+    }
+    // What answers `is stopped` is the op that needs a workspace running: a command has nowhere to run.
+    let exec = w.ask("machine.exec", json!({ "machineId": id, "cmd": "true" })).await;
+    assert_eq!(exec["ok"], false, "{exec}");
+    assert!(exec["error"].as_str().unwrap().contains("is stopped"), "{exec}");
     // A fresh open of the same root finds the workspace stopped by the same reading, takes its mount and youki's
     // state, and says which.
     let again = Ops::open(&root(), PathBuf::from(env!("CARGO_BIN_EXE_wsp-daemon"))).unwrap();
@@ -1180,8 +1240,10 @@ async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forwa
     }
     let mut w = World::open().await;
     let id = w.create(spec(json!({ "memMb": 512 }))).await;
-    // A second workspace beside it, to be stopped and woken first: its block is then not the lowest free one.
-    let other = w.create(spec(json!({}))).await;
+    // A second workspace beside it, to be stopped and woken first: its block is then not the lowest free one. At
+    // a size of its own and not the box's ceiling, which on a box whose share is a third is the whole cap: two
+    // workspaces at that size leave the room figure below this one's 512 MB and it could not be read.
+    let other = w.create(spec(json!({ "memMb": 512 }))).await;
     let other_address = w.network(&other).address;
     let address = w.listen_inside(&id).await;
     assert_ne!(other_address, address);
@@ -1382,6 +1444,34 @@ fn container_id(stdout: &str) -> Option<String> {
     stdout.lines().map(str::trim).find(|l| l.len() == 64 && l.bytes().all(|b| b.is_ascii_hexdigit())).map(str::to_owned)
 }
 
+/// The images a case is about to pull onto the box's engine through the fence, removed when the case ends however
+/// it ends. An image the box already holds is left alone: it is the box's, not the case's, and a box serving
+/// something is not a box whose images a test may take away.
+struct PulledImages {
+    /// The ones the box did not hold when the case started, in the order they were named.
+    ours: Vec<String>,
+}
+
+impl PulledImages {
+    fn of(refs: &[&str]) -> PulledImages {
+        let held = |image: &&str| on_box(&["image", "inspect", "--format", "{{.Id}}", image]).0 == 0;
+        let ours: Vec<String> = refs.iter().filter(|image| !held(image)).map(|image| (*image).to_owned()).collect();
+        eprintln!("== images this case will pull and remove: {ours:?}");
+        PulledImages { ours }
+    }
+}
+
+impl Drop for PulledImages {
+    fn drop(&mut self) {
+        for image in std::mem::take(&mut self.ours) {
+            let (code, _, said) = on_box(&["image", "rm", &image]);
+            if code != 0 {
+                eprintln!("== the image {image} stayed on the box: {}", said.trim());
+            }
+        }
+    }
+}
+
 /// A container of the box's own, outside any workspace, removed when the case ends however it ends.
 struct OutsideContainer {
     name: String,
@@ -1422,6 +1512,9 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
         eprintln!("this box has no docker client with a compose plugin to land inside; the engine case is skipped");
         return;
     };
+    // Declared before the world, so it is dropped after it: the workspace's own containers go with the kill, and
+    // an image cannot be removed while a container of it is still there.
+    let _images = PulledImages::of(&["postgres:16-alpine", "nginx:alpine", "alpine"]);
     let mut w = World::open().await;
     let key = checkout_key();
     // A container of the box's own, outside any workspace: the one the workspace must not see. Removed when the case
@@ -1437,22 +1530,26 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     let outside_id = container_id(&started).unwrap_or_else(|| panic!("no container id on stdout: {started:?}"));
     let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-665-engine-{key}") }))).await;
     put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
-    put_file(&w, &id, &compose, "/root/.docker/cli-plugins/docker-compose").await;
+    put_file(&w, &id, &compose, COMPOSE_PLUGIN_INSIDE).await;
     let (code, out, err) = w.exec(&id, "ls -la /var/run/docker.sock /run/wsp; readlink -f /var/run/docker.sock").await;
     show("the socket inside the workspace made with --engine", code, &out, &err);
     assert_eq!(code, 0);
-    let compose_file = "services:\n  db:\n    image: postgres:16-alpine\n    environment:\n      POSTGRES_PASSWORD: wsp\n  web:\n    image: nginx:alpine\n    ports:\n      - \"18080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n    depends_on: [db]\n";
+    // Both services wear this suite's own label, so a person sweeping the box after a run that died finds them
+    // by one filter: a compose stack's containers are named after its project and not after this suite.
+    let compose_file = format!(
+        "services:\n  db:\n    image: postgres:16-alpine\n    environment:\n      POSTGRES_PASSWORD: wsp\n    labels:\n      {LIVE_LABEL}: \"1\"\n  web:\n    image: nginx:alpine\n    ports:\n      - \"18080:80\"\n    volumes:\n      - ./html:/usr/share/nginx/html:ro\n    labels:\n      {LIVE_LABEL}: \"1\"\n    depends_on: [db]\n"
+    );
     let (code, _, err) = w
         .exec(
             &id,
             &format!(
-                "mkdir -p /root/demo/html /root/.wsp && echo hello-from-workspace > /root/demo/html/index.html && printf '%s' '{compose_file}' > /root/demo/compose.yaml && echo /root/demo > /root/.wsp/roots && docker version --format 'client {{{{.Client.Version}}}} server {{{{.Server.Version}}}}'"
+                "mkdir -p /var/tmp/demo/html /root/.wsp && echo hello-from-workspace > /var/tmp/demo/html/index.html && printf '%s' '{compose_file}' > /var/tmp/demo/compose.yaml && echo /var/tmp/demo > /root/.wsp/roots && docker version --format 'client {{{{.Client.Version}}}} server {{{{.Server.Version}}}}'"
             ),
         )
         .await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
     let started = Instant::now();
-    let (code, out, err) = w.exec(&id, "cd /root/demo && docker compose -p wspdemo up -d 2>&1").await;
+    let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo up -d 2>&1").await;
     show("docker compose up -d, from inside", code, &out, &err);
     eprintln!("compose up took {} ms", started.elapsed().as_millis());
     assert_eq!(code, 0);
@@ -1469,7 +1566,10 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     let (code, out, err) = w.exec(&id, "docker run --rm -v /:/host alpine ls /host 2>&1").await;
     show("docker run -v /:/host, from inside", code, &out, &err);
     assert_ne!(code, 0);
-    assert!(out.contains("a bind mount's source must sit under a project folder of this workspace (/root/demo), and / does not"), "{out}");
+    assert!(
+        out.contains("a bind mount's source must sit under a project folder of this workspace (/var/tmp/demo), and / does not"),
+        "{out}"
+    );
     let (code, out, err) =
         w.exec(&id, "exec 3<>/dev/tcp/127.0.0.1/18080; printf 'GET / HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n' >&3; timeout 5 cat <&3").await;
     show("GET 127.0.0.1:18080 from inside (the published port)", code, &out, &err);
@@ -1502,7 +1602,7 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     eprintln!("== cost: docker ps through the fence {fenced} ms, straight at the engine {straight} ms (mean of 20, from the box)");
     let status = fs::read_to_string("/proc/self/status").unwrap();
     eprintln!("== this process VmRSS with the proxy and forwards up: {}", status.lines().find(|l| l.starts_with("VmRSS")).unwrap_or(""));
-    let (code, out, err) = w.exec(&id, "cd /root/demo && docker compose -p wspdemo down -v 2>&1").await;
+    let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo down -v 2>&1").await;
     show("docker compose down -v, from inside", code, &out, &err);
     assert_eq!(code, 0);
     // A workspace made without the engine: no socket, and the client says so.
@@ -1541,6 +1641,9 @@ async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
         eprintln!("this box has no docker client with a compose plugin to land inside; the compose project case is skipped");
         return;
     };
+    // Declared before the world, so it is dropped after it: the workspace's own containers go with the kill, and
+    // an image cannot be removed while a container of it is still there.
+    let _images = PulledImages::of(&["alpine"]);
     let mut w = World::open().await;
     let key = checkout_key();
     let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-compose-{key}") }))).await;
@@ -1555,28 +1658,31 @@ async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
     assert_eq!((code, boot_env.trim()), (0, format!("COMPOSE_PROJECT_NAME={project}").as_str()));
 
     put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
-    put_file(&w, &id, &compose, "/root/.docker/cli-plugins/docker-compose").await;
-    let stack = "services:\n  quiet:\n    image: alpine\n    command: sleep 600\n";
+    put_file(&w, &id, &compose, COMPOSE_PLUGIN_INSIDE).await;
+    // The label every container this suite makes on the box wears, so a person sweeping the box after a run that
+    // died can find them by one filter rather than by name.
+    let stack = format!("services:\n  quiet:\n    image: alpine\n    command: sleep 600\n    labels:\n      {LIVE_LABEL}: \"1\"\n");
     let (code, _, err) = w
         .exec(
             &id,
-            &format!("mkdir -p /root/stack /root/.wsp && printf '%s' '{stack}' > /root/stack/compose.yaml && echo /root/stack > /root/.wsp/roots"),
+            &format!("mkdir -p /var/tmp/stack /root/.wsp && printf '%s' '{stack}' > /var/tmp/stack/compose.yaml && echo /var/tmp/stack > /root/.wsp/roots"),
         )
         .await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
     // No project named on the command line: what compose uses is the name in the environment, and without one it
     // would be the directory's, which every workspace of one project shares.
-    let (code, out, err) = w.exec(&id, "cd /root/stack && docker compose up -d 2>&1").await;
+    let (code, out, err) = w.exec(&id, "cd /var/tmp/stack && docker compose up -d 2>&1").await;
     show("docker compose up -d with no project named, from inside", code, &out, &err);
     assert_eq!(code, 0);
     let (code, named, err) = w.exec(&id, "docker ps --format '{{.Names}}'").await;
     show("what the stack's container is called", code, &named, &err);
     assert_eq!(code, 0);
     assert!(named.lines().any(|line| line.trim() == format!("{project}-quiet-1")), "{named}");
-    // The box sees it under the same name, which is what makes two workspaces two stacks on one engine.
-    let (_, on_the_box, _) = on_box(&["ps", "--format", "{{.Names}}"]);
+    // The box sees it under the same name, which is what makes two workspaces two stacks on one engine, and
+    // wearing this suite's own label, which is how a person finds what a run that died left.
+    let (_, on_the_box, _) = on_box(&["ps", "--filter", &format!("label={LIVE_LABEL}"), "--format", "{{.Names}}"]);
     assert!(on_the_box.lines().any(|line| line.trim() == format!("{project}-quiet-1")), "{on_the_box}");
-    let (code, out, err) = w.exec(&id, "cd /root/stack && docker compose down -v 2>&1").await;
+    let (code, out, err) = w.exec(&id, "cd /var/tmp/stack && docker compose down -v 2>&1").await;
     show("docker compose down -v, from inside", code, &out, &err);
     assert_eq!(code, 0);
     w.close().await;
