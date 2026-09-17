@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DROP_A_FOLDER_LINE, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, dropRefusedLine, exportFromLine, harmonyDots, importIntoLine, registerRequest, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -43,7 +43,7 @@ const iso = (offsetMs: number) => NOW + offsetMs;
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", createdAgoMs = 60 * 60_000): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: new Date(NOW - createdAgoMs).toISOString(),
@@ -275,21 +275,21 @@ describe("rows from the fixture wire", () => {
       expect(mark.nextElementSibling?.className).toContain("text-[var(--top-row-meta)]");
       return { label: provenance(title).getAttribute("aria-label"), text: provenance(title).textContent, mark: mark.getAttribute("data-harness-mark"), svg: mark.tagName, tone, size: [...mark.classList].find(c => c.startsWith("size-")) };
     };
-    expect(reads("fix the port list")).toEqual({ label: "Claude Code · cli", text: "·cli", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
-    expect(reads("upgrade node")).toEqual({ label: "Codex · you", text: "·you", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
-    expect(reads("before provenance")).toEqual({ label: "Claude Code · you", text: "·you", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
-    expect(reads("from the director")).toEqual({ label: "Claude Code · agent", text: "·agent", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("fix the port list")).toEqual({ label: "Claude Code · the-project · cli", text: "·the-project·cli", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("upgrade node")).toEqual({ label: "Codex · the-project · you", text: "·the-project·you", mark: "codex", svg: "svg", tone: undefined, size: "size-[13px]" });
+    expect(reads("before provenance")).toEqual({ label: "Claude Code · the-project · you", text: "·the-project·you", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
+    expect(reads("from the director")).toEqual({ label: "Claude Code · the-project · agent", text: "·the-project·agent", mark: "claude", svg: "svg", tone: "text-agent-claude", size: "size-[13px]" });
     const line = provenance("fix the port list").closest<HTMLElement>("[data-thread-meta]")!;
     expect(line.className).toContain("font-mono");
     expect(line.className).toContain("text-[var(--top-row-meta)]");
   });
 
-  it("a thread row's second line carries the project its folder sits in beside the agent's mark, in the meta line's muted mono, and a row without one keeps the same height and grammar", async () => {
-    const projects = [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" }, { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" }];
+  it("a thread row's second line carries its workspace's project beside the agent's mark, in the meta line's muted mono, and every row keeps the same height and grammar", async () => {
+    const project = { id: "pr_spoo", name: "spoo", path: "/root/spoo", computer: "default" };
     await mount(
       fakeApi(
-        [{ ...API, projects }],
-        [status({ ...API, projects })],
+        [{ ...API, project }],
+        [status({ ...API, project })],
         [
           session("s1", "ws_a", { prompt: "fix the port list", startedBy: "cli", cwd: "/root/spoo" }),
           session("s2", "ws_a", { prompt: "upgrade node", harness: "codex", startedBy: "person", cwd: "/root/wsp/packages/host" }),
@@ -301,14 +301,15 @@ describe("rows from the fixture wire", () => {
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
     const provenance = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-provenance]")!;
     const word = (title: string): HTMLElement | null => rowOf(title).querySelector<HTMLElement>("[data-thread-word]");
+    // A workspace is one project's copy, so every thread on it carries that project whatever folder it ran in.
     expect(word("fix the port list")!.textContent).toBe("spoo");
-    expect(word("upgrade node")!.textContent).toBe("wsp");
-    expect(word("no project")!.textContent).toBe("you");
+    expect(word("upgrade node")!.textContent).toBe("spoo");
+    expect(word("no project")!.textContent).toBe("spoo");
     // Mark, then the project, then who opened it: `✳ · spoo · cli`, the dots drawn as text and not as chips.
     expect(provenance("fix the port list").textContent).toBe("·spoo·cli");
     expect(provenance("fix the port list").getAttribute("aria-label")).toBe("Claude Code · spoo · cli");
-    expect(provenance("no project").textContent).toBe("·you");
-    expect(provenance("no project").getAttribute("aria-label")).toBe("Claude Code · you");
+    expect(provenance("no project").textContent).toBe("·spoo·you");
+    expect(provenance("no project").getAttribute("aria-label")).toBe("Claude Code · spoo · you");
     const line = word("fix the port list")!.closest<HTMLElement>("[data-thread-meta]")!;
     expect(line.className).toContain("font-mono");
     expect(word("fix the port list")!.className).toContain("truncate");
@@ -337,9 +338,9 @@ describe("rows from the fixture wire", () => {
     expect(title.nextElementSibling!.textContent).toBe("48m");
     const meta = rowOf(LONG).querySelector<HTMLElement>("[data-thread-meta]")!;
     expect(meta.contains(title)).toBe(false);
-    expect(meta.textContent).toBe("Working··you");
+    expect(meta.textContent).toBe("Working··the-project·you");
     expect(meta.className).toContain("font-mono");
-    expect(rowOf(SHORT).querySelector("[data-thread-meta]")!.textContent).toBe("·cli");
+    expect(rowOf(SHORT).querySelector("[data-thread-meta]")!.textContent).toBe("·the-project·cli");
     expect(rowOf(SHORT).className).toBe(rowOf(LONG).className);
   });
 
@@ -554,7 +555,7 @@ describe("rows from the fixture wire", () => {
   });
 
   it("this computer's own daemon down: the row says No daemon, and the glyph beside it is the start its line names", async () => {
-    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
     const asked: string[] = [];
     const api = fakeApi([MAC], [{ ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "unreachable" } }]);
     api.restartDaemon = vi.fn(async (id: string) => void asked.push(id));
@@ -574,7 +575,7 @@ describe("rows from the fixture wire", () => {
   });
 
   it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork, green while the machine runs and muted otherwise; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
-    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
     const OLD = view("ws_c", "old", "gone");
     await mount(fakeApi([API, WEB, MAC, OLD], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }, status(OLD, { machineState: "gone", reach: { state: "gone" } })]), "api");
     await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
@@ -845,23 +846,6 @@ describe("new thread", () => {
     }
   });
 
-  it("the import and the export are asked for through the registry's request, and the dialog opens for that workspace", async () => {
-    const api = fakeApi([API, WEB], [status(API), status(WEB)]);
-    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] }));
-    api.importProject = vi.fn();
-    api.exportProject = vi.fn();
-    await mount(api, "api");
-    act(() => requestProjectTrip({ workspaceId: "ws_b", trip: "import" }));
-    const importing = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(importing).getByText(importIntoLine("web"))).toBeDefined();
-    fireEvent.click(within(importing).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    act(() => requestProjectTrip({ workspaceId: "ws_b", trip: "export" }));
-    const exporting = await screen.findByRole("dialog", { name: "Export a project" });
-    expect(within(exporting).getByText(exportFromLine("web"))).toBeDefined();
-    fireEvent.click(within(exporting).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  });
 
   it("a zombie row offers the rebuild and no new thread", async () => {
     await mount(fakeApi([API], [status(API, { reach: { state: "zombie" } })]), "api");
@@ -871,7 +855,7 @@ describe("new thread", () => {
 });
 
 describe("a folder dragged from the desktop", () => {
-  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
   const PLAN = { source: "/Users/dev/spoo", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] };
   /** A drag event as the window sees one: jsdom builds no DragEvent, so the transfer rides the event as a property. */
   const drag = (type: string, dataTransfer: Record<string, unknown>): Event => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { dataTransfer });
@@ -892,71 +876,11 @@ describe("a folder dragged from the desktop", () => {
     delete window.wsp;
   });
 
-  it("turns every workspace row into a dotted drop tile in the row's muted mono with the kind's words, and gives the rows back when the drag leaves the window or drops", async () => {
-    await mountWithBridge();
-    expect(tiles()).toEqual([]);
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    expect(tiles().sort()).toEqual(["import to api", "import to web", "register on this computer"]);
-    const tile = tileOf("ws_a");
-    expect(tile.className).toContain("border-dashed");
-    expect(tile.className).toContain("font-mono");
-    expect(tile.className).toContain("h-15");
-    expect(tile.dataset["sidebarRow"]).toBeDefined();
-    expect(screen.queryByText("api")).toBeNull();
-    // A drag walks into child elements and out again: only leaving the last one it entered ends it.
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    act(() => void window.dispatchEvent(drag("dragleave", carrying)));
-    expect(tiles()).toHaveLength(3);
-    act(() => void window.dispatchEvent(drag("dragleave", carrying)));
-    expect(tiles()).toEqual([]);
-    expect(screen.getByText("api")).toBeDefined();
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    expect(tiles()).toHaveLength(3);
-    act(() => void window.dispatchEvent(drag("drop", carrying)));
-    expect(tiles()).toEqual([]);
-  });
 
   it("a drag that carries no files, text say, moves nothing", async () => {
     await mountWithBridge();
     act(() => void window.dispatchEvent(drag("dragenter", { types: ["text/plain"], items: [{ kind: "string", type: "text/plain" }] })));
     expect(tiles()).toEqual([]);
-  });
-
-  it("dropped on a box's tile the folder opens the import dialog already reading it; on this computer's it is registered at once with no plan, and the toast says so; a file is refused in the toast", async () => {
-    const api = await mountWithBridge();
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    fireEvent(tileOf("ws_b"), drag("drop", folder("spoo")));
-    const importing = await screen.findByRole("dialog", { name: "Import a project" });
-    expect(within(importing).getByText(importIntoLine("web"))).toBeDefined();
-    await waitFor(() => expect(api.planProject).toHaveBeenCalledWith("/Users/dev/spoo"));
-    expect(api.importProject).not.toHaveBeenCalled();
-    expect(tiles()).toEqual([]);
-    fireEvent.click(within(importing).getByRole("button", { name: "Cancel" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    fireEvent(tileOf("ws_m"), drag("drop", folder("spoo")));
-    await waitFor(() => expect(api.importProject).toHaveBeenCalledWith({ workspaceId: "ws_m", ...registerRequest("/Users/dev/spoo") }));
-    expect(api.planProject).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(useStore.getState().toast).toBe(registeredLine("/Users/dev/spoo")));
-    // The folder is on the workspace as soon as the host answers, so the pane lists it with no refresh and no daemon.
-    expect(useStore.getState().workspaces.find(w => w.id === "ws_m")?.projects).toEqual([{ name: "dev", dest: "/Users/dev/spoo", importedAt: "2026-09-12T10:00:00.000Z", size: 900 }]);
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    fireEvent(tileOf("ws_a"), drag("drop", { types: ["Files"], files: [new File(["x"], "notes.txt")], items: [{ kind: "file", type: "text/plain", webkitGetAsEntry: () => ({ isDirectory: false }) }] }));
-    await waitFor(() => expect(useStore.getState().toast).toBe(DROP_A_FOLDER_LINE));
-    expect(api.importProject).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("dialog")).toBeNull();
-
-    // A register the host refused says what did not happen and what to try, by the folder's own name: the line
-    // used to begin with the workspace's name and a colon and end in whatever the host threw.
-    api.importProject = vi.fn(async () => { throw new Error("EACCES: permission denied, scandir '/Users/dev/spoo'"); });
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    fireEvent(tileOf("ws_m"), drag("drop", folder("spoo")));
-    await waitFor(() => expect(useStore.getState().toast).toBe(dropRefusedLine("/Users/dev/spoo")));
-    expect(useStore.getState().toast).toBe("spoo was not imported; check the folder is still there and drop it again.");
-    expect(useStore.getState().toast).not.toContain("EACCES");
   });
 
   it("a browser tab cannot read a dropped folder's path, so its rows stay rows", async () => {
@@ -1425,7 +1349,7 @@ const themed = (angle: number): WorkspaceTheme => ({ ...DEFAULT_THEME, dots: har
 describe("a workspace's own theme and glyph", () => {
   const THEMED: WorkspaceView = { ...view("ws_a", "api", "running", 3 * 60 * 60_000), theme: themed(200), glyph: "flask" };
   const PLAIN = view("ws_b", "web", "napping", 2 * 60 * 60_000);
-  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac", "running", 60 * 60_000), kind: "local", machineId: "local", golden: "" };
+  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac", "running", 60 * 60_000), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
   const all = () => [{ ...THEMED }, { ...PLAIN }, { ...MAC }];
   const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
   const leadOf = (el: HTMLElement): HTMLElement => el.querySelector<HTMLElement>("span[aria-hidden]")!;
@@ -1621,7 +1545,7 @@ describe("Spaces mode", () => {
   });
 
   it("this computer's header reads its cores and memory where a fork's size reads, through the one machine line, and free where a fork's spend reads", async () => {
-    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
     useStore.setState({ selectedId: "ws_m" });
     await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
     await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
@@ -1833,7 +1757,7 @@ describe("a thread another thread's agent opened", () => {
       fakeApi(
         [API],
         // The provider the record carries is what the row names, never the id the provider minted for the machine.
-        [status(API, { machineId: "sb_9f2c1d8a", provider: "solari" })],
+        [status(API, { machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "solari" })],
         [
           lead,
           session("s2", "ws_a", { prompt: "write the migration", startedBy: "agent", threadId: "th_mig", parentThreadId: "th_lead" }),
@@ -1852,7 +1776,7 @@ describe("a thread another thread's agent opened", () => {
     expect(meta("review the diff").textContent).toBe("Failed··solari");
     // The opener word is dropped on a spawned row: the indent says an agent opened it. The row above keeps both.
     expect(meta("write the migration").textContent).not.toContain("agent");
-    expect(meta("ship the search rewrite").textContent).toBe("Working··you");
+    expect(meta("ship the search rewrite").textContent).toBe("Working··the-project·you");
     expect(rowOf("write the migration").className).toContain("pl-5");
     expect(rowOf("write the migration").querySelector("[data-thread-provenance]")!.getAttribute("aria-label")).toBe("Claude Code · solari");
   });
@@ -1868,7 +1792,7 @@ describe("a thread an agent opened on another workspace", () => {
     mount(
       fakeApi(
         [MAC, BENCH],
-        [status(MAC), status(BENCH, { machineId: "sb_9f2c1d8a", provider: "ascii" })],
+        [status(MAC), status(BENCH, { machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "ascii" })],
         [
           session("s1", "ws_mac", { prompt: "run the migration across the fleet", startedBy: "person", threadId: "th_lead", startedAt: iso(-60_000) }),
           session("s2", "ws_bench", { prompt: "benchmark the new index", startedBy: "agent", threadId: "th_bench", parentThreadId: "th_lead", startedAt: iso(-600_000) }),
@@ -1892,7 +1816,7 @@ describe("a thread an agent opened on another workspace", () => {
     // The dot alone says it works on a spawned row, and the opener word is dropped: the indent already says it.
     expect(meta("benchmark the new index").textContent).not.toContain("Working");
     expect(meta("benchmark the new index").textContent).not.toContain("agent");
-    expect(meta("run the migration across the fleet").textContent).toBe("Working··you");
+    expect(meta("run the migration across the fleet").textContent).toBe("Working··the-project·you");
     expect(rowOf("benchmark the new index").querySelector("[data-thread-provenance]")!.getAttribute("aria-label")).toBe("Claude Code · spoo-bench · ascii");
   });
 });

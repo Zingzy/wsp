@@ -1,42 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The projects on a workspace record and the default folder rule: a record
-// from before projects were a list loads as a list of one, a second import
-// keeps the first, every start and every command reads the one rule in the
-// runtime, the rule remembers where a thread landed, and a snapshot and a fork
-// carry the project along.
-import { tarOf } from "@wsp/engine";
-import { DEFAULT_PREFERENCES, noProjectLine, type AdapterEvent, type ProjectPlan, type TurnResult, type WorkspaceProject } from "@wsp/protocol";
-import { describe, expect, it } from "vitest";
-import { writeDaemonRootsScript } from "../src/daemon-roots.js";
-import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type PackedProject, type ProjectBundler, type Runtime } from "../src/runtime.js";
-import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
-import type { ExecResult } from "@wsp/engine";
+// Projects as records of their own: what wsp add records and what it refuses,
+// the two roads a workspace of one takes, and what a thread on it starts in.
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { folderOnCopyRefusal, gitOnThisMacRefusal, HERE_PLACE_ID, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, type AdapterEvent, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { createRuntime, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "../src/runtime.js";
+import { memoryStore } from "../src/store.js";
+import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend } from "./stub-backend.js";
 
-/** The guest side of the exec stream: the launch lands and the command exits 0 with no output, so a command's folder
- * can be read off the stream without a machine. */
-function execGuest(backend: StubBackend): void {
-  const base = backend.execImpl;
-  backend.execImpl = (m: StubMachine, cmd: string): Promise<ExecResult> | ExecResult => {
-    if (cmd.includes("base64 -d")) return { exitCode: 0, stdout: "WSP_LAUNCHED\n", stderr: "" };
-    if (cmd.includes("kill -TERM") || cmd.includes("kill -KILL")) return { exitCode: 0, stdout: "", stderr: "" };
-    const sentinel = /(__WSP_EOF_[a-z0-9]+__)/.exec(cmd)?.[1];
-    if (sentinel !== undefined) return { exitCode: 0, stdout: `\n${sentinel} 0 down\n`, stderr: "" };
-    return base(m, cmd);
-  };
-}
-
-/** A folder of one file, nothing secret-shaped, no agents, weighing `bytes`. */
-function bundler(source: string, bytes = 20): ProjectBundler {
-  const plan: ProjectPlan = { source, repo: true, files: 1, bytes, secrets: [], excluded: [], skipped: [], agents: [] };
-  return {
-    plan: async () => plan,
-    pack: async (): Promise<PackedProject> => ({ tar: tarOf([{ path: "src/index.ts", mode: 0o644, content: "export const a = 1;\n" }]), files: 1, bytes, cut: [], rewritten: [] }),
-    packState: async () => {
-      throw new Error("no agent state in this test");
-    },
-  };
-}
+const REPO = "https://github.com/spoo-me/frontend.git";
 
 /** A harness that records what it was started with and replies at once. */
 function recording(): { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] } {
@@ -63,199 +38,176 @@ function recording(): { adapter: HarnessAdapterFactory; starts: HarnessStartOpti
   return { adapter, starts };
 }
 
-const SPOO = { source: "/Users/dev/spoo", dest: "/root/spoo" };
-const WSP = { source: "/Users/dev/wsp", dest: "/root/wsp" };
+const roots: string[] = [];
+const here = (): string => {
+  const root = mkdtempSync(join(tmpdir(), "wsp-projects-"));
+  roots.push(root);
+  return root;
+};
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
 
-async function setup(store: Store = memoryStore()): Promise<{ rt: Runtime; backend: StubBackend; store: Store; starts: HarnessStartOptions[] }> {
-  const backend = stubBackend();
+function withLocal(backend: StubBackend = stubBackend()): { rt: Runtime; backend: StubBackend; starts: HarnessStartOptions[] } {
   const { adapter, starts } = recording();
-  const rt = createRuntime({ backend, store, adapters: { claude: adapter } });
-  execGuest(backend);
-  return { rt, backend, store, starts };
+  const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local: fakeLocal(here()) });
+  return { rt, backend, starts };
 }
 
-const importOf = (rt: Runtime, workspaceId: string, folder: { source: string; dest: string }, bytes?: number) =>
-  rt.projects.import({ workspaceId, source: folder.source, dest: folder.dest, bundler: bundler(folder.source, bytes) });
-
-describe("the projects on a workspace record", () => {
-  it("a record from before projects were a list loads as a list of one and is kept that way", async () => {
-    const store = memoryStore();
-    const first = await setup(store);
-    const ws = await first.rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    await first.rt.close();
-    const stored = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
-    const project: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
-    await store.put("workspaces", ws.id, { ...stored, project });
-
-    const { rt } = await setup(store);
-    const loaded = await rt.workspaces.get(ws.id);
-    expect(loaded.projects).toEqual([project]);
-    expect("project" in loaded).toBe(false);
-    await rt.workspaces.rename(ws.id, "b3");
-    const kept = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
-    expect(kept["projects"]).toEqual([project]);
-    expect("project" in kept).toBe(false);
-    await rt.close();
+describe("recording a project", () => {
+  it("a folder that is a git repo is a project on this computer, in place, and it goes out as an event", async () => {
+    const { rt } = withLocal();
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const folder = tempRepo();
+    const project = await rt.projects.add({ source: folder });
+    expect(project).toMatchObject({ id: expect.stringMatching(/^pr_[0-9a-f]{8}$/), name: folder.split("/").at(-1), computer: HERE_PLACE_ID, path: folder, source: { kind: "folder", path: folder } });
+    expect(events.filter(e => e.type === "project.added")).toEqual([{ type: "project.added", project, seq: expect.any(Number) }]);
+    expect(await rt.projects.list()).toEqual([project]);
+    rmSync(folder, { recursive: true, force: true });
   });
 
-  it("a second import keeps the first, in import order, each with its size; one landing at a folder already held replaces that entry alone", async () => {
-    const { rt, backend } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    await importOf(rt, ws.id, SPOO, 2048);
-    await importOf(rt, ws.id, WSP, 4096);
-    const both = (await rt.workspaces.get(ws.id)).projects!;
-    expect(both.map(p => [p.name, p.dest, p.size])).toEqual([["spoo", "/root/spoo", 2048], ["wsp", "/root/wsp", 4096]]);
-    // The daemon browses every project, so the roots file names both.
-    const machine = backend.machines[0]!;
-    expect(machine.execLog.at(-1)).toBe(writeDaemonRootsScript(["/root/spoo", "/root/wsp"]));
+  it("a folder that is no git repo is no project: a workspace of one starts on a branch", async () => {
+    const { rt } = withLocal();
+    const plain = mkdtempSync(join(tmpdir(), "wsp-plain-"));
+    await expect(rt.projects.add({ source: plain })).rejects.toThrow(NOT_A_REPO_LINE);
+    expect(await rt.projects.list()).toEqual([]);
+    rmSync(plain, { recursive: true, force: true });
+  });
 
-    await rt.projects.import({ workspaceId: ws.id, source: SPOO.source, dest: SPOO.dest, replace: true, bundler: bundler(SPOO.source, 3000) });
-    const again = (await rt.workspaces.get(ws.id)).projects!;
-    expect(again.map(p => [p.name, p.size])).toEqual([["wsp", 4096], ["spoo", 3000]]);
-    expect(again[1]!.importedAt > both[0]!.importedAt || again[1]!.importedAt === both[0]!.importedAt).toBe(true);
-    await rt.close();
+  it("a folder under a repo is no project either: the folder itself has to be the top of it", async () => {
+    const { rt } = withLocal();
+    const repo = tempRepo();
+    execFileSync("mkdir", ["-p", join(repo, "packages", "host")]);
+    await expect(rt.projects.add({ source: join(repo, "packages", "host") })).rejects.toThrow(NOT_A_REPO_LINE);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("a repo's url with no computer names the ones that clone, since this computer takes a folder of yours", async () => {
+    const { rt } = withLocal();
+    await expect(rt.projects.add({ source: REPO })).rejects.toThrow("name the computer that clones it with --on default");
+    expect(await rt.projects.list()).toEqual([]);
+  });
+
+  it("a repo's url on a computer that clones records the clone's own path inside a copy of it", async () => {
+    const { rt } = withLocal();
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing" });
+    expect(project).toMatchObject({ computer: "default", name: "spoo-landing", path: "/root/spoo-landing", source: { kind: "git", url: REPO } });
+    // The same source on that computer again is the same project, so a second record of it is refused by name.
+    await expect(rt.projects.add({ source: REPO, on: "default" })).rejects.toMatchObject({ message: sameSourceRefusal("spoo-landing", "default"), kind: "conflict" });
+  });
+
+  it("each computer takes the source its kind takes and refuses the other in one sentence", async () => {
+    const { rt } = withLocal();
+    const folder = tempRepo();
+    await expect(rt.projects.add({ source: folder, on: "default" })).rejects.toThrow(folderOnCopyRefusal("default"));
+    await expect(rt.projects.add({ source: REPO, on: HERE_PLACE_ID })).rejects.toThrow(gitOnThisMacRefusal);
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it("a project is dropped once no workspace stands on it, and the drop goes out as an event", async () => {
+    const { rt } = withLocal();
+    const events: EventUnion[] = [];
+    const project = await projectOn(rt);
+    const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
+    rt.events.on("*", e => events.push(e));
+    await expect(rt.projects.remove(project.id)).rejects.toMatchObject({ message: projectInUseRefusal(project.name, ["work"]), kind: "conflict" });
+    await rt.workspaces.delete(ws.id);
+    await rt.projects.remove(project.id);
+    expect(await rt.projects.list()).toEqual([]);
+    expect(events.filter(e => e.type === "project.removed")).toEqual([{ type: "project.removed", projectId: project.id, seq: expect.any(Number) }]);
+  });
+
+  it("a project is named by id or by name, and a word that names none is refused with the ones there are", async () => {
+    const { rt } = withLocal();
+    const project = await projectOn(rt, "default", REPO, { name: "spoo-landing" });
+    expect(await rt.projects.resolve(project.id)).toEqual(project);
+    expect(await rt.projects.resolve("spoo-landing")).toEqual(project);
+    await expect(rt.projects.resolve("nothing")).rejects.toThrow("no project \"nothing\"; this host holds spoo-landing");
   });
 });
 
-describe("the default folder rule, in the runtime", () => {
-  it("a named folder wins; else the project named; else the last project used there; else the only project; else the kind's own folder", async () => {
-    const { rt, starts } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    // No project and a cloud kind: the kind names no folder, so the harness starts in its own home, and the view says so.
-    expect(ws).not.toHaveProperty("folder");
-    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
-    expect(starts.at(-1)!.cwd).toBeUndefined();
-
-    await importOf(rt, ws.id, SPOO);
-    // The only project.
-    await (await rt.sessions.start(ws.id, { prompt: "two" })).finished;
-    expect(starts.at(-1)!.cwd).toBe("/root/spoo");
-
-    await importOf(rt, ws.id, WSP);
-    // Two projects and the last used was spoo (the start above landed there).
-    await (await rt.sessions.start(ws.id, { prompt: "three" })).finished;
-    expect(starts.at(-1)!.cwd).toBe("/root/spoo");
-    // The project named wins over the last used.
-    await (await rt.sessions.start(ws.id, { prompt: "four", project: "wsp" })).finished;
-    expect(starts.at(-1)!.cwd).toBe("/root/wsp");
-    // A folder named outright wins over both.
-    await (await rt.sessions.start(ws.id, { prompt: "five", project: "spoo", cwd: "/root/elsewhere" })).finished;
-    expect(starts.at(-1)!.cwd).toBe("/root/elsewhere");
-    await rt.close();
-  });
-
-  it("two projects with none used yet fall to the kind's own folder, and a name the workspace lacks is refused before anything starts", async () => {
-    const { rt, starts } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    await importOf(rt, ws.id, SPOO);
-    await importOf(rt, ws.id, WSP);
-    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
-    expect(starts.at(-1)!.cwd).toBeUndefined();
-    const projects = (await rt.workspaces.get(ws.id)).projects!;
-    await expect(rt.sessions.start(ws.id, { prompt: "two", project: "nope" })).rejects.toThrow(noProjectLine("nope", projects));
-    expect(starts).toHaveLength(1);
-    await rt.close();
-  });
-
-  it("a start remembers the project it landed in and the last target on the preferences record, once per change, so a second start on the same project pushes no record", async () => {
-    const { rt, store } = await setup();
-    const changed: number[] = [];
+describe("a workspace of a project", () => {
+  it("on a computer that clones, it forks that computer's image and clones the repo into it before it is ready", async () => {
+    const { rt, backend } = withLocal();
+    const stages: string[] = [];
     rt.events.on("*", e => {
-      if (e.type === "preferences.changed") changed.push(changed.length + 1);
+      if (e.type === "workspace.creating") stages.push(e.stage);
     });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    expect((await rt.preferences.get()).project).toEqual({});
-    // No project on the workspace: nothing to remember of a project, but the workspace is now the target an import
-    // or a thread asked for from nowhere goes to.
-    await (await rt.sessions.start(ws.id, { prompt: "zero" })).finished;
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing", base: "main" });
+    const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "pricing page" });
+    expect(ws.project).toEqual({ id: project.id, name: "spoo-landing", path: "/root/spoo-landing", computer: "default" });
+    expect(backend.machines[0]!.execLog).toContain(`git clone --branch main ${REPO} /root/spoo-landing`);
+    expect(stages).toContain("project-cloned");
+    expect(stages.indexOf("project-cloned")).toBeLessThan(stages.indexOf("ready"));
+  });
+
+  it("with no base recorded the clone takes the remote's own default branch", async () => {
+    const { rt, backend } = withLocal();
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing" });
+    await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
+    expect(backend.machines[0]!.execLog).toContain(`git clone ${REPO} /root/spoo-landing`);
+  });
+
+  it("a clone that fails ends the create with git's own last line and the machine goes with it", async () => {
+    const backend = stubBackend();
+    const plain = backend.execImpl;
+    backend.execImpl = (m, cmd) => (cmd.startsWith("git clone") ? { exitCode: 128, stdout: "", stderr: "Cloning into '/root/x'...\nfatal: could not read Username for 'https://github.com'" } : plain(m, cmd));
+    const { rt } = withLocal(backend);
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "x" });
+    await expect(rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" })).rejects.toThrow("fatal: could not read Username for 'https://github.com'");
+    expect(backend.machines.every(m => m.killed)).toBe(true);
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("on this computer the workspace is the folder itself, and a second one on that project names the one standing", async () => {
+    const { rt } = withLocal();
+    const folder = tempRepo();
+    const project = await rt.projects.add({ source: folder });
+    const ws = await rt.workspaces.create({ project: project.id, name: "plan check" });
+    expect(ws).toMatchObject({ kind: "local", golden: "", project: { name: project.name, path: folder, computer: HERE_PLACE_ID } });
+    await expect(rt.workspaces.create({ project: project.id, name: "second" })).rejects.toMatchObject({ message: oneWorkspacePerProject(project.name, "plan check"), kind: "conflict" });
+    rmSync(folder, { recursive: true, force: true });
+  });
+});
+
+describe("the folder a thread starts in", () => {
+  it("is the workspace's project, and the cwd a caller names wins over it", async () => {
+    const { rt, starts } = withLocal();
+    const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing" });
+    const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
+    await rt.sessions.start(ws.id, { prompt: "hi" });
+    expect(starts.at(-1)!.cwd).toBe("/root/spoo-landing");
+    await rt.sessions.start(ws.id, { prompt: "hi", cwd: "/root/elsewhere" });
+    expect(starts.at(-1)!.cwd).toBe("/root/elsewhere");
+  });
+
+  it("the agent a thread ran under is remembered on the project and taken by the next thread that names none", async () => {
+    const { rt } = withLocal();
+    const project = await projectOn(rt);
+    const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
+    expect((await rt.projects.resolve(project.id)).lastAgent).toBeUndefined();
+    await rt.sessions.start(ws.id, { prompt: "hi", harness: "claude" });
+    expect((await rt.projects.resolve(project.id)).lastAgent).toBe("claude");
+    // A start that names none runs it, which is what the composer and the command line both show as the default.
+    const handle = await rt.sessions.start(ws.id, { prompt: "again" });
+    expect(handle.view().harness).toBe("claude");
+  });
+
+  it("the last target is the workspace alone, since a workspace holds one project", async () => {
+    const { rt } = withLocal();
+    const project = await projectOn(rt);
+    const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
+    await rt.sessions.start(ws.id, { prompt: "hi" });
     expect((await rt.preferences.get()).target).toEqual({ workspace: ws.id });
-    expect(changed).toHaveLength(1);
-    await importOf(rt, ws.id, SPOO);
-    await importOf(rt, ws.id, WSP);
-    await (await rt.sessions.start(ws.id, { prompt: "one", project: "wsp" })).finished;
-    let preferences = await rt.preferences.get();
-    expect(preferences.project).toEqual({ [ws.id]: "wsp" });
-    expect(preferences.target).toEqual({ workspace: ws.id, project: "wsp" });
-    expect(changed).toHaveLength(2);
-    // The same project again moves nothing, so no socket hears a record that did not move.
-    await (await rt.sessions.start(ws.id, { prompt: "again", project: "wsp" })).finished;
-    expect(changed).toHaveLength(2);
-    // A folder deep inside a project counts as that project's.
-    await (await rt.sessions.start(ws.id, { prompt: "two", cwd: "/root/spoo/packages/api" })).finished;
-    preferences = await rt.preferences.get();
-    expect(preferences.project).toEqual({ [ws.id]: "spoo" });
-    expect(preferences.target).toEqual({ workspace: ws.id, project: "spoo" });
-    expect(changed).toHaveLength(3);
-    // Outside every project: the last project stands, the target is the workspace alone.
-    await (await rt.sessions.start(ws.id, { prompt: "three", cwd: "/root/elsewhere" })).finished;
-    preferences = await rt.preferences.get();
-    expect(preferences.project).toEqual({ [ws.id]: "spoo" });
-    expect(preferences.target).toEqual({ workspace: ws.id });
-    expect(changed).toHaveLength(4);
-    // What the record holds is what a fresh runtime reads.
-    expect(((await store.get("preferences", "default")) as { project: unknown }).project).toEqual({ [ws.id]: "spoo" });
-    await rt.close();
   });
+});
 
-  it("the preference the composer writes is the second branch: the last project stands until a start or a pick moves it, and a stale name drops through", async () => {
-    const { rt, starts } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    await importOf(rt, ws.id, SPOO);
-    await importOf(rt, ws.id, WSP);
-    await rt.preferences.set({ project: { [ws.id]: "wsp" } });
-    await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
-    expect(starts.at(-1)!.cwd).toBe("/root/wsp");
-    await rt.preferences.set({ project: { [ws.id]: "gone" } });
-    await (await rt.sessions.start(ws.id, { prompt: "two" })).finished;
-    expect(starts.at(-1)!.cwd).toBeUndefined();
-    await rt.close();
-  });
-
-  it("a command, the road wsp exec takes, starts in the folder the same rule names", async () => {
-    const { rt } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    const home = await rt.workspaces.execStream(ws.id, ["pwd"]);
-    expect(home.ranIn).toBeUndefined();
-    await importOf(rt, ws.id, SPOO);
-    const only = await rt.workspaces.execStream(ws.id, ["pwd"]);
-    expect(only.ranIn).toBe("/root/spoo");
-    await importOf(rt, ws.id, WSP);
-    await rt.preferences.set({ project: { [ws.id]: "wsp" } });
-    const last = await rt.workspaces.execStream(ws.id, ["pwd"]);
-    expect(last.ranIn).toBe("/root/wsp");
-    const named = await rt.workspaces.execStream(ws.id, ["pwd"], "/root/elsewhere");
-    expect(named.ranIn).toBe("/root/elsewhere");
-    await rt.close();
-  });
-
-  it("a snapshot is named after the project the rule picks and carries every project on the disk, and a fork of it starts with all of them", async () => {
-    const { rt, backend } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b2" });
-    // A fork's home is the guest's, published so a client shortens folders under it to ~.
-    expect(ws.home).toBe("/root");
-    await importOf(rt, ws.id, SPOO);
-    await importOf(rt, ws.id, WSP);
-    await rt.preferences.set({ project: { [ws.id]: "wsp" } });
-    const golden = await rt.workspaces.snapshot(ws.id);
-    expect(golden.projects.map(p => p.name)).toEqual(["spoo", "wsp"]);
-    expect(backend.snapshots.at(-1)!.name).toContain("-project-wsp-");
-    const fork = await rt.workspaces.create({ golden: golden.snapshotId, name: "task" });
-    expect(fork.projects).toEqual(golden.projects);
-    expect((await rt.preferences.get()).project).toEqual({ [ws.id]: "wsp" });
-    expect(DEFAULT_PREFERENCES.project).toEqual({});
-    await rt.close();
-  });
-
-  it("a project golden stored with the one project of before lists and forks as a golden of that one project", async () => {
+describe("a state file from before projects were records", () => {
+  it("is not read: the host refuses in one sentence naming the file and does not serve", async () => {
     const store = memoryStore();
-    const { rt } = await setup(store);
-    const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
-    await store.put("project-goldens", "snap_old", { snapshotId: "snap_old", project: spoo, golden: "snap_g", workspaceId: "ws_gone", workspaceName: "b1", createdAt: "2026-09-01T01:00:00Z" });
-    const [listed] = await rt.golden.projects();
-    expect(listed).toEqual({ snapshotId: "snap_old", projects: [spoo], golden: "snap_g", workspaceId: "ws_gone", workspaceName: "b1", createdAt: "2026-09-01T01:00:00Z" });
-    expect(listed).not.toHaveProperty("project");
-    const fork = await rt.workspaces.create({ golden: "snap_old", name: "task" });
-    expect(fork.projects).toEqual([spoo]);
-    await rt.close();
+    await store.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true, projects: [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00.000Z" }] });
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-905/state.json" });
+    await expect(rt.workspaces.list()).rejects.toThrow("move /tmp/wsp-905/state.json aside and start again");
   });
 });

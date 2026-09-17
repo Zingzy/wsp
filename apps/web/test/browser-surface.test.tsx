@@ -21,7 +21,7 @@ const OTHER = "ws_other0002";
 const workspace = (id: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",

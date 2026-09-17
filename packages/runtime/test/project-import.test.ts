@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, type PackedProject, type PackedState, type ProjectBundler, type StateRequest } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { wsRequest } from "./ws-client.js";
 
 const dirs: string[] = [];
@@ -107,7 +107,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     // The create uploaded the machine context; the import's PUT is the one after it.
     const before = backend.puts.length;
     const bundler = fakeBundler();
@@ -140,32 +140,34 @@ describe("project.import on a workspace", () => {
     expect(landing).toContain("mkdir -p '/root/work'");
     expect(landing).toMatch(/test ! -e '\/root\/work\/proj' \|\| exit 66\nmv '\/root\/work\/proj\.wsp-in-[^']+' '\/root\/work\/proj'/);
     // The daemon browses the landed folder beside its home: named in its roots file, written after the move.
-    const browsable = machine.execLog.find(c => c.includes("/root/.wsp/roots"))!;
-    expect(browsable).toBe("mkdir -p '/root/.wsp'\nprintf '%s\\n' '/root/work/proj' > '/root/.wsp/roots.next'\nmv -f '/root/.wsp/roots.next' '/root/.wsp/roots'");
+    // The workspace's own project and the folder just landed, both browsable; the record names one project and
+    // an import beside it adds no second one to it.
+    const own = (await rt.workspaces.get(ws.id)).project.path;
+    const browsable = machine.execLog.filter(c => c.includes("/root/.wsp/roots")).at(-1)!;
+    expect(browsable).toBe(`mkdir -p '/root/.wsp'\nprintf '%s\\n' '${own}' '/root/work/proj' > '/root/.wsp/roots.next'\nmv -f '/root/.wsp/roots.next' '/root/.wsp/roots'`);
     expect(machine.execLog.indexOf(browsable)).toBeGreaterThan(machine.execLog.indexOf(landing));
-    expect((await rt.workspaces.get(ws.id))?.projects).toEqual([{ name: "proj", dest: "/root/work/proj", importedAt: expect.any(String), size: 4000 }]);
   });
 
-  it("fails the import, with no project on the record, when the machine will not take the roots file", async () => {
+  it("fails the import when the machine will not take the roots file, and the workspace's own project stands", async () => {
     const backend = stubBackend();
     const plain = backend.execImpl;
     backend.execImpl = (m, cmd) => (cmd.includes("/root/.wsp/roots") ? { exitCode: 1, stdout: "", stderr: "mkdir: read-only file system" } : plain(m, cmd));
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", bundler: fakeBundler() })).rejects.toThrow(
       "could not make /root/work/proj browsable on the machine: mkdir: read-only file system",
     );
     expect(imports(events).at(-1)).toMatchObject({ stage: "failed", message: "could not make /root/work/proj browsable on the machine: mkdir: read-only file system" });
-    expect((await rt.workspaces.get(ws.id))?.projects).toBeUndefined();
+    expect((await rt.workspaces.get(ws.id)).project.path).toMatch(/^\/root\/stub-/);
   });
 
   it("a rewrite the person accepted reaches the pack, is said in the consented line and named in the result", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const bundler = fakeBundler([GIT_CONFIG]);
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: [".env"], rewrite: [".git/config"], bundler });
     expect(bundler.calls).toEqual(["plan", "pack .env rewrite .git/config"]);
@@ -188,7 +190,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const before = backend.puts.length;
     await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler: fakeBundler() })).rejects.toMatchObject({ kind: "exists" });
     expect(backend.puts).toHaveLength(before);
@@ -213,7 +215,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const before = backend.puts.length;
     const bundler = fakeBundler([], AGENTS);
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", carry: [".env"], agents: ["claude", "pi", "codex"], bundler });
@@ -266,7 +268,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", agents: ["codex", "hermes"], bundler: fakeBundler([], [...AGENTS, HERMES]) });
     expect(result.agents).toEqual([
       { agent: "codex", files: 1, bytes: Buffer.byteLength("codex at /root/work/proj\n"), outcome: "failed", error: "the merge on the machine failed (exit 124): no output" },
@@ -290,7 +292,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const before = backend.puts.length;
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/work/proj", agents: ["codex", "hermes"], bundler: fakeBundler([], [...AGENTS, HERMES]) });
     expect(result.agents).toEqual([
@@ -316,7 +318,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const unreadable: ProjectAgent = { agent: "opencode", name: "OpenCode", sessions: 0, bytes: 0, carry: "transcript-only", error: "file is not a database" };
     const bundler = fakeBundler([], [...AGENTS, unreadable]);
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", agents: ["claude", "opencode"], bundler });
@@ -330,7 +332,7 @@ describe("project.import on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const before = backend.puts.length;
     const bundler = fakeBundler([], AGENTS);
     const result = await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler });
@@ -343,7 +345,7 @@ describe("project.import on a workspace", () => {
 
   it("a napping workspace and an unknown one are refused before the folder is read", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     await rt.workspaces.nap(ws.id);
     const bundler = fakeBundler();
     await expect(rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: "/root/proj", bundler })).rejects.toThrow(/^Workspace is paused; wake it to import$/);
@@ -389,7 +391,7 @@ describe("project.import on a workspace", () => {
     expect(planned["ok"]).toBe(true);
     expect((planned["plan"] as ProjectPlan).secrets).toEqual(expect.arrayContaining([GIT_CONFIG]));
     expect((planned["plan"] as ProjectPlan).secrets.map(s => s.path)).toEqual([".env", ".git/config", "config/secrets.json", "keys/id_ed25519"]);
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const imported = await wsRequest(srv.port, "t", { op: "project.import", workspaceId: ws.id, source: SOURCE, dest: "/root/proj", carry: ["keys/id_ed25519"], rewrite: [".git/config"], agents: ["pi"] });
     expect(imported["ok"]).toBe(true);
     expect(imported["imported"]).toEqual({ dest: "/root/proj", files: 4, bytes: 4000, parts: 1, cut: [".env", "config/secrets.json"], rewritten: [".git/config"], agents: [{ agent: "pi", files: 1, bytes: Buffer.byteLength("pi at /root/proj\n"), outcome: "moved" }], project: { name: "proj", dest: "/root/proj", importedAt: expect.any(String), size: 4000 } });

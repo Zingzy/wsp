@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, dropRefusedLine, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, goldenHead, isLocalWorkspace, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -43,7 +43,6 @@ import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, 
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
 import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
 import { ForwardsList } from "./ForwardsList.js";
-import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
@@ -264,41 +263,9 @@ export function WorkspaceSidebar() {
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
 
-  // A folder dragged from the desktop: only the desktop shell can read where it is, and only a client with the import
-  // ops has anywhere to put it, so a browser tab's rows stay rows.
-  const droppedPath = desktopBridge()?.droppedPath;
-  useWindowFolderDrag(droppedPath !== undefined && verbs.importProject !== undefined);
-  const dragging = useFolderDrag(s => s.dragging);
-  /** Where a dropped folder goes, by the workspace's kind: registered at once on this computer, with the result or
-   * the refusal in the toast; read into the import dialog for a box. A file is neither. */
-  const landDrop = async (project: SidebarProjectSnapshot, transfer: DataTransfer): Promise<void> => {
-    useFolderDrag.getState().end();
-    const file = droppedFolder(transfer);
-    if (file === null || droppedPath === undefined) {
-      useStore.setState({ toast: DROP_A_FOLDER_LINE });
-      return;
-    }
-    const source = droppedPath(file);
-    if (kindWords(workspaceKind(project.workspace)).imports !== "registers") {
-      setTrip({ key: Date.now(), workspaceId: project.id, trip: "import", source });
-      return;
-    }
-    if (api?.importProject === undefined) return;
-    try {
-      const landed = await api.importProject({ workspaceId: project.id, ...registerRequest(source) });
-      useStore.getState().landProject(project.id, landed.project);
-      useStore.setState({ toast: registeredLine(landed.dest) });
-    } catch (e) {
-      useStore.setState({ toast: dropRefusedLine(source) });
-    }
-  };
-  /** The row's tile while a drag lasts, where a drop has somewhere to go: a kind with an import road, on a machine the
-   * import action is not refused for, so a gone or zombie row stays a row. */
-  const tileFor = (project: SidebarProjectSnapshot, actions: ReadonlyArray<ResolvedAction>): DropTile | null => {
-    if (!dragging || actionById(actions, "import-project").refusal !== null) return null;
-    const label = dropTileLine(workspaceKind(project.workspace), project.displayName);
-    return label === null ? null : { label, onDrop: transfer => void landDrop(project, transfer) };
-  };
+  /** A row takes no drop: a project is recorded with wsp add and a workspace is made of it, so there is nothing for
+   * a folder dropped on a workspace to become. */
+  const tileFor = (): DropTile | null => null;
 
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
@@ -424,7 +391,7 @@ export function WorkspaceSidebar() {
     const isCollapsed = collapsed.has(project.id);
     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
     const naming = renaming?.rowId === workspaceRowId(project.id);
-    const tile = tileFor(project, actions);
+    const tile = tileFor();
     return (
       <SidebarMenuItem
         key={project.id}
@@ -702,9 +669,7 @@ export function WorkspaceSidebar() {
         />
       ) : null}
       {trip !== null && tripTarget !== undefined ? (
-        trip.trip === "import" ? (
-          <ImportProjectDialog key={trip.key} workspace={tripTarget} {...(trip.source !== undefined ? { initialSource: trip.source } : {})} onClose={() => setTrip(null)} />
-        ) : (
+        trip.trip === "import" ? null : (
           <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} />
         )
       ) : null}

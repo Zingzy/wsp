@@ -18,7 +18,7 @@ import { machineExecStream } from "../src/machine-exec.js";
 import { SESSION_TITLE_REFRESH_MAX, SESSION_TITLE_TTL_MS, createRuntime, type HarnessAdapter, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 
 const SESSION = "33333333-3333-4333-8333-333333333333";
@@ -118,7 +118,7 @@ describe("the harness's own title on a thread", () => {
   it("is read from the harness's store when the turn ends and is what every client folds the thread by", async () => {
     const { backend, reads } = titledBackend(() => "Building the server");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server, and its tests" })).finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
     expect(reads).toEqual([`${TITLE_COMMAND} ${SESSION}`]);
@@ -130,7 +130,7 @@ describe("the harness's own title on a thread", () => {
     const { backend } = titledBackend(() => named);
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
     expect(await titleOf(rt, ws.id)).toBe("Building the server");
@@ -150,7 +150,7 @@ describe("the harness's own title on a thread", () => {
     const { backend, reads } = titledBackend(() => "Building the server");
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
     await until(async () => reads.length === 1);
     for (let i = 0; i < 5; i++) await rt.sessions.list(ws.id);
@@ -164,7 +164,7 @@ describe("the harness's own title on a thread", () => {
     let named: string | null = "Building the server";
     const { backend, reads } = titledBackend(() => named);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
     await until(async () => reads.length === 1);
     await rt.workspaces.nap(ws.id);
@@ -178,7 +178,7 @@ describe("the harness's own title on a thread", () => {
     const { backend, reads } = titledBackend(() => named);
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: titledAdapter() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
     // The row's own document, which is what the next process reads the index back out of.
     const stored = async (): Promise<string | undefined> =>
@@ -198,7 +198,7 @@ describe("the harness's own title on a thread", () => {
     const { backend } = titledBackend(() => null);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ reader: codex.sessionTitle }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     try {
       await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: "-not-a-slug" })).finished;
       const rows = await rt.sessions.list(ws.id);
@@ -219,7 +219,7 @@ describe("the harness's own title on a thread", () => {
     const { backend, reads } = titledBackend(() => null);
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const ids = [...Array(SESSION_TITLE_REFRESH_MAX + 1).keys()].map(i => `s-${String(i).padStart(2, "0")}`);
     for (const id of ids) {
       advance(1_000);
@@ -242,7 +242,7 @@ describe("the harness's own title on a thread", () => {
     const { backend, reads } = titledBackend(() => null);
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ rekeys: true }) }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION })).finished;
     advance(1_000);
     await (await rt.sessions.start(ws.id, { prompt: "and tests", resume: SESSION })).finished;
@@ -258,7 +258,7 @@ describe("the harness's own title on a thread", () => {
   it("leaves the opening turn's words alone for a harness that keeps no title, and asks its machine nothing", async () => {
     const { backend, reads } = titledBackend(() => "never asked");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsTitles: false }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server\nand its tests" })).finished;
     expect(await titleOf(rt, ws.id)).toBe("make a server");
     expect((await rt.sessions.list(ws.id))[0]).not.toHaveProperty("harnessTitle");
@@ -270,7 +270,7 @@ describe("the harness's own title on a thread", () => {
     const { backend, reads } = titledBackend(() => named);
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server" })).finished;
     await until(async () => reads.length === 1);
     expect(await titleOf(rt, ws.id)).toBe("make a server");
@@ -304,7 +304,7 @@ describe("the title the harness makes for a thread", () => {
       },
       clock,
     });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: OPENING });
     // The question goes out at the start, with no reply to carry; the seed stands only while the harness thinks.
     await until(() => asked.length === 1);
@@ -327,7 +327,7 @@ describe("the title the harness makes for a thread", () => {
     const asked: unknown[] = [];
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ announces: false, maker: async t => (asked.push(t), "Seed thread titles here") }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
     await new Promise(r => setTimeout(r, 5));
     expect(asked).toEqual([]);
@@ -337,7 +337,7 @@ describe("the title the harness makes for a thread", () => {
   it("writes the name it made into the harness's own store, so the harness's own list says the same", async () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, maker: async () => "Seed thread titles here" }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
     await until(async () => writes.length === 1);
     expect(writes).toEqual([`${RENAME_COMMAND} ${SESSION} Seed thread titles here`]);
@@ -351,7 +351,7 @@ describe("the title the harness makes for a thread", () => {
       store: memoryStore(),
       adapters: { claude: titledAdapter({ maker: async t => (asked.push(t), "Seed thread titles here") }) },
     });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
     expect(await titleOf(rt, ws.id)).toBe("the sidebar's own name");
@@ -367,7 +367,7 @@ describe("the title the harness makes for a thread", () => {
       const asked: unknown[] = [];
       const { backend } = titledBackend(() => stored);
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ maker: async t => (asked.push(t), "Seed thread titles here") }) } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
       await until(async () => (await rt.sessions.list(ws.id))[0]?.titleSource === "auto");
       expect(asked, stored).toHaveLength(1);
@@ -381,7 +381,7 @@ describe("the title the harness makes for a thread", () => {
     const { backend, reads } = titledBackend(() => OPENING);
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ maker: async () => "Seed thread titles here" }) }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.titleSource === "auto");
     const before = reads.length;
@@ -400,7 +400,7 @@ describe("the title the harness makes for a thread", () => {
     const { clock, advance } = fakeClock();
     let asks = 0;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ maker: () => (asks += 1, answer.wait) }) }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
     await until(async () => asks === 1);
     // The harness is thinking about a title; meanwhile the person renames the session inside the harness itself.
@@ -434,7 +434,7 @@ describe("the title the harness makes for a thread", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsTitles: false, maker: claude.titleFor }) } });
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
       await until(async () => answers.length === 1);
       expect(await titleOf(rt, ws.id)).toBe(OPENING);
@@ -453,7 +453,7 @@ describe("the title the harness makes for a thread", () => {
   it("keeps the name it made through the thread's later turns, which the fold titles by", async () => {
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ rekeys: true, maker: async () => "Seed thread titles here" }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: OPENING })).finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.titleSource === "auto");
     await (await rt.sessions.start(ws.id, { prompt: "and now the tests", resume: SESSION })).finished;
@@ -470,7 +470,7 @@ describe("the title the harness makes for a thread", () => {
       store: memoryStore(),
       adapters: { claude: titledAdapter({ starts, keepsNames: true, hold: () => turn.wait, maker: async t => (asked.push(t), "Seed thread titles here") }) },
     });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: OPENING, title: " Ticket 411 review\nand its branch " });
     // The name stands from the first second, before any turn has ended.
     expect(await titleOf(rt, ws.id)).toBe("Ticket 411 review");
@@ -489,7 +489,7 @@ describe("the title the harness makes for a thread", () => {
   it("refuses a start named with nothing at all", async () => {
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await expect(rt.sessions.start(ws.id, { prompt: OPENING, title: "  \n " })).rejects.toThrow(EMPTY_TITLE_LINE);
   });
 });
@@ -503,7 +503,7 @@ describe("naming a thread from wsp", () => {
     });
     const { clock, advance } = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) }, clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION })).finished;
     advance(1_000);
     const second = await rt.sessions.start(ws.id, { prompt: "and tests", resume: SESSION });
@@ -524,7 +524,7 @@ describe("naming a thread from wsp", () => {
     const store = memoryStore();
     const { backend } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store, adapters: { claude: titledAdapter({ keepsNames: true }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     await rt.sessions.rename(session.id, "the name");
@@ -534,7 +534,7 @@ describe("naming a thread from wsp", () => {
   it("answers unsupported for a harness that keeps no name of a person's, and asks its machine nothing", async () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     expect(await rt.sessions.rename(session.id, "the name")).toEqual({ outcome: "unsupported" });
@@ -545,7 +545,7 @@ describe("naming a thread from wsp", () => {
   it("answers no-session when the store took nothing, and the row keeps the title it had", async () => {
     const { backend } = titledBackend(() => "Building the server", () => "no-session");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
@@ -556,7 +556,7 @@ describe("naming a thread from wsp", () => {
   it("answers failed with the machine's own line when the store refused the write, and the row keeps the title it had", async () => {
     const { backend } = titledBackend(() => "Building the server", () => "database is locked");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.harnessTitle !== undefined);
@@ -568,7 +568,7 @@ describe("naming a thread from wsp", () => {
   it("answers no-session for a thread whose harness never named a session, and asks the machine nothing", async () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, announces: false }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     // The turn ended without a session.start, so the row carries no harness id and the store is keyed by nothing.
@@ -581,14 +581,14 @@ describe("naming a thread from wsp", () => {
   it("answers not-found for a session this runtime does not hold", async () => {
     const { backend } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
-    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await createOn(rt, { golden: "snap_g", name: "a" });
     expect(await rt.sessions.rename("no-such-session", "the name")).toEqual({ outcome: "not-found" });
   });
 
   it("refuses a name that is nothing but space, before it asks anything of the machine", async () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     await expect(rt.sessions.rename(session.id, "   ")).rejects.toThrow(EMPTY_TITLE_LINE);
@@ -598,7 +598,7 @@ describe("naming a thread from wsp", () => {
   it("refuses while the machine is not up, since the name goes into a store on it", async () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server" });
     await session.finished;
     await rt.workspaces.nap(ws.id);
@@ -609,7 +609,7 @@ describe("naming a thread from wsp", () => {
   it("names the session the harness announced, whatever the runtime calls the row", async () => {
     const { backend, writes } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ keepsNames: true, rekeys: true }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const session = await rt.sessions.start(ws.id, { prompt: "make a server", resume: SESSION });
     await session.finished;
     expect(session.id).not.toBe(SESSION);
@@ -622,7 +622,7 @@ describe("the agents whose store keeps a name", () => {
   it("rides on the harness's catalog row from its adapter, as steers does, and is written nowhere else", async () => {
     const { backend } = titledBackend(() => null, () => "written");
     const rt = createRuntime({ backend, store: memoryStore(), adapters: HARNESS_ADAPTERS });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const rows = await rt.harnesses.list(ws.id);
     expect(rows.map(c => c.harness).sort()).toEqual([...THREAD_AGENTS].sort());
     const machine = { id: "m_1" } as unknown as Machine;
@@ -642,7 +642,7 @@ describe("the agents whose store keeps a name", () => {
     const turn = gate<void>();
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter({ reply: "the server is up on 3000", hold: () => turn.wait }) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "make a server, and its tests" });
 
     // The thread is addressed by id inside, so the name it runs under is the record's alone.
@@ -661,7 +661,7 @@ describe("the agents whose store keeps a name", () => {
   it("an adapter that carries no write says so on its row, and a client reads that as a no", async () => {
     const { backend } = titledBackend(() => null);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: titledAdapter() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const [row] = await rt.harnesses.list(ws.id);
     expect(row).toMatchObject({ harness: "claude", renames: false, source: "table" });
     // The row came from the table, so it is no answer yet; the same row from the machine is a no.

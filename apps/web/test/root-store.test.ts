@@ -74,11 +74,11 @@ describe("the folder chosen for the next thread", () => {
     useRootStore.getState().choose(WS, "/root/app");
     expect(useRootStore.getState().byWorkspaceId[WS]!.chosen).toBe("/root/app");
     expect(root()).toBe("/root/app");
-    expect(threadStart("/root/app", null)).toEqual({ cwd: "/root/app" });
+    expect(threadStart("/root/app")).toEqual({ cwd: "/root/app" });
     useRootStore.getState().unchoose(WS);
     expect(useRootStore.getState().byWorkspaceId[WS]!.chosen).toBeNull();
-    expect(threadStart(null, { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" })).toEqual({ project: "spoo" });
-    expect(threadStart(null, null)).toEqual({});
+    // A workspace holds one project, so a start that chose no folder names none and the runtime opens there.
+    expect(threadStart(null)).toEqual({});
   });
 });
 

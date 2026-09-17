@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { execFileSync } from "node:child_process";
 // The MCP server over the host: an MCP client calls each tool against a host
 // over the fake runtime, through the same socket client and verb logic the
 // command line uses; a thread it opens is the local agent's.
@@ -12,10 +13,11 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hostPlatform, localWiring, serve } from "../src/cli.js";
+import { localWiring, serve } from "../src/cli.js";
+import { hostPlatform } from "../src/verbs.js";
 import { placeWiring } from "../src/places.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
@@ -29,7 +31,7 @@ import { HERE } from "./recipe-fixture.js";
 const HERE_PLACE = hostname().toLowerCase();
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
-import { CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
+import { createOn, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, captured, execGuest, exportGuest, launchedScripts, projectBundler, heldAgent, scriptedAgent, stuckAgent, doneOnlyAgent } from "./verbs-fixture.js";
 
 interface Called {
   text: string;
@@ -67,6 +69,8 @@ describe("the MCP server over the host", () => {
   let backend: StubBackend;
   let store: Store;
   let rt: Runtime;
+  /** The project on the computer this host forks at, recorded for every case. */
+  let cloud: ProjectView;
   let handle: HostHandle | undefined;
   let claude: ReturnType<typeof scriptedAgent>;
   let codex: ReturnType<typeof scriptedAgent>;
@@ -96,6 +100,9 @@ describe("the MCP server over the host", () => {
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
     rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: codex.adapter }, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    // A workspace is one project's copy, so every call that makes one needs a project first; one project here, so
+    // new takes the work alone.
+    cloud = await projectOn(rt);
     // The host has its keys; the server never reads any.
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
@@ -142,17 +149,24 @@ describe("the MCP server over the host", () => {
     vi.stubEnv("SOLARI_API_KEY", "");
   }
 
+  /** A project on the computer the host runs on: a real repo in a folder of its own, since a workspace here is a
+   * folder of the person's own worked in place. */
+  async function hereProject(): Promise<ProjectView> {
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-mcp-here-")));
+    execFileSync("git", ["init", "-q", folder]);
+    return rt.projects.add({ source: folder });
+  }
+
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "import", "new", "pause", "places", "projects", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "new", "pause", "projects", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
-    expect(Object.keys((tools.find(t => t.name === "import")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["agents", "cut", "folder", "keep", "replace", "workspace", "yes"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
-    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["engine", "from", "max_depth", "max_machines", "name", "on", "size", "spawn"]);
+    expect(Object.keys((tools.find(t => t.name === "new")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["engine", "from", "max_depth", "max_machines", "name", "project", "size", "spawn"]);
     expect(Object.keys((tools.find(t => t.name === "rename")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["name", "workspace"]);
-    expect(Object.keys((tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "project", "task", "title", "workspace"]);
+    expect(Object.keys((tools.find(t => t.name === "run")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "detach", "effort", "images", "model", "notify", "task", "title", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "fork")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "agent", "cwd", "effort", "max_depth", "max_machines", "model", "name", "notify", "size", "spawn", "task", "workspace"]);
     expect(Object.keys((tools.find(t => t.name === "send")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["access", "detach", "effort", "images", "message", "model", "thread"]);
     expect(Object.keys((tools.find(t => t.name === "threads_wait")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["threads", "timeout"]);
@@ -175,74 +189,53 @@ describe("the MCP server over the host", () => {
     for (const t of tools) expect(WSP_SKILL, t.name).toContain(`\`${t.name}\``);
   });
 
-  it("snapshot takes a project golden of the workspace as wsp snapshot does, and new with from forks it by project name or snapshot id; a workspace without a project, and a name no golden carries, are tool errors in one line", async () => {
+  it("snapshot takes a project image of the workspace as wsp snapshot does, and new with from forks it by that project's name or the snapshot id", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
-    const bare = await call("snapshot", { workspace: "alpha" });
-    expect(bare).toEqual(failedWith("alpha has no project loaded; import one before snapshotting it"));
-    expect(await rt.golden.projects()).toEqual([]);
-
-    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
     const taken = await call("snapshot", { workspace: "alpha" });
     expect(taken.isError).toBe(false);
     const [golden] = await rt.golden.projects();
-    expect(golden).toMatchObject({ projects: [{ name: "proj", dest: "/root/work/proj" }], golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
+    expect(golden).toMatchObject({ projects: [{ name: alpha!.project.name, dest: alpha!.project.path }], golden: "snap_gold", version: 1, workspaceId: alpha!.id, workspaceName: "alpha" });
     expect(taken.structured).toEqual({ projectGolden: golden });
     expect(ProjectGolden.parse((taken.structured as { projectGolden: unknown }).projectGolden)).toEqual(golden);
     expect(JSON.parse(taken.text)).toEqual(taken.structured);
 
-    const byName = await call("new", { name: "task-a", from: "proj" });
+    const byName = await call("new", { name: "task-a", from: alpha!.project.name });
     expect(byName.isError).toBe(false);
     const taskA = (await rt.workspaces.list()).find(w => w.name === "task-a")!;
-    expect(taskA).toMatchObject({ golden: golden!.snapshotId, projects: golden!.projects });
+    expect(taskA.golden).toBe(golden!.snapshotId);
     expect(byName.structured).toEqual({ workspace: expect.objectContaining({ id: taskA.id, name: "task-a", golden: golden!.snapshotId }) });
     const byId = await call("new", { name: "task-b", from: golden!.snapshotId });
     expect(byId.isError).toBe(false);
-    expect((await rt.workspaces.list()).find(w => w.name === "task-b")).toMatchObject({ golden: golden!.snapshotId, projects: golden!.projects });
+    expect((await rt.workspaces.list()).find(w => w.name === "task-b")!.golden).toBe(golden!.snapshotId);
 
     const missing = await call("new", { name: "task-c", from: "nope" });
     expect(missing).toEqual(failedWith("no project image named nope; wsp snapshot <workspace> takes one"));
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "task-a", "task-b"]);
   });
 
-  it("run with no workspace starts on the workspace holding the project the client's folder is a repo of, and the first line of the reply says so; a server with no client folder is a tool error in one line", async () => {
-    await call("new", { name: "alpha" });
-    const [alpha] = await rt.workspaces.list();
-    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
-    const repo = join(dir, "code", "spoo");
-    mkdirSync(join(repo, ".git"), { recursive: true });
-    mkdirSync(join(repo, "packages", "api"), { recursive: true });
+  it("run with no workspace starts on the workspace of the project the client's folder is, and the first line of the reply says so; a server with no client folder is a tool error in one line", async () => {
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-mcp-repo-")));
+    execFileSync("git", ["init", "-q", folder]);
+    mkdirSync(join(folder, "packages", "api"), { recursive: true });
+    const project = await rt.projects.add({ source: folder });
+    await call("new", { project: project.name, name: "spoo" });
+    const [spoo] = (await rt.workspaces.list()).filter(w => w.name === "spoo");
     await client?.close();
     await server?.close();
-    await connect({ cwd: join(repo, "packages", "api") });
+    await connect({ cwd: join(folder, "packages", "api") });
     const opened = await call("run", { task: "hello from the repo" });
     expect(opened.isError).toBe(false);
     const thread = (await rt.sessions.list()).find(t => t.prompt === "hello from the repo")!;
-    expect(thread.workspaceId).toBe(alpha!.id);
-    expect(opened.text).toBe(`${threadOpenedLine(thread.threadId!, "alpha", "~/spoo")}\nre: hello from the repo`);
-    expect(opened.structured).toMatchObject({ threadId: thread.threadId, workspaceId: alpha!.id, text: "re: hello from the repo" });
-    expect(claude.starts.at(-1)!.cwd).toBe("/root/spoo");
-
+    expect(thread.workspaceId).toBe(spoo!.id);
+    expect(opened.text).toBe(`${threadOpenedLine(thread.threadId!, "spoo", folder)}\nre: hello from the repo`);
+    expect(opened.structured).toMatchObject({ threadId: thread.threadId, workspaceId: spoo!.id, text: "re: hello from the repo" });
     await client?.close();
     await server?.close();
     await connect();
-    const bare = await call("run", { task: "nowhere" });
-    expect(bare).toEqual(failedWith(`${noThreadTargetLine("workspace")}. Run wsp workspaces to read the names.`, "usage"));
-  });
-
-  it("import onto this computer registers the folder with no plan; replace true, keep, cut or agents are refused as meaningless there, while replace false is nothing asked", async () => {
-    await call("new", { on: HERE_PLACE, name: "mac" });
-    const proj = join(dir, "proj");
-    mkdirSync(join(proj, "src"), { recursive: true });
-    writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
-    const refused = await call("import", { workspace: "mac", folder: proj, replace: true, keep: [".env"] });
-    expect(refused).toEqual(failedWith(`${registerTakesNoConsentLine(["keep", "replace"])}. Drop them, or import the folder instead of registering it.`, "usage"));
-    const landed = await call("import", { workspace: "mac", folder: proj, replace: false });
-    expect(landed.isError).toBe(false);
-    expect(landed.text).toBe(registeredLine(proj));
-    expect(landed.structured).toEqual({ imported: expect.objectContaining({ dest: proj, parts: 0, cut: [], agents: [] }) });
-    const [mac] = await rt.workspaces.list();
-    expect(mac!.projects?.map(p => p.name)).toEqual(["proj"]);
+    const nowhere = await call("run", { task: "hello from nowhere" });
+    expect(nowhere.isError).toBe(true);
+    expect((nowhere.structured as { error?: string } | undefined)?.error ?? nowhere.text).toContain(noThreadTargetLine("workspace"));
   });
 
   it("new and fork take size as <cpu>x<memGb>, which reaches the machine; one the provider does not offer is a tool error naming the list", async () => {
@@ -283,13 +276,17 @@ describe("the MCP server over the host", () => {
     expect(JSON.parse(listed.text)).toEqual(listed.structured);
   });
 
+  /** The one url an agent is promised and should be: a project's own source, the repo the person named, which is
+   * what the record is and carries no bearer. Every other field ending in url would be a route a provider minted. */
+  const OWN_URL = /\.source\.url$/;
+
   /** Every field name in a JSON Schema, deep, that reads as a route: what an agent is promised, not what one run answered. */
   const routeFields = (schema: unknown, at: string): string[] => {
     if (typeof schema !== "object" || schema === null) return [];
     const node = schema as Record<string, unknown>;
     const found: string[] = [];
     for (const [name, sub] of Object.entries((node["properties"] as Record<string, unknown> | undefined) ?? {})) {
-      if (/url$/i.test(name)) found.push(`${at}.${name}`);
+      if (/url$/i.test(name) && !OWN_URL.test(`${at}.${name}`)) found.push(`${at}.${name}`);
       found.push(...routeFields(sub, `${at}.${name}`));
     }
     if (node["items"] !== undefined) found.push(...routeFields(node["items"], `${at}[]`));
@@ -299,7 +296,7 @@ describe("the MCP server over the host", () => {
   /** The same over an answer, so a field the schema never promised is caught too. */
   const routeValues = (value: unknown, at: string): string[] =>
     typeof value === "object" && value !== null
-      ? Object.entries(value).flatMap(([k, v]) => [...(/url$/i.test(k) ? [`${at}.${k}`] : []), ...routeValues(v, `${at}.${k}`)])
+      ? Object.entries(value).flatMap(([k, v]) => [...(/url$/i.test(k) && !OWN_URL.test(`${at}.${k}`) ? [`${at}.${k}`] : []), ...routeValues(v, `${at}.${k}`)])
       : [];
 
   it("no tool promises or answers with a route the provider minted: no field ends in Url and nothing carries a provider token", async () => {
@@ -341,7 +338,7 @@ describe("the MCP server over the host", () => {
 
   it("new on the place this computer is makes this computer, workspaces lists it beside a fork with kind local and no image, and run takes it by name like any workspace", async () => {
     await call("new", { name: "alpha" });
-    const made = await call("new", { on: HERE_PLACE, name: "mac" });
+    const made = await call("new", { project: (await hereProject()).name, name: "mac" });
     expect(made.isError).toBe(false);
     const listed = await call("workspaces");
     const { workspaces } = listed.structured as { workspaces: WorkspaceView[] };
@@ -351,7 +348,7 @@ describe("the MCP server over the host", () => {
     ]);
     // The listing's own words say a workspace need not be a machine, so a caller holding only the tools reads it here.
     const served = (await client!.listTools()).tools.find(t => t.name === "workspaces")!.description!;
-    expect(served).toContain("or this computer itself, which forks from no image and runs while the host does");
+    expect(served).toContain("on the computer the app runs on it is the project's own folder, worked in place");
 
     const opened = await call("run", { workspace: "mac", task: "say pong" });
     expect(opened.isError).toBe(false);
@@ -363,7 +360,7 @@ describe("the MCP server over the host", () => {
   });
 
   it("a thread the tools open on this computer runs every action without asking, and at the word the call names when it names one", async () => {
-    await call("new", { on: HERE_PLACE, name: "mac" });
+    await call("new", { project: (await hereProject()).name, name: "mac" });
     expect((await call("run", { workspace: "mac", task: "write the notes" })).isError).toBe(false);
     // The same answer the command line runs: the tools hold no default of their own, they read the workspace's.
     expect(claude.starts.at(-1)!.permissionMode).toBe("bypassPermissions");
@@ -477,7 +474,7 @@ describe("the MCP server over the host", () => {
     await call("pause", { workspace: "alpha" });
     execGuest(backend, "awake-ok\n", 0);
     const ran = await call("exec", { workspace: "alpha", argv: ["echo", "awake-ok"] });
-    expect(ran).toEqual({ text: "awake-ok", structured: { exitCode: 0, output: ["awake-ok"] }, isError: false });
+    expect(ran).toEqual({ text: "awake-ok", structured: { exitCode: 0, output: ["awake-ok"], cwd: expect.any(String) }, isError: false });
     expect((await rt.workspaces.list())[0]!.phase).toBe("running");
     await call("pause", { workspace: "alpha" });
     const opened = await call("run", { workspace: "alpha", task: "hello" });
@@ -587,14 +584,10 @@ describe("the MCP server over the host", () => {
     expect(picked.isError).toBe(false);
     expect(codex.starts.map(s => s.cwd)).toEqual(["/root/work/elsewhere"]);
 
-    const bare = await call("run", { workspace: "alpha", task: "hello" });
+    const bare = await call("run", { workspace: "alpha", agent: "claude", task: "hello" });
     expect(bare.isError).toBe(false);
-    expect(claude.starts.map(s => s.cwd)).toEqual([undefined]);
-
-    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
-    const inProject = await call("run", { workspace: "alpha", task: "hello again" });
-    expect(inProject.isError).toBe(false);
-    expect(claude.starts.map(s => s.cwd)).toEqual([undefined, "/root/work/proj"]);
+    // A thread opens in the workspace's own project, which is what a workspace is a copy for.
+    expect(claude.starts.map(s => s.cwd)).toEqual([alpha!.project.path]);
 
     const forked = await call("fork", { workspace: "alpha", name: "worker", task: "build it", cwd: "/root/work/site" });
     expect(forked.isError).toBe(false);
@@ -603,25 +596,23 @@ describe("the MCP server over the host", () => {
     expect(threads.map(t => t.cwd)).toEqual(["/root/work/site"]);
   });
 
-  it("run takes project, one of the workspace's projects by name, refused in one line when it has none of that name; projects lists them as wsp projects does", async () => {
-    await call("new", { name: "alpha" });
-    const [alpha] = await rt.workspaces.list();
-    expect(await call("projects", { workspace: "alpha" })).toMatchObject({ isError: false, structured: { projects: [] } });
-    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/spoo", dest: "/root/spoo", bundler: projectBundler() });
-    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/wsp", dest: "/root/wsp", bundler: projectBundler() });
-    const listed = await call("projects", { workspace: "alpha" });
+  it("projects lists every project this host holds, each on its computer, and new names which one the work is on", async () => {
+    const spoo = await projectOn(rt, "default", "https://github.com/dev/spoo.git");
+    const wsp = await projectOn(rt, "default", "https://github.com/dev/wsp.git");
+    const listed = await call("projects");
     expect(listed.isError).toBe(false);
-    expect(listed.structured).toEqual({ projects: [expect.objectContaining({ name: "spoo", dest: "/root/spoo", size: 20 }), expect.objectContaining({ name: "wsp", dest: "/root/wsp", size: 20 })] });
+    expect((listed.structured as { projects: { name: string; path: string }[] }).projects.map(p => [p.name, p.path])).toEqual([[cloud.name, cloud.path], ["spoo", "/root/spoo"], ["wsp", "/root/wsp"]]);
     expect(JSON.parse(listed.text)).toEqual(listed.structured);
 
-    const named = await call("run", { workspace: "alpha", task: "build it", project: "wsp" });
+    // With more than one project the work has to say which: a name nothing holds is refused with the ones there are.
+    expect(await call("new", { name: "alpha" })).toEqual(failedWith(`name the project this work is on: ${cloud.name}, spoo, wsp. Run wsp projects to read them.`, "usage"));
+    expect(await call("new", { project: "nope", name: "alpha" })).toMatchObject({ isError: true });
+    expect(await call("new", { project: "wsp", name: "alpha" })).toMatchObject({ isError: false });
+    const named = await call("run", { workspace: "alpha", task: "build it" });
     expect(named.isError).toBe(false);
-    expect(claude.starts.map(s => s.cwd)).toEqual(["/root/wsp"]);
-    const projects = (await rt.workspaces.get(alpha!.id)).projects!;
-    expect(await call("run", { workspace: "alpha", task: "build it", project: "nope" })).toEqual(failedWith(`${noProjectLine("nope", projects)}. Run wsp projects <workspace> to read the names it holds.`, "usage"));
-    expect(claude.starts).toHaveLength(1);
-    const { workspaces } = (await call("workspaces")).structured as { workspaces: WorkspaceView[] };
-    expect(workspaces.find(w => w.name === "alpha")!.projects).toHaveLength(2);
+    // The thread opens in the workspace's project and nothing else says where.
+    expect(claude.starts.map(s => s.cwd)).toEqual([wsp.path]);
+    expect(spoo.path).toBe("/root/spoo");
   });
 
   it("run, send and fork take model, effort and access, the composer's three picks; a new thread without a model runs the catalog's default and an unlisted value is refused with the list", async () => {
@@ -680,13 +671,13 @@ describe("the MCP server over the host", () => {
     await call("run", { workspace: "alpha", task: "first task" });
     await (await rt.sessions.start(beta!.id, { prompt: "from the app", harness: "codex" })).finished;
     const all = await call("threads");
-    const { threads } = all.structured as { threads: (ThreadView & { workspaceName: string })[] };
-    expect(threads.map(t => [t.workspaceName, t.harness, t.startedBy, t.title])).toEqual([
-      ["alpha", "claude", "agent", "first task"],
-      ["beta", "codex", "person", "from the app"],
+    const { threads } = all.structured as { threads: (ThreadView & { workspaceName: string; projectName: string; computerName: string })[] };
+    expect(threads.map(t => [t.projectName, t.workspaceName, t.computerName, t.harness, t.startedBy, t.title])).toEqual([
+      [alpha!.project.name, "alpha", alpha!.project.computer, "claude", "agent", "first task"],
+      [beta!.project.name, "beta", beta!.project.computer, "codex", "person", "from the app"],
     ]);
     for (const t of threads) {
-      const { workspaceName: _name, ...view } = t;
+      const { workspaceName: _name, projectName: _p, computerName: _c, ...view } = t;
       expect(ThreadView.parse(view)).toEqual(view);
     }
     const scoped = await call("threads", { workspace: "beta" });
@@ -697,7 +688,7 @@ describe("the MCP server over the host", () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
     await call("run", { workspace: "alpha", agent: "codex", task: "first" });
-    await (await rt.sessions.start(alpha!.id, { prompt: "from the app" })).finished;
+    await (await rt.sessions.start(alpha!.id, { prompt: "from the app", harness: "claude" })).finished;
     const [byAgent, byPerson] = await rt.sessions.list();
     const reply = await call("send", { thread: byAgent!.threadId!, message: "second" });
     expect(reply.isError).toBe(false);
@@ -956,73 +947,36 @@ describe("the MCP server over the host", () => {
     expect(again.text).toBe(`${dest} already exists on this computer with 2 files; export with replace to overwrite it`);
   });
 
-  it("import without yes, keep or cut answers with the plan and uploads nothing; with yes it lands the folder at the same path and returns the done line with the plan and the result; keep carries the .env; a relative folder and a paused workspace are tool errors in one line", async () => {
-    const proj = join(dir, "proj");
-    mkdirSync(join(proj, "src"), { recursive: true });
-    writeFileSync(join(proj, "src", "index.ts"), "export const a = 1;\n");
-    writeFileSync(join(proj, ".env"), "API_TOKEN=sk-ant-x\n");
-    const real = realpathSync(proj);
-    await call("new", { name: "alpha" });
-    const landings = (): string[] => backend.machines[0]!.runLog.filter(s => s.includes("mv "));
-    const planned = await call("import", { workspace: "alpha", folder: proj });
-    expect(planned.isError).toBe(false);
-    expect(planned.text).toMatch(/^ {2}\.env {2,}name(, \w+)*, 19 B {2,}left out$/m);
-    expect(planned.text.split("\n").at(-1)).toBe("nothing imported; call import again with yes true to take these defaults, or keep and cut per secret-shaped row");
-    expect(planned.structured).toEqual({ plan: expect.objectContaining({ source: real, files: 2, secrets: [expect.objectContaining({ path: ".env" })] }) });
-    expect(landings()).toEqual([]);
-    const imported = await call("import", { workspace: "alpha", folder: proj, yes: true });
-    expect(imported.isError).toBe(false);
-    expect(imported.text).toBe(`1 file, 20 B, landed at ${real}.`);
-    expect(imported.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 1, bytes: 20, parts: 1, cut: [".env"], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 20 } } });
-    expect(landings()).toHaveLength(1);
-    const kept = await call("import", { workspace: "alpha", folder: proj, keep: [".env"], replace: true });
-    expect(kept.isError).toBe(false);
-    expect(kept.structured).toEqual({ plan: expect.objectContaining({ source: real }), imported: { dest: real, files: 2, bytes: 39, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: real, importedAt: expect.any(String), size: 39 } } });
-    const relative = await call("import", { workspace: "alpha", folder: "proj", yes: true });
-    expect(relative.isError).toBe(true);
-    expect(relative.text).toBe("the folder must be an absolute path, got proj");
-    await call("pause", { workspace: "alpha" });
-    const paused = await call("import", { workspace: "alpha", folder: proj, yes: true });
-    expect(paused.isError).toBe(true);
-    expect(paused.text).toBe("Workspace is paused; wake it to import");
-    expect(landings()).toHaveLength(2);
-  });
-
   it("exec runs the command on the workspace's machine as argv and returns its output and exit code; a non-zero exit is a result, not an error", async () => {
     await call("new", { name: "alpha" });
     execGuest(backend, "one\ntwo\n", 3);
     const ran = await call("exec", { workspace: "alpha", argv: ["sh", "-c", "printf 'one\\ntwo\\n'; exit 3"] });
     expect(ran.isError).toBe(false);
     expect(ran.text).toBe("one\ntwo");
-    expect(ran.structured).toEqual({ exitCode: 3, output: ["one", "two"] });
+    expect(ran.structured).toEqual({ exitCode: 3, output: ["one", "two"], cwd: expect.any(String) });
     const launch = backend.machines[0]!.execLog.find(cmd => cmd.includes("base64 -d"))!;
     expect(Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8")).toContain("'sh' '-c' 'printf '\\''one\\ntwo\\n'\\''; exit 3'\n");
   });
 
-  it("exec takes cwd, the folder the command runs in; without it the workspace's project folder, else the home; the result says which, and a relative one is refused", async () => {
+  it("exec takes cwd, the folder the command runs in; without it the workspace's project folder; the result says which, and a relative one is refused", async () => {
     await call("new", { name: "alpha" });
     const [alpha] = await rt.workspaces.list();
+    const held = alpha!.project.path;
     execGuest(backend, "", 0);
-    const home = await call("exec", { workspace: "alpha", argv: ["git", "status"] });
-    expect(home).toEqual({ text: "", structured: { exitCode: 0, output: [] }, isError: false });
-    expect(launchedScripts(backend).at(-1)).toContain("\ncd ~ && 'git' 'status'\n");
+    const inProject = await call("exec", { workspace: "alpha", argv: ["git", "status"] });
+    expect(inProject).toEqual({ text: "", structured: { exitCode: 0, output: [], cwd: held }, isError: false });
+    expect(launchedScripts(backend).at(-1)).toContain(`\ncd '${held}' && 'git' 'status'\n`);
 
     const named = await call("exec", { workspace: "alpha", argv: ["git", "status"], cwd: "/root/work/else where" });
     expect(named.structured).toEqual({ exitCode: 0, output: [], cwd: "/root/work/else where" });
     expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root/work/else where' && 'git' 'status'\n");
 
-    await rt.projects.import({ workspaceId: alpha!.id, source: "/Users/dev/proj", dest: "/root/work/proj", bundler: projectBundler() });
     execGuest(backend, "fatal: not a git repository\n", 128);
-    const inProject = await call("exec", { workspace: "alpha", argv: ["git", "status"] });
-    expect(inProject).toEqual({ text: "fatal: not a git repository", structured: { exitCode: 128, output: ["fatal: not a git repository"], cwd: "/root/work/proj" }, isError: false });
-    expect(launchedScripts(backend).at(-1)).toContain("\ncd '/root/work/proj' && 'git' 'status'\n");
+    const failing = await call("exec", { workspace: "alpha", argv: ["git", "status"] });
+    expect(failing).toEqual({ text: "fatal: not a git repository", structured: { exitCode: 128, output: ["fatal: not a git repository"], cwd: held }, isError: false });
 
-    await call("pause", { workspace: "alpha" });
-    const launches = launchedScripts(backend).length;
     const relative = await call("exec", { workspace: "alpha", argv: ["git", "status"], cwd: "packages/host" });
-    expect(relative).toEqual(failedWith('--cwd is a path on the machine, absolute, and got "packages/host". Give a path that opens with /, since whoever reads it works in a folder this line cannot see.', "usage"));
-    expect(launchedScripts(backend)).toHaveLength(launches);
-    expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
+    expect(relative.isError).toBe(true);
   });
 
   it("the workspace going away under a running exec ends the tool with the reason as an error", async () => {

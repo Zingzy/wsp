@@ -11,7 +11,7 @@ import { needsRebuild, RESUME_UNANSWERED, WAKE_STOPPED, wakeAskingAgainLine, wak
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { abortedCall, stubBackend, type StubMachine } from "./stub-backend.js";
+import { abortedCall, stubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 
 /** The cadence between asks, shaped like the shipped one and short enough to count in whole ticks. The cap and the
@@ -91,7 +91,7 @@ function watch(waking: Promise<unknown>): { outcome: Promise<string>; ended: () 
 describe("a wake the provider does not answer", () => {
   it("says the provider has not answered and that the machine is being read, as soon as the backend gives the resume up", async () => {
     const { backend, fc, rt, rows } = rig({ forMs: 2 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -115,7 +115,7 @@ describe("a wake the provider does not answer", () => {
 
   it("asks again on its own once a cadence, counting the asks on the row, and stops when the asking is spent", async () => {
     const { backend, fc, rt, rows } = rig({ forMs: 4 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -140,7 +140,7 @@ describe("a wake the provider does not answer", () => {
 
   it("counts the cadence from when the ask began, so a cap that eats half of it does not push the next ask out", async () => {
     const { backend, fc, rt, rows } = rig({ forMs: 3 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const at = timesResumes(backend.machines[0]!, fc.clock.now);
@@ -172,7 +172,7 @@ describe("a wake the provider does not answer", () => {
     // The cloud provider's own asking, read off its declaration and not off a number of the runtime's.
     const { everyMs, forMs } = SOLARI_LIFECYCLE.budgets.resumeAsks!;
     const { backend, fc, rt } = rig({ everyMs, forMs });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const at = timesResumes(backend.machines[0]!, fc.clock.now);
@@ -206,7 +206,7 @@ describe("a wake the provider does not answer", () => {
 
   it("reads before it asks again, sends no second resume at one that came up, and still checks the guest and ends first life", async () => {
     const { backend, fc, rt, store, rows } = rig({ forMs: 30 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     expect(await store.get("workspaces", ws.id)).toMatchObject({ firstLife: true });
     await rt.workspaces.nap(ws.id);
     const m = backend.machines[0]!;
@@ -244,7 +244,7 @@ describe("a wake the provider does not answer", () => {
 
   it("leaves the rebuild road on the record when the asking runs out, and a wake that lands takes it away", async () => {
     const { backend, fc, rt, store, rows } = rig({ forMs: 3 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const m = backend.machines[0]!;
     const deaf = deafResume(m);
@@ -279,7 +279,7 @@ describe("a wake the provider does not answer", () => {
 
   it("stops when the person stops it from the row, while the host waits to ask again", async () => {
     const { backend, fc, rt, store, rows } = rig({ forMs: 30 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -305,7 +305,7 @@ describe("a wake the provider does not answer", () => {
 
   it("stops while the host is on a call by ending it, and a cap that fires after says nothing on the paused row", async () => {
     const { backend, fc, rt, rows } = rig({ forMs: 30 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const waking = rt.workspaces.wake(ws.id);
@@ -329,7 +329,7 @@ describe("a wake the provider does not answer", () => {
 
   it("a resume the provider finally takes ends the wake with the machine running, however many asks it took", async () => {
     const { backend, fc, rt, events } = rig({ forMs: 30 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -350,7 +350,7 @@ describe("a wake the provider does not answer", () => {
 
   it("keeps the line on every status the poll builds, so the row does not fall silent between two asks", async () => {
     const { backend, fc, rt } = rig({ forMs: 30 * EVERY });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -372,13 +372,13 @@ describe("a wake the provider does not answer", () => {
 
   it("a stop asked of a workspace with no wake in flight answers with the record as it stands", async () => {
     const { rt } = rig();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     expect((await rt.workspaces.stopWake(ws.id)).phase).toBe("running");
   });
 
   it("a backend that declares no asking is asked once: no second resume, and the gave-up line counts one", async () => {
     const { backend, fc, rt, rows } = rig(null);
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "b1" });
     await rt.workspaces.nap(ws.id);
     const deaf = deafResume(backend.machines[0]!);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

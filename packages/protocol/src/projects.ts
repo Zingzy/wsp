@@ -1,64 +1,79 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The projects a workspace holds and the one rule for which of them a thread
-// starts in. The runtime applies the rule to every start and every command,
-// the composer shows its answer under the box, and the command line refuses a
-// name before a machine is woken for it; all three read it from here so no
-// road can start a thread somewhere another road would not.
+// The rules a project is recorded and read by: what one word to `wsp add`
+// names, what a project is called, where its checkout sits inside a workspace
+// of it, and which workspace a folder on this computer belongs to. The
+// command line, the runtime and the app all read them here, so no road can
+// record a project one way and read it back another.
 import { THIS_COMPUTER } from "./format.js";
-import type { Preferences, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
+import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
-import { kindWords, workspaceKind, type WorkspaceKindWords } from "./workspace-state.js";
+import { kindWords } from "./workspace-state.js";
 
-/** A workspace's projects as every client reads them: a record from before projects were a list carries none here,
- * and reads as none rather than as a field to guard. */
-export function workspaceProjects(view: Pick<WorkspaceView, "projects">): WorkspaceProject[] {
-  return view.projects ?? [];
+/** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones, or a
+ * folder a computer holds. Read once here, so the command line, the tool and the runtime cannot each decide for
+ * themselves what somebody typed. A word that is none of the three throws with the three forms. */
+export function sourceKind(word: string): "computer" | "git" | "folder" {
+  if (word.includes("://") || /^[\w.-]+@[\w.-]+:/.test(word) || word.endsWith(".git")) return "git";
+  if (word.startsWith("/") || word.startsWith("~") || word.startsWith(".")) return "folder";
+  if (/^[\w.-]+@[\w.-]+$/.test(word)) return "computer";
+  throw new Error(ADD_FORMS_LINE);
 }
 
-/** The projects a workspace holds once one has landed: the same folder imported again is the one project, at what
- * the last import made of it, and a new folder goes on the end, where the newest import belongs. The runtime keeps
- * the record by this rule and a client applies it to the project the host answers with, so a list a person is
- * looking at never grows a second row for the folder they just imported. */
-export function withProject(projects: readonly WorkspaceProject[], landed: WorkspaceProject): WorkspaceProject[] {
-  return [...projects.filter(p => p.dest !== landed.dest), landed];
+/** The three forms `wsp add` takes, which is what a word matching none of them is refused with. */
+export const ADD_FORMS_LINE =
+  "wsp add takes user@host for a computer of yours, a folder on this computer for a project here, or a repo's url with --on <computer> for a project there";
+
+/** What a project is called: the repo's last word without .git, or the folder's own name. */
+export function projectNameOf(source: ProjectSource): string {
+  if (source.kind === "folder") return folderName(source.path);
+  const last = source.url.replace(/\/+$/, "").split(/[/:]/).pop() ?? source.url;
+  return last.replace(/\.git$/, "");
 }
 
-/** Why a project a caller named is not on the workspace, with the ones that are. */
-export function noProjectLine(name: string, projects: readonly WorkspaceProject[]): string {
-  const held = projects.length === 0 ? "it has no projects" : `its projects are ${projects.map(p => p.name).join(", ")}`;
-  return `no project named ${JSON.stringify(name)} on this workspace; ${held}`;
+/** Where a project's checkout sits inside a workspace of it: the folder itself where the workspace is this
+ * computer working in place, and the home every copy of the image carries where the workspace is a machine. */
+export function projectPathOn(kind: WorkspaceKind, source: ProjectSource, name: string): string {
+  if (source.kind === "folder") return source.path;
+  return `${GUEST_PROJECT_HOME}/${name}`;
 }
 
-/** The project a thread on the workspace starts in when nothing names a folder outright: the one named, else the
- * one last used on that workspace (the preferences record's project entry), else the only one, else none, which
- * leaves the kind's own folder to the runtime. A name the caller gave is refused when the workspace lacks it, since
- * a thread started elsewhere in silence is the bug this rule exists to end; a remembered name the workspace no
- * longer holds drops through, as a stale access pick does. */
-export function projectFor(projects: readonly WorkspaceProject[], pick: { named: string | undefined; last: string | undefined }): WorkspaceProject | null {
-  if (pick.named !== undefined) {
-    const found = projects.find(p => p.name === pick.named);
-    if (found === undefined) throw new Error(noProjectLine(pick.named, projects));
-    return found;
-  }
-  return projects.find(p => p.name === pick.last) ?? (projects.length === 1 ? projects[0]! : null);
-}
+/** The folder a copy's projects are cloned under: the home a fork's own login lands in. */
+const GUEST_PROJECT_HOME = "/root";
 
-/** The project a folder belongs to: the one whose folder it is or sits under, the nearest when projects nest, none
- * when it sits outside them all. The thread row's word and the runtime's memory of which project a start used both
- * read this, so a thread opened deep inside a project still counts as that project's. */
-export function projectAt(projects: readonly WorkspaceProject[], folder: string | undefined): WorkspaceProject | null {
-  if (folder === undefined) return null;
-  let found: WorkspaceProject | null = null;
-  for (const project of projects) if (underProject(folder, project.dest) && (found === null || project.dest.length > found.dest.length)) found = project;
-  return found;
-}
+/** Why a second project on one source on one computer is refused: one source per computer is one project, and a
+ * second record of it would give two names to one checkout. */
+export const sameSourceRefusal = (name: string, computer: string): string =>
+  `that source is already a project on ${computer}, ${name}; one source on one computer is one project`;
 
-/** The count a workspace listing shows for its projects: nothing where there are none, so a row without projects
- * stays quiet, and the number where there are. */
-export function projectCountCell(projects: readonly WorkspaceProject[]): string {
-  return projects.length === 0 ? "" : String(projects.length);
-}
+/** Why a repo's url with no computer named records nothing: this computer works a folder of yours in place, so a
+ * url needs the computer that clones it, with the ones that do. */
+export const noComputerForSourceLine = (word: string, computers: readonly string[]): string =>
+  `${word} is a repo, and ${THIS_COMPUTER} takes a folder of yours; name the computer that clones it with --on ${computers.length === 0 ? "<computer>, once you have added one" : computers.join(" | ")}`;
+
+/** Why a folder that is no repo is not a project: a workspace of it starts on a branch, and a folder with no git
+ * in it has none. */
+export const NOT_A_REPO_LINE = "is not a git repo; git init makes it one, or name a repo's url with --on <computer>";
+
+/** Why a repo's url on this computer records nothing: this computer works the folder you already have. */
+export const gitOnThisMacRefusal = `${THIS_COMPUTER} takes a folder of yours and works it in place; a repo's url is for a computer that clones it, named with --on <computer>`;
+
+/** Why a folder on a computer that is not this one records nothing: nothing carries a folder there yet, so its
+ * project is the repo that computer can clone. */
+export const folderOnCopyRefusal = (computer: string): string =>
+  `${computer} takes a repo it can clone, not a folder on this computer; give the repo's url, or add the folder here with no --on`;
+
+/** Why a project cannot be dropped yet, with the workspaces standing on it. */
+export const projectInUseRefusal = (name: string, workspaces: readonly string[]): string =>
+  `${name} has ${workspaces.length === 1 ? "a workspace" : "workspaces"} standing on it: ${workspaces.join(", ")}; delete ${workspaces.length === 1 ? "it" : "them"} first`;
+
+/** Why a word names no project here, with the ones it could have named. */
+export const noSuchProjectLine = (ref: string, names: readonly string[]): string =>
+  `no project ${JSON.stringify(ref)}; ${names.length === 0 ? "wsp add <folder> records one" : `this host holds ${names.join(", ")}`}`;
+
+/** Why a workspace cannot be made without naming its project, with the projects to name. */
+export const nameTheProjectLine = (names: readonly string[]): string =>
+  `name the project this work is on: ${names.join(", ")}`;
 
 /** A path as the machine's own shell would show it: `~` for its home and anything under it, the path as given
  * elsewhere or where the home is not known. */
@@ -67,40 +82,12 @@ export function homeShortened(path: string, home: string | undefined): string {
   return path === home ? "~" : `~${path.slice(home.length)}`;
 }
 
-/** The words on a workspace row while a folder is dragged over the window: what a drop there does, by the kind's
- * import road; nothing for a kind without one, whose row stays a row. */
-export function dropTileLine(kind: WorkspaceKind, workspaceName: string): string | null {
-  switch (kindWords(kind).imports) {
-    case "copies":
-      return `import to ${workspaceName}`;
-    case "registers":
-      return `register on ${THIS_COMPUTER}`;
-    case null:
-      return null;
-  }
-}
-
-/** What a drop that was not a folder is refused with: a project is a folder, and a file dropped on a tile is not one. */
-export const DROP_A_FOLDER_LINE = "drop a folder; a project is a folder, not a file";
-
 /** What a register says as it starts: the folder is on this computer already, so its path is recorded and nothing moves. */
 export const REGISTERING_LINE = "already on this computer, registering";
 
 /** What a register says when it has landed. */
 export function registeredLine(dest: string): string {
   return `${folderName(dest)} registered at ${dest}; nothing was copied.`;
-}
-
-/** What a drop the host would not register says: the folder by its own name, what did not happen and what to try.
- * The host's reason is not the sentence. It ends in whatever threw, and the sentence used to begin with the
- * workspace's name and a colon, which read as a machine talking to itself in the corner of the screen. */
-export function dropRefusedLine(dest: string): string {
-  return `${folderName(dest)} was not imported; check the folder is still there and drop it again.`;
-}
-
-/** The line under an import that named no workspace: where it goes instead, and why that one. */
-export function lastTargetLine(workspaceName: string): string {
-  return `importing to ${workspaceName}, the workspace the last thread started on`;
 }
 
 /** What a fork of a project golden starts with, after the created line; nothing for an image carrying none. */
@@ -127,36 +114,37 @@ export function threadOpenedLine(threadId: string, workspaceName: string, folder
 /** Why a run from inside a folder no workspace holds a project for opens nothing, with both roads out; `named` is the
  * caller's word for naming a workspace (`<workspace>` on the command line, `workspace` on the tool). */
 export function noWorkspaceForFolderLine(folder: string, named: string): string {
-  return `no workspace holds a project for ${folder}; name one with ${named}, or wsp import <workspace> ${shellQuote(folder)} lands it there`;
+  return `no workspace holds a project for ${folder}; name one with ${named}, or wsp add ${shellQuote(folder)} records it as a project here`;
 }
 
 /** The workspace a folder on this computer belongs to, and the project it is there as, for a thread opened with no
- * workspace named. A kind that registers a folder holds it at its own path, so it matches by path alone, and a copy
- * registered here wins outright: the folder is that project on this computer. A kind that copies holds the folder
- * at a path of its own (a real import lands it at the same path, but that says nothing about where it last ran),
- * so it matches by the folder's name, and among the copies the workspace the last thread anywhere started in it on
- * (the target) decides, else the one whose last thread ran in it, else the first that holds it, in listing order;
- * none when no workspace has it. */
-export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "kind" | "projects">>(workspaces: readonly W[], folder: string, preferences: Pick<Preferences, "project" | "target">): { workspace: W; project: WorkspaceProject } | null {
-  const name = folderName(folder);
-  const road = (workspace: W): WorkspaceKindWords["imports"] => kindWords(workspaceKind(workspace)).imports;
-  const holds = (workspace: W, p: WorkspaceProject): boolean => (road(workspace) === "copies" ? p.name === name : p.dest === folder);
-  const held = workspaces.flatMap(workspace => workspaceProjects(workspace).filter(p => holds(workspace, p)).map(project => ({ workspace, project })));
-  if (held.length === 0) return null;
-  const registered = held.find(h => road(h.workspace) === "registers");
-  if (registered !== undefined) return registered;
-  const target = preferences.target;
-  const targeted = target?.project === name ? held.find(h => h.workspace.id === target.workspace) : undefined;
-  return targeted ?? held.find(h => preferences.project[h.workspace.id] === h.project.name) ?? held[0]!;
+ * workspace named. A project on this computer is worked in place, so the folder is the project's own path: the
+ * match is the project whose path the folder is or sits under, the nearest when projects nest, and the workspace
+ * is the one standing on that project. None when no project holds the folder, and none when one does and no
+ * workspace of it stands. */
+export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "project">>(
+  workspaces: readonly W[],
+  projects: readonly ProjectView[],
+  folder: string,
+): { workspace: W; project: ProjectView } | null {
+  let found: ProjectView | null = null;
+  for (const project of projects) {
+    if (project.source.kind !== "folder") continue;
+    if (underProject(folder, project.path) && (found === null || project.path.length > found.path.length)) found = project;
+  }
+  if (found === null) return null;
+  const workspace = workspaces.find(w => w.project.id === found!.id);
+  return workspace === undefined ? null : { workspace, project: found };
+}
+
+/** Whether a workspace of this kind works its project where it already sits rather than holding a copy of it: the
+ * one reading of the kind table both the create and the folder rule take. */
+export function worksInPlace(kind: WorkspaceKind): boolean {
+  return kindWords(kind).projectSources.includes("folder");
 }
 
 /** Why a thread opened with no workspace named, from a folder that is not inside a repo, opens nothing; `named` is
  * the caller's word for naming one (`<workspace>` on the command line, `workspace` on the tool). */
 export function noThreadTargetLine(named: string): string {
   return `${named} is needed outside a repo: run from inside a repo one of the workspaces holds, or name the workspace`;
-}
-
-/** Why an import that named no workspace goes nowhere before any thread has started. */
-export function noLastTargetLine(named: string): string {
-  return `${named} is needed: no thread has started yet, so there is no last workspace to import to`;
 }

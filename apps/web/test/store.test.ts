@@ -13,7 +13,7 @@ import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 const view = (id: string): WorkspaceView => ({
   id,
   name: id,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -936,7 +936,7 @@ describe("store workspaces", () => {
     const was = useStore.getState().statuses["ws_a"]!;
     emit({ type: "workspace.renamed", workspaceId: "ws_a", name: "the name he typed" });
     expect(useStore.getState().workspaces[0]!.name).toBe("the name he typed");
-    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ name: "the name he typed", phase: was.phase, machineId: was.machineId, machineState: was.machineState });
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ name: "the name he typed", phase: was.phase, machineId: was.machineId, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, machineState: was.machineState });
     // A workspace no row holds is not invented by a name.
     emit({ type: "workspace.renamed", workspaceId: "ws_gone", name: "nobody" });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);

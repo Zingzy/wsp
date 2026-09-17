@@ -36,14 +36,13 @@ export async function checkSetup(opts: SetupOptions): Promise<Setup> {
   return { ready: false };
 }
 
-/** The first launch's last step: this computer recorded as the one local workspace, the road wsp new --on it takes,
- * over a runtime the window then serves. With or without a provider key: the cloud is what a person adds later, and
- * adding it never blocks what they have. A record already there is the one kept. */
-export async function recordThisComputer(opts: SetupOptions): Promise<{ runtime: Runtime; workspace: WorkspaceView }> {
+/** The first launch's last step: the runtime the window then serves, and the workspace on this computer where one
+ * already stands. A workspace is one project's copy, so this launch records none: the person names a folder and the
+ * work it is for, and the app opens on whatever they have until the first-run screen that asks for both lands. */
+export async function openThisComputer(opts: SetupOptions): Promise<{ runtime: Runtime; workspace: WorkspaceView | null }> {
   const runtime = runtimeOf(opts, await findKeys(opts.sources), opts.statePath);
   try {
-    const workspace = (await runtime.workspaces.list()).find(isLocalWorkspace) ?? (await runtime.workspaces.createLocal());
-    return { runtime, workspace };
+    return { runtime, workspace: (await runtime.workspaces.list()).find(isLocalWorkspace) ?? null };
   } catch (e) {
     await runtime.close();
     throw e;

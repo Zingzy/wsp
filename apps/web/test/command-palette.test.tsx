@@ -36,7 +36,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", over: Partial<WorkspaceView> = {}): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: `2026-09-01T00:0${id.length}:00Z`,

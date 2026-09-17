@@ -48,7 +48,7 @@ import { noDaemonApi } from "./fake-daemon-api.js";
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -387,7 +387,7 @@ describe("the Workspaces section's menu", () => {
 
   it("the road to this computer makes it once and goes to it after, and a client without the road offers it refused", async () => {
     const api = fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]);
-    const local: WorkspaceView = { ...API, id: "ws_mac", name: "zingzys-mac", kind: "local", machineId: "local", golden: "" };
+    const local: WorkspaceView = { ...API, id: "ws_mac", name: "zingzys-mac", kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
     const calls: number[] = [];
     api.createLocalWorkspace = async () => {
       calls.push(1);

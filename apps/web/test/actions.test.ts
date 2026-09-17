@@ -196,8 +196,8 @@ describe("workspace actions", () => {
   });
 
   it("one target builder serves every surface: the status's phase, machine state, reach and reason lead, the record fills in", () => {
-    const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
-    const status: WorkspaceStatus = { ...view, machineId: "m_new", phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
+    const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
+    const status: WorkspaceStatus = { ...view, machineId: "m_new", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
     expect(workspaceTarget(view, status, [])).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words", wakeRefused: null, absent: null });
     expect(workspaceTarget(view, null, [])).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words", wakeRefused: null, absent: null });
     // The record's own wake words ride apart from the reason, which the next status push replaces.

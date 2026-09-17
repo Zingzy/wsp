@@ -98,7 +98,7 @@ const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: fa
 
 /** The workspaces the app holds, as the sidebar lists them: this computer's own, and the forks, whether they stand
  * at a provider or on a computer somebody joined. */
-const workspace = (id: string, kind: WorkspaceView["kind"], machineId: string): WorkspaceView => ({ id, name: id, kind, machineId, phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z" });
+const workspace = (id: string, kind: WorkspaceView["kind"], machineId: string): WorkspaceView => ({ id, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, name: id, kind, machineId, phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z" });
 const mine = workspace("ws_a", "local", "local");
 const onLaptop: WorkspaceView = { ...workspace("ws_b", "cloud", "ctr_9f"), place: "p_1" };
 const fork = (id: string): WorkspaceView => workspace(id, "cloud", `fk_${id}`);
@@ -128,7 +128,7 @@ describe("Where agents run", () => {
   it("says this computer's own daemon is not running in the slot, rather than listing this Mac as perfectly fine", () => {
     // This Mac holds no link of its own, so the table read it as present and said nothing while every pane on it
     // said unreachable: the app was telling a person two different things in two rooms.
-    const silent = { id: mine.id, phase: "running", machineState: "running", reach: { state: "unreachable" }, machineId: "local", kind: "local", size: { cpu: 8, memMb: 16384 }, name: mine.name, golden: "", createdAt: mine.createdAt } as unknown as WorkspaceStatus;
+    const silent = { id: mine.id, phase: "running", machineState: "running", reach: { state: "unreachable" }, machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, kind: "local", size: { cpu: 8, memMb: 16384 }, name: mine.name, golden: "", createdAt: mine.createdAt } as unknown as WorkspaceStatus;
     useStore.setState({ places: [here], workspaces: [mine], statuses: { [mine.id]: silent } });
     render(<WhereAgentsRun now={NOW} />);
     const row = screen.getAllByRole("row")[1]!;
@@ -442,7 +442,7 @@ describe("a computer's own row", () => {
   const withWorkspaces = (): void => {
     useStore.setState({
       places: [here, laptop],
-      workspaces: [{ id: "ws_b", name: "spoo-fix", kind: "cloud", machineId: "ctr_9f", place: "p_1", phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z", home: "/home/dev" }] as never,
+      workspaces: [{ id: "ws_b", name: "spoo-fix", kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_1", phase: "running", golden: "", createdAt: "2026-09-11T00:00:00.000Z", home: "/home/dev" }] as never,
       sessions: { ws_b: [{ id: "s1" }, { id: "s2" }] } as never,
     });
   };
@@ -665,7 +665,7 @@ describe("the ssh road of the sheet", () => {
   });
 
   it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, the image and the opener", async () => {
-    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], projects: [] }) } as unknown as Partial<Api>);
+    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }) } as unknown as Partial<Api>);
     const lines = plan().map(([word]) => word ?? "");
     // The one line that is about this computer rather than the box, in the file's own name.
     expect(lines[1]).toBe("keeps the box's host key in ~/.ssh/known_hosts here");
@@ -679,7 +679,7 @@ describe("the ssh road of the sheet", () => {
   });
 
   it("says the image sentence without a figure on a wsp that has built no image yet, rather than one it guessed", async () => {
-    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: null, copies: [], projects: [] }) } as unknown as Partial<Api>);
+    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: null, copies: [], project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }) } as unknown as Partial<Api>);
     expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
   });
 

@@ -12,7 +12,7 @@ import { goldenHead } from "../src/index.js";
 import { newPlaceKeyPair, type PlaceWiring } from "../src/places.js";
 import { memoryStore } from "../src/store.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 
 /** Three providers over three stubs, as the host's table hands them down: the stand-in this host forks on and
@@ -82,7 +82,7 @@ describe("a place is always current", () => {
     await until(async () => (await current("solari")) && (await current("box")), 5000);
     expect([fake.snapshots.length, solari.snapshots.length, box.snapshots.length]).toEqual([1, 1, 1]);
     // A fork at solari takes solari's own copy, which its snapshot id says.
-    const made = await rt.workspaces.create({ golden: await head(), name: "x", on: "solari" });
+    const made = await createOn(rt, { golden: await head(), name: "x", on: "solari" });
     expect(made.golden).toContain("solari-");
     expect(solari.machines.at(-1)!.spec.fromSnapshot).toBe(made.golden);
     // The same recipe sealed again moves no hash, so no copy is owed anywhere.
@@ -104,7 +104,7 @@ describe("a place is always current", () => {
     await until(() => frames.some(f => f.place === "solari"));
     expect((await row("solari")).build).toBe("building your image · creating the machine");
     // The create and a second keep both arrive while the builder is still being made.
-    const creating = rt.workspaces.create({ golden: await head(), name: "x", on: "solari" });
+    const creating = createOn(rt, { golden: await head(), name: "x", on: "solari" });
     void rt.image.keepCurrent("solari");
     release();
     const made = await creating;
@@ -159,7 +159,7 @@ describe("a place is always current", () => {
       expect(manifest.versions.map(v => v.imageHash)).toEqual([v1, v2]);
     }
     expect([solari.snapshots.length, box.snapshots.length]).toEqual([2, 2]);
-    const made = await rt.workspaces.create({ golden: await head(), name: "x", on: "solari" });
+    const made = await createOn(rt, { golden: await head(), name: "x", on: "solari" });
     const copy = (await rt.image.get()).copies.find(c => c.place === "solari")!;
     expect(copy.hash).toBe(v2);
     expect(made.golden).toBe(copy.snapshotId);

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { copyKey, createRuntime } from "../src/runtime.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { wsRequest } from "./ws-client.js";
 
 const GB = 1e9;
@@ -88,8 +88,8 @@ describe("runtime golden retention", () => {
 
   it("never offers or deletes a snapshot a running or paused workspace was forked from; the workspace is named", async () => {
     const { backend, rt } = await fourVersions();
-    const alpha = await rt.workspaces.create({ golden: "snap_golden-v1", name: "alpha" });
-    const beta = await rt.workspaces.create({ golden: "snap_golden-v1", name: "beta" });
+    const alpha = await createOn(rt, { golden: "snap_golden-v1", name: "alpha" });
+    const beta = await createOn(rt, { golden: "snap_golden-v1", name: "beta" });
     await rt.workspaces.nap(beta.id);
     const plan = (await rt.golden.retention())!;
     expect(plan.drop.map(v => v.version)).toEqual([2]);
@@ -151,7 +151,7 @@ describe("runtime golden retention", () => {
     expect(plan.abandoned.map(v => v.version)).toEqual([3, 4]);
     expect(plan.parentAssumed).toBe(false);
     // A workspace forked from v4 guards it: prune deletes v1 and v3, and v4 stays with its recipe.
-    await updating.workspaces.create({ golden: "snap_golden-v4", name: "alpha" });
+    await createOn(updating, { golden: "snap_golden-v4", name: "alpha" });
     const guarded = (await updating.golden.retention())!;
     expect(guarded.drop.map(v => v.version)).toEqual([1, 3]);
     expect(guarded.guarded.map(g => [g.version.version, g.workspaces])).toEqual([[4, ["alpha"]]]);

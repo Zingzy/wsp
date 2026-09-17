@@ -14,6 +14,7 @@ import { DAEMON_DEPLOYED_LINE, deployDaemon } from "../src/doctor.js";
 import { importFor } from "../src/init-import.js";
 import { goldenRecipeFor } from "../src/init-recipe.js";
 import type { ManifestEntry } from "@wsp/collect";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 const LABEL = { wsp: "1", "wsp-test": "golden-import-live" };
 
@@ -90,7 +91,7 @@ describe.runIf(LIVE)("golden import (live: apply a trimmed recipe, seal, fork, p
       const sealMs = Date.now() - tSeal;
       expect(version.smoke).toMatchObject({ exitCode: 0 });
 
-      const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "t87-fork", envs: {}, labels: LABEL });
+      const ws = await createOn(rt, { golden: version.snapshotId, name: "t87-fork", envs: {}, labels: LABEL });
       workspaceId = ws.id;
       mine.add(ws.machineId);
       const fork = await backend.get(ws.machineId);

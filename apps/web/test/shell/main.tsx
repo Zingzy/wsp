@@ -100,7 +100,7 @@ if (params.get("drop") === "1" || params.get("import") === "1") window.wsp = { .
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: "2026-09-05T11:00:00Z",
@@ -121,7 +121,7 @@ if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 // wide in a narrow window, so the composer on a kept machine draws every picker it has and the one label a person
 // names, which no width bounds.
 const LONG_PROJECT = { name: "customer-billing-service-platform", dest: "/Users/zingzy/customer-billing-service-platform", importedAt: "2026-09-06T08:00:00Z", size: 912_000_000 };
-const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", ...(projects ? { projects: [...PROJECTS, LONG_PROJECT] } : {}) };
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // ?look=1 gives the first two workspaces a theme and the first a glyph of its own, and leaves the rest with neither, so
 // one page holds two themed spaces, a plain one and, with ?local=1 and ?ssh=1, every kind's own glyph on the bar. The
@@ -131,7 +131,7 @@ if (params.get("look") === "1") {
   Object.assign(workspaces[1]!, { theme: { ...DEFAULT_THEME, dots: [...THEME_PRESETS[2]!.dots], harmony: THEME_PRESETS[2]!.harmony, grain: 0.5, opacity: 0.7, mode: "dark" } });
 }
 // ?ssh=1 adds a machine over ssh, the third kind, so the space bar can be shot with every kind's own glyph.
-if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", golden: "" });
+if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" });
 // ?many=<n> adds n more running forks, so the space bar can be measured once its icons outgrow the footer.
 for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`ws_x${i}`, `extra-${i}`));
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle

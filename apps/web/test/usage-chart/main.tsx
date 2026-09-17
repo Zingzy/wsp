@@ -19,7 +19,7 @@ document.documentElement.classList.toggle("dark", query.get("theme") !== "light"
 const empty = query.get("empty") === "1";
 
 const NOW = Date.UTC(2026, 8, 6, 6, 24);
-const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api_0123456789abcdef", phase: "napping", golden: "snap_golden-v1", createdAt: new Date(NOW - 50 * 3_600_000).toISOString() };
+const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api_0123456789abcdef", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "napping", golden: "snap_golden-v1", createdAt: new Date(NOW - 50 * 3_600_000).toISOString() };
 const status: WorkspaceStatus = { ...workspace, machineState: "paused", reach: { state: "napping" }, size: { cpu: 4, memMb: 8192 }, rateUsdPerHour: 0.22 };
 const lineage: SnapshotLineage = { name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "sha1", createdAt: "2026-09-04T11:38:00.000Z", smoke: { cmd: "true", exitCode: 0 } }] };
 

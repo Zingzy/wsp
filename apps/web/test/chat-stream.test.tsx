@@ -25,7 +25,7 @@ let restoreLayout: () => void = () => {};
 beforeAll(() => { restoreLayout = installFakeLayout(); });
 afterAll(() => restoreLayout());
 
-const workspace: WorkspaceView = { id: CHAT_WS, name: "api", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+const workspace: WorkspaceView = { id: CHAT_WS, name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 
 const settledTurn = (n: number): SessionEvent[] => {
   const sc = { workspaceId: CHAT_WS, sessionId: "sess_h", turnId: `turn_h_${n}` };

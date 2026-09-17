@@ -88,12 +88,8 @@ import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCom
 import { startHost, workspaceRoads, type HostHandle } from "./server.js";
 import { serveMcp } from "./mcp.js";
 import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpec, nextLine, refreshSkills, registeredLine, removeEach, removeLines, runningWsp, type RunningWsp } from "./mcp-install.js";
-import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
+import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
-
-/** The computer every screen and every reader here is told it is on; the one reading, so a run, its hand-off and
- * the init job a host serves never disagree about which of the two this is. */
-export const hostPlatform = (): Platform => (platform() === "darwin" ? "darwin" : "linux");
 
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
@@ -107,27 +103,30 @@ export const HELP = `wsp - ${TAGLINE}
 usage: wsp <verb> ...
 
   wsp init                        seal this computer into your image, once
-  wsp add                         a place: user@host for a computer over ssh,
-                                  <provider> for a provider
-  wsp places                      your places, the default marked
-  wsp remove <place>              take a place out; the computer is left as
+  wsp add <user@host|folder|url>  a computer of yours over ssh; or a project: a
+                                  folder here, or a repo a computer clones
+                                  with --on <computer>
+  wsp computers                   your computers: this one, each box you added,
+                                  each cloud account
+  wsp remove <computer>           take a computer out; the box is left as
                                   wsp found it
-  wsp new <name>                  a workspace from your image; --on <place>
-                                  says where, once you have more than one
-  wsp import <workspace> <folder> put a folder in it; again for the next one
+  wsp projects                    your projects, each on its computer
+  wsp new [<project>] "<work>"    a workspace: a copy of the project's computer
+                                  with the project inside, named by the work
+  wsp workspaces                  what you have, its project and its computer
+  wsp threads [<workspace>]       who is working, in which workspace, on which
+                                  computer
   wsp run <workspace> "<task>"    an agent works in it and you read its reply
-  wsp pause <workspace>           sleep it now; an idle one sleeps by itself
-  wsp wake <workspace>            wake it now; run, send and exec wake it anyway
-  wsp delete <workspace>          gone; the image stays
-  wsp workspaces                  what you have, and where each one runs
-  wsp threads [<workspace>]       who is working, and in which workspace
   wsp send <thread> "<message>"   the thread's next message
   wsp stop <thread>               end the thread's running turn
+  wsp pause <workspace>           sleep it now; an idle one sleeps by itself
+  wsp wake <workspace>            wake it now; run and send wake it anyway
+  wsp delete <workspace>          gone; the project and the computer stay
   wsp status                      whether a host serves, and where
   wsp mcp                         the verbs as tools for agents on this computer
 
-A workspace or a thread comes right after the verb. new takes --on <place> once
-you have more than one place; run and send take the agent's own flags, run
+A workspace or a thread comes right after the verb. new takes the project once
+you have more than one; run and send take the agent's own flags, run
 --help lists them. Sleeping is automatic.
 
 wsp <verb> --help      the verb's own flags
@@ -708,6 +707,7 @@ export function makeRuntime(
     ssh: sshWiring(),
     placeLinks: placeWiring(statePath, env, agents?.advertise),
     store: jsonFileStore(statePath),
+    statePath,
     adapters: HARNESS_ADAPTERS,
     goldenRecipe: recipe,
     copyRecipe: hostCopyRecipe(),
@@ -1142,14 +1142,9 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
   const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
-  // A state with nothing in it is recorded, not refused: this computer becomes its own workspace the way the app's
-  // first launch records it, so a machine the host was just installed on serves and listens for pairing at once.
-  // Found or made, the shape the app's own road takes, so the three roads that record this computer read alike and
-  // a runtime that already holds one is never asked for a second.
-  if (await servesNothing(rt)) {
-    const workspace = (await rt.workspaces.list()).find(isLocalWorkspace) ?? (await rt.workspaces.createLocal());
-    io.log(thisComputerLine(workspace.name, workspace.id));
-  }
+  // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
+  // no workspace to record, and wsp add is the road. The host listens for pairing either way.
+  if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
   return hostFor(rt, keys, { ...opts, providerEnv }, io, opts.running);
 }
 
@@ -1539,6 +1534,7 @@ interface SharedFlags {
   "code-file"?: string;
   "ssh-port"?: string;
   "ssh-key"?: string;
+  base?: string;
   watch?: boolean;
   update?: boolean;
   name?: string;
@@ -1730,13 +1726,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   add: {
     page: "front",
-    usage: "wsp add [<provider>|user@host|<place> --update] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
-    about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types, a place with --update to put this wsp's daemon on one already in",
+    usage: "wsp add [<user@host>|<folder>|<url>|<provider>|<computer> --update] [--on <computer>] [--name <name>] [--base <branch>] [--ssh-port <port>] [--ssh-key <path>]",
+    about: "a computer of yours over ssh, or a project: a folder on this computer worked in place, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, and a computer with --update puts this wsp's daemon on one already in",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update)),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values.on, values.base)),
   },
   remove: {
     page: "front",
@@ -1944,6 +1940,7 @@ export const SHARED_OPTIONS: Options = {
   "code-file": { type: "string" },
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
+  base: { type: "string" },
   watch: { type: "boolean" },
   update: { type: "boolean" },
   name: { type: "string" },
@@ -2072,7 +2069,9 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },
   { name: "project", on: ["init"], says: "the project folder you are bringing first; its own files say what it needs, and those rows are ticked first" },
-  { name: "on", on: ["init"], says: "the place the image is built on, by the name wsp places lists, a computer you joined included; the default place without it" },
+  { name: "on", on: ["init"], says: "the computer the image is built on, by the name wsp computers lists, a box you joined included; the default place without it" },
+  { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo's url needs one, since this computer works a folder of yours in place and never clones" },
+  { name: "base", on: ["add"], says: "the branch a workspace of the project starts on; the remote's own default branch at the clone without it" },
   { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
   { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
   { name: "rebuild", on: ["init"], says: "seal the next version from a fresh machine rather than from your image plus the changes, which is the question a run at a terminal is asked; without it a run that asks nothing takes whichever road the changes call for" },

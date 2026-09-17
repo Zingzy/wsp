@@ -224,7 +224,7 @@ describe("the wsp skill", () => {
     expect(INSTRUCTIONS).not.toContain("their own terminal");
     expect(INSTRUCTIONS).toContain("prefer the `wsp` command line");
     // An agent holding only the tools reads here that a workspace need not be a machine, and which listing shows both.
-    expect(INSTRUCTIONS).toContain("This computer is a workspace too, the one `wsp new <name> --on it` makes");
+    expect(INSTRUCTIONS).toContain("A project is a repo on one computer, recorded with `wsp add`");
     expect(INSTRUCTIONS).toContain("Start with `wsp workspaces` to see every workspace");
     // Everything but the rules is one line, so a client that shows the instructions as a paragraph shows them whole.
     expect(INSTRUCTIONS.split("\n").filter(line => !line.startsWith("- "))).toHaveLength(1);
@@ -249,7 +249,7 @@ describe("the wsp skill", () => {
     }
     // The ten, each by the fact it turns on: the two roads to a child's end, which kind of workspace the work goes
     // on, the golden, the count, the worktree, the send, the restart, the pause, the person reading along.
-    expect(section).toContain("the one `wsp new <name> --on it` makes");
+    expect(section).toContain("the one `wsp add <folder>` and `wsp new \"<what you are working on>\"` make");
     expect(section).toContain("a quick subtask or a second harness");
     expect(section).toContain("Fork a cloud workspace for builds that run beside each other");
     expect(section).toContain("anything that should not touch this computer");

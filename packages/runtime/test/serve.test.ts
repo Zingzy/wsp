@@ -4,7 +4,7 @@ import { HOST_STOPPING_CLOSE, type AdapterEvent, type ForwardEvent, type InitJob
 import { copyKey, createRuntime, type HarnessAdapterFactory, type HarnessSession, type HarnessStartOptions, type InitDoor } from "../src/runtime.js";
 import { serveRuntime, type ForwardsSource, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { WsClient } from "./ws-client.js";
+import { WsClient, createOverWire } from "./ws-client.js";
 import { abortedCall, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { until } from "./until.js";
@@ -99,7 +99,7 @@ describe("serveRuntime events", () => {
     const quiet = await WsClient.connect(srv.port, { token: "secret" });
     await sub.request("events.subscribe");
 
-    const created = await sub.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(sub, "x", { golden: "snap_g" });
     expect(created.ok).toBe(true);
     await until(() => sub.events.some(e => e.type === "workspace.created"));
     expect(quiet.events).toEqual([]);
@@ -125,7 +125,7 @@ describe("serveRuntime session history", () => {
     const runtime = rt();
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const id = (created["workspace"] as { id: string }).id;
     const res = await c.request("sessions.history", { workspaceId: id });
     expect(res.ok).toBe(true);
@@ -193,7 +193,7 @@ describe("serveRuntime harness catalog", () => {
     const catalogs = listed["harnesses"] as { harness: string; source: string; efforts: { value: string }[] }[];
     expect(catalogs.find(x => x.harness === "claude")?.efforts.map(o => o.value)).toContain("high");
     expect(catalogs.find(x => x.harness === "claude")?.source).toBe("table");
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     // On a workspace the machine is asked; the stub's binary says nothing, so the table answers, marked as such.
     const scoped = await c.request("harnesses.list", { workspaceId });
@@ -226,7 +226,7 @@ describe("serveRuntime session interrupt", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     await c.request("events.subscribe");
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     const started = await c.request("sessions.start", { workspaceId, prompt: "go" });
     expect(started["session"]).toMatchObject({ id: h.sessionId, status: "running" });
@@ -261,7 +261,7 @@ describe("serveRuntime session interrupt", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     await c.request("events.subscribe");
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     await c.request("sessions.start", { workspaceId, prompt: "go", requestId: "req_1" });
     const arrived: string[] = [];
@@ -290,7 +290,7 @@ describe("serveRuntime session interrupt", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     await c.request("events.subscribe");
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     const first = await c.request("sessions.start", { workspaceId, prompt: "go", requestId: "req_1" });
     expect(first).toMatchObject({ ok: true, outcome: "started", turnId: expect.any(String), session: { id: h.sessionId, status: "running" } });
@@ -316,7 +316,7 @@ describe("serveRuntime session interrupt", () => {
     const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fakeClock().clock });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     await c.request("sessions.start", { workspaceId: (created["workspace"] as { id: string }).id, prompt: "go" });
     expect((await c.request("sessions.interrupt", { sessionId: h.sessionId }))["outcome"]).toBe("accepted");
     expect((await c.request("sessions.interrupt", { sessionId: h.sessionId }))["outcome"]).toBe("not-running");
@@ -331,7 +331,7 @@ describe("serveRuntime port reach", () => {
     backend.execImpl = tokenGuest;
     srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const id = (created["workspace"] as { id: string }).id;
     backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: 1_800_000_000_000 });
     const res = await c.request("workspaces.portReach", { workspaceId: id, port: 3000 });
@@ -353,7 +353,7 @@ describe("serveRuntime port reach", () => {
       backend.execImpl = tokenGuest;
       srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
       const c = await WsClient.connect(srv.port, { token: "secret" });
-      const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+      const created = await createOverWire(c, "x", { golden: "snap_g" });
       const id = (created["workspace"] as { id: string }).id;
       backend.machines[0]!.previewUrl = async () => ({ url: `http://127.0.0.1:${guestPort}/?pt_token=e`, token: "e", expiresAt: 1_800_000_000_000 });
       const res = await c.request("workspaces.portProbe", { workspaceId: id, port: 5173 });
@@ -372,7 +372,7 @@ describe("serveRuntime port reach", () => {
     const backend = stubBackend();
     srv = await serveRuntime(createRuntime({ backend, store: memoryStore(), adapters: {} }), { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const id = (created["workspace"] as { id: string }).id;
     const res = await c.request("workspaces.rebuild", { workspaceId: id });
     expect(res.ok).toBe(true);
@@ -593,7 +593,7 @@ describe("serveRuntime thread provenance", () => {
     const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     const rows = async (): Promise<string[]> => ((await c.request("sessions.list", { workspaceId }))["sessions"] as { startedBy: string }[]).map(s => s.startedBy);
     const byCli = await c.request("sessions.start", { workspaceId, prompt: "go", startedBy: "cli" });
@@ -648,7 +648,7 @@ describe("serveRuntime workspaces.exec", () => {
     const c = await WsClient.connect(srv.port, { token: "secret" });
     const other = await WsClient.connect(srv.port, { token: "secret" });
     await other.request("events.subscribe");
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "one\ntwo\n", 3);
 
@@ -686,7 +686,7 @@ describe("serveRuntime workspaces.exec", () => {
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({ PATH: "/usr/bin" }) } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "", 0);
     const scripts = (): string[] => backend.machines[0]!.execLog.filter(cmd => cmd.includes("base64 -d")).map(launch => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(launch)![1]!, "base64").toString("utf8"));
@@ -700,10 +700,11 @@ describe("serveRuntime workspaces.exec", () => {
 
     const bare = await c.request("workspaces.exec", { workspaceId, argv: ["git", "status"] });
     expect(bare.ok).toBe(true);
-    // A fork's kind names no folder, so the reply names none either and its shell lands in the machine's own home.
-    expect(bare).not.toHaveProperty("cwd");
+    // With no folder named the command runs where the workspace's project sits, the same folder a turn opens in.
+    const held = (created["workspace"] as { project: { path: string } }).project.path;
+    expect(bare["cwd"]).toBe(held);
     await until(() => c.events.some(e => e.type === "exec.exit" && e["execId"] === bare["execId"]));
-    expect(scripts().at(-1)).toContain("export PATH='/usr/bin'\ncd ~ && 'git' 'status'\necho $? > ");
+    expect(scripts().at(-1)).toContain(`export PATH='/usr/bin'\ncd '${held}' && 'git' 'status'\necho $? > `);
     c.close();
   });
 
@@ -712,7 +713,7 @@ describe("serveRuntime workspaces.exec", () => {
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     const refused = await c.request("workspaces.exec", { workspaceId, argv: ["true"] });
     expect(refused).toMatchObject({ ok: false, error: 'no adapter registered for harness "claude"; agents on this host: none' });
@@ -724,7 +725,7 @@ describe("serveRuntime workspaces.exec", () => {
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({}) } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "", undefined);
     const started = await c.request("workspaces.exec", { workspaceId, argv: ["sleep", "600"] });
@@ -740,7 +741,7 @@ describe("serveRuntime workspaces.exec", () => {
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({}) } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "", undefined);
     const started = await c.request("workspaces.exec", { workspaceId, argv: ["sleep", "600"] });
@@ -761,7 +762,7 @@ describe("serveRuntime workspaces.exec", () => {
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: { claude: envAdapter({}) } });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     execGuest(backend, "", undefined);
     const started = await c.request("workspaces.exec", { workspaceId, argv: ["sleep", "600"] });
@@ -783,7 +784,7 @@ describe("serveRuntime workspaces.exec", () => {
     const runtime = createRuntime({ backend, store: memoryStore(), adapters: {} });
     srv = await serveRuntime(runtime, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     await c.request("workspaces.nap", { workspaceId });
     const m = backend.machines[0]!;

@@ -123,14 +123,14 @@ const WS = CHAT_WS;
 const workspace: WorkspaceView = {
   id: WS,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
   claudeSessionId: "sess_0001",
 };
 /** The same workspace after one import: the picker browses home and the project folder. */
-const withProject: WorkspaceView = { ...workspace, projects: imported.projects };
+const withProject: WorkspaceView = { ...workspace, project: { id: "pr_wsp", name: "wsp", path: PROJECT_DEST, computer: "default" } };
 const STATUS = { branch: { oid: "abc", head: "feature/panes", ahead: 0, behind: 0 }, entries: [], root: "/root/app" };
 
 function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: WorkspaceView = workspace) {
@@ -292,10 +292,11 @@ describe("composer checkout row", () => {
   it("draws the path the one way in both forms, inside a box that gives its width up, so a long one never reaches the branch slot", async () => {
     const LONG = "/var/folders/xx/90zsjs6n7yjgw9bb1vp6_tx00000gn/T/checkouts/acme-platform/services/gateway-and-edge-router";
     provideDaemonHello(WS, { ...DAEMON_HELLO, root: LONG });
+    const onLong = { ...workspace, project: { id: "pr_1", name: "the-project", path: LONG, computer: "default" } };
 
     // Before the first message: the picker button.
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": STATUS }));
-    await setup(fixtureApi().api);
+    await setup(fixtureApi([], [], onLong).api);
     await waitFor(() => expect(branch()).toBe("feature/panes"));
     expect(folder()).toBe(LONG);
     const picker = { item: folderItem().className.split(" "), path: folderPath().className, text: folderPath().textContent };
@@ -396,7 +397,7 @@ describe("composer checkout row", () => {
     expect(started[0]).toMatchObject({ prompt: "work in the project", cwd: `${PROJECT_DEST}/packages` });
   });
 
-  it("starts an unpicked thread on a workspace with one project by naming that project, the folder under the box saying where that lands; the runtime's rule does the rest", async () => {
+  it("starts an unpicked thread naming no folder at all: the runtime opens it in the workspace's project, which is the folder under the box", async () => {
     provideDaemonWire(WS, fakeWire({ "fs.list": LISTING, "git.status": params => ({ ...STATUS, root: String(params["cwd"]) }) }));
     const { api, started } = fixtureApi([], [], withProject);
     await setup(api);
@@ -405,7 +406,7 @@ describe("composer checkout row", () => {
     await typeInto(editor, "hello");
     await press(editor, "Enter");
     await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ project: "wsp" });
+    expect(started[0]?.project).toBeUndefined();
     expect(started[0]?.cwd).toBeUndefined();
   });
 
@@ -413,7 +414,7 @@ describe("composer checkout row", () => {
     const WORK = "/Users/dev/wsp-work";
     provideDaemonHello(WS, { ...DAEMON_HELLO, root: "/Users/dev" });
     provideDaemonWire(WS, fakeWire({ "fs.list": () => ({ entries: [], truncated: false, total: 0 }), "git.status": () => Object.assign(new Error("not a git repository"), { code: "not-a-git-repo" }) }));
-    const { api, started } = fixtureApi([], [], { ...workspace, kind: "local", machineId: "local", golden: "", folder: WORK });
+    const { api, started } = fixtureApi([], [], { ...workspace, kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: WORK, computer: "default" }, golden: "", folder: WORK });
     await setup(api);
     expect(folder()).toBe(WORK);
     const editor = composerEditor();
@@ -545,7 +546,7 @@ describe("composer checkout row", () => {
       "git.status": STATUS,
     });
     provideDaemonWire(WS, wire);
-    const { api } = fixtureApi();
+    const { api } = fixtureApi([], [], { ...workspace, project: { id: "pr_1", name: "the-project", path: HOME, computer: "default" } });
     await setup(api);
     // The machine says what it is; the Library is hidden because this home is its own, not because of the path.
     onAMac(true);
@@ -581,7 +582,7 @@ describe("composer checkout row", () => {
         "git.status": STATUS,
       }),
     );
-    const { api } = fixtureApi();
+    const { api } = fixtureApi([], [], { ...workspace, project: { id: "pr_1", name: "the-project", path: HOME, computer: "default" } });
     await setup(api);
     onAMac(false);
     await openPicker(HOME);

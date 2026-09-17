@@ -19,7 +19,7 @@ const WS = "ws_switch";
 // An hour before the run, not a fixed date: these rows must stay on the idle shelf, and a fixed date walks past the
 // archive threshold as soon as the calendar moves, which shuts them into the archive and hides them from the sidebar.
 const T0 = Date.now() - 60 * 60_000;
-const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", claudeSessionId: "sess_b" };
+const workspace: WorkspaceView = { id: WS, name: "api", machineId: "m_api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", claudeSessionId: "sess_b" };
 const manifest: GoldenManifest = {
   head: 1,
   versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "default", kind: "sandbox", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }],

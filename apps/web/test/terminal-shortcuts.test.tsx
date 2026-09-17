@@ -22,7 +22,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipPopup: ({ children }: { children: ReactNode }) => <span data-tooltip>{children}</span>,
 }));
 
-const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 const CAPS = caps();
 
 function fakeApi(): Api {

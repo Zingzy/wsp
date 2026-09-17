@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createRuntime, type LandRequest, type LandedProject, type ProjectLander } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { wsRequest } from "./ws-client.js";
 
 let srv: RuntimeServer | undefined;
@@ -113,7 +113,7 @@ describe("project.export on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const lander = fakeLander();
     const result = await rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander });
     expect(result).toEqual({
@@ -171,7 +171,7 @@ describe("project.export on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const lander = fakeLander();
     const result = await rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander });
     const sentence = storeUnreadLine(unread.store, unread.why);
@@ -190,7 +190,7 @@ describe("project.export on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const commands = backend.machines[0]!.execLog.length;
     const lander = fakeLander(12);
     await expect(rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander })).rejects.toMatchObject({ kind: "exists", message: `${DEST} already exists on this computer with 12 files; export with replace to overwrite it` });
@@ -212,7 +212,7 @@ describe("project.export on a workspace", () => {
     const backend = stubBackend();
     machineWith(backend, ["/root/.claude-cfg/projects/-root-work-proj"]);
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const lander = fakeLander();
     const result = await rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, agents: ["claude", "pi"], lander });
     const machine = backend.machines[0]!;
@@ -226,7 +226,7 @@ describe("project.export on a workspace", () => {
   it("a folder that is not on the machine, a napping workspace and an unknown one are refused, the lander never asked to land", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const lander = fakeLander();
     await expect(rt.projects.export({ workspaceId: ws.id, source: SOURCE, dest: DEST, lander })).rejects.toThrow(`${SOURCE} is not a folder on the machine`);
     await rt.workspaces.nap(ws.id);
@@ -242,7 +242,7 @@ describe("project.export on a workspace", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const lander = fakeLander();
     srv = await serveRuntime(rt, { port: 0, authToken: "t", landing: lander });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const exported = await wsRequest(srv.port, "t", { op: "project.export", workspaceId: ws.id, source: SOURCE, dest: DEST, agents: ["claude"] });
     expect(exported).toMatchObject({ ok: true, exported: { dest: DEST, files: 3, bytes: 4000, excluded: ["dist", "node_modules"], agents: [] } });
     expect(lander.landings[0]).toMatchObject({ source: SOURCE, dest: DEST, replace: false });

@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import {
+import { sourceKind, type ProjectView,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
@@ -287,17 +287,24 @@ export interface AddFlags {
   /** The one word for a computer already in this wsp: put the daemon this host deploys on it. Every other flag on
    * this verb is about a computer that is not in yet, so it goes beside none of them. */
   update?: boolean;
+  /** Which computer a project lives on, by the name or the id the computers table carries; a folder here needs
+   * none, and a repo's url is refused without one. */
+  on?: string;
+  /** The branch a workspace of the project starts on; absent takes the remote's own default at the clone. */
+  base?: string;
 }
 
 /** The words a person gave beside the address, read by the one rule every ssh road on this command line reads
  * them by: a port that is a number and a key that is a path on this computer. */
-export function addFlags(name?: string, port?: string, keyPath?: string, update?: boolean): AddFlags {
+export function addFlags(name?: string, port?: string, keyPath?: string, update?: boolean, on?: string, base?: string): AddFlags {
   const asked = sshAsked(name, port, keyPath);
   return {
     ...(asked.name !== undefined ? { name: asked.name } : {}),
     ...(asked.port !== undefined ? { sshPort: asked.port } : {}),
     ...(asked.keyPath !== undefined ? { keyPath: asked.keyPath } : {}),
     ...(update === true ? { update: true } : {}),
+    ...(on !== undefined ? { on } : {}),
+    ...(base !== undefined ? { base } : {}),
   };
 }
 
@@ -626,7 +633,11 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
     return updatePlace(io, opts, aim, word, deps);
   }
   const named = flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined;
-  if (word !== undefined && word.includes("@")) return addOverSsh(io, opts, aim, word, flags, deps);
+  // What one word names is read once, in the protocol: a computer of the person's own over ssh, a repo a computer
+  // clones, or a folder this computer holds. A provider's own word is neither and is read first.
+  const kind = word === undefined || addableProviders().includes(word) ? undefined : sourceKindOf(word);
+  if (kind === "computer") return addOverSsh(io, opts, aim, word!, flags, deps);
+  if (kind === "git" || kind === "folder") return addProject(io, opts, aim, word!, flags, deps);
   if (named) {
     io.error(ADD_FLAGS_REFUSAL);
     return 1;
@@ -705,6 +716,45 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
   } finally {
     client.close();
   }
+}
+
+/** What one word to wsp add names, with the verb's own refusal for a word that names none of the three forms. */
+function sourceKindOf(word: string): "computer" | "git" | "folder" | undefined {
+  try {
+    return sourceKind(word);
+  } catch {
+    return undefined;
+  }
+}
+
+/** One typed folder or repo url: a project recorded on a computer, which is what every workspace is a copy for.
+ * The work is the host's, over the socket this line opens, so the app and the command line record one project the
+ * same way. */
+async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: string, flags: AddFlags, deps: PlaceDeps): Promise<number> {
+  if (flags.sshPort !== undefined || flags.keyPath !== undefined) {
+    io.error(ADD_FLAGS_REFUSAL);
+    return 1;
+  }
+  const client = await deps.dial(opts.statePath, { aim });
+  try {
+    const { project } = await client.request<{ project: ProjectView }>("projects.add", {
+      source,
+      ...(flags.on !== undefined ? { on: flags.on } : {}),
+      ...(flags.name !== undefined ? { name: flags.name } : {}),
+      ...(flags.base !== undefined ? { base: flags.base } : {}),
+    });
+    io.log(addedProjectLine(project));
+    return 0;
+  } finally {
+    client.close();
+  }
+}
+
+/** What the line prints once a project is recorded: what it is called, where its code comes from, the computer it
+ * lives on and where a workspace of it holds the checkout, then the line that makes one. */
+export function addedProjectLine(project: ProjectView): string {
+  const from = project.source.kind === "git" ? project.source.url : project.source.path;
+  return `${project.name} ${project.id}: ${from} on ${project.computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
 
 /** One typed address: the host logs in over ssh, installs the agent and waits for that computer to dial back. The

@@ -10,7 +10,7 @@ import { copyKey, createRuntime, wiredPlace, type PlaceBackends, type Runtime } 
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { COPY_RECIPE, EMPTY_TGZ_SHA, SMALL, dfOk, digestOf, importOf, recipeWith } from "./image-fixtures.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -413,13 +413,13 @@ describe("where an image build goes", () => {
     const none = new NoProviderBackend();
     const solari = stubBackend();
     const rt = createRuntime({ backend: none, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith(), hostId: "h1", places: forking({ none, solari }, "none") });
-    await expect(rt.workspaces.landing()).rejects.toThrow(placeForksNothingPickLine("none", ["solari"]));
-    await expect(rt.workspaces.create({ golden: "snap_x", name: "x" })).rejects.toThrow(placeForksNothingPickLine("none", ["solari"]));
+    await expect(rt.workspaces.landing({ project: (await projectOn(rt, "none")).id })).rejects.toThrow(placeForksNothingPickLine("none", ["solari"]));
+    await expect(createOn(rt, { on: "none", golden: "snap_x", name: "x" })).rejects.toThrow(placeForksNothingPickLine("none", ["solari"]));
     expect(solari.machines).toEqual([]);
     await rt.close();
     const alone = createRuntime({ backend: none, store: memoryStore(), adapters: {}, goldenRecipe: recipeWith(), hostId: "h1", places: forking({ none }, "none") });
-    await expect(alone.workspaces.landing()).rejects.toThrow(NO_PROVIDER_LINE);
-    await expect(alone.workspaces.create({ golden: "snap_x", name: "x" })).rejects.toThrow(NO_PROVIDER_LINE);
+    await expect(alone.workspaces.landing({ project: (await projectOn(alone, "none")).id })).rejects.toThrow(NO_PROVIDER_LINE);
+    await expect(createOn(alone, { on: "none", golden: "snap_x", name: "x" })).rejects.toThrow(NO_PROVIDER_LINE);
     await alone.close();
   });
 

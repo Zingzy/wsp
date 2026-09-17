@@ -213,7 +213,6 @@ export function usageError(argv: readonly string[], lines: readonly CommandLine[
 const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "threads wait threads": "the threads are the words after the verb",
   "exec argv": "the command is the words after the verb",
-  "import agents": "the catalog ids are one comma-joined value of --agents",
   "export agents": "the catalog ids are one comma-joined value of --agents",
   "recipe scan project": "--project",
   "recipe set": "--set",
@@ -225,8 +224,6 @@ const LISTS_ON_THE_COMMAND_LINE: Record<string, string> = {
   "run notify": "--notify",
   "run images": "--image",
   "send images": "--image",
-  "import keep": "--keep",
-  "import cut": "--cut",
 };
 
 describe("the command line, the MCP tools and the skill are one contract", () => {
@@ -444,7 +441,6 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "wsp run reads --effort, which its row does not show",
       "wsp run reads --image, which its row does not show",
       "wsp run reads --model, which its row does not show",
-      "wsp run reads --project, which its row does not show",
       "wsp run reads --title, which its row does not show",
       "wsp send reads --access, which its row does not show",
       "wsp send reads --detach, which its row does not show",

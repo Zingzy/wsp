@@ -41,7 +41,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
   TooltipPopup: () => null,
 }));
 
-const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({ id, name, machineId: `m_${id}`, phase, golden: "snap_g", createdAt: new Date(Date.now() - 3_600_000).toISOString() });
+const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({ id, name, machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase, golden: "snap_g", createdAt: new Date(Date.now() - 3_600_000).toISOString() });
 const API = view("ws_a", "api");
 const WEB = view("ws_b", "web", "napping");
 

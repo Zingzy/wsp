@@ -18,7 +18,7 @@ import { ExportProjectDialog } from "../src/sidebar/ExportProjectDialog.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
 
-const workspace: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
+const workspace: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 const SOURCE = "/root/proj";
 
 const session = (id: string, harness: string): SessionView => ({ id, workspaceId: "ws_a", harness, status: "completed", threadId: `t_${id}` });
@@ -148,14 +148,15 @@ describe("export project dialog", () => {
     expect(within(root).queryByRole("button", { name: /folder/ })).toBeNull();
   });
 
-  it("without a thread folder or a daemon root the inputs open empty and Export waits for a folder; a typed destination is sent as typed", async () => {
+  it("without a thread folder the inputs open on the workspace's project; a typed destination is sent as typed", async () => {
     useRootStore.setState({ byWorkspaceId: {} });
     const { api } = fakeApi();
     useStore.getState().bind(api);
     render(<ExportProjectDialog workspace={workspace} onClose={() => {}} />);
     const root = await dialog();
-    expect(field(root, "Folder on the workspace").value).toBe("");
-    expect(button(root, "Export").disabled).toBe(true);
+    // A workspace is one project's copy, so the folder to bring home is that project's until one is typed.
+    expect(field(root, "Folder on the workspace").value).toBe(workspace.project.path);
+    expect(button(root, "Export").disabled).toBe(false);
     fireEvent.change(field(root, "Folder on the workspace"), { target: { value: "/root/other" } });
     expect(field(root, "Folder on this Mac").value).toBe("/root/other");
     expect(button(root, "Export").disabled).toBe(false);

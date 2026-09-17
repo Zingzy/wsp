@@ -3,14 +3,15 @@
 // beside a workspace's name, and what a word that names no place is refused
 // with. The host here holds no joined computer, so what is proved is the road
 // from the command line to the runtime and the refusals a person reads.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copyKey, createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { cli, localWiring, serve, type CliIO } from "../src/cli.js";
 import { placeWiring } from "../src/places.js";
-import { createFromHead, workspaceLine } from "../src/verbs.js";
+import { createFor, workspaceLine } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import type { HostHandle } from "../src/server.js";
@@ -68,56 +69,30 @@ const run = async (...argv: string[]): Promise<{ code: number; io: Captured }> =
   return { code: await cli([...argv, "--state", statePath], io), io };
 };
 
-describe("wsp new --on", () => {
-  it("refuses a word that names no place, and names the ones this host holds", async () => {
-    const { code, io } = await run("new", "x", "--on", "nowhere");
+describe("wsp add and the computer a project lives on", () => {
+  it("refuses a word that names no computer, and names the ones this host holds", async () => {
+    const { code, io } = await run("add", "https://github.com/dev/x.git", "--on", "nowhere");
     expect(code).not.toBe(0);
     expect(io.errors.join("\n")).toContain("no place named nowhere");
-    expect(io.errors.join("\n")).toContain(hostname().toLowerCase());
   });
 
-  it("records this computer as its own one workspace when the word names this computer, since it forks nothing", async () => {
-    const { code, io } = await run("new", "x", "--on", hostname().toLowerCase());
-    expect(code, io.errors.join("\n")).toBe(0);
-    const made = (await rt!.workspaces.list()).find(w => w.name === "x")!;
-    expect(made.kind).toBe("local");
-    expect(made.place).toBeUndefined();
+  it("records a folder here as a project worked in place, and wsp new makes its workspace", async () => {
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-place-here-")));
+    execFileSync("git", ["init", "-q", folder]);
+    const added = await run("add", folder);
+    expect(added.code, added.io.errors.join("\n")).toBe(0);
+    const made = await run("new", "work here");
+    expect(made.code, made.io.errors.join("\n")).toBe(0);
+    const held = (await rt!.workspaces.list()).find(w => w.name === "work here")!;
+    expect(held.kind).toBe("local");
+    expect(held.project.path).toBe(folder);
+    rmSync(folder, { recursive: true, force: true });
   });
 
-  /** A host as the create road sees it: the place list, the golden's head, the landing at srv with the one size it
-   * offers, and every frame the road sends in order. */
-  const hostOf = (sent: Record<string, unknown>[]): Parameters<typeof createFromHead>[0] =>
-    ({
-      request: async (op: string, params?: Record<string, unknown>) => {
-        if (op === "places.list") return { places: [{ id: "p_1", kind: "computer", name: "srv", default: true, present: true, takesForks: true }] };
-        if (op === "golden.get") return { manifest: { name: "default", head: 1, versions: [{ version: 1, snapshotId: "snap_head" }] } };
-        sent.push({ op, ...params });
-        if (op === "workspaces.landing") return { place: "p_1", name: "srv", capabilities: { sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }] } };
-        return { workspace: { id: "ws_1", name: "x", machineId: "m1", phase: "running", kind: "cloud", golden: "snap_g", createdAt: "2026-09-12T00:00:00.000Z" } };
-      },
-      events: async () => {},
-      onFrame: () => () => {},
-    }) as unknown as Parameters<typeof createFromHead>[0];
-
-  it("asks the host once where the fork lands and sends the place on the create frame, so the host decides where the machine lands", async () => {
-    const sent: Record<string, unknown>[] = [];
-    await createFromHead(hostOf(sent), { emit: () => {}, stream: () => {} }, "x", undefined, undefined, "srv");
-    expect(sent).toEqual([
-      { op: "workspaces.landing", on: "srv" },
-      { op: "workspaces.create", golden: "snap_head", name: "x", on: "srv" },
-    ]);
-  });
-
-  it("holds --size to what the landing place offers, off that one read, and sends no create for a size it does not", async () => {
-    const sent: Record<string, unknown>[] = [];
-    await expect(createFromHead(hostOf(sent), { emit: () => {}, stream: () => {} }, "x", "4x8", undefined, "srv")).rejects.toThrow("4x8 is not a size this provider offers; the sizes are 2x4");
-    expect(sent).toEqual([{ op: "workspaces.landing", on: "srv" }]);
-  });
-
-  it("refuses the words that pick an image or a size on a place that forks nothing", async () => {
-    const sized = await run("new", "here", "--on", hostname().toLowerCase(), "--size", "2x4");
-    expect(sized.code).not.toBe(0);
-    expect(sized.io.errors.join("\n")).toContain("forks nothing");
+  it("refuses a repo's url with no computer, naming the ones that clone", async () => {
+    const { code, io } = await run("add", "https://github.com/dev/x.git");
+    expect(code).not.toBe(0);
+    expect(io.errors.join("\n")).toContain("name the computer that clones it with --on");
   });
 });
 
@@ -134,17 +109,18 @@ describe("the computer a workspace's row names", () => {
     size: { cpu: 2, memMb: 4096 },
     rateUsdPerHour: 0,
     reach: { state: "reachable" as const },
+    project: { id: "pr_1", name: "api", path: "/root/api", computer: "p_ab12cd34" },
   };
 
   it("names the computer a fork lives on under WHERE, by the name the person gave it, and leaves the name column the name alone", () => {
     const listed = workspaceLine({ ...row, place: "p_ab12cd34" }, new Map([["p_ab12cd34", "srv"]]));
     expect(listed[0]).toBe("x");
-    expect(listed[2]).toBe("srv");
+    expect(listed[3]).toBe("srv");
   });
 
   it("falls back to the id when the places are not to hand, and a fork at the provider names what it runs at", () => {
-    expect(workspaceLine({ ...row, place: "p_ab12cd34" })[2]).toBe("p_ab12cd34");
-    expect(workspaceLine({ ...row, provider: "solari" })[2]).toBe("solari");
-    expect(workspaceLine(row)[2]).toBe("a provider");
+    expect(workspaceLine({ ...row, place: "p_ab12cd34" })[3]).toBe("p_ab12cd34");
+    expect(workspaceLine({ ...row, provider: "solari" })[3]).toBe("solari");
+    expect(workspaceLine(row)[3]).toBe("a provider");
   });
 });

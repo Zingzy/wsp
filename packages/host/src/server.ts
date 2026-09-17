@@ -5,9 +5,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir, networkInterfaces, platform } from "node:os";
 import { extname, join, resolve as resolvePath, sep } from "node:path";
 import { CREATED_AT_LABEL, HOST_LABEL, SMOKE_LABEL, WSP_LABEL, agentHomes } from "@wsp/engine";
-import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type WorkspaceView } from "@wsp/protocol";
+import { API_UNAUTHORIZED, DEFAULT_PORT, DEFAULT_WS_PORT, PLACES_WORDS, PLACE_PORT_OFFSET, WILDCARD, WS_PATH, authority, doorPortHeldLine, isLoopback, joinAddressOf, recordRestoredLine, relayUrlOf, type BootPayload, type Caller, type PlaceDoorView, type ProjectImportResult, type ProjectPlan, type ProjectView, type WorkspaceView, HERE_PLACE_ID, nameTheProjectLine } from "@wsp/protocol";
 import { LOOPBACK, describeAge, goldenHead, serveRuntime, type CreatedWorkspace, type GoldenBuilderView, type GoldenVersion, type InitDoor, type PlaceDoorControl, type ProjectBundler, type ProjectImportOptions, type ReapedMachine, type Runtime, type RuntimeServer, type SparedMachine } from "@wsp/runtime";
 import { advertiseWord, reachAddresses } from "./pairing.js";
+import { NO_PROJECT_YET } from "./verbs.js";
 import { accountHere, publicHostname } from "./relay-link.js";
 import { wspHome } from "./hosts.js";
 import { nodeHost, readGhosttyConfig } from "@wsp/collect";
@@ -75,10 +76,12 @@ export interface HostOptions {
 export interface WorkspaceRoads {
   /** Forks the golden's head into a new workspace, with the envs and labels the app's own create gives it. The
    * caller is who asked, so a route reached with a thread's own token is held to what that thread may do. */
-  createWorkspace(name: string, caller?: Caller): Promise<CreatedWorkspace>;
+  createWorkspace(name: string, caller?: Caller, project?: string): Promise<CreatedWorkspace>;
+  /** Records a project, the road every workspace starts from: a folder on this computer, or a repo a computer
+   * clones when `on` names one. */
+  addProject(source: string, on?: string, caller?: Caller): Promise<ProjectView>;
   /** Makes this computer the one local workspace, as the app's own This computer row does; it forks nothing and
    * needs no golden, so it is the one road into an empty state. */
-  createLocalWorkspace(): Promise<WorkspaceView>;
   /** Reads a folder on this computer as the app's import dialog reads it; nothing is packed or uploaded. */
   planProject(source: string): Promise<ProjectPlan>;
   /** Lands that folder on a workspace's machine through the bundler the app's import goes through. */
@@ -256,20 +259,30 @@ export function workspaceRoads(rt: Runtime, homes: Readonly<Record<string, strin
   const bundlerFor = (source: string) => projectBundler(source, homes);
   return {
     bundlerFor,
-    createWorkspace: async (name, caller) => {
+    addProject: (source, on, caller) => rt.projects.add({ source, ...(on !== undefined ? { on } : {}) }, caller),
+    createWorkspace: async (name, caller, named) => {
+      // A workspace is one project's copy. A road that names none takes the only project there is and refuses in
+      // the same sentence the command line uses when there are several.
+      const all = await rt.projects.list(caller);
+      // A road that names none is forking, so the projects it can mean are the ones on a computer that forks: a
+      // folder worked in place here is a workspace of its own and is never what a fork was asked for.
+      const held = named === undefined ? all.filter(p => p.computer !== HERE_PLACE_ID) : all;
+      const project = named === undefined ? held[0] : held.find(p => p.id === named || p.name === named);
+      if (project === undefined || (named === undefined && held.length !== 1)) throw new Error(held.length === 0 ? NO_PROJECT_YET : nameTheProjectLine(held.map(p => p.name)));
       const head = goldenHead(await rt.golden.get());
-      if (!head) throw new NoGoldenError();
+      // A project worked in place forks nothing, so it needs no image; every other computer's copy does.
+      if (!head && project.computer !== HERE_PLACE_ID) throw new NoGoldenError();
       return rt.workspaces.create(
         {
-          golden: head.snapshotId,
+          project: project.id,
+          ...(head !== undefined ? { golden: head.snapshotId } : {}),
           name,
-          ...(opts.workspaceEnvs !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
+          ...(opts.workspaceEnvs !== undefined && head !== undefined ? { envs: opts.workspaceEnvs(head) } : {}),
           labels: { [WSP_LABEL]: "1", [HOST_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },
         },
         caller,
       );
     },
-    createLocalWorkspace: () => rt.workspaces.createLocal(),
     planProject: source => bundlerFor(source).plan(),
     importProject: o => rt.projects.import({ ...o, bundler: bundlerFor(o.source) }),
   };
@@ -307,7 +320,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
   const log = opts.log ?? (() => {});
 
   const homes = agentHomes(homedir());
-  const { bundlerFor, createWorkspace, createLocalWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
+  const { bundlerFor, addProject, createWorkspace, planProject, importProject } = workspaceRoads(rt, homes, opts);
 
   const address = opts.listen ?? LOOPBACK;
   // Reaching a loopback host already means being on this computer, so the page carries the token and the JSON
@@ -396,7 +409,7 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         }
         let created: CreatedWorkspace;
         try {
-          created = await createWorkspace(name, who.caller);
+          created = await createWorkspace(name, who.caller, typeof (body as { project?: unknown }).project === "string" ? (body as { project: string }).project : undefined);
         } catch (e) {
           if (!(e instanceof NoGoldenError)) throw e;
           sendJson(res, 409, { error: e.message });
@@ -554,8 +567,8 @@ export async function startHost(opts: HostOptions): Promise<HostHandle> {
         await new Promise<void>((resolve, reject) => doorServer.close(err => (err ? reject(err) : resolve())));
       },
     },
+    addProject,
     createWorkspace,
-    createLocalWorkspace,
     planProject,
     importProject,
     close: async () => {

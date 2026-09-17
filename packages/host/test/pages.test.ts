@@ -19,7 +19,7 @@ const captured = (): CliIO & { lines: string[]; errors: string[] } => {
 };
 
 /** The sixteen words, in the order the front page prints them. */
-const FRONT = ["init", "add", "places", "remove", "new", "import", "run", "pause", "wake", "delete", "workspaces", "threads", "send", "stop", "status", "mcp"];
+const FRONT = ["init", "add", "computers", "remove", "projects", "new", "workspaces", "threads", "run", "send", "stop", "pause", "wake", "delete", "status", "mcp"];
 
 /** Every line the front page draws: one per word, each opening at two spaces. */
 const frontLines = (): string[] => HELP.split("\n").filter(line => line.startsWith("  wsp "));
@@ -42,7 +42,7 @@ describe("the pages wsp prints", () => {
     expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT].sort());
     // The three rules and the two pages behind it, which is what makes "nothing else" findable.
     expect(HELP).toContain("A workspace or a thread comes right after the verb.");
-    expect(HELP).toContain("new takes --on <place> once");
+    expect(HELP).toContain("new takes the project once");
     expect(HELP).toContain("Sleeping is automatic.");
     expect(HELP).toContain("wsp --help agent");
     expect(HELP).toContain("wsp host --help");
@@ -62,11 +62,9 @@ describe("the pages wsp prints", () => {
         if (/^\[?<(workspace|thread)>\]?$/.test(word)) expect(at, usage).toBe(2);
       }
     }
-    // The only flag named anywhere in the rows is the one the sentence says a person meets, and it is on new.
+    // The only flag named anywhere in the rows is the one the sentence says a person meets, and it is on add.
     const block = HELP.split("\n\n")[2]!;
-    expect(block.split("\n").filter(line => line.includes("--")).map(line => line.trim())).toEqual([
-      "wsp new <name>                  a workspace from your image; --on <place>",
-    ]);
+    expect(block.split("\n").filter(line => line.includes("--")).map(line => line.trim())).toEqual(["with --on <computer>"]);
     // run and send take the agent's own flags, as the sentence says, and their own help is where they are listed.
     for (const name of ["run", "send"]) {
       const verb = CLI_VERBS.find(v => v.name === name)!;

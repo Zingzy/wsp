@@ -20,7 +20,7 @@ import { noDaemonApi } from "./fake-daemon-api.js";
 const view = (id: string, name: string): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",

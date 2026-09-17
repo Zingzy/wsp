@@ -82,7 +82,7 @@ describe("makeApi wrappers", () => {
 
   it("preferences and setPreferences send the two preferences ops and unwrap the record the wire type vouches for", async () => {
     const { api, lastSent } = await connect();
-    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, project: { ws_a: "spoo" }, target: { workspace: "ws_a", project: "spoo" }, labs: false };
+    const record = { theme: "light", sidebarMode: "spaces", sidebarWidth: 312, terminalSize: "app", terminalZoom: { ws_a: 2 }, access: { ws_a: "bypassPermissions" }, target: { workspace: "ws_a" }, labs: false };
     ScriptedSocket.reply = f => ({ id: f["id"], ok: true, preferences: record });
     expect(await api.preferences!()).toEqual(record);
     expect(lastSent()).toEqual({ id: expect.any(Number), op: "preferences.get" });
@@ -140,7 +140,7 @@ describe("makeApi wrappers", () => {
 
   it("createWorkspace and createFromGoldenHead send a picked size as cpu and memMb, and nothing about size without one", async () => {
     const { api, lastSent } = await connect();
-    const workspace = { id: "ws_1", name: "beta", machineId: "m1", phase: "running", golden: "snap_1", createdAt: "t" };
+    const workspace = { id: "ws_1", name: "beta", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_1", createdAt: "t" };
     const manifest = { head: 1, versions: [{ version: 1, snapshotId: "snap_1", baseTemplate: "default", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] };
     ScriptedSocket.reply = f => (f["op"] === "golden.get" ? { id: f["id"], ok: true, manifest } : { id: f["id"], ok: true, workspace });
     await api.createWorkspace("snap_1", "beta", { cpu: 2, memMb: 8192 });
@@ -495,7 +495,7 @@ describe("ProtocolClient event cursor", () => {
     await replied();
 
     push(socket(0), { type: "workspace.napped", workspaceId: "ws_1", seq: 3 });
-    push(socket(0), { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2", resurrected: false, seq: 4 });
+    push(socket(0), { type: "workspace.woken", workspaceId: "ws_1", machineId: "m2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, resurrected: false, seq: 4 });
     expect(seen).toHaveLength(2);
 
     await redial(client, socket(0));

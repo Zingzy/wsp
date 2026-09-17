@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { imagePathIn, noImagesLine, sendRefusal, threadImagesDir, turnImagesDir, type AdapterEvent, type AttachmentRoad, type TurnImage, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -88,7 +88,7 @@ function landedFiles(puts: StubBackend["puts"]): Map<string, Buffer> {
  * daemon, so what an image costs is only ever what came after. */
 async function workspaceOn(adapters: Record<string, HarnessAdapterFactory>, backend = stubBackend()) {
   const rt = createRuntime({ backend, store: memoryStore(), adapters });
-  const ws = await rt.workspaces.create({ golden: "snap_g", name: "shots" });
+  const ws = await createOn(rt, { golden: "snap_g", name: "shots" });
   const mark = { puts: backend.puts.length, execs: backend.machines[0]!.execLog.length };
   const since = () => ({ puts: backend.puts.slice(mark.puts), execs: backend.machines[0]!.execLog.slice(mark.execs) });
   return { rt, ws, backend, since };

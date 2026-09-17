@@ -1611,7 +1611,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
       if (handle !== undefined) log.step(DONE_LINE, out);
     } else {
       if (ask.fork !== undefined) first = await runFirst({ first: ask.fork, handle: roads, goldenVersion: version, output: io.output, spin: label => spin(io.output, label, io.isTTY), ...(io.json !== undefined ? { json: io.json } : {}) });
-      if (ask.local) local = await runLocal(roads, io.output);
+      if (ask.local) local = await runLocal(roads, io.output, ask.fork?.folder);
       if (first === undefined && local === undefined && handle !== undefined) log.step(DONE_LINE, out);
     }
   }

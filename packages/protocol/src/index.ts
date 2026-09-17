@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
+import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -316,6 +316,35 @@ export type PortProbeView = z.infer<typeof PortProbeView>;
 export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string(), size: z.number().int().nonnegative().optional() });
 export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
 
+/** Where a project's code comes from, as the computer it lives on sees it: a folder that computer holds, or a repo
+ * it clones. Which of the two a computer takes is its kind's own row (projectSources), so no road guesses. */
+export const ProjectSource = z.discriminatedUnion("kind", [z.object({ kind: z.literal("folder"), path: z.string() }), z.object({ kind: z.literal("git"), url: z.string() })]);
+export type ProjectSource = z.infer<typeof ProjectSource>;
+
+/** A project: one computer, one source that computer can see, and the branch a workspace of it starts on. Its own
+ * record, not a folder inside a workspace: a workspace is a copy of this computer with this project in it. */
+export const ProjectView = z.object({
+  id: z.string(),
+  /** The folder's name, or the repo's last word without .git; --name overrides. */
+  name: z.string(),
+  /** An id off places.list: this computer, a computer somebody joined, or a provider account. */
+  computer: z.string(),
+  source: ProjectSource,
+  /** Where the checkout sits inside a workspace of it: the folder itself on this computer, /root/<name> on a copy. */
+  path: z.string(),
+  /** The branch a new workspace starts on; absent is the remote's default branch, read at the clone. */
+  base: z.string().optional(),
+  createdAt: z.string(),
+  /** The agent the last thread on this project used; what run and the composer default to. */
+  lastAgent: z.string().optional(),
+});
+export type ProjectView = z.infer<typeof ProjectView>;
+
+/** The project a workspace holds, joined onto the view by the runtime from the record's project id: what every row
+ * that names a workspace's project reads, without a second fetch of the projects list. */
+export const ProjectRef = ProjectView.pick({ id: true, name: true, path: true, computer: true });
+export type ProjectRef = z.infer<typeof ProjectRef>;
+
 /** What a workspace's machine is: cloud, a fork wsp made at a provider, local, this computer itself, or ssh, a
  * machine of the person's own that wsp only reaches. A missing kind reads cloud, since every record written before
  * local workspaces existed was one. The one fact every road that varies by machine kind reads; nothing switches on
@@ -402,8 +431,9 @@ export const WorkspaceView = z.object({
    * workspace, which forks from no image. */
   golden: z.string(),
   createdAt: z.string(),
-  /** The projects on the machine, oldest import first; absent reads as none, through workspaceProjects. */
-  projects: z.array(WorkspaceProject).optional(),
+  /** The one project this workspace was made for, joined from its record's project id. A workspace holds exactly
+   * one; the computer it runs on is that project's. */
+  project: ProjectRef,
   /** The folder a thread or a command starts in when no project does, the last branch of the runtime's default folder
    * rule: the kind's own (the work folder on this computer). Absent where the kind names none and the machine's own
    * home is where the shell lands (a fork, a machine over ssh). Published so a client shows what the runtime will do. */
@@ -490,7 +520,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
  * facts, and nothing the provider minted. Picked rather than omitted, so a route added to the view later is not
  * handed over by having been forgotten, which is how the display stream rode these doors until now. */
 const WORKSPACE_OUT = {
-  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, projects: true, folder: true, home: true,
+  id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
   agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true,
 } as const;
@@ -1253,7 +1283,7 @@ export const isSessionEvent = (e: { type: string }): e is SessionEvent => SESSIO
  * up, so a change to a record a client already holds is never this event. */
 export const WorkspaceCreatedEvent = z.object({ type: z.literal("workspace.created"), workspace: WorkspaceView });
 /** The awaited steps of a create in the order the runtime reaches them; `failed` ends a create that threw. */
-export const WorkspaceCreateStage = z.enum(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready", "failed"]);
+export const WorkspaceCreateStage = z.enum(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "project-cloned", "ready", "failed"]);
 export type WorkspaceCreateStage = z.infer<typeof WorkspaceCreateStage>;
 /** Whether a line of a create's log is the step the create is waiting on, rather than a note on a step it already
  * took. A surface with one line for the whole create shows the last of these, so a cosmetic step's verdict never
@@ -1551,8 +1581,9 @@ export type SidebarMode = z.infer<typeof SidebarMode>;
 export const TerminalSizeSource = z.enum(["app", "file"]);
 export type TerminalSizeSource = z.infer<typeof TerminalSizeSource>;
 
-/** The last target: the workspace a thread was last started on, and the project when it landed in one. */
-export const PreferencesTarget = z.object({ workspace: z.string(), project: z.string().optional() });
+/** The last target: the workspace a thread was last started on. A workspace holds one project, so the workspace
+ * is the whole of the answer. */
+export const PreferencesTarget = z.object({ workspace: z.string() }).strict();
 export type PreferencesTarget = z.infer<typeof PreferencesTarget>;
 
 /** One record on the host's state; the desktop app and a browser tab on the same host read and write this one. sidebarWidth
@@ -1570,13 +1601,8 @@ export const Preferences = z.object({
    * either harness and their mode lists are disjoint, and a pick the harness in front of us does not take drops to
    * that harness's own default rather than refusing the send. */
   access: z.record(z.string(), z.string()),
-  /** The project a thread was last started in, by workspace id and project name: the second branch of the default
-   * folder rule (projectFor), written by the runtime on every start that lands in one of the workspace's projects
-   * and by the composer when its pick changes, so the next thread on that workspace opens where the last one did
-   * whichever client or CLI opens it. A name the workspace no longer holds drops through, as a stale access does. */
-  project: z.record(z.string(), z.string()),
-  /** The workspace and, when it landed in one, the project a thread was last started on anywhere: where a new
-   * thread asked for from nowhere goes. Absent until the first start. */
+  /** The workspace a thread was last started on anywhere: where a new thread asked for from nowhere goes. Absent
+   * until the first start. */
   target: PreferencesTarget.optional(),
   /** Whether the surfaces still being worked on are offered at all. The host stamps it from its own environment at
    * every read, so no client sets it and nothing a state file holds can turn it on. */
@@ -1588,18 +1614,21 @@ export type Preferences = z.infer<typeof Preferences>;
 export const labsFromEnv = (env: Record<string, string | undefined>): boolean => env[LABS_ENV] === "1";
 
 /** What preferences.set takes: any of the record's fields but labs, which is the host's to say; a null sidebarWidth
- * clears it back to the default, terminalZoom, access and project name only the workspaces they move, a null entry
- * dropping that workspace's zoom or pick, and a null target clears the last target. */
-export const PreferencesPatch = Preferences.omit({ labs: true }).partial().extend({
-  sidebarWidth: z.number().int().positive().nullable().optional(),
-  terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
-  access: z.record(z.string(), z.string().nullable()).optional(),
-  project: z.record(z.string(), z.string().nullable()).optional(),
-  target: PreferencesTarget.nullable().optional(),
-});
+ * clears it back to the default, terminalZoom and access name only the workspaces they move, a null entry dropping
+ * that workspace's zoom or pick, and a null target clears the last target. Strict, so a field this record dropped
+ * is refused rather than written into a state file nothing reads. */
+export const PreferencesPatch = Preferences.omit({ labs: true })
+  .partial()
+  .extend({
+    sidebarWidth: z.number().int().positive().nullable().optional(),
+    terminalZoom: z.record(z.string(), z.number().int().nullable()).optional(),
+    access: z.record(z.string(), z.string().nullable()).optional(),
+    target: PreferencesTarget.nullable().optional(),
+  })
+  .strict();
 export type PreferencesPatch = z.infer<typeof PreferencesPatch>;
 
-export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, project: {}, labs: false };
+export const DEFAULT_PREFERENCES: Preferences = { theme: "system", sidebarMode: "list", terminalSize: "app", terminalZoom: {}, access: {}, labs: false };
 
 /** The record as stored, over the defaults; a record that does not parse (an older or a hand-edited state file) reads as the defaults. */
 export function preferencesFrom(stored: unknown): Preferences {
@@ -1626,7 +1655,6 @@ export function applyPreferencesPatch(current: Preferences, patch: PreferencesPa
     terminalSize: patch.terminalSize ?? current.terminalSize,
     terminalZoom: perWorkspace(current.terminalZoom, patch.terminalZoom),
     access: perWorkspace(current.access, patch.access),
-    project: perWorkspace(current.project, patch.project),
     labs: current.labs,
     ...(sidebarWidth === null || sidebarWidth === undefined ? {} : { sidebarWidth }),
     ...(target === null || target === undefined ? {} : { target }),
@@ -2266,6 +2294,14 @@ export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 export const PlaceKind = z.enum(["computer", "provider"]);
 export type PlaceKind = z.infer<typeof PlaceKind>;
 
+/** What the computers table calls one row's kind, which is finer than PlaceKind by one: the computer the host runs
+ * on is named as its owner names it, a computer somebody joined is a box, and a provider account is a cloud. The
+ * one table, so the command line's KIND column and the app read one word per row. */
+export function computerKindWord(place: Pick<PlaceView, "id" | "kind">, platform: "darwin" | "linux"): string {
+  if (place.id === HERE_PLACE_ID) return thisComputer(platform);
+  return place.kind === "provider" ? "cloud" : "box";
+}
+
 /** How a computer this host holds is reached, off the road it was added on. `ssh` is the login the host logs in
  * as, which is also what a person types in their own terminal; `from` is where its last link dialled in from. A
  * row with neither is a computer that joined with a code and has never linked. */
@@ -2390,6 +2426,14 @@ export const PlaceRemovedEvent = z.object({ type: z.literal("place.removed"), pl
 /** The four as one type, so the host's door and the app's fold read one shape. */
 export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof PlacePresentEvent> | z.infer<typeof PlaceAbsentEvent> | z.infer<typeof PlaceRemovedEvent>;
 
+/** A project was recorded, so every client's list follows without a refetch. */
+export const ProjectAddedEvent = z.object({ type: z.literal("project.added"), project: ProjectView });
+export type ProjectAddedEvent = z.infer<typeof ProjectAddedEvent>;
+
+/** A project's record was dropped. */
+export const ProjectRemovedEvent = z.object({ type: z.literal("project.removed"), projectId: z.string() });
+export type ProjectRemovedEvent = z.infer<typeof ProjectRemovedEvent>;
+
 export const EventUnion = z.discriminatedUnion("type", [
   WorkspaceCreatingEvent.extend(sequenced),
   WorkspaceCreatedEvent.extend(sequenced),
@@ -2418,6 +2462,8 @@ export const EventUnion = z.discriminatedUnion("type", [
   GoldenStageEvent.extend(sequenced),
   ForwardOpenEvent.extend(sequenced),
   ForwardCloseEvent.extend(sequenced),
+  ProjectAddedEvent.extend(sequenced),
+  ProjectRemovedEvent.extend(sequenced),
   ProjectImportEvent.extend(sequenced),
   ProjectExportEvent.extend(sequenced),
   PreferencesChangedEvent.extend(sequenced),
@@ -3912,7 +3958,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({
     id: reqId,
     op: z.literal("workspaces.create"),
-    golden: z.string(),
+    /** A project image by snapshot id; absent takes the head of the project's computer's own image. */
+    golden: z.string().optional(),
+    /** The project this workspace is made for, by id or by name. Its computer is where the workspace lands. */
+    project: z.string(),
     name: z.string(),
     cpu: z.number().optional(),
     memMb: z.number().optional(),
@@ -3922,22 +3971,15 @@ const RuntimeOp = z.discriminatedUnion("op", [
     agents: WorkspaceAgents.partial().optional(),
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
-    /** Where this fork lands: a joined computer by name or id, or this computer. Absent takes the place a fork
-     * last landed on. */
-    on: z.string().optional(),
     /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
     engine: z.boolean().optional(),
   }),
-  /** The one local workspace: this computer. Forks nothing (the machine already exists); refused when this host wired
-   * no local backend, when one already exists, or for a name another workspace holds. Replies with { workspace }. */
-  /** Makes this computer the host's one local workspace; the name defaults to this computer's own. */
-  z.object({ id: reqId, op: z.literal("workspaces.createLocal"), name: z.string().optional() }),
-  /** Where a fork would land and what that place offers: the place `on` names, else the default place. Replies with
+  /** Where a workspace of this project would land and what that computer offers. Replies with
    * { place?, name, capabilities }, `place` absent where the landing is the provider this host forks on. Refused
-   * before any machine is asked for where that place forks nothing: with NO_PROVIDER_LINE when no place here runs
+   * before any machine is asked for where that computer forks nothing: with NO_PROVIDER_LINE when no place here runs
    * workspaces, else naming the places that do. The one gate a create runs, read ahead so the refusal comes in one
    * sentence before any stage is streamed. */
-  z.object({ id: reqId, op: z.literal("workspaces.landing"), on: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("workspaces.landing"), project: z.string() }),
   /** Records a machine the person already has, reached over ssh at `address` (user@host), with the port and key
    * they named where those are not ssh's own. Forks nothing; refused when this host wired no ssh backend, when the
    * machine does not answer the dial, when a workspace already stands on it, or for a name another workspace holds.
@@ -4021,9 +4063,6 @@ const RuntimeOp = z.discriminatedUnion("op", [
     /** The folder the thread starts in, absolute; it wins over project and the rule. Absent leaves the runtime's
      * default folder rule (projectFor, then the kind's own folder) to say. */
     cwd: z.string().optional(),
-    /** One of the workspace's projects by name, the folder the thread starts in when cwd names none; refused with
-     * noProjectLine when the workspace has no project of that name. */
-    project: z.string().optional(),
     /** Values from the harness's catalog for the workspace (harnesses.list), refused with that list on a miss. A
      * start that opens a thread without a model runs the one the catalog marks default, so the app, the command line
      * and the MCP server run the same model; an absent effort or mode leaves the CLI's own. */
@@ -4187,6 +4226,16 @@ const RuntimeOp = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("preferences.get") }),
   /** Lands the patch on the record, keeps it, pushes preferences.changed to every socket and replies with { preferences: Preferences }. */
   z.object({ id: reqId, op: z.literal("preferences.set"), patch: PreferencesPatch }),
+  /** Records a project: one word, which is a folder on this computer or a repo url a computer clones, and the
+   * computer it lives on. Replies with { project, notice? }; refused with the three forms when the word names
+   * none of them, and refused naming the project when that source is already recorded on that computer. */
+  z.object({ id: reqId, op: z.literal("projects.add"), source: z.string(), on: z.string().optional(), name: z.string().optional(), base: z.string().optional() }),
+  /** Every project this host holds. Replies with { projects }. */
+  z.object({ id: reqId, op: z.literal("projects.list") }),
+  /** The project a word names, by id or by name. Replies with { project }. */
+  z.object({ id: reqId, op: z.literal("projects.resolve"), ref: z.string() }),
+  /** Drops a project's record; refused while a workspace of it stands, naming the workspaces. Replies with {}. */
+  z.object({ id: reqId, op: z.literal("projects.remove"), projectId: z.string() }),
   /** Replies with { plan: ProjectPlan } for a folder on this computer; nothing is read into memory or uploaded. */
   z.object({ id: reqId, op: z.literal("project.plan"), source: z.string() }),
   /** Packs the folder and lands it at `dest` on the workspace's machine; progress rides project.import events and the
@@ -4534,7 +4583,7 @@ export {
 export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
-export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importDest, importRequest, registerRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
+export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
 export * from "./init-job.js";

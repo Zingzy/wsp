@@ -29,7 +29,7 @@ const TAB = params.get("tab") === "1";
 if (!TAB) window.wsp = { pickFolder: async () => undefined };
 
 const SOURCE = params.get("long") === "1" ? "/Users/me/code/clients/northwind-traders/platform/services/billing-reconciliation/workers/nightly-settlements-batch/spoo" : "/Users/me/code/spoo";
-const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api", phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
+const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-05T11:00:00Z" };
 const session = (id: string, harness: string): SessionView => ({ id, workspaceId: workspace.id, harness, status: "completed", threadId: `t_${id}`, cwd: SOURCE });
 const landed: ProjectExportResult = {
   dest: SOURCE,

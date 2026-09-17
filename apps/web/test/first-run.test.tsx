@@ -16,8 +16,8 @@ const manifest: GoldenManifest = {
   head: 1,
   versions: [{ version: 1, snapshotId: "snap_golden-v1", baseTemplate: "default", kind: "sandbox", setupSha: "x", createdAt: "t", smoke: { cmd: "claude --version", exitCode: 0 } }],
 };
-const first: WorkspaceView = { id: "ws_first", name: "first", machineId: "m_fork", phase: "running", golden: "snap_golden-v1", createdAt: "t" };
-const local: WorkspaceView = { id: "ws_local", name: "thisbox", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: "t" };
+const first: WorkspaceView = { id: "ws_first", name: "first", machineId: "m_fork", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_golden-v1", createdAt: "t" };
+const local: WorkspaceView = { id: "ws_local", name: "thisbox", kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "t" };
 const here: PlaceView = { id: "here", kind: "computer", name: "zingzy-mbp", default: true, present: true, shape: { cpu: 8, memMb: 16384 } };
 const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, rateUsdPerHour: 0.018, takesForks: true };
 const CAPS = caps();

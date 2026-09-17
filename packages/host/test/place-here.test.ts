@@ -325,6 +325,7 @@ describe("wsp status on a computer joined as a place", () => {
       golden: "",
       createdAt: "2026-09-13T02:00:00.000Z",
       place: "pl_1",
+      project: { id: "pr_1", name: "api", path: "/root/api", computer: "pl_1" },
       size: { cpu: 2, memMb: 2048 },
       rateUsdPerHour: 0,
       reach: { state: "reachable" as const },

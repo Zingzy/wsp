@@ -13,7 +13,7 @@ import { RightPanel } from "../src/shell/RightPanel.js";
 const KEY = "wsp:right-panel-state:v1";
 const WS = "ws_panel_store";
 
-const view: WorkspaceView = { id: WS, name: "panel", machineId: "m_panel", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+const view: WorkspaceView = { id: WS, name: "panel", machineId: "m_panel", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 
 beforeEach(() => {
   window.localStorage.clear();

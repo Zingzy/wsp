@@ -31,7 +31,7 @@ const CAPS = caps();
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running", createdAt = "2026-09-01T00:00:00Z"): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt,
@@ -527,7 +527,7 @@ describe("the thread switcher in Spaces", () => {
       expect(document.querySelectorAll("[data-card-preview]")).toHaveLength(0);
       expect(highlightedThread()).toBe("thr_2");
       expect(document.querySelector("[data-thread-card='thr_2'] [data-card-name]")?.textContent).toBe("thread 2");
-      expect(document.querySelector("[data-thread-card='thr_2'] [data-card-thread]")?.textContent).toBe("Claude Code · you");
+      expect(document.querySelector("[data-thread-card='thr_2'] [data-card-thread]")?.textContent).toBe("Claude Code · the-project · you");
       // Nothing moves until the hold is let go.
       expect(useStore.getState().selectedThreadId).toBe("thr_1");
       tab();
@@ -686,6 +686,6 @@ describe("buildSwitcherCards", () => {
     const thread = { ...session("s_t", "ws_a", "The thread.", Date.parse("2026-09-01T02:00:00Z")), threadId: "thr_t", startedBy: "cli" as const };
     const snapshot = deriveSidebarProjects({ workspaces: WORKSPACES, sessions: { ws_a: [thread] } });
     const cards = buildSwitcherCards({ projects: snapshot, targets: [{ workspaceId: "ws_a", threadId: "thr_t" }, { workspaceId: "ws_a", threadId: "thr_gone" }], images: { ws_a: "data:image/png;base64,AAA" }, currentId: "ws_a", pinnedThreadId: null });
-    expect(cards).toEqual([{ workspaceId: "ws_a", threadId: "thr_t", name: "The thread.", threadTitle: "Claude Code · cli", image: null }]);
+    expect(cards).toEqual([{ workspaceId: "ws_a", threadId: "thr_t", name: "The thread.", threadTitle: "Claude Code · the-project · cli", image: null }]);
   });
 });

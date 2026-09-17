@@ -92,6 +92,7 @@ describe("the workspace menu the smoke expects", () => {
     id: "ws_a",
     name: "first",
     machineId: "m_ws_a",
+    project: { id: "pr_1", name: "api", path: "/root/api", computer: "default" },
     phase: "running",
     golden: "snap_g",
     createdAt: "2026-09-01T00:00:00.000Z",
