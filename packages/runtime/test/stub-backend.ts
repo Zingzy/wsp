@@ -129,6 +129,8 @@ export function stubBackend(mark?: string): StubBackend {
       snapshotListing: true,
       templates: false,
       kept: false,
+      copies: true,
+      ownNetwork: true,
       sizes: [{ cpu: 2, memMb: 2048, rateUsdPerHour: 0.09 }, { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }, { cpu: 4, memMb: 8192, rateUsdPerHour: 0.22 }],
     },
     pricing: { rateUsdPerHour: (s: { cpu: number; memMb: number }) => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE },
@@ -312,6 +314,11 @@ export type CreateOn = Omit<CreateWorkspaceOptions, "project"> & { project?: str
 type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
 type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create"> };
 
+/** The computer this suite is running on, in the two words every line that names this computer takes. Read rather
+ * than written down: the landing gate runs on a Mac and ci runs on Linux, and a literal here would pin the word
+ * one of them reads. */
+export const testPlatform = (): "darwin" | "linux" => (process.platform === "darwin" ? "darwin" : "linux");
+
 /** This computer as a test wires it: a LocalBackend rooted in a folder of the test's own, so a project here is a
  * real folder and the exec that reads whether it is a repo runs where the test can see it. Written here beside
  * the fixtures because three test files need the same wiring and a second copy of it drifts. */
@@ -322,5 +329,6 @@ export function fakeLocal(root: string): LocalWiring {
     home: () => join(root, ".claude"),
     homeDir: root,
     env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    platform: testPlatform(),
   };
 }

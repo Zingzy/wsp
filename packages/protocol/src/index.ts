@@ -236,6 +236,14 @@ export const Capabilities = z.object({
    * rebuild and nothing else. Whether the access picker names the machine on the pick that asks nothing reads this;
    * what a thread with no access word runs at is the kind's own row, read through workspaceAccess. */
   kept: z.boolean(),
+  /** The computer makes a workspace as a copy of itself with the project inside. A Linux box and a provider fork
+   * yes; the computer the app runs on yes, by copying the project folder to a path of its own; a machine reached
+   * over ssh and a host with no provider no. */
+  copies: z.boolean(),
+  /** A copy gets its own network, its own localhost and its own ports. A Linux box and a provider fork yes; the
+   * computer the app runs on no, so its copies share its ports and the row says so. The one flag the row and the
+   * port base read. */
+  ownNetwork: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -425,6 +433,58 @@ export const AGENTS_OFF: WorkspaceAgents = { spawn: false, maxMachines: 0, maxDe
  * app draws without indenting twice. */
 export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDepth: 1 };
 
+/** Which road made a workspace's copy on a computer that copies by directory: a directory clone of the project
+ * folder, a git worktree of it, or the folder itself worked where it sits. */
+export const CopyRoad = z.enum(["clonefile", "worktree", "in-place"]);
+export type CopyRoad = z.infer<typeof CopyRoad>;
+
+/** What rode along in the copy: everything the folder held that git ignores, so the dependencies are there and a
+ * build runs at once; the config files alone, so the dependencies install first; or nothing. */
+export const Carried = z.enum(["deps-and-config", "config-only", "nothing"]);
+export type Carried = z.infer<typeof Carried>;
+
+/** One copy as the daemon binary's copy verb is asked for it. The size line rides rather than living in the
+ * daemon: the number is the host's to change in one place, and a copy asked for by a test names a small one to
+ * take the fallback road. */
+export const CopyAsk = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** The ref the copy is reset to; the folder's default branch when absent. */
+  base: z.string().optional(),
+  /** Directories removed after the copy so they rebuild at the new path. */
+  exclude: z.array(z.string()),
+  /** Apparent size above which the directory clone is not taken. */
+  sizeLineBytes: z.number().int().nonnegative(),
+  /** A road named outright; the verb's own pick when absent. */
+  road: CopyRoad.optional(),
+});
+export type CopyAsk = z.infer<typeof CopyAsk>;
+
+/** What the daemon binary's copy verb printed, read back by the host and kept on the workspace's record as
+ * `copy`. */
+export const CopyReport = z.object({
+  road: CopyRoad,
+  path: z.string(),
+  base: z.string(),
+  branch: z.string(),
+  fetched: z.boolean(),
+  carried: Carried,
+  excluded: z.array(z.string()),
+  bytes: z.number().int().nonnegative(),
+  ms: z.number().int().nonnegative(),
+  fellBack: z.string().optional(),
+});
+export type CopyReport = z.infer<typeof CopyReport>;
+
+/** What a workspace on a computer that copies by directory is made of: the road that made the copy, where it
+ * landed, what it stands on and what rode along. Absent on a fork and on a box snapshot, whose project arrives by
+ * the runtime's own road. */
+export const ProjectCopy = CopyReport.pick({ road: true, path: true, base: true, branch: true, carried: true, fellBack: true }).extend({
+  /** The project folder the copy was taken from: what a worktree's remove needs and what the row names. */
+  source: z.string(),
+});
+export type ProjectCopy = z.infer<typeof ProjectCopy>;
+
 /** The switch a patch leaves on the record, the one rule both roads that set one read: every key the patch does not
  * name keeps what the record holds, so turning it off and on again does not throw the caps away, and a workspace
  * that never had one takes the defaults for the caps nobody named. */
@@ -493,6 +553,14 @@ export const WorkspaceView = z.object({
   /** The place a fork lives on, by id; absent on a fork at the host's own provider and on every workspace that is
    * not a fork. The command line and the app show its name after the workspace's. */
   place: z.string().optional(),
+  /** What this workspace's copy of its project is made of, on a computer that makes a workspace by copying the
+   * project folder: the road, the path, the base and the folder it came from. Absent on a fork, whose project
+   * arrives by the runtime's own road. */
+  copy: ProjectCopy.optional(),
+  /** The port an app that reads PORT binds in this workspace, on a computer whose copies share its network.
+   * Absent where a copy has a network of its own, and absent on the folder worked in place, whose ports are the
+   * person's own. */
+  portBase: z.number().int().positive().optional(),
   /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in a
    * registry (`solari`, `box`, `docker`): the host's own where it forked the machine, and the joined computer's
    * own offer where `place` names one, so the two fields cannot disagree about where a machine lives. The runtime
@@ -534,7 +602,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true,
+  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true, copy: true, portBase: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -2348,6 +2416,7 @@ export type WorkspaceCopy = z.infer<typeof WorkspaceCopy>;
  * subvolume snapshot of it, plain writes every byte and takes the time that takes. */
 export const CopyWord = z.enum(["reflink", "snapshot", "plain"]);
 export type CopyWord = z.infer<typeof CopyWord>;
+
 
 /** One login the computer running a workspace keeps outside every one of them and mounts into this one at
  * `target`, read-write: signed in once on that computer, so a refresh inside any workspace there is the
@@ -4659,7 +4728,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

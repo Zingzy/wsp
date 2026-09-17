@@ -582,6 +582,9 @@ export class SshBackend implements MachineBackend {
     // The machine is the person's own: nothing on it was made by wsp and nothing on it is thrown away, so a turn's
     // access starts at what its harness asks for rather than at skip-everything.
     kept: true,
+    // wsp reaches this machine and nothing more: a project on it is worked where it sits, and no copy of it is made.
+    copies: false,
+    ownNetwork: false,
   };
 
   /** Nothing wsp runs is billed here, and no size is a default on a machine that already exists: every record

@@ -20,6 +20,7 @@ import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localEx
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry } from "@wsp/catalog";
 import { applyRecipe, recipePath, withCatalogAgents } from "../src/init-recipe.js";
+import { hostPlatform } from "../src/verbs.js";
 import { signInItems } from "../src/init-pick.js";
 import { CARD_FRAME, card, widthOf } from "../src/init-layout.js";
 import { PROJECT_QUESTION, noFolderNote } from "../src/init-pick.js";
@@ -315,7 +316,14 @@ const LOCAL_NAME = "this-mac";
 /** This computer as the fake runtime holds it: a real local backend over the run's own folder, so the workspace step's
  * tick makes a record the way it does on a person's machine. No turn is ever started here. */
 function localWiring(root: string): LocalWiring {
-  return { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({}) };
+  return {
+    backend: new LocalBackend({ root }),
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    env: () => ({}),
+    platform: hostPlatform(),
+  };
 }
 
 /** What the host's own create does: a fork of the golden's head under the given name. */

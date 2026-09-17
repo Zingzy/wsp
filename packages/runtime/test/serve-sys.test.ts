@@ -13,7 +13,7 @@ import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { createOn, stubBackend } from "./stub-backend.js";
+import { createOn, stubBackend, testPlatform } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -56,6 +56,7 @@ async function served(sampler: ReturnType<typeof fakeSampler>): Promise<string> 
     home: () => join(root!, ".claude"),
     homeDir: root,
     env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    platform: testPlatform(),
     sysSamples: sampler.subscribe,
   };
   rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local });

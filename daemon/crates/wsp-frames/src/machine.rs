@@ -305,6 +305,10 @@ pub struct Capabilities {
     pub templates: bool,
     pub sizes: Vec<MachineSizeOffer>,
     pub kept: bool,
+    /// The computer makes a workspace as a copy of itself with the project inside.
+    pub copies: bool,
+    /// A copy gets its own network: its own localhost, its own ports. False on a Mac, where ports are shared.
+    pub own_network: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -707,7 +711,7 @@ mod tests {
 
     #[test]
     fn a_backend_says_where_the_logins_it_shares_live_and_only_as_a_path() {
-        let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
+        let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false,"copies":true,"ownNetwork":true},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
         assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().logins, None);
         let shared = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"/var/lib/wsp/logins","offer":"runtime""#);
         assert_eq!(serde_json::from_str::<BackendFacts>(&shared).unwrap().logins.as_deref(), Some("/var/lib/wsp/logins"));

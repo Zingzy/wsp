@@ -19,6 +19,10 @@ flate2 = "1"
 tar = { version = "0.4", features = ["xattr"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# clonefile, statfs and getattrlist: the three calls the directory clone on a Mac is made of.
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 libcontainer = { version = "0.7.0", default-features = false, features = ["v2", "libseccomp"] }
 libcgroups = { version = "0.7.0", default-features = false, features = ["v2"] }

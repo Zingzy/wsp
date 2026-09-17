@@ -11,12 +11,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { LocalBackend } from "@wsp/engine";
 import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
-import { createRuntime, oneWorkspacePerProject, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { createRuntime, NO_COPIER_HERE, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { grandchild, sweepStrays } from "./strays.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -179,6 +179,7 @@ describe("local workspace", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
   });
   afterEach(() => {
@@ -216,11 +217,13 @@ describe("local workspace", () => {
     expect(over.pid).toBeUndefined();
   });
 
-  it("a project worked in place has one workspace: a second on it names the one standing", async () => {
+  it("a project worked in place has one workspace where this host has no copy road, and says why a second cannot be made", async () => {
     const rt = runtime();
     const project = await projectOn(rt, HERE_PLACE_ID, repoIn(root));
     await rt.workspaces.create({ project: project.id, name: "mac" });
-    await expect(rt.workspaces.create({ project: project.id, name: "mac2" })).rejects.toThrow(oneWorkspacePerProject(project.name, "mac"));
+    // This wiring hands in no copier, so the second piece of work has no road to a copy and the sentence says so.
+    // With one wired it is a copy of the folder; that is local-copy.test.ts.
+    await expect(rt.workspaces.create({ project: project.id, name: "mac2" })).rejects.toThrow(NO_COPIER_HERE);
     // A second project here is a second workspace: this computer runs as many as there are folders to work in.
     const second = await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"));
     expect((await rt.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
@@ -776,6 +779,7 @@ describe("a local turn and a host restart", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
   });
   afterEach(() => {

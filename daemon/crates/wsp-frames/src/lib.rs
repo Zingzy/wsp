@@ -5,6 +5,7 @@
 //! the protocol's own test reads too, so the two halves cannot drift quietly.
 
 mod auth;
+mod copy;
 mod enums;
 mod event;
 mod guest;
@@ -19,6 +20,7 @@ mod validate;
 pub mod words;
 
 pub use auth::DaemonAuthRequest;
+pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName};
 pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, ProcSignal, PtyMode, WorkspaceKind};
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};

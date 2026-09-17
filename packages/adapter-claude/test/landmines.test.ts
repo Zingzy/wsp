@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCommand, buildEnv, newSessionId, userMessageLine } from "../src/landmines.js";
+import { buildCommand, buildEnv, newSessionId, PROJECT_DIR_ENV, userMessageLine } from "../src/landmines.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -21,6 +21,18 @@ describe("buildEnv", () => {
     expect(env.CLAUDE_CODE_SSE_PORT).toBeUndefined();
     expect(env.FORCE_CODE_TERMINAL).toBeUndefined();
     expect(env.PATH).toBe(base.PATH);
+  });
+
+  it("drops an inherited project key and sets the one the caller named, after the strip", () => {
+    // The strip takes every inherited CLAUDE_CODE_* as a nesting mark, so a key merged into the base is thrown
+    // away; the key a workspace's own kind answers is set after it, which is what makes it reach the CLI.
+    expect(buildEnv({ base: { ...base, [PROJECT_DIR_ENV]: "-Users-z-repo" } })[PROJECT_DIR_ENV]).toBeUndefined();
+    const keyed = buildEnv({ base, projectDirName: "-Users-z-repo" });
+    expect(keyed[PROJECT_DIR_ENV]).toBe("-Users-z-repo");
+    // A base carrying its own is still dropped, and the named one is what is set.
+    expect(buildEnv({ base: { ...base, [PROJECT_DIR_ENV]: "-stale" }, projectDirName: "-Users-z-repo" })[PROJECT_DIR_ENV]).toBe("-Users-z-repo");
+    // Nobody naming one leaves the CLI keying off the folder each turn runs in.
+    expect(PROJECT_DIR_ENV in buildEnv({ base })).toBe(false);
   });
 
   it("never sets CLAUDE_CONFIG_DIR or IS_SANDBOX of its own: the login environment carries them where they are true", () => {

@@ -28,6 +28,17 @@ export const PROJECT_STATE_RESOLVERS: ReadonlyMap<string, ProjectStateResolver> 
   [claudeResolver, codexResolver, geminiResolver, hermesResolver, opencodeResolver, piResolver].map(r => [r.agent, r]),
 );
 
+/** The name one agent keys a project's state under, for a project at this path: the registry's own module answers
+ * it, so the rule lives once beside the module that moves that agent's files. Nothing for an agent with no module
+ * or no such word, which is a turn told nothing and an agent keying its state off the folder it runs in.
+ *
+ * On a computer whose workspaces are copies of a project folder this is what makes one memory and one sessions
+ * list out of the folder and every copy of it: each copy is told the original folder's key, so nothing is seeded
+ * and nothing is moved. */
+export function projectStateKey(agent: string, path: string): string | undefined {
+  return PROJECT_STATE_RESOLVERS.get(agent)?.key?.(resolveProjectPath(path));
+}
+
 export interface ProjectStateMove {
   /** The project's old absolute path, as the agents stored it on the machine it came from. */
   from: string;

@@ -125,6 +125,11 @@ export class LocalBackend implements MachineBackend {
     // This computer is the person's own: nothing here was made by wsp and nothing here is thrown away, so a turn's
     // access starts at what its harness asks for rather than at skip-everything.
     kept: true,
+    // A workspace here is a copy of the project folder at a path of its own, made by the daemon binary's copy verb.
+    copies: true,
+    // Nothing here gives a copy a network: every copy binds the ports of this one computer, which is why each gets
+    // a port base of its own and the row says the ports are shared.
+    ownNetwork: false,
   };
 
   readonly pricing: BackendPricing = {

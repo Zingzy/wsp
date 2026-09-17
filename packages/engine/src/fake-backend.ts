@@ -288,6 +288,8 @@ export class FakeBackend implements MachineBackend {
       templates: false,
       sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
       kept: false,
+      copies: true,
+      ownNetwork: true,
     };
   }
 

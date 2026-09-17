@@ -151,6 +151,8 @@ export class SolariBackend implements MachineBackend {
     snapshotListing: true,
     templates: true,
     kept: false, // a fork wsp made and can rebuild in a minute: a turn that wrecks its disk costs nothing else
+    copies: true, // a fork of the image with the project cloned into it
+    ownNetwork: true, // the machine is its own, so its localhost and its ports are its own
     sizes: SIZES.map(size => ({ ...size, rateUsdPerHour: rateUsdPerHour(size) })),
   };
 

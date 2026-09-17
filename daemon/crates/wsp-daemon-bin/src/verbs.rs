@@ -3,7 +3,9 @@
 //! way a machine create will, so the fetch can be timed on a box by itself. `runtime ask` answers one machine
 //! frame from the runtime under a root, so a snapshot or a wake can be driven and timed on a box with nothing else
 //! running. `runtime create` and `runtime exec` are the fresh processes the daemon runs youki's clone in;
-//! `runtime init` is a workspace's first process.
+//! `runtime init` is a workspace's first process. `copy` makes and removes the copy a workspace on the computer
+//! somebody sits at is: the host runs it as a child and reads one JSON line back, so the road picking and the two
+//! rules live in the daemon's own code without the door answering a new op.
 
 use std::io::{self, Write};
 use std::net::{Ipv4Addr, SocketAddr};
@@ -11,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::Subcommand;
-use wsp_frames::numbers;
+use wsp_frames::{numbers, CopyAsk, CopyRoadName};
 use wsp_runtime::fetch::{Client, Reference};
 use wsp_runtime::store::Store;
 
@@ -21,6 +23,12 @@ pub(crate) enum Verb {
     Runtime {
         #[command(subcommand)]
         verb: RuntimeVerb,
+    },
+    /// The copy a workspace on the computer somebody sits at is made of: one JSON line on stdout when it stands,
+    /// one sentence on stderr and exit 1 when it does not.
+    Copy {
+        #[command(subcommand)]
+        verb: CopyVerb,
     },
     /// The wsp a process inside this machine runs: the whole line goes to the host over this machine's own daemon.
     /// Nothing here reads a verb or a flag, so the words the host's command line takes are the words that work.
@@ -77,6 +85,81 @@ pub(crate) enum RuntimeVerb {
     },
 }
 
+#[derive(Debug, Subcommand)]
+pub(crate) enum CopyVerb {
+    /// Copies the folder to a path of its own by the best road this computer has, then makes it a clean checkout.
+    Make {
+        /// The project folder, which is the top of a git work tree.
+        #[arg(long, value_name = "dir")]
+        from: PathBuf,
+        /// Where the copy lands; it must not be there yet.
+        #[arg(long, value_name = "dir")]
+        to: PathBuf,
+        /// The ref the copy is reset to; the folder's default branch when absent.
+        #[arg(long, value_name = "ref")]
+        base: Option<String>,
+        /// A directory removed from the copy so it rebuilds at the new path, once per directory.
+        #[arg(long, value_name = "dir")]
+        exclude: Vec<String>,
+        /// Apparent size above which the directory clone is not taken.
+        #[arg(long, default_value_t = u64::MAX, value_name = "n")]
+        size_line_bytes: u64,
+        /// A road named outright; the picker's own choice when absent.
+        #[arg(long, value_name = "clonefile|worktree", value_parser = road_of)]
+        road: Option<CopyRoadName>,
+    },
+    /// Takes a copy away by the road that made it.
+    Remove {
+        #[arg(long, value_name = "dir")]
+        from: PathBuf,
+        #[arg(long, value_name = "dir")]
+        to: PathBuf,
+        #[arg(long, value_name = "clonefile|worktree", value_parser = road_of)]
+        road: CopyRoadName,
+    },
+}
+
+/// The road a person or a host names on the line, in the words the wire carries.
+fn road_of(word: &str) -> Result<CopyRoadName, String> {
+    match word {
+        "clonefile" => Ok(CopyRoadName::Clonefile),
+        "worktree" => Ok(CopyRoadName::Worktree),
+        "in-place" => Ok(CopyRoadName::InPlace),
+        other => Err(format!("{other} is not a road: clonefile, worktree or in-place")),
+    }
+}
+
+/// The copy, with its report as the one line on stdout. Nothing else is printed there, so a caller reads the line
+/// and parses it; the reason a copy was refused goes to stderr as one sentence.
+fn copy(verb: CopyVerb) -> i32 {
+    let done = match verb {
+        CopyVerb::Make { from, to, base, exclude, size_line_bytes, road } => {
+            let ask = CopyAsk {
+                from: from.to_string_lossy().into_owned(),
+                to: to.to_string_lossy().into_owned(),
+                base,
+                exclude,
+                size_line_bytes,
+                road,
+            };
+            wsp_runtime::copy_road::make(&ask).and_then(|report| serde_json::to_string(&report).map_err(|e| e.to_string()))
+        }
+        CopyVerb::Remove { from, to, road } => wsp_runtime::copy_road::remove(&from, &to, road).map(|()| String::new()),
+    };
+    match done {
+        Ok(line) => {
+            if !line.is_empty() {
+                println!("{line}");
+            }
+            0
+        }
+        Err(why) => {
+            eprintln!("{why}");
+            1
+        }
+    }
+}
+
 pub(crate) fn run(verb: Verb) -> i32 {
     match verb {
         Verb::Runtime { verb: RuntimeVerb::Pull { image, root } } => match pull(&image, &root) {
@@ -90,6 +173,7 @@ pub(crate) fn run(verb: Verb) -> i32 {
         Verb::Runtime { verb: RuntimeVerb::Create { root, id } } => linux::create(&root, &id),
         Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, cmd } } => linux::exec(&root, &id, cmd, timeout_ms),
         Verb::Runtime { verb: RuntimeVerb::Init { cmd } } => linux::init(&cmd),
+        Verb::Copy { verb } => copy(verb),
         Verb::Wsp { line } => {
             let daemon = SocketAddr::from((Ipv4Addr::LOCALHOST, numbers::DEFAULT_PORT));
             wsp_guest::run(&line, &|name| std::env::var(name).ok(), daemon, Path::new(numbers::DEFAULT_TOKEN_PATH))
