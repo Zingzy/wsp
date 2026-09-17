@@ -1686,7 +1686,6 @@ const SEALED = {
   versions: [{ version: 1, snapshotId: "snap_g", templateId: "tpl_g", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-16T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }],
 };
 
-
 function forks(
   client: WsClient,
   capacity: {
