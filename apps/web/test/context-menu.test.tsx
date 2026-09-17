@@ -71,7 +71,6 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
-    createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => statuses,
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
@@ -366,12 +365,12 @@ describe("a client that cannot hold a look", () => {
 });
 
 describe("the Workspaces section's menu", () => {
-  it("holds the sidebar's body toggle and the road to this computer, and choosing the toggle turns the body into one workspace under its header", async () => {
+  it("holds the sidebar's body toggle alone, and choosing it turns the body into one workspace under its header", async () => {
     await mountSidebar(fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]), "api");
     expect(document.querySelector("[data-space-header]")).toBeNull();
     rightClick(screen.getByRole("button", { name: "Workspaces" }));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title, "This computer"]);
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title]);
     fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
     await waitFor(() => expect(menu()).toBeNull());
     await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
@@ -382,30 +381,7 @@ describe("the Workspaces section's menu", () => {
     expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
     rightClick(document.querySelector("[data-slot=sidebar-group]")!);
     await screen.findByRole("menu");
-    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title, "This computer"]);
-  });
-
-  it("the road to this computer makes it once and goes to it after, and a client without the road offers it refused", async () => {
-    const api = fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]);
-    const local: WorkspaceView = { ...API, id: "ws_mac", name: "zingzys-mac", kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
-    const calls: number[] = [];
-    api.createLocalWorkspace = async () => {
-      calls.push(1);
-      return local;
-    };
-    await mountSidebar(api, "api");
-    rightClick(screen.getByRole("button", { name: "Workspaces" }));
-    await screen.findByRole("menu");
-    fireEvent.click(item("This computer"));
-    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_mac"));
-    expect(calls).toHaveLength(1);
-
-    // One per host: the row now says it goes to the workspace this computer already is.
-    rightClick(screen.getByRole("button", { name: "Workspaces" }));
-    await screen.findByRole("menu");
-    fireEvent.click(item("This computer"));
-    await waitFor(() => expect(useStore.getState().selectedId).toBe("ws_mac"));
-    expect(calls).toHaveLength(1);
+    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title]);
   });
 });
 

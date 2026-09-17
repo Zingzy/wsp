@@ -30,7 +30,6 @@ function fakeApi(): Api {
     listWorkspaces: async () => [view],
     getWorkspace: async () => view,
     createWorkspace: async () => view,
-    createFromGoldenHead: async () => view,
     watchStatuses: async () => [],
     nap: async () => view,
     wake: async () => view,

@@ -34,7 +34,6 @@ function fakeApi(record: Preferences, file: TerminalConfig | null = FILE) {
     listWorkspaces: async () => [view("ws_a", "api")],
     getWorkspace: async () => view("ws_a", "api"),
     createWorkspace: async () => view("ws_a", "api"),
-    createFromGoldenHead: async () => view("ws_a", "api"),
     watchStatuses: async () => [],
     nap: async () => view("ws_a", "api"),
     wake: async () => view("ws_a", "api"),

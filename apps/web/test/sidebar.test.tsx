@@ -5,7 +5,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registeredLine, type PlaceView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, FREE_WORD, HOSTNAME_KEPT, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, exportFromLine, harmonyDots, importIntoLine, registeredLine, type PlaceView, type ProjectView, type SessionView, type WorkspaceLook, type WorkspaceStatus, type WorkspaceTheme, type WorkspaceView } from "@wsp/protocol";
 import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { onOpenCommandPalette } from "../src/commandPaletteBus.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
@@ -60,7 +60,7 @@ const session = (id: string, workspaceId: string, over: Partial<SessionView> = {
 });
 
 type FakeApi = Api & {
-  createFromGoldenHead: ReturnType<typeof vi.fn>;
+  createWorkspace: ReturnType<typeof vi.fn>;
   rebuild: ReturnType<typeof vi.fn>;
   forget: ReturnType<typeof vi.fn>;
   watchStatuses: ReturnType<typeof vi.fn>;
@@ -72,9 +72,9 @@ function fakeApi(workspaces: WorkspaceView[], statuses: WorkspaceStatus[], sessi
     // Two rows: this computer, which is never somewhere to put a workspace, and the provider this host forks on,
     // which is the row the New workspace dialog checks.
     placesList: vi.fn(async () => PLACES),
+    projectsList: vi.fn(async () => PROJECTS),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
-    createWorkspace: vi.fn(async () => workspaces[0]!),
-    createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
+    createWorkspace: vi.fn(async (_project: string, name: string) => view("ws_new", name)),
     watchStatuses: vi.fn(async () => statuses),
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
@@ -112,10 +112,14 @@ const PLACES: PlaceView[] = [
   { id: "here", kind: "computer", name: "studio.local", default: false, engine: "none", present: true, takesForks: false },
   { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018, takesForks: true },
 ];
+/** What the dialog makes a workspace of: one project on the computer these tests fork at. */
+const PROJECTS: ProjectView[] = [
+  { id: "pr_1", name: "spoo-landing", computer: "box", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" },
+];
 
 beforeEach(() => {
   window.localStorage.clear();
-  useStore.setState({ places: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
+  useStore.setState({ places: [], projects: [], api: null, conn: "live", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, creations: [], sessions: {}, launches: {}, ready: false, preferences: { ...DEFAULT_PREFERENCES, labs: true }, settingsOpen: false });
 });
 
 async function mount(api: FakeApi, firstName: string) {
@@ -1035,7 +1039,7 @@ describe("new workspace dialog", () => {
 
   it("a create that made room shows the notice as a toast, the way a failure shows its line", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.createFromGoldenHead = vi.fn(async (name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from image v1 to make room at the machine cap." }));
+    api.createWorkspace = vi.fn(async (_project: string, name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from image v1 to make room at the machine cap." }));
     await mount(api, "api");
     const { input } = await openDialog();
     fireEvent.keyDown(input, { key: "Enter" });
@@ -1050,7 +1054,7 @@ describe("new workspace dialog", () => {
     const api = fakeApi([API], [status(API)]);
     api.placesList = vi.fn(async () => sized);
     api.getGolden = async () => ({ head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "t", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 4096 } }] });
-    api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_new", name));
+    api.createWorkspace = vi.fn(async (_project: string, name: string) => view("ws_new", name));
     await mount(api, "api");
     const { dialog, input } = await openDialog();
     const group = within(dialog).getByRole("radiogroup", { name: "Size" });
@@ -1058,26 +1062,26 @@ describe("new workspace dialog", () => {
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", { cpu: 2, memMb: 8192 }, "box"));
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", { size: { cpu: 2, memMb: 8192 } }));
 
     const again = await openDialog();
     fireEvent.change(again.input, { target: { value: "gamma" } });
     fireEvent.keyDown(again.input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("gamma", undefined, "box"));
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "gamma", undefined));
     vi.unstubAllGlobals();
   });
 
   it("offers a default name, creates on Enter, selects the creating row, shows its current stage whole, and swaps to the workspace on workspace.created", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([API], [status(API)]);
-    api.createFromGoldenHead = vi.fn(() => new Promise<WorkspaceView>(resolve => { finish = resolve; }));
+    api.createWorkspace = vi.fn(() => new Promise<WorkspaceView>(resolve => { finish = resolve; }));
     await mount(api, "api");
     const { input } = await openDialog();
     expect(input.value).toBe("workspace-1");
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box");
+    expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", undefined);
     const pending = await screen.findByText("beta");
     const row = pending.closest<HTMLElement>("[data-sidebar-row]")!;
     expect(row.getAttribute("aria-busy")).toBe("true");
@@ -1112,7 +1116,7 @@ describe("new workspace dialog", () => {
   it("while the image is still building the Create keycap is held, so Enter forks nothing and no row is written", async () => {
     const api = fakeApi([API], [status(API)]);
     api.getGolden = async () => undefined;
-    api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_new", name));
+    api.createWorkspace = vi.fn(async (_project: string, name: string) => view("ws_new", name));
     await mount(api, "api");
     await waitFor(() => expect(useStore.getState().hasGolden).toBe(false));
     act(() =>
@@ -1127,7 +1131,7 @@ describe("new workspace dialog", () => {
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.keyDown(input, { key: "Enter" });
     fireEvent.click(create);
-    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+    expect(api.createWorkspace).not.toHaveBeenCalled();
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().toast).toBeNull();
     expect(screen.queryByText(/wspx|golden build/)).toBeNull();
@@ -1135,12 +1139,12 @@ describe("new workspace dialog", () => {
     act(() => useStore.getState().applyEvent({ type: "init.job", job: { id: "init_1", road: "manual", phase: "done", keys: { solari: true }, step: 0, stoppable: false, screens: [], rows: [], progress: { done: 2, total: 2 }, log: [] } }));
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false));
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box"));
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", undefined));
   });
 
   it("a refusal keeps the row, names the refusal on it, and reopens no dialog", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.createFromGoldenHead = vi.fn(async () => { throw new RequestError("Sandbox limit reached", "concurrency"); });
+    api.createWorkspace = vi.fn(async () => { throw new RequestError("Sandbox limit reached", "concurrency"); });
     await mount(api, "api");
     const { input } = await openDialog();
     fireEvent.change(input, { target: { value: "gamma" } });
@@ -1159,16 +1163,17 @@ describe("new workspace dialog", () => {
     expect(useStore.getState().creations.map(c => c.name)).toEqual(["gamma", "gamma"]);
   });
 
-  it("the Where control offers the rows this wsp holds, never this computer, and the create names the checked one", async () => {
+  it("the Project control offers the projects this wsp holds and the create names the checked one, whose computer comes with it", async () => {
     const api = fakeApi([API], [status(API)]);
-    api.createFromGoldenHead = vi.fn(async (name: string) => view("ws_beta", name));
+    api.createWorkspace = vi.fn(async (_project: string, name: string) => view("ws_beta", name));
     await mount(api, "api");
     const { dialog, input } = await openDialog();
-    const group = await within(dialog).findByRole("radiogroup", { name: "Where" });
-    expect(within(group).getAllByRole("radio").map(r => [r.textContent, r.getAttribute("aria-checked")])).toEqual([["ASCII", "true"]]);
+    // One project: it reads as its own name and asks nothing, and the create is on it.
+    await waitFor(() => expect(dialog.querySelector<HTMLElement>("[data-project=pr_1]")?.textContent).toBe("spoo-landing"));
+    expect(within(dialog).queryByRole("radiogroup", { name: "Project" })).toBeNull();
     fireEvent.change(input, { target: { value: "beta" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.createFromGoldenHead).toHaveBeenCalledWith("beta", undefined, "box"));
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", undefined));
   });
 
   it("Escape cancels without creating; a blank name cannot be submitted", async () => {
@@ -1176,11 +1181,11 @@ describe("new workspace dialog", () => {
     const { input } = await openDialog();
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+    expect(api.createWorkspace).not.toHaveBeenCalled();
     expect(screen.getByRole("dialog")).toBeDefined();
     fireEvent.keyDown(input, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+    expect(api.createWorkspace).not.toHaveBeenCalled();
   });
 });
 
@@ -1432,9 +1437,9 @@ describe("a workspace's own theme and glyph", () => {
     const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping", 60_000), theme: themed(100) };
     const running: WorkspaceView = { ...view("ws_zzz", "api", "running", 3 * 60 * 60_000), theme: themed(300) };
     const api = fakeApi([napping, running], [status(napping), status(running)]);
-    api.createFromGoldenHead.mockImplementation(() => new Promise(() => {}));
+    api.createWorkspace.mockImplementation(() => new Promise(() => {}));
     await mountSpaces(api);
-    await act(async () => void useStore.getState().createWorkspace("fresh"));
+    await act(async () => void useStore.getState().createWorkspace("pr_1", "fresh"));
     await waitFor(() => expect(useStore.getState().selectedId).toBe(useStore.getState().creations[0]!.key));
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_aaa", "ws_zzz"]);
     expect(within(spaceHeader()!).getByText("api")).toBeDefined();

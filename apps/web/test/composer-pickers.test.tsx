@@ -217,7 +217,6 @@ function fixtureApi(opts: {
     capabilities: async () => (caps()),
     listSessions: async () => opts.sessions ?? [],
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspace,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async o => {

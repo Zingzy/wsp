@@ -215,10 +215,3 @@ export const noDiffLine = (fileName: string, scopeLabel: string): string => `${f
 export const rowVerb = (verb: string, name: string): string => `${verb} ${name}`;
 export const rowNewThread = (name: string): string => `New thread in ${name}`;
 
-/** What the road to this computer says under its name: what a pick will do, since there is one local workspace per
- * host and the second pick is a selection, and why it cannot be picked at all. */
-export const THIS_COMPUTER_HINTS = {
-  fresh: "This computer itself, nothing to copy",
-  existing: "Already a workspace; go to it",
-  offline: "Not connected to wsp",
-} as const;

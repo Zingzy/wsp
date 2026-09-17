@@ -60,7 +60,6 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]): Api & { 
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
-    createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => [],
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: async id => workspaces.find(w => w.id === id)!,

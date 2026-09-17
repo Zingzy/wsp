@@ -75,7 +75,6 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionV
     capabilities: async () => (caps()),
     listSessions: async () => rows,
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspace,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {

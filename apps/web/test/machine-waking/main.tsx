@@ -61,7 +61,6 @@ const api: Api = {
   listWorkspaces: async () => [workspace],
   getWorkspace: async () => workspace,
   createWorkspace: async () => workspace,
-  createFromGoldenHead: async () => workspace,
   watchStatuses: async () => [status],
   nap: async () => workspace,
   wake: async () => workspace,

@@ -423,7 +423,6 @@ const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
   createWorkspace: async () => workspaces[0]!,
-  createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
       w.id === MAC.id

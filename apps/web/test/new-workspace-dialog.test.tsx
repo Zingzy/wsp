@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The new-workspace dialog: its layout, its Where control and what each pick
-// says under it, the state with nowhere to put a workspace, and the four
-// reasons Create is held, each of which is read in the caption under Where
-// before any click, with the keycap held while it waits and live the moment it
-// can be pressed. Header, panel and footer stack inside one flex column of the
-// popup, so the footer stays attached to the card, and the form still submits
-// on Enter and on the Create button.
+// The new-workspace dialog: its layout, its Project control and what the
+// project's computer says under it, the state with no project to make one of,
+// and the four reasons Create is held, each of which is read in the caption
+// under the control before any click, with the keycap held while it waits and
+// live the moment it can be pressed. Header, panel and footer stack inside one
+// flex column of the popup, so the footer stays attached to the card, and the
+// form still submits on Enter and on the Create button.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fmtPrice, fmtSize, type PlaceView, type SealedImageCopy } from "@wsp/protocol";
+import { fmtPrice, fmtSize, type PlaceView, type ProjectView, type SealedImageCopy } from "@wsp/protocol";
 
 import { NewWorkspaceDialog } from "../src/sidebar/NewWorkspaceDialog.js";
 
@@ -29,6 +29,19 @@ const FREE_SIZES = [
 const DOCKER: PlaceView = { id: "docker", kind: "provider", name: "docker", default: false, rateUsdPerHour: 0, sizes: FREE_SIZES, takesForks: true };
 const COPY: SealedImageCopy = { place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" };
 
+const cloned = (id: string, name: string, computer: string): ProjectView => ({
+  id,
+  name,
+  computer,
+  source: { kind: "git", url: `https://github.com/dev/${name}.git` },
+  path: `/root/${name}`,
+  createdAt: "2026-09-12T09:31:00.000Z",
+});
+/** The project a workspace is made of in most of these: one repo on the computer that clones it. */
+const SPOO = cloned("pr_1", "spoo-landing", "p_1");
+const SITE = cloned("pr_2", "site", "box");
+const IN_PLACE: ProjectView = { id: "pr_3", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: "2026-09-12T09:31:00.000Z" };
+
 /** What a keycap is drawn as, read the way ui/button.test.tsx reads it: the outline carries the input's hairline. */
 const isOutline = (button: HTMLElement): boolean => button.className.split(" ").includes("border-input") && !button.className.split(" ").includes("bg-primary");
 
@@ -36,6 +49,7 @@ const dialogWith = (props: Partial<Parameters<typeof NewWorkspaceDialog>[0]> = {
   <NewWorkspaceDialog
     initialName="workspace-1"
     places={[HERE, HETZNER, ASCII]}
+    projects={[SPOO, SITE]}
     copies={[]}
     goldenSize={null}
     refusal={null}
@@ -74,38 +88,47 @@ describe("new workspace dialog", () => {
     expect(before(panel, footer)).toBe(true);
   });
 
-  it("Enter in the name and the Create button both submit the trimmed name on the default row", async () => {
+  it("Enter in the name and the Create button both submit the trimmed name on the project the work is on", async () => {
     const onCreate = vi.fn();
     const dialog = await open({ onCreate });
     const input = within(dialog).getByLabelText("Name") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "  beta " } });
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onCreate).toHaveBeenNthCalledWith(1, "beta", "p_1", undefined);
+    // The project's id, which is what the wire takes; the computer is the project's own and nothing here says it.
+    expect(onCreate).toHaveBeenNthCalledWith(1, "beta", "pr_1", undefined);
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenNthCalledWith(2, "beta", "p_1", undefined);
+    expect(onCreate).toHaveBeenNthCalledWith(2, "beta", "pr_1", undefined);
   });
 });
 
-describe("the Where control", () => {
-  it("lists every computer and provider that takes a workspace, never this computer, with the default checked", async () => {
-    const dialog = await open();
-    const group = within(dialog).getByRole("radiogroup", { name: "Where" });
-    const segments = within(group).getAllByRole("radio");
-    expect(segments.map(s => s.textContent)).toEqual(["hetzner", "ASCII"]);
-    expect(segments.map(s => s.getAttribute("aria-checked"))).toEqual(["true", "false"]);
+describe("the Project control", () => {
+  it("is the project's own name with one project, which asks no question, and creates on it", async () => {
+    const onCreate = vi.fn();
+    const dialog = await open({ projects: [SPOO], onCreate });
+    expect(within(dialog).queryByRole("radiogroup", { name: "Project" })).toBeNull();
+    expect(dialog.querySelector<HTMLElement>("[data-project=pr_1]")!.textContent).toBe("spoo-landing");
+    fireEvent.click(create(dialog));
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "pr_1", undefined);
   });
 
-  it("says what the checked row costs, its room, and that the image is built there first", async () => {
+  it("lists every project this wsp holds with the first checked, and a project worked in place here is one of them", async () => {
+    const dialog = await open({ projects: [SPOO, SITE, IN_PLACE] });
+    const group = within(dialog).getByRole("radiogroup", { name: "Project" });
+    const segments = within(group).getAllByRole("radio");
+    expect(segments.map(s => s.textContent)).toEqual(["spoo-landing", "site", "wsp"]);
+    expect(segments.map(s => s.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+  });
+
+  it("says what the checked project's computer costs, its room, and that the image is built there first", async () => {
     const dialog = await open();
     expect(caption(dialog)).toBe("free · room for 3 workspaces · builds your image there first, about 4 min");
   });
 
   it("says a provider's rate and which image is there, and offers its sizes under the caption", async () => {
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
     const onCreate = vi.fn();
     const dialog = await open({ copies: [COPY], goldenSize: { cpu: 2, memMb: 4096 }, onCreate });
     expect(within(dialog).queryByRole("radiogroup", { name: "Size" })).toBeNull();
-    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Project" })).getByRole("radio", { name: "site" }));
     // The ticked row's rate, not the provider's default: the caption prices the workspace this dialog would make.
     expect(caption(dialog)).toBe("$0.11/hr while awake · naps to $0 · your image is there, v1");
     const sizes = within(dialog).getByRole("radiogroup", { name: "Size" });
@@ -115,37 +138,32 @@ describe("the Where control", () => {
     fireEvent.click(rows[1]!);
     expect(caption(dialog)).toBe("$0.15/hr while awake · naps to $0 · your image is there, v1");
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenCalledWith("workspace-1", "box", { cpu: 2, memMb: 8192 });
-    vi.unstubAllGlobals();
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "pr_2", { cpu: 2, memMb: 8192 });
   });
 
-  it("quotes the row's own rate while no size is ticked, since none is priced yet", async () => {
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+  it("quotes the computer's own rate while no size is ticked, since none is priced yet", async () => {
     const dialog = await open({ copies: [COPY], goldenSize: null });
-    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Where" })).getByRole("radio", { name: "ASCII" }));
+    fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Project" })).getByRole("radio", { name: "site" }));
     expect(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["false", "false"]);
     expect(caption(dialog)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
-    vi.unstubAllGlobals();
   });
 
-  it("leaves a size behind when the pick moves to a row that offers none", async () => {
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
+  it("leaves a size behind when the pick moves to a project whose computer offers none", async () => {
     const onCreate = vi.fn();
     const dialog = await open({ onCreate });
-    const where = within(dialog).getByRole("radiogroup", { name: "Where" });
-    fireEvent.click(within(where).getByRole("radio", { name: "ASCII" }));
+    const pick = within(dialog).getByRole("radiogroup", { name: "Project" });
+    fireEvent.click(within(pick).getByRole("radio", { name: "site" }));
     fireEvent.click(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio")[1]!);
-    fireEvent.click(within(where).getByRole("radio", { name: "hetzner" }));
+    fireEvent.click(within(pick).getByRole("radio", { name: "spoo-landing" }));
     expect(within(dialog).queryByRole("radiogroup", { name: "Size" })).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    expect(onCreate).toHaveBeenCalledWith("workspace-1", "p_1", undefined);
-    vi.unstubAllGlobals();
+    expect(onCreate).toHaveBeenCalledWith("workspace-1", "pr_1", undefined);
   });
 
-  it("holds Create on a row with no room left and gives its caption as the reason", async () => {
+  it("holds Create on a computer with no room left and gives its caption as the reason", async () => {
     const onCreate = vi.fn();
     const full = { ...HETZNER, forks: { running: 3, room: 0 } };
-    const dialog = await open({ places: [HERE, full], onCreate });
+    const dialog = await open({ places: [HERE, full], projects: [SPOO], onCreate });
     const line = "free · 3 of 3 workspaces · pause or delete one there";
     expect(caption(dialog)).toBe(line);
     expect(create(dialog).disabled).toBe(true);
@@ -154,42 +172,38 @@ describe("the Where control", () => {
     expect(onCreate).not.toHaveBeenCalled();
   });
 
-  it("prices each row off its own list, and writes a row that charges nothing as free", async () => {
+  it("prices each computer off its own list, and writes one that charges nothing as free", async () => {
     // One list of sizes for every row quoted the wired provider's three rates under a row that bills nothing, so
     // two places read the same to the cent and there was nothing to choose between them.
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
-    const dialog = await open({ places: [HERE, HETZNER, ASCII, DOCKER] });
-    const where = within(dialog).getByRole("radiogroup", { name: "Where" });
-    fireEvent.click(within(where).getByRole("radio", { name: "docker" }));
+    const onDocker = cloned("pr_4", "tools", "docker");
+    const dialog = await open({ places: [HERE, HETZNER, ASCII, DOCKER], projects: [SPOO, SITE, onDocker] });
+    const pick = within(dialog).getByRole("radiogroup", { name: "Project" });
+    fireEvent.click(within(pick).getByRole("radio", { name: "tools" }));
     const rows = within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio");
     expect(rows.map(r => r.closest("label")!.textContent)).toEqual(FREE_SIZES.map(size => `${fmtSize(size)}free`));
     expect(caption(dialog)).toBe("free · builds your image there first, about 4 min");
-    // The row beside it keeps its own shapes and its own prices.
-    fireEvent.click(within(where).getByRole("radio", { name: "ASCII" }));
+    // The project beside it keeps its computer's own shapes and its own prices.
+    fireEvent.click(within(pick).getByRole("radio", { name: "site" }));
     expect(within(within(dialog).getByRole("radiogroup", { name: "Size" })).getAllByRole("radio").map(r => r.closest("label")!.textContent)).toEqual(
       SIZES.map(size => `${fmtSize(size)}${fmtPrice(size.rateUsdPerHour)}`),
     );
-    vi.unstubAllGlobals();
   });
 
-  it("puts the rows in a select once there are more than four", async () => {
-    const more = ["a", "b", "c", "d", "e"].map((name, at): PlaceView => ({ ...HETZNER, id: `p_${at}`, name, default: at === 0 }));
-    const dialog = await open({ places: [HERE, ...more] });
-    expect(within(dialog).queryByRole("radiogroup", { name: "Where" })).toBeNull();
+  it("puts the projects in a select once there are more than four", async () => {
+    const many = ["a", "b", "c", "d", "e"].map((name, at) => cloned(`pr_${at}`, name, "p_1"));
+    const dialog = await open({ projects: many });
+    expect(within(dialog).queryByRole("radiogroup", { name: "Project" })).toBeNull();
     expect(dialog.querySelector<HTMLElement>("[data-slot=select-button]")!.textContent).toContain("a");
   });
 });
 
-describe("with nowhere to put a workspace", () => {
-  const NOWHERE: PlaceView[] = [HERE];
-
-  it("drops the control for two notes, the first of them why this computer is not on the list, and makes the one road forward the loud key", async () => {
+describe("with no project to make a workspace of", () => {
+  it("drops the control for two notes, the second of them the line that records a project, and makes the one road forward the loud key", async () => {
     const onAddComputer = vi.fn();
-    const dialog = await open({ places: NOWHERE, onAddComputer });
-    expect(within(dialog).queryByRole("radiogroup", { name: "Where" })).toBeNull();
-    // The answer to a person who has just read in Settings that this Mac is a computer where agents run.
-    expect(dialog.querySelector("[data-k=nowhere-here]")!.textContent).toBe("this Mac is already a workspace, the only one it can be");
-    expect(dialog.querySelector("[data-k=nowhere-add]")!.textContent).toBe("Add a computer you own or connect a provider, and workspaces can be created there.");
+    const dialog = await open({ projects: [], onAddComputer });
+    expect(within(dialog).queryByRole("radiogroup", { name: "Project" })).toBeNull();
+    expect(dialog.querySelector("[data-k=no-project-here]")!.textContent).toBe("No projects yet, and a workspace is a copy of one.");
+    expect(dialog.querySelector("[data-k=no-project-add]")!.textContent).toBe("Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.");
     const add = within(dialog).getByRole("button", { name: "Add a computer" });
     expect(isHeld(add)).toBe(false);
     // The one key that can be pressed here is the loud one: a held Create is drawn as the outline, so leaving this

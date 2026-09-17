@@ -81,7 +81,6 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
     listSessions: async () => [],
     listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => statuses,
-    createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {

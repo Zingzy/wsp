@@ -24,7 +24,6 @@ function fakeApi(storage: SnapshotStorage | null) {
     listWorkspaces: async () => [WS],
     getWorkspace: async () => WS,
     createWorkspace: async () => WS,
-    createFromGoldenHead: async () => WS,
     watchStatuses: async () => [STATUS],
     nap: async () => WS,
     wake: async () => WS,

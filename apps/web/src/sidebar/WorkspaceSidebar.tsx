@@ -140,11 +140,10 @@ export function WorkspaceSidebar() {
   // waiting state of its own, so it holds nothing at all.
   const ready = useReady();
   const createWorkspace = useStore(s => s.createWorkspace);
-  const createLocal = useStore(s => s.createLocalWorkspace);
-  // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
-  const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
   // Where a workspace can go: the same list Settings draws, so the dialog and that table never offer two answers.
   const places = useStore(s => s.places);
+  // What a workspace is made of. Named apart from the sidebar's own `projects`, which are its workspace rows.
+  const recorded = useStore(s => s.projects);
   const openAddComputer = useStore(s => s.openAddComputer);
   const hasGolden = useStore(s => s.hasGolden);
   const initJob = useStore(s => s.initJob);
@@ -198,8 +197,8 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(
-    () => resolveActions(sidebarActions, { mode, hasLocal, connected: api !== null }, { setMode, newLocal: () => void createLocal() }, labs),
-    [api, createLocal, hasLocal, labs, mode, setMode],
+    () => resolveActions(sidebarActions, { mode }, { setMode }, labs),
+    [labs, mode, setMode],
   );
   const spaceId = useSpaceWorkspaceId();
   const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
@@ -244,9 +243,9 @@ export function WorkspaceSidebar() {
   );
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
-  const create = async (name: string, where?: string, size?: WorkspaceSize): Promise<void> => {
+  const create = async (name: string, project: string, size?: WorkspaceSize): Promise<void> => {
     setDialog(null);
-    await createWorkspace(name, undefined, size, where);
+    await createWorkspace(project, name, size === undefined ? undefined : { size });
   };
 
   // The row's rebuild spins until the status names a new machine, so it stands in for the registry's plain call.
@@ -657,10 +656,11 @@ export function WorkspaceSidebar() {
           key={dialog.key}
           initialName={dialog.name}
           places={places}
+          projects={recorded}
           copies={dialog.copies}
           goldenSize={dialog.goldenSize}
           refusal={createRefusal?.line ?? null}
-          onCreate={(name, where, size) => void create(name, where, size)}
+          onCreate={(name, project, size) => void create(name, project, size)}
           onCancel={() => setDialog(null)}
           onAddComputer={() => {
             setDialog(null);

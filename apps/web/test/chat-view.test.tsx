@@ -72,7 +72,6 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     capabilities: async () => (caps()),
     listSessions: async () => sessions,
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => ({ id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running" }),

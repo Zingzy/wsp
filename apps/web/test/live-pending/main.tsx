@@ -38,7 +38,6 @@ const api: Api = {
   listWorkspaces: async () => [box, mac],
   getWorkspace: async id => (id === box.id ? box : mac),
   createWorkspace: async () => mac,
-  createFromGoldenHead: async () => mac,
   watchStatuses: async () => [statusOf(box), statusOf(mac)],
   nap: async () => mac,
   wake: async () => mac,

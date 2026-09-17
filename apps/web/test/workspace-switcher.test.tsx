@@ -58,7 +58,6 @@ function fakeApi(): Api {
     listWorkspaces: async () => WORKSPACES,
     getWorkspace: async id => WORKSPACES.find(w => w.id === id)!,
     createWorkspace: async () => WORKSPACES[0]!,
-    createFromGoldenHead: async () => WORKSPACES[0]!,
     watchStatuses: async () => [],
     forget: async () => {},
     nap: async id => WORKSPACES.find(w => w.id === id)!,

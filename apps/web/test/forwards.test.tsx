@@ -25,7 +25,6 @@ function fakeApi(workspaces: WorkspaceView[], forwards: PortForward[], opts: { l
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
-    createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => workspaces.map(w => ({ ...w, machineState: "running" as const, reach: { state: "reachable" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 })),
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,

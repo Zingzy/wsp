@@ -27,7 +27,6 @@ function fakeApi(workspaces: WorkspaceView[]): Api {
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
-    createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => [],
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,
@@ -113,11 +112,11 @@ describe("workspace creation view", () => {
   it("creating opens the view in the center with the name, a moving wave and the log growing with timestamps; created swaps in the thread", async () => {
     let finish!: (w: WorkspaceView) => void;
     const api = fakeApi([workspace]);
-    api.createFromGoldenHead = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    api.createWorkspace = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
     useStore.getState().bind(api);
     render(<Shell />);
     await screen.findByRole("heading", { level: 1 });
-    void useStore.getState().createWorkspace("beta");
+    void useStore.getState().createWorkspace("pr_1", "beta");
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("true");
     expect(within(view).getByRole("heading", { level: 1 }).textContent).toBe("beta");
@@ -168,11 +167,11 @@ describe("workspace creation view", () => {
       throw new RequestError(CAP_LINE, "concurrency");
     });
     create.mockImplementation(() => new Promise<WorkspaceView>(() => {}));
-    api.createFromGoldenHead = create;
+    api.createWorkspace = create;
     useStore.getState().bind(api);
     render(<Shell />);
     await screen.findByRole("heading", { level: 1 });
-    await act(() => useStore.getState().createWorkspace("beta"));
+    await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.getAttribute("aria-busy")).toBe("false");
     expect(view.textContent).toContain("Creation failed");
@@ -190,19 +189,19 @@ describe("workspace creation view", () => {
 
     fireEvent.click(within(view).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-    // The retry goes back to the same computer, with the same size: a retry is the create again, not a new one.
-    expect(create).toHaveBeenLastCalledWith("beta", undefined, undefined);
+    // The retry goes back to the same project, with the same size: a retry is the create again, not a new one.
+    expect(create).toHaveBeenLastCalledWith("pr_1", "beta", {});
     await waitFor(() => expect(screen.getByTestId("workspace-creation").getAttribute("aria-busy")).toBe("true"));
     expect(within(screen.getByTestId("workspace-creation")).queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("dismissing a failed creation returns the center to the first workspace", async () => {
     const api = fakeApi([workspace]);
-    api.createFromGoldenHead = async () => { throw new Error("no golden image yet"); };
+    api.createWorkspace = async () => { throw new Error("no golden image yet"); };
     useStore.getState().bind(api);
     render(<Shell />);
     await screen.findByRole("heading", { level: 1 });
-    await act(() => useStore.getState().createWorkspace("beta"));
+    await act(() => useStore.getState().createWorkspace("pr_1", "beta"));
     const view = await screen.findByTestId("workspace-creation");
     expect(view.textContent).toContain("no golden image yet");
     fireEvent.click(within(view).getByRole("button", { name: "Dismiss" }));

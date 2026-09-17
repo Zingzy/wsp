@@ -51,7 +51,6 @@ function fixtureApi(transcript: SessionEvent[] = [...SETTLED_A, ...RUNNING_B], r
     listWorkspaces: async () => [ws],
     getWorkspace: async () => ws,
     createWorkspace: async () => ws,
-    createFromGoldenHead: async () => ws,
     watchStatuses: async () => [],
     nap: async () => workspace,
     wake: async () => workspace,

@@ -65,7 +65,6 @@ function fakeApi(sessions: SessionView[] = THREADS) {
     listWorkspaces: vi.fn(async () => [workspace]),
     getWorkspace: vi.fn(async () => workspace),
     createWorkspace: vi.fn(async () => workspace),
-    createFromGoldenHead: vi.fn(async () => workspace),
     watchStatuses: vi.fn(async () => []),
     nap: vi.fn(async () => workspace),
     wake: vi.fn(async () => workspace),

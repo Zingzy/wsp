@@ -152,7 +152,6 @@ function fixtureApi(history: SessionEvent[] = [], rows: SessionView[] = [], ws: 
     listSessions: async () => rows,
     listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => ws,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {

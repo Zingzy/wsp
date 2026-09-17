@@ -663,9 +663,10 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   };
 
   // A copy of a project image, named after the project it carries: the name is the row's title in the sidebar, so
-  // it reads as what it is rather than as the verb underneath.
+  // it reads as what it is rather than as the verb underneath. The image is of this workspace's own project, so
+  // that project is what the copy is made of and the image says which version of it.
   const fork = (g: ProjectGolden): void => {
-    void createWorkspace(`${goldenForkName(g)}-copy`, g.snapshotId);
+    void createWorkspace(workspace.project.id, `${goldenForkName(g)}-copy`, { golden: g.snapshotId });
   };
 
   const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;

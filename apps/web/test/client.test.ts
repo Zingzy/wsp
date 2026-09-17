@@ -3,7 +3,7 @@
 // dispatches and unwraps the field its reply carries. The same socket plays a
 // runtime that dies and comes back for the reconnect tests.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, PLACE_ADD_WORDS } from "@wsp/protocol";
+import { PLACE_ADD_WORDS, RuntimeRequest } from "@wsp/protocol";
 import { DisconnectedError, makeApi, ProtocolClient, type ConnStatus, type InstallStage, type ProtocolClientOptions } from "../src/protocol/client.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 import { caps } from "./caps.js";
@@ -138,17 +138,35 @@ describe("makeApi wrappers", () => {
     await expect(api.planProject!("/var/proj")).rejects.toThrow();
   });
 
-  it("createWorkspace and createFromGoldenHead send a picked size as cpu and memMb, and nothing about size without one", async () => {
+  it("createWorkspace sends the project and the name, a picked size as cpu and memMb and a picked image, and the runtime parses every one of them", async () => {
     const { api, lastSent } = await connect();
     const workspace = { id: "ws_1", name: "beta", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_1", createdAt: "t" };
-    const manifest = { head: 1, versions: [{ version: 1, snapshotId: "snap_1", baseTemplate: "default", setupSha: "x", createdAt: "t", smoke: { cmd: "true", exitCode: 0 } }] };
-    ScriptedSocket.reply = f => (f["op"] === "golden.get" ? { id: f["id"], ok: true, manifest } : { id: f["id"], ok: true, workspace });
-    await api.createWorkspace("snap_1", "beta", { cpu: 2, memMb: 8192 });
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", golden: "snap_1", name: "beta", cpu: 2, memMb: 8192 });
-    await api.createFromGoldenHead("beta", { cpu: 2, memMb: 8192 });
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", golden: "snap_1", name: "beta", cpu: 2, memMb: 8192 });
-    await api.createFromGoldenHead("beta");
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", golden: "snap_1", name: "beta" });
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, workspace });
+    // A workspace is one project's copy: the project is the whole of where it goes, and the image and the size ride
+    // only where the person picked one. Each frame is parsed by the runtime's own schema here, so the app and the
+    // wire cannot drift apart again without this test going red.
+    await api.createWorkspace("pr_1", "beta");
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", project: "pr_1", name: "beta" });
+    expect(RuntimeRequest.parse(lastSent())).toMatchObject({ op: "workspaces.create", project: "pr_1", name: "beta" });
+    await api.createWorkspace("pr_1", "beta", { size: { cpu: 2, memMb: 8192 } });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", project: "pr_1", name: "beta", cpu: 2, memMb: 8192 });
+    expect(RuntimeRequest.safeParse(lastSent()).success).toBe(true);
+    await api.createWorkspace("pr_1", "beta", { golden: "snap_1", size: { cpu: 2, memMb: 8192 } });
+    expect(lastSent()).toEqual({ id: expect.any(Number), op: "workspaces.create", project: "pr_1", name: "beta", golden: "snap_1", cpu: 2, memMb: 8192 });
+    expect(RuntimeRequest.safeParse(lastSent()).success).toBe(true);
+  });
+
+  it("sends no frame the runtime would refuse: every op this client has is one the runtime serves", async () => {
+    const { api, lastSent } = await connect();
+    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, workspaces: [], projects: [], places: [], statuses: [], sessions: [] });
+    // The create road that left the wire with the projects recut leaves the client with it: nothing here asks for a
+    // local workspace of this computer, which is now a project of its own recorded with wsp add.
+    expect("createLocalWorkspace" in api).toBe(false);
+    await api.listWorkspaces();
+    expect(RuntimeRequest.safeParse(lastSent()).success).toBe(true);
+    await api.projectsList!();
+    expect(lastSent()).toMatchObject({ op: "projects.list" });
+    expect(RuntimeRequest.safeParse(lastSent()).success).toBe(true);
   });
 
   it("capabilities sends capabilities.get and unwraps the flags", async () => {
@@ -321,13 +339,7 @@ describe("makeApi golden wrappers", () => {
     expect(await api.getGolden()).toEqual(manifest);
   });
 
-  it("a fork of a head that is not there refuses in the app's words, never with a command to run", async () => {
-    const { api, lastSent } = await connect();
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true });
-    await expect(api.createFromGoldenHead("beta")).rejects.toThrow(CLOUD_SETUP_WORDS.create.none);
-    await expect(api.createFromGoldenHead("beta")).rejects.not.toThrow(/wspx|golden build/);
-    expect(lastSent()).toMatchObject({ op: "golden.get" });
-  });
+
 });
 
 describe("ProtocolClient reconnect", () => {

@@ -28,7 +28,6 @@ function fakeApi(opts: { golden?: GoldenManifest; workspaces?: WorkspaceView[]; 
     listWorkspaces: vi.fn(async () => opts.workspaces ?? []),
     getWorkspace: vi.fn(async () => first),
     createWorkspace: vi.fn(async () => first),
-    createFromGoldenHead: vi.fn(async () => first),
     watchStatuses: vi.fn(async () => []),
     nap: vi.fn(async () => first),
     wake: vi.fn(async () => first),

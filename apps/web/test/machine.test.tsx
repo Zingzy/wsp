@@ -113,8 +113,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     }),
     listWorkspaces: vi.fn(async () => workspaces),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
-    createWorkspace: vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>(async () => workspaces[0]!),
-    createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
+    createWorkspace: vi.fn<(project: string, name: string) => Promise<WorkspaceView>>(async (_project, name) => view("ws_new", name)),
     watchStatuses: vi.fn(async () => workspaces.map(w => status(w))),
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
@@ -852,9 +851,9 @@ describe("project goldens in the lineage", () => {
     expect(screen.getAllByRole("button", { name: /^new workspace from the image of/ })[0]!.textContent).toBe("New workspace from this");
     fireEvent.click(screen.getByRole("button", { name: "new workspace from the image of proj taken on api, v12" }));
     // The name a person reads on the row it makes: a copy of the project, never the verb under it.
-    await waitFor(() => // A fork of a project golden names no computer: it goes where the image it carries already stands.
-    expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-copy", undefined, undefined));
-    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+    // A fork of a project image is a copy of this workspace's own project, at the version that image holds, so the
+    // project is what it names and nothing says where: the project's computer is already where the image stands.
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_api", "proj-copy", { golden: "snap_p1" }));
   });
 
   it("without any project golden the versions render as before and nothing is listed under them", async () => {

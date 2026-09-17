@@ -23,7 +23,6 @@ function fakeApi(record: Preferences, refuse?: () => Error) {
     listWorkspaces: async () => [view("ws_a")],
     getWorkspace: async () => view("ws_a"),
     createWorkspace: async () => view("ws_a"),
-    createFromGoldenHead: async () => view("ws_a"),
     watchStatuses: async () => [],
     nap: async () => view("ws_a"),
     wake: async () => view("ws_a"),
