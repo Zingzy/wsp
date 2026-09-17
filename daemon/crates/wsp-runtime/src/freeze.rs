@@ -1,62 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The freezer, written and read at the workspace's cgroup: youki's own pause looks for the cgroup under the raw
-//! path the spec names and misses it under a manager that moved it, and writing cgroup.freeze costs nothing. The
-//! path is the plain manager's, which the layout spells; nothing here reads a cgroup off a pid, since a pid can
-//! belong to another process by the time it is read.
+//! What the daemon reads and writes at a workspace's cgroup: the processes in it, what it holds of its caps, and
+//! the two limits the kernel takes from us rather than from the spec. The path is the plain manager's, which the
+//! layout spells; nothing here reads a cgroup off a pid, since a pid can belong to another process by the time it
+//! is read.
+//!
+//! Nothing here freezes. A workspace on a computer somebody owns is awake or stopped and nothing else, so the
+//! freezer that used to serve the pause has no reader left: the pause kills, and the wake boots over what the
+//! stop left on disk.
 
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 /// Where cgroup v2 is mounted.
 pub const CGROUP_ROOT: &str = "/sys/fs/cgroup";
-
-/// How long a freeze or a thaw gets to show in cgroup.events before it is called failed.
-const SETTLE: Duration = Duration::from_secs(5);
-
-/// Whether cgroup.events says frozen.
-pub fn frozen(cgroup: &Path) -> io::Result<bool> {
-    let events = fs::read_to_string(cgroup.join("cgroup.events"))?;
-    Ok(events.lines().any(|line| line.trim() == "frozen 1"))
-}
-
-/// Freezes and waits for cgroup.events to agree, off the daemon's one runtime thread: a workspace mid heavy IO
-/// takes a while to freeze, and nothing else the daemon serves may wait behind it.
-pub async fn freeze(cgroup: PathBuf) -> io::Result<()> {
-    set_frozen_off_thread(cgroup, true, SETTLE).await
-}
-
-pub async fn thaw(cgroup: PathBuf) -> io::Result<()> {
-    set_frozen_off_thread(cgroup, false, SETTLE).await
-}
-
-async fn set_frozen_off_thread(cgroup: PathBuf, want: bool, patience: Duration) -> io::Result<()> {
-    tokio::task::spawn_blocking(move || set_frozen(&cgroup, want, patience)).await.map_err(|e| io::Error::other(e.to_string()))?
-}
-
-/// A freeze that does not settle in time is written back off before it is called failed: the kernel would finish
-/// it a moment later and hold the workspace frozen behind a failure nobody thaws.
-fn set_frozen(cgroup: &Path, want: bool, patience: Duration) -> io::Result<()> {
-    fs::write(cgroup.join("cgroup.freeze"), if want { "1" } else { "0" })?;
-    let started = Instant::now();
-    while frozen(cgroup)? != want {
-        if started.elapsed() > patience {
-            if want {
-                let _ = fs::write(cgroup.join("cgroup.freeze"), "0");
-            }
-            return Err(io::Error::other(format!(
-                "{} did not read frozen {} in {} s",
-                cgroup.display(),
-                u8::from(want),
-                patience.as_secs()
-            )));
-        }
-        sleep(Duration::from_millis(1));
-    }
-    Ok(())
-}
 
 /// Waits until cgroup.events says no process is left, or the cgroup is gone; killed processes take a moment to
 /// leave, and the cgroup cannot be removed before they have.
@@ -85,24 +44,44 @@ pub fn forbid_swap(cgroup: &Path) -> io::Result<()> {
     }
 }
 
+/// The cap as a throttle, written beside the cap itself: above this the kernel puts the workspace's own processes
+/// into reclaim and slows their allocations rather than ending one, so a workspace whose build has filled the
+/// cap with page cache gives it back and runs on. The kill stays behind it as memory.max, which youki writes from
+/// the spec: with no swap to fall back on, a workspace allocating memory nothing can reclaim would otherwise
+/// stall in reclaim for the life of the box, holding its cores and its cgroup and answering nothing.
+///
+/// A cgroup whose controller keeps no memory.high refuses the write with no such file, since nothing creates a
+/// file in cgroupfs: such a box has the cap and the kill alone, which is what it had before.
+pub fn throttle_at(cgroup: &Path, mem_mb: u64) -> io::Result<()> {
+    match fs::write(cgroup.join("memory.high"), (mem_mb * 1024 * 1024).to_string()) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
 /// memory.current in bytes.
 pub fn memory_current(cgroup: &Path) -> io::Result<u64> {
     let text = fs::read_to_string(cgroup.join("memory.current"))?;
     text.trim().parse().map_err(|e| io::Error::other(format!("memory.current: {e}")))
 }
 
-/// Every process in the cgroup and in the cgroups under it. The count is the subtree's because a workspace running
-/// a container engine holds its containers' processes in cgroups of their own, and pids.current is not read: the
-/// pids controller is not one a workspace needs, so a box that delegates only memory and cpu has no such file.
-pub fn pids_in(cgroup: &Path) -> io::Result<u64> {
-    let mut count = fs::read_to_string(cgroup.join("cgroup.procs"))?.lines().filter(|line| !line.trim().is_empty()).count() as u64;
+/// Every process in the cgroup and in the cgroups under it. The subtree because a workspace running a container
+/// engine holds its containers' processes in cgroups of their own, and pids.current is not read: the pids
+/// controller is not one a workspace needs, so a box that delegates only memory and cpu has no such file.
+pub fn pids_under(cgroup: &Path) -> io::Result<Vec<i32>> {
+    let mut pids: Vec<i32> = fs::read_to_string(cgroup.join("cgroup.procs"))?.lines().filter_map(|line| line.trim().parse().ok()).collect();
     for entry in fs::read_dir(cgroup)? {
         let entry = entry?;
         if entry.file_type()?.is_dir() {
-            count += pids_in(&entry.path())?;
+            pids.extend(pids_under(&entry.path())?);
         }
     }
-    Ok(count)
+    Ok(pids)
+}
+
+/// How many of them there are, off the same walk: a reading counts what the stop signals.
+pub fn pids_in(cgroup: &Path) -> io::Result<u64> {
+    Ok(pids_under(cgroup)?.len() as u64)
 }
 
 /// cpu.stat's usage_usec.
@@ -127,39 +106,34 @@ mod tests {
         assert!(forbid_swap(Path::new("/proc/no-such-cgroup-here/x")).is_ok());
     }
 
-    #[tokio::test]
-    async fn the_freezer_waits_off_the_runtime_thread() {
+    #[test]
+    fn the_cap_is_written_as_a_throttle_beside_the_kill_and_a_cgroup_without_one_is_no_failure() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("cgroup.freeze"), "0").unwrap();
-        fs::write(dir.path().join("cgroup.events"), "populated 1\nfrozen 0\n").unwrap();
-        let ticks = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
-        let counting = std::sync::Arc::clone(&ticks);
-        let ticker = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_millis(1)).await;
-                counting.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-        });
-        // A cgroup that never reads frozen: the wait runs its whole patience, and the runtime keeps ticking meanwhile.
-        let waited = set_frozen_off_thread(dir.path().to_path_buf(), true, Duration::from_millis(300)).await;
-        ticker.abort();
-        assert!(waited.is_err());
-        // The freeze it wrote is taken back, so a freeze that failed leaves nothing frozen behind it.
-        assert_eq!(fs::read_to_string(dir.path().join("cgroup.freeze")).unwrap(), "0");
-        assert!(
-            ticks.load(std::sync::atomic::Ordering::Relaxed) >= 20,
-            "the runtime thread was held: {} ticks",
-            ticks.load(std::sync::atomic::Ordering::Relaxed)
-        );
+        fs::write(dir.path().join("memory.high"), "max").unwrap();
+        throttle_at(dir.path(), 512).unwrap();
+        assert_eq!(fs::read_to_string(dir.path().join("memory.high")).unwrap(), (512 * 1024 * 1024).to_string());
+        // Written again by every wake, over whatever the last boot left at it.
+        throttle_at(dir.path(), 1024).unwrap();
+        assert_eq!(fs::read_to_string(dir.path().join("memory.high")).unwrap(), (1024 * 1024 * 1024).to_string());
+        // A cgroup whose controller keeps no such file answers no such file, since cgroupfs creates none: the
+        // boot goes on with the cap and the kill alone rather than failing.
+        assert!(throttle_at(Path::new("/proc/no-such-cgroup-here/x"), 512).is_ok());
     }
 
     #[test]
-    fn frozen_reads_the_events_file() {
+    fn the_processes_of_a_workspace_are_its_cgroup_and_the_cgroups_under_it() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("cgroup.events"), "populated 1\nfrozen 0\n").unwrap();
-        assert!(!frozen(dir.path()).unwrap());
-        fs::write(dir.path().join("cgroup.events"), "populated 1\nfrozen 1\n").unwrap();
-        assert!(frozen(dir.path()).unwrap());
+        let engine = dir.path().join("docker/one");
+        fs::create_dir_all(&engine).unwrap();
+        fs::write(dir.path().join("cgroup.procs"), "41\n42\n\n").unwrap();
+        fs::write(engine.join("cgroup.procs"), "77\n").unwrap();
+        fs::write(dir.path().join("docker/cgroup.procs"), "").unwrap();
+        let mut pids = pids_under(dir.path()).unwrap();
+        pids.sort_unstable();
+        // The containers a workspace's own engine runs are its processes too, and an empty line is no process.
+        assert_eq!(pids, [41, 42, 77]);
+        assert_eq!(pids_in(dir.path()).unwrap(), 3);
+        assert!(pids_under(&dir.path().join("gone")).is_err());
         fs::write(dir.path().join("cpu.stat"), "usage_usec 4200\nuser_usec 1\n").unwrap();
         assert_eq!(cpu_usage_usec(dir.path()).unwrap(), 4200);
     }

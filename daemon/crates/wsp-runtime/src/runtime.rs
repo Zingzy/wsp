@@ -14,7 +14,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use libcontainer::container::builder::ContainerBuilder;
 use libcontainer::container::{Container, ContainerStatus, State};
@@ -44,6 +44,15 @@ const STALE_NOTIFY: Duration = Duration::from_secs(30);
 const TENANT_NOTIFY: &str = "tenant-notify-";
 /// How long killed processes get to leave their cgroup before the kill is called failed.
 const KILL_PATIENCE: Duration = Duration::from_secs(10);
+/// How long the processes of a workspace get to end themselves after SIGTERM before the kill road takes whatever
+/// stayed. A turn writing its files out and a dev server closing its sockets are both done well inside it, and a
+/// person who asked for a stop does not wait longer than this on a process that ignores the signal.
+pub const STOP_PATIENCE: Duration = Duration::from_secs(15);
+/// How long the boot command gets to appear in the workspace's cgroup after the start before the boot is called
+/// failed. Measured on a box: the first process is in the cgroup 133 to 162 ms after a create is asked for and
+/// its own child 297 to 319 ms after, so this is a wide multiple of what it takes and not a figure a healthy
+/// boot ever reaches.
+pub const BOOT_CHILD_PATIENCE: Duration = Duration::from_secs(10);
 /// The one sentence an exec is refused with when the workspace's filter has a rule whose action is notify: loading
 /// such a filter hands back a notify fd, and nothing on the exec road serves it.
 const NOTIFY_REFUSAL: &str =
@@ -300,11 +309,138 @@ impl Runtime {
         Ok(Container::load(dir).map_err(container)?.pid().map(|pid| pid.as_raw()))
     }
 
-    /// youki's status word written to its state file, so its own reads agree with the freezer.
-    pub fn set_status(&self, id: &str, paused: bool) -> Result<(), Error> {
-        let mut c = Container::load(self.layout.state_of(id)).map_err(container)?;
-        c.set_status(if paused { ContainerStatus::Paused } else { ContainerStatus::Running }).save().map_err(container)
+    /// Waits until the workspace's first process has started the boot command, which is the one child it starts
+    /// itself, and answers that child's pid.
+    ///
+    /// The start is what execs the init, and the init spawns the boot command a moment later, so for about a
+    /// sixth of a second a workspace's cgroup holds its first process and nothing else. A create that answered
+    /// ready inside that window handed back a workspace a stop could not stop: the stop read a cgroup of one
+    /// pid, had nothing to ask, and then watched the boot command appear and waited on it for the whole patience
+    /// (measured on a box, every pause fifteen seconds). So the boot does not answer until the child is there.
+    pub async fn boot_child_up(&self, id: &str, init: &Init) -> Result<i32, Error> {
+        let cgroup = self.layout.cgroup_dir(id);
+        let init = init.clone();
+        tokio::task::spawn_blocking(move || boot_child_in(&cgroup, &init, BOOT_CHILD_PATIENCE)).await.map_err(joined)?
     }
+
+    /// The stop a nap is, which always stops: SIGTERM to the workspace's own processes, its init and the boot
+    /// command last of all, a wait for them to leave, then the kill road for whatever stayed.
+    ///
+    /// The init is signalled last because it is the first process of a pid namespace: the kernel kills every
+    /// other process in one the moment that process is gone, so an init signalled first would take the turn and
+    /// the dev server down with it before either could write out what it held. The boot command waits with it,
+    /// and for the same reason at one remove: this init exits as soon as the one child it started is reaped, so
+    /// a boot command asked to end first ends the init, and the init's end kills everything the wait was for.
+    /// The init forwards what it is sent to that child, so signalling the init is what ends both.
+    ///
+    /// `init` is the record's, so a workspace whose init is some other process by now signals nothing and goes
+    /// straight to the kill road.
+    pub async fn stop(&self, id: &str, init: Option<&Init>) -> Result<(), Error> {
+        let cgroup = self.layout.cgroup_dir(id);
+        let init_pid = init.filter(|init| alive(init)).map(|init| init.pid);
+        tokio::task::spawn_blocking(move || term_under(&cgroup, init_pid, STOP_PATIENCE)).await.map_err(joined)??;
+        self.kill(id, init).await
+    }
+}
+
+/// SIGTERM to the workspace's own processes and then to its init, waiting for each to leave inside the patience
+/// they share. Whatever is still there when it runs out is the kill road's; nothing here fails for that, since a
+/// stop that refused would leave a workspace neither awake nor stopped.
+///
+/// Two pids are held back to the end, which `held_back` reads: the init, and the one process the init started
+/// itself. Everything else in the cgroup is a turn's, and those are what the wait is for.
+///
+/// Every pass signals what it has not signalled yet, rather than only the listing the first pass read. A pid
+/// appears in a cgroup after a stop has begun more often than it looks: a process forked by one that is shutting
+/// down, one reparented onto the init when its parent left, or the workspace's own boot command where a create
+/// answered before it existed. One nothing ever signalled is one the wait then holds to the deadline, which is
+/// what a box measured as every pause costing the whole patience.
+fn term_under(cgroup: &Path, init: Option<i32>, patience: Duration) -> Result<(), Error> {
+    if !cgroup.exists() {
+        return Ok(());
+    }
+    let deadline = Instant::now() + patience;
+    let mut signalled: Vec<i32> = Vec::new();
+    // The first read is the one that can say why a stop asked nothing; every read after it is a poll, and a
+    // cgroup that went while the wait ran is a workspace that ended itself.
+    let mut listing = crate::freeze::pids_under(cgroup).map_err(io_at(cgroup))?;
+    loop {
+        let last = held_back(&listing, init);
+        let asking: Vec<i32> = listing.iter().copied().filter(|pid| !last.contains(pid) && !signalled.contains(pid)).collect();
+        for pid in asking {
+            let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
+            signalled.push(pid);
+        }
+        // Nothing left but the pair the init's own signal ends, or the patience is up: the init's turn either way.
+        if !listing.iter().any(|pid| !last.contains(pid)) || Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+        listing = crate::freeze::pids_under(cgroup).unwrap_or_default();
+    }
+    let Some(init) = init else { return Ok(()) };
+    // The init alone, which forwards it to the boot command: one signal ends the pair, and the kernel takes
+    // whatever is left of the namespace with them.
+    let _ = kill(Pid::from_raw(init), Signal::SIGTERM);
+    while !crate::freeze::pids_under(cgroup).unwrap_or_default().is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
+/// The pids a stop holds back to the end: the workspace's first process and the one process it started itself.
+/// Read off every listing rather than once, since which pid is the boot command is a fact about the cgroup as it
+/// is now, and a workspace still coming up has not put it there yet.
+fn held_back(pids: &[i32], init: Option<i32>) -> Vec<i32> {
+    init.into_iter().flat_map(|init| [Some(init), boot_child(pids, init)]).flatten().collect()
+}
+
+/// Waits for the init to have started the boot command, and answers its pid. An init that went while this waited
+/// started nothing and never will, which is said in its own sentence rather than waited out; so is a boot that
+/// ran nothing inside the patience, since a workspace whose first process starts nothing is a workspace with
+/// nothing in it.
+fn boot_child_in(cgroup: &Path, init: &Init, patience: Duration) -> Result<i32, Error> {
+    let deadline = Instant::now() + patience;
+    loop {
+        if let Some(child) = boot_child(&crate::freeze::pids_under(cgroup).unwrap_or_default(), init.pid) {
+            return Ok(child);
+        }
+        if !alive(init) {
+            return Err(Error::Container("the workspace's first process ended before it started anything".to_owned()));
+        }
+        if Instant::now() >= deadline {
+            return Err(Error::Container(format!(
+                "the workspace's first process started nothing in {} s, so there is nothing running inside it",
+                patience.as_secs()
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+
+/// The one process the init started itself, which is the boot command: the oldest of the cgroup's processes whose
+/// parent is the init.
+///
+/// The oldest and not simply a child of the init: a process a turn started and lost is reparented onto the init
+/// too, which is what this init is there for, and those are the very processes the stop asks to end first. The
+/// boot command is the only child the init has had since the workspace came up, and every turn's is younger than
+/// the boot, so age is what tells them apart. Nothing where the init has no child, which is a workspace whose
+/// boot command has already gone and whose init is on its way out with it.
+pub fn boot_child(pids: &[i32], init: i32) -> Option<i32> {
+    pids.iter()
+        .copied()
+        .filter(|pid| *pid != init)
+        .filter_map(|pid| parent_and_start(pid).filter(|(parent, _)| *parent == init).map(|(_, started)| (started, pid)))
+        .min()
+        .map(|(_, pid)| pid)
+}
+
+/// The parent's pid and the start time of a process, off the one stat line: the start time through the reader
+/// above, which is where that field's place is spelled.
+fn parent_and_start(pid: i32) -> Option<(i32, u64)> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let parent = stat.rsplit_once(')')?.1.split_whitespace().nth(1)?.parse().ok()?;
+    Some((parent, start_ticks(&stat).ok()?))
 }
 
 /// The identity of a live process: its pid with its start time and the box's boot id, which is what tells the
@@ -539,6 +675,151 @@ mod tests {
         assert!(!alive(&Init { pid: 4_194_303, ..own }));
     }
 
+    /// Which pid the stop holds back to the end with the init, on this process standing in for one: the oldest
+    /// child and not any child, since a process a turn backgrounded and lost is reparented onto the init too and
+    /// those are the ones the stop asks to end first.
+    #[test]
+    fn the_boot_command_is_the_oldest_child_the_init_has_and_not_a_turns_own() {
+        let me = std::process::id() as i32;
+        // The stand-in for the boot command, started first, and one for a process a turn left behind, started
+        // after it. Two clock ticks apart at the coarsest tick a kernel counts in, since the rule reads age.
+        let mut boot = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        let mut of_a_turn = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (booted, turned) = (boot.id() as i32, of_a_turn.id() as i32);
+        // In whatever order the cgroup hands them over, and with the init among them.
+        assert_eq!(boot_child(&[turned, me, booted], me), Some(booted));
+        assert_eq!(boot_child(&[booted, turned], me), Some(booted));
+        // The parent is what makes one a candidate: a pid of nobody's child here is not the init's boot command.
+        assert_eq!(boot_child(&[me, 1], me), None);
+        assert_eq!(boot_child(&[me], me), None);
+        assert_eq!(boot_child(&[], me), None);
+        // And what the two reads answer for a live process of ours: the parent is this process and the start
+        // time is the one the identity is read from.
+        let (parent, started) = parent_and_start(booted).unwrap();
+        assert_eq!(parent, me);
+        assert_eq!(started, identity_of(booted).unwrap().started);
+        for child in [&mut boot, &mut of_a_turn] {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        // A pid nothing holds answers nothing rather than failing the stop that reads it.
+        assert_eq!(parent_and_start(4_194_303), None);
+    }
+
+    /// A process's one child, waited for: what a shell that backgrounds a sleep and waits for it leaves behind,
+    /// which is the shape of an init and its boot command. Read off /proc by the parent link, as the rule does.
+    fn child_of(parent: i32, patience: Duration) -> Option<i32> {
+        let deadline = Instant::now() + patience;
+        loop {
+            let found = fs::read_dir("/proc")
+                .ok()?
+                .flatten()
+                .filter_map(|e| e.file_name().to_string_lossy().parse::<i32>().ok())
+                .find(|pid| parent_and_start(*pid).is_some_and(|(held, _)| held == parent));
+            if found.is_some() || Instant::now() >= deadline {
+                return found;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// Waits for what a poll can see, and says where it gave up.
+    fn wait_until(what: &str, patience: Duration, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + patience;
+        while !done() {
+            assert!(Instant::now() < deadline, "{what} did not happen in {} ms", patience.as_millis());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// The wait signals what appears while it runs, not only the listing its first pass read, and it never
+    /// signals the init or the one child the init started: a workspace still coming up puts its own boot command
+    /// in the cgroup after a stop that arrived early has read it, and a process nobody signalled is one the wait
+    /// holds to the deadline, which a box measured as every pause costing the whole patience.
+    ///
+    /// The cgroup here is a directory this case writes as the kernel would, and the pids in it are real
+    /// processes of its own, so what the stop sends them is what ends them.
+    #[test]
+    fn the_wait_signals_what_appears_while_it_runs_and_holds_back_the_init_and_its_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let procs = dir.path().join("cgroup.procs");
+        // The init and the one child it started, which are the two the stop leaves for last.
+        let mut init = std::process::Command::new("sh").args(["-c", "sleep 30 & wait"]).spawn().unwrap();
+        let init_pid = init.id() as i32;
+        let boot = child_of(init_pid, Duration::from_secs(2)).expect("the stand-in init started no child");
+        // Two processes of a turn's, neither of them a child of the init: one in the first listing, one that
+        // appears while the wait runs.
+        let mut first = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut second = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let (turn_one, turn_two) = (first.id() as i32, second.id() as i32);
+        let listing = |pids: &[i32]| fs::write(&procs, pids.iter().map(|pid| format!("{pid}\n")).collect::<String>()).unwrap();
+        listing(&[init_pid, boot, turn_one]);
+
+        let cgroup = dir.path().to_path_buf();
+        let stopping = std::thread::spawn(move || term_under(&cgroup, Some(init_pid), Duration::from_secs(5)));
+        // The first pass asks the turn's process to end, and asks neither of the other two.
+        wait_until("the first pass signalled the turn's process", Duration::from_secs(2), || first.try_wait().unwrap().is_some());
+        assert!(Path::new(&format!("/proc/{boot}")).exists(), "the boot command was signalled with the turn's processes");
+        assert!(init.try_wait().unwrap().is_none(), "the init was signalled before the wait was done");
+
+        // One that appears after that listing: nothing signalled it before this fix, and the wait then held to
+        // the deadline for it.
+        listing(&[init_pid, boot, turn_two]);
+        wait_until("the wait signalled the process that appeared", Duration::from_secs(2), || second.try_wait().unwrap().is_some());
+        assert!(init.try_wait().unwrap().is_none(), "the init was signalled while a turn's process was still there");
+
+        // Nothing left but the pair: the wait ends and the init takes the signal it forwards to its child.
+        listing(&[init_pid, boot]);
+        wait_until("the init was signalled last", Duration::from_secs(2), || init.try_wait().unwrap().is_some());
+        // And the cgroup empty, which is what the second wait reads.
+        listing(&[]);
+        assert!(stopping.join().unwrap().is_ok());
+        // The child of a shell that has gone is nobody's to wait for, so it is ended by the pid this case
+        // started it under.
+        let _ = kill(Pid::from_raw(boot), Signal::SIGKILL);
+    }
+
+    /// What a create waits for before it answers ready: the boot command in the cgroup, the sentence where the
+    /// first process ends without starting anything, and the sentence where it starts nothing at all.
+    #[test]
+    fn the_boot_is_not_ready_until_the_first_process_has_started_the_boot_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let procs = dir.path().join("cgroup.procs");
+        let mut init = std::process::Command::new("sh").args(["-c", "sleep 30 & wait"]).spawn().unwrap();
+        let init_pid = init.id() as i32;
+        let boot = child_of(init_pid, Duration::from_secs(2)).expect("the stand-in init started no child");
+        let identity = identity_of(init_pid).unwrap();
+
+        // The window a box measured: for a sixth of a second the cgroup holds the first process alone. The wait
+        // answers the child once it is there rather than the moment the start returned.
+        fs::write(&procs, format!("{init_pid}\n")).unwrap();
+        let writing = procs.clone();
+        let appears = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(80));
+            fs::write(&writing, format!("{init_pid}\n{boot}\n")).unwrap();
+        });
+        assert_eq!(boot_child_in(dir.path(), &identity, Duration::from_secs(5)).unwrap(), boot);
+        appears.join().unwrap();
+
+        // A first process that ended without starting anything says so at once rather than waiting out the
+        // patience, since nothing is coming.
+        let gone = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
+        let said = boot_child_in(dir.path(), &gone, Duration::from_secs(30)).unwrap_err().to_string();
+        assert_eq!(said, "the workspace's first process ended before it started anything");
+
+        // And one that is there and starts nothing is the patience and then its own sentence.
+        fs::write(&procs, format!("{init_pid}\n")).unwrap();
+        let waited = Instant::now();
+        let said = boot_child_in(dir.path(), &identity, Duration::from_secs(1)).unwrap_err().to_string();
+        assert!(waited.elapsed() >= Duration::from_secs(1), "{} ms", waited.elapsed().as_millis());
+        assert_eq!(said, "the workspace's first process started nothing in 1 s, so there is nothing running inside it");
+
+        let _ = init.kill();
+        let _ = init.wait();
+        let _ = kill(Pid::from_raw(boot), Signal::SIGKILL);
+    }
+
     #[test]
     fn stale_notify_sockets_go_and_fresh_ones_stay() {
         let dir = tempfile::tempdir().unwrap();
@@ -572,6 +853,7 @@ mod tests {
             engine: None,
             shares: &[],
             binds: &[],
+            compose_project: None,
         });
         crate::bundle::write_json(&layout.config(id), &spec).unwrap();
         spec
