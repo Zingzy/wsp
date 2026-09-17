@@ -293,6 +293,20 @@ describe("the table wsp places prints", () => {
     expect(printed.filter(l => l.includes("default"))).toHaveLength(1);
   });
 
+  it("says beside the engine how a workspace's copy of a project is made there, and nothing for a place that has not said", () => {
+    const printed = placeLines([{ ...rows[1]!, copies: "reflink" }, rows[0]!, rows[2]!]);
+    // Beside the engine: both are what that computer brings to a workspace rather than what one asked for.
+    const header = printed[0]!;
+    expect(header).toContain("COPIES");
+    expect(header.indexOf("COPIES")).toBeGreaterThan(header.indexOf("ENGINE"));
+    expect(printed[1]).toContain("reflink");
+    // The columns line up: the word sits under its own heading rather than in the one beside it.
+    const column = (line: string): string => line.slice(header.indexOf("COPIES"), header.indexOf("PRESENT")).trim();
+    expect(column(printed[1]!)).toBe("reflink");
+    expect(column(printed[2]!)).toBe("");
+    expect(column(printed[3]!)).toBe("");
+  });
+
   it("says how to get one when the host holds none", () => {
     expect(placeLines([]).join("")).toContain("wsp add prints the join line");
   });

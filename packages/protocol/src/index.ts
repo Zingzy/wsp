@@ -87,6 +87,15 @@ export function isHttpUrl(url: unknown): url is string {
   }
 }
 
+/** Every folder a turn's paths are built from is held to this: absolute, and made of what a path is made of. A
+ * machine can answer with anything, and what it answers lands in the commands a turn runs there, so a home
+ * carrying a semicolon, a quote, a backtick or a glob is refused at the one door rather than quoted at each of
+ * twenty places (the paths are quoted too; this is what keeps a machine from deciding what those paths mean). A
+ * space is a path on macOS and stays allowed. The one rule, read by the wire schemas here and by the ssh read. */
+export function isPlainPath(path: string): boolean {
+  return path.startsWith("/") && /^[A-Za-z0-9 ._+@:,/-]+$/.test(path) && !path.includes("//");
+}
+
 /** The host of a URL that passed isHttpUrl (with its port, without userinfo), or undefined when it does not parse: never throws. */
 export function hostOf(url: string): string | undefined {
   try {
@@ -2286,6 +2295,21 @@ export const PlaceDialled = z.object({
 });
 export type PlaceDialled = z.infer<typeof PlaceDialled>;
 
+/** The project a workspace on a computer you own is made with: a checkout on that computer, copied once for this
+ * workspace and mounted read-write at `at` inside, the project's real path. The copy is the workspace's own from
+ * the moment it is made: the checkout can be fetched, switched or built in and no workspace already made from it
+ * sees any of it. Absent is a workspace of the computer with no project in it. */
+export const WorkspaceCopy = z.object({
+  from: z.string().min(1).refine(isPlainPath, "an absolute path on the computer"),
+  at: z.string().min(1).refine(isPlainPath, "an absolute path inside the workspace"),
+});
+export type WorkspaceCopy = z.infer<typeof WorkspaceCopy>;
+
+/** How a computer makes a workspace's copy of a checkout: reflink shares blocks with it, snapshot is a btrfs
+ * subvolume snapshot of it, plain writes every byte and takes the time that takes. */
+export const CopyWord = z.enum(["reflink", "snapshot", "plain"]);
+export type CopyWord = z.infer<typeof CopyWord>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2298,6 +2322,9 @@ export const PlaceView = z.object({
   diskFreeBytes: z.number().int().optional(),
   /** The engine a project's own containers run on there. Absent on a place that has never said what it is. */
   engine: z.enum(["none", "docker", "podman"]).optional(),
+  /** How a workspace's copy of a project is made there, as that computer last reported it. Absent on a place
+   * that runs no workspaces and on one that has never said. */
+  copies: CopyWord.optional(),
   present: z.boolean().optional(),
   joinedAt: z.string().optional(),
   lastSeenAt: z.string().optional(),
@@ -2773,6 +2800,8 @@ export const MachineSpec = z.object({
    * compose runs inside it and sees its own containers alone; a place with no engine refuses the create. Absent is
    * no socket. */
   engine: z.boolean().optional(),
+  /** The project this workspace is made with, on a computer the person owns. */
+  copy: WorkspaceCopy.optional(),
 });
 export type MachineSpec = z.infer<typeof MachineSpec>;
 
@@ -3612,6 +3641,8 @@ export const PlaceReport = z.object({
   workspacesBlocked: z.string().optional(),
   /** The engine a project's own containers would run on here; "none" until the person installs one. */
   engine: z.enum(["none", "docker", "podman"]),
+  /** How this computer makes a workspace's copy of a checkout. Absent where the computer runs no workspaces. */
+  copies: CopyWord.optional(),
   /** How long that computer had been up when it wrote this report. Kept on the record so a row can say what the
    * computer last was rather than nothing while it is not answering. */
   uptimeMs: z.number().int().nonnegative().optional(),

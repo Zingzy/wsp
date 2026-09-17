@@ -109,6 +109,8 @@ pub(crate) struct ReportInput<'a> {
     pub(crate) agents: &'a [AgentBin],
     pub(crate) daemon_port: u16,
     pub(crate) dialed: &'a str,
+    /// Where this daemon keeps the workspaces it runs; the copy word is read under it.
+    pub(crate) runtime_root: &'a Path,
 }
 
 /// What this computer says about itself on this link, in the shape the host parses.
@@ -117,7 +119,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     let work = input.home.join("wsp-work");
     let free = disk_free(if work.exists() { &work } else { input.home });
     let wsp = if input.wsp_argv.is_empty() { vec!["wsp".to_owned()] } else { input.wsp_argv.to_vec() };
-    let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts());
+    let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts(input.runtime_root));
     PlaceReport {
         name: input.file.name.clone(),
         platform: if cfg!(target_os = "macos") { Platform::Darwin } else { Platform::Linux },
@@ -138,6 +140,9 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         runs_workspaces: doctor.runs_workspaces,
         workspaces_blocked: doctor.blocked,
         engine: doctor.engine.word().to_owned(),
+        // How a copy of a project is made here, and only where a workspace runs here at all: a computer that
+        // boots none has no copy to describe.
+        copies: doctor.runs_workspaces.then_some(doctor.copies).flatten(),
         daemon_version: numbers::DAEMON_VERSION,
         daemon_port: std::num::NonZeroU16::new(input.daemon_port),
         wsp,
@@ -357,6 +362,7 @@ mod tests {
             agents: &agents,
             daemon_port: 4321,
             dialed: "http://h:1",
+            runtime_root: &home.path().join("runtime"),
         });
         assert_eq!(report.name, "old-macbook");
         assert_eq!(report.wsp, argv);
@@ -369,8 +375,18 @@ mod tests {
         assert_eq!(report.daemon_version, numbers::DAEMON_VERSION);
         // runs_workspaces and engine are the doctor's reading of this box; on this Linux test box it runs them.
         assert_eq!(report.engine, wsp_runtime::doctor::engine_on_path(&std::env::var("PATH").unwrap_or_default()).word());
-        let bare =
-            place_report(&ReportInput { file: &file, home: home.path(), wsp_argv: &[], agents: &[], daemon_port: 1, dialed: "http://h:1" });
+        // The copy word rides with runs_workspaces: a box that boots workspaces says how it copies a project,
+        // and a computer that boots none says nothing rather than a word nothing would use.
+        assert_eq!(report.copies.is_some(), report.runs_workspaces);
+        let bare = place_report(&ReportInput {
+            file: &file,
+            home: home.path(),
+            wsp_argv: &[],
+            agents: &[],
+            daemon_port: 1,
+            dialed: "http://h:1",
+            runtime_root: home.path(),
+        });
         assert_eq!(bare.wsp, vec!["wsp"]);
         // The shape the host parses is the shape this serialises to.
         serde_json::from_value::<PlaceReport>(serde_json::to_value(&report).unwrap()).unwrap();

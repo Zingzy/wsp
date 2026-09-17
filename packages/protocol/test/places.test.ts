@@ -220,6 +220,15 @@ describe("what a join carrying the app's own ask may send", () => {
     expect(PlaceJoinReply.safeParse({ ...base, device: { deviceId: "d_1", deviceToken: "t" } }).success).toBe(true);
   });
 
+  it("takes the word for how a computer copies a project, and a report from one that says none", () => {
+    for (const copies of ["reflink", "snapshot", "plain"]) {
+      expect(PlaceReport.safeParse({ ...report, copies }).success, copies).toBe(true);
+    }
+    // A computer that runs no workspaces has no copy to describe, and a word nothing makes is not one.
+    expect(PlaceReport.safeParse(report).success).toBe(true);
+    expect(PlaceReport.safeParse({ ...report, copies: "hardlink" }).success).toBe(false);
+  });
+
   it("takes the agents a computer found on itself, up to the cap the sentence they land in can hold", () => {
     expect(PlaceReport.safeParse({ ...report, agents: ["claude", "codex"] }).success).toBe(true);
     expect(PlaceReport.safeParse({ ...report, agents: Array.from({ length: 33 }, () => "claude") }).success).toBe(false);

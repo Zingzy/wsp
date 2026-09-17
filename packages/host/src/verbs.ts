@@ -459,6 +459,9 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
     p.engine === undefined ? "" : p.engine,
+    // How a project's files get into a workspace there: beside the engine, since both are what that computer
+    // brings to a workspace rather than what the workspace asked for.
+    p.copies === undefined ? "" : p.copies,
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
@@ -468,7 +471,7 @@ export function placeLines(places: readonly PlaceView[]): string[] {
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
   ]);
-  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "BEHIND", "IMAGE"], ...rows]);
+  return table([["PLACE", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "FORKS", "LAST SEEN", "DEFAULT", "BEHIND", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */

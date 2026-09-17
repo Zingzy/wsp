@@ -1551,7 +1551,7 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     if !live() {
         return;
     }
-    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
+    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts(&root())) else {
         eprintln!("this box has no container engine with a socket; the engine case is skipped");
         return;
     };
@@ -1659,4 +1659,245 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     assert!(!socket.exists(), "the socket stays after the kill");
     let (_, outside_still, _) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
     assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
+}
+
+/// A checkout on the box, as a project a person keeps there: a file, a folder, a symlink, a mode and a pair of
+/// hard links, which is what a package tree is made of.
+fn checkout(at: &Path) {
+    fs::create_dir_all(at.join("src")).unwrap();
+    fs::write(at.join("README.md"), b"the checkout\n").unwrap();
+    fs::write(at.join("src/index.js"), b"module.exports = 1\n").unwrap();
+    fs::hard_link(at.join("src/index.js"), at.join("src/again.js")).unwrap();
+    std::os::unix::fs::symlink("index.js", at.join("src/link.js")).unwrap();
+    fs::set_permissions(at.join("README.md"), std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+}
+
+#[tokio::test]
+async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own_path() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let from = root().join("projects").join(format!("live-904-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    let at = "/Users/zingzy/wsp";
+    let started = Instant::now();
+    let made = w
+        .created(spec(json!({
+            "copy": { "from": from.display().to_string(), "at": at },
+            "idempotencyKey": format!("live-904-copy-{key}"),
+        })))
+        .await;
+    let id = made["id"].as_str().unwrap().to_owned();
+    eprintln!("create with a copy to ready: {} ms", started.elapsed().as_millis());
+    // The project is inside at the path it has on the computer, with the checkout's own bytes and its mode.
+    let (code, out, err) = w.exec(&id, &format!("cat {at}/README.md; stat -c %a {at}/README.md; readlink {at}/src/link.js")).await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert_eq!(out.lines().collect::<Vec<_>>(), ["the checkout", "600", "index.js"], "{out}");
+    // The two names of one file are one file in the copy too, which is what keeps a package tree's bytes down.
+    let (code, out, _) = w.exec(&id, &format!("stat -c %i {at}/src/index.js {at}/src/again.js")).await;
+    assert_eq!(code, 0);
+    let inodes: Vec<&str> = out.lines().collect();
+    assert_eq!(inodes.len(), 2);
+    assert_eq!(inodes[0], inodes[1], "the hard linked pair became two files: {out}");
+    // A write inside stays inside: the checkout on the box is not the workspace's to change.
+    let (code, _, err) = w.exec(&id, &format!("echo written-inside >> {at}/README.md")).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(fs::read_to_string(from.join("README.md")).unwrap(), "the checkout\n");
+    // And the checkout moving on does not reach a copy already made.
+    fs::write(from.join("README.md"), "moved\n").unwrap();
+    let (_, out, _) = w.exec(&id, &format!("cat {at}/README.md")).await;
+    assert_eq!(out, "the checkout\nwritten-inside\n", "{out}");
+    // The record carries how the copy was made and how long it took, and the copy is under the root's own folder.
+    let record: Value = serde_json::from_slice(&fs::read(root().join("run").join(&id).join("workspace.json")).unwrap()).unwrap();
+    let copy = &record["copy"];
+    eprintln!("== the copy as the record carries it: {copy}");
+    assert_eq!((copy["from"].as_str(), copy["at"].as_str()), (Some(from.display().to_string().as_str()), Some(at)));
+    assert!(["reflink", "snapshot", "plain"].contains(&copy["made"].as_str().unwrap()), "{copy}");
+    assert!(copy["ms"].as_u64().is_some(), "{copy}");
+    assert!(root().join("copies").join(&id).is_dir());
+    // A nap keeps the copy and the file the workspace wrote in it, and the wake binds it back at the same path.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    assert!(root().join("copies").join(&id).is_dir(), "the nap took the copy");
+    assert!(!fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!("/run/{id}/rootfs")), "the nap left a mount");
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    let (code, out, _) = w.exec(&id, &format!("cat {at}/README.md")).await;
+    assert_eq!((code, out.as_str()), (0, "the checkout\nwritten-inside\n"));
+    // The kill takes the copy with the workspace, and leaves the checkout on the box where it was.
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert!(!root().join("copies").join(&id).exists(), "the copy stayed after the kill");
+    assert!(from.join("README.md").exists(), "the kill took the checkout");
+    let _ = fs::remove_dir_all(&from);
+    w.close().await;
+}
+
+#[tokio::test]
+async fn a_create_whose_project_is_not_there_is_refused_by_name_and_leaves_nothing() {
+    if !live() {
+        return;
+    }
+    let w = World::open().await;
+    let key = checkout_key();
+    let gone = root().join("projects").join(format!("live-904-no-such-{key}"));
+    let id = format!("wsp-live-904-missing-{key}");
+    let reply = w
+        .ask(
+            "machine.create",
+            json!({ "spec": spec(json!({
+                "copy": { "from": gone.display().to_string(), "at": "/Users/zingzy/wsp" },
+                "idempotencyKey": format!("live-904-missing-{key}"),
+            })) }),
+        )
+        .await;
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert!(reply["error"].as_str().unwrap().contains(&gone.display().to_string()), "{reply}");
+    // Nothing of a workspace that never came up: no run directory, no copy, no cgroup.
+    assert!(!root().join("run").join(&id).exists() && !root().join("copies").join(&id).exists());
+    assert!(!Path::new(CGROUPS).join(&id).exists());
+}
+
+/// A throwaway volume of its own filesystem, made as a file and mounted on a loop device, so a box whose root
+/// shares no blocks can still be asked what it does when a disk shares them. Unmounted and removed when the case
+/// ends, a panic included.
+struct Volume {
+    image: PathBuf,
+    at: PathBuf,
+}
+
+impl Drop for Volume {
+    fn drop(&mut self) {
+        let _ = std::process::Command::new("umount").arg(&self.at).status();
+        let _ = fs::remove_dir_all(&self.at);
+        let _ = fs::remove_file(&self.image);
+    }
+}
+
+/// `mkfs` run over a sparse file of `gb` gigabytes and mounted, or nothing where this box has no such mkfs.
+fn volume(word: &str, mkfs: &[&str], gb: u64) -> Option<Volume> {
+    let key = checkout_key();
+    let volume =
+        Volume { image: PathBuf::from(format!("/tmp/wsp-904-{word}-{key}.img")), at: PathBuf::from(format!("/tmp/wsp-904-{word}-{key}")) };
+    let _ = std::process::Command::new("umount").arg(&volume.at).status();
+    let _ = fs::remove_file(&volume.image);
+    fs::create_dir_all(&volume.at).unwrap();
+    let file = fs::File::create(&volume.image).unwrap();
+    file.set_len(gb * 1024 * 1024 * 1024).unwrap();
+    drop(file);
+    let made = std::process::Command::new(mkfs[0]).args(&mkfs[1..]).arg(&volume.image).output();
+    match made {
+        Ok(out) if out.status.success() => {}
+        Ok(out) => {
+            eprintln!("this box will not make a {word}: {}", String::from_utf8_lossy(&out.stderr).trim());
+            return None;
+        }
+        Err(e) => {
+            eprintln!("this box has no {}: {e}", mkfs[0]);
+            return None;
+        }
+    }
+    let mounted = std::process::Command::new("mount").args(["-o", "loop"]).arg(&volume.image).arg(&volume.at).output().ok()?;
+    if !mounted.status.success() {
+        eprintln!("this box will not mount a {word} on a loop device: {}", String::from_utf8_lossy(&mounted.stderr).trim());
+        return None;
+    }
+    Some(volume)
+}
+
+/// What the volume this path sits on holds right now.
+fn used_bytes(at: &Path) -> u64 {
+    let name = std::ffi::CString::new(std::os::unix::ffi::OsStrExt::as_bytes(at.as_os_str())).unwrap();
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: the name is a nul-terminated path and the struct is the one the call fills.
+    assert_eq!(unsafe { libc::statvfs(name.as_ptr(), &mut stat) }, 0, "{}", at.display());
+    (stat.f_blocks - stat.f_bfree) * u64::from(stat.f_frsize as u32)
+}
+
+/// Whether this run is root, which the loop volumes and their mounts need.
+fn root_here() -> bool {
+    // SAFETY: geteuid reads this process and touches nothing.
+    unsafe { libc::geteuid() == 0 }
+}
+
+/// A checkout of `mb` megabytes in files of a megabyte each, with the odds and ends a real one carries.
+fn big_checkout(at: &Path, mb: u64) {
+    fs::create_dir_all(at.join("node_modules")).unwrap();
+    let megabyte = vec![7u8; 1024 * 1024];
+    for i in 0..mb {
+        fs::write(at.join("node_modules").join(format!("pkg-{i}.js")), &megabyte).unwrap();
+    }
+    fs::write(at.join("README.md"), b"the checkout\n").unwrap();
+    fs::hard_link(at.join("node_modules/pkg-0.js"), at.join("node_modules/linked.js")).unwrap();
+    std::os::unix::fs::symlink("pkg-0.js", at.join("node_modules/link.js")).unwrap();
+    fs::set_permissions(at.join("README.md"), std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
+    xattr::set(at.join("README.md"), "user.wsp", b"kept").unwrap();
+}
+
+#[tokio::test]
+async fn a_disk_that_shares_blocks_copies_a_two_hundred_megabyte_checkout_for_its_metadata_alone() {
+    if !live() || !root_here() {
+        return;
+    }
+    let Some(volume) = volume("xfs", &["mkfs.xfs", "-q", "-m", "reflink=1"], 2) else { return };
+    let (from, copies) = (volume.at.join("projects/checkout"), volume.at.join("copies"));
+    big_checkout(&from, 200);
+    fs::create_dir_all(&copies).unwrap();
+    let copier = wsp_runtime::copy::copier_for(&from, &copies).unwrap();
+    assert_eq!(copier.word(), wsp_frames::CopyWord::Reflink, "a reflink xfs did not pick the reflink copy");
+    let before = used_bytes(&volume.at);
+    let started = Instant::now();
+    copier.copy(&from, &copies.join("wsp-a")).unwrap();
+    let took = started.elapsed();
+    let grew = used_bytes(&volume.at).saturating_sub(before);
+    eprintln!("== a 200 MB checkout copied by reflink in {} ms, and the volume grew by {grew} bytes", took.as_millis());
+    assert!(grew < 1024 * 1024, "the copy cost {grew} bytes, which is a copy of the bytes rather than of the metadata");
+    let to = copies.join("wsp-a");
+    // What the checkout is made of came across.
+    assert_eq!(fs::read(to.join("README.md")).unwrap(), b"the checkout\n");
+    assert_eq!(fs::symlink_metadata(to.join("README.md")).unwrap().mode() & 0o7777, 0o600);
+    assert_eq!(xattr::get(to.join("README.md"), "user.wsp").unwrap().as_deref(), Some(&b"kept"[..]));
+    assert_eq!(fs::read_link(to.join("node_modules/link.js")).unwrap(), Path::new("pkg-0.js"));
+    let (first, second) =
+        (fs::metadata(to.join("node_modules/pkg-0.js")).unwrap(), fs::metadata(to.join("node_modules/linked.js")).unwrap());
+    assert_eq!((first.ino(), first.nlink()), (second.ino(), 2), "the hard linked pair became two files");
+    // Each tree is its own from the moment the clone is taken, whichever side is written.
+    fs::write(to.join("README.md"), b"written in the copy\n").unwrap();
+    assert_eq!(fs::read(from.join("README.md")).unwrap(), b"the checkout\n");
+    fs::write(from.join("node_modules/pkg-1.js"), b"the checkout moved on\n").unwrap();
+    assert_eq!(fs::metadata(to.join("node_modules/pkg-1.js")).unwrap().len(), 1024 * 1024);
+    copier.remove(&to).unwrap();
+    assert!(!to.exists());
+}
+
+#[tokio::test]
+async fn a_btrfs_subvolume_is_snapshotted_rather_than_walked_at_all() {
+    if !live() || !root_here() {
+        return;
+    }
+    let Some(volume) = volume("btrfs", &["mkfs.btrfs", "-q", "-f"], 2) else { return };
+    let (from, copies) = (volume.at.join("checkout"), volume.at.join("copies"));
+    let made = std::process::Command::new("btrfs").args(["subvolume", "create"]).arg(&from).output();
+    match made {
+        Ok(out) if out.status.success() => {}
+        _ => {
+            eprintln!("this box has no btrfs command to make a subvolume with; the snapshot case is skipped");
+            return;
+        }
+    }
+    big_checkout(&from, 50);
+    fs::create_dir_all(&copies).unwrap();
+    let copier = wsp_runtime::copy::copier_for(&from, &copies).unwrap();
+    assert_eq!(copier.word(), wsp_frames::CopyWord::Snapshot, "a subvolume did not pick the snapshot");
+    let to = copies.join("wsp-a");
+    let started = Instant::now();
+    copier.copy(&from, &to).unwrap();
+    let took = started.elapsed();
+    eprintln!("== a 50 MB subvolume snapshotted in {} ms", took.as_millis());
+    assert!(took < Duration::from_millis(100), "the snapshot took {} ms, which is a walk rather than a snapshot", took.as_millis());
+    assert_eq!(fs::read(to.join("README.md")).unwrap(), b"the checkout\n");
+    fs::write(to.join("README.md"), b"written in the copy\n").unwrap();
+    assert_eq!(fs::read(from.join("README.md")).unwrap(), b"the checkout\n");
+    copier.remove(&to).unwrap();
+    assert!(!to.exists(), "the snapshot's own directory stayed after the remove");
 }

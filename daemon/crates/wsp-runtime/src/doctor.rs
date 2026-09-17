@@ -8,6 +8,8 @@
 
 use std::path::Path;
 
+use wsp_frames::CopyWord;
+
 /// Where cgroup v2 is mounted when the box runs it; the read-only twin of the self check reads the same root the
 /// freezer writes. Read only on Linux, where a workspace runs.
 #[cfg(target_os = "linux")]
@@ -50,6 +52,9 @@ pub struct Facts {
     pub kvm: bool,
     /// The engine a project's own containers would run on.
     pub engine: Engine,
+    /// How this computer makes a workspace's copy of a checkout under the runtime's root, off a clone probe
+    /// there. Nothing where no workspace runs here, which is every computer that is not Linux.
+    pub copies: Option<CopyWord>,
 }
 
 /// What the doctor tells the host about this box: enough for the three sentences, no English of its own, since the
@@ -62,6 +67,8 @@ pub struct Doctor {
     pub blocked: Option<String>,
     pub kvm: bool,
     pub engine: Engine,
+    /// The word for how a copy is made here, as the place's report carries it.
+    pub copies: Option<CopyWord>,
 }
 
 /// The controllers a memory cap and a cpu quota need.
@@ -72,7 +79,7 @@ const WANTED_CONTROLLERS: [&str; 2] = ["memory", "cpu"];
 /// missing is the reason, in the self check's own words so the two never disagree.
 pub fn assess(facts: &Facts) -> Doctor {
     let blocked = blocking_reason(facts);
-    Doctor { runs_workspaces: blocked.is_none(), blocked, kvm: facts.kvm, engine: facts.engine }
+    Doctor { runs_workspaces: blocked.is_none(), blocked, kvm: facts.kvm, engine: facts.engine, copies: facts.copies }
 }
 
 fn blocking_reason(facts: &Facts) -> Option<String> {
@@ -98,10 +105,11 @@ fn blocking_reason(facts: &Facts) -> Option<String> {
     None
 }
 
-/// The facts read off this box: nothing is mounted or created, so it costs a few file reads and can run at every
-/// dial. Off Linux only the engine is read; the rest stand false, and the doctor names Linux as the reason a
-/// workspace does not run here, since youki's kernel work has no answer on another kernel.
-pub fn read_facts() -> Facts {
+/// The facts read off this box, `root` being where this daemon keeps what it runs: a few file reads and one
+/// clone probe under that root, so it can run at every dial. Off Linux only the engine is read; the rest stand
+/// false, the copy word is nothing, and the doctor names Linux as the reason a workspace does not run here,
+/// since youki's kernel work has no answer on another kernel.
+pub fn read_facts(root: &Path) -> Facts {
     let engine = engine_on_path(&std::env::var("PATH").unwrap_or_default());
     #[cfg(target_os = "linux")]
     {
@@ -115,11 +123,13 @@ pub fn read_facts() -> Facts {
             root: euid_is_root(),
             kvm: Path::new("/dev/kvm").exists(),
             engine,
+            copies: Some(crate::copy::copies_word(root)),
         }
     }
     #[cfg(not(target_os = "linux"))]
     {
-        Facts { linux: false, cgroup2: false, controllers: Vec::new(), overlay: false, root: false, kvm: false, engine }
+        let _ = root;
+        Facts { linux: false, cgroup2: false, controllers: Vec::new(), overlay: false, root: false, kvm: false, engine, copies: None }
     }
 }
 
@@ -167,6 +177,7 @@ mod tests {
             root: true,
             kvm: true,
             engine: Engine::None,
+            copies: Some(CopyWord::Reflink),
         }
     }
 
@@ -177,6 +188,20 @@ mod tests {
         assert_eq!(d.blocked, None);
         assert!(d.kvm);
         assert_eq!(d.engine, Engine::None);
+        assert_eq!(d.copies, Some(CopyWord::Reflink));
+    }
+
+    #[test]
+    fn the_copy_word_travels_whatever_else_the_kernel_says_and_is_read_under_the_root() {
+        // The word is the box's, not a verdict on it: a computer that cannot run workspaces still says how a
+        // copy would be made, and one that says nothing says nothing.
+        assert_eq!(assess(&Facts { copies: Some(CopyWord::Plain), root: false, ..box_that_runs() }).copies, Some(CopyWord::Plain));
+        assert_eq!(assess(&Facts { copies: None, ..box_that_runs() }).copies, None);
+        let dir = tempfile::tempdir().unwrap();
+        let read = read_facts(dir.path());
+        // On Linux the word is read under the root handed in; anywhere else there is no workspace and no word.
+        assert_eq!(read.copies.is_some(), cfg!(target_os = "linux"));
+        assert_eq!(read.copies, assess(&read).copies);
     }
 
     #[test]
@@ -230,7 +255,7 @@ mod tests {
         // read_facts does not panic on this kernel, and assess over what it read agrees with assess over the same
         // facts spelled out: the read and the verdict are one road. self_check calls this pair before it mounts, so
         // the two cannot part ways on a box.
-        let facts = read_facts();
+        let facts = read_facts(&tempfile::tempdir().unwrap().path().join("root"));
         assert_eq!(assess(&facts), assess(&facts.clone()));
         assert_eq!(
             assess(&facts).runs_workspaces,
@@ -255,9 +280,11 @@ mod tests {
             root: false,
             kvm: false,
             engine: Engine::Docker,
+            copies: None,
         });
         assert!(!d.runs_workspaces);
         assert!(d.blocked.as_deref().unwrap().contains("Linux computer"), "{:?}", d.blocked);
         assert_eq!(d.engine, Engine::Docker);
+        assert_eq!(d.copies, None);
     }
 }

@@ -123,6 +123,27 @@ where
     Ok(s)
 }
 
+/// The protocol's isPlainPath: absolute, made of what a path is made of, and no empty part in it. A path off the
+/// wire lands in a mount and in the commands a turn runs, so a semicolon, a quote, a backtick or a glob in one is
+/// refused here rather than quoted at each of twenty places. A space is a path on macOS and stays allowed.
+pub fn is_plain_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.is_empty()
+        && !path.contains("//")
+        && path.chars().all(|c| c.is_ascii_alphanumeric() || " ._+@:,/-".contains(c))
+}
+
+pub(crate) fn plain_path<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(d)?;
+    if !is_plain_path(&s) {
+        return Err(de::Error::custom("an absolute path made of what a path is made of"));
+    }
+    Ok(s)
+}
+
 pub(crate) fn positive<'de, D>(d: D) -> Result<Option<u32>, D::Error>
 where
     D: Deserializer<'de>,
@@ -181,6 +202,14 @@ mod tests {
         assert!(!is_http_url("https://a\u{1f}b"));
         assert!(!is_http_url("日本語://x"));
         assert!(!is_http_url("ħttps://x"));
+    }
+
+    #[test]
+    fn plain_paths_are_read_as_the_protocol_reads_them() {
+        assert!(is_plain_path("/Users/zingzy/wsp") && is_plain_path("/wsp/projects/my project/checkout"));
+        assert!(!is_plain_path("wsp") && !is_plain_path("") && !is_plain_path("/a//b"));
+        assert!(!is_plain_path("/a; rm -rf /") && !is_plain_path("/a'b") && !is_plain_path("/a*"));
+        assert!(!is_plain_path("/日本語"));
     }
 
     #[test]

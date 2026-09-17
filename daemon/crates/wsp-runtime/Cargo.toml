@@ -22,7 +22,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 libcontainer = { version = "0.7.0", default-features = false, features = ["v2", "libseccomp"] }
 libcgroups = { version = "0.7.0", default-features = false, features = ["v2"] }
-nix = { version = "0.31", default-features = false, features = ["fs", "mount", "process", "sched", "signal", "user"] }
+nix = { version = "0.31", default-features = false, features = ["fs", "ioctl", "mount", "process", "sched", "signal", "user"] }
 xattr = "1"
 netlink-sys = "0.8"
 netlink-packet-core = "0.8"
