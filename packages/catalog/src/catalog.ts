@@ -379,6 +379,19 @@ export const CATALOG: readonly CatalogEntry[] = [
   { ...tool, id: "playwright", name: "Chromium for Playwright", bin: "playwright", installRoad: { road: "script", script: PLAYWRIGHT_INSTALL, version: PLAYWRIGHT.version }, after: "node", covers: ["chromium"], depends: { npm: ["playwright", "@playwright/test", "playwright-core"] }, signIn: NO_SIGN_IN, defaultOn: false, source: { sessions: 0, images: 0, road: "unmeasured" }, size: measured("du", 1015808000) },
 ];
 
+/** Directories that bind to the path they were built at, taken out of a copy of a project folder so they are
+ * rebuilt where the copy now sits. One row per ecosystem, and the one home of the list: the copy verb is handed
+ * these names and the seed menu labels the same ones "rebuilt on the box". */
+export const PATH_BOUND_DIRS: readonly { ecosystem: string; dirs: readonly string[] }[] = [
+  { ecosystem: "python", dirs: [".venv"] },
+  { ecosystem: "next", dirs: [".next"] },
+  { ecosystem: "turbo", dirs: [".turbo"] },
+  { ecosystem: "node", dirs: [".cache", "node_modules/.cache"] },
+];
+
+/** Every path-bound directory, in the order the rows list them: what one copy is asked to take out. */
+export const PATH_BOUND_DIR_NAMES: readonly string[] = PATH_BOUND_DIRS.flatMap(row => row.dirs);
+
 export const CATALOG_AGENTS: readonly AgentEntry[] = CATALOG.filter((e): e is AgentEntry => e.kind === "agent");
 
 const firstAgent = CATALOG_AGENTS[0];

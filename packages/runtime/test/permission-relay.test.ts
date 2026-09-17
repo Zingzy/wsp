@@ -16,7 +16,7 @@ import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runti
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
 
 const SESSION = "22222222-2222-4222-8222-222222222222";
 
@@ -131,6 +131,7 @@ describe("a permission prompt relayed into the chat", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
     rt = runtime();
   });
@@ -322,6 +323,7 @@ describe("the access a thread starts at", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
   });
   afterEach(() => {
@@ -518,6 +520,7 @@ describe("an access picked while a turn runs", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
     return { rt: createRuntime({ backend: stubBackend(), store, adapters: { claude: adapter }, local }), turns, picks };
   };

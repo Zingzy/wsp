@@ -423,3 +423,76 @@ async fn a_shell_it_spawns_sees_home_and_user_even_when_the_daemon_has_none() {
     }
     child.kill().await.unwrap();
 }
+
+/// The copy verb as the host runs it: a child with argv, one JSON line on stdout, exit 0. The line is the whole
+/// of stdout, since the host parses it rather than searching it.
+#[tokio::test]
+async fn the_copy_verb_prints_one_json_line_and_takes_the_copy_away_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let from = dir.path().join("work");
+    std::fs::create_dir_all(&from).unwrap();
+    for args in [
+        vec!["init", "--quiet", "--initial-branch", "main"],
+        vec!["config", "user.email", "t@example.com"],
+        vec!["config", "user.name", "t"],
+    ] {
+        assert!(std::process::Command::new("git").args(&args).current_dir(&from).status().unwrap().success(), "{args:?}");
+    }
+    std::fs::write(from.join("README.md"), b"one\n").unwrap();
+    assert!(std::process::Command::new("git").args(["add", "README.md"]).current_dir(&from).status().unwrap().success());
+    assert!(std::process::Command::new("git").args(["commit", "--quiet", "-m", "first"]).current_dir(&from).status().unwrap().success());
+    std::fs::create_dir_all(from.join(".next")).unwrap();
+    let to = dir.path().join("work-other");
+
+    let made = std::process::Command::new(BIN)
+        .args(["copy", "make", "--from"])
+        .arg(&from)
+        .arg("--to")
+        .arg(&to)
+        .args(["--exclude", ".next", "--size-line-bytes", "21474836480"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&made.stderr).into_owned();
+    if cfg!(target_os = "macos") {
+        assert!(made.status.success(), "{said}");
+        let out = String::from_utf8_lossy(&made.stdout);
+        assert_eq!(out.lines().count(), 1, "{out}");
+        let report: Value = serde_json::from_str(out.trim()).unwrap_or_else(|e| panic!("{out}: {e}"));
+        assert_eq!(report["road"], "clonefile");
+        assert_eq!(report["path"], to.display().to_string());
+        assert_eq!(report["branch"], "main");
+        assert_eq!(report["carried"], "deps-and-config");
+        assert_eq!(report["excluded"], json!([".next"]));
+        assert!(to.join("README.md").exists() && !to.join(".next").exists());
+
+        let removed = std::process::Command::new(BIN)
+            .args(["copy", "remove", "--from"])
+            .arg(&from)
+            .arg("--to")
+            .arg(&to)
+            .args(["--road", "clonefile"])
+            .output()
+            .unwrap();
+        assert!(removed.status.success(), "{}", String::from_utf8_lossy(&removed.stderr));
+        assert!(!to.exists());
+    } else {
+        // A computer that runs workspaces of its own answers the one sentence and makes nothing.
+        assert_eq!(made.status.code(), Some(1), "{said}");
+        assert_eq!(said.trim(), "this computer copies through its workspace runtime; wsp-daemon copy serves a Mac");
+        assert!(String::from_utf8_lossy(&made.stdout).is_empty());
+        assert!(!to.exists());
+        let removed = std::process::Command::new(BIN)
+            .args(["copy", "remove", "--from"])
+            .arg(&from)
+            .arg("--to")
+            .arg(&to)
+            .args(["--road", "worktree"])
+            .output()
+            .unwrap();
+        assert_eq!(removed.status.code(), Some(1));
+        assert_eq!(
+            String::from_utf8_lossy(&removed.stderr).trim(),
+            "this computer copies through its workspace runtime; wsp-daemon copy serves a Mac"
+        );
+    }
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildCommand, buildEnv, newSessionId, userMessageLine } from "../src/landmines.js";
+import { buildCommand, buildEnv, newSessionId, PROJECT_DIR_ENV, userMessageLine } from "../src/landmines.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -23,13 +23,16 @@ describe("buildEnv", () => {
     expect(env.PATH).toBe(base.PATH);
   });
 
-  it("keeps the project key the runtime sets, and still drops every mark of a run this one inherited", () => {
-    // The key says which folder under the config dir this turn's memory and sessions sit in; it is wsp's own to
-    // set on every launch, so the strip that removes a nesting mark must not take it with them.
-    const env = buildEnv({ base: { ...base, CLAUDE_CODE_PROJECT_DIR_NAME: "-Users-z-spoo-landing" } });
-    expect(env.CLAUDE_CODE_PROJECT_DIR_NAME).toBe("-Users-z-spoo-landing");
-    expect(env.CLAUDECODE).toBeUndefined();
-    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+  it("drops an inherited project key and sets the one the caller named, after the strip", () => {
+    // The strip takes every inherited CLAUDE_CODE_* as a nesting mark, so a key merged into the base is thrown
+    // away; the key a workspace's own kind answers is set after it, which is what makes it reach the CLI.
+    expect(buildEnv({ base: { ...base, [PROJECT_DIR_ENV]: "-Users-z-repo" } })[PROJECT_DIR_ENV]).toBeUndefined();
+    const keyed = buildEnv({ base, projectDirName: "-Users-z-repo" });
+    expect(keyed[PROJECT_DIR_ENV]).toBe("-Users-z-repo");
+    // A base carrying its own is still dropped, and the named one is what is set.
+    expect(buildEnv({ base: { ...base, [PROJECT_DIR_ENV]: "-stale" }, projectDirName: "-Users-z-repo" })[PROJECT_DIR_ENV]).toBe("-Users-z-repo");
+    // Nobody naming one leaves the CLI keying off the folder each turn runs in.
+    expect(PROJECT_DIR_ENV in buildEnv({ base })).toBe(false);
   });
 
   it("never sets CLAUDE_CONFIG_DIR or IS_SANDBOX of its own: the login environment carries them where they are true", () => {

@@ -454,6 +454,8 @@ impl Ops {
                 templates: false,
                 sizes,
                 kept: false,
+                copies: true,
+                own_network: true,
             },
             pricing: BackendPricing {
                 default_size: WorkspaceSize { cpu: SIZES[0].0, mem_mb: SIZES[0].1 },

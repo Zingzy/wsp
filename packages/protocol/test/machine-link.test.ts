@@ -120,6 +120,8 @@ describe("the machine ops on a place link", () => {
         templates: true,
         sizes: [],
         kept: false,
+        copies: true,
+        ownNetwork: true,
       },
       pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },
     };

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { gitOnThisMacRefusal, HERE_PLACE_ID, noRemoteLine, worksInPlaceTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
-import { createRuntime, NO_IMAGE_FOR_SEED, NO_SEED_WIRING, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
+import { createRuntime, NO_COPIER_HERE, NO_IMAGE_FOR_SEED, NO_SEED_WIRING, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend } from "./stub-backend.js";
 
@@ -225,13 +225,18 @@ describe("a workspace of a project", () => {
     rmSync(folder, { recursive: true, force: true });
   });
 
-  it("on this computer the workspace is the folder itself, and a second one on that project names the one standing", async () => {
+  it("on this computer the first workspace is the folder itself, and a second one needs a copy road", async () => {
     const { rt } = withLocal();
     const folder = tempRepo();
     const project = await rt.projects.add({ source: folder });
     const ws = await rt.workspaces.create({ project: project.id, name: "plan check" });
     expect(ws).toMatchObject({ kind: "local", golden: "", project: { name: project.name, path: folder, computer: HERE_PLACE_ID } });
-    await expect(rt.workspaces.create({ project: project.id, name: "second" })).rejects.toMatchObject({ message: oneWorkspacePerProject(project.name, "plan check"), kind: "conflict" });
+    expect(ws.copy).toEqual({ road: "in-place", path: folder, source: folder, base: "", branch: "", carried: "nothing" });
+    // The folder worked in place holds no port of its own: the ports there are the person's.
+    expect(ws.portBase).toBeUndefined();
+    // This wiring hands in no copier, so the second piece of work says what it would need. With one wired it is a
+    // copy of the folder at a sibling path; that is local-copy.test.ts.
+    await expect(rt.workspaces.create({ project: project.id, name: "second" })).rejects.toThrow(NO_COPIER_HERE);
     rmSync(folder, { recursive: true, force: true });
   });
 });

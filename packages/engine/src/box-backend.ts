@@ -340,6 +340,8 @@ export class BoxBackend implements MachineBackend {
     snapshotListing: true,
     templates: true, // a named snapshot is the template: durable past its source box, deleted by name
     kept: false, // a fork wsp made and can rebuild
+    copies: true, // the project's checkout is copied into the fork by the box's own runtime
+    ownNetwork: true, // each workspace on a box gets its own network and its own published ports
     sizes: BOX_CLASSES.map(c => ({ cpu: c.cpu, memMb: c.memMb, rateUsdPerHour: c.rateUsdPerHour })),
   };
 

@@ -30,6 +30,24 @@ export const claudeMemoryDir = (stateHome: string, key: string): string => `${st
  * call the folder, and what a permission prompt names a file by. */
 export const folderName = (path: string): string => path.replace(/\/+$/, "").split("/").at(-1) ?? path;
 
+/** A piece of work's name as a folder name: lowercase, every run of anything else one dash, nothing hanging off
+ * either end, and cut short enough that the whole path stays typeable. A name with nothing usable in it reads as
+ * `work`, so a copy always has a folder to land in. */
+export function folderSlug(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+  return slug === "" ? "work" : slug;
+}
+
+/** Where a copy of a project folder made for one piece of work lands: beside the folder it was copied from, under
+ * its own name with the work's on the end. A sibling and not a folder of wsp's own, because a directory clone
+ * needs the same volume as what it clones and because a sibling is where a person's editor and their own
+ * worktrees already are. */
+export function copyPathFor(folder: string, slug: string): string {
+  const at = folder.replace(/\/+$/, "");
+  const parent = at.slice(0, at.lastIndexOf("/"));
+  return `${parent}/${folderName(at)}-${slug}`;
+}
+
 /** The machine a folder browser is walking, as far as the hidden rule cares: the home that machine reports, and
  * whether it is a Mac. Absent either way, the dot rule stands alone, which is every machine wsp forks. */
 export interface FolderMachine {

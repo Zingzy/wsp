@@ -200,6 +200,8 @@ import {
   computerNamed,
   worksInPlaceTakesNone,
   worksInPlace,
+  copyRoadWord,
+  networkLine,
   kindForComputer,
   computerKindWord,
   nameTheProjectLine,
@@ -1155,10 +1157,23 @@ export function threadTree(rows: readonly ThreadRow[]): { row: ThreadRow; depth:
  * word for every row, this computer's included, read off the status through the one predicate the sidebar reads,
  * so a machine the provider has paused and one whose daemon is dark say here what they say there. The projects
  * themselves are wsp projects' table. */
-export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, string> = new Map()): string[] {
+export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, string> = new Map(), capabilities?: Pick<Capabilities, "copies" | "ownNetwork">): string[] {
   const kind = kindWords(workspaceKind(w));
   const named = w.place === undefined ? undefined : places.get(w.place) ?? w.place;
-  return [w.name, w.id, w.project.name, whereWord(w, named), kind.rowReadsMachine ? fmtSize(w.size, kind.cpu) : "", workspaceWord(workspaceStateOf(w, w)), agentsWord(w.agents)];
+  return [
+    w.name,
+    w.id,
+    w.project.name,
+    whereWord(w, named),
+    // What this workspace's copy of the project is, and what it costs: the road that made it and, on a computer
+    // whose copies share its network, that they do. Both cells are empty on a fork, whose project arrives by the
+    // runtime's own road and whose machine has a network of its own.
+    w.copy === undefined ? "" : copyRoadWord(w.copy.road),
+    w.copy === undefined || capabilities === undefined ? "" : networkLine(capabilities, hostPlatform()),
+    kind.rowReadsMachine ? fmtSize(w.size, kind.cpu) : "",
+    workspaceWord(workspaceStateOf(w, w)),
+    agentsWord(w.agents),
+  ];
 }
 
 /** What each place this host holds is called, by the id a record names it with: the rows carry the id, and a person
@@ -1200,6 +1215,13 @@ export const NO_PROJECT_YET = "no projects yet; wsp add <folder> records one her
 /** A workspace of one project: the landing is read first, so a computer that forks nothing refuses in one sentence
  * before a stage is streamed, and the image is the computer's own head unless a project image is named. `size`
  * is the --size word; `engine` asks the computer for its container engine through the fenced socket. */
+/** The two flags a computer declares about copies, read through the landing of a project standing on it: a row
+ * that carries a copy is a row on the computer the host runs on, so its own project is what answers. Asked once
+ * per table and only where a row holds a copy, since every other row's cells are empty either way. */
+export async function hereCapabilities(client: HostClient, project: string): Promise<Pick<Capabilities, "copies" | "ownNetwork">> {
+  return (await client.request<{ capabilities: Capabilities }>("workspaces.landing", { project })).capabilities;
+}
+
 export async function createFor(
   client: HostClient,
   out: Out,
@@ -1233,7 +1255,10 @@ export async function createFor(
       ...(asked.engine === true ? { engine: true } : {}),
     });
     const created: WorkspaceCreateResult = { workspace, ...(notice !== undefined ? { notice } : {}) };
-    out.emit(created, `created ${workspace.name} ${workspace.id} with ${workspace.project.name} at ${workspace.project.path}${notice !== undefined ? `\n${notice}` : ""}`);
+    // The folder this workspace actually holds the project in: the project's own where it is worked in place, and
+    // the copy's where one was made, since a person who just had a copy made needs the path it landed at.
+    const at = workspace.folder ?? workspace.project.path;
+    out.emit(created, `created ${workspace.name} ${workspace.id} with ${workspace.project.name} at ${at}${notice !== undefined ? `\n${notice}` : ""}`);
     return created;
   } finally {
     pushed.stop();
@@ -2414,7 +2439,14 @@ export const VERBS: readonly Verb[] = [
       return drawRows(ctx, "wsp workspaces", async client => {
         const rows = await workspaceStatuses(client);
         const places = rows.some(w => w.place !== undefined) ? await placeNames(client) : new Map<string, string>();
-        return { value: { workspaces: rows }, rows: table([["WORKSPACE", "ID", "PROJECT", "COMPUTER", "SIZE", "STATE", "AGENTS"], ...rows.map(w => workspaceLine(w, places))]) };
+        // Asked once and only where a row carries a copy: the two flags are this computer's, and every row that
+        // holds a copy of a folder is a row on it.
+        const held = rows.find(w => w.copy !== undefined);
+        const here = held === undefined ? undefined : await hereCapabilities(client, held.project.id);
+        return {
+          value: { workspaces: rows },
+          rows: table([["WORKSPACE", "ID", "PROJECT", "COMPUTER", "COPY", "PORTS", "SIZE", "STATE", "AGENTS"], ...rows.map(w => workspaceLine(w, places, here))]),
+        };
       });
     },
     tool: tool({

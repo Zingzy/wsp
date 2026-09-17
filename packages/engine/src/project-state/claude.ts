@@ -24,6 +24,7 @@ export const claudeResolver: ProjectStateResolver = {
     if (existsSync(memory)) moved.push({ state: "auto memory", files: [memory], changed: 1 });
     return moved;
   },
+  key: claudeProjectKey,
   sessions: (home, path) => keyedSessions(join(home, PROJECTS), claudeProjectKey, path),
   entries: (home, path) => keyedEntries(join(home, PROJECTS), claudeProjectKey, path),
   listing: home => [keyedStep(join(home, PROJECTS), KEY_PY)],

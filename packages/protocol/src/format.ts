@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { ContextMenuItem, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
@@ -2293,6 +2293,22 @@ export function isMacMachine(osName: string | null | undefined): boolean {
 /** The computer the host runs on as a row names it, off what that machine itself reported: the same word every
  * screen that names this computer uses, so a table and the settings list cannot call one computer two things. */
 export const computerWord = (os: string | null | undefined): string => thisComputer(isMacMachine(os) ? "darwin" : "linux");
+
+/** What a row says about the network of a workspace on a computer that copies but cannot give a copy a network of
+ * its own: every copy binds the ports of the one computer, so two dev servers on 3000 are one port and the second
+ * one fails. The platform rides, as it does in every line naming this computer, so a Linux reader is not told
+ * about a Mac. */
+export const sharesPortsLine = (platform: "darwin" | "linux"): string => `shares ports with ${thisComputer(platform)}`;
+
+/** The network cell of a workspace's row: the shared-ports line on a computer that copies and has no network for
+ * a copy, nothing anywhere else. Reads the two capability flags and nothing about the workspace's kind, so a
+ * computer that gains its own network changes one flag and the cell follows. */
+export function networkLine(c: Pick<Capabilities, "copies" | "ownNetwork">, platform: "darwin" | "linux"): string {
+  return c.copies && !c.ownNetwork ? sharesPortsLine(platform) : "";
+}
+
+/** The road a copy was made by as a row says it: one word, so the column is narrow. */
+export const copyRoadWord = (road: CopyRoad): string => ({ clonefile: "clone", worktree: "worktree", "in-place": "in place" })[road];
 
 /** The heading over the tools a package manager here has that no catalog row carries: the wizard's own screen and
  * the `wsp recipe scan` section are one section, so they carry one name. */
