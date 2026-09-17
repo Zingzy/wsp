@@ -3382,7 +3382,6 @@ const DAEMON_CONTENTS = [
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
   "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
   "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
-  "bff66c988c3b697a61163b21d723c9f0475555923f0f019175cf261ab1c4a959",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3512,12 +3511,7 @@ const DAEMON_CONTENTS = [
  * Version 47 adds the copy verb the Mac host runs as a child: a directory clone of a project folder at a sibling path
  * in one call, a git worktree where a clone cannot work, then the two rules that make the copy a clean checkout with
  * its ignored files kept; the capabilities say whether a computer copies and whether a copy gets its own network,
- * which is how the row knows this Mac shares ports.
- * Version 48 makes a workspace on a box awake or stopped and nothing else: pause stops it with SIGTERM to its cgroup
- * after a real quiet window read off its published ports and its commands, and the reading carries how long it has
- * been quiet; a service bound to loopback inside answers through the published port; a create the box has no room for
- * is refused in one sentence naming the quietest workspace; root inside drops the standard capability list and sees
- * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace. */
+ * which is how the row knows this Mac shares ports. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
