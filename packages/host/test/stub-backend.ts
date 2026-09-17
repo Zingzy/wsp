@@ -91,12 +91,12 @@ export function mcpConfigRead(cmd: string, configs: (file: string) => string | u
     .join("\n");
 }
 
-/** What a bare guest answers: nothing, except a Node step, which keeps the base's Node when it meets the step's floor
- * and installs the pinned release when it does not, and the reach check. */
 /** The branch the stub guest's checkout is on, and the remote's copy of it: what a fork of such a workspace
  * starts from, and what a bring back from it measures against. */
 export const GUEST_BRANCH = "work";
 
+/** What a bare guest answers: nothing, except a Node step, which keeps the base's Node when it meets the step's floor
+ * and installs the pinned release when it does not, and the reach check. */
 export function guestAnswer(cmd: string, configs?: (file: string) => string | undefined): ExecResult {
   if (cmd.includes("NODE_HAVE")) {
     const floor = Number(/-ge (\d+) \]/.exec(cmd)?.[1] ?? 0);

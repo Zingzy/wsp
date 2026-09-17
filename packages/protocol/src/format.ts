@@ -2430,7 +2430,7 @@ export function spawnReachRefusal(threadId: string, name: string): string {
  * is on: a child starts on its parent's branch and its work lands back in that branch, so a parent that could not
  * be read stops the fork rather than quietly starting it somewhere else. The machine's own words ride it. */
 export function branchUnreadRefusal(workspace: string, said: string): string {
-  return `${workspace} did not say which branch it is on (${said}); wake it and try again, since a workspace forked from it starts on that branch`;
+  return `${workspace} did not say which branch it is on (${said}); wake it and try again, since a child of it starts on that branch and its work lands back in it`;
 }
 
 /** The one sentence a create naming a parent this host does not hold is refused with: a child is made out of a

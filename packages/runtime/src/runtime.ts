@@ -627,6 +627,11 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
    * what says a second workspace would stand on a machine one already stands on. A kind whose id is the machine
    * (a fork at the provider, this computer) carries none and is compared by that id. */
   machineIdentity?: string;
+  /** The branch this workspace's copy started from: the branch its parent was on at the fork for a child, and the
+   * branch the project starts from for every other workspace. A fact of the fork and not a reading of the parent,
+   * since it is the code this copy was cut from, which is where its work goes back however the parent moves on;
+   * absent on a record written before it, which reads the project's own base as it always did. */
+  base?: string;
   /** With phase gone: the provider's words when the machine was found missing; cleared when a fresh machine lands. */
   gone?: string;
   /** That this host put a daemon on the machine, and which one. Only a kind whose machine wsp did not make carries
@@ -2984,9 +2989,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return branch === "HEAD" || tracked === "" ? undefined : branch;
   };
 
-  /** The project a child of that workspace starts from: the branch its parent is on where the remote has it, else
-   * the project as it was recorded. One reading for both roads a create takes. */
-  const seededFrom = async (project: ProjectView, parent: LiveWorkspace | undefined): Promise<ProjectView> => {
+  /** What a workspace starts from: the project as it was recorded, seeded for a child with the branch its parent
+   * is on where the remote has a copy of it. One reading for both roads a create takes. The branch is read here
+   * and nowhere else: it is a fact of the fork, recorded on the child, since it names the code that child was cut
+   * from and so where its work goes back, whatever branch the parent moves to afterwards. */
+  const startedFrom = async (project: ProjectView, parent: LiveWorkspace | undefined): Promise<ProjectView> => {
     const branch = parent === undefined ? undefined : await branchOn(parent);
     return branch === undefined ? project : { ...project, base: branch };
   };
@@ -4445,6 +4452,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // fork that is still landing already holds its place and two forks at once cannot both pass the count.
       ...(spawned !== undefined ? { parentThreadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : {}),
       ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
+      // The branch this copy starts from, kept because a bring back measures against it long after the parent may
+      // have moved on or gone to sleep; nothing reads the parent's machine for it again.
+      ...(project.base !== undefined ? { base: project.base } : {}),
       // A fork a thread asked for stores no switch of its own: it carries the tree it belongs to, and the switch is
       // read off that tree's root wherever it is asked for, so one workspace holds the answer for the whole tree.
       ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
@@ -4566,15 +4576,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * checkouts on two branches rather than two names for one working tree. The machine is this computer either
    * way, and its phase is running with auto-nap off from the start: a machine wsp does not run neither naps nor
    * wakes. */
-  const recordExisting = async (project: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined): Promise<WorkspaceView> => {
+  const recordExisting = async (recorded: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined, parent?: LiveWorkspace): Promise<WorkspaceView> => {
     const n = nameGiven(o.name);
     refuseRecording(n, caller);
     // The folder is the workspace, so the words a fork takes have nothing to act on here: they are refused in one
     // sentence rather than taken and ignored.
     const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
-    if (forkWords.length > 0) throw Object.assign(new Error(worksInPlaceTakesNone(project.name, forkWords)), { kind: "invalid" });
+    if (forkWords.length > 0) throw Object.assign(new Error(worksInPlaceTakesNone(recorded.name, forkWords)), { kind: "invalid" });
     const refusal = nameRefusal(n);
     if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
+    // Read once this create is allowed, as the fork road reads it: nothing is asked of a parent's machine for a
+    // request its own refusal was going to stop.
+    const project = await startedFrom(recorded, parent);
     const standing = [...live.values()].find(e => e.record.project === project.id);
     const mine = backendOfKind("local");
     // The folder itself is the first workspace of a project here; a second piece of work on it is a copy, and a
@@ -4602,6 +4615,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       copy,
       ...(portBase !== undefined ? { portBase } : {}),
       ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
+      ...(project.base !== undefined ? { base: project.base } : {}),
       spec: {},
       size: mine.pricing.defaultSize,
       firstLife: false,
@@ -4661,7 +4675,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // somebody's root; the branch itself is read off the parent's machine below, once this create is allowed.
       const parent = o.parent === undefined ? undefined : live.get(o.parent);
       if (o.parent !== undefined && parent === undefined) throw Object.assign(new Error(noParentWorkspaceLine(o.parent)), { kind: "invalid" });
-      if (inPlace) return recordExisting(await seededFrom(project, parent), o, origin);
+      if (inPlace) return recordExisting(project, o, origin, parent);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on.
       const freePlace = spawnGuard("fork", origin);
@@ -4700,7 +4714,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // Read inside the try, so a parent that did not answer gives the name and the slot back the way every
         // other end of this create does, and after the guard, so what a thread may do is decided before anything
         // is asked of a machine.
-        return await createStaged(o, await seededFrom(project, parent), id, report, spawned, freePlace);
+        return await createStaged(o, await startedFrom(project, parent), id, report, spawned, freePlace);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
         // will not part with keeps its record instead, since a machine nobody records bills unseen.
@@ -5097,10 +5111,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       spawnGuard("bring_back", origin);
       const entry = await entryOf(workspaceId, origin);
       const cwd = checkoutOf(entry.record);
-      // A child's work goes back into the branch its parent is on right now; every other workspace measures
-      // against the branch its project starts from, and a project that named none leaves it to the checkout.
-      const parent = entry.record.parentWorkspaceId === undefined ? undefined : live.get(entry.record.parentWorkspaceId);
-      const base = (parent === undefined ? undefined : await branchOn(parent)) ?? projectHeld(entry.record.project).base;
+      // The branch this copy started from, off its own record: for a child that is the branch its parent was on at
+      // the fork, which is the code it was cut from and so where its work goes back, and nothing is asked of the
+      // parent's machine, so a child whose parent has gone to sleep brings its work back without a wake nobody
+      // named. A record written before that fact was kept reads the branch its project starts from, as it did.
+      const base = entry.record.base ?? projectHeld(entry.record.project).base;
       const against = base === undefined ? {} : { base };
       return withDaemon(entry, async ask => {
         const push = GitPushReply.parse(await ask({ op: "git.push", cwd, ...against }));

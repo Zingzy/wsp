@@ -73,7 +73,7 @@ async function withWorkspace(daemon: ReturnType<typeof fakeDaemon>, base?: strin
 }
 
 describe("workspaces.bringBack", () => {
-  it("pushes the branch and opens the pull request against the project's base, on one dial that is closed after", async () => {
+  it("a workspace with no parent pushes and opens the pull request against the project's own base, on one dial that is closed after", async () => {
     const daemon = fakeDaemon();
     const { id } = await withWorkspace(daemon, "main");
     const back = await rt!.workspaces.bringBack({ workspaceId: id, title: "the pricing page", body: "what it does" });
@@ -128,18 +128,25 @@ describe("workspaces.bringBack", () => {
     expect((await rt!.workspaces.list()).map(w => w.name)).toEqual(["pricing page"]);
   });
 
-  it("a bring back whose parent will not say which branch it is on stops too, and sends nothing", async () => {
+  it("a child whose parent went to sleep after the fork brings back against the branch it was forked from", async () => {
     const daemon = fakeDaemon();
     const { backend, id, projectId } = await withWorkspace(daemon, "main");
     backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : tokenGuest(m, cmd));
     const child = await rt!.workspaces.create({ project: projectId, golden: "snap_g", name: "second look", parent: id });
     backend.machines[1]!.previewUrl = async () => ({ url: "http://127.0.0.1:7071", token: "e", expiresAt: Date.now() + 3_600_000 });
-    // The parent stops answering after the child exists, which is the state a stopped parent leaves behind.
-    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 1, stdout: "", stderr: "fatal: not a git repository\n" } : tokenGuest(m, cmd));
-    const refused = await rt!.workspaces.bringBack({ workspaceId: child.id }).catch((e: unknown) => e);
-    expect((refused as Error).message).toBe(branchUnreadRefusal("pricing page", "fatal: not a git repository"));
-    expect(daemon.frames).toEqual([]);
-    expect(daemon.dials).toEqual([]);
+    const readsOfTheParent = (): number => backend.machines[0]!.execLog.filter(cmd => cmd.includes("rev-parse --abbrev-ref HEAD")).length;
+    expect(readsOfTheParent()).toBe(1);
+    // The parent naps, and every command on it would now answer with what a stopped machine answers. The child's
+    // work still goes back into the branch it was cut from, and nothing asks that machine anything.
+    await rt!.workspaces.nap(id);
+    backend.execImpl = (m, cmd) => {
+      if (m.id === backend.machines[0]!.id) throw new Error("machine is paused");
+      return tokenGuest(m, cmd);
+    };
+    const back = await rt!.workspaces.bringBack({ workspaceId: child.id });
+    expect(back.base).toBe("pricing-page");
+    expect(daemon.frames.map(f => f["base"])).toEqual(["pricing-page", "pricing-page"]);
+    expect(readsOfTheParent()).toBe(1);
   });
 
   it("a create naming a parent this host does not hold is refused, not landed as a root", async () => {
@@ -150,7 +157,7 @@ describe("workspaces.bringBack", () => {
     expect((await rt!.workspaces.list()).map(w => w.name)).toEqual(["pricing page"]);
   });
 
-  it("a child workspace measures against the branch its parent is on right now", async () => {
+  it("a child workspace measures against the branch its parent was on at the fork, whatever the parent does after", async () => {
     const daemon = fakeDaemon();
     const { backend, id, projectId } = await withWorkspace(daemon, "main");
     // The parent is on a branch the remote has, which is what makes it a branch a child can start from.
@@ -161,6 +168,8 @@ describe("workspaces.bringBack", () => {
     // The child starts where its parent stands, not where the project does: the clone inside it takes that branch.
     expect(backend.machines[1]!.execLog.find(cmd => cmd.includes("git clone"))).toContain("--branch pricing-page");
     backend.machines[1]!.previewUrl = async () => ({ url: "http://127.0.0.1:7071", token: "e", expiresAt: Date.now() + 3_600_000 });
+    // The parent switches branches after the fork; the child's work still belongs on the branch it was cut from.
+    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "somewhere-else\norigin/somewhere-else\n", stderr: "" } : tokenGuest(m, cmd));
     await rt!.workspaces.bringBack({ workspaceId: child.id });
     expect(daemon.frames.map(f => f["base"])).toEqual(["pricing-page", "pricing-page"]);
   });
