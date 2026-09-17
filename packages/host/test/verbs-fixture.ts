@@ -421,4 +421,4 @@ export function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, origin?
 }
 
 type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
-type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create"> };
+type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create" | "get"> };

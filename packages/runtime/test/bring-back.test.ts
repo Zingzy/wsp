@@ -100,10 +100,25 @@ describe("workspaces.bringBack", () => {
     expect(daemon.frames.map(f => f["base"])).toEqual([undefined, undefined]);
   });
 
+  it("a branch only the parent's own copy holds is no base: the child starts and lands where the project does", async () => {
+    const daemon = fakeDaemon();
+    const { backend, id, projectId } = await withWorkspace(daemon, "main");
+    // On a branch, with nothing tracking it: nothing on the remote for a clone to start from or a pull request to
+    // aim at, so the project's own base is what both read.
+    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "only-here\n\n", stderr: "" } : tokenGuest(m, cmd));
+    const child = await rt!.workspaces.create({ project: projectId, golden: "snap_g", name: "second look", parent: id });
+    expect(child.parentWorkspaceId).toBe(id);
+    expect(backend.machines[1]!.execLog.find(cmd => cmd.includes("git clone"))).toContain("--branch main");
+    backend.machines[1]!.previewUrl = async () => ({ url: "http://127.0.0.1:7071", token: "e", expiresAt: Date.now() + 3_600_000 });
+    await rt!.workspaces.bringBack({ workspaceId: child.id });
+    expect(daemon.frames.map(f => f["base"])).toEqual(["main", "main"]);
+  });
+
   it("a child workspace measures against the branch its parent is on right now", async () => {
     const daemon = fakeDaemon();
     const { backend, id, projectId } = await withWorkspace(daemon, "main");
-    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\n", stderr: "" } : tokenGuest(m, cmd));
+    // The parent is on a branch the remote has, which is what makes it a branch a child can start from.
+    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : tokenGuest(m, cmd));
     const child = await rt!.workspaces.create({ project: projectId, golden: "snap_g", name: "pricing page copy", parent: id });
     expect(child.parentWorkspaceId).toBe(id);
     expect(child.project.id).toBe(projectId);

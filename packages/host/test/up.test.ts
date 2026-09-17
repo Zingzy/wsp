@@ -115,7 +115,7 @@ describe("wsp up", () => {
 
   it("serves a state that holds only a local workspace and no golden: this computer is something to show", async () => {
     stateFile({
-      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: localWorkFolder(home) }, path: localWorkFolder(home), createdAt: new Date().toISOString() } },
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: localWorkFolder(home) }, path: localWorkFolder(home), remote: "https://github.com/dev/mac.git", defaultBranch: "main", memoryKey: "-Users-dev-mac", memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory", createdAt: new Date().toISOString() } },
       workspaces: {
         ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
@@ -132,7 +132,7 @@ describe("wsp up", () => {
   it("a turn on this computer starts in the workspace's own project folder, never in the person's home", async () => {
     const work = localWorkFolder(home);
     stateFile({
-      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: work }, path: work, createdAt: new Date().toISOString() } },
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: work }, path: work, remote: "https://github.com/dev/mac.git", defaultBranch: "main", memoryKey: "-Users-dev-mac", memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory", createdAt: new Date().toISOString() } },
       workspaces: {
         ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
@@ -224,7 +224,7 @@ describe("wsp up", () => {
 
   it("the panes of a local workspace dial a daemon this host starts on the first ask and closes with the runtime", async () => {
     stateFile({
-      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: localWorkFolder(home) }, path: localWorkFolder(home), createdAt: new Date().toISOString() } },
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: localWorkFolder(home) }, path: localWorkFolder(home), remote: "https://github.com/dev/mac.git", defaultBranch: "main", memoryKey: "-Users-dev-mac", memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory", createdAt: new Date().toISOString() } },
       workspaces: {
         ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },

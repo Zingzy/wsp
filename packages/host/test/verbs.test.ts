@@ -10,8 +10,8 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, sharesPortsLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
-import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
+import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, sharesPortsLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type RuntimeDaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, localWorkFolder, serve } from "../src/cli.js";
@@ -33,16 +33,16 @@ runsFromItsOwnFolder();
 
 /** A daemon inside a workspace that answers the two frames a bring back sends, so the verb's own line is read here
  * without a machine: the push, then the pull request or the sentence that says none was opened. */
-function fakeGitDaemon(): { open: (o: { url: string; token: string }) => Promise<{ send: (frame: { op: string }) => Promise<Record<string, unknown>>; close: () => void }>; pr: { refuse?: { error: string; code?: string } } } {
-  const state: { refuse?: { error: string; code?: string } } = {};
+function fakeGitDaemon(): { open: (o: { url: string; token: string }) => Promise<RuntimeDaemonChannel>; pr: { refuse?: { error: string; code?: DaemonErrorCode } } } {
+  const state: { refuse?: { error: string; code?: DaemonErrorCode } } = {};
   return {
     pr: state,
     open: async () => ({
-      send: async frame => {
+      send: async (frame: { op: string }) => {
         if (frame.op === "git.push") {
           return { id: 1, ok: true, branch: "pricing-page", base: "main", remote: "origin", ahead: 2, uncommitted: 1, stat: [" src/page.tsx | 4 ++--", " 1 file changed, 2 insertions(+), 2 deletions(-)"] };
         }
-        if (state.refuse !== undefined) return { id: 1, ok: false, ...state.refuse };
+        if (state.refuse !== undefined) return { id: 1, ok: false as const, ...state.refuse };
         return { id: 1, ok: true, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" }, created: true };
       },
       close: () => {},

@@ -340,9 +340,75 @@ export type PortProbeView = z.infer<typeof PortProbeView>;
 export const WorkspaceProject = z.object({ name: z.string(), dest: z.string(), importedAt: z.string(), size: z.number().int().nonnegative().optional() });
 export type WorkspaceProject = z.infer<typeof WorkspaceProject>;
 
+/** What a path git ignores is to a seed of the folder it sits in, as the catalog's own rows judge it: config
+ * travels, rebuilt is what the computer makes again, data is a database, never is a login that does not leave this
+ * computer whatever is ticked, and unknown is a path no row names. The catalog's junk kind reaches no menu, so it
+ * is not here. */
+export const SeedKind = z.enum(["config", "rebuilt", "data", "never", "unknown"]);
+export type SeedKind = z.infer<typeof SeedKind>;
+
+/** One row of the seed menu: a path git ignores in the folder, relative to it and collapsed to the directory where
+ * the whole directory is ignored, with its size, the catalog row and kind that judged it, and whether it starts
+ * ticked. */
+export const SeedFile = z.object({
+  path: z.string(),
+  dir: z.boolean(),
+  bytes: z.number().int().nonnegative(),
+  kind: SeedKind,
+  /** The catalog row's id and name; absent on unknown. */
+  row: z.object({ id: z.string(), name: z.string() }).optional(),
+  ticked: z.boolean(),
+});
+export type SeedFile = z.infer<typeof SeedFile>;
+
+/** What seeding a project from this folder would carry, for the person to read before anything leaves this
+ * computer. Nothing here is a file's content: the plan is names, sizes and counts. */
+export const SeedPlan = z.object({
+  /** The folder on this computer, resolved. */
+  source: z.string(),
+  /** The remote the computer clones, origin's URL; null where the folder has none, which refuses the add. */
+  remote: z.string().nullable(),
+  /** The branch the folder is on, and the branch the remote's own HEAD names. */
+  branch: z.string(),
+  defaultBranch: z.string().nullable(),
+  /** Commits on the branch the remote does not have, with the commit they start from; null when there are none. */
+  unpushed: z.object({ commits: z.number().int(), base: z.string() }).nullable(),
+  /** Changed or untracked files that stay on this computer: the menu says how many and the seed carries none. */
+  uncommitted: z.number().int().nonnegative(),
+  /** Claude Code's memory folder for this folder here, with the key it sits under; null where there is none. */
+  memory: z.object({ key: z.string(), files: z.number().int(), bytes: z.number().int() }).nullable(),
+  files: z.array(SeedFile),
+  /** The ticks came from a choice remembered for this folder rather than from the catalog's own defaults. */
+  remembered: z.boolean(),
+});
+export type SeedPlan = z.infer<typeof SeedPlan>;
+
+/** What the person chose off the menu: the paths that travel, the memory folder, the unpushed commits as a patch,
+ * and whether the choice is kept for the next add of this folder. */
+export const SeedChoice = z.object({
+  files: z.array(z.string()),
+  memory: z.boolean(),
+  commits: z.boolean(),
+  remember: z.boolean().optional(),
+});
+export type SeedChoice = z.infer<typeof SeedChoice>;
+
+/** How far an add has got. In order: planned, the folder read or the remote resolved; cloning, on the computer;
+ * seeding, the chosen files landed there; installing, the lockfile's own install run once; imaging, the machine
+ * snapshotted as the project's image, which only a provider computer does; done. failed ends one that threw. */
+export const ProjectAddStage = z.enum(["planned", "cloning", "seeding", "installing", "imaging", "done", "failed"]);
+export type ProjectAddStage = z.infer<typeof ProjectAddStage>;
+
 /** Where a project's code comes from, as the computer it lives on sees it: a folder that computer holds, or a repo
  * it clones. Which of the two a computer takes is its kind's own row (projectSources), so no road guesses. */
-export const ProjectSource = z.discriminatedUnion("kind", [z.object({ kind: z.literal("folder"), path: z.string() }), z.object({ kind: z.literal("git"), url: z.string() })]);
+export const ProjectSource = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("folder"), path: z.string() }),
+  z.object({ kind: z.literal("git"), url: z.string() }),
+  /** owner/repo on a host whose signed-in command line the computer's image carries: the clone goes through that
+   * command, so a private repo needs no key of the person's on the box. */
+  z.object({ kind: z.literal("github"), repo: z.string() }),
+  z.object({ kind: z.literal("gitlab"), repo: z.string() }),
+]);
 export type ProjectSource = z.infer<typeof ProjectSource>;
 
 /** A project: one computer, one source that computer can see, and the branch a workspace of it starts on. Its own
@@ -356,6 +422,28 @@ export const ProjectView = z.object({
   source: ProjectSource,
   /** Where the checkout sits inside a workspace of it: the folder itself on this computer, /root/<name> on a copy. */
   path: z.string(),
+  /** The remote the computer cloned, or the seed folder's own origin: written once at the add and never read again
+   * to decide anything, so a remote renamed later changes nothing about a project that already stands. */
+  remote: z.string(),
+  /** The branch the remote's HEAD named at the add. */
+  defaultBranch: z.string(),
+  /** The value of every agent's project key variable in every workspace of this project: the seed folder's own key
+   * on this Mac when it was seeded from one, else the key of the path on the computer. It is fixed at the add, so a
+   * project's memory and sessions key on the project rather than on wherever its checkout sits. */
+  memoryKey: z.string(),
+  /** Where the project's memory lives on the computer holding it, which every workspace of it reads: the folder
+   * itself on this Mac, a folder of wsp's own on a computer that clones. */
+  memoryDir: z.string(),
+  /** Where the checkout sits on the computer holding it, outside every workspace of it: a folder of wsp's own on
+   * a computer that cloned it there, which every workspace of the project takes its own copy of. Absent where the
+   * computer keeps the project inside an image instead, and where the project is worked where it already sits. */
+  checkout: z.string().optional(),
+  /** What the seed carried, once, where the source was a folder on this computer. */
+  seeded: z.object({ files: z.number().int(), bytes: z.number().int(), memory: z.boolean(), commits: z.number().int(), at: z.string() }).optional(),
+  /** What the install ran and how long it took, once; absent where no catalog row named an install for this repo. */
+  installed: z.object({ row: z.string(), command: z.string(), at: z.string(), seconds: z.number() }).optional(),
+  /** On a provider computer: the project image every workspace of this project forks from. */
+  image: z.object({ snapshotId: z.string(), builtAt: z.string(), lockfileSha: z.string().optional() }).optional(),
   /** The branch a new workspace starts on; absent is the remote's default branch, read at the clone. */
   base: z.string().optional(),
   createdAt: z.string(),
@@ -2436,6 +2524,17 @@ export const MachineShare = z.object({
 });
 export type MachineShare = z.infer<typeof MachineShare>;
 
+/** One folder the computer running a workspace mounts into it: the source on the computer, the path it lands at
+ * inside, and whether the workspace may write through it. Unlike a share, which is one file of a login, this is a
+ * folder both sides keep working in, which is what makes one project's memory the same memory in every workspace
+ * of it on that computer. */
+export const MachineBind = z.object({
+  source: z.string().min(1).refine(isPlainPath, "an absolute path on the computer"),
+  target: z.string().min(1).refine(isPlainPath, "an absolute path inside the workspace"),
+  readOnly: z.boolean().optional(),
+});
+export type MachineBind = z.infer<typeof MachineBind>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2551,6 +2650,18 @@ export type PlaceEvent = z.infer<typeof PlaceJoinedEvent> | z.infer<typeof Place
 export const ProjectAddedEvent = z.object({ type: z.literal("project.added"), project: ProjectView });
 export type ProjectAddedEvent = z.infer<typeof ProjectAddedEvent>;
 
+/** How far one add has got, one event per stage, so a client watching an add reads the clone, the seed and the
+ * install as they happen rather than waiting on one reply. */
+export const ProjectAddEvent = z.object({
+  type: z.literal("project.add"),
+  projectId: z.string(),
+  computer: z.string(),
+  stage: ProjectAddStage,
+  message: z.string(),
+  elapsedMs: z.number(),
+});
+export type ProjectAddEvent = z.infer<typeof ProjectAddEvent>;
+
 /** A project's record was dropped. */
 export const ProjectRemovedEvent = z.object({ type: z.literal("project.removed"), projectId: z.string() });
 export type ProjectRemovedEvent = z.infer<typeof ProjectRemovedEvent>;
@@ -2584,6 +2695,7 @@ export const EventUnion = z.discriminatedUnion("type", [
   ForwardOpenEvent.extend(sequenced),
   ForwardCloseEvent.extend(sequenced),
   ProjectAddedEvent.extend(sequenced),
+  ProjectAddEvent.extend(sequenced),
   ProjectRemovedEvent.extend(sequenced),
   ProjectImportEvent.extend(sequenced),
   ProjectExportEvent.extend(sequenced),
@@ -2953,6 +3065,10 @@ export const MachineSpec = z.object({
   copy: WorkspaceCopy.optional(),
   /** The logins that computer holds for every workspace on it, mounted into this one. Absent shares none. */
   shares: z.array(MachineShare).optional(),
+  /** Folders on the computer bound into the workspace at create, read-write unless the bind says otherwise: a
+   * project's memory folder rides this, so every workspace of one project reads and writes the same memory on the
+   * computer holding it. A bind whose source is not a directory the computer holds is refused there. */
+  binds: z.array(MachineBind).optional(),
 });
 export type MachineSpec = z.infer<typeof MachineSpec>;
 
@@ -3057,6 +3173,9 @@ export const BackendFacts = z.object({
   /** Where this computer keeps the logins every workspace on it shares, absolute; absent from a backend that
    * shares none, which is every provider, since a machine somebody else runs holds no file of this person's. */
   logins: z.string().min(1).refine(isPlainPath, "an absolute path on the computer").optional(),
+  /** Where this computer keeps the project checkouts it holds and each project's own memory, absolute; absent from
+   * a backend that keeps none, which is every provider, where a project lives in an image instead. */
+  projects: z.string().min(1).refine(isPlainPath, "an absolute path on the computer").optional(),
 });
 export type BackendFacts = z.infer<typeof BackendFacts>;
 
@@ -3394,6 +3513,7 @@ const DAEMON_CONTENTS = [
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
   "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
   "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
+  "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3523,7 +3643,11 @@ const DAEMON_CONTENTS = [
  * Version 47 adds the copy verb the Mac host runs as a child: a directory clone of a project folder at a sibling path
  * in one call, a git worktree where a clone cannot work, then the two rules that make the copy a clean checkout with
  * its ignored files kept; the capabilities say whether a computer copies and whether a copy gets its own network,
- * which is how the row knows this Mac shares ports. */
+ * which is how the row knows this Mac shares ports.
+ * Version 48 lets a machine specification name binds: folders on the computer bound into a workspace at create,
+ * read-write or read-only, refused where the source is not a directory on the computer; the runtime binds a project's
+ * memory folder this way so every workspace of the project on that computer reads and writes the one memory, keyed on
+ * the project and not on a path. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4396,7 +4520,20 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Records a project: one word, which is a folder on this computer or a repo url a computer clones, and the
    * computer it lives on. Replies with { project, notice? }; refused with the three forms when the word names
    * none of them, and refused naming the project when that source is already recorded on that computer. */
-  z.object({ id: reqId, op: z.literal("projects.add"), source: z.string(), on: z.string().optional(), name: z.string().optional(), base: z.string().optional() }),
+  z.object({
+    id: reqId,
+    op: z.literal("projects.add"),
+    source: z.string(),
+    on: z.string().optional(),
+    name: z.string().optional(),
+    base: z.string().optional(),
+    /** What the person chose off the seed menu; required where the source is a folder on this computer and that
+     * folder is seeding a computer that clones, since nothing of theirs leaves this computer unasked. */
+    seed: SeedChoice.optional(),
+  }),
+  /** Replies with { plan: SeedPlan } for a folder on this computer: what a seed of it would carry, read off git's
+   * own ignore listing and one size pass. No file's content is read and nothing leaves this computer. */
+  z.object({ id: reqId, op: z.literal("project.seed.plan"), source: z.string() }),
   /** Every project this host holds. Replies with { projects }. */
   z.object({ id: reqId, op: z.literal("projects.list") }),
   /** The project a word names, by id or by name. Replies with { project }. */
@@ -4750,10 +4887,11 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
+export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";

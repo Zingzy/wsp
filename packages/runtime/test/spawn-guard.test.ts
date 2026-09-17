@@ -133,7 +133,7 @@ describe("agents spawning agents", () => {
   it("a thread's fork is a child of its own workspace, holding its project and starting on the branch it is on", async () => {
     const held = heldAdapter();
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    backend.execImpl = (_m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const rt = runtimeWith({ claude: held.factory }, { reach: { url: "http://10.0.0.2:4700" } }, backend);
     const project = await projectOn(rt);
     const ws = await createOn(rt, { project: project.id, golden: "snap_g", name: "lead", agents: AGENTS_ON });
