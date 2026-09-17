@@ -42,7 +42,7 @@ import {
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
-import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
 import { NO_PLACE_UPDATER, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
@@ -1671,6 +1671,21 @@ const PLACE_FACTS = {
 };
 
 const PLACE_ROADS = { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true };
+/** What a computer somebody joined answers about itself once its workspaces are copies of the computer: it keeps
+ * no image, so nothing behind an image is offered either. The shape the daemon of this build reports. */
+const KEEPS_NO_IMAGE = {
+  ...PLACE_FACTS,
+  capabilities: { ...PLACE_FACTS.capabilities, images: false, diskSnapshots: false, snapshotsAnyLife: false, snapshotListing: false, templates: false },
+  baseTemplates: undefined,
+};
+
+/** One sealed version of this host's own image, promoted to a template: what a fork at a provider that keeps
+ * images stands on, and the image a create on a computer that keeps none is handed and must not send. */
+const SEALED = {
+  head: 1,
+  versions: [{ version: 1, snapshotId: "snap_g", templateId: "tpl_g", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-16T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }],
+};
+
 
 function forks(
   client: WsClient,
@@ -1693,6 +1708,8 @@ function forks(
   },
   /** What a command run on a machine there answers; nothing and exit 0 unless the test says. */
   exec: (cmd: string) => { exitCode: number; stdout: string; stderr: string } = () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  /** What this computer says it forks with; the default keeps images, which is the shape the copy road is read on. */
+  facts: Record<string, unknown> = PLACE_FACTS,
 ): ForkingPlace {
   let held: ((...args: never[]) => void)[] | undefined;
   const seen: ForkingPlace = {
@@ -1732,7 +1749,7 @@ function forks(
     if (seen.swallow.has(op)) return;
     switch (op) {
       case "machine.backend":
-        return say(PLACE_FACTS);
+        return say(facts);
       case "machine.capacity":
         return say(capacity);
       case "machine.create": {
@@ -1882,6 +1899,49 @@ describe("a fork at a provider this host is not wired to", () => {
 });
 
 describe("a fork on a computer you joined", () => {
+  it("names no image where that computer keeps none: no template, no snapshot, and nothing of an image read or built there first", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, KEEPS_NO_IMAGE)) });
+    sockets.push(client.ws);
+    // This host has sealed no image at all, and a computer that keeps none needs none: the create reads no image
+    // head and builds no copy of one there before the fork, where the road behind it stopped for want of one.
+    const bare = await createOn(runtime, { name: "x", on: "srv" });
+    expect(place.created).toHaveLength(1);
+    expect(place.created[0]).not.toHaveProperty("template");
+    expect(place.created[0]).not.toHaveProperty("fromSnapshot");
+    expect(bare.golden).toBe("");
+    expect(await store.get("workspaces", bare.id)).toMatchObject({ golden: "" });
+    // And where this host does hold an image, the word the verb hands every create down is dropped rather than
+    // sent on to a computer that would refuse it.
+    await store.put("goldens", copyKey("solari", "default"), SEALED);
+    const named = await createOn(runtime, { golden: "snap_g", name: "y", on: "srv" });
+    expect(place.created).toHaveLength(2);
+    expect(place.created[1]).not.toHaveProperty("template");
+    expect(place.created[1]).not.toHaveProperty("fromSnapshot");
+    expect(named.golden).toBe("");
+    // Nothing was forked at this host's own provider for either, which is where a copy would have been built.
+    expect(backend.machines).toHaveLength(0);
+  });
+
+  it("still names the image where the computer keeps them: a fork at this host's own provider carries the template its version was promoted to", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    backend.capabilities.templates = true;
+    backend.templates.set("tpl_g", { id: "tpl_g", name: "wsp-default-v1", status: "ready", snapshotId: "snap_g" });
+    runtime = createRuntime({ backend, store, adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await store.put("goldens", copyKey("solari", "default"), SEALED);
+    const made = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.spec).toMatchObject({ template: "tpl_g" });
+    expect(made.golden).toBe("snap_g");
+  });
+
   it("lands on that computer's backend and not on this host's, and the record and the view say where", async () => {
     const backend = stubBackend();
     const store = memoryStore();

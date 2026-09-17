@@ -84,7 +84,6 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     const socket = await host.socket;
     backend = await LinkBackend.open(linkOver(socket as unknown as WebSocket));
     expect(backend.capabilities.pauseMode).toBe("disk");
-    expect(backend.capabilities.diskSnapshots).toBe(true);
   }, 60_000);
 
   afterAll(async () => {
@@ -107,7 +106,7 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     // Two cores of a box that keeps one for itself, read off the box rather than written down here.
     const cores = (await backend.capacity()).cores;
     const givenCpu = Math.min(2, Math.max(1, cores - 1));
-    const machine = await create({ kind: "sandbox", template: "ubuntu:24.04", cpu: 2, memMb: 1024, envs: { WSP_TOKEN: "t" }, labels: { row: "build" }, idempotencyKey: key });
+    const machine = await create({ kind: "sandbox", cpu: 2, memMb: 1024, envs: { WSP_TOKEN: "t" }, labels: { row: "build" }, idempotencyKey: key });
     expect(machine.id).toBe(`wsp-${key}`);
     expect(await machine.state()).toBe("running");
     const seen = await exec(machine, "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.swap.max; echo $WSP_TOKEN; hostname; for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline; echo; done");
@@ -307,6 +306,16 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     const onTheBox = readFileSync("/etc/os-release", "utf8").split("\n")[0]!;
     expect(seen.stdout).toContain(onTheBox);
     expect(seen.stdout.trimEnd().split("\n").at(-1)).toBe("0");
+    // The binaries the computer itself carries, at the paths it answers with: read off the box here and asked of
+    // the workspace, so what this case expects is whatever this box happens to hold and never a path written down.
+    const tools = new Map<string, string>();
+    for (const tool of ["sh", "env", "git", "node"]) {
+      const found = execFileSync("/bin/sh", ["-c", `command -v ${tool} || true`]).toString().trim();
+      if (found !== "") tools.set(tool, found);
+    }
+    expect([...tools.keys()]).toContain("sh");
+    const answered = await exec(machine, [...tools.keys()].map(tool => `command -v ${tool}`).join("; "));
+    expect(answered.stdout.trimEnd().split("\n")).toEqual([...tools.values()]);
     // A second workspace of the same computer while the first is up, each with its own view of it.
     const second = await create({ kind: "sandbox" });
     expect((await exec(second, "hostname")).stdout.trim()).toBe(second.id);
