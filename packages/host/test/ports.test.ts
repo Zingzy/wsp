@@ -2,7 +2,9 @@
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { LOOPBACK } from "@wsp/runtime";
+import { PORT_TAKEN_REFUSAL, portInsteadLine, portTakenLine, portsPickedLine } from "@wsp/protocol";
 import { choosePorts, listenerOf, portHolder, portInUse } from "../src/ports.js";
+import { pickUpPorts, type CliIO } from "../src/cli.js";
 import type { HostLock } from "../src/host-lock.js";
 
 const servers: Server[] = [];
@@ -53,7 +55,7 @@ describe("choosing the pair a run binds", () => {
   const node = async () => ({ command: "node", pid: 62569 });
 
   it("takes the pair as asked when both ports are free", async () => {
-    expect(await choosePorts(asked, { probe: busy(), listener: node })).toEqual({ ports: { port: 4400, wsPort: 4410 } });
+    expect(await choosePorts(asked, { probe: busy(), listener: node, states: [] })).toEqual({ ports: { port: 4400, wsPort: 4410 } });
   });
 
   it("steps a pair nobody named to the next pair with both free, naming the port it stepped over and its holder", async () => {
@@ -62,7 +64,7 @@ describe("choosing the pair a run binds", () => {
       moved: { port: 4400, holder: { command: "node", pid: 62569 } },
     });
     // The websocket port alone being taken moves the pair too: the pair is what a run binds, not either port.
-    expect(await choosePorts(asked, { probe: busy(4410), listener: node })).toEqual({
+    expect(await choosePorts(asked, { probe: busy(4410), listener: node, states: [] })).toEqual({
       ports: { port: 4401, wsPort: 4411 },
       moved: { port: 4410, holder: { command: "node", pid: 62569 } },
     });
@@ -80,7 +82,7 @@ describe("choosing the pair a run binds", () => {
   });
 
   it("refuses a port a person named, with its holder, rather than serving somewhere they did not ask for", async () => {
-    expect(await choosePorts({ port: 4401, wsPort: 4411, named: true }, { probe: busy(4411), listener: node })).toEqual({
+    expect(await choosePorts({ port: 4401, wsPort: 4411, named: true }, { probe: busy(4411), listener: node, states: [] })).toEqual({
       taken: { port: 4411, holder: { command: "node", pid: 62569 } },
     });
   });
@@ -114,3 +116,61 @@ async function freed(): Promise<number> {
   await new Promise<void>(resolve => server.close(() => resolve()));
   return port;
 }
+
+describe("the pair wsp up binds", () => {
+  // Every case fakes the whole answer in this process, `states: []` included: the real reading asks which state
+  // files on this computer could be serving, and on the tester's own Mac one of them is, which would name a live
+  // host as the holder instead of the process these cases pretend holds the port.
+  const busy = (...ports: number[]) => async (port: number) => ports.includes(port);
+  const node = async () => ({ command: "node", pid: 62569 });
+  const nobody = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
+  /** What the two lines a pick prints land in, kept apart: the step is the run saying where it is, the refusal is
+   * a failure. */
+  const io = (): CliIO & { lines: string[]; errors: string[] } => {
+    const lines: string[] = [];
+    const errors: string[] = [];
+    return { lines, errors, log: l => lines.push(l), error: l => errors.push(l), ask: nobody, askSecret: nobody };
+  };
+
+  it("takes the pair as asked and says nothing when both ports are free", async () => {
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(), listener: node, states: [] })).toEqual({
+      port: 4401,
+      wsPort: 4411,
+    });
+    expect([out.lines, out.errors]).toEqual([[], []]);
+  });
+
+  it("steps over a taken pair nobody named and says which pair it serves and who held the one it left", async () => {
+    // Priya typed wsp up with no flags on a Mac whose default pair was held, and read the bind's own error.
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4400, wsPort: 4410, named: false, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4410), listener: node, states: [] })).toEqual({
+      port: 4401,
+      wsPort: 4411,
+    });
+    expect(out.lines).toEqual([portsPickedLine({ port: 4401, wsPort: 4411 }, 4410, { command: "node", pid: 62569 })]);
+    expect(out.errors).toEqual([]);
+  });
+
+  it("refuses a port a person named with who holds it and the free pair to type, and hands back no pair to bind", async () => {
+    // Marco lost seventy seconds and three guesses here: every refusal carried the port and nothing to type next.
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4411), listener: node, states: [] })).toBeUndefined();
+    expect(out.errors).toEqual([portTakenLine(4411, { command: "node", pid: 62569 }), portInsteadLine({ port: 4402, wsPort: 4412 })]);
+    expect(portInsteadLine({ port: 4402, wsPort: 4412 })).toContain("wsp up --port 4402");
+    expect(out.lines).toEqual([]);
+  });
+
+  it("names both ports where the pair a person asked for is not the offset apart, since --port alone would not have it", async () => {
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 9000, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4401), listener: node, states: [] })).toBeUndefined();
+    expect(out.errors[1]).toBe(portInsteadLine({ port: 4402, wsPort: 9001 }));
+    expect(out.errors[1]).toContain("wsp up --port 4402 --ws-port 9001");
+  });
+
+  it("falls back to the two ways on where no pair in the window is free", async () => {
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: async () => true, listener: node, states: [] })).toBeUndefined();
+    expect(out.errors[1]).toBe(PORT_TAKEN_REFUSAL);
+  });
+});

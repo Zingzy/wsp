@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { WS_PATH } from "@wsp/protocol";
 import { aimedHost, aliasFrom, checkedAlias, defaultHost, dialWindowMs, hostsDir, listHosts, noSuchHostLine, readHost, removeHost, setDefaultHost, wsUrlOf, wspHome, writeHost, type HostRecord } from "../src/hosts.js";
 import { homeNamed } from "../src/serving-home.js";
-import { hostAddress } from "../src/verbs.js";
+import { hostAddress, noHostServingLine } from "../src/verbs.js";
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -230,7 +230,7 @@ describe("where a verb dials", () => {
 
   it("refuses a state file no host serves in one sentence", () => {
     const gone = join(tempDir("hosts-empty"), "state.json");
-    expect(() => hostAddress(gone, { env: {}, home: tempDir("hosts-none") })).toThrow(`no wsp host is serving ${gone}`);
+    expect(() => hostAddress(gone, { env: {}, home: tempDir("hosts-none") })).toThrow(noHostServingLine(gone));
   });
 });
 

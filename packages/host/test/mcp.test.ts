@@ -17,7 +17,7 @@ import { type ProjectView, HERE_PLACE_ID, addedProjectLine, goneRoadRefusal, EMP
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
-import { hostPlatform } from "../src/verbs.js";
+import { hostPlatform, noHostServingLine } from "../src/verbs.js";
 import { placeWiring } from "../src/places.js";
 import { dialer, mcpServer, serveMcp } from "../src/mcp.js";
 import { RecipeAnswer, RecipeScan, allRows, recipePrintout, scanPrintout } from "../src/recipe-answer.js";
@@ -1015,7 +1015,7 @@ describe("the MCP server over the host", () => {
     handle = undefined;
     await socket!.closed;
     const gone = await call("workspaces");
-    expect(gone).toEqual(failedWith(`no wsp host is serving ${statePath}`));
+    expect(gone).toEqual(failedWith(noHostServingLine(statePath)));
 
     await restartHost({ claude: stuckAgent() });
     const turn = call("run", { workspace: "alpha", task: "hang" });
