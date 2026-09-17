@@ -87,13 +87,16 @@ export function isHttpUrl(url: unknown): url is string {
   }
 }
 
-/** Every folder a turn's paths are built from is held to this: absolute, and made of what a path is made of. A
- * machine can answer with anything, and what it answers lands in the commands a turn runs there, so a home
- * carrying a semicolon, a quote, a backtick or a glob is refused at the one door rather than quoted at each of
- * twenty places (the paths are quoted too; this is what keeps a machine from deciding what those paths mean). A
- * space is a path on macOS and stays allowed. The one rule, read by the wire schemas here and by the ssh read. */
+/** Every folder a turn's paths are built from is held to this: absolute, made of what a path is made of, and
+ * never walking up out of itself. A machine can answer with anything, and what it answers lands in a mount and
+ * in the commands a turn runs there, so a home carrying a semicolon, a quote, a backtick, a glob or a `..` is
+ * refused at the one door rather than quoted or resolved at each of twenty places (the paths are quoted too;
+ * this is what keeps a machine from deciding what those paths mean). A space is a path on macOS and stays
+ * allowed, and a name that begins with a dot is a name. The one rule, read by the wire schemas here and by the
+ * ssh read. */
 export function isPlainPath(path: string): boolean {
-  return path.startsWith("/") && /^[A-Za-z0-9 ._+@:,/-]+$/.test(path) && !path.includes("//");
+  if (!path.startsWith("/") || !/^[A-Za-z0-9 ._+@:,/-]+$/.test(path) || path.includes("//")) return false;
+  return !path.split("/").some(part => part === "." || part === "..");
 }
 
 /** The host of a URL that passed isHttpUrl (with its port, without userinfo), or undefined when it does not parse: never throws. */

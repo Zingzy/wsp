@@ -109,7 +109,7 @@ pub(crate) struct ReportInput<'a> {
     pub(crate) agents: &'a [AgentBin],
     pub(crate) daemon_port: u16,
     pub(crate) dialed: &'a str,
-    /// Where this daemon keeps the workspaces it runs; the copy word is read under it.
+    /// Where this daemon keeps the workspaces it runs; the copy word is probed under it.
     pub(crate) runtime_root: &'a Path,
 }
 
@@ -119,7 +119,7 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     let work = input.home.join("wsp-work");
     let free = disk_free(if work.exists() { &work } else { input.home });
     let wsp = if input.wsp_argv.is_empty() { vec!["wsp".to_owned()] } else { input.wsp_argv.to_vec() };
-    let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts(input.runtime_root));
+    let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts());
     PlaceReport {
         name: input.file.name.clone(),
         platform: if cfg!(target_os = "macos") { Platform::Darwin } else { Platform::Linux },
@@ -140,9 +140,10 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         runs_workspaces: doctor.runs_workspaces,
         workspaces_blocked: doctor.blocked,
         engine: doctor.engine.word().to_owned(),
-        // How a copy of a project is made here, and only where a workspace runs here at all: a computer that
-        // boots none has no copy to describe.
-        copies: doctor.runs_workspaces.then_some(doctor.copies).flatten(),
+        // How a copy of a project is made here, probed on the disk under the runtime's own root, and only
+        // where a workspace runs here at all: a computer that boots none has no copy to describe, and the probe
+        // is not run for one.
+        copies: doctor.runs_workspaces.then(|| wsp_runtime::copy::copies_word(input.runtime_root)),
         daemon_version: numbers::DAEMON_VERSION,
         daemon_port: std::num::NonZeroU16::new(input.daemon_port),
         wsp,

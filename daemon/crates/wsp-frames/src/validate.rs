@@ -123,14 +123,15 @@ where
     Ok(s)
 }
 
-/// The protocol's isPlainPath: absolute, made of what a path is made of, and no empty part in it. A path off the
-/// wire lands in a mount and in the commands a turn runs, so a semicolon, a quote, a backtick or a glob in one is
-/// refused here rather than quoted at each of twenty places. A space is a path on macOS and stays allowed.
+/// The protocol's isPlainPath: absolute, made of what a path is made of, no empty part in it and no part that
+/// walks up out of it. A path off the wire lands in a mount and in the commands a turn runs, so a semicolon, a
+/// quote, a backtick, a glob or a `..` in one is refused here rather than quoted or resolved at each of twenty
+/// places. A space is a path on macOS and stays allowed, and a name that merely begins with a dot is a name.
 pub fn is_plain_path(path: &str) -> bool {
     path.starts_with('/')
-        && !path.is_empty()
         && !path.contains("//")
         && path.chars().all(|c| c.is_ascii_alphanumeric() || " ._+@:,/-".contains(c))
+        && !path.split('/').any(|part| part == "." || part == "..")
 }
 
 pub(crate) fn plain_path<'de, D>(d: D) -> Result<String, D::Error>
@@ -210,6 +211,12 @@ mod tests {
         assert!(!is_plain_path("wsp") && !is_plain_path("") && !is_plain_path("/a//b"));
         assert!(!is_plain_path("/a; rm -rf /") && !is_plain_path("/a'b") && !is_plain_path("/a*"));
         assert!(!is_plain_path("/日本語"));
+        // A path that walks up out of itself is refused here, since what it resolves to is a mount on the box
+        // rather than a path inside a workspace.
+        assert!(!is_plain_path("/Users/../../etc") && !is_plain_path("/..") && !is_plain_path("/a/../b"));
+        assert!(!is_plain_path("/a/./b") && !is_plain_path("/.") && !is_plain_path("/a/.."));
+        // A name is still a name where it begins with a dot, which half a home folder does.
+        assert!(is_plain_path("/root/.claude/projects") && is_plain_path("/a/...") && is_plain_path("/a/.b"));
     }
 
     #[test]

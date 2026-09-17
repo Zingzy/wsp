@@ -244,7 +244,7 @@ impl Ops {
     /// The workspace's socket bound in its directory and its accept loop started over the box's engine; one already
     /// served is replaced.
     async fn serve_engine(&self, id: &str) -> Result<(), OpError> {
-        let socket = engine::socket_of(&crate::doctor::read_facts(self.layout.root())).map_err(OpError::plain)?;
+        let socket = engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
         let listener = engine::bind(&self.layout.engine(id))?;
         let fence = Fence {
             workspace: id.to_owned(),
@@ -262,7 +262,7 @@ impl Ops {
     /// The published ports of the workspace's running containers joined to its loopback, as after a wake or a
     /// daemon restart; a container whose port cannot be joined is left for the next start to try again.
     async fn join_ports(&self, record: &Workspace) {
-        let Ok(socket) = engine::socket_of(&crate::doctor::read_facts(self.layout.root())) else { return };
+        let Ok(socket) = engine::socket_of(&crate::doctor::read_facts()) else { return };
         let Ok(pairs) = engine::published(&socket, &record.id).await else { return };
         for (inside, box_port) in pairs {
             let _ = self.net.forward_inward(&record.id, record.init.pid, inside, box_port).await;
@@ -507,7 +507,7 @@ impl Ops {
         // The read-only facts the doctor reads for the report, in one place, then the live proof below: a mount and
         // a cgroup this can make, which the read alone cannot promise. The two answer in the same words because
         // they are the same words.
-        if let Some(reason) = crate::doctor::assess(&crate::doctor::read_facts(layout.root())).blocked {
+        if let Some(reason) = crate::doctor::assess(&crate::doctor::read_facts()).blocked {
             return Err(reason);
         }
         let check = layout.check();
@@ -656,7 +656,7 @@ impl Ops {
         let _one_at_a_time = self.pulls.lock().await;
         let engine = spec.engine == Some(true);
         if engine {
-            engine::socket_of(&crate::doctor::read_facts(self.layout.root())).map_err(OpError::plain)?;
+            engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
         }
         let chain = self.resolve_chain(image).await?;
         let hostname: String = id.chars().take(HOSTNAME_MAX).collect();
@@ -694,7 +694,7 @@ impl Ops {
         // travels inside with it, and the daemon goes on seeing it at the same path out here. A wake binds the
         // copy the stop left on disk, so everything the workspace wrote in the project is still there.
         if let Some(made) = &record.copy {
-            bundle::bind_into(&self.layout.copy_of(&id), &bundle::inside(&self.layout.rootfs(&id), &made.at))?;
+            bundle::bind_into(&self.layout.copy_of(&id), &bundle::inside(&self.layout.rootfs(&id), &made.at)?)?;
         }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {
@@ -914,7 +914,7 @@ impl Ops {
         self.stop_engine(id).await;
         let record = bundle::read_record(&self.layout.record(id))?;
         if record.as_ref().is_some_and(|record| record.engine) {
-            if let Ok(socket) = engine::socket_of(&crate::doctor::read_facts(self.layout.root())) {
+            if let Ok(socket) = engine::socket_of(&crate::doctor::read_facts()) {
                 let _ = engine::remove_all(&socket, id).await;
             }
         }

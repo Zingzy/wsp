@@ -50,5 +50,27 @@
         "from": "/wsp/projects/wsp/checkout"
       }
     }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "copy": {
+        "from": "/wsp/projects/wsp/checkout",
+        "at": "/Users/../../etc"
+      }
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "copy": {
+        "from": "/wsp/projects/../../root/.ssh",
+        "at": "/Users/zingzy/wsp"
+      }
+    }
   }
 ]

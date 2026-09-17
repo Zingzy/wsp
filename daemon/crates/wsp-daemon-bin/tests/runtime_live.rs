@@ -1551,7 +1551,7 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     if !live() {
         return;
     }
-    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts(&root())) else {
+    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
         eprintln!("this box has no container engine with a socket; the engine case is skipped");
         return;
     };
@@ -1679,7 +1679,7 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
     }
     let mut w = World::open().await;
     let key = checkout_key();
-    let from = root().join("projects").join(format!("live-904-{key}"));
+    let from = root().join("projects").join(format!("live-copy-{key}"));
     let _ = fs::remove_dir_all(&from);
     checkout(&from);
     let at = "/Users/zingzy/wsp";
@@ -1687,7 +1687,7 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
     let made = w
         .created(spec(json!({
             "copy": { "from": from.display().to_string(), "at": at },
-            "idempotencyKey": format!("live-904-copy-{key}"),
+            "idempotencyKey": format!("live-copy-made-{key}"),
         })))
         .await;
     let id = made["id"].as_str().unwrap().to_owned();
@@ -1740,14 +1740,14 @@ async fn a_create_whose_project_is_not_there_is_refused_by_name_and_leaves_nothi
     }
     let w = World::open().await;
     let key = checkout_key();
-    let gone = root().join("projects").join(format!("live-904-no-such-{key}"));
-    let id = format!("wsp-live-904-missing-{key}");
+    let gone = root().join("projects").join(format!("live-copy-no-such-{key}"));
+    let id = format!("wsp-live-copy-missing-{key}");
     let reply = w
         .ask(
             "machine.create",
             json!({ "spec": spec(json!({
                 "copy": { "from": gone.display().to_string(), "at": "/Users/zingzy/wsp" },
-                "idempotencyKey": format!("live-904-missing-{key}"),
+                "idempotencyKey": format!("live-copy-missing-{key}"),
             })) }),
         )
         .await;
@@ -1777,8 +1777,10 @@ impl Drop for Volume {
 /// `mkfs` run over a sparse file of `gb` gigabytes and mounted, or nothing where this box has no such mkfs.
 fn volume(word: &str, mkfs: &[&str], gb: u64) -> Option<Volume> {
     let key = checkout_key();
-    let volume =
-        Volume { image: PathBuf::from(format!("/tmp/wsp-904-{word}-{key}.img")), at: PathBuf::from(format!("/tmp/wsp-904-{word}-{key}")) };
+    let volume = Volume {
+        image: PathBuf::from(format!("/tmp/wsp-copy-{word}-{key}.img")),
+        at: PathBuf::from(format!("/tmp/wsp-copy-{word}-{key}")),
+    };
     let _ = std::process::Command::new("umount").arg(&volume.at).status();
     let _ = fs::remove_file(&volume.image);
     fs::create_dir_all(&volume.at).unwrap();

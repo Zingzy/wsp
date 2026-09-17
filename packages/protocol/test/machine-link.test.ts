@@ -62,6 +62,13 @@ describe("the machine ops on a place link", () => {
     expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/zingzy/wsp; rm -rf /" } })).toBe(false);
     expect(create({ kind: "sandbox", copy: { ...copy, from: "" } })).toBe(false);
     expect(create({ kind: "sandbox", copy: { from: copy.from } })).toBe(false);
+    // A path that walks up out of itself is refused on both halves: what it resolves to is a folder on the
+    // computer, and a bind mount over one of those cannot be taken back.
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/../../etc" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, from: "/wsp/projects/../../root/.ssh" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/./wsp" } })).toBe(false);
+    // A folder whose name begins with a dot is a folder, and half a home is made of them.
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/root/.claude/projects" } })).toBe(true);
   });
 
   it("refuses an op it does not carry, a part out of range and a command over the body cap", () => {

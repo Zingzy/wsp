@@ -326,9 +326,15 @@ pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     mount(Some(source), target, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).map_err(nix_at(target))
 }
 
-/// Where a path inside a workspace lands under its rootfs on the box.
-pub fn inside(rootfs: &Path, at: &str) -> PathBuf {
-    rootfs.join(at.trim_start_matches('/'))
+/// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own: a
+/// path that walks up out of the rootfs resolves to a path on the box, and a bind mount is the one place a slip
+/// cannot be undone afterwards.
+pub fn inside(rootfs: &Path, at: &str) -> Result<PathBuf, Error> {
+    if !at.starts_with('/') || at.split('/').any(|part| part == "." || part == "..") {
+        let detail = format!("{at} is not a path inside a workspace");
+        return Err(Error { path: rootfs.to_owned(), source: io::Error::new(io::ErrorKind::InvalidInput, detail) });
+    }
+    Ok(rootfs.join(at.trim_start_matches('/')))
 }
 
 /// Every mount under this path taken down, deepest first, and then the path itself: a rootfs carries the
@@ -435,10 +441,16 @@ mod tests {
     }
 
     #[test]
-    fn a_copy_lands_inside_the_workspace_at_the_projects_own_path() {
+    fn a_copy_lands_inside_the_workspace_at_the_projects_own_path_and_nowhere_else() {
         let l = Layout::new(Path::new("/wsp"));
-        assert_eq!(inside(&l.rootfs("wsp-a"), "/Users/zingzy/wsp"), PathBuf::from("/wsp/run/wsp-a/rootfs/Users/zingzy/wsp"));
-        assert_eq!(inside(Path::new("/r"), "/x"), PathBuf::from("/r/x"));
+        assert_eq!(inside(&l.rootfs("wsp-a"), "/Users/zingzy/wsp").unwrap(), PathBuf::from("/wsp/run/wsp-a/rootfs/Users/zingzy/wsp"));
+        assert_eq!(inside(Path::new("/r"), "/x").unwrap(), PathBuf::from("/r/x"));
+        // The wire refuses these before they reach here; this is the wall behind that one, since what a bind
+        // mount lands on cannot be taken back.
+        for walking in ["/Users/../../etc", "/..", "/a/../b", "/a/./b", "Users/zingzy/wsp"] {
+            let refused = inside(&l.rootfs("wsp-a"), walking).unwrap_err().to_string();
+            assert!(refused.contains(walking) && refused.contains("not a path inside a workspace"), "{walking}: {refused}");
+        }
     }
 
     #[test]

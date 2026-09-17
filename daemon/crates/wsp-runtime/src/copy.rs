@@ -43,8 +43,8 @@ pub fn copier_of(word: CopyWord) -> Box<dyn Copier> {
 }
 
 /// Which way this disk makes the copy, checked rather than read off a filesystem's name: the checkout and the
-/// copies directory on one device and the checkout a btrfs subvolume is the snapshot, one device and a clone that
-/// the kernel takes under the copies directory is the reflink, anything else writes every byte.
+/// copies directory on one filesystem and the checkout a btrfs subvolume is the snapshot, one filesystem and a
+/// clone the kernel takes under the copies directory is the reflink, anything else writes every byte.
 pub fn copier_for(from: &Path, copies: &Path) -> io::Result<Box<dyn Copier>> {
     let meta = fs::metadata(from).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", from.display())))?;
     if !meta.is_dir() {
@@ -53,20 +53,69 @@ pub fn copier_for(from: &Path, copies: &Path) -> io::Result<Box<dyn Copier>> {
     #[cfg(target_os = "linux")]
     {
         fs::create_dir_all(copies).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", copies.display())))?;
-        let one_device = fs::metadata(copies)?.dev() == meta.dev();
-        if one_device && crate::copy_snapshot::is_subvolume(from) {
-            return Ok(Box::new(crate::copy_snapshot::BtrfsSnapshot));
-        }
-        if one_device && clones_under(copies) {
-            return Ok(Box::new(crate::copy_reflink::Reflink));
-        }
-        Ok(Box::new(crate::copy_plain::Plain))
+        let together = one_filesystem(&reading_of(from)?, &reading_of(copies)?);
+        Ok(match word_for(together, crate::copy_snapshot::is_subvolume(from), || clones_under(copies)) {
+            CopyWord::Snapshot => Box::new(crate::copy_snapshot::BtrfsSnapshot) as Box<dyn Copier>,
+            CopyWord::Reflink => Box::new(crate::copy_reflink::Reflink),
+            CopyWord::Plain => Box::new(crate::copy_plain::Plain),
+        })
     }
     #[cfg(not(target_os = "linux"))]
     {
         let _ = copies;
         Err(io::Error::new(io::ErrorKind::Unsupported, format!("{}: a workspace's copy is made on Linux alone", from.display())))
     }
+}
+
+/// What the picker reads of one path. The device number is read and never compared: btrfs gives every subvolume
+/// an anonymous device of its own, so a subvolume checkout and the copies directory beside it are two devices on
+/// one filesystem, and a clone and a snapshot between them both work. The filesystem's own id is what says they
+/// are one filesystem.
+#[cfg(target_os = "linux")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reading {
+    pub filesystem: u64,
+    pub device: u64,
+}
+
+/// The kernel's reading of the path: `statfs` for the filesystem's id, `stat` for the device.
+#[cfg(target_os = "linux")]
+pub fn reading_of(path: &Path) -> io::Result<Reading> {
+    let stat = nix::sys::statfs::statfs(path).map_err(|e| io::Error::new(io::Error::from(e).kind(), format!("{}: {e}", path.display())))?;
+    Ok(Reading { filesystem: filesystem_id(&stat), device: fs::metadata(path)?.dev() })
+}
+
+/// Whether two paths are on one filesystem, by the kernel's id for it and by nothing else.
+#[cfg(target_os = "linux")]
+pub fn one_filesystem(a: &Reading, b: &Reading) -> bool {
+    a.filesystem == b.filesystem
+}
+
+/// The word these facts ask for: a subvolume on the same filesystem is snapshotted, a filesystem that clones is
+/// reflinked, anything else is written byte by byte. `clones` is asked last and only where it can change the
+/// answer, since asking it writes a file.
+#[cfg(target_os = "linux")]
+fn word_for(one_filesystem: bool, subvolume: bool, clones: impl FnOnce() -> bool) -> CopyWord {
+    if !one_filesystem {
+        return CopyWord::Plain;
+    }
+    if subvolume {
+        return CopyWord::Snapshot;
+    }
+    if clones() {
+        return CopyWord::Reflink;
+    }
+    CopyWord::Plain
+}
+
+/// The filesystem's own id as its bytes. The two C libraries this daemon is built against spell `fsid` two ways
+/// and neither spells it comparable, so it is read as the eight bytes it is on both.
+#[cfg(target_os = "linux")]
+fn filesystem_id(stat: &nix::sys::statfs::Statfs) -> u64 {
+    const _: () = assert!(std::mem::size_of::<nix::sys::statfs::fsid_t>() == std::mem::size_of::<u64>());
+    let id = stat.filesystem_id();
+    // SAFETY: the id is eight bytes on every target this builds for, which the assertion above holds the build to.
+    unsafe { std::mem::transmute_copy::<nix::sys::statfs::fsid_t, u64>(&id) }
 }
 
 /// The word alone, for the doctor's reading and the row a person sees: a clone probe under the root's own scratch
@@ -79,6 +128,7 @@ pub fn copies_word(root: &Path) -> CopyWord {
             return CopyWord::Plain;
         }
         let word = if clones_under(&check) { CopyWord::Reflink } else { CopyWord::Plain };
+        // Only when it is empty: a self check's own scratch may be sitting in there.
         let _ = fs::remove_dir(&check);
         word
     }
@@ -91,9 +141,15 @@ pub fn copies_word(root: &Path) -> CopyWord {
 
 /// Whether the kernel shares blocks between two files in this directory: a byte written, cloned, and both taken
 /// away again. The one probe the picker and the doctor's word are both read from.
+///
+/// Named per call rather than per process: two creates probe the same copies directory at once, and a shared
+/// name means the first one's cleanup takes the second one's file out from under its clone, which would answer
+/// plain on a disk that shares blocks and cost that workspace a copy of every byte.
 #[cfg(target_os = "linux")]
 fn clones_under(dir: &Path) -> bool {
-    let source = dir.join(format!(".clone-probe-{}", std::process::id()));
+    static PROBES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let mine = PROBES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let source = dir.join(format!(".clone-probe-{}-{mine}", std::process::id()));
     let clone = source.with_extension("clone");
     let took = fs::write(&source, b"w").is_ok() && crate::copy_reflink::clone_file(&source, &clone).is_ok();
     let _ = fs::remove_file(&source);
@@ -286,5 +342,42 @@ mod tests {
         let gone = dir.path().join("no-such-checkout");
         let missing = copier_for(&gone, &dir.path().join("copies")).map(|_| ()).unwrap_err().to_string();
         assert!(missing.contains(&gone.display().to_string()), "{missing}");
+    }
+
+    /// The one thing the picker must not read is the device number. btrfs gives every subvolume its own, so a
+    /// checkout made with `btrfs subvolume create` and the copies directory beside it on the same disk are two
+    /// devices; a picker that compared them would fall through to a full byte copy of the tree on the one disk
+    /// that can snapshot it in a millisecond.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_subvolume_and_the_copies_beside_it_are_one_filesystem_whatever_their_device_numbers_say() {
+        let checkout = Reading { filesystem: 0x9123_683e_0000_0007, device: 64_768 };
+        let copies = Reading { filesystem: checkout.filesystem, device: 42 };
+        assert!(one_filesystem(&checkout, &copies));
+        assert_eq!(word_for(true, true, || panic!("a subvolume is answered before a probe is written")), CopyWord::Snapshot);
+        // The same two readings on two filesystems: nothing is probed and every byte is written.
+        let elsewhere = Reading { filesystem: 0x0000_0000_ef53_0001, device: checkout.device };
+        assert!(!one_filesystem(&checkout, &elsewhere));
+        assert_eq!(word_for(false, true, || panic!("another filesystem is answered before a probe is written")), CopyWord::Plain);
+        // One filesystem that is no subvolume: the probe decides, and it is the only thing that does.
+        assert_eq!(word_for(true, false, || true), CopyWord::Reflink);
+        assert_eq!(word_for(true, false, || false), CopyWord::Plain);
+    }
+
+    /// Two creates probe one copies directory at the same moment, which the host does whenever it forks more
+    /// than one workspace at once. Each probe is its own file, so neither takes the other's out from under it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn two_probes_at_once_in_one_directory_both_answer_the_word() {
+        let dir = tempfile::tempdir().unwrap();
+        let word = clones_under(dir.path());
+        let answers: Vec<bool> = std::thread::scope(|scope| {
+            let running: Vec<_> = (0..8).map(|_| scope.spawn(|| clones_under(dir.path()))).collect();
+            running.into_iter().map(|t| t.join().unwrap()).collect()
+        });
+        assert!(answers.iter().all(|&answer| answer == word), "{answers:?} against {word}");
+        // And nothing of any of them is left behind for the next reader.
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 }
