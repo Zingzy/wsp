@@ -480,6 +480,89 @@ describe("the socket a place proved", () => {
   });
 });
 
+/** A place answering machine.backend with the facts this test hands it, counting the asks: the facts belong to
+ * the daemon that answered, so a test can move the answer between dials the way an update does. Its capacity is
+ * answered too, since a computer whose facts are on the record is asked for that at every listing. */
+const saysItsFacts = (facts: () => Record<string, unknown>, asks: { count: number }) => (c: WsClient): void => {
+  c.ws.on("message", raw => {
+    const frame = JSON.parse(String(raw)) as { id?: number; op?: string };
+    if (frame.op === "machine.capacity") {
+      const room = { cores: 4, memMb: 8192, memRoomMb: 4096, machineMemMb: 4096, diskFreeBytes: 10 * 1024 ** 3, images: [], machines: { running: 0, paused: 0 } };
+      c.ws.send(JSON.stringify({ id: frame.id, ok: true, ...room }));
+      return;
+    }
+    if (frame.op !== "machine.backend") return;
+    asks.count += 1;
+    c.ws.send(JSON.stringify({ id: frame.id, ok: true, ...facts() }));
+  });
+};
+
+/** Where a computer keeps the logins its workspaces share, as its daemon reports one. */
+const LOGINS = "/var/lib/wsp/logins";
+
+describe("what a computer says it forks with", () => {
+  it("is asked once per computer, and asked again when it dials back on another daemon, so a field the version before it never carried lands on the row", async () => {
+    const { hostKey } = await serving();
+    const asks = { count: 0 };
+    let logins: string | undefined;
+    const answers = saysItsFacts(() => ({ ...PLACE_FACTS, ...(logins === undefined ? {} : { logins }) }), asks);
+    const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
+    const { client, placeId, pair } = await join(hostKey, { code: await code(), report: behind, answers });
+    sockets.push(client.ws);
+    // The first attach asks, and what that daemon said is kept: it shares no logins, so the row carries none.
+    await until(async () => runtime!.places!.offerOf(placeId) === PLACE_FACTS.offer);
+    expect(asks.count).toBe(1);
+    expect((await placesOf()).find(p => p.id === placeId)!.logins).toBeUndefined();
+
+    // A dial on the same daemon is the same computer saying the same thing: nothing is asked again.
+    client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const same = await relink(hostKey, placeId, pair, behind, answers);
+    sockets.push(same.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === true);
+    expect(asks.count).toBe(1);
+
+    // It takes the daemon this host deploys and dials back on it, and that one shares its logins.
+    logins = LOGINS;
+    same.client.close();
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
+    const newer = await relink(hostKey, placeId, pair, report("old-macbook", { daemonVersion: DAEMON_VERSION }), answers);
+    sockets.push(newer.client.ws);
+    await until(async () => (await placesOf()).find(p => p.id === placeId)!.logins === LOGINS);
+    expect(asks.count).toBe(2);
+    // The backend a fork there stands on reads the same answer, which is what fills a create's shares.
+    expect(runtime!.places!.backendOf(placeId)?.logins).toBe(LOGINS);
+  });
+
+  it("is read over the link a join has just opened, so the row an install answers with already says where that computer keeps its logins", async () => {
+    const hostKey = newPlaceKeyPair();
+    const asks = { count: 0 };
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store: memoryStore(),
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        install: async req => {
+          const { client } = await join(hostKey, {
+            code: readJoinToken(req.code).code,
+            name: "box",
+            answers: saysItsFacts(() => ({ ...PLACE_FACTS, logins: LOGINS }), asks),
+          });
+          sockets.push(client.ws);
+          return { name: "box" };
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ address: "root@10.0.0.9", name: "box", hostUrls: DOOR }, Date.now());
+    // Before the add answers, not behind it: the sign-in the join offers next reads this field off the row.
+    expect(added.place.logins).toBe(LOGINS);
+    expect(asks.count).toBe(1);
+  });
+
+});
+
 describe("a channel to the daemon on a computer you own", () => {
   it("rides the link that computer opened: the frame goes up it, the answer comes back under the ask, and what it pushes reaches the socket that asked", async () => {
     const { hostKey } = await serving();
@@ -653,6 +736,39 @@ describe("moving a place onto the daemon this host deploys", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]!.req.report.arch).toBe("x64");
     expect(asked[0]!.req.name).toBe("old-macbook");
+  });
+
+  it("is asked again by an update, so the row it answers with carries the new daemon's facts rather than none", async () => {
+    const asks = { count: 0 };
+    let logins: string | undefined;
+    const answers = (landed: Buffer[], sent: { sha256: string[]; uploads: string[] }) => (c: WsClient): void => {
+      takesParts(landed, sent)(c);
+      saysItsFacts(() => ({ ...PLACE_FACTS, ...(logins === undefined ? {} : { logins }) }), asks)(c);
+    };
+    const asked: { req: PlaceUpdateRequest }[] = [];
+    const { hostKey } = await serving({ update: overTheLink(Buffer.from("a daemon for this box"), asked), updateWaitMs: 5_000 });
+    const landed: Buffer[] = [];
+    const sent = { sha256: [] as string[], uploads: [] as string[] };
+    const behind = report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 });
+    const { client, placeId, pair } = await join(hostKey, { code: await code(), report: behind, answers: answers(landed, sent) });
+    sockets.push(client.ws);
+    await until(async () => runtime!.places!.offerOf(placeId) === PLACE_FACTS.offer);
+    expect((await placesOf()).find(p => p.id === placeId)!.logins).toBeUndefined();
+
+    // The computer restarts its agent on the binary the update landed and dials back on the new daemon, which
+    // shares its logins where the one before it shared none.
+    logins = LOGINS;
+    const back = setTimeout(() => {
+      client.close();
+      void relink(hostKey, placeId, pair, report("old-macbook", { daemonVersion: DAEMON_VERSION }), answers(landed, sent)).then(({ client: fresh }) => sockets.push(fresh.ws));
+    }, 200);
+    back.unref?.();
+    const answer = await update(placeId);
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    expect(answer["to"]).toBe(DAEMON_VERSION);
+    // The row read straight after the update carries them: the sign-in on that computer is the next thing a
+    // person runs, and it reads this field.
+    expect((await placesOf()).find(p => p.id === placeId)!.logins).toBe(LOGINS);
   });
 
   it("answers what the row still reads, with the reason, when the computer has not come back on it inside the wait", async () => {

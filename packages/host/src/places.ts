@@ -293,9 +293,11 @@ export const SIGN_IN_FLAGS_REFUSAL =
 export const signInAgentRefusal = (agent: string): string =>
   `wsp add --sign-in takes an agent whose login lives on the computer that runs the workspaces, which ${agent} is not: ${sharedAgentsOn(CATALOG_AGENTS.map(a => a.id)).join(", ")}.`;
 
-/** A computer that has not told this host where it keeps the logins its workspaces share. */
+/** A computer that has not told this host where it keeps the logins its workspaces share. It says so on every
+ * link, so the two causes left are a computer that is not connected and one whose agent is older than the one
+ * this host deploys, which shared no login at all; the second names its own way out. */
 export const placeNoLoginsLine = (name: string): string =>
-  `${name} has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in; it is not connected, or its agent is older than this host.`;
+  `${name} has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in: it is not connected, or the agent on it is older than the one this host deploys. wsp add ${name} --update puts this one on it.`;
 
 /** The question the join puts while the person is still at this terminal. */
 export const boxSignInAsk = (name: string, agent: string): string =>
