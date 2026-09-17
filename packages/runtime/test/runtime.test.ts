@@ -4153,7 +4153,7 @@ describe("nap vault against the stub backend", () => {
 describe("runtime golden import", () => {
   const importOf = (recipeHash = "h1"): GoldenImport => ({
     recipeHash,
-    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [], macPaths: [] }) },
+    files: { count: 1, rungs: { shell: 1 }, bytes: 10, lands: [], skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [], macPaths: [] }) },
     tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }],
     agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", road: "npm" as const }],
   });
@@ -4973,7 +4973,7 @@ describe("runtime golden update and the post-seal grace", () => {
   const importOf = (recipeHash = "h1", agents: GoldenImport["agents"] = [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", road: "npm" as const }]): GoldenImport => ({
     recipeHash,
     recipe: snapshot(recipeHash, [".zshrc"]),
-    files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [], macPaths: [] }) },
+    files: { count: 1, rungs: { shell: 1 }, bytes: 10, lands: [], skipped: [], pack: async () => ({ tar: Buffer.from("t"), bytes: 10, unpacked: 10, skipped: [], cut: [], silenced: [], macPaths: [] }) },
     tools: [],
     agents,
   });
@@ -4982,7 +4982,7 @@ describe("runtime golden update and the post-seal grace", () => {
     import: {
       recipeHash,
       recipe: snapshot(recipeHash, [".zshrc", ".config/starship.toml"]),
-      files: { count: 1, rungs: { shell: 1 }, bytes: 5, skipped: [], pack: async () => ({ tar: Buffer.from("d"), bytes: 5, unpacked: 5, skipped: [], cut: [], silenced: [], macPaths: [] }) },
+      files: { count: 1, rungs: { shell: 1 }, bytes: 5, lands: [], skipped: [], pack: async () => ({ tar: Buffer.from("d"), bytes: 5, unpacked: 5, skipped: [], cut: [], silenced: [], macPaths: [] }) },
       tools: [{ id: "tools/npm/cowsay", label: "cowsay", manager: "npm", cmd: "npm install -g cowsay" }],
       agents: [],
     },

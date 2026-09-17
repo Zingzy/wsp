@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest } from "@wsp/collect";
 import { catalogEntry } from "@wsp/catalog";
-import type { Recipe } from "@wsp/protocol";
+import { MCP_ID_PREFIX, type Recipe } from "@wsp/protocol";
 import { AGENT_NODE_STEP, type ProvisionPlan } from "@wsp/engine";
 import { placeProvisioner } from "../src/place-provision.js";
 import { smallRecipePath } from "../src/recipe-file.js";
@@ -97,6 +97,33 @@ describe("the recipe this host holds, planned for a computer you own", () => {
     // The manager the row names is brought onto that computer before the row runs.
     expect(own.after).toBeDefined();
     expect(plan.steps.some(t => t.id === own.after)).toBe(true);
+  });
+
+  it("carries the agents' own files and nothing else of this computer's: no dotfile, no shell rc, no identity", async () => {
+    write(SMALL);
+    const plan = await planned();
+    expect(plan.files?.lands.map(l => [l.id, l.dest])).toEqual([
+      // Claude Code's state home reads as the folder wsp gives it on the guest; Codex keeps its own name.
+      ["agents/claude", ".claude-cfg"],
+      ["agents/codex", ".codex"],
+    ]);
+    expect(plan.files?.lands.every(l => l.label !== "")).toBe(true);
+    const dests = plan.files?.lands.map(l => l.dest) ?? [];
+    for (const kept of [".gitconfig", ".zshrc", ".ssh/config", ".config/starship.toml", ".config/mise/config.toml"]) expect(dests).not.toContain(kept);
+  });
+
+  it("carries the MCP servers the recipe names, for the agents whose configs travel with them", async () => {
+    write(SMALL);
+    writeFileSync(join(home, ".claude.json"), '{ "mcpServers": { "github": { "command": "npx" } } }\n');
+    const withServer = {
+      ...FIXTURE,
+      entries: [...FIXTURE.entries, { rung: "agents" as const, id: `${MCP_ID_PREFIX}claude/github`, label: "github", group: "Claude Code MCP servers", paths: ["~/.claude.json"], bytes: 300, default: "bring" as const }],
+    };
+    const plan = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => withServer, brew: async () => new Map() }).plan();
+    if ("noRecipe" in plan) throw new Error("no recipe");
+    expect(plan.mcp?.agents.map(a => [a.id, a.scopes.flatMap(sc => sc.keep)])).toEqual([["claude", ["github"]]]);
+    // The config the server is defined in travels with the agent's own row, which is what the edit there reads.
+    expect(plan.files?.lands.map(l => l.dest)).toContain(".claude-cfg/.claude.json");
   });
 
   it("plans nothing at all for a row of this computer that has no Linux road, and sets nothing aside for it", async () => {

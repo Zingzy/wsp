@@ -33,6 +33,8 @@ export * from "./labels.js";
 export * from "./orphans.js";
 export * from "./golden-import.js";
 export * from "./provision.js";
+export * from "./provision-files.js";
+export * from "./provision-mcp.js";
 export * from "./golden-diff.js";
 export * from "./golden-mcp.js";
 export * from "./machine-context.js";
