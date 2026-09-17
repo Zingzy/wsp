@@ -53,6 +53,12 @@ export function agentStateFile(f: { id: string; source: string }, home: string):
 /** What each line of the landing prints, so no path of the person's can be read as the run's own words. */
 export const LAND_MARK = "wsp-land";
 
+/** The field the list beside the job is split on and the end of one of its lines, as the text of these runs
+ * spells them: a printf escape, never the character itself, so a script reads back on one line wherever it is
+ * printed. One spelling for the landing, the ownership read and the close. */
+const TAB = "\\t";
+const NL = "\\n";
+
 /** One line the landing printed: what became of one path under the home on that computer. */
 interface Landed {
   rel: string;
@@ -82,7 +88,7 @@ export function landFilesScript(home: string): string {
     '    d=$(sha256sum "$dest" 2>/dev/null | cut -d" " -f1)',
     // The path goes to awk through the environment: an assigned variable would have every backslash in it read
     // as an escape, and a path holding one would match no line of the list.
-    '    known=$(wsp_rel="$rel" awk -F"\\t" \'$1==ENVIRON["wsp_rel"] { print $2" "$3; exit }\' "$ledger" 2>/dev/null)',
+    `    known=$(wsp_rel="$rel" awk -F"${TAB}" '$1==ENVIRON["wsp_rel"] { print $2" "$3; exit }' "$ledger" 2>/dev/null)`,
     '    if [ "$d" = "$s" ]; then act=present',
     // The person's own file stands unless the bytes there are the ones wsp left: then the copy is wsp's to
     // replace, and it is replaced only where their computer's copy has itself changed since.
@@ -93,8 +99,8 @@ export function landFilesScript(home: string): string {
     '  if [ "$act" = installed ]; then',
     '    mkdir -p "$(dirname "$dest")" && cp -p "$src" "$dest" || act=failed',
     "  fi",
-    `  printf '${LAND_MARK}\\t%s\\t%s\\t%s\\n' "$act" "$s" "$rel"`,
-    '  if [ "$act" != kept ] && [ "$act" != failed ]; then printf "%s\\t%s\\n" "$rel" "$s" >> "$landing"; fi',
+    `  printf '${LAND_MARK}${TAB}%s${TAB}%s${TAB}%s${NL}' "$act" "$s" "$rel"`,
+    `  if [ "$act" != kept ] && [ "$act" != failed ]; then printf "%s${TAB}%s${NL}" "$rel" "$s" >> "$landing"; fi`,
     "done",
     "exit 0",
   ].join("\n");
@@ -112,33 +118,44 @@ export function landedFilesScript(home: string): string {
     "set -u",
     `home=${shellQuote(home)}; ledger=${shellQuote(at.landed)}`,
     '[ -f "$ledger" ] || exit 0',
-    'tab=$(printf "\t")',
+    `tab=$(printf "${TAB}")`,
     'while IFS="$tab" read -r rel from at; do',
     '  dest="$home/$rel"',
     '  [ -f "$dest" ] || continue',
     '  d=$(sha256sum "$dest" | cut -d" " -f1)',
-    `  [ "$d" = "$at" ] && printf '${OWN_MARK}\t%s\n' "$rel"`,
+    `  [ "$d" = "$at" ] && printf '${OWN_MARK}${TAB}%s${NL}' "$rel"`,
     'done < "$ledger"',
     "exit 0",
   ].join("\n");
 }
 
-/** The run that closes the job on that computer: what wsp owns there, each with the bytes that travelled for it
- * and the bytes standing there now, which the MCP edit may have rewritten since. The tree that travelled goes
- * with it, so nothing of the person's is left lying in wsp's folder. */
+/** The run that closes the job on that computer: every path this round landed, with the bytes that travelled for
+ * it and the bytes standing there now, which the MCP edit may have rewritten since; then the lines from before it
+ * for the paths it did not land, since what wsp left at those is still what it left. A round that landed nothing
+ * writes no landing, and this run then leaves the list exactly as it was rather than emptying it. The tree that
+ * travelled goes with it, so nothing of the person's is left lying in wsp's folder. */
 export function closeFilesScript(home: string): string {
   const at = placeProvisionPaths(home);
+  const q = (s: string): string => shellQuote(s);
   return [
     "set -u",
-    `home=${shellQuote(home)}; stage=${shellQuote(at.staging)}; ledger=${shellQuote(at.landed)}; landing=${shellQuote(at.landing)}`,
+    `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}`,
+    // No landing at all is a round that never reached the computer: the list stands, so the copies wsp left
+    // there before are still read as its own.
+    '[ -f "$landing" ] || exit 0',
+    `tab=$(printf "${TAB}")`,
     ': > "$ledger.new" || exit 1',
-    'tab=$(printf "\\t")',
     'while IFS="$tab" read -r rel from; do',
     '  dest="$home/$rel"',
     '  [ -f "$dest" ] || continue',
-    '  printf "%s\\t%s\\t%s\\n" "$rel" "$from" "$(sha256sum "$dest" | cut -d" " -f1)" >> "$ledger.new"',
+    `  printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$(sha256sum "$dest" | cut -d" " -f1)" >> "$ledger.new"`,
     'done < "$landing"',
-    'mv "$ledger.new" "$ledger"',
+    '[ ! -f "$ledger" ] || cat "$ledger" >> "$ledger.new"',
+    // One line per path, this round's first: both readers of the list take the first line a path has, so a path
+    // this round wrote again keeps one line and a path it did not touch keeps the line it had.
+    `awk -F"${TAB}" '!seen[$1]++' "$ledger.new" > "$ledger.keep" || exit 1`,
+    'mv "$ledger.keep" "$ledger"',
+    'rm -f "$ledger.new"',
     'rm -rf "$stage" "$landing"',
     "exit 0",
   ].join("\n");
@@ -170,6 +187,11 @@ const NAMED = 3;
 
 const listOf = (paths: readonly string[]): string => (paths.length <= NAMED ? paths.join(", ") : `${paths.slice(0, NAMED).join(", ")} and ${paths.length - NAMED} more`);
 
+/** How a file's row reads: the name of the recipe row that carries it, where one does, and the path it lands at on
+ * that computer. The rows the landing answers with and the rows a round that never landed answers with read the
+ * same way. */
+const fileLabel = (label: string | undefined, home: string, dest: string): string => (label === undefined ? `${home}/${dest}` : `${label} ${home}/${dest}`);
+
 /** One row per planned entry, in plan order, with what became of the paths under it: installed where anything
  * landed, present where every path was already the same, kept in the person's own words where their files stand
  * and nothing of theirs was touched, failed where a path could not be written. */
@@ -193,8 +215,7 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
     const outcome: PlaceProvisionRow["outcome"] =
       failed.length > 0 ? "failed" : installed.length > 0 ? "installed" : rows.length === 0 || kept.length === rows.length ? "skipped" : "present";
     const note = failed.length > 0 ? `could not be written: ${listOf(failed)}` : rows.length === 0 ? "nothing of it travelled" : notes.join("; ");
-    const at = `${home}/${dest}`;
-    return { id, label: label === undefined ? at : `${label} ${at}`, outcome, kind: "file", ...(note !== "" ? { note } : {}) };
+    return { id, label: fileLabel(label, home, dest), outcome, kind: "file", ...(note !== "" ? { note } : {}) };
   };
   return [
     ...lands.map(l => rowOf(`files/${l.dest}`, l.label, l.dest, byOwner.get(l.dest) ?? [])),
@@ -264,7 +285,7 @@ export async function provisionFiles(machine: Machine, o: { home: string; lands:
   } catch (e) {
     const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
     return {
-      rows: o.lands.map(l => ({ id: `files/${l.dest}`, label: `${l.label} ${o.home}/${l.dest}`, outcome: "failed" as const, kind: "file" as const, note })),
+      rows: o.lands.map(l => ({ id: `files/${l.dest}`, label: fileLabel(l.label, o.home, l.dest), outcome: "failed" as const, kind: "file" as const, note })),
       owned: new Map(),
       skipped: [],
     };

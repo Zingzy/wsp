@@ -132,7 +132,9 @@ const TAR = (over: Record<string, string> = {}): Buffer =>
     file(".codex/AGENTS.md", over["agents"] ?? "the same rules for codex\n"),
   ]);
 
-describe("the landing on the computer itself", () => {
+/** Every landing here is a real archive through a real shell over a real directory, which takes seconds on an idle
+ * machine and longer on one running a gate beside it. */
+describe("the landing on the computer itself", { timeout: 60_000 }, () => {
   it("lands what is missing, leaves what is already the same, never writes over the person's own file, and says which is which", async () => {
     const { root, machine } = box();
     // What the person keeps there: their own AGENTS.md, and a CLAUDE.md that is already the copy this would land.
@@ -183,8 +185,34 @@ describe("the landing on the computer itself", () => {
     // The person wrote that file themselves on the box: their words stand, and the row names the path it kept.
     write(root, ".claude-cfg/skills/why/SKILL.md", "his own skill now\n");
     const theirs = await landAgentFiles(machine, { home: root, tar: TAR({ skill: "a third copy\n" }), lands: LANDS });
+    // The row covers the two skills that travelled: one is theirs now and one is the same copy as before, so the
+    // row reads present and names the path it kept rather than reading skipped for the pair.
+    expect(theirs.rows[0]!.outcome).toBe("present");
     expect(theirs.rows[0]!.note).toContain("already there with other content: .claude-cfg/skills/why/SKILL.md");
     expect(read(root, ".claude-cfg/skills/why/SKILL.md")).toBe("his own skill now\n");
+  });
+
+  it("leaves the list as it was after a round that landed nothing, so the paths it landed before stay its own", async () => {
+    const { root, machine } = box();
+    const at = placeProvisionPaths(root);
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await closeAgentFiles(machine, root);
+    const listed = readFileSync(at.landed, "utf8");
+
+    // The person writes their own words over every path that travelled: the landing keeps all of them, so it
+    // lands nothing and the close has nothing of this round to fold in.
+    for (const rel of [".claude-cfg/skills/why/SKILL.md", ODD, ".claude-cfg/CLAUDE.md", ".codex/AGENTS.md"]) write(root, rel, `his own ${rel}\n`);
+    const none = await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    expect(none.rows.every(r => r.outcome === "skipped")).toBe(true);
+    await closeAgentFiles(machine, root);
+    expect(readFileSync(at.landed, "utf8")).toBe(listed);
+
+    // And a path this round did land keeps one line, the one it wrote: the list holds no second line for it.
+    write(root, ".claude-cfg/CLAUDE.md", "his standing rules\n");
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await closeAgentFiles(machine, root);
+    const lines = readFileSync(at.landed, "utf8").split("\n").filter(l => l !== "");
+    expect(lines.filter(l => l.startsWith(".claude-cfg/CLAUDE.md\t"))).toHaveLength(1);
   });
 
   it("reads its own copy of a path holding a backslash off the list, and replaces it when this computer's copy changed", async () => {
@@ -215,6 +243,13 @@ describe("the landing on the computer itself", () => {
     expect(failed.rows.map(r => r.outcome)).toEqual(lands.map(() => "failed"));
     expect(failed.rows.every(r => r.note === "Keychain: user cancelled")).toBe(true);
     expect([...failed.owned]).toEqual([]);
+
+    // The job closes the round whether it landed anything or not: a round with no landing leaves the list as it
+    // was, so what wsp left on that computer is still written down.
+    const listed = readFileSync(placeProvisionPaths(root).landed, "utf8");
+    expect(listed).toContain(".claude-cfg/.claude.json");
+    await closeAgentFiles(machine, root);
+    expect(readFileSync(placeProvisionPaths(root).landed, "utf8")).toBe(listed);
 
     // What wsp owns there is still read off that computer, so the config it wrote reads as its own.
     const owned = await landedFiles(machine, root);
