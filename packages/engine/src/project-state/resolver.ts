@@ -40,6 +40,10 @@ export interface ProjectStateResolver {
   /** How the files `entries` names travel: whether they carry every key the agent needs to find the project's
    * sessions at the new path, or a shared store left behind holds one. */
   carry: ProjectCarry;
+  /** The name this agent keys a project's state under, for an agent whose store can be told which one to use: the
+   * folder's own key, so a copy of that folder at another path reads the memory and the sessions the person's own
+   * terminal wrote in it. Absent on an agent whose store takes no such word, whose copies keep their own state. */
+  key?(path: string): string;
   /** Applies the move; an empty list means nothing in this home was keyed to `from`. */
   move(home: string, from: string, to: string): Promise<MovedState[]>;
   /** How many sessions in this home ran at `path` or in a folder under it. */

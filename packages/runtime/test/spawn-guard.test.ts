@@ -32,7 +32,7 @@ import { createRuntime, type HarnessAdapterFactory, type HostReach, type LocalWi
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
 import { WsClient, createOverWire } from "./ws-client.js";
 
 /** What each turn's launch was handed, so a test reads the environment and the servers the runtime built rather
@@ -88,6 +88,7 @@ describe("agents spawning agents", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
   });
   afterEach(() => {

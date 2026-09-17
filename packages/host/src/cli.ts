@@ -26,9 +26,9 @@ import {
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach } from "@wsp/engine";
+import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
-import { webDirFor } from "./assets.js";
+import { daemonBinaryHere, webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
@@ -470,11 +470,23 @@ export type LocalDaemonStart = (opts: LocalDaemonOptions) => Promise<LocalDaemon
  * gives an agent reach it here too. The adapters strip their own agent-session variables from it, as they do on a
  * fork. The person's home and the folder work starts in are two facts: the stores are theirs, so a sign-in they
  * made is the one a turn uses, and the work folder is the workspace's own. */
+/** The copy road this command has: the daemon binary staged beside it. A build or an install that left the daemon
+ * asset out leaves this host with one workspace per project and the sentence that says so, rather than failing to
+ * start. */
+function copierHere(): Copier | undefined {
+  try {
+    return verbCopier(daemonBinaryHere());
+  } catch {
+    return undefined;
+  }
+}
+
 export function localWiring(
   home = homedir(),
   env: Readonly<Record<string, string | undefined>> = process.env,
   startDaemon: LocalDaemonStart = opts => import("./local-daemon.js").then(m => m.LocalDaemon.start(opts)),
   runDir: string = hostRunDir(join(defaultHomeIn(home), "state.json")),
+  copier: Copier | undefined = copierHere(),
 ): LocalWiring {
   const root = localWorkFolder(home);
   // The person whose sign-ins a turn here reads. Their login home, except under a harness serving a fixture out of
@@ -493,6 +505,8 @@ export function localWiring(
     execStream: (o, waiting) => localExecStream({ root: backend.workFolder(), runDir, ...o }, waiting),
     home: id => agentHome(person, id, env),
     homeDir: home,
+    ...(copier !== undefined ? { copier } : {}),
+    platform: hostPlatform(),
     env: () => ({ ...Object.fromEntries(Object.entries(env).filter((e): e is [string, string] => e[1] !== undefined)), HOME: person }),
     sysSamples: async fn => (await daemon.get()).sysSamples(fn),
     daemonRoad: async () => {

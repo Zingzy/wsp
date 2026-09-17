@@ -30,6 +30,8 @@ const CAPABILITIES: Capabilities = {
   snapshotListing: true,
   templates: true,
   kept: false,
+  copies: true,
+  ownNetwork: true,
   sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }],
 };
 

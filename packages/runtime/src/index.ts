@@ -14,6 +14,7 @@ export * from "./tunnel.js";
 export * from "./place-forward.js";
 export * from "./harness-catalog.js";
 export * from "./adapters.js";
+export * from "./ports.js";
 // Re-exported so clients (wspx) can wire a backend without importing the
 // engine directly; the runtime is the only layer that drives it.
 export {

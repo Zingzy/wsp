@@ -17,6 +17,8 @@ export function caps(overrides: Partial<Capabilities> = {}): Capabilities {
     snapshotListing: true,
     templates: false,
     kept: false,
+    copies: true,
+    ownNetwork: true,
     sizes: [],
     ...overrides,
   };

@@ -50,6 +50,9 @@ export class NoProviderBackend implements MachineBackend {
     templates: false,
     sizes: [],
     kept: false,
+    // Nothing here forks and nothing here copies: the host has no provider, so there is nothing to copy onto.
+    copies: false,
+    ownNetwork: false,
   };
 
   readonly pricing: BackendPricing = {

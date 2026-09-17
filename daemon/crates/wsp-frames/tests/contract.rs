@@ -11,8 +11,8 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GuestCliMessage, GuestOpenReply,
-    MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
+    numbers, words, BackendFacts, CopyReport, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GuestCliMessage,
+    GuestOpenReply, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
     MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
@@ -195,6 +195,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "MachineReachReply" => {
                     round_trip::<MachineReachReply>(&sample, &at);
                 }
+                "CopyReport" => {
+                    round_trip::<CopyReport>(&sample, &at);
+                }
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
@@ -211,6 +214,7 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
     }
     seen.sort();
     let mut expected = vec![
+        "CopyReport",
         "DaemonErrorResponse",
         "GuestCliMessage",
         "GuestOpenReply",

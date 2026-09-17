@@ -9,8 +9,8 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
+import { type ProjectView, copyPathFor, sharesPortsLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -53,6 +53,9 @@ describe("wsp verbs over the host", () => {
   let statePath: string;
   let backend: StubBackend;
   let store: Store;
+  /** The copy road this host is wired with: a stand-in, so a second piece of work on a project here is a copy the
+   * case can read back and nothing on this machine is actually cloned. */
+  let copier: ReturnType<typeof fakeCopier>;
   let rt: Runtime;
   let handle: HostHandle | undefined;
   let claude: ReturnType<typeof scriptedAgent>;
@@ -75,10 +78,11 @@ describe("wsp verbs over the host", () => {
     vi.stubEnv("WSP_HOME", join(dir, "home"));
     backend = stubBackend();
     store = memoryStore();
+    copier = fakeCopier();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}) });
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, undefined, undefined, copier), placeLinks: placeWiring(statePath, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -147,7 +151,7 @@ describe("wsp verbs over the host", () => {
   async function restartHost(adapters: Parameters<typeof createRuntime>[0]["adapters"], over: Store = store, places?: PlaceBackends, wired: MachineBackend = backend): Promise<void> {
     await handle?.close();
     handle = undefined;
-    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user")), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
+    rt = createRuntime({ backend: wired, store: over, adapters, local: localWiring(join(dir, "user"), process.env, undefined, undefined, copier), placeLinks: placeWiring(statePath, {}), ...(places !== undefined ? { places } : {}) });
     vi.stubEnv("SOLARI_API_KEY", "slr_live_fake_verbs_key");
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir: join(dir, "web"), runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
@@ -255,10 +259,11 @@ describe("wsp verbs over the host", () => {
     expect(code, io.errors.join("\n")).toBe(0);
     expect(io.lines[0]).toBe(`created mac ${(await rt.workspaces.list()).find(w => w.name === "mac")!.id} with ${project.name} at ${folder}`);
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind, w.machineId])).toEqual([["mac", "local", "local"]]);
-    // A folder is one working tree, so a second workspace on that project names the one standing.
+    // The second piece of work on that project is a copy of the folder at a sibling path.
     const again = await run("new", project.name, "other");
-    expect(again.code).not.toBe(0);
-    expect(again.io.errors[0]).toContain("is worked where it sits, so it has one workspace and mac is it");
+    expect(again.code, again.io.errors.join("\n")).toBe(0);
+    expect(copier.asks.map(a => a.to)).toEqual([copyPathFor(folder, "other")]);
+    expect((await rt.workspaces.list()).find(w => w.name === "other")!.copy?.road).toBe("clonefile");
     // A word that names no project is refused with the ones there are.
     const nowhere = await run("new", "srv", "x");
     expect(nowhere.code).not.toBe(0);
@@ -268,9 +273,22 @@ describe("wsp verbs over the host", () => {
 
   it("this computer's row carries Running while its daemon answers and the reach word when it does not, as every other row does", () => {
     const here = { id: "ws_1", name: "mac", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-12T00:00:00.000Z", machineState: "running" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, project: { id: "pr_1", name: "wsp", path: "/Users/dev/wsp", computer: "here" } };
-    expect(workspaceLine({ ...here, reach: { state: "reachable" } })[5]).toBe("Running");
-    expect(workspaceLine({ ...here, reach: { state: "no-daemon" } })[5]).toBe("Unreachable");
-    expect(workspaceLine({ ...here, reach: { state: "unreachable" } })[5]).toBe("Unreachable");
+    expect(workspaceLine({ ...here, reach: { state: "reachable" } })[7]).toBe("Running");
+    expect(workspaceLine({ ...here, reach: { state: "no-daemon" } })[7]).toBe("Unreachable");
+    expect(workspaceLine({ ...here, reach: { state: "unreachable" } })[7]).toBe("Unreachable");
+  });
+
+  it("a row carries the road its copy was made by and, where this computer's copies share its ports, that they do", () => {
+    const shape = { id: "ws_1", name: "qr codes", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-17T00:00:00.000Z", machineState: "running" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "reachable" as const }, project: { id: "pr_1", name: "wsp", path: "/Users/dev/wsp", computer: "here" } };
+    const shares = { copies: true, ownNetwork: false };
+    const cloned = { ...shape, copy: { road: "clonefile" as const, path: "/Users/dev/wsp-qr-codes", source: "/Users/dev/wsp", base: "abc", branch: "main", carried: "deps-and-config" as const } };
+    expect(workspaceLine(cloned, new Map(), shares).slice(4, 6)).toEqual(["clone", sharesPortsLine(hostPlatform())]);
+    expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "worktree" } }, new Map(), shares)[4]).toBe("worktree");
+    expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "in-place" } }, new Map(), shares)[4]).toBe("in place");
+    // A computer whose copies each get a network of their own says nothing about ports.
+    expect(workspaceLine(cloned, new Map(), { copies: true, ownNetwork: true }).slice(4, 6)).toEqual(["clone", ""]);
+    // A fork has no copy of a folder on this computer, so both cells are empty.
+    expect(workspaceLine(shape, new Map(), shares).slice(4, 6)).toEqual(["", ""]);
   });
 
   it("workspaces gives every row one state word, where it runs in the person's words and its shape apart from it, and the machine id only in the json", async () => {
@@ -282,12 +300,24 @@ describe("wsp verbs over the host", () => {
     const listed = await run("workspaces");
     expect(listed.code).toBe(0);
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
-    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "PROJECT", "COMPUTER", "SIZE", "STATE", "AGENTS"]);
-    // One kind of thing per column: the project it holds, the computer it runs on, the shape, then one state word
-    // per row, this computer's included. The id the provider minted for the machine is on no row.
-    expect(rows.map(r => r.split(/ {2,}/))).toEqual([
-      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+\u00a0vCPU\u00a0·\u00a0\d+\u00a0GB$/), expect.stringMatching(/^\S+$/)],
-      ["mac", expect.stringMatching(/^ws_/), here.name, expect.stringMatching(/^this (?:Mac|computer)$/), expect.stringMatching(/^\d+\u00a0cores\u00a0·\u00a0\d+\u00a0GB$/), expect.stringMatching(/^\S+$/)],
+    expect(heading!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "PROJECT", "COMPUTER", "COPY", "PORTS", "SIZE", "STATE", "AGENTS"]);
+    // One kind of thing per column: the project it holds, the computer it runs on, what its copy of that project
+    // is and what that copy shares, the shape, then one state word per row, this computer's included. A fork
+    // carries no copy of a folder on this computer, so its two copy cells are empty and the split drops them. The
+    // id the provider minted for the machine is on no row.
+    const cells = (row: string): string[] => row.split(/ {2,}/);
+    expect(rows.map(cells)).toEqual([
+      ["alpha", expect.stringMatching(/^ws_/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\S+$/), expect.stringMatching(/^\d+ vCPU · \d+ GB$/), expect.stringMatching(/^\S+$/)],
+      [
+        "mac",
+        expect.stringMatching(/^ws_/),
+        here.name,
+        expect.stringMatching(/^this (?:Mac|computer)$/),
+        "in place",
+        sharesPortsLine(hostPlatform()),
+        expect.stringMatching(/^\d+ cores · \d+ GB$/),
+        expect.stringMatching(/^\S+$/),
+      ],
     ]);
     expect(listed.io.errors).toEqual([]);
     rmSync(folder, { recursive: true, force: true });
@@ -295,12 +325,13 @@ describe("wsp verbs over the host", () => {
     const raw = await run("workspaces", "--json");
     const rawRows = (json(raw.io)[0] as { workspaces: WorkspaceListing[] }).workspaces;
     expect(listed.io.lines[0]).not.toContain(rawRows[0]!.machineId);
-    expect(rows[0]!.split(/ {2,}/)[3]).toBe(whereWord(rawRows[0]!));
-    expect(rows[1]!.split(/ {2,}/)[3]).toBe(whereWord(rawRows[1]!));
-    expect(rows[1]!.split(/ {2,}/)[4]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
+    expect(cells(rows[0]!)[3]).toBe(whereWord(rawRows[0]!));
+    expect(cells(rows[1]!)[3]).toBe(whereWord(rawRows[1]!));
+    expect(cells(rows[1]!)[6]).toBe(fmtSize(rawRows[1]!.size, kindWords("local").cpu));
     // Which word each row carries is the one predicate's, read off that row's own status: what this computer's
-    // daemon is doing on the machine this test runs on decides the word, and never whether there is a word.
-    expect(rows.map(r => r.split(/ {2,}/)[5])).toEqual(rawRows.map(w => workspaceWord(workspaceStateOf(w, w))));
+    // daemon is doing on the machine this test runs on decides the word, and never whether there is a word. The
+    // state is a row's last cell either way, since nothing here has turned its agents on.
+    expect(rows.map(r => cells(r).at(-1))).toEqual(rawRows.map(w => workspaceWord(workspaceStateOf(w, w))));
     expect(rawRows.map(w => [w.name, workspaceKind(w), w.golden])).toEqual([
       ["alpha", "cloud", head(SEALED_GOLDEN).snapshotId],
       ["mac", "local", ""],
@@ -1908,7 +1939,7 @@ describe("wsp verbs over the host", () => {
 
     const workspaces = await run("workspaces");
     const table = workspaces.io.lines[0]!.split("\n");
-    expect(table[0]!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "PROJECT", "COMPUTER", "SIZE", "STATE", "AGENTS"]);
+    expect(table[0]!.split(/ {2,}/)).toEqual(["WORKSPACE", "ID", "PROJECT", "COMPUTER", "COPY", "PORTS", "SIZE", "STATE", "AGENTS"]);
     expect(table[1]!.split(/ {2,}/).slice(0, 3)).toEqual(["alpha", expect.stringMatching(/^ws_/), "spoo"]);
     // The verb takes no positional: the projects are the host's, not a workspace's.
     const extra = await run("projects", "nope");
