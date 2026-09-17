@@ -128,6 +128,11 @@ export interface PlanFilesOptions {
   rewrites?: readonly [string, string][];
   /** A small laptop file's text, for a login whose Keychain items are filed per account: the tool's own file names them. */
   read?: (abs: string) => string | undefined;
+  /** Which planned files travel at all, where the caller carries fewer than the recipe ticked: a computer somebody
+   * owns takes the agents' own files and nothing else. Absent, every ticked path travels, which is the image. A
+   * file this turns away counts nowhere: not in the rungs, not in the bytes and not among the skips, since the
+   * recipe did not set it aside, this destination did not ask for it. */
+  keep?: (f: PlannedFile) => boolean;
 }
 
 const ticked = (e: RecipeEntry): boolean => e.bring === true;
@@ -554,7 +559,9 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
       }
       const excludes = (e.excludes ?? []).filter(x => x.startsWith(`${p}/`)).map(x => join(opts.home, x.slice(2)));
-      plan.files.push({ id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) });
+      const planned: PlannedFile = { id: e.id, source, dest: rewrite(rel), mode: st.mode & 0o7777, dir: st.kind === "dir", excludes, volatile: (e.volatile ?? []).includes(p) };
+      if (opts.keep !== undefined && !opts.keep(planned)) continue;
+      plan.files.push(planned);
       brought++;
     }
     if (brought > 0) {

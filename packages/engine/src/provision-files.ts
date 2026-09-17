@@ -1,0 +1,216 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The person's own agent files on a computer they own: the skills, the
+// standing instructions, the commands and the configuration their agents read,
+// landed in the agents' homes on that computer. A computer somebody lives on
+// is not an image: a file already there with other content is never written
+// over, its row says so, and a run after they remove it lands it. What wsp
+// itself put there it may replace, which is what the list beside the job
+// records; nothing outside an agent's own paths travels at all.
+import { agentOfRow, placeProvisionPaths, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+import { CATALOG_AGENTS } from "@wsp/catalog";
+import { INLINE_EXEC_MS } from "./exec-detached.js";
+import type { SkippedPath } from "./golden-import.js";
+import { parseMcpId } from "./golden-mcp.js";
+import type { Machine } from "./machine.js";
+import { importInto } from "./vault.js";
+
+/** One planned file of the person's, as the run needs it: the recipe row it came from and where it lands under the
+ * home on that computer. */
+export interface ProvisionLanding {
+  id: string;
+  label: string;
+  /** Home-relative on the computer; a directory covers every file under it. */
+  dest: string;
+}
+
+/** What one path came to there. `kept` is a file the person already had with other content, which is never
+ * written over. */
+export type LandOutcome = "installed" | "present" | "kept" | "failed";
+
+/** The `~/`-relative paths one agent keeps what it reads in, off the catalog alone: the home its own state sits
+ * under, the folder it loads skills from, every config path the catalog names for it and the file it keeps its
+ * MCP servers in. */
+function agentPaths(a: (typeof CATALOG_AGENTS)[number]): string[] {
+  return [`~/${a.stateHome}`, a.skills, ...a.configPaths, ...(a.mcp?.files ?? [])].map(p => p.replace(/\/+$/, ""));
+}
+
+/** Whether one planned file may land in an agent's home on a computer somebody owns: its row is that agent's own
+ * or one of that agent's MCP servers, and its path on this computer is one the catalog names for it. Nothing else
+ * goes: a dotfile, a login's store and a shell's rc belong to the computer the person sits at, not to the agents
+ * they run there, and an agent the catalog does not carry has no home of its own to write into. */
+export function agentStateFile(f: { id: string; source: string }, home: string): boolean {
+  const agent = agentOfRow(f) ?? parseMcpId(f.id)?.agent;
+  const entry = CATALOG_AGENTS.find(a => a.id === agent);
+  if (entry === undefined) return false;
+  return agentPaths(entry).some(p => {
+    const abs = `${home}/${p.slice(2)}`;
+    return f.source === abs || f.source.startsWith(`${abs}/`);
+  });
+}
+
+/** What each line of the landing prints, so no path of the person's can be read as the run's own words. */
+export const LAND_MARK = "wsp-land";
+
+/** One line the landing printed: what became of one path under the home on that computer. */
+interface Landed {
+  rel: string;
+  outcome: LandOutcome;
+}
+
+/** The run on the computer itself, over the tree already extracted beside the job: every file the person's copy
+ * holds, landed where it is missing, left alone where the same bytes are already there, and kept as it is where
+ * the person's own file differs, unless that file is the one wsp landed last time and has not been touched since.
+ * Each path prints its outcome; the ones wsp owns are written down with what travelled for them, and the run that
+ * closes the job turns that list into what it left there. */
+export function landFilesScript(home: string): string {
+  const at = placeProvisionPaths(home);
+  const q = (s: string): string => shellQuote(s);
+  return [
+    "set -u",
+    `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}`,
+    'mkdir -p "$(dirname "$landing")" || exit 1',
+    ': > "$landing" || exit 1',
+    'cd "$stage" || exit 1',
+    'find . -type f -print | while IFS= read -r p; do',
+    '  rel=${p#./}',
+    '  src="$stage/$rel"; dest="$home/$rel"',
+    '  s=$(sha256sum "$src" | cut -d" " -f1)',
+    '  if [ ! -e "$dest" ]; then act=installed',
+    "  else",
+    '    d=$(sha256sum "$dest" 2>/dev/null | cut -d" " -f1)',
+    '    known=$(awk -F"\\t" -v r="$rel" \'$1==r { print $2" "$3; exit }\' "$ledger" 2>/dev/null)',
+    '    if [ "$d" = "$s" ]; then act=present',
+    // The person's own file stands unless the bytes there are the ones wsp left: then the copy is wsp's to
+    // replace, and it is replaced only where their computer's copy has itself changed since.
+    '    elif [ -n "$known" ] && [ "$d" = "${known##* }" ]; then',
+    '      if [ "$s" = "${known%% *}" ]; then act=present; else act=installed; fi',
+    "    else act=kept; fi",
+    "  fi",
+    '  if [ "$act" = installed ]; then',
+    '    mkdir -p "$(dirname "$dest")" && cp -p "$src" "$dest" || act=failed',
+    "  fi",
+    `  printf '${LAND_MARK}\\t%s\\t%s\\t%s\\n' "$act" "$s" "$rel"`,
+    '  if [ "$act" != kept ] && [ "$act" != failed ]; then printf "%s\\t%s\\n" "$rel" "$s" >> "$landing"; fi',
+    "done",
+    "exit 0",
+  ].join("\n");
+}
+
+/** The run that closes the job on that computer: what wsp owns there, each with the bytes that travelled for it
+ * and the bytes standing there now, which the MCP edit may have rewritten since. The tree that travelled goes
+ * with it, so nothing of the person's is left lying in wsp's folder. */
+export function closeFilesScript(home: string): string {
+  const at = placeProvisionPaths(home);
+  return [
+    "set -u",
+    `home=${shellQuote(home)}; stage=${shellQuote(at.staging)}; ledger=${shellQuote(at.landed)}; landing=${shellQuote(at.landing)}`,
+    ': > "$ledger.new" || exit 1',
+    'tab=$(printf "\\t")',
+    'while IFS="$tab" read -r rel from; do',
+    '  dest="$home/$rel"',
+    '  [ -f "$dest" ] || continue',
+    '  printf "%s\\t%s\\t%s\\n" "$rel" "$from" "$(sha256sum "$dest" | cut -d" " -f1)" >> "$ledger.new"',
+    'done < "$landing"',
+    'mv "$ledger.new" "$ledger"',
+    'rm -rf "$stage" "$landing"',
+    "exit 0",
+  ].join("\n");
+}
+
+/** What the landing printed, in the order it printed it; a line that is not the mark's is not an answer. */
+export function parseLanded(stdout: string): Landed[] {
+  return stdout.split("\n").flatMap(line => {
+    const words = line.split("\t");
+    const outcome = words[1];
+    if (words[0] !== LAND_MARK || words.length < 4 || outcome === undefined || !["installed", "present", "kept", "failed"].includes(outcome)) return [];
+    return [{ outcome: outcome as LandOutcome, rel: words.slice(3).join("\t") }];
+  });
+}
+
+/** Which planned entry a landed path belongs to: the longest destination that holds it, since one row may name a
+ * folder and another a file inside it. Nothing for a path no entry names, which gets a row of its own. */
+function ownerOf(rel: string, lands: readonly ProvisionLanding[]): ProvisionLanding | undefined {
+  let best: ProvisionLanding | undefined;
+  for (const l of lands) {
+    if (rel !== l.dest && !rel.startsWith(`${l.dest}/`)) continue;
+    if (best === undefined || l.dest.length > best.dest.length) best = l;
+  }
+  return best;
+}
+
+/** How many paths of a row's are named in its note before it says how many more there are. */
+const NAMED = 3;
+
+const listOf = (paths: readonly string[]): string => (paths.length <= NAMED ? paths.join(", ") : `${paths.slice(0, NAMED).join(", ")} and ${paths.length - NAMED} more`);
+
+/** One row per planned entry, in plan order, with what became of the paths under it: installed where anything
+ * landed, present where every path was already the same, kept in the person's own words where their files stand
+ * and nothing of theirs was touched, failed where a path could not be written. */
+export function filesRows(lands: readonly ProvisionLanding[], landed: readonly Landed[], home: string): PlaceProvisionRow[] {
+  const byOwner = new Map<string, Landed[]>();
+  const loose: Landed[] = [];
+  for (const l of landed) {
+    const owner = ownerOf(l.rel, lands);
+    if (owner === undefined) loose.push(l);
+    else (byOwner.get(owner.dest) ?? byOwner.set(owner.dest, []).get(owner.dest)!).push(l);
+  }
+  const rowOf = (id: string, label: string, dest: string, rows: readonly Landed[]): PlaceProvisionRow => {
+    const under = (outcome: LandOutcome): string[] => rows.filter(r => r.outcome === outcome).map(r => r.rel);
+    const failed = under("failed");
+    const installed = under("installed");
+    const kept = under("kept");
+    const notes = [
+      ...(rows.length > 1 && installed.length > 0 ? [`${installed.length} of ${rows.length} files`] : []),
+      ...(kept.length > 0 ? [`${kept.length === rows.length ? "already there with other content" : `${kept.length} already there with other content`}: ${listOf(kept)}`] : []),
+    ];
+    const outcome: PlaceProvisionRow["outcome"] =
+      failed.length > 0 ? "failed" : installed.length > 0 ? "installed" : rows.length === 0 || kept.length === rows.length ? "skipped" : "present";
+    const note = failed.length > 0 ? `could not be written: ${listOf(failed)}` : rows.length === 0 ? "nothing of it travelled" : notes.join("; ");
+    return { id, label: `${label} ${home}/${dest}`, outcome, kind: "file", ...(note !== "" ? { note } : {}) };
+  };
+  return [
+    ...lands.map(l => rowOf(`files/${l.dest}`, l.label, l.dest, byOwner.get(l.dest) ?? [])),
+    ...loose.map(l => rowOf(`files/${l.rel}`, "", l.rel, [l])),
+  ];
+}
+
+/** The paths under the home on a computer that hold what wsp landed there, each with whether this run put it there
+ * or found the same bytes already. The MCP edit reads it twice: to know an agent's config there is wsp's own copy
+ * rather than the person's, and to say whether a server in that config arrived with this run. */
+export type OwnedPaths = ReadonlyMap<string, "installed" | "present">;
+
+export interface LandFilesResult {
+  rows: PlaceProvisionRow[];
+  owned: OwnedPaths;
+  /** What the person keeps there, for the document the job leaves on the computer. */
+  skipped: SkippedPath[];
+}
+
+/** How long the files may take to reach that computer and be walked into place. */
+const LAND_MS = 300_000;
+
+/** Lands the person's agent files on the computer itself: the archive extracted into wsp's own folder there, then
+ * one run that puts each file in its agent's home under the rules above, then the rows. The staging tree stays
+ * until the job closes, since the MCP edit reads the configs that just landed. */
+export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[] }): Promise<LandFilesResult> {
+  const at = placeProvisionPaths(o.home);
+  await machine.exec(`rm -rf ${shellQuote(at.staging)}`, { timeoutMs: INLINE_EXEC_MS });
+  // Under wsp's own folder there, never the shared temporary one: on a computer somebody owns, another account
+  // could be sitting in /tmp first, and what travels is the person's own configuration.
+  await importInto(machine, o.tar, at.staging, { overlay: true, timeoutMs: LAND_MS, tmpDir: at.dir });
+  const res = await machine.run(landFilesScript(o.home), { deadlineMs: LAND_MS });
+  if (res.exitCode !== 0) throw new Error(`the agents' files did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.slice(-300)}`);
+  const landed = parseLanded(res.stdout);
+  return {
+    rows: filesRows(o.lands, landed, o.home),
+    owned: new Map(landed.flatMap(l => (l.outcome === "installed" || l.outcome === "present" ? [[`${o.home}/${l.rel}`, l.outcome] as const] : []))),
+    skipped: landed.filter(l => l.outcome === "kept").map(l => ({ id: ownerOf(l.rel, o.lands)?.id ?? `files/${l.rel}`, path: `${o.home}/${l.rel}`, note: "already there with other content; wsp did not write over it" })),
+  };
+}
+
+/** Writes down what wsp owns on that computer and takes the tree that travelled away again. Nothing here fails
+ * the job: a computer that would not keep the list is one whose files landed all the same, and the next run reads
+ * its own copies as the person's, which keeps them rather than writing over them. */
+export async function closeAgentFiles(machine: Machine, home: string): Promise<void> {
+  await machine.run(closeFilesScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
+}

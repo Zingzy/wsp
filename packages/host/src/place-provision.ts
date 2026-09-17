@@ -7,7 +7,7 @@
 // is here is where the recipe lives and what this computer is.
 import { existsSync } from "node:fs";
 import type { Manifest, Platform } from "@wsp/collect";
-import { provisionBox, provisionPlanOf, type BrewTable } from "@wsp/engine";
+import { agentStateFile, provisionBox, provisionPlanOf, type BrewTable } from "@wsp/engine";
 import type { PlaceProvisioner } from "@wsp/runtime";
 import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
@@ -38,10 +38,13 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       const rows = copyRows(manifest, { recipe, pins: [] }, { home: o.home, brew });
       const imp = planImport(
         rows.filter(e => e.bring === true),
-        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map() },
+        // The files that travel to a computer somebody owns are the agents' own: their skills, their standing
+        // instructions and their configuration, in the agents' homes there. A dotfile, a login's store and a
+        // shell's rc are the person's computer, and the computer they joined is one they already live on.
+        { rows, small: recipe, home: o.home, platform: o.platform, brew, secrets: new Map(), keepFile: agentStateFile },
       );
       return provisionPlanOf(imp, recipe.at);
     },
-    run: (machine, plan, stage) => provisionBox(machine, plan, stage),
+    run: (machine, plan, stage, on) => provisionBox(machine, plan, stage, on),
   };
 }

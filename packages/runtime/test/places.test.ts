@@ -47,6 +47,7 @@ import {
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
+import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
@@ -2619,26 +2620,29 @@ describe("the recipe this host holds, put on a computer you own", () => {
   ];
 
   /** A provisioner as the host wires one, with what it plans and what its run comes to under this test's hand. */
-  function provisioner(o: { rows?: PlaceProvisionRow[]; throws?: string; noRecipe?: string; hold?: boolean; planThrows?: string; planMs?: number } = {}) {
+  function provisioner(o: { rows?: PlaceProvisionRow[]; plan?: ProvisionPlan; throws?: string; noRecipe?: string; hold?: boolean; planThrows?: string; planMs?: number } = {}) {
     let release = (): void => {};
     const held = new Promise<void>(resolve => (release = resolve));
     const calls = { plan: 0, run: 0 };
     const machines: Machine[] = [];
+    const homes: string[] = [];
     const rows = o.rows ?? ROWS;
     return {
       calls,
       machines,
+      homes,
       release,
       wired: {
         plan: async () => {
           calls.plan++;
           if (o.planMs !== undefined) await new Promise(resolve => setTimeout(resolve, o.planMs));
           if (o.planThrows !== undefined) throw new Error(o.planThrows);
-          return o.noRecipe === undefined ? PLAN : { noRecipe: o.noRecipe };
+          return o.noRecipe === undefined ? (o.plan ?? PLAN) : { noRecipe: o.noRecipe };
         },
-        run: async (machine, plan, stage) => {
+        run: async (machine, plan, stage, on) => {
           calls.run++;
           machines.push(machine);
+          homes.push(on.home);
           expect(plan.recipeAt).toBe(RECIPE_AT);
           // The row it is on before the first outcome, as a run that is on a step says it.
           stage(`${rows[0]!.label} (1/${rows.length})`, { label: rows[0]!.label, index: 1, of: rows.length });
@@ -2728,6 +2732,45 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(provision.finishedAt).toBeDefined();
     expect(provision.at).toBeUndefined();
     expect(p.calls).toEqual({ plan: 1, run: 1 });
+    // The run is handed the home the computer's own agent reported: the agents' folders there hang off it, and
+    // this host has no other way of knowing where they are.
+    expect(p.homes).toEqual([(await runtime!.places!.reportOf(placeId))!.login["HOME"]]);
+  });
+
+  it("says what the recipe puts there by kind, in the line the job opens with and in the header of its log there", async () => {
+    const stages: PlaceStageEvent[] = [];
+    const cmds: string[] = [];
+    const hostKey = newPlaceKeyPair();
+    const p = provisioner({
+      plan: {
+        ...PLAN,
+        files: { lands: [{ id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/skills" }], pack: () => Promise.reject(new Error("no pack under this test")) },
+        mcp: { agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, keep: ["github"], drop: [] }], aside: [] }], guestHome: "/root", rewrites: [], binDirs: [], tools: [] },
+      },
+    });
+    const store = memoryStore();
+    const answers = answersFor(cmds);
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        provision: p.wired,
+        install: async req => {
+          const { client } = await join(hostKey, { code: readJoinToken(req.code).code, name: "spoo", answers });
+          sockets.push(client.ws);
+          return { name: "spoo" };
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    await until(async () => (await provisionOf(added.place.id))?.state === "done");
+    expect(stages.filter(e => e.step === "provision")[0]?.note).toBe(`2 tools, 1 file, 1 MCP server from the recipe of ${RECIPE_AT}`);
+    // The log on that computer opens with the same count, so its own reader is told what this run was for.
+    expect(cmds.some(c => c.includes(Buffer.from("2 tools, 1 file, 1 MCP server").toString("base64").slice(0, 20)))).toBe(true);
   });
 
   it("says each row as it lands on the add's own stream, and says the tally once at the end", async () => {

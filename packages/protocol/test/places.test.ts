@@ -18,7 +18,9 @@ import {
   placeProvisionPaths,
   placeProvisioningLine,
   provisionLines,
+  provisionCountWord,
   provisionWord,
+  MCP_ID_PREFIX,
   PLACE_PORT_OFFSET,
   PlaceAddStep,
   PlaceAuthRequest,
@@ -391,16 +393,31 @@ describe("the recipe on a computer you own", () => {
     expect(PlaceAddStep.options).toContain("provision");
     // Last of them: the recipe goes on once the computer is a place at all.
     expect(PlaceAddStep.options.at(-1)).toBe("provision");
-    expect(PLACE_ADD_WORDS.provision).toBe("installing the recipe's agents and tools");
+    expect(PLACE_ADD_WORDS.provision).toBe("installing agents, tools, skills and servers");
   });
 
   it("says on the row what is under way, or what stands, in one word each", () => {
     expect(provisionWord(undefined)).toBe("");
     expect(provisionWord(running)).toBe("setting up 3/7: Codex");
     expect(provisionWord({ ...running, at: undefined })).toBe("setting up");
-    // Tools, never rows: a row is the recipe's own word and nobody reading a computer's row has seen a recipe.
+    // What the rows put there, never the word row: a row is the recipe's own word and nobody reading a computer's
+    // row has seen a recipe.
     expect(provisionWord(done([row(), row({ id: "tools/uv/ruff", label: "ruff", outcome: "present" })]))).toBe("2 tools ready");
     expect(provisionWord(done([row()]))).toBe("1 tool ready");
+    // The files in the agents' homes there and the servers in their configs are rows of the same job, counted by
+    // what they are; a row that says nothing is a tool, which is what every row was before there were others.
+    expect(
+      provisionWord(
+        done([
+          row(),
+          row({ id: "files/.claude-cfg/skills", label: "Claude Code /root/.claude-cfg/skills", kind: "file", outcome: "installed" }),
+          row({ id: "files/.codex/AGENTS.md", label: "Codex /root/.codex/AGENTS.md", kind: "file", outcome: "skipped" }),
+          row({ id: `${MCP_ID_PREFIX}claude/github`, label: "Claude Code github", kind: "server", outcome: "present" }),
+        ]),
+      ),
+    ).toBe("1 tool, 2 files, 1 MCP server ready");
+    expect(provisionCountWord({})).toBe("0 tools");
+    expect(provisionCountWord({ server: 2 })).toBe("2 MCP servers");
     expect(provisionWord(done([row(), row({ id: "tools/release/gh", label: "GitHub CLI", outcome: "failed" }), row({ id: "tools/uv/uv", label: "uv", outcome: "failed" })]))).toBe(
       "2 of 3 failed: GitHub CLI, uv",
     );
@@ -445,7 +462,15 @@ describe("the recipe on a computer you own", () => {
 
   it("keeps its log and its outcome in the folder wsp already owns on that computer, never inside a workspace", () => {
     const at = placeProvisionPaths("/root");
-    expect(at).toEqual({ dir: "/root/.wsp/provision", runDir: "/root/.wsp/provision/run", log: "/root/.wsp/provision/log", result: "/root/.wsp/provision/result.json" });
+    expect(at).toEqual({
+      dir: "/root/.wsp/provision",
+      runDir: "/root/.wsp/provision/run",
+      log: "/root/.wsp/provision/log",
+      result: "/root/.wsp/provision/result.json",
+      staging: "/root/.wsp/provision/files",
+      landed: "/root/.wsp/provision/landed",
+      landing: "/root/.wsp/provision/landing",
+    });
     for (const path of Object.values(at)) expect(path.startsWith(`${placeDaemonPaths("/root").wsp}/`)).toBe(true);
   });
 });

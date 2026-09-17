@@ -2433,7 +2433,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
-  provision: "installing the recipe's agents and tools",
+  provision: "installing agents, tools, skills and servers",
 };
 
 /** Where the app's sheet says a step differently from the line a terminal prints. The sheet's road is a Linux box
@@ -2534,14 +2534,40 @@ export type MachineBind = z.infer<typeof MachineBind>;
 
 /** What one row of the recipe came to on a computer you own. `present` is a row the computer already had at the
  * version asked, so nothing ran for it; `skipped` waited on a row that did not land, or was set aside by the plan. */
+export const PlaceProvisionKind = z.enum(["tool", "file", "server"]);
+export type PlaceProvisionKind = z.infer<typeof PlaceProvisionKind>;
+
+/** What each kind of row is called where a count of them is read. One table, so the row's word, the line a job
+ * opens with and the log on that computer cannot name the same rows three ways. */
+export const PROVISION_KIND_WORDS: Record<PlaceProvisionKind, string> = { tool: "tool", file: "file", server: "MCP server" };
+
+/** A count of rows by kind as a person reads it, the kinds with none left out: `9 tools, 3 files, 5 MCP servers`.
+ * Nothing but tools reads as it did before there was anything else. */
+export function provisionCountWord(counts: Partial<Record<PlaceProvisionKind, number>>): string {
+  const said = PlaceProvisionKind.options.flatMap(kind => ((counts[kind] ?? 0) > 0 ? [plural(counts[kind]!, PROVISION_KIND_WORDS[kind])] : []));
+  return said.length === 0 ? plural(0, PROVISION_KIND_WORDS.tool) : said.join(", ");
+}
+
 export const PlaceProvisionRow = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
   outcome: z.enum(["installed", "present", "failed", "skipped"]),
+  /** What this row puts there; absent reads as a tool, which is what every row was before files and servers had rows. */
+  kind: PlaceProvisionKind.optional(),
   note: z.string().optional(),
   ms: z.number().int().nonnegative().optional(),
 });
 export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
+
+/** The rows of a job counted by kind, for the word above. */
+export function provisionCounts(rows: readonly PlaceProvisionRow[]): Partial<Record<PlaceProvisionKind, number>> {
+  const counts: Partial<Record<PlaceProvisionKind, number>> = {};
+  for (const r of rows) {
+    const kind = r.kind ?? "tool";
+    counts[kind] = (counts[kind] ?? 0) + 1;
+  }
+  return counts;
+}
 
 /** The recipe on a computer you own, as the job that puts its rows there stands: `running` while rows are going on,
  * `done` once every row has an outcome (failed rows included), `stopped` when the job itself ended before its rows
@@ -3766,8 +3792,9 @@ export function provisionWord(p: PlaceProvision | undefined): string {
   if (p.state === "stopped") return `stopped: ${p.said ?? "no reason recorded"}`;
   if (p.state === "running") return p.at === undefined ? "setting up" : `setting up ${p.at.index}/${p.at.of}: ${p.at.label}`;
   const failed = p.rows.filter(r => r.outcome === "failed");
-  // Tools, not rows: a row is the recipe's own word and nobody reading this screen has seen a recipe.
-  return failed.length === 0 ? `${plural(p.rows.length, "tool")} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
+  // What the rows put there, not the word row: a row is the recipe's own word and nobody reading this screen has
+  // seen a recipe.
+  return failed.length === 0 ? `${provisionCountWord(provisionCounts(p.rows))} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
 }
 
 /** The lines a terminal prints once a job is over: what installed by name, how many rows were already there, then

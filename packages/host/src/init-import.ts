@@ -466,6 +466,9 @@ export interface ImportOptions {
   brew?: BrewTable;
   /** The recipe's rows outside the catalog; they install after every catalog road and are never offered a sign-in. */
   custom?: readonly RecipeCustomRow[];
+  /** Which planned files travel at all, where the caller carries fewer than the recipe ticked: a computer somebody
+   * owns takes the agents' own files and nothing else. Absent, every planned file travels, which is the image. */
+  keepFile?: (f: PlannedFile, home: string) => boolean;
   onResult?: (result: ImportResult) => void;
   onContext?: GoldenImport["onContext"];
 }
@@ -573,12 +576,14 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
     return { ...row, bring: true, ...(volatile !== undefined ? { volatile } : {}) };
   });
   const home = resolved(opts.home) ?? opts.home;
+  const keepFile = opts.keepFile;
   const plan = planFiles(bring, {
     home,
     stat: statOf,
     read: readSmall,
     platform: opts.platform,
     rewrites: [[".claude/", `${CLAUDE_CONFIG_REL}/`], [".claude.json", `${CLAUDE_CONFIG_REL}/.claude.json`]],
+    ...(keepFile !== undefined ? { keep: (f: PlannedFile) => keepFile(f, home) } : {}),
   });
   const shell = shellInstallFor(bring);
   // The Mac's Homebrew unread (the wizard said so) is an empty table: no tap formula has a release to take.
@@ -597,6 +602,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
   const withSecret = new Set(plan.secrets.map(s => s.id));
   const files = plan.files.map(f => (withSecret.has(f.id) && !f.volatile ? { ...f, volatile: true } : f));
   const digested = files.map(f => ({ id: f.id, path: tilde(f), dest: f.dest, digest: digestOf(f.source, f.excludes, home), volatile: f.volatile }));
+  const lands = files.map(f => ({ id: f.id, label: label(f.id), dest: f.dest }));
   // The values are read after the earlier-builder check, so they are digested when the recipe is read, not here.
   const secretDigests = () =>
     plan.secrets.flatMap(s => {
@@ -618,7 +624,7 @@ export function importFor(picked: readonly ManifestEntry[], opts: ImportOptions)
       return recipeDigest(bring, [...digested, ...secretDigests()], custom, brew);
     },
     ...(anyFiles
-      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, pack, ...(volatile !== undefined ? { volatile } : {}) } }
+      ? { files: { count, rungs: plan.rungs, bytes: plan.bytes, skipped: plan.skipped, lands, pack, ...(volatile !== undefined ? { volatile } : {}) } }
       : {}),
     ...(shell !== undefined ? { shell } : {}),
     tools: tools.installs,

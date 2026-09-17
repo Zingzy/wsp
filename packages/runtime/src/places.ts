@@ -39,8 +39,8 @@ import {
   placeNoRecipeLine,
   placeProvisionPaths,
   placeProvisioningLine,
+  provisionCountWord,
   provisionLines,
-  plural,
   sshRoadOf,
   placeNoDialLine,
   BackendFacts,
@@ -64,7 +64,7 @@ import {
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, plainPath, putFiles, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, plainPath, provisionCountsOf, putFiles, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -177,7 +177,7 @@ export interface PlaceWiring {
  * reading of this computer are the host's, as the installer and the daemon binary are. */
 export interface PlaceProvisioner {
   plan(): Promise<ProvisionPlan | { noRecipe: string }>;
-  run(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
+  run(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage, on: { home: string }): Promise<PlaceProvisionRow[]>;
 }
 
 /** One login over ssh as this host holds it: the address in the spelling a person would type back, and the key file
@@ -859,7 +859,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const runProvision = async (placeId: string, addId: string, planned: ProvisionPlan, machine: Machine, home: string, started: PlaceProvision): Promise<void> => {
     const provisioner = wiring.provision;
     if (provisioner === undefined) return;
-    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} put the recipe of ${planned.recipeAt} on this computer at ${started.startedAt}: ${plural(planned.steps.length, "tool")}`);
+    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} put the recipe of ${planned.recipeAt} on this computer at ${started.startedAt}: ${provisionCountWord(provisionCountsOf(planned))}`);
     let held = started;
     let writing: Promise<void> = Promise.resolve();
     const push = (next: PlaceProvision): void => {
@@ -876,7 +876,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       push({ ...held, rows: row === undefined ? held.rows : [...held.rows, row], ...(at === undefined ? {} : { at }) });
     };
     try {
-      const rows = await provisioner.run(machine, planned, stage);
+      const rows = await provisioner.run(machine, planned, stage, { home });
       const { at: _under, ...rest } = held;
       push({ ...rest, state: "done", finishedAt: new Date(clockNow()).toISOString(), rows });
       await writing;
@@ -921,7 +921,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       const provision: PlaceProvision = { state: "running", addId, recipeAt: planned.recipeAt, startedAt: new Date(clockNow()).toISOString(), rows: [] };
       await writeProvision(placeId, provision);
-      provisionStage(addId, "running", `${plural(planned.steps.length, "tool")} from the recipe of ${planned.recipeAt}`);
+      provisionStage(addId, "running", `${provisionCountWord(provisionCountsOf(planned))} from the recipe of ${planned.recipeAt}`);
       // The computer itself, not a workspace on it: the link it is holding to this host, driven as a machine.
       const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
       void runProvision(placeId, addId, planned, machine, home, provision).finally(() => provisioning.delete(placeId));
