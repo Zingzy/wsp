@@ -23,6 +23,7 @@ import {
   placeCurrentLine,
   forkRoom,
   placeLinkTranscript,
+  isPlainPath,
   joinToken,
   absentComputer,
   namesPlace,
@@ -54,7 +55,7 @@ import {
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, isPlainPath, keyFingerprint, plainPath, type ExecResult, type MachineBackend, type MachineLink } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, keyFingerprint, plainPath, type ExecResult, type MachineBackend, type MachineLink } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -872,6 +873,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     shape: record.report.shape,
     ...(record.report.diskFreeBytes !== undefined ? { diskFreeBytes: record.report.diskFreeBytes } : {}),
     engine: record.report.engine,
+    ...(record.report.copies !== undefined ? { copies: record.report.copies } : {}),
     present: live.has(record.id),
     joinedAt: record.joinedAt,
     lastSeenAt: record.lastSeenAt,

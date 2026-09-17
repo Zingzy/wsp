@@ -413,6 +413,14 @@ fn open_runtime(options: &Options, log: &Log) -> Option<Arc<wsp_runtime::ops::Op
             for id in ops.stopped_at_open() {
                 log(&format!("workspace {id} found stopped at start: its init is gone"));
             }
+            let unfinished = ops.unfinished_at_open();
+            if !unfinished.is_empty() {
+                log(&format!(
+                    "creates that never finished swept: {} half made copies, {} claimed folders with no workspace in them",
+                    unfinished.copies.len(),
+                    unfinished.claims.len()
+                ));
+            }
             let net_swept = ops.net_swept_at_open();
             if !net_swept.links.is_empty() || net_swept.rules {
                 log(&format!(

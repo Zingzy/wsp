@@ -10,8 +10,8 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, stat
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LOGIN_READ, SSH_STORE_VARS, isPlainPath, localShape, plainPath, readValues } from "@wsp/engine";
-import { DAEMON_VERSION, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
+import { LOGIN_READ, SSH_STORE_VARS, localShape, plainPath, readValues } from "@wsp/engine";
+import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
 import { dirname } from "node:path";
 import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";

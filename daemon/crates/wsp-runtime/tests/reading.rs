@@ -34,6 +34,7 @@ fn recorded(layout: &Layout, id: &str, init: Init) {
         created_at: "2026-09-14T00:00:00.000Z".to_owned(),
         init,
         engine: false,
+        copy: None,
     };
     fs::create_dir_all(layout.upper(id)).unwrap();
     bundle::write_json(&layout.record(id), &record).unwrap();

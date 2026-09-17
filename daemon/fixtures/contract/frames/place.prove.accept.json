@@ -29,7 +29,8 @@
       "agents": [
         "a1",
         "b2"
-      ]
+      ],
+      "copies": "reflink"
     }
   },
   {

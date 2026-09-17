@@ -8,7 +8,7 @@ use std::num::NonZeroU16;
 
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, positive};
+use crate::validate::{bounded, plain_path, positive};
 use crate::{RequestId, WorkspaceSize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,6 +52,42 @@ pub struct MachineSpec {
     /// The workspace gets the box's container engine through this daemon's fenced socket; refused where the box has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<bool>,
+    /// The project this workspace is made with, on a computer the person owns: a checkout on that computer, copied
+    /// once for this workspace and mounted read-write inside it at the project's real path. Absent is a workspace
+    /// of the computer with no project in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<WorkspaceCopy>,
+}
+
+/// Where a workspace's copy comes from and where it lands inside: both absolute paths, the first on the computer,
+/// the second in the workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkspaceCopy {
+    #[serde(deserialize_with = "plain_path")]
+    pub from: String,
+    #[serde(deserialize_with = "plain_path")]
+    pub at: String,
+}
+
+/// How a computer makes a workspace's copy of a checkout: a reflink shares blocks with it, a snapshot is a btrfs
+/// subvolume snapshot of it, a plain copy writes every byte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CopyWord {
+    Reflink,
+    Snapshot,
+    Plain,
+}
+
+impl CopyWord {
+    /// The word the report carries and the host reads.
+    pub fn word(self) -> &'static str {
+        match self {
+            CopyWord::Reflink => "reflink",
+            CopyWord::Snapshot => "snapshot",
+            CopyWord::Plain => "plain",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

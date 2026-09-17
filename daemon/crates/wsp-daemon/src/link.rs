@@ -293,6 +293,7 @@ impl Link {
             agents: &self.agents,
             daemon_port: self.daemon_port,
             dialed: url,
+            runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),
         });
         let signature = place::sign_place_bytes(&pem, &place_link_transcript(LinkRole::Place, &file.place_id, host_nonce, my_nonce))?;
         Ok(PlaceProveRequest::new(RequestId::from(2), signature, report))

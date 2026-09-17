@@ -87,6 +87,18 @@ export function isHttpUrl(url: unknown): url is string {
   }
 }
 
+/** Every folder a turn's paths are built from is held to this: absolute, made of what a path is made of, and
+ * never walking up out of itself. A machine can answer with anything, and what it answers lands in a mount and
+ * in the commands a turn runs there, so a home carrying a semicolon, a quote, a backtick, a glob or a `..` is
+ * refused at the one door rather than quoted or resolved at each of twenty places (the paths are quoted too;
+ * this is what keeps a machine from deciding what those paths mean). A space is a path on macOS and stays
+ * allowed, and a name that begins with a dot is a name. The one rule, read by the wire schemas here and by the
+ * ssh read. */
+export function isPlainPath(path: string): boolean {
+  if (!path.startsWith("/") || !/^[A-Za-z0-9 ._+@:,/-]+$/.test(path) || path.includes("//")) return false;
+  return !path.split("/").some(part => part === "." || part === "..");
+}
+
 /** The host of a URL that passed isHttpUrl (with its port, without userinfo), or undefined when it does not parse: never throws. */
 export function hostOf(url: string): string | undefined {
   try {
@@ -2286,6 +2298,21 @@ export const PlaceDialled = z.object({
 });
 export type PlaceDialled = z.infer<typeof PlaceDialled>;
 
+/** The project a workspace on a computer you own is made with: a checkout on that computer, copied once for this
+ * workspace and mounted read-write at `at` inside, the project's real path. The copy is the workspace's own from
+ * the moment it is made: the checkout can be fetched, switched or built in and no workspace already made from it
+ * sees any of it. Absent is a workspace of the computer with no project in it. */
+export const WorkspaceCopy = z.object({
+  from: z.string().min(1).refine(isPlainPath, "an absolute path on the computer"),
+  at: z.string().min(1).refine(isPlainPath, "an absolute path inside the workspace"),
+});
+export type WorkspaceCopy = z.infer<typeof WorkspaceCopy>;
+
+/** How a computer makes a workspace's copy of a checkout: reflink shares blocks with it, snapshot is a btrfs
+ * subvolume snapshot of it, plain writes every byte and takes the time that takes. */
+export const CopyWord = z.enum(["reflink", "snapshot", "plain"]);
+export type CopyWord = z.infer<typeof CopyWord>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2298,6 +2325,9 @@ export const PlaceView = z.object({
   diskFreeBytes: z.number().int().optional(),
   /** The engine a project's own containers run on there. Absent on a place that has never said what it is. */
   engine: z.enum(["none", "docker", "podman"]).optional(),
+  /** How a workspace's copy of a project is made there, as that computer last reported it. Absent on a place
+   * that runs no workspaces and on one that has never said. */
+  copies: CopyWord.optional(),
   present: z.boolean().optional(),
   joinedAt: z.string().optional(),
   lastSeenAt: z.string().optional(),
@@ -2773,6 +2803,8 @@ export const MachineSpec = z.object({
    * compose runs inside it and sees its own containers alone; a place with no engine refuses the create. Absent is
    * no socket. */
   engine: z.boolean().optional(),
+  /** The project this workspace is made with, on a computer the person owns. */
+  copy: WorkspaceCopy.optional(),
 });
 export type MachineSpec = z.infer<typeof MachineSpec>;
 
@@ -3213,6 +3245,7 @@ const DAEMON_CONTENTS = [
   "8308517d14718d8b82e1e129f1e48a8a511aa9fdaae26b60c900b6280fa85051",
   "a51cf26e554a02935fda02942869ddd7251b41e84625e500336c7ce171a4d667",
   "c2f00944a79a850450b11b4610b93ac4894b7da39282755a9bfef55776a11dff",
+  "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3323,7 +3356,14 @@ const DAEMON_CONTENTS = [
  * Version 43 names the run of the daemon that opened a guest session: every opened frame carries a marker minted
  * once per start, so the host tells a session it still holds from a session of the same name on a machine that
  * was rebuilt under it, whose names count from the start again. Without it a guest carrying no turn token, running
- * the same line from the same folder under the same token, was glued to the earlier session's output. */
+ * the same line from the same folder under the same token, was glued to the earlier session's output.
+ * Version 44 gives a workspace on a computer you own its project as a copy made once for it: a btrfs snapshot where
+ * the checkout is a subvolume, a reflink copy where the disk shares blocks, a plain copy everywhere else with its
+ * time said in the create's notice, chosen by asking the disk and never by a filesystem's name or id, bound into the
+ * workspace at the project's own path before the runtime starts and unmounted deepest first at stop. The place report
+ * carries the word for what the computer's disk can do, so the computers row says it. Before this a workspace shared
+ * its project through an overlay whose lower directory the box could change under it, which the kernel leaves
+ * undefined. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -3612,6 +3652,8 @@ export const PlaceReport = z.object({
   workspacesBlocked: z.string().optional(),
   /** The engine a project's own containers would run on here; "none" until the person installs one. */
   engine: z.enum(["none", "docker", "podman"]),
+  /** How this computer makes a workspace's copy of a checkout. Absent where the computer runs no workspaces. */
+  copies: CopyWord.optional(),
   /** How long that computer had been up when it wrote this report. Kept on the record so a row can say what the
    * computer last was rather than nothing while it is not answering. */
   uptimeMs: z.number().int().nonnegative().optional(),

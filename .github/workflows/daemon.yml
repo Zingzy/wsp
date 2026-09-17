@@ -80,6 +80,14 @@ jobs:
           ./scripts/libseccomp-archive.sh musl
       - name: Static musl build
         run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo build --release --target x86_64-unknown-linux-musl
+      # The tests above run a glibc debug build, where every C symbol resolves and nothing is thrown away. The
+      # shipped binary is static musl under fat link time optimisation, where a weakly declared C symbol that
+      # nothing pulls out of the archive resolves to address zero and the first call to it takes the process
+      # down. That is what a plain copy of a project did on a box, with no test able to see it, so the crate
+      # that touches the disk runs its own tests in the shipped profile too. One crate, since the whole suite in
+      # this profile costs minutes of link time for nothing the job above does not already cover.
+      - name: The runtime's tests in the shipped profile
+        run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl -p wsp-runtime
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}

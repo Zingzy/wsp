@@ -12,7 +12,7 @@ use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
 use crate::validate::{bounded, bounded_list, http_url, non_empty_list};
-use crate::RequestId;
+use crate::{CopyWord, RequestId};
 
 /// Decodes what the protocol's regex accepts: the standard alphabet, padded, with the trailing bits of the last
 /// symbol left unchecked, since the zod side counts bytes off the text and never decodes.
@@ -103,6 +103,10 @@ pub struct PlaceReport {
     /// The engine a project's own containers would run on here, none until the person installs one.
     #[serde(deserialize_with = "bounded::<_, 0, 16>")]
     pub engine: String,
+    /// How this computer makes a workspace's copy of a checkout, read off a clone probe under the runtime's root.
+    /// Absent where the computer runs no workspaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copies: Option<CopyWord>,
     pub daemon_version: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daemon_port: Option<NonZeroU16>,

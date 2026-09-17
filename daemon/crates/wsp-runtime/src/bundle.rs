@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use wsp_frames::CopyWord;
 
 use crate::profile;
 use crate::store::Chain;
@@ -79,9 +80,29 @@ impl Layout {
     pub fn put(&self, upload_id: &str) -> PathBuf {
         self.root.join("put").join(upload_id)
     }
-    /// Scratch for the self check's overlay mount.
+    /// Scratch for the self check's overlay mount and the clone probe the copies word is read from.
     pub fn check(&self) -> PathBuf {
         self.root.join("check")
+    }
+    /// Every workspace's own copy of the checkout it was made with, one directory per workspace.
+    pub fn copies(&self) -> PathBuf {
+        self.root.join("copies")
+    }
+    pub fn copy_of(&self, id: &str) -> PathBuf {
+        self.copies().join(id)
+    }
+    /// Where a copy is made before it is one: a create that dies mid-copy leaves this rather than a half
+    /// written `copy_of`, and the open sweeps every one of them. The copy is renamed into place, which is one
+    /// directory entry, only once every byte of it is there.
+    pub fn copy_being_made(&self, id: &str) -> PathBuf {
+        self.copies().join(format!(".{id}.partial"))
+    }
+    /// The mark a name being made carries, read by the sweep.
+    pub const PARTIAL: &'static str = ".partial";
+    /// Where the project checkouts a box holds live; the copies directory sits beside it under the same root,
+    /// which is what lets a copy share blocks with the checkout it was made from.
+    pub fn projects(&self) -> PathBuf {
+        self.root.join("projects")
     }
     /// The workspace's cgroup as the spec names it, under the cgroup root.
     pub fn cgroup_name(&self, id: &str) -> String {
@@ -128,6 +149,24 @@ pub struct Workspace {
     /// The workspace asked for the box's container engine, so every boot serves the fenced socket into it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub engine: bool,
+    /// The project this workspace was made with, where it was made with one: the copy of a checkout this
+    /// computer holds, bound inside at the project's own path by every boot. A record written before any
+    /// workspace took a project reads as one without.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copy: Option<CopyMade>,
+}
+
+/// The copy one workspace was made with, as the create made it: where it came from, where it is mounted inside,
+/// the way this disk made it and how long that took. The way is kept because the remove takes a snapshot away
+/// through the kernel and a copied tree away through the filesystem, and the time because a plain copy's minutes
+/// are a thing the person is told rather than left to guess at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyMade {
+    pub from: String,
+    pub at: String,
+    pub made: CopyWord,
+    pub ms: u64,
 }
 
 /// What one config.json is built from, beside the profile.
@@ -286,6 +325,97 @@ pub fn unmount(target: &Path) -> Result<(), Error> {
     }
 }
 
+/// The copy bound into the workspace's rootfs at the path the project has inside it, from this daemon's own
+/// mount namespace and before youki's create: youki rebinds the rootfs recursively as it pivots, so the copy
+/// travels into the workspace with it, and the daemon keeps seeing it at the same path outside, which is the
+/// path the engine fence already rewrites a bind source to.
+pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
+    fs::create_dir_all(target).map_err(at(target))?;
+    mount(Some(source), target, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).map_err(nix_at(target))
+}
+
+/// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own, held
+/// to the wire's own rule rather than to a copy of it: a path that walks up out of the rootfs resolves to a
+/// path on the box, and a bind mount is the one place a slip cannot be undone afterwards.
+pub fn inside(rootfs: &Path, at: &str) -> Result<PathBuf, Error> {
+    if !wsp_frames::is_plain_path(at) {
+        let detail = format!("{at} is not a path inside a workspace");
+        return Err(Error { path: rootfs.to_owned(), source: io::Error::new(io::ErrorKind::InvalidInput, detail) });
+    }
+    Ok(rootfs.join(at.trim_start_matches('/')))
+}
+
+/// Every mount under this path taken down, deepest first, and then the path itself: a rootfs carries the
+/// overlay, the copy bound into it and whatever youki mounted under that, and a stop that detached only the
+/// rootfs would leave the rest of them on the box. Read off this process's own mount table, so nothing outside
+/// the path is ever named, let alone unmounted.
+pub fn unmount_under(target: &Path) -> Result<(), Error> {
+    let mut under: Vec<PathBuf> = mount_points(&fs::read_to_string(MOUNTINFO).map_err(at(Path::new(MOUNTINFO)))?)
+        .into_iter()
+        .filter(|point| point.starts_with(target))
+        .collect();
+    // Deepest first: a mount cannot be detached while another sits under it.
+    under.sort_by_key(|point| std::cmp::Reverse(point.components().count()));
+    for point in under {
+        unmount(&point)?;
+    }
+    unmount(target)
+}
+
+/// The filesystem the mount covering this path is of, for the sentence a plain copy is explained in; nothing
+/// where the table names no mount over it.
+pub fn filesystem_at(path: &Path) -> Option<String> {
+    let table = fs::read_to_string(MOUNTINFO).ok()?;
+    mounts(&table)
+        .into_iter()
+        .filter(|(point, _)| path.starts_with(point))
+        .max_by_key(|(point, _)| point.components().count())
+        .map(|(_, kind)| kind)
+}
+
+/// Where the kernel writes this process's own mounts.
+const MOUNTINFO: &str = "/proc/self/mountinfo";
+
+fn mount_points(table: &str) -> Vec<PathBuf> {
+    mounts(table).into_iter().map(|(point, _)| point).collect()
+}
+
+/// Every mount in the table as its point and its filesystem. A line is the kernel's: the point is the fifth
+/// field with its spaces and other odd bytes written as octal escapes, and the filesystem is the first field
+/// after the lone dash, which the optional fields before it are told from by nothing else.
+fn mounts(table: &str) -> Vec<(PathBuf, String)> {
+    table
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split(' ');
+            let point = unescaped(fields.nth(4)?);
+            let kind = fields.by_ref().skip_while(|word| *word != "-").nth(1)?;
+            Some((PathBuf::from(point), kind.to_owned()))
+        })
+        .collect()
+}
+
+/// A mount point as the kernel wrote it: \040 and its three siblings back to the bytes they stand for.
+fn unescaped(word: &str) -> String {
+    let mut out = String::with_capacity(word.len());
+    let mut bytes = word.chars();
+    while let Some(c) = bytes.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        let octal: String = bytes.clone().take(3).collect();
+        match u8::from_str_radix(&octal, 8) {
+            Ok(byte) if octal.len() == 3 => {
+                out.push(char::from(byte));
+                bytes.nth(2);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
 pub fn write_json(path: &Path, value: &impl Serialize) -> Result<(), Error> {
     let text = serde_json::to_vec_pretty(value).map_err(|e| Error { path: path.to_owned(), source: io::Error::other(e) })?;
     fs::write(path, text).map_err(at(path))
@@ -311,6 +441,46 @@ mod tests {
         assert_eq!(l.state_of("wsp-a"), PathBuf::from("/var/lib/wsp/state/wsp-a"));
         assert_eq!(l.put("u1"), PathBuf::from("/var/lib/wsp/put/u1"));
         assert_eq!(l.cgroup_name("wsp-a"), "/wsp/wsp-a");
+        assert_eq!(l.copies(), PathBuf::from("/var/lib/wsp/copies"));
+        assert_eq!(l.copy_of("wsp-a"), PathBuf::from("/var/lib/wsp/copies/wsp-a"));
+        assert_eq!(l.projects(), PathBuf::from("/var/lib/wsp/projects"));
+        // The copies sit beside the checkouts under one root, which is what lets a copy share their blocks.
+        assert_eq!(l.copies().parent(), l.projects().parent());
+    }
+
+    #[test]
+    fn a_copy_lands_inside_the_workspace_at_the_projects_own_path_and_nowhere_else() {
+        let l = Layout::new(Path::new("/wsp"));
+        assert_eq!(inside(&l.rootfs("wsp-a"), "/Users/zingzy/wsp").unwrap(), PathBuf::from("/wsp/run/wsp-a/rootfs/Users/zingzy/wsp"));
+        assert_eq!(inside(Path::new("/r"), "/x").unwrap(), PathBuf::from("/r/x"));
+        // The wire refuses these before they reach here; this is the wall behind that one, since what a bind
+        // mount lands on cannot be taken back.
+        for walking in ["/Users/../../etc", "/..", "/a/../b", "/a/./b", "Users/zingzy/wsp"] {
+            let refused = inside(&l.rootfs("wsp-a"), walking).unwrap_err().to_string();
+            assert!(refused.contains(walking) && refused.contains("not a path inside a workspace"), "{walking}: {refused}");
+        }
+    }
+
+    #[test]
+    fn the_mount_table_reads_as_the_kernel_writes_it() {
+        // The kernel's own shape: optional fields before the dash on the first line and none on the second, a
+        // point with a space in it as an octal escape, and a filesystem after the dash rather than before it.
+        let table = concat!(
+            "36 35 98:0 / /wsp rw,noatime shared:1 master:2 - xfs /dev/sda1 rw\n",
+            "37 36 0:24 / /wsp/run/wsp-a/rootfs rw - overlay overlay rw\n",
+            "38 37 98:0 /copies/wsp-a /wsp/run/wsp-a/rootfs/Users/my\\040project rw - xfs /dev/sda1 rw\n",
+        );
+        assert_eq!(
+            mounts(table),
+            vec![
+                (PathBuf::from("/wsp"), "xfs".to_owned()),
+                (PathBuf::from("/wsp/run/wsp-a/rootfs"), "overlay".to_owned()),
+                (PathBuf::from("/wsp/run/wsp-a/rootfs/Users/my project"), "xfs".to_owned()),
+            ]
+        );
+        assert_eq!(unescaped("/a\\040b\\011c"), "/a b\tc");
+        assert_eq!(unescaped("/plain\\x"), "/plain\\x");
+        assert!(mounts("not a mount line").is_empty());
     }
 
     #[test]
@@ -391,12 +561,52 @@ mod tests {
             created_at: "2026-09-12T00:00:00.000Z".into(),
             init: Init { pid: 4242, started: 123_456, boot_id: "b0".into() },
             engine: false,
+            copy: None,
         };
         write_json(&path, &record).unwrap();
         assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
-        // A record written before the engine field existed reads as a workspace without one.
-        assert!(!fs::read_to_string(&path).unwrap().contains("engine"));
-        write_json(&path, &Workspace { engine: true, ..record }).unwrap();
+        // A record written before the engine and the copy fields existed reads as a workspace without either.
+        let written = fs::read_to_string(&path).unwrap();
+        assert!(!written.contains("engine") && !written.contains("copy"), "{written}");
+        assert_eq!(read_record(&path).unwrap().unwrap().copy, None);
+        write_json(&path, &Workspace { engine: true, ..record.clone() }).unwrap();
         assert!(read_record(&path).unwrap().unwrap().engine);
+        let made = CopyMade {
+            from: "/wsp/projects/wsp/checkout".to_owned(),
+            at: "/Users/zingzy/wsp".to_owned(),
+            made: CopyWord::Reflink,
+            ms: 1_903,
+        };
+        write_json(&path, &Workspace { copy: Some(made.clone()), ..record }).unwrap();
+        assert_eq!(read_record(&path).unwrap().unwrap().copy, Some(made));
+        assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
+    }
+
+    /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself
+    /// holds under the same root stays. Root and a mount namespace of its own, so it runs where the live cases do.
+    #[test]
+    fn unmount_under_takes_a_bind_under_a_bind_and_leaves_the_boxs_own_mounts() {
+        if std::env::var("WSP_RUNTIME_LIVE").as_deref() != Ok("1") || !nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (root, rootfs) = (dir.path().join("root"), dir.path().join("root/run/wsp-a/rootfs"));
+        let outside = dir.path().join("outside");
+        for made in [&rootfs, &outside, &root.join("copies/wsp-a")] {
+            fs::create_dir_all(made).unwrap();
+        }
+        fs::write(root.join("copies/wsp-a/file"), b"in the copy").unwrap();
+        // The box's own mount under the same root, which nothing here may take down.
+        let kept = root.join("projects");
+        fs::create_dir_all(&kept).unwrap();
+        bind_into(&outside, &kept).unwrap();
+        bind_into(&root.join("copies/wsp-a"), &rootfs.join("Users/zingzy/wsp")).unwrap();
+        bind_into(&root.join("copies/wsp-a"), &rootfs.join("Users/zingzy/wsp/again")).unwrap();
+        let mounted = |at: &Path| mount_points(&fs::read_to_string(MOUNTINFO).unwrap()).contains(&at.to_path_buf());
+        assert!(mounted(&rootfs.join("Users/zingzy/wsp")) && mounted(&rootfs.join("Users/zingzy/wsp/again")));
+        unmount_under(&rootfs).unwrap();
+        assert!(!mounted(&rootfs.join("Users/zingzy/wsp")) && !mounted(&rootfs.join("Users/zingzy/wsp/again")));
+        assert!(mounted(&kept), "the box's own mount went with the workspace's");
+        unmount(&kept).unwrap();
     }
 }
