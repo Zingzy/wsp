@@ -8,7 +8,7 @@ use std::num::NonZeroU16;
 
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, plain_path, positive};
+use crate::validate::{bounded, plain_path, plain_path_opt, positive};
 use crate::{RequestId, WorkspaceSize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +57,22 @@ pub struct MachineSpec {
     /// of the computer with no project in it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<WorkspaceCopy>,
+    /// The logins this computer holds for every workspace on it, each mounted into this one. Absent is a
+    /// workspace that shares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shares: Option<Vec<Share>>,
+}
+
+/// One file the computer running a workspace keeps outside every one of them and mounts into each at `target`:
+/// a login signed in once on that computer, read-write, so a refresh inside one workspace is the computer's own
+/// refresh rather than a copy going stale. `source` lives under the daemon's logins directory and a create
+/// refuses one that does not; `target` is where the tool reads it inside, both absolute.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Share {
+    #[serde(deserialize_with = "plain_path")]
+    pub source: String,
+    #[serde(deserialize_with = "plain_path")]
+    pub target: String,
 }
 
 /// Where a workspace's copy comes from and where it lands inside: both absolute paths, the first on the computer,
@@ -347,6 +363,10 @@ pub struct BackendFacts {
     pub lifecycle: Option<Lifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_templates: Option<BaseTemplates>,
+    /// Where this computer keeps the logins every workspace on it shares, absolute. Absent from a backend that
+    /// shares none, which is every provider: a machine somebody else runs has no file of this person's on it.
+    #[serde(default, deserialize_with = "plain_path_opt", skip_serializing_if = "Option::is_none")]
+    pub logins: Option<String>,
 }
 
 /// Which optional calls a handle carries, so the client builds a machine whose methods are present exactly where
@@ -635,4 +655,63 @@ pub struct MachineTemplateReply {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MachineTemplatesReply {
     pub templates: Vec<TemplateRow>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_spec_carries_the_logins_the_computer_shares_and_a_spec_without_them_carries_no_key() {
+        let bare = MachineSpec {
+            kind: MachineKind::Sandbox,
+            template: None,
+            from_snapshot: None,
+            cpu: None,
+            mem_mb: None,
+            disk_gb: None,
+            envs: None,
+            labels: None,
+            on_idle: None,
+            idle_timeout_ms: None,
+            idempotency_key: None,
+            engine: None,
+            copy: None,
+            shares: None,
+        };
+        let written = serde_json::to_string(&bare).unwrap();
+        assert_eq!(written, r#"{"kind":"sandbox"}"#);
+        assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), bare);
+        let shared = MachineSpec {
+            shares: Some(vec![Share {
+                source: "/var/lib/wsp/logins/codex/auth.json".to_owned(),
+                target: "/root/.codex/auth.json".to_owned(),
+            }]),
+            ..bare
+        };
+        let written = serde_json::to_string(&shared).unwrap();
+        assert_eq!(
+            written,
+            r#"{"kind":"sandbox","shares":[{"source":"/var/lib/wsp/logins/codex/auth.json","target":"/root/.codex/auth.json"}]}"#
+        );
+        assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), shared);
+        // Both paths are read by the wire's own rule: a bind mount is the one thing a slip cannot be taken back.
+        for bad in [
+            r#"{"kind":"sandbox","shares":[{"source":"logins/codex/auth.json","target":"/root/.codex/auth.json"}]}"#,
+            r#"{"kind":"sandbox","shares":[{"source":"/var/lib/wsp/logins/../../root/.ssh/id","target":"/root/.codex/auth.json"}]}"#,
+            r#"{"kind":"sandbox","shares":[{"source":"/var/lib/wsp/logins/codex/auth.json","target":"/root/../etc/passwd"}]}"#,
+        ] {
+            assert!(serde_json::from_str::<MachineSpec>(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_backend_says_where_the_logins_it_shares_live_and_only_as_a_path() {
+        let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
+        assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().logins, None);
+        let shared = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"/var/lib/wsp/logins","offer":"runtime""#);
+        assert_eq!(serde_json::from_str::<BackendFacts>(&shared).unwrap().logins.as_deref(), Some("/var/lib/wsp/logins"));
+        let relative = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"logins","offer":"runtime""#);
+        assert!(serde_json::from_str::<BackendFacts>(&relative).is_err());
+    }
 }

@@ -2313,6 +2313,16 @@ export type WorkspaceCopy = z.infer<typeof WorkspaceCopy>;
 export const CopyWord = z.enum(["reflink", "snapshot", "plain"]);
 export type CopyWord = z.infer<typeof CopyWord>;
 
+/** One login the computer running a workspace keeps outside every one of them and mounts into this one at
+ * `target`, read-write: signed in once on that computer, so a refresh inside any workspace there is the
+ * computer's own refresh rather than a copy going stale. `source` is a file under that computer's own logins
+ * directory, which its daemon says where it is and refuses a create that names anything else. */
+export const MachineShare = z.object({
+  source: z.string().min(1).refine(isPlainPath, "an absolute path on the computer"),
+  target: z.string().min(1).refine(isPlainPath, "an absolute path inside the workspace"),
+});
+export type MachineShare = z.infer<typeof MachineShare>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2334,6 +2344,10 @@ export const PlaceView = z.object({
   daemonVersion: z.number().int().optional(),
   /** The catalog ids of the agents that computer found on itself, as it last reported them. */
   agents: z.array(z.string()).optional(),
+  /** Where that computer keeps the logins every workspace on it shares, off what its backend last said. What the
+   * sign-in on that computer points the tool's own store at, and what a create there shares in. Absent on a
+   * computer that has not said yet and on a provider, which holds no file of this person's. */
+  logins: z.string().optional(),
   /** A provider: its hourly rate for the default size. */
   rateUsdPerHour: z.number().optional(),
   /** Every size a workspace here may be asked for, each with this place's own rate for it, read off the backend
@@ -2805,6 +2819,8 @@ export const MachineSpec = z.object({
   engine: z.boolean().optional(),
   /** The project this workspace is made with, on a computer the person owns. */
   copy: WorkspaceCopy.optional(),
+  /** The logins that computer holds for every workspace on it, mounted into this one. Absent shares none. */
+  shares: z.array(MachineShare).optional(),
 });
 export type MachineSpec = z.infer<typeof MachineSpec>;
 
@@ -2906,6 +2922,9 @@ export const BackendFacts = z.object({
   pricing: z.object({ defaultSize: WorkspaceSize, snapshotStorage: SnapshotStoragePricing, builderDiskGb: z.number().optional() }),
   lifecycle: z.object({ budgets: LifecycleBudgets }).optional(),
   baseTemplates: z.object({ sandbox: z.string(), desktop: z.string() }).optional(),
+  /** Where this computer keeps the logins every workspace on it shares, absolute; absent from a backend that
+   * shares none, which is every provider, since a machine somebody else runs holds no file of this person's. */
+  logins: z.string().min(1).refine(isPlainPath, "an absolute path on the computer").optional(),
 });
 export type BackendFacts = z.infer<typeof BackendFacts>;
 
@@ -3786,6 +3805,10 @@ export const NO_PLACE_INSTALLER = "this host cannot install the agent on a compu
  * host runs on and nowhere else. */
 export const PLACES_TICKET_REFUSAL = "a socket let in on a ticket cannot see or change the places this host holds; run wsp places on the computer the host runs on";
 
+/** The refusal for a daemon channel that named both a workspace and a computer, or neither: a channel is one
+ * daemon's, and which one is the caller's to say. */
+export const DAEMON_OPEN_ONE_OF = "daemon.open opens a channel to one daemon: name the workspace or the place, not both";
+
 /** Where a computer you own dials this wsp: the port the door answers on and every address it can be reached at.
  * A host that already binds beyond this computer answers its own port and opens nothing. */
 export const PlaceDoorView = z.object({
@@ -4034,8 +4057,12 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * workspace's kind answers with and sends its own token as the first frame. Refused with kind "refused" when the
    * door answered the upgrade with anything but 101 (the sentence carries the status and the body's first line),
    * with kind "reauth" when the daemon took the upgrade and closed 4401 on the token, and with the runtime's own
-   * sentence and no kind when the machine has no road or no daemon yet, or the dial failed or timed out. */
-  z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string() }),
+   * sentence and no kind when the machine has no road or no daemon yet, or the dial failed or timed out.
+   *
+   * With `placeId` in place of `workspaceId` the channel is to the daemon on a computer the person owns, over the
+   * link that computer is holding: nothing is dialled, and it is refused where that computer is not connected.
+   * One of the two, never both. */
+  z.object({ id: reqId, op: z.literal("daemon.open"), workspaceId: z.string().optional(), placeId: z.string().optional() }),
   /** Pushes WorkspaceSysEvent frames for this workspace on this socket, one per poll tick, until the socket goes.
    * The one road for a workspace whose kind reads its Live rows in the host rather than off a daemon; refused for
    * every other kind, which reads them over its own daemon link with sys.watch. Replies `{}`. */

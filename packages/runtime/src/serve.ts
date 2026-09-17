@@ -12,6 +12,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   ACCOUNT_TICKET_REFUSAL,
+  absentComputer,
   ACCOUNT_UNSERVED,
   DEVICES_TICKET_REFUSAL,
   DEVICE_REVOKE_REFUSAL,
@@ -21,6 +22,7 @@ import {
   PAIR_CODE_TTL_MS,
   PAIR_ISSUE_REFUSAL,
   PLACES_TICKET_REFUSAL,
+  DAEMON_OPEN_ONE_OF,
   PLACE_CODE_REFUSAL,
   PLACE_DOOR_REFUSAL,
   PLACE_DOOR_UNSERVED,
@@ -683,20 +685,44 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true });
               return;
             case "daemon.open": {
-              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused here.
-              const reach = await rt.workspaces.daemonReach(msg.workspaceId, origin);
-              if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
               const channel = randomBytes(6).toString("hex");
               // The daemon pushes its hello right after the auth reply, so frames that land before the open reply is
               // written wait here and go out after it: a page hears a channel's id before anything arrives on it.
               let queued: Record<string, unknown>[] | null = [];
+              const onEvent = (event: Record<string, unknown>): void => {
+                if (queued !== null) queued.push(event);
+                else send({ type: "daemon.event", channel, event });
+              };
+              if (msg.placeId !== undefined) {
+                // A computer the person owns is driven from this host's own terminal and its own window, the same
+                // gate every other places op reads; the channel rides the link that computer opened.
+                if (msg.workspaceId !== undefined) throw new Error(DAEMON_OPEN_ONE_OF);
+                if (!ownRoad()) {
+                  send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
+                  return;
+                }
+                const onLink = places().channel(msg.placeId, onEvent);
+                if (onLink === undefined) throw new Error(absentComputer(places().nameOf(msg.placeId), null).sentence);
+                channels.set(channel, onLink);
+                void onLink.closed.then(({ code, reason }) => {
+                  if (channels.get(channel) !== onLink) return;
+                  channels.delete(channel);
+                  send({ type: "daemon.closed", channel, code, reason });
+                });
+                send({ id: msg.id, ok: true, channel });
+                const held = queued;
+                queued = null;
+                for (const event of held) send({ type: "daemon.event", channel, event });
+                return;
+              }
+              if (msg.workspaceId === undefined) throw new Error(DAEMON_OPEN_ONE_OF);
+              // The same gate every workspace verb reads: a socket that may not drive this workspace is refused here.
+              const reach = await rt.workspaces.daemonReach(msg.workspaceId, origin);
+              if (reach.daemonToken === undefined) throw new Error("the machine has no daemon yet");
               const ch = await openDaemonChannel({
                 url: reach.url,
                 token: reach.daemonToken,
-                onEvent: event => {
-                  if (queued !== null) queued.push(event);
-                  else send({ type: "daemon.event", channel, event });
-                },
+                onEvent,
               });
               // The page left while the dial was in flight; the machine keeps no socket for a tab that is gone.
               if (ws.readyState !== ws.OPEN) {

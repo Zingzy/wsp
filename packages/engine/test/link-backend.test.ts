@@ -3,7 +3,9 @@
 // answers is what its own backend answered, and which optional calls a handle
 // carries is the far side's to say.
 import { describe, expect, it } from "vitest";
-import { MACHINE_PUT_PART_BYTES, type BackendFacts, type Capabilities, type MachineHandle } from "@wsp/protocol";
+import { MACHINE_PUT_PART_BYTES, type BackendFacts, type Capabilities, type MachineHandle, type MachineSpec } from "@wsp/protocol";
+import { sharesIn } from "@wsp/catalog";
+import { BUILDER_LABEL } from "../src/labels.js";
 import { LINK_MARGIN_MS, LinkBackend, LinkMachine, PlaceAbsentError, isPlaceAbsent, type MachineLink } from "../src/link-backend.js";
 import type { SnapshotProgress } from "../src/machine.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
@@ -136,6 +138,25 @@ describe("a machine over a link", () => {
     expect(machine.previewUrl).toBeUndefined();
     expect(machine.metrics).toBeUndefined();
     expect(machine.describe).toBeDefined();
+  });
+
+  it("fills a create with the logins that computer signs in once and shares into every workspace on it", async () => {
+    const l = link(sent =>
+      sent.op === "machine.backend" ? { ...FACTS, logins: "/var/lib/wsp/logins" } : sent.op === "machine.create" ? { machine: HANDLE } : {},
+    );
+    const backend = await LinkBackend.open(l.link);
+    await backend.create({ kind: "sandbox" });
+    // The catalog's own rows, at the directory that computer said it keeps them in: Codex's auth.json today.
+    expect((l.sent.at(-1)!.params["spec"] as MachineSpec).shares).toEqual(sharesIn("/var/lib/wsp/logins"));
+    // A builder becomes an image, and a sign-in never sits in one, so it shares nothing at all.
+    await backend.create({ kind: "sandbox", labels: { [BUILDER_LABEL]: "1" } });
+    expect((l.sent.at(-1)!.params["spec"] as MachineSpec).shares).toBeUndefined();
+  });
+
+  it("shares nothing where the computer names no logins directory, which is every provider", async () => {
+    const { l, backend } = await withMachine(() => ({}));
+    await backend.create({ kind: "sandbox" });
+    expect(l.sent.at(-1)!.params["spec"]).toEqual({ kind: "sandbox" });
   });
 
   it("execs with the caller's bound, and waits a little longer than it for the answer", async () => {
