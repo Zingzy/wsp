@@ -743,7 +743,9 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
       ...(flags.name !== undefined ? { name: flags.name } : {}),
       ...(flags.base !== undefined ? { base: flags.base } : {}),
     });
-    io.log(addedProjectLine(project));
+    // The computer by the name this wsp holds for it, off the same list every table reads.
+    const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
+    io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), platform() === "darwin" ? "darwin" : "linux"));
     return 0;
   } finally {
     client.close();

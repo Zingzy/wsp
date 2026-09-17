@@ -26,7 +26,7 @@ import {
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
 import { authority, authRefusal, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portsAsked, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
-import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, parseSshAddress, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshIdentity, sshMachineName, sshReachOf, type SshReach } from "@wsp/engine";
+import { agentHome, agentHomes, checkProviderKey, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
@@ -543,21 +543,6 @@ export function sshWiring(forwards = new SshForwards()): SshWiring {
   };
   return {
     backend,
-    adopt: async (address, opts) => {
-      const reach = parseSshAddress(address, opts);
-      const { machine, login, shape, hostKey } = await backend.adopt(reach);
-      return {
-        machine,
-        name: sshMachineName(reach),
-        login,
-        shape,
-        // What the machine is, as the key this client holds for it says, so the same machine under another address,
-        // port or key is the workspace it already is; a client holding no entry for it leaves the record on its
-        // address alone.
-        ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}),
-      };
-    },
-    deployDaemon: async (machine, login) => deployDaemon(machine, { place: sshDaemonPlace(login) }).then(() => DAEMON_DEPLOYED_LINE),
     forward: (machine, remotePort) => forwards.forward(machine.id, reachOf(machine), remotePort),
     removeDaemon: (machine, login) => removeDaemon(machine, sshDaemonPlace(login)),
     dropForward: machine => forwards.drop(machine.id),
@@ -1745,8 +1730,8 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   remove: {
     page: "front",
-    usage: "wsp remove <place>",
-    about: "take a place out; the agent, its files and the workspaces standing on it go, and the computer is left as wsp found it",
+    usage: "wsp remove <computer>",
+    about: "take a computer out; the agent and its files go, and the computer is left as wsp found it. Refused while a workspace or a project stands on it, naming them",
     json: false,
     host: "hostSide",
     cliOnly: "takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it",

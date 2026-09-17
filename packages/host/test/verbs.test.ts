@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -1866,6 +1866,23 @@ describe("wsp verbs over the host", () => {
     }
   });
 
+  it("a project worked in place takes none of the words a fork takes, and says which to drop", async () => {
+    const folder = realpathSync(mkdtempSync(join(dir, "repo-flags-")));
+    execFileSync("git", ["init", "-q", folder]);
+    const here = await projectOn(rt, HERE_PLACE_ID, folder);
+    for (const [word, value] of [["--from", "snap_p"], ["--size", "2x4"]] as const) {
+      const said = await run("new", here.name, "work", word, value);
+      expect(said.code).toBe(EXIT_CODES.usage);
+      expect(said.io.errors[0]).toContain(worksInPlaceTakesNone(here.name, [word]));
+    }
+    const engined = await run("new", here.name, "work", "--engine");
+    expect(engined.code).toBe(EXIT_CODES.usage);
+    expect(engined.io.errors[0]).toContain(worksInPlaceTakesNone(here.name, ["--engine"]));
+    // Nothing was made by any of the three, so the folder is still free for the workspace that names none of them.
+    expect((await rt.workspaces.list()).filter(w => w.project.id === here.id)).toEqual([]);
+    expect((await run("new", here.name, "work")).code).toBe(0);
+  });
+
   it("projects lists every project this host holds, each on its computer, and a workspace row names the one it holds", async () => {
     const spoo = await projectOn(rt, undefined, "https://github.com/dev/spoo.git");
     await run("new", spoo.name, "alpha");
@@ -1875,6 +1892,16 @@ describe("wsp verbs over the host", () => {
     const [heading, ...rows] = listed.io.lines[0]!.split("\n");
     expect(heading!.split(/ {2,}/)).toEqual(["PROJECT", "ID", "COMPUTER", "SOURCE", "PATH", "BASE", "WORKSPACES"]);
     expect(rows.map(r => r.split(/ {2,}/)).find(r => r[0] === "spoo")).toEqual(["spoo", spoo.id, spoo.computer, "https://github.com/dev/spoo.git", "/root/spoo", "1"]);
+
+    // The computer's own word, never the place id: a project on the computer the host runs on reads as this Mac,
+    // the same word the workspaces table gives its row.
+    const folder = realpathSync(mkdtempSync(join(dir, "repo-here-")));
+    execFileSync("git", ["init", "-q", folder]);
+    const here = await projectOn(rt, HERE_PLACE_ID, folder);
+    const both = await run("projects");
+    const cell = both.io.lines[0]!.split("\n").map(r => r.split(/ {2,}/)).find(r => r[0] === here.name)!;
+    expect(cell[2]).toBe(thisComputer("darwin"));
+    expect(cell[2]).not.toBe(HERE_PLACE_ID);
     const raw = await run("projects", "--json");
     expect((json(raw.io)[0] as { projects: { name: string }[] }).projects.map(p => p.name)).toContain("spoo");
 
