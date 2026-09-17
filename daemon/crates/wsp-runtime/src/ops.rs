@@ -4,10 +4,12 @@
 //! status }` with `kind: missing` for a workspace nothing here knows. A workspace is a record under the run
 //! directory, a container youki made from this computer's own directories and one copy of a checkout on it, its
 //! cgroup, and its network. This computer keeps no image: a create that names a template or a snapshot is
-//! refused in one sentence, and nothing here pulls, builds, saves or lists one. Idle means stopped: a pause kills
-//! the processes and takes the network down, the workspace's upper directories stay with its copy, and the wake
-//! mounts the computer again and boots from them with the same id, address and forwards; a workspace labelled to
-//! keep running is frozen instead.
+//! refused in one sentence, and nothing here pulls, builds, saves or lists one.
+//!
+//! Idle means stopped, and a pause always stops: SIGTERM to the workspace's processes, its init last, then the
+//! kill road for whatever stayed, the network down, and every mount under the rootfs detached. The upper
+//! directories stay with the copy, and the wake mounts the computer again and boots from them with the same id,
+//! address and forwards. There is no other state: nothing here freezes a workspace, and no label asks for it.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -23,7 +25,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use wsp_frames::{
-    words, BackendFacts, BackendPricing, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
+    words, BackendFacts, BackendPricing, Bind, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
     MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply,
     MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode,
@@ -52,10 +54,9 @@ pub const EXEC_ENV: &str = "export HOME=/root USER=root";
 pub const DAEMON_LISTENING_CHECK: &str = "(exec 3<>/dev/tcp/127.0.0.1/7070) 2>/dev/null";
 /// The label every workspace wears, so a listing is only ours.
 pub const WSP_LABEL: &str = "wsp";
-/// The label and its value on a workspace that must keep what its processes hold: a pause freezes it instead of
-/// stopping it, which is what a pinned port or a service inside asks for.
-pub const IDLE_LABEL: &str = "wsp.idle";
-pub const IDLE_FREEZE: &str = "freeze";
+/// The label a workspace's own name rides on, which the host stamps at the create: what the refusal of a create
+/// with no room names the workspace to stop by, since an id is not a thing a person recognises.
+pub const NAME_LABEL: &str = "wsp-name";
 const SIZES: [(f64, u64); 2] = [(2.0, 4096), (4.0, 8192)];
 const WAKE_ATTEMPTS: u32 = 1;
 const DAEMON_ANSWERS_MS: u64 = 30_000;
@@ -70,6 +71,58 @@ pub fn boot_cmd() -> Vec<String> {
         "-c".to_owned(),
         format!("if [ -x {GUEST_SUPERVISOR_PATH} ]; then exec {GUEST_SUPERVISOR_PATH}; fi\nexec sleep infinity"),
     ]
+}
+
+/// Whether a command run inside is the workspace doing something or this computer asking whether it is still
+/// there. The daemon-listening probe is the host's own health check, asked of every running workspace every few
+/// seconds for as long as the host is up, so a workspace whose probe counted would read busy for ever and never
+/// reach a window's end. Everything else a command road carries was asked for by somebody.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Seen {
+    Command,
+    Probe,
+}
+
+/// What every exec carries ahead of its command: the home and the user every wsp guest exec sets, and the
+/// compose project of a workspace that asked for an engine. The project name rides on each exec as well as on the
+/// boot because an exec runs as a tenant of the workspace, which youki hands the init's namespaces and cgroup
+/// and none of its environment.
+pub fn exec_env(record: &Workspace) -> String {
+    match record.engine {
+        true => format!("{EXEC_ENV} COMPOSE_PROJECT_NAME={}", compose_project(&record.id)),
+        false => EXEC_ENV.to_owned(),
+    }
+}
+
+/// The compose project one workspace's containers, networks and volumes belong to: its own id, held to what
+/// compose takes as a project name. Two pieces of work on one project on one box are two workspaces, and without
+/// a name each the second one's compose finds the first one's network under the name it wants and fails at the
+/// network step (measured through the fence on a box).
+pub fn compose_project(id: &str) -> String {
+    let word: String =
+        id.chars().map(|c| if c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-' { c } else { '-' }).collect();
+    word.trim_start_matches(['-', '_']).to_owned()
+}
+
+/// The name a person knows a workspace by, which the host stamps at the create; its id where a create of its own
+/// carried no name.
+fn workspace_name(record: &Workspace) -> String {
+    record.labels.get(NAME_LABEL).filter(|name| !name.is_empty()).cloned().unwrap_or_else(|| record.id.clone())
+}
+
+/// What a create is refused with on a box with no room for another workspace: what the kernel says is free, what
+/// the workspace would have been capped at, and the one to stop to make room, which is whichever of the awake
+/// ones has gone longest without anybody asking it for anything. A box whose own work filled it has none of ours
+/// to name, and says so rather than naming nothing.
+pub fn box_full_refusal(need_mb: u64, free_mb: u64, quietest: Option<(String, u64)>) -> String {
+    match quietest {
+        Some((name, quiet_min)) => format!(
+            "this computer has {free_mb} MB free and a workspace needs {need_mb} MB; stop {name}, quiet for {quiet_min} min, to make room"
+        ),
+        None => format!(
+            "this computer has {free_mb} MB free and a workspace needs {need_mb} MB, and no workspace of yours is awake to stop: what is holding it is the computer's own work"
+        ),
+    }
 }
 
 /// A refusal on the wire: the sentence, and the engine's kind and status where a client branches on them.
@@ -178,6 +231,13 @@ impl Unfinished {
     }
 }
 
+/// What one create mounts into the workspace, kept together from the create to the record: the computer's logins
+/// and the folders of its own it binds.
+struct Mounted {
+    shares: Vec<Share>,
+    binds: Vec<Bind>,
+}
+
 impl Ops {
     /// Opens the root, sweeps the creates that never finished, reads the box, marks every workspace whose init is
     /// gone as stopped (a reboot, or a daemon that was not there when the init died, leaves its record, its upper
@@ -198,13 +258,16 @@ impl Ops {
             fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
         }
         // The logins directory is made before any sign-in on this computer asks for it, and only this login may
-        // read it: what lands under it is the person's own sign-in for every workspace here.
-        let logins = layout.logins();
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&logins)
-            .map_err(|e| OpError::plain(format!("{}: {e}", logins.display())))?;
+        // read it: what lands under it is the person's own sign-in for every workspace here. The projects
+        // directory is made the same way and for the same reason: a project's checkout and its agent's memory are
+        // the person's, and an add binds a project's own folder under it into the workspace that clones into it.
+        for dir in [layout.logins(), layout.projects()] {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&dir)
+                .map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
+        }
         // Before anything reads the run directory as a list of workspaces: what a create that died left is not
         // one, and a copy that was still being made is not a copy.
         let unfinished = sweep_unfinished(&layout)?;
@@ -330,37 +393,22 @@ impl Ops {
             MachineOp::List { labels } => body(MachineListReply { machines: self.list(labels.as_ref())? }),
             MachineOp::Exec { machine_id, cmd, timeout_ms } => {
                 let record = self.running(&machine_id)?;
-                body(MachineExecReply { result: self.exec(&record.id, &cmd, None, deadline(timeout_ms)).await? })
+                body(MachineExecReply { result: self.exec(&record, &cmd, None, deadline(timeout_ms), Seen::Command).await? })
             }
             MachineOp::Pause { machine_id } => {
                 let record = self.record(&machine_id)?;
                 if !runtime::alive(&record.init) {
                     return Err(OpError::plain(format!("workspace {} is already paused", record.id)));
                 }
-                let cgroup = self.layout.cgroup_dir(&record.id);
-                if freeze::frozen(&cgroup)? {
-                    return Err(OpError::plain(format!("workspace {} is already paused", record.id)));
-                }
-                if record.labels.get(IDLE_LABEL).is_some_and(|v| v == IDLE_FREEZE) {
-                    freeze::freeze(cgroup).await?;
-                    self.runtime.set_status(&record.id, true)?;
-                } else {
-                    self.stop(&record).await?;
-                }
+                self.stop(&record).await?;
                 body(Empty {})
             }
             MachineOp::Resume { machine_id } => {
                 let record = self.record(&machine_id)?;
-                if !runtime::alive(&record.init) {
-                    self.wake(record).await?;
-                    return body(Empty {});
-                }
-                let cgroup = self.layout.cgroup_dir(&record.id);
-                if !freeze::frozen(&cgroup)? {
+                if runtime::alive(&record.init) {
                     return Err(OpError::plain(format!("workspace {} is not paused", record.id)));
                 }
-                freeze::thaw(cgroup).await?;
-                self.runtime.set_status(&record.id, false)?;
+                self.wake(record).await?;
                 body(Empty {})
             }
             MachineOp::Kill { machine_id } => {
@@ -389,12 +437,12 @@ impl Ops {
             MachineOp::Metrics { machine_id } => body(MachineReadingReply { reading: self.reading(&self.record(&machine_id)?) }),
             MachineOp::DaemonAnswers { machine_id, timeout_ms } => {
                 let record = self.running(&machine_id)?;
-                let result = self.exec(&record.id, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms)).await?;
+                let result = self.exec(&record, DAEMON_LISTENING_CHECK, None, deadline(timeout_ms), Seen::Probe).await?;
                 body(MachineAnswersReply { answers: result.exit_code == 0 })
             }
             MachineOp::PutBytes { machine_id, path, upload_id, seq, last, data, timeout_ms } => {
                 let record = self.running(&machine_id)?;
-                self.put_bytes(&record.id, &path, &upload_id, seq, last, &data, deadline(timeout_ms)).await?;
+                self.put_bytes(&record, &path, &upload_id, seq, last, &data, deadline(timeout_ms)).await?;
                 body(Empty {})
             }
             MachineOp::Facts { machine_id } => {
@@ -458,6 +506,7 @@ impl Ops {
             // Nothing boots from a name here, so there is no name to offer for a kind.
             base_templates: None,
             logins: Some(self.layout.logins().to_string_lossy().into_owned()),
+            projects: Some(self.layout.projects().to_string_lossy().into_owned()),
         }
     }
 
@@ -543,6 +592,12 @@ impl Ops {
     }
 
     async fn create(&self, spec: MachineSpec) -> Result<MachineHandle, OpError> {
+        self.create_with_room(spec, crate::size::free_mem_mb()).await
+    }
+
+    /// `free_mb` is what the box says it has free, read by the create above and handed in, so the room rule is
+    /// read against a figure the caller holds rather than against the moment the check runs.
+    async fn create_with_room(&self, spec: MachineSpec, free_mb: Option<u64>) -> Result<MachineHandle, OpError> {
         // A workspace here is made of this computer's own directories, so a name for an image to boot from is
         // not something to fall back from: it is a create meant for another kind of place.
         if spec.template.is_some() || spec.from_snapshot.is_some() {
@@ -554,6 +609,7 @@ impl Ops {
         // Before the claim and before anything is mounted: a source this daemon does not share out is refused,
         // and a refusal here costs nothing to take back.
         let shares = self.shares_of(&spec)?;
+        let binds = self.binds_of(&spec)?;
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
             None => format!("wsp-{}", random_word()),
@@ -569,6 +625,16 @@ impl Ops {
                 None => Err(OpError::plain(format!("workspace {id} is being created"))),
             };
         }
+        // After the claim, and before a byte is copied or anything is mounted: a box with no room for another
+        // workspace says so in one sentence naming the one to stop, rather than booting a workspace that pushes
+        // the computer somebody is using into reclaim. After the claim because a create under a key this box
+        // already holds a workspace for is that workspace's handle and needs no room at all: the client's retry
+        // of a create whose answer the link dropped must not be refused for the room its own workspace holds.
+        // The claim is given back with the refusal, so the next create under that key is not wedged by it.
+        if let Some(refusal) = self.no_room_for(size.mem_mb, free_mb)? {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(OpError::plain(refusal));
+        }
         // Before anything is mounted and before youki: a copy of the checkout is the slowest thing a create does
         // and the one thing a person waits on, and a refusal here costs nothing else.
         let copy = match &spec.copy {
@@ -582,7 +648,7 @@ impl Ops {
             None => None,
         };
         let notice = notices([size.clamped.clone(), copy.as_ref().and_then(|made| self.plain_copy_notice(made))]);
-        match self.build(&id, &spec, &size, copy.clone(), shares).await {
+        match self.build(&id, &spec, &size, copy.clone(), Mounted { shares, binds }).await {
             Ok(record) => Ok(noticed(self.handle(&record, None, None), notice)),
             Err(e) => {
                 // A workspace that would not come up is ours and nobody else's: nothing of it stays behind, the
@@ -596,7 +662,49 @@ impl Ops {
         }
     }
 
+    /// Whether this box has room for one more workspace of that size, and the sentence to refuse the create with
+    /// where it has not: what the kernel says is free right now against what the workspace would be capped at.
+    ///
+    /// What is free and not the sum of the caps: a cap is what a workspace may take, not what it holds, so five
+    /// awake workspaces whose processes are all small leave the box its room and a sixth is made. The other way
+    /// round, a workspace that later grows into its cap can still push the box into swap before another create
+    /// is refused; the cap is what bounds each of them, and this is what keeps a create from being the thing
+    /// that does it.
+    ///
+    /// A box whose kernel says nothing free refuses nothing, which is every computer that is not a box: the size
+    /// rule above is what holds a create there.
+    fn no_room_for(&self, need_mb: u64, free_mb: Option<u64>) -> Result<Option<String>, OpError> {
+        let Some(free_mb) = free_mb else { return Ok(None) };
+        if free_mb >= need_mb {
+            return Ok(None);
+        }
+        Ok(Some(box_full_refusal(need_mb, free_mb, self.quietest_awake()?)))
+    }
+
+    /// The awake workspace that has gone longest without a byte through a published port or a command run in it,
+    /// as the name a person knows it by and the minutes it has been quiet: the one to stop to make room. Nothing
+    /// where nothing of ours is awake, which is a box whose own work is what filled it.
+    ///
+    /// Compared by the millisecond and told in minutes, since two workspaces quiet for different lengths of the
+    /// same minute are not the same answer. One this daemon has no clock for reads as busy rather than as quiet:
+    /// a workspace nothing is known about is not the one to tell somebody to stop.
+    fn quietest_awake(&self) -> Result<Option<(String, u64)>, OpError> {
+        let mut quietest: Option<(String, u64)> = None;
+        for record in self.records()? {
+            if !runtime::alive(&record.init) {
+                continue;
+            }
+            let quiet_ms = self.net.quiet_for_ms(&record.id).unwrap_or(0);
+            if quietest.as_ref().is_none_or(|(_, held)| quiet_ms > *held) {
+                quietest = Some((workspace_name(&record), quiet_ms));
+            }
+        }
+        Ok(quietest.map(|(name, quiet_ms)| (name, quiet_ms / 60_000)))
+    }
+
     /// The logins a create asks for, held to one rule: a file under the directory this daemon shares them out of.
+    /// (The two lists a create carries travel together from here to the record, so the boot mounts what the
+    /// create was given and a wake mounts what the record kept.)
     /// A source anywhere else on the box is refused, since a bind mount lands on the workspace's own files and is
     /// the one thing a slip cannot be taken back; so is one that is there and is not a file, which the boot would
     /// otherwise pass over without a word. A source that is not there yet is a login nobody has signed in on this
@@ -617,6 +725,30 @@ impl Ops {
                     share.source
                 )));
             }
+        }
+        Ok(asked)
+    }
+
+    /// The folders a create asks to have mounted into the workspace, held to one rule: a directory under the
+    /// projects directory this daemon keeps the checkouts and their memory in. A bind mount lands on the
+    /// workspace's own files and is the one thing a slip cannot be taken back, so nothing else on the box is bound,
+    /// and a source that is there and is not a directory is refused rather than passed over without a word. A
+    /// source that is not there yet is made: an add binds a project's own folder before it has cloned into it.
+    fn binds_of(&self, spec: &MachineSpec) -> Result<Vec<Bind>, OpError> {
+        let projects = self.layout.projects();
+        let asked = spec.binds.clone().unwrap_or_default();
+        for bind in &asked {
+            let at = Path::new(&bind.source);
+            let under =
+                wsp_frames::is_plain_path(&bind.source) && at.strip_prefix(&projects).is_ok_and(|rest| rest.iter().next().is_some());
+            if !under || (at.exists() && !at.is_dir()) {
+                return Err(OpError::plain(format!(
+                    "a folder bound into a workspace is a directory under {}, and {} is not one",
+                    projects.display(),
+                    bind.source
+                )));
+            }
+            fs::create_dir_all(at).map_err(|e| OpError::plain(format!("{}: {e}", at.display())))?;
         }
         Ok(asked)
     }
@@ -664,7 +796,7 @@ impl Ops {
         spec: &MachineSpec,
         size: &SizeOnBox,
         copy: Option<CopyMade>,
-        shares: Vec<Share>,
+        mounted: Mounted,
     ) -> Result<Workspace, OpError> {
         let engine = spec.engine == Some(true);
         if engine {
@@ -684,7 +816,8 @@ impl Ops {
             init: Init { pid: 0, started: 0, boot_id: String::new() },
             engine,
             copy,
-            shares,
+            shares: mounted.shares,
+            binds: mounted.binds,
         };
         self.boot(record).await
     }
@@ -714,6 +847,12 @@ impl Ops {
             bundle::empty_file(&bundle::inside(&self.layout.rootfs(&id), &share.target)?)?;
             shares.push(share.clone());
         }
+        // The folders of the computer's own this workspace was made with, bound where it reads them: made here
+        // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
+        // workspace mounts under one of them never reaches the computer.
+        for bind in &record.binds {
+            bundle::bind_into(Path::new(&bind.source), &bundle::inside(&self.layout.rootfs(&id), &bind.target)?)?;
+        }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {
             fs::create_dir_all(dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
@@ -721,6 +860,9 @@ impl Ops {
         }
         let mut args = vec![profile::INIT_PATH.to_owned(), "runtime".to_owned(), "init".to_owned(), "--".to_owned()];
         args.extend(boot_cmd());
+        // The compose project of a workspace with an engine, in the environment its daemon and every thread
+        // under it inherits; the exec road carries the same name, since a tenant inherits none of this.
+        let compose_name = record.engine.then(|| compose_project(&id));
         let cgroup = self.layout.cgroup_name(&id);
         let config = Config {
             hostname: &record.hostname,
@@ -733,6 +875,8 @@ impl Ops {
             etc: &self.layout.etc(&id),
             engine: engine_dir.as_deref(),
             shares: &shares,
+            binds: &record.binds,
+            compose_project: compose_name.as_deref(),
         };
         bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
         self.runtime.create(&id).await?;
@@ -742,11 +886,21 @@ impl Ops {
         let network = self.net.up(&id, pid).await?;
         // The same inode the container has bound, so the line lands inside.
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, Some(network.gateway))?;
-        freeze::forbid_swap(&self.layout.cgroup_dir(&id))?;
+        let cgroup = self.layout.cgroup_dir(&id);
+        freeze::forbid_swap(&cgroup)?;
+        // The cap as a throttle as well as a kill: youki wrote memory.max off the spec, and this is the same
+        // figure at memory.high, so the kernel reclaims what it can from the workspace before it ends anything.
+        if let Some(mem_mb) = record.mem_mb {
+            freeze::throttle_at(&cgroup, mem_mb)?;
+        }
         if record.engine {
             self.serve_engine(&id).await?;
         }
         self.runtime.start(&id).await?;
+        // Ready is the boot command running, not the start returning: the start execs the workspace's first
+        // process and that process spawns the boot command a moment later, so a create that answered in between
+        // handed back a workspace whose cgroup held one pid, which a stop asked right then could not stop.
+        self.runtime.boot_child_up(&id, &record.init).await?;
         self.net.restore(std::slice::from_ref(&id)).await?;
         if record.engine {
             self.join_ports(&record).await;
@@ -754,13 +908,14 @@ impl Ops {
         Ok(record)
     }
 
-    /// Idle means stopped: the processes are killed, youki's state and the cgroup go, the network's link and
-    /// listeners go, and every mount under the rootfs is detached, deepest first, so a stopped workspace holds
-    /// none of the box's directories and the box may upgrade them while it sleeps. The upper directories, the
-    /// copy, the record and the network record stay: they are what the wake boots it with.
+    /// Idle means stopped: the workspace's processes are asked to end and killed if they will not, youki's state
+    /// and the cgroup go, the network's link and listeners go, and every mount under the rootfs is detached,
+    /// deepest first, so a stopped workspace holds none of the box's directories and the box may upgrade them
+    /// while it sleeps. The upper directories, the copy, the record and the network record stay: they are what
+    /// the wake boots it with.
     async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
         self.stop_engine(&record.id).await;
-        self.runtime.kill(&record.id, Some(&record.init)).await?;
+        self.runtime.stop(&record.id, Some(&record.init)).await?;
         self.net.stop(&record.id).await?;
         bundle::unmount_under(&self.layout.rootfs(&record.id))?;
         Ok(())
@@ -774,9 +929,19 @@ impl Ops {
         self.boot(record).await
     }
 
-    async fn exec(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
-        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{EXEC_ENV}\n{cmd}")];
-        let done = self.runtime.exec(id, &args, stdin, timeout).await?;
+    async fn exec(
+        &self,
+        record: &Workspace,
+        cmd: &str,
+        stdin: Option<Vec<u8>>,
+        timeout: Duration,
+        seen: Seen,
+    ) -> Result<ExecResult, OpError> {
+        if seen == Seen::Command {
+            self.net.touched(&record.id);
+        }
+        let args = vec!["bash".to_owned(), "-c".to_owned(), format!("{}\n{cmd}", exec_env(record))];
+        let done = self.runtime.exec(&record.id, &args, stdin, timeout).await?;
         Ok(ExecResult { exit_code: done.exit_code, stdout: done.stdout, stderr: done.stderr })
     }
 
@@ -785,7 +950,7 @@ impl Ops {
     #[allow(clippy::too_many_arguments)]
     async fn put_bytes(
         &self,
-        id: &str,
+        record: &Workspace,
         path: &str,
         upload_id: &str,
         seq: u64,
@@ -817,9 +982,9 @@ impl Ops {
         let whole = fs::read(&part)?;
         let _ = fs::remove_file(&part);
         let script = land_script(path, whole.len());
-        let done = self.exec(id, &script, Some(whole), timeout).await?;
+        let done = self.exec(record, &script, Some(whole), timeout, Seen::Command).await?;
         if done.exit_code != 0 {
-            return Err(OpError::plain(format!("landing {path} on {id} exited {}: {}", done.exit_code, done.stderr.trim())));
+            return Err(OpError::plain(format!("landing {path} on {} exited {}: {}", record.id, done.exit_code, done.stderr.trim())));
         }
         Ok(())
     }
@@ -879,6 +1044,7 @@ impl Ops {
             cpu_usage_usec: live.then(|| freeze::cpu_usage_usec(&cgroup).ok()).flatten(),
             uptime_ms: live.then(|| runtime::uptime_ms(&record.init).ok()).flatten(),
             procs: live.then(|| freeze::pids_in(&cgroup).ok()).flatten(),
+            quiet_for_ms: live.then(|| self.net.quiet_for_ms(&record.id)).flatten(),
             address: self.net.record(&record.id).ok().flatten().map(|network| network.address.to_string()),
             cgroup: cgroup.display().to_string(),
             upper: self.layout.upper(&record.id).display().to_string(),
@@ -1055,12 +1221,12 @@ impl Ops {
             .collect())
     }
 
-    /// created reads starting, a frozen cgroup reads paused, and a stopped workspace reads paused too: under a
-    /// disk pause a stop is a nap, as the Docker backend reads an exited container, and its upper directory is
-    /// what the wake boots. A record whose init is not the process it named is stopped before youki is asked,
-    /// since youki reads any process on that pid as the container; one whose upper directory is gone too is gone.
-    /// A live init whose youki state reads stopped, is missing or does not load is a workspace this daemon can
-    /// neither nap nor wake, and reads gone rather than a nap the resume could not do.
+    /// created reads starting and a stopped workspace reads paused: under a disk pause a stop is a nap, as the
+    /// Docker backend reads an exited container, and its upper directory is what the wake boots. A record whose
+    /// init is not the process it named is stopped before youki is asked, since youki reads any process on that
+    /// pid as the container; one whose upper directory is gone too is gone. A live init whose youki state reads
+    /// stopped, is missing or does not load is a workspace this daemon can neither nap nor wake, and reads gone
+    /// rather than a nap the resume could not do.
     pub fn state_of(&self, record: &Workspace) -> MachineState {
         if !runtime::alive(&record.init) {
             return if self.layout.upper(&record.id).is_dir() { MachineState::Paused } else { MachineState::Gone };
@@ -1068,10 +1234,7 @@ impl Ops {
         match self.runtime.status(&record.id) {
             Ok(Status::Creating | Status::Created) => MachineState::Starting,
             Ok(Status::Paused) => MachineState::Paused,
-            Ok(Status::Running) => match freeze::frozen(&self.layout.cgroup_dir(&record.id)) {
-                Ok(true) => MachineState::Paused,
-                _ => MachineState::Running,
-            },
+            Ok(Status::Running) => MachineState::Running,
             Ok(Status::Stopped | Status::Gone) | Err(_) => MachineState::Gone,
         }
     }
@@ -1193,10 +1356,175 @@ mod tests {
             etc: Path::new("/tmp"),
             engine: None,
             shares: &[],
+            binds: &[],
+            compose_project: None,
         });
-        // One core of every period, and half of the box's four gigabytes.
+        // One core of every period, and a third of the box's four gigabytes.
         assert_eq!(spec["linux"]["resources"]["cpu"], serde_json::json!({ "quota": 100_000, "period": 100_000 }));
-        assert_eq!(spec["linux"]["resources"]["memory"], serde_json::json!({ "limit": 2_147_483_648u64 }));
+        assert_eq!(spec["linux"]["resources"]["memory"], serde_json::json!({ "limit": 1365u64 * 1024 * 1024 }));
+    }
+
+    /// The workspace a refusal names, and the one every exec carries the compose project of.
+    fn awake(id: &str, name: Option<&str>) -> Workspace {
+        let mut labels = BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]);
+        if let Some(name) = name {
+            labels.insert(NAME_LABEL.to_owned(), name.to_owned());
+        }
+        Workspace {
+            id: id.to_owned(),
+            hostname: id.to_owned(),
+            labels,
+            envs: BTreeMap::new(),
+            cpu: Some(1.0),
+            mem_mb: Some(1024),
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            init: Init { pid: 1, started: 0, boot_id: String::new() },
+            engine: false,
+            copy: None,
+            shares: Vec::new(),
+            binds: Vec::new(),
+        }
+    }
+
+    /// A create a box has no room for is refused in one sentence, and the sentence names the workspace to stop:
+    /// the awake one nobody has asked anything of for the longest, by the name the person gave it.
+    #[test]
+    fn a_box_with_no_room_names_the_quietest_awake_workspace_to_stop() {
+        assert_eq!(
+            box_full_refusal(2582, 900, Some(("landing-a".to_owned(), 34))),
+            "this computer has 900 MB free and a workspace needs 2582 MB; stop landing-a, quiet for 34 min, to make room"
+        );
+        // A workspace created without a name of its own is named by its id, which is what a person sees in the
+        // listing for it.
+        let no_name = workspace_name(&awake("wsp-8fef733ad777", None));
+        assert!(box_full_refusal(2582, 900, Some((no_name, 0))).contains("stop wsp-8fef733ad777, quiet for 0 min"));
+        assert_eq!(workspace_name(&awake("wsp-a", Some("landing-b"))), "landing-b");
+        // An empty name label is no name: the id says more than nothing does.
+        assert_eq!(workspace_name(&awake("wsp-a", Some(""))), "wsp-a");
+        // And a box whose own work filled it has nothing of ours to name, and says that rather than naming
+        // nothing.
+        let none = box_full_refusal(2582, 120, None);
+        assert!(none.starts_with("this computer has 120 MB free and a workspace needs 2582 MB, and no"), "{none}");
+        assert!(none.ends_with("the computer's own work"), "{none}");
+    }
+
+    /// The room check end to end, on records this process is the init of, so they read awake without a container:
+    /// what the kernel says is free against what the workspace would be capped at, and the sentence naming the
+    /// one to stop.
+    #[test]
+    fn a_create_with_no_room_on_the_box_is_refused_and_a_box_with_room_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        // Two workspaces of ours, awake because their records name this process as their init.
+        let mine = runtime::identity_of(std::process::id() as i32).unwrap();
+        for (id, name) in [("wsp-one", "landing-a"), ("wsp-two", "landing-b")] {
+            fs::create_dir_all(layout.upper(id)).unwrap();
+            let mut record = awake(id, Some(name));
+            record.init = mine.clone();
+            bundle::write_json(&layout.record(id), &record).unwrap();
+        }
+        // A box that says nothing about what is free holds a create to the size rule alone, which is every
+        // computer that is not a box.
+        assert_eq!(ops.no_room_for(2582, None).unwrap(), None);
+        // Room for it: nothing is said and nothing is refused.
+        assert_eq!(ops.no_room_for(2582, Some(4096)).unwrap(), None);
+        assert_eq!(ops.no_room_for(2582, Some(2582)).unwrap(), None);
+        // No room: one sentence, naming the awake workspace nobody has asked anything of for longest. The second
+        // one's clock started first and the first one was touched since, so the second is the one to stop.
+        ops.net.quiet_of("wsp-two");
+        std::thread::sleep(Duration::from_millis(60));
+        ops.net.touched("wsp-one");
+        let refused = ops.no_room_for(2582, Some(900)).unwrap().unwrap();
+        assert_eq!(refused, box_full_refusal(2582, 900, Some(("landing-b".to_owned(), 0))));
+        assert!(refused.contains("stop landing-b"), "{refused}");
+        // And a workspace that is not awake is not a workspace to stop: with neither of them running, the box's
+        // own work is what is holding it.
+        for id in ["wsp-one", "wsp-two"] {
+            let mut record = bundle::read_record(&layout.record(id)).unwrap().unwrap();
+            record.init = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
+            bundle::write_json(&layout.record(id), &record).unwrap();
+        }
+        assert_eq!(ops.no_room_for(2582, Some(900)).unwrap().unwrap(), box_full_refusal(2582, 900, None));
+    }
+
+    /// A create retried under a key this box already holds a workspace for is that workspace's handle, whatever
+    /// the room: the client retries a create whose answer the link dropped, and the workspace it is asking about
+    /// is already holding the memory the room check would refuse it for. The refusal is for a create that would
+    /// make a new one, and it gives the claim back so the key is not wedged.
+    #[tokio::test]
+    async fn a_retry_under_a_key_the_box_already_holds_a_workspace_for_is_answered_and_not_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        let key = "landing-a";
+        let id = format!("wsp-{}", workspace_word(key));
+        let asking = MachineSpec { idempotency_key: Some(key.to_owned()), ..bare_spec() };
+
+        // No room at all, and no workspace under the key yet: one sentence, and the claim it took is given back.
+        let refused = ops.create_with_room(asking.clone(), Some(1)).await.unwrap_err().message;
+        assert_eq!(refused, box_full_refusal(ops.facts().machine_mem_mb(), 1, None));
+        assert!(!layout.workspace(&id).exists(), "the refusal kept the claim");
+
+        // The same create once its workspace stands: the handle of the workspace the first one made, marked as
+        // the answer to a create that was already served, and no refusal though the box is just as full.
+        fs::create_dir_all(layout.upper(&id)).unwrap();
+        let mut record = awake(&id, Some(key));
+        record.init = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
+        bundle::write_json(&layout.record(&id), &record).unwrap();
+        let handle = ops.create_with_room(asking, Some(1)).await.unwrap();
+        assert_eq!((handle.id.as_str(), handle.replayed), (id.as_str(), Some(true)));
+        // And the create that would make a new one is still refused, key or no key.
+        assert!(ops.create_with_room(bare_spec(), Some(1)).await.is_err());
+    }
+
+    /// A spec asking for nothing at all: the kind, and no image, size, copy, login or folder of the computer's.
+    fn bare_spec() -> MachineSpec {
+        MachineSpec {
+            kind: MachineKind::Sandbox,
+            template: None,
+            from_snapshot: None,
+            cpu: None,
+            mem_mb: None,
+            disk_gb: None,
+            envs: None,
+            labels: None,
+            on_idle: None,
+            idle_timeout_ms: None,
+            idempotency_key: None,
+            engine: None,
+            copy: None,
+            shares: None,
+            binds: None,
+        }
+    }
+
+    /// The compose project of a workspace is its own id, so two pieces of work on one project are two stacks; and
+    /// it is a name compose takes, whatever a person's idempotency key made of the id.
+    #[test]
+    fn the_compose_project_is_the_workspace_and_a_name_compose_takes() {
+        assert_eq!(compose_project("wsp-8fef733ad77786dc"), "wsp-8fef733ad77786dc");
+        assert_ne!(compose_project("wsp-landing-a"), compose_project("wsp-landing-b"));
+        // A key with a dot in it is a workspace id and not a compose project: compose takes letters, digits,
+        // underscores and hyphens, and nothing leading with a hyphen.
+        assert_eq!(compose_project("wsp-spoo.landing"), "wsp-spoo-landing");
+        assert_eq!(compose_project("-wsp-a"), "wsp-a");
+        assert_eq!(compose_project("wsp-A_1"), "wsp--_1");
+        // Every character it answers is one compose takes.
+        for word in ["wsp-spoo.landing", "wsp-A_1", "-_-wsp-b"] {
+            let project = compose_project(word);
+            assert!(project.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-'), "{project}");
+            assert!(!project.starts_with(['-', '_']), "{project}");
+        }
+    }
+
+    /// Every exec carries the home and the user; one in a workspace with an engine carries its compose project
+    /// too, since youki hands a tenant none of the init's environment.
+    #[test]
+    fn an_exec_in_a_workspace_with_an_engine_carries_its_compose_project() {
+        assert_eq!(exec_env(&awake("wsp-a", None)), "export HOME=/root USER=root");
+        let engined = Workspace { engine: true, ..awake("wsp-spoo.landing", None) };
+        assert_eq!(exec_env(&engined), "export HOME=/root USER=root COMPOSE_PROJECT_NAME=wsp-spoo-landing");
     }
 
     #[test]
@@ -1384,6 +1712,7 @@ mod tests {
             engine: false,
             copy: None,
             shares: Vec::new(),
+            binds: Vec::new(),
         };
         fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
     }
@@ -1425,6 +1754,7 @@ mod tests {
             idempotency_key: None,
             engine: None,
             copy: None,
+            binds: None,
             shares: Some(vec![Share { source: source.display().to_string(), target: "/root/.codex/auth.json".to_owned() }]),
         }
     }
@@ -1457,6 +1787,48 @@ mod tests {
         assert!(ops.shares_of(&MachineSpec { shares: None, ..asking_for(&logins) }).unwrap().is_empty());
         // What this computer says about itself names the same directory, which is what the host fills a create from.
         assert_eq!(ops.backend_facts().logins, Some(logins.display().to_string()));
+    }
+
+    /// A spec asking for one folder of the computer's own to be bound in, with the source spelled as given.
+    fn binding(source: &Path) -> MachineSpec {
+        MachineSpec {
+            binds: Some(vec![Bind {
+                source: source.display().to_string(),
+                target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
+                read_only: false,
+            }]),
+            shares: None,
+            ..asking_for(source)
+        }
+    }
+
+    #[test]
+    fn a_folder_bound_into_a_workspace_is_a_directory_under_this_daemons_root_and_nowhere_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let projects = ops.layout.projects();
+        // The open made the projects directory, and only this login reads what lands under it: a project's
+        // checkout and its agent's memory are the person's.
+        assert!(projects.is_dir());
+        assert_eq!(fs::metadata(&projects).unwrap().permissions().mode() & 0o777, 0o700);
+        // A folder the add has not written yet is made, since the add binds this directory before it has cloned
+        // anything into it.
+        let memory = projects.join("pr_1/memory");
+        assert_eq!(ops.binds_of(&binding(&memory)).unwrap().len(), 1);
+        assert!(memory.is_dir());
+        // Anywhere else on the box, the projects directory itself and a directory beside it: each refused in one
+        // sentence naming where a bound folder lives. A file is refused rather than passed over, since a boot
+        // mounting a directory over it would fail without a word here.
+        let file = projects.join("pr_1/a-file");
+        fs::write(&file, b"x").unwrap();
+        for outside in [dir.path().join("root/.ssh"), ops.layout.logins(), projects.clone(), projects.join("../copies"), file] {
+            let refused = ops.binds_of(&binding(&outside)).unwrap_err().message;
+            assert!(refused.contains(&projects.display().to_string()) && refused.ends_with("is not one"), "{outside:?}: {refused}");
+        }
+        // A create that asks for none binds none, and what this computer says about itself names the directory a
+        // host fills one from.
+        assert!(ops.binds_of(&MachineSpec { binds: None, ..binding(&memory) }).unwrap().is_empty());
+        assert_eq!(ops.backend_facts().projects, Some(projects.display().to_string()));
     }
 
     #[test]

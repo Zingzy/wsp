@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import { isCancel } from "@clack/prompts";
-import { collect, computeRecipe, expand, nodeHost, scanProject, type Manifest, type Platform, type Rung } from "@wsp/collect";
+import { collect, computeRecipe, expand, nodeHost, scanProject, seedMenu, type Manifest, type Platform, type Rung } from "@wsp/collect";
 import {
   HARNESS_ADAPTERS,
   createRuntime,
@@ -22,6 +22,7 @@ import {
   type LocalWiring,
   type Machine,
   type Runtime,
+  type SeedWiring,
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
@@ -39,6 +40,7 @@ export { writeEnvFile } from "./env-keys.js";
 import { keychainReader } from "./init-import.js";
 import { adoptLoginPath } from "./login-path.js";
 import { CACHE_RULE } from "./project-bundle.js";
+import { packSeed } from "./project-seed.js";
 import { readBrewTable } from "./init-brew.js";
 import { copyGoldenRecipe } from "./image-recipe.js";
 import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } from "./init.js";
@@ -718,6 +720,9 @@ export function makeRuntime(
     // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
     // of it is written to a machine.
     vault: () => vaultNow(env),
+    // How a folder on this computer is read and packed to seed a project elsewhere: the collector's own menu over
+    // this computer, and the host's pack of whichever rows the person ticked.
+    seed: hostSeed(),
     goldenRecipe: recipe,
     copyRecipe: hostCopyRecipe(),
     hostId: hostIdentity(),
@@ -726,6 +731,17 @@ export function makeRuntime(
   PROVIDER_SLOTS.set(rt, slot);
   PROVIDER_PICKS.set(rt, pick);
   return rt;
+}
+
+/** The seed half of an add on this computer: the menu off git's own listing of what a folder ignores, and the
+ * archive of the rows the person ticked. Both read the person's folder and Claude Code's store here, so the state
+ * home is read the one way every road on this computer reads it. */
+function hostSeed(): SeedWiring {
+  const claudeStateHome = (): string => agentHomes(homedir(), process.env)["claude"] ?? join(homedir(), ".claude");
+  return {
+    plan: folder => seedMenu(nodeHost(), folder, { claudeStateHome: claudeStateHome() }),
+    pack: o => packSeed({ ...o, claudeStateHome: claudeStateHome() }),
+  };
 }
 
 /** How a copy of the image is planned on this computer for a serving host: the same readers wsp init builds from,
@@ -1543,6 +1559,11 @@ interface SharedFlags {
   "ssh-port"?: string;
   "ssh-key"?: string;
   base?: string;
+  keep?: string[];
+  cut?: string[];
+  "no-memory"?: boolean;
+  "no-commits"?: boolean;
+  remember?: boolean;
   watch?: boolean;
   update?: boolean;
   "sign-in"?: string;
@@ -1735,14 +1756,22 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   add: {
     page: "front",
-    usage: "wsp add [<user@host>|<folder>|<url>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--ssh-port <port>] [--ssh-key <path>]",
+    usage:
+      "wsp add [<user@host>|<folder>|<url>|<owner/repo>|<provider>|<computer> --update|<computer> --sign-in <agent>] [--on <computer>] [--name <name>] [--base <branch>] [--yes] [--keep <path>] [--cut <path>] [--no-memory] [--no-commits] [--remember] [--ssh-port <port>] [--ssh-key <path>]",
     about:
       "a computer of yours over ssh, or a project: a folder on this computer worked in place, or a repo a computer clones with --on <computer>; <provider> takes a provider's key, nothing prints the join line another computer types, a computer with --update puts this wsp's daemon on one already in, and a computer with --sign-in signs that agent in there once, outside every workspace on it",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values.on, values.base, values["sign-in"])),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values.on, values.base, values["sign-in"], {
+        ...(values.yes === true ? { yes: true } : {}),
+        ...(values.keep !== undefined ? { keep: values.keep } : {}),
+        ...(values.cut !== undefined ? { cut: values.cut } : {}),
+        ...(values["no-memory"] === true ? { noMemory: true } : {}),
+        ...(values["no-commits"] === true ? { noCommits: true } : {}),
+        ...(values.remember === true ? { remember: true } : {}),
+      })),
   },
   remove: {
     page: "front",
@@ -1951,6 +1980,11 @@ export const SHARED_OPTIONS: Options = {
   "ssh-port": { type: "string" },
   "ssh-key": { type: "string" },
   base: { type: "string" },
+  keep: { type: "string", multiple: true },
+  cut: { type: "string", multiple: true },
+  "no-memory": { type: "boolean" },
+  "no-commits": { type: "boolean" },
+  remember: { type: "boolean" },
   watch: { type: "boolean" },
   update: { type: "boolean" },
   "sign-in": { type: "string" },
@@ -2084,6 +2118,12 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "on", on: ["init"], says: "the computer the image is built on, by the name wsp computers lists, a box you joined included; the default place without it" },
   { name: "on", on: ["add"], says: "the computer a project lives on, by the name wsp computers lists: a repo's url needs one, since this computer works a folder of yours in place and never clones" },
   { name: "base", on: ["add"], says: "the branch a workspace of the project starts on; the remote's own default branch at the clone without it" },
+  { name: "yes", on: ["add"], says: "send the ticked rows of the seed menu; without it a folder seeding a project on another computer prints the menu and sends nothing, since what git ignores in your folder is yours" },
+  { name: "keep", on: ["add"], says: "one more path off the seed menu that travels, however the catalogue ticked it; given once per path" },
+  { name: "cut", on: ["add"], says: "one path off the seed menu that does not travel; given once per path" },
+  { name: "no-memory", on: ["add"], says: "leave this folder's Claude Code memory here; the project's own memory on that computer then starts empty" },
+  { name: "no-commits", on: ["add"], says: "leave the commits the remote does not have here; the computer's clone then starts at the remote's own tip" },
+  { name: "remember", on: ["add"], says: "keep these ticks for this folder, so the next add of it starts with them rather than the catalogue's" },
   { name: "first-workspace", on: ["init"], says: "fork the first workspace under this name once the image seals, without asking (default first)" },
   { name: "import", on: ["init"], says: "import this folder's project onto that first workspace, with the consent the app's import starts from" },
   { name: "rebuild", on: ["init"], says: "seal the next version from a fresh machine rather than from your image plus the changes, which is the question a run at a terminal is asked; without it a run that asks nothing takes whichever road the changes call for" },

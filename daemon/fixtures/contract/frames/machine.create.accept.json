@@ -27,6 +27,12 @@
           "source": "/var/lib/wsp/logins/codex/auth.json",
           "target": "/root/.codex/auth.json"
         }
+      ],
+      "binds": [
+        {
+          "source": "/wsp/projects/pr_1/memory",
+          "target": "/root/.claude-cfg/projects/-root-wsp/memory"
+        }
       ]
     }
   },
@@ -35,6 +41,20 @@
     "op": "machine.create",
     "spec": {
       "kind": "desktop"
+    }
+  },
+  {
+    "id": 3,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "binds": [
+        {
+          "source": "/wsp/projects/pr_1/checkout",
+          "target": "/Users/zingzy/wsp",
+          "readOnly": true
+        }
+      ]
     }
   }
 ]

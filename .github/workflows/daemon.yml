@@ -88,6 +88,25 @@ jobs:
       # this profile costs minutes of link time for nothing the job above does not already cover.
       - name: The runtime's tests in the shipped profile
         run: LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl -p wsp-runtime
+      # The live cases drive the kernel as root, so they run on a box and nowhere else, and a box carries no
+      # toolchain to build them with. Built here as one static test executable and uploaded beside the daemon, so
+      # the proof on a box is a download and a run rather than a Rust install on a computer serving something.
+      - name: The live test executable for a box
+        run: |
+          LIBSECCOMP_LIB_PATH=$PWD/target/libseccomp/musl cargo test --release --target x86_64-unknown-linux-musl \
+            -p wsp-daemon-bin --test runtime_live --no-run --message-format=json > /tmp/runtime-live.json
+          built=$(jq -r 'select(.executable != null) | select(.target.name == "runtime_live") | .executable' /tmp/runtime-live.json | tail -1)
+          test -n "$built"
+          cp "$built" "runtime_live-x86_64-unknown-linux-musl"
+          file "runtime_live-x86_64-unknown-linux-musl"
+          sha256sum "runtime_live-x86_64-unknown-linux-musl" > "runtime_live-x86_64-unknown-linux-musl.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-live-x86_64-unknown-linux-musl
+          path: |
+            daemon/runtime_live-x86_64-unknown-linux-musl
+            daemon/runtime_live-x86_64-unknown-linux-musl.sha256
+          if-no-files-found: error
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}

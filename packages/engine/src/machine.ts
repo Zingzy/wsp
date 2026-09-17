@@ -152,6 +152,10 @@ export interface Lifecycle {
    * forgotten. Called from the policy's own arming and not awaited: a rejection is logged, and the backend decides
    * whether a given instant is worth a call, since the window is armed on every streamed chunk. */
   backstop?(machine: Machine, until: number): Promise<void>;
+  /** Optional: how long the machine has been quiet by what the computer running it can see, bytes on its
+   * published ports and commands run in it. Read once before an idle stop, so a dev server somebody is clicking
+   * through stays up. Undefined where the backend cannot say, which leaves the stop to the host's own clock. */
+  quietForMs?(machine: Machine): Promise<number | undefined>;
 }
 
 export interface MachineBackend {
@@ -165,6 +169,10 @@ export interface MachineBackend {
   /** Optional: where the computer holding this backend keeps the logins every workspace on it shares, absolute.
    * Only a computer the person owns answers one; a provider holds no file of theirs. */
   readonly logins?: string;
+  /** Optional: where that computer keeps the project checkouts it holds and each project's own memory, absolute.
+   * Only a computer whose daemon holds a disk of the person's answers one; on a provider a project lives in an
+   * image instead, so there is nothing to clone into or to bind. */
+  readonly projects?: string;
   create(spec: MachineSpec): Promise<Machine>;
   /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
    * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with

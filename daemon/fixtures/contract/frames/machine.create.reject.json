@@ -123,5 +123,56 @@
         }
       ]
     }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "binds": [
+        {
+          "source": "projects/pr_1/memory",
+          "target": "/root/.claude-cfg/projects/-root-wsp/memory"
+        }
+      ]
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "binds": [
+        {
+          "source": "/wsp/projects/../../root/.ssh",
+          "target": "/root/.claude-cfg/projects/-root-wsp/memory"
+        }
+      ]
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "binds": [
+        {
+          "source": "/wsp/projects/pr_1/memory",
+          "target": "/root/../etc"
+        }
+      ]
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "binds": [
+        {
+          "source": "/wsp/projects/pr_1/memory"
+        }
+      ]
+    }
   }
 ]
