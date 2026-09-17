@@ -471,6 +471,10 @@ pub struct MachineReading {
     /// Every process in its cgroup and in the cgroups under it, which is what a container engine inside it makes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub procs: Option<u64>,
+    /// Milliseconds since this computer last saw the workspace do anything on its own: a byte through a published
+    /// port, or a command run in it. Counts from the boot until something happens. Absent when it is not running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quiet_for_ms: Option<u64>,
     /// The address it answers on inside the computer's own network.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
