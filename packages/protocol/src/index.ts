@@ -3497,6 +3497,7 @@ const DAEMON_CONTENTS = [
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
   "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
   "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
+  "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3626,7 +3627,11 @@ const DAEMON_CONTENTS = [
  * Version 47 adds the copy verb the Mac host runs as a child: a directory clone of a project folder at a sibling path
  * in one call, a git worktree where a clone cannot work, then the two rules that make the copy a clean checkout with
  * its ignored files kept; the capabilities say whether a computer copies and whether a copy gets its own network,
- * which is how the row knows this Mac shares ports. */
+ * which is how the row knows this Mac shares ports.
+ * Version 48 lets a machine specification name binds: folders on the computer bound into a workspace at create,
+ * read-write or read-only, refused where the source is not a directory on the computer; the runtime binds a project's
+ * memory folder this way so every workspace of the project on that computer reads and writes the one memory, keyed on
+ * the project and not on a path. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
