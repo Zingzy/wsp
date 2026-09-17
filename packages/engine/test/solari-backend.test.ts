@@ -30,6 +30,9 @@ describe("SolariBackend", () => {
       templates: true,
       // A fork wsp made and can rebuild: nothing on it is the person's, so a turn runs without asking.
       kept: false,
+      // A fork of the image with the project cloned into it, and the machine's localhost and ports are its own.
+      copies: true,
+      ownNetwork: true,
       sizes: [
         { cpu: 2, memMb: 4096, rateUsdPerHour: expect.closeTo(0.11, 10) },
         { cpu: 2, memMb: 8192, rateUsdPerHour: expect.closeTo(0.15, 10) },

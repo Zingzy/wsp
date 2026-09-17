@@ -177,6 +177,10 @@ describe("BoxBackend declarations", () => {
       snapshotListing: true,
       templates: true,
       kept: false,
+      // The project's checkout is copied into the fork by the box's own runtime, and each workspace there gets a
+      // network and published ports of its own.
+      copies: true,
+      ownNetwork: true,
       sizes: [
         { cpu: 2, memMb: 4096, rateUsdPerHour: 0.018 },
         { cpu: 4, memMb: 8192, rateUsdPerHour: 0.036 },

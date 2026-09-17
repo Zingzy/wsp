@@ -20,6 +20,9 @@ describe("no provider backend", () => {
       sizes: [],
       // Nothing here is a machine of the person's; there is no machine at all.
       kept: false,
+      // Nothing forks and nothing copies: there is nothing to copy onto.
+      copies: false,
+      ownNetwork: false,
     });
   });
 

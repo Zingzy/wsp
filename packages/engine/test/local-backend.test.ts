@@ -29,6 +29,10 @@ describe("local backend", () => {
       // This computer is the person's own: its files and sign-ins outlive every turn, so a thread on it starts at
       // the access its harness asks for rather than at skip-everything. The one fact that road reads.
       kept: true,
+      // A workspace here is a copy of the project folder at a path of its own, and every copy binds this one
+      // computer's ports, which is why each gets a port base and the row says the ports are shared.
+      copies: true,
+      ownNetwork: false,
       sizes: [],
     });
     expect(backend.pricing.rateUsdPerHour({ cpu: 2, memMb: 4096 })).toBe(0);

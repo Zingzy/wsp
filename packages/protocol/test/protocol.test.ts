@@ -655,8 +655,8 @@ describe("daemon wire types (one home for the ops the daemon answers)", () => {
 });
 
 describe("backend capabilities", () => {
-  it("requires every flag, callbackRelay, templates, diskSnapshots, snapshotsAnyLife, replacesMachine, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, pauseMode: "memory", replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+  it("requires every flag, callbackRelay, templates, diskSnapshots, snapshotsAnyLife, replacesMachine, kept, copies, ownNetwork and the sizes list included, so no backend can leave one unstated", () => {
+    const full = { liveCloneForks: true, pauseMode: "memory", replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, copies: true, ownNetwork: true, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { templates: _t, ...noTemplates } = full;
     expect(() => Capabilities.parse(noTemplates)).toThrow();
@@ -675,6 +675,13 @@ describe("backend capabilities", () => {
     // A backend that never says whether its machine is the person's own would have every turn's access decided for it.
     const { kept: _k, ...noKept } = full;
     expect(() => Capabilities.parse(noKept)).toThrow();
+    // A backend that never says whether it makes a workspace by copying itself leaves a second piece of work on
+    // one project with no road, and one that never says whether a copy gets a network of its own leaves the port
+    // base and the row's ports cell guessing.
+    const { copies: _c, ...noCopies } = full;
+    expect(() => Capabilities.parse(noCopies)).toThrow();
+    const { ownNetwork: _n, ...noNetwork } = full;
+    expect(() => Capabilities.parse(noNetwork)).toThrow();
     const { sizes: _s, ...noSizes } = full;
     expect(() => Capabilities.parse(noSizes)).toThrow();
     expect(() => Capabilities.parse({ ...full, sizes: [{ cpu: 2, memMb: 4096 }] })).toThrow();
@@ -687,7 +694,7 @@ describe("backend capabilities", () => {
   });
 
   it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {
-    const full = { liveCloneForks: true, replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, sizes: [] };
+    const full = { liveCloneForks: true, replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, copies: true, ownNetwork: true, sizes: [] };
     // Absent is a machine that cannot be paused: this computer, a machine reached over ssh.
     expect(Capabilities.parse(full)).toEqual(full);
     expect(Capabilities.parse({ ...full, pauseMode: "memory" })).toMatchObject({ pauseMode: "memory" });
