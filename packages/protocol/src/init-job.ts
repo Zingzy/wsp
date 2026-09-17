@@ -86,9 +86,10 @@ export const LoginState = z.enum(["signed-in", "not-signed-in", "not-verified", 
 export type LoginState = z.infer<typeof LoginState>;
 
 /** What happens to a login: copied from this computer, signed in on the machine while the build runs, left to the
- * first time the tool needs it on a workspace, set on the machine as an API key the tool reads, or left out. One
- * list, read by the collector's rows, by a recipe's rows and by the words `wsp recipe --signin` takes. */
-export const LOGIN_CHOICES = ["copy", "machine", "later", "key", "skip"] as const;
+ * first time the tool needs it on a workspace, set on the machine as an API key the tool reads, minted here as a
+ * long-lived token the vault hands every turn, or left out. One list, read by the collector's rows, by a recipe's
+ * rows and by the words `wsp recipe --signin` takes. */
+export const LOGIN_CHOICES = ["copy", "machine", "later", "key", "skip", "token"] as const;
 export const LoginChoice = z.enum(LOGIN_CHOICES);
 export type LoginChoice = z.infer<typeof LoginChoice>;
 

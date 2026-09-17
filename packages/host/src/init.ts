@@ -24,6 +24,7 @@ import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type Secre
 import { planGoldenRecipe, planImport, type BuildContext } from "./image-recipe.js";
 import {
   RUNG_TITLE,
+  agentName,
   answeredRows,
   applyRecipe,
   goldenRecipeFor,
@@ -64,8 +65,9 @@ import { retentionOffer } from "./storage.js";
 import { DONE_LINE, appUrl, askFirst, checkImportFolder, firstWorkspaceName, runFirst, runLocal, type FirstResult } from "./init-first.js";
 import type { Tone } from "./init-select.js";
 import { diskLine, diskTone } from "./init-weight.js";
-import { builderLink, flowHooks, keyAsks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
+import { SIGN_IN_CAP_MS, builderLink, flowHooks, noteOutcomes, signInStage, stageLogins, type BuilderLink, type HostHooks, type LoginOutcome, type SignInCodes, type SignInFlow } from "./init-signin.js";
 import { handoffStage } from "./init-handoff.js";
+import { vaultRows, vaultStage } from "./init-vault.js";
 import { type PortProbes } from "./ports.js";
 import { openApp, pickPorts } from "./init-serve.js";
 import type { CallbackRelay } from "./relay.js";
@@ -124,13 +126,24 @@ export interface InitOptions {
    * for, so the flag path shows the same card the wizard's own question leaves, and onProgress how far through one
    * agent's session files the read is, since a first read of a busy computer takes a while. */
   recipe(onHistory: (h: RecipeHistory) => void, onProject: (scan: ProjectScan) => void, onProgress: (p: HistoryProgress) => void): Promise<Recipe>;
-  /** The agents' API keys that ride onto the image, each under the variable its agent's sign-in declares. */
-  agentKeys: Readonly<Record<string, string>>;
+  /** What the vault holds, by variable, read again whenever it is asked: a token or key already here is not asked
+   * for again, and one a client saves while the run waits is seen. Nothing of it rides onto the image; the runtime
+   * sets it in the environment of every turn. */
+  vault(): Readonly<Record<string, string>>;
+  /** Writes what the vault step took into the wsp home's .env, mode 0600. */
+  saveKeys(set: Record<string, string>): void;
   /** Told, on the hand-off road, what the sign-in stage runs with: the relay's flow, the builder's link and the stop
    * signal, so a sign-in can be run again the same way while the run goes on. */
   signIns?(ctx: SignInContext): void;
   /** How often a sign-in's status is asked on the machine; the hand-off's own cadence otherwise. */
   pollMs?: number;
+  /** How long the hand-off's vault step waits for a client to save a token or key it asked for; the sign-in cap
+   * otherwise. Tests shorten it. */
+  vaultWaitMs?: number;
+  /** Runs a token row's own mint command on this computer, with this terminal. The command line comes from the
+   * catalog and starts the tool's browser flow, so it is handed in rather than reached for: a run that was given
+   * none prints the command and waits for the paste instead, and nothing can start that flow by accident. */
+  mintHere?(command: string): Promise<void>;
   /** Prices the builder the confirm names, and sizes the disk the screens draw. The whole table belongs to a
    * provider module; a run beside a serving host reads these off that host, which is the computer that boots it. */
   pricing: InitPricing;
@@ -1048,10 +1061,9 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     saveSmallRecipe(small.path, smallRecipeNow());
   };
   let landed: ImportResult | undefined;
-  /** What every build road here is planned against: this computer, its Homebrew, the Keychain values read below and
-   * the keys the ticked agents run with. The rows change as the screens and the Keychain reads answer; the context
-   * around them does not. */
-  const context = (): BuildContext => ({ home: opts.home, platform: opts.platform, brew, secrets, agentKeys: opts.agentKeys });
+  /** What every build road here is planned against: this computer, its Homebrew and the Keychain values read below.
+   * The rows change as the screens and the Keychain reads answer; the context around them does not. */
+  const context = (): BuildContext => ({ home: opts.home, platform: opts.platform, brew, secrets });
   const importHooks = () => ({
     onResult: (r: ImportResult) => {
       writeFileSync(resultsPath, `${JSON.stringify({ ...r, ...(lastBuild !== undefined ? { build: lastBuild } : {}) }, null, 2)}\n`);
@@ -1451,15 +1463,32 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
   // Nobody is here to type: the flag that said so when there was a terminal, else the terminal that is missing.
   const nobodyAsks = !io.isTTY ? "no terminal to paste into" : opts.yes ? "--yes asks nothing" : "--non-interactive asks nothing";
   const skipSecretsWhy = interactive ? undefined : `${nobodyAsks}; set them from the app's terminal`;
-  // A key the wsp home already holds rides onto the image as its variable, so its row is set and nothing is asked.
-  const keys = keyAsks(offered, choices);
-  for (const k of keys) if (opts.agentKeys[k.name] !== undefined) io.json?.({ event: "key-set", tool: k.tool, label: k.label });
+  // The agents' own tokens and keys stay here: the vault step below asks for them and saves them in the wsp home,
+  // and the machine is never told. What is left for the machine is what the pack cut out of the rc files it carried.
+  for (const row of vaultRows(offered, choices)) if (opts.vault()[row.name] !== undefined) io.json?.({ event: "key-set", tool: agentName(row.entry), label: row.entry.label });
   const secretOutcomes = await secretsStage({
-    asks: [...(landed?.files?.cut ?? []).flatMap(c => c.names.map(name => ({ name, from: `cut from ${c.path}` }))), ...keys.filter(k => opts.agentKeys[k.name] === undefined)],
+    asks: (landed?.files?.cut ?? []).flatMap(c => c.names.map(name => ({ name, from: `cut from ${c.path}` }))),
     dial,
     input: io.input,
     output: io.output,
     ...(skipSecretsWhy !== undefined ? { skipWhy: skipSecretsWhy } : {}),
+    hide: value => runLog.hide(value),
+  });
+  // The tokens and keys the person holds here, before any sign-in on the machine: nothing of this step touches one.
+  // The hand-off road has nobody at this terminal either, and its client answers such a row with init.signInCode.
+  // A client that can answer (the app's own job opens one) is waited for below; every other run with nobody at this
+  // terminal leaves the row where it stands, since there is no road for a paste to arrive on.
+  const vaultWhy = interactive || (handoff && opts.codes !== undefined) ? undefined : `${nobodyAsks}; paste it from the app`;
+  const vaultOutcomes = await vaultStage({
+    rows: vaultRows(offered, choices),
+    held: opts.vault,
+    save: opts.saveKeys,
+    ...(interactive && opts.mintHere !== undefined ? { mint: opts.mintHere } : {}),
+    ...(handoff && opts.codes !== undefined ? { waitMs: opts.vaultWaitMs ?? SIGN_IN_CAP_MS } : {}),
+    input: io.input,
+    output: io.output,
+    ...(vaultWhy !== undefined ? { skipWhy: vaultWhy } : {}),
+    ...(io.json !== undefined ? { json: io.json } : {}),
     hide: value => runLog.hide(value),
   });
   // Only --yes gets here: every other run without a terminal hands its sign-ins over instead of skipping them.
@@ -1472,7 +1501,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
     if (have === undefined) left.set(s.id, s.note);
     else if (!have.includes(s.note)) left.set(s.id, `${have}; ${s.note}`);
   }
-  const outcomes = handoff
+  const machineOutcomes = handoff
     ? await handoffStage({
         logins: staged,
         left,
@@ -1494,6 +1523,7 @@ export async function runInit(opts: InitOptions, io: InitIO): Promise<InitResult
         open: url => io.open(url),
         flow,
       });
+  const outcomes = [...vaultOutcomes, ...machineOutcomes];
   if (noteOutcomes(resultsPath, { logins: outcomes, secrets: secretOutcomes }).replaced) log.warn(`${resultsPath} could not be read; it was rewritten with the logins and secrets alone.`, out);
   // The relay's work ends with the sign-ins; the host that serves the app after the seal links to the workspaces itself.
   if (handoff) {

@@ -1779,6 +1779,7 @@ export const SIGN_IN_ANSWERS: Record<LoginChoice, SignInAnswer> = {
   later: { label: () => SIGN_IN_LATER, short: "when you need it" },
   key: { label: () => "API key", short: "API key" },
   skip: { label: () => "skip", short: "skip" },
+  token: { label: () => "token from this computer", short: "token" },
 };
 
 /** The answers a row can be walked through, in order, with the words each shows. */
@@ -2044,6 +2045,11 @@ export const initAgentStep = (job: Pick<InitJob, "road" | "phase" | "screens">):
 /** The sentence a sign-in whose page is open makes: one spelling for the sidebar's line, the toast and a system
  * notification. */
 const signInTo = (label: string): string => `sign in to ${label}`;
+
+/** What a row of the vault step waits on: a value the person holds on their own computer, pasted into the client
+ * rather than typed on a machine. `mint`, where the tool has one, is the command that prints it there. */
+export const pasteHereLine = (word: string, mint?: string): string =>
+  mint === undefined ? `paste the ${word}; it stays on this computer` : `run ${mint} on this computer and paste the ${word} it prints; it stays there`;
 
 /** The sign-in row whose page waits for the person, if one does. */
 const openSignIn = (rows: InitJob["rows"]): InitJob["rows"][number] | undefined => rows.find(r => r.kind === "sign-in" && r.state === SIGN_IN_OPEN_STATE);
@@ -3044,6 +3050,12 @@ export function sealFailedBuilderStaysLine(builderId: string, rateUsdPerHour: nu
  * was not touched, and the attach is offered as when it is known to be up. */
 export function sealFailedBuilderUnreadLine(builderId: string, rateUsdPerHour: number, attachCommand: string): string {
   return `Seal failed; the provider could not be read about the builder, so nothing on it was touched. ${builderStaysLine(builderId, rateUsdPerHour, attachCommand)}`;
+}
+
+/** Why a seal was refused before it took the snapshot: the builder holds a file a sign-in leaves behind. The paths
+ * are the guest's own, so whoever reads the line can go and look at them. */
+export function credentialOnBuilderLine(paths: readonly string[]): string {
+  return `the builder holds a sign-in file at ${paths.join(", ")}; sign-ins never sit in an image, so nothing was sealed`;
 }
 
 /** The wizard's last line when the seal failed on any road but a refused snapshot: the builder was consumed. */

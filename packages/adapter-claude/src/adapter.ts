@@ -77,6 +77,8 @@ export interface AdapterDeps {
   configDir: string;
   baseEnv?: Readonly<Record<string, string | undefined>>;
   apiKey?: string;
+  /** The long-lived token the vault holds for this agent; set on every turn's environment. */
+  oauthToken?: string;
   interruptGraceMs?: number;
   /** How long the CLI gets to exit on the EOF its result closed the channel with, before its process and its tree
    * are ended for it. */
@@ -349,7 +351,7 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
 export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   if (!deps.configDir.trim().startsWith("/")) throw new Error(`configDir must be an absolute path, got "${deps.configDir}"`);
   const sessions = new Map<string, ClaudeSession>();
-  const env = buildEnv({ base: deps.baseEnv, apiKey: deps.apiKey });
+  const env = buildEnv({ base: deps.baseEnv, apiKey: deps.apiKey, ...(deps.oauthToken !== undefined ? { oauthToken: deps.oauthToken } : {}) });
 
   /** wsp's half for a refusal the CLI named a cause for: the road the caller handed this adapter, which is the one
    * rule every door reads for how this workspace is signed in, and the cause the failure is classed by. */

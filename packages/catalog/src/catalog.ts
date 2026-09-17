@@ -13,7 +13,7 @@ import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./m
 import { APT_INDEX, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
-import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
+import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
 
@@ -475,7 +475,7 @@ export interface LoginRow {
 
 export const LOGIN_ROWS: readonly LoginRow[] = CATALOG.flatMap((e): LoginRow[] => {
   const s = e.signIn;
-  if (!hasLogin(s)) return s.note !== undefined ? [{ id: loginIdOf(e.id), entry: e, signIn: s }] : [];
+  if (!hasLogin(s)) return mintsToken(s) || s.note !== undefined ? [{ id: loginIdOf(e.id), entry: e, signIn: s }] : [];
   return [{ id: loginIdOf(e.id), entry: e, signIn: s }, ...(s.keys === undefined ? [] : [{ id: keysIdOf(e.id), entry: e, signIn: keysRowOf(s.keys, s.status), keys: s.keys }])];
 });
 

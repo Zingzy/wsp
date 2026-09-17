@@ -5,7 +5,7 @@
 // proves the login. Nothing here reads the tool's output beyond the status
 // lines named below.
 import type { SignInFinish } from "@wsp/protocol";
-import { CLAUDE_CONFIG_DIR, CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
+import { CLAUDE_CONFIG_REL, CLAUDE_KEY_FILE, GUEST_HOME } from "./roads.js";
 
 export interface StatusCheck {
   /** The command as the row and the golden's notes show it. */
@@ -29,8 +29,9 @@ export interface StatusCheck {
 export type LoginSource = "keychain" | "rc-key" | "file" | "helper";
 
 /** The flow a tool's sign-in takes: a browser with a callback (oauth), a code typed on a page the machine names
- * (device), a key pasted or exported (key), or nothing to run on a headless machine (none). */
-export type SignInKind = "oauth" | "device" | "key" | "none";
+ * (device), a key pasted or exported (key), a long-lived token minted on this computer (token), or nothing to run
+ * on a headless machine (none). */
+export type SignInKind = "oauth" | "device" | "key" | "token" | "none";
 
 interface Asks {
   /** What the tool prints when it asks, matched against its output with the terminal's escapes taken out. */
@@ -53,9 +54,26 @@ export interface KeyFiles {
   note: string;
 }
 
+/** A long-lived token minted on this computer by the tool's own command, held in the wsp home's .env under
+ * `tokenEnv` and set in the environment of every turn. Nothing of it is on any machine. */
+export type TokenSignIn = {
+  kind: "token";
+  /** Runs on this computer, in the person's terminal. */
+  mint: string;
+  tokenEnv: string;
+  /** What the printed token looks like, so the stage can read it off the output or refuse a paste. */
+  token: RegExp;
+  keyEnv?: string;
+  status?: StatusCheck;
+  note?: string;
+  sources: [];
+  stateOnMachine: [];
+};
+
 export type SignIn =
+  | TokenSignIn
   | {
-      kind: Exclude<SignInKind, "none">;
+      kind: Exclude<SignInKind, "none" | "token">;
       login: string;
       /** The sources the collector finds and the pack carries for this tool; empty when nothing of it travels. */
       sources: readonly LoginSource[];
@@ -77,6 +95,10 @@ export type SignIn =
       status?: StatusCheck;
       note?: string;
       keys?: KeyFiles;
+      /** Where this login lives once signed in: in the image (today's rows) or on the computer that runs the
+       * workspaces, signed in there once and shared into each of them. A login that lives on the computer is never
+       * copied onto a builder and never signed in on one. */
+      livesOn?: "computer";
       /** Where this tool's login lives on the machine once signed in there or copied onto it, `~`-relative guest
        * paths: what the image vault archives for the row. Claude Code's is under CLAUDE_CONFIG_DIR, never HOME. */
       stateOnMachine: readonly string[];
@@ -89,7 +111,17 @@ export type LoginSignIn = Extract<SignIn, { login: string }>;
 
 /** A sign-in the wizard runs as a command on the machine. */
 export function hasLogin(s: SignIn | { kind: "shell" }): s is LoginSignIn {
-  return s.kind !== "none" && s.kind !== "shell";
+  return "login" in s;
+}
+
+/** A sign-in that is a token minted on this computer: nothing runs on a machine for it. */
+export function mintsToken(s: SignIn | { kind: "shell" }): s is TokenSignIn {
+  return s.kind === "token";
+}
+
+/** A login signed in once on the computer that runs the workspaces and shared into each of them. */
+export function livesOnComputer(s: SignIn | { kind: "shell" }): boolean {
+  return hasLogin(s) && s.livesOn === "computer";
 }
 
 /** The questions this login is known to ask, for the relay to watch the tool's output for: it types the ones the
@@ -145,6 +177,11 @@ export function loginStatePaths(entry: { signIn: SignIn }): string[] {
 /** No sign-in and nothing to say about it. */
 export const NO_SIGN_IN: SignIn = { kind: "none", sources: [] };
 
+/** The paths a builder may never hold when the seal reads it: the login files the pack used to copy, plus the key
+ * file the apiKeyHelper road wrote. A sign-in never sits in an image, and a file that outranks the vault's token
+ * inside the tool would bill an API key on every fork. */
+export const NEVER_IN_IMAGE: readonly string[] = [`${GUEST_HOME}/${CLAUDE_CONFIG_REL}/.credentials.json`, `${GUEST_HOME}/${CLAUDE_CONFIG_REL}/${CLAUDE_KEY_FILE}`, `${GUEST_HOME}/.codex/auth.json`];
+
 /** In a subshell so its exits never cut the quiet run's own exit marker. */
 export const AWS_STATUS = `sh -c 'for p in $(aws configure list-profiles 2>/dev/null); do aws sts get-caller-identity --profile "$p" 2>/dev/null && exit 0; done; exit 1'`;
 
@@ -154,14 +191,6 @@ export const GEMINI_STATUS = `if test -s "$HOME/.gemini/oauth_creds.json"; then 
 
 /** cloudflared has no status command: its login writes the origin certificate and nothing else, so the line proves the file. */
 export const CLOUDFLARED_STATUS = `if test -s "$HOME/.cloudflared/cert.pem"; then echo cert.pem; else false; fi`;
-
-/** The helper's key on the guest: the pack places it under Claude Code's config dir and rewrites the copied settings to cat it. */
-export const CLAUDE_KEY_PATH = `${CLAUDE_CONFIG_DIR}/${CLAUDE_KEY_FILE}`;
-const KEY_MARK = "WSP_KEY_FILE";
-
-/** Measured on 2.1.257: with any apiKeyHelper configured the status says logged in without running the helper, so the
- * typed line also proves the key file is present and non-empty; claude's own exit is kept for the marker. */
-export const CLAUDE_STATUS = `claude auth status; s=$?; test -s ${CLAUDE_KEY_PATH} && echo ${KEY_MARK}; (exit $s)`;
 
 const has = (re: RegExp) => (output: string): boolean => re.test(output);
 const ok = (re?: RegExp) => (output: string, exitCode: number): boolean => exitCode === 0 && (re === undefined || re.test(output));
@@ -198,29 +227,25 @@ function claudeStatus(output: string): Record<string, unknown> | undefined {
   }
 }
 
-const keyFileSeen = (output: string): boolean => new RegExp(`^${KEY_MARK}$`, "m").test(output);
-const helperNamed = (status: Record<string, unknown> | undefined): boolean => status?.["loggedIn"] === true && status["apiKeySource"] === "apiKeyHelper";
-
-/** Logged in, and when the helper is the source, its key file is there to read. */
 export function claudeSignedIn(output: string): boolean {
-  const status = claudeStatus(output);
-  return status?.["loggedIn"] === true && (!helperNamed(status) || keyFileSeen(output));
+  return claudeStatus(output)?.["loggedIn"] === true;
 }
 
-export function claudeWhy(output: string): string | undefined {
-  return helperNamed(claudeStatus(output)) && !keyFileSeen(output) ? "claude auth status names the settings.json helper while its key file is missing or empty on the machine" : undefined;
-}
-
-/** What claude auth status says the key comes from (measured on 2.1.257): apiKeySource names ANTHROPIC_API_KEY or
- * apiKeyHelper when an API key is in use, authMethod is claude.ai on OAuth credentials alone. */
+/** What claude auth status says the login comes from (measured on 2.1.257 and 2.1.259): apiKeySource names
+ * ANTHROPIC_API_KEY when a key is in use, authMethod is oauth_token under the long-lived token and claude.ai on
+ * the stored credentials of a browser sign-in. */
 export function claudeSource(output: string, secrets: ReadonlyMap<string, string>): string | undefined {
   const status = claudeStatus(output);
   if (status === undefined) return undefined;
   if (status["apiKeySource"] === "ANTHROPIC_API_KEY") return keyFrom("ANTHROPIC_API_KEY", secrets);
-  if (status["apiKeySource"] === "apiKeyHelper") return `API key from the settings.json helper${keyFileSeen(output) ? ", key file present" : ""}`;
-  if (status["loggedIn"] === true && status["authMethod"] === "claude.ai") return "OAuth credentials";
+  if (status["loggedIn"] !== true) return undefined;
+  if (status["authMethod"] === "oauth_token") return TOKEN_SOURCE;
+  if (status["authMethod"] === "claude.ai") return "OAuth credentials";
   return undefined;
 }
+
+/** What the status says when the token is what signed the tool in; the sign-in stage's own word for a held token. */
+export const TOKEN_SOURCE = "the token from this computer";
 
 /** The sign-in rows of the entries that have one, by the tool's name; a row's words are the wizard's. */
 export const SIGN_IN_ROWS = {
@@ -316,16 +341,19 @@ export const SIGN_IN_ROWS = {
     stateOnMachine: [".doppler"],
   },
   // The shim gets the localhost-callback URL and the terminal the hosted paste-code one; either finishes the login.
+  // The token is minted here by claude setup-token and held in the wsp home's .env; every turn on every kind of
+  // machine gets it in its environment, so nothing of this login is ever on a machine or in an image.
   claude: {
-    kind: "oauth",
-    sources: ["keychain", "rc-key", "file", "helper"],
-    finish: "callback",
+    kind: "token",
+    mint: "claude setup-token",
+    tokenEnv: "CLAUDE_CODE_OAUTH_TOKEN",
+    token: /sk-ant-oat01-[A-Za-z0-9_-]{20,}/,
     keyEnv: "ANTHROPIC_API_KEY",
-    login: "claude auth login",
-    status: { command: "claude auth status", typed: CLAUDE_STATUS, signedIn: claudeSignedIn, detail: claudeSource, why: claudeWhy },
-    stateOnMachine: [`${CLAUDE_CONFIG_REL}/.credentials.json`, `${CLAUDE_CONFIG_REL}/${CLAUDE_KEY_FILE}`],
+    status: { command: "claude auth status", signedIn: claudeSignedIn, detail: claudeSource },
+    sources: [],
+    stateOnMachine: [],
   },
-  codex: { kind: "oauth", sources: ["file"], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", status: { command: "codex login status", signedIn: ok(/Logged in using/) }, stateOnMachine: [".codex/auth.json"] },
+  codex: { kind: "oauth", sources: [], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", livesOn: "computer", status: { command: "codex login status", signedIn: ok(/Logged in using/) }, stateOnMachine: [] },
   // Gemini CLI 0.59.0 asks about the folder before anything else, and then which sign-in to take, with Google's
   // preselected: --skip-trust answers the first and the relay's Enter takes the second.
   gemini: {
@@ -386,3 +414,9 @@ export const SIGN_IN_ROWS = {
     stateOnMachine: [".hermes/auth.json", ".hermes/.env"],
   },
 } satisfies Record<string, SignIn>;
+
+/** Every variable the vault hands a turn: each row's token variable and each row's key variable, derived from the
+ * rows and nowhere else, so a tool that reads a new one declares it on its own row and the vault carries it. */
+export const VAULT_VARIABLES: ReadonlySet<string> = new Set(
+  Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(s => [...(mintsToken(s) ? [s.tokenEnv] : []), ...("keyEnv" in s && s.keyEnv !== undefined ? [s.keyEnv] : [])]),
+);

@@ -3,9 +3,8 @@
 // are the measured ones, and each status check reads fixture output the way
 // the tool prints it (fake names, masked tokens; nothing real).
 import { describe, expect, it } from "vitest";
-import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
 import { SignInFinish } from "@wsp/protocol";
-import { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, claudeSource, claudeWhy, geminiSource, hasLogin, asksThePerson, loginWords, questionsOf, secretNamed, signInFor, signInWords, signsInByDefault, type SignIn } from "../src/signin-table.js";
+import { AWS_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, SIGN_INS, TOKEN_SOURCE, claudeSource, geminiSource, hasLogin, asksThePerson, livesOnComputer, loginWords, mintsToken, questionsOf, secretNamed, signInFor, signInWords, signsInByDefault, type SignIn } from "../src/signin-table.js";
 import { collectorLogins } from "./collector-logins.js";
 import { ASKED, REACHED } from "./signin-questions.js";
 
@@ -49,7 +48,11 @@ describe("sign-in table", () => {
     expect(command("vercel").fallback).toBeUndefined();
     expect(command("codex").fallback).toBe("codex login --device-auth");
     expect(command("supabase").fallback).toBe("supabase login --no-browser");
-    expect(command("claude").login).toBe("claude auth login");
+    // Claude Code has no sign-in command on a machine at all: its row mints a token on this computer.
+    const claude = signInFor("claude");
+    expect(mintsToken(claude) && claude.mint).toBe("claude setup-token");
+    expect(hasLogin(claude)).toBe(false);
+    expect(signInWords(claude)).toBe("claude setup-token");
     expect(command("opencode").note).toMatch(/1\.3\.0/);
     // pi signs in only through /login inside its TUI and hermes through its auth menu; both run in the machine's pty.
     expect(command("pi").login).toBe("pi");
@@ -63,7 +66,9 @@ describe("sign-in table", () => {
     // it names is really in the command, and that no shape is global.
     for (const [name, s] of Object.entries(SIGN_INS)) {
       if (!hasLogin(s)) {
-        expect(s.kind, name).toBe("none");
+        // A row with no login command is either a tool with no sign-in or one whose token is minted here; neither
+        // ever runs in a pty, so neither declares a question.
+        expect(["none", "token"], name).toContain(s.kind);
         expect(questionsOf(s), name).toEqual([]);
         continue;
       }
@@ -113,7 +118,7 @@ describe("sign-in table", () => {
     expect(command("pi").questions?.[0]?.asks.test(ASKED.pi)).toBe(true);
     expect(command("hermes").questions?.[0]?.asks.test(ASKED.hermes)).toBe(true);
     // Each of these printed a page and then waited on the browser, so there is nothing for the relay to answer.
-    for (const name of ["gcloud", "wrangler", "vercel", "netlify", "fly", "railway", "claude", "codex", "cloudflared"]) {
+    for (const name of ["gcloud", "wrangler", "vercel", "netlify", "fly", "railway", "codex", "cloudflared"]) {
       expect(command(name).questions, name).toBeUndefined();
       expect(questionsOf(signInFor(name)), name).toEqual([]);
       expect(asksThePerson(signInFor(name)), name).toBe(false);
@@ -142,12 +147,9 @@ describe("sign-in table", () => {
     // what the row shows is the command alone.
     expect(statusOf(signInFor("kube"))?.command).toBe("kubectl config current-context");
     expect(statusOf(signInFor("kube"))?.typed).toBe("kubectl config current-context 2>/dev/null");
-    // Claude Code's typed line also proves the helper's key file, keeping claude's own exit for the marker; the row shows the status command alone.
-    expect(command("claude").status?.command).toBe("claude auth status");
-    expect(command("claude").status?.typed).toBe(CLAUDE_STATUS);
-    expect(CLAUDE_KEY_PATH).toBe(`${CLAUDE_CONFIG_DIR}/anthropic-api-key`);
-    expect(CLAUDE_STATUS).toBe(`claude auth status; s=$?; test -s ${CLAUDE_KEY_PATH} && echo WSP_KEY_FILE; (exit $s)`);
-    for (const [name, s] of Object.entries(SIGN_INS)) if (name !== "kube" && name !== "claude") expect(statusOf(s)?.typed, name).toBeUndefined();
+    // Claude Code's status is its own command and nothing around it: there is no key file beside it any more.
+    expect(statusOf(signInFor("claude"))?.command).toBe("claude auth status");
+    for (const [name, s] of Object.entries(SIGN_INS)) if (name !== "kube") expect(statusOf(s)?.typed, name).toBeUndefined();
     expect(statusOf(signInFor("op"))).toBeUndefined();
     expect(statusOf({ kind: "shell" })).toBeUndefined();
     expect(statusOf(signInFor("gh"))).toBe(command("gh").status);
@@ -202,10 +204,8 @@ describe("sign-in table", () => {
     expect(check("doppler", "Doppler Error: you must provide a token", 1)).toBe(false);
     expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "apiProvider": "firstParty"\n}', 0)).toBe(true);
     expect(check("claude", '{\n  "loggedIn": false\n}', 1)).toBe(false);
-    // A status that names the helper counts only with the key file marker: the status says logged in without running the helper.
-    expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}', 0)).toBe(false);
-    expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE', 0)).toBe(true);
-    expect(check("claude", '{\n  "loggedIn": false,\n  "authMethod": "none"\n}\nWSP_KEY_FILE', 1)).toBe(false);
+    // The token is what signs it in on a workspace, and the status names that road.
+    expect(check("claude", '{\n  "loggedIn": true,\n  "authMethod": "oauth_token"\n}', 0)).toBe(true);
     expect(check("codex", "Logged in using ChatGPT", 0)).toBe(true);
     expect(check("codex", "Not logged in", 1)).toBe(false);
   });
@@ -257,25 +257,20 @@ describe("sign-in table", () => {
     expect(command("gemini").status?.detail).toBe(geminiSource);
   });
 
-  it("reads which key source claude auth status names: the exported key by the file it was cut from, the helper, or the OAuth credentials", () => {
+  it("reads which source claude auth status names: the exported key by the file it was cut from, the token from this computer, or the OAuth credentials", () => {
     const envKey = '{\n  "loggedIn": true,\n  "authMethod": "api_key",\n  "apiProvider": "firstParty",\n  "apiKeySource": "ANTHROPIC_API_KEY"\n}';
     const secrets = new Map([["ANTHROPIC_API_KEY", "~/.zshrc"]]);
     expect(claudeSource(envKey, secrets)).toBe("API key from ~/.zshrc, set on the machine as a secret");
     expect(claudeSource(envKey, new Map())).toBe("API key from ANTHROPIC_API_KEY on the machine");
-    // With a helper configured too, apiKeySource still names the environment: the exported key wins.
-    expect(claudeSource(envKey.replace('"api_key"', '"api_key_helper"'), secrets)).toBe("API key from ~/.zshrc, set on the machine as a secret");
-    expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}', secrets)).toBe("API key from the settings.json helper");
-    expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE', secrets)).toBe("API key from the settings.json helper, key file present");
-    expect(claudeWhy('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}')).toBe("claude auth status names the settings.json helper while its key file is missing or empty on the machine");
-    expect(claudeWhy('{\n  "loggedIn": true,\n  "authMethod": "api_key_helper",\n  "apiKeySource": "apiKeyHelper"\n}\nWSP_KEY_FILE')).toBeUndefined();
-    expect(claudeWhy(envKey)).toBeUndefined();
-    expect(claudeWhy("not json at all")).toBeUndefined();
-    expect(command("claude").status?.why).toBe(claudeWhy);
+    // The token is its own source, which is what a workspace runs on.
+    expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "oauth_token"\n}', secrets)).toBe(TOKEN_SOURCE);
+    expect(TOKEN_SOURCE).toBe("the token from this computer");
+    expect(statusOf(signInFor("claude"))?.why).toBeUndefined();
     expect(command("gh").status?.why).toBeUndefined();
     expect(claudeSource('{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "subscriptionType": "max"\n}', secrets)).toBe("OAuth credentials");
     expect(claudeSource('{\n  "loggedIn": false,\n  "authMethod": "none"\n}', secrets)).toBeUndefined();
     expect(claudeSource("not json at all", secrets)).toBeUndefined();
-    expect(command("claude").status?.detail).toBe(claudeSource);
+    expect(statusOf(signInFor("claude"))?.detail).toBe(claudeSource);
     expect(command("gh").status?.detail).toBeUndefined();
   });
 
@@ -283,12 +278,15 @@ describe("sign-in table", () => {
     expect(command("gh").kind).toBe("device");
     expect(command("hermes").kind).toBe("device");
     expect(command("opencode").kind).toBe("key");
-    for (const name of ["claude", "codex", "gemini", "gcloud", "aws", "wrangler", "vercel", "pi", "cloudflared"]) expect(command(name).kind, name).toBe("oauth");
+    for (const name of ["codex", "gemini", "gcloud", "aws", "wrangler", "vercel", "pi", "cloudflared"]) expect(command(name).kind, name).toBe("oauth");
+    expect(signInFor("claude").kind).toBe("token");
+    // Codex signs in once on the computer that runs the workspaces, and it is the only row that does.
+    expect(collectorLogins().filter(id => livesOnComputer(signInFor(id)))).toEqual(["codex"]);
   });
 
   it("declares in one place how each login finishes where nobody is at the machine's terminal, so the hand-off reads a road instead of guessing one", () => {
     // The tools whose own notes here say a browser on the machine finishes them: their page returns to a port there.
-    for (const name of ["gcloud", "gemini", "railway", "wrangler", "aws", "claude", "codex"]) expect(command(name).finish, name).toBe("callback");
+    for (const name of ["gcloud", "gemini", "railway", "wrangler", "aws", "codex"]) expect(command(name).finish, name).toBe("callback");
     // gh prints the code its page asks for, and the rest are unmeasured from the app, so none of them takes a code back.
     for (const name of ["gh", "vercel", "netlify", "fly", "supabase", "doppler", "opencode", "cloudflared", "pi", "hermes"]) expect(command(name).finish, name).toBe("none");
     for (const [name, s] of Object.entries(SIGN_INS)) if (hasLogin(s)) expect(SignInFinish.options, name).toContain(s.finish);
@@ -296,7 +294,7 @@ describe("sign-in table", () => {
 
   it("signsInByDefault holds for the oauth and device kinds and not for key, none or a bare shell", () => {
     const machine = collectorLogins().filter(id => signsInByDefault(signInFor(id)));
-    expect(machine.sort()).toEqual(["aws", "claude", "cloudflared", "codex", "gcloud", "gemini", "gh", "hermes", "pi", "vercel", "wrangler"]);
+    expect(machine.sort()).toEqual(["aws", "cloudflared", "codex", "gcloud", "gemini", "gh", "hermes", "pi", "vercel", "wrangler"]);
     for (const id of ["opencode", "kube", "op"]) expect(signsInByDefault(signInFor(id)), id).toBe(false);
     expect(signsInByDefault({ kind: "shell" })).toBe(false);
   });

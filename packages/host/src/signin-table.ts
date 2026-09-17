@@ -2,10 +2,10 @@
 // The sign-in rows the init terminal runs, read off the catalog by the login
 // id the collector emits; a tool the catalog does not know gets a shell where
 // the person types the tool's own command.
-import { LOGIN_ROWS, hasLogin, type SignIn as CatalogSignIn } from "@wsp/catalog";
+import { LOGIN_ROWS, hasLogin, mintsToken, type SignIn as CatalogSignIn } from "@wsp/catalog";
 
 export type { LoginSource } from "@wsp/catalog";
-export { AWS_STATUS, CLAUDE_KEY_PATH, CLAUDE_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, asksThePerson, claudeSource, claudeWhy, geminiSource, hasLogin, loginWords, questionsOf, secretNamed, signsInByDefault } from "@wsp/catalog";
+export { AWS_STATUS, CLOUDFLARED_STATUS, GEMINI_STATUS, TOKEN_SOURCE, asksThePerson, claudeSource, geminiSource, hasLogin, livesOnComputer, loginWords, mintsToken, questionsOf, secretNamed, signsInByDefault } from "@wsp/catalog";
 
 /** A catalog row, or a shell for a tool with no row. */
 export type SignIn = CatalogSignIn | { kind: "shell" };
@@ -21,5 +21,6 @@ export function signInFor(name: string): SignIn {
 /** The words a step header shows for the row. */
 export function signInWords(s: SignIn): string {
   if (hasLogin(s)) return s.login;
+  if (mintsToken(s)) return s.mint;
   return s.kind === "shell" ? "sign in as the tool asks" : (s.note ?? "no sign-in");
 }

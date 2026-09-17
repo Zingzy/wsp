@@ -25,7 +25,7 @@ describe.runIf(LIVE)("daemon deploy on a desktop builder (live)", () => {
     const t0 = Date.now();
     const stages: { stage: GoldenStage; at: number; detail?: string }[] = [];
     let deployed: { token: string } | undefined;
-    const { setup, smoke, ...recipe } = goldenRecipe({ anthropic: env.ANTHROPIC_API_KEY });
+    const { setup, smoke, ...recipe } = goldenRecipe();
     void setup;
     void smoke;
     const builder = await prepareBuilder({

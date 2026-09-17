@@ -20,7 +20,7 @@ import { outsideCatalog } from "./recipe-file.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
 import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
-import { asksThePerson, hasLogin, loginWords, signInFor, type SignIn } from "./signin-table.js";
+import { asksThePerson, hasLogin, livesOnComputer, loginWords, mintsToken, signInFor, type SignIn } from "./signin-table.js";
 import type { ScanRow } from "./scan.js";
 
 /** The screens of a run, in order, with the one sentence each opens with; the build comes after them. */
@@ -174,16 +174,25 @@ function mcpWhy(e: ManifestEntry, manifest: Manifest): string {
 
 /** The answers a login row can take: a copy when there is something here to copy, an API key when the tool reads one,
  * and always skip. A catalog flow that runs on the machine without stopping on the person is offered both ways: left
- * to the first time the tool is needed there, which is the default, or run during the build, which is the opt-in. */
+ * to the first time the tool is needed there, which is the default, or run during the build, which is the opt-in.
+ * A tool that mints a token on this computer is offered that and never a copy, since nothing of such a login is on
+ * a machine to copy; a login that lives on the computer that runs the workspaces is signed in there once, so the
+ * build never runs it and no file of it travels. The row's own road leads, since a row whose saved answer is no
+ * longer offered opens on the first word it can take. */
 export function choicesFor(e: ManifestEntry, s: SignIn, platform: Platform): Choice[] {
+  const token = mintsToken(s);
+  const onComputer = livesOnComputer(s);
   const allowed = new Set<string>(["skip"]);
-  if (e.paths.length > 0 || e.bytes > 0) allowed.add("copy");
-  if (hasLogin(s) && !asksThePerson(s)) {
+  if (!token && !onComputer && (e.paths.length > 0 || e.bytes > 0)) allowed.add("copy");
+  if (token) allowed.add("token");
+  if (onComputer) allowed.add("later");
+  if (hasLogin(s) && !asksThePerson(s) && !onComputer) {
     allowed.add("machine");
     allowed.add("later");
   }
-  if (hasLogin(s) && s.keyEnv !== undefined) allowed.add("key");
-  return signInChoices(platform).filter(c => allowed.has(c.value));
+  if ((hasLogin(s) || token) && s.keyEnv !== undefined) allowed.add("key");
+  const offered = signInChoices(platform).filter(c => allowed.has(c.value));
+  return token ? [...offered.filter(c => c.value === "token"), ...offered.filter(c => c.value !== "token")] : offered;
 }
 
 /** A header's counts: how its rows answered, in the choice order, in short words. */
