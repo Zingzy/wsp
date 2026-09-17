@@ -3118,6 +3118,12 @@ export const placeHoldsNoImageLine = (place: string, image: string): string =>
 export const placeHoldsForksRefusal = (place: string, names: readonly string[]): string =>
   `${place} still holds ${names.length === 1 ? "a fork" : `${names.length} forks`} (${names.join(", ")}); delete them first, then wsp remove ${place}`;
 
+/** What a remove of a place that still holds projects is refused with: a project is one computer's, so taking the
+ * computer out would leave records standing on a place nothing here can name again. The forks go first, since a
+ * workspace of a project is a machine on that computer, and the projects themselves after. */
+export const placeHoldsProjectsRefusal = (place: string, names: readonly string[]): string =>
+  `${place} still holds ${names.length === 1 ? "a project" : `${names.length} projects`} (${names.join(", ")}); wsp projects remove each of them first, then wsp remove ${place}`;
+
 /** What a fork aimed at a place this host no longer holds a record for is refused with. Every computer on the
  * list forks, so the only way to reach this is a record that went between the word being read and the fork being
  * asked for: a remove, or a store another process wrote. */
@@ -4026,7 +4032,6 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * they named where those are not ssh's own. Forks nothing; refused when this host wired no ssh backend, when the
    * machine does not answer the dial, when a workspace already stands on it, or for a name another workspace holds.
    * The name defaults to what the address calls the machine. Replies with { workspace }. */
-  z.object({ id: reqId, op: z.literal("workspaces.createSsh"), address: z.string(), name: z.string().optional(), port: z.number().int().optional(), keyPath: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.list") }),
   /** The workspace a person's word names, by id or by name, off the same reading workspaces.list serves: a name no
    * workspace here carries is refused as absent, and one this caller may not drive by the rule that hides it, so a

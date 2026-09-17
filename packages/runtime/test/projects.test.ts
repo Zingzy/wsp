@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { folderOnCopyRefusal, gitOnThisMacRefusal, HERE_PLACE_ID, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, type AdapterEvent, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { folderOnCopyRefusal, gitOnThisMacRefusal, HERE_PLACE_ID, worksInPlaceTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, type AdapterEvent, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { createRuntime, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend } from "./stub-backend.js";
@@ -160,6 +160,22 @@ describe("a workspace of a project", () => {
     expect(await rt.workspaces.list()).toEqual([]);
   });
 
+  it("takes none of the words a fork takes: the folder is the workspace, so from, size and engine are refused in one sentence", async () => {
+    const { rt } = withLocal();
+    const folder = tempRepo();
+    const project = await rt.projects.add({ source: folder });
+    for (const [asked, word] of [
+      [{ golden: "snap_g" }, "--from"],
+      [{ cpu: 2, memMb: 4096 }, "--size"],
+      [{ engine: true }, "--engine"],
+    ] as const) {
+      await expect(rt.workspaces.create({ project: project.id, name: "work", ...asked })).rejects.toThrow(worksInPlaceTakesNone(project.name, [word]));
+    }
+    // Nothing was recorded by any of the three: the refusal comes before the record.
+    expect(await rt.workspaces.list()).toEqual([]);
+    rmSync(folder, { recursive: true, force: true });
+  });
+
   it("on this computer the workspace is the folder itself, and a second one on that project names the one standing", async () => {
     const { rt } = withLocal();
     const folder = tempRepo();
@@ -168,6 +184,36 @@ describe("a workspace of a project", () => {
     expect(ws).toMatchObject({ kind: "local", golden: "", project: { name: project.name, path: folder, computer: HERE_PLACE_ID } });
     await expect(rt.workspaces.create({ project: project.id, name: "second" })).rejects.toMatchObject({ message: oneWorkspacePerProject(project.name, "plan check"), kind: "conflict" });
     rmSync(folder, { recursive: true, force: true });
+  });
+});
+
+describe("naming a workspace", () => {
+  /** Two workspaces whose ids share their first six characters, written into the store by hand: the runtime mints
+   * random ids, and an ambiguous prefix is only ambiguous where two ids are known to share one. */
+  function twoSharing(): Runtime {
+    const store = memoryStore();
+    const project = { id: "pr_1", name: "spoo-landing", computer: "default", source: { kind: "git" as const, url: REPO }, path: "/root/spoo-landing", createdAt: "2026-09-01T00:00:00.000Z" };
+    void store.put("projects", project.id, project);
+    for (const [id, name] of [["ws_1a2b3c4d", "pricing page"], ["ws_1a2bffff", "landing copy"]] as const) {
+      void store.put("workspaces", id, { id, name, kind: "cloud", project: project.id, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true });
+    }
+    return createRuntime({ backend: stubBackend(), store, adapters: {} });
+  }
+
+  it("takes the id, the name, or enough of the id to name one", async () => {
+    const rt = twoSharing();
+    expect((await rt.workspaces.resolve("ws_1a2b3c4d")).name).toBe("pricing page");
+    expect((await rt.workspaces.resolve("pricing page")).id).toBe("ws_1a2b3c4d");
+    // Enough of an id is the way round quoting a name with spaces.
+    expect((await rt.workspaces.resolve("ws_1a2b3")).name).toBe("pricing page");
+    expect((await rt.workspaces.resolve("ws_1a2bf")).name).toBe("landing copy");
+  });
+
+  it("refuses a word that starts two of them with both ids, and one too short to name any as absent", async () => {
+    const rt = twoSharing();
+    await expect(rt.workspaces.resolve("ws_1a2b")).rejects.toThrow(idPrefixRefusal("ws_1a2b", ["ws_1a2b3c4d", "ws_1a2bffff"]));
+    // Three characters is under the floor, so it is read as a name and nothing else, however many ids open with it.
+    await expect(rt.workspaces.resolve("ws_")).rejects.toThrow(noWorkspaceRefusal("ws_"));
   });
 });
 
@@ -207,7 +253,7 @@ describe("a state file from before projects were records", () => {
   it("is not read: the host refuses in one sentence naming the file and does not serve", async () => {
     const store = memoryStore();
     await store.put("workspaces", "ws_old", { id: "ws_old", name: "old", kind: "cloud", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true, projects: [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00.000Z" }] });
-    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-905/state.json" });
-    await expect(rt.workspaces.list()).rejects.toThrow("move /tmp/wsp-905/state.json aside and start again");
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, statePath: "/tmp/wsp-hierarchy/state.json" });
+    await expect(rt.workspaces.list()).rejects.toThrow("move /tmp/wsp-hierarchy/state.json aside and start again");
   });
 });

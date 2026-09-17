@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { ADD_FORMS_LINE, folderName, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, ADD_FORMS_LINE, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -34,6 +34,8 @@ describe("what one word to wsp add names", () => {
     expect(sourceKind("/Users/dev/wsp")).toBe("folder");
     expect(sourceKind("~/spoo/spoo-landing")).toBe("folder");
     expect(sourceKind("./frontend")).toBe("folder");
+    // A path is a path first: a folder somebody called repo.git is theirs on this computer, not a url.
+    expect(sourceKind("/Users/me/repo.git")).toBe("folder");
     expect(() => sourceKind("spoo")).toThrow(ADD_FORMS_LINE);
   });
 
@@ -46,8 +48,8 @@ describe("what one word to wsp add names", () => {
   });
 
   it("the checkout sits where the workspace's kind puts it: the folder itself on this computer, the copy's own home on a machine", () => {
-    expect(projectPathOn("cloud", gitSource("https://github.com/spoo-me/frontend"), "spoo-landing")).toBe("/root/spoo-landing");
-    expect(projectPathOn("local", folderSource("/Users/z/spoo/spoo-landing"), "spoo-landing")).toBe("/Users/z/spoo/spoo-landing");
+    expect(projectPathOn(gitSource("https://github.com/spoo-me/frontend"), "spoo-landing")).toBe("/root/spoo-landing");
+    expect(projectPathOn(folderSource("/Users/z/spoo/spoo-landing"), "spoo-landing")).toBe("/Users/z/spoo/spoo-landing");
   });
 
   it("which sources a computer takes is its kind's own row, so no road decides it for itself", () => {
@@ -84,6 +86,26 @@ describe("the project a workspace holds", () => {
     expect(homeShortened("/root", "/root")).toBe("~");
     expect(homeShortened("/rooted/spoo", "/root")).toBe("/rooted/spoo");
     expect(homeShortened("/root/spoo", undefined)).toBe("/root/spoo");
+  });
+});
+
+describe("what a computer is called in a row", () => {
+  it("is this computer's own word for the computer the host runs on, and the name this wsp holds for every other", () => {
+    const named = new Map([["pl_box", "hetzner"]]);
+    expect(computerNamed(HERE_PLACE_ID, named, "darwin")).toBe("this Mac");
+    expect(computerNamed(HERE_PLACE_ID, named, "linux")).toBe("this computer");
+    expect(computerNamed("pl_box", named)).toBe("hetzner");
+    // A caller that could not read the list says the id rather than inventing a name for it.
+    expect(computerNamed("pl_box")).toBe("pl_box");
+  });
+
+  it("the line a recorded project answers with names the computer the same way, and says the command that makes its workspace", () => {
+    const project = { id: "pr_1", name: "spoo-landing", computer: "pl_box", source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+    expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]))).toBe(
+      'spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing inside a workspace of it\nmake one with: wsp new \'spoo-landing\' "<what you are working on>"',
+    );
+    const here = { ...project, id: "pr_2", name: "wsp", computer: HERE_PLACE_ID, source: { kind: "folder" as const, path: "/Users/dev/wsp" }, path: "/Users/dev/wsp" };
+    expect(addedProjectLine(here, new Map(), "darwin")).toContain("on this Mac, at /Users/dev/wsp");
   });
 });
 

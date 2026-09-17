@@ -340,12 +340,13 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
-  it("the view names the workspace's own folder, the one a thread starts in when no project does, so the app's line under the box says what the runtime will do", async () => {
+  it("the view names the project's own folder, which is what a workspace worked in place is, so the app's line under the box says what the runtime will do", async () => {
     const rt = runtime();
     const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
-    expect(ws.folder).toBe(root);
-    expect((await rt.workspaces.get(ws.id)).folder).toBe(root);
-    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(root);
+    // The workspace here is the folder the project was recorded on, and a thread on it starts there.
+    expect(ws.folder).toBe(ws.project.path);
+    expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.project.path);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.project.path);
     await rt.close();
   });
 

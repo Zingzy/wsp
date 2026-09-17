@@ -196,7 +196,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, sameSourceRefusal, sourceKind, worksInPlace, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, sameSourceRefusal, sourceKind, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent } from "@wsp/engine";
@@ -761,29 +761,12 @@ export interface LocalWiring {
   close?: () => Promise<void>;
 }
 
-/** What a host wires for the machines it reaches over ssh: the backend that dials them, and the one call that
- * records one. Absent, the runtime serves no ssh workspace and `createSsh` is refused. The one place the ssh
- * variant is registered beside the cloud default. */
+/** What a host wires for the machines it reaches over ssh: the backend that dials them and the road to a daemon
+ * already on one. A machine somebody owns is a computer this host joins, and the projects on it are cloned into
+ * copies of its own image, so nothing here records a workspace: this is the ssh variant's registration beside the
+ * cloud default and nothing more. */
 export interface SshWiring {
   backend: MachineBackend;
-  /** One dial that proves the machine answers and reads what its record stands on: the handle, the name the address
-   * suggests, the machine's own login environment and its size. The address is the person's own word for the
-   * machine (user@host), read here and nowhere else in the runtime. */
-  adopt: (address: string, opts: { port?: number; keyPath?: string }) => Promise<{
-    machine: Machine;
-    name: string;
-    login: Readonly<Record<string, string>>;
-    shape: MachineShape;
-    /** What the machine answered about who it is, so one machine carries one workspace however it was addressed. */
-    identity?: string;
-    /** The key the machine answered the connection with, shown to the person once so they can compare it. */
-    hostKey?: string;
-  }>;
-  /** Puts the daemon on a machine reached over ssh, under the login it answered with: everything it writes sits
-   * under that home and its unit is that login's own, so nothing about the deploy needs root. A returned string
-   * rides the stage line as its detail, the way a fork's does. Absent, an ssh workspace is recorded with no
-   * daemon and its panes say so. */
-  deployDaemon?: (machine: Machine, login: { home: string; path: string }) => Promise<void | string>;
   /** A port on this computer's own loopback carried to a port on the machine's, one connection per machine and
    * reused by every dial after the first. Nothing on the machine listens past its own loopback, so this is the
    * whole road to its daemon. */
@@ -1800,8 +1783,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
     execStream: (entry: LiveWorkspace, opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
     /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
-     * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since on
-     * a computer somebody owns the folder sits under the home that computer answered with. */
+     * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since a
+     * workspace worked in place is its project's own folder. */
     folder: (record: WorkspaceRecord) => string | undefined;
     /** Where the harness keeps its sessions on this workspace's machine: a fixed folder on a kind whose machines
      * wsp makes alike, the record's own on a machine that already existed and answered with its home. */
@@ -1977,20 +1960,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     daemonTokens.delete(entry.machine.id);
     await daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
   };
-  /** Puts this runtime's daemon under the login the machine answered with. The record keeps that it happened, so
-   * a later host process knows the machine has one without dialling it, and the panes refuse with the sentence
-   * that names the verb rather than waiting on a port nothing binds. */
-  const sshDeploy = async (entry: LiveWorkspace): Promise<void | string> => {
-    if (ssh?.deployDaemon === undefined) throw new Error(noKindLine("ssh"));
-    const login = loginOf(entry.record);
-    const home = sshHomeDir(entry);
-    const detail = await ssh.deployDaemon(entry.machine, { home, path: login["PATH"] ?? "" });
-    daemonTokens.delete(entry.machine.id);
-    await daemonTokenOf(entry.machine, sshDaemonPaths(home).tokenPath);
-    entry.record.daemon = { deployedAt: new Date(clock.now()).toISOString(), version: DAEMON_VERSION };
-    await persist(entry.record);
-    return detail;
-  };
   /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind
    * this host does not serve answers. */
   let placeDoor: PlaceDoor | undefined;
@@ -2038,7 +2007,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         : {
             backend: () => local.backend,
             execStream: (_entry, o, waiting) => local.execStream(o, waiting),
-            folder: () => local.backend.folder,
+            // The workspace here is the project's own folder worked in place, so that folder is the word its view
+            // carries and where a thread on it starts; the same reading threadFolder takes.
+            folder: record => projectHeld(record.project).path,
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
             env: () => local.env(),
@@ -2128,7 +2099,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 await ssh.dropForward?.(entry.machine);
               }
             },
-            ...(ssh.deployDaemon === undefined ? {} : { deployDaemon: sshDeploy }),
             // The machine is the person's own and the folder is theirs to land on, so the bytes travel the way a
             // fork's do; the road that carries them reads the machine for how, and over ssh that is the connection.
             import: (entry, o, report) => copyImport(entry, o, report),
@@ -2413,6 +2383,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         forksOn: async placeId => {
           await ready();
           return [...live.values()].filter(e => e.record.place === placeId).map(e => e.record.name);
+        },
+        projectsOn: async placeId => {
+          await ready();
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => p.name);
         },
       },
     });
@@ -4179,9 +4153,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * forked and nothing is copied. One workspace per such project, since two records on one folder would be two
    * names for one working tree; the machine is this computer, and its phase is running with auto-nap off from the
    * start, a machine wsp does not run neither napping nor waking. */
-  const recordExisting = async (project: ProjectView, name: string, caller: Caller | undefined): Promise<WorkspaceView> => {
-    const n = nameGiven(name);
+  const recordExisting = async (project: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined): Promise<WorkspaceView> => {
+    const n = nameGiven(o.name);
     refuseRecording(n, caller);
+    // The folder is the workspace, so the words a fork takes have nothing to act on here: they are refused in one
+    // sentence rather than taken and ignored.
+    const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
+    if (forkWords.length > 0) throw Object.assign(new Error(worksInPlaceTakesNone(project.name, forkWords)), { kind: "invalid" });
     const refusal = nameRefusal(n);
     if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
     const standing = [...live.values()].find(e => e.record.project === project.id);
@@ -4232,7 +4210,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads, so a
       // create on a computer whose agents could not drive this host is refused rather than given a dead switch.
       if (o.agents?.spawn === true && !agentsMayDrive(kind)) throw Object.assign(new Error(agentsKindRefusal(kind)), { kind: "invalid" });
-      if (worksInPlace(kind)) return recordExisting(project, o.name, origin);
+      if (worksInPlace(kind)) return recordExisting(project, o, origin);
       refuseRelayed({ kind, name: o.name }, origin);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on.
@@ -4322,7 +4300,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await ready();
       const rows = held();
       // A name names one workspace at most: the create and the rename both refuse a name another already holds.
-      const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
+      // Failing both, enough of an id to name one is the way round quoting a name with spaces; a word that starts
+      // two is refused with both ids rather than guessing between them.
+      const started = ref.length >= ID_PREFIX_MIN ? rows.filter(e => e.record.id.startsWith(ref)) : [];
+      if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
+      const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref) ?? started[0];
       if (entry === undefined) {
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
@@ -7224,7 +7206,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         name,
         computer,
         source,
-        path: projectPathOn(kindForComputer(computer), source, name),
+        path: projectPathOn(source, name),
         ...(o.base !== undefined ? { base: o.base } : {}),
         createdAt: new Date(clock.now()).toISOString(),
       };

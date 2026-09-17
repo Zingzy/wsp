@@ -734,6 +734,10 @@ describe("runtime wire types", () => {
     expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create", name: "x" })).toThrow(); // a workspace is a project's
     // The image is the project's computer's own head unless a project image is named outright.
     expect(RuntimeRequest.parse({ id: 1, op: "workspaces.create", project: "spoo-landing", name: "x" })).not.toHaveProperty("golden");
+    // The two roads that recorded a workspace of their own leave with the projects recut: this computer is a
+    // project recorded with wsp add, and a machine somebody owns is a computer their projects are cloned onto.
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.createLocal" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.createSsh", address: "dev@box" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
     // The two roads that handed a daemon token out leave the wire with the relay: nothing outside the host dials a daemon.

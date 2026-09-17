@@ -2112,6 +2112,23 @@ describe("a fork on a computer you joined", () => {
     expect(swept).toEqual([]);
     expect(place.killed).toEqual([]);
   });
+
+  it("refuses to take a computer out from under the projects recorded on it, naming them, and sweeps nothing", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const swept: string[] = [];
+    client.ws.on("message", raw => {
+      const frame = JSON.parse(String(raw)) as { op?: string };
+      if (frame.op === "place.leave") swept.push("asked");
+    });
+    // A project with no workspace of it: the forks refusal cannot be what answers here, so the projects one is.
+    await projectOn(runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    await expect(runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a project \(spoo-landing\); wsp projects remove each of them first/);
+    expect(swept).toEqual([]);
+    expect(place.killed).toEqual([]);
+  });
 });
 
 /** One connection to a port this host is forwarding; answers what it read, or "cut" when the far side refused it. */

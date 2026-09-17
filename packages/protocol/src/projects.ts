@@ -4,7 +4,7 @@
 // of it, and which workspace a folder on this computer belongs to. The
 // command line, the runtime and the app all read them here, so no road can
 // record a project one way and read it back another.
-import { THIS_COMPUTER } from "./format.js";
+import { THIS_COMPUTER, thisComputer } from "./format.js";
 import { HERE_PLACE_ID } from "./index.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
@@ -13,18 +13,20 @@ import { kindWords } from "./workspace-state.js";
 
 /** What a caller is told once a project is recorded: what it is called, where its code comes from, the computer it
  * lives on and where a workspace of it holds the checkout, then the line that makes one. The command line prints it
- * and the tool answers it, so both doors say the same thing about the same record. */
-export function addedProjectLine(project: ProjectView): string {
+ * and the tool answers it, so both doors say the same thing about the same record. The computer is named the way
+ * every table names it, off the same places reading; a caller with none says the id. */
+export function addedProjectLine(project: ProjectView, named?: ReadonlyMap<string, string>, platform: "darwin" | "linux" = "darwin"): string {
   const from = project.source.kind === "git" ? project.source.url : project.source.path;
-  return `${project.name} ${project.id}: ${from} on ${project.computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
+  return `${project.name} ${project.id}: ${from} on ${computerNamed(project.computer, named, platform)}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
 
 /** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones, or a
  * folder a computer holds. Read once here, so the command line, the tool and the runtime cannot each decide for
  * themselves what somebody typed. A word that is none of the three throws with the three forms. */
 export function sourceKind(word: string): "computer" | "git" | "folder" {
-  if (word.includes("://") || /^[\w.-]+@[\w.-]+:/.test(word) || word.endsWith(".git")) return "git";
+  // A path is a path first: /Users/me/repo.git is a folder somebody named that way, not a url.
   if (word.startsWith("/") || word.startsWith("~") || word.startsWith(".")) return "folder";
+  if (word.includes("://") || /^[\w.-]+@[\w.-]+:/.test(word) || word.endsWith(".git")) return "git";
   if (/^[\w.-]+@[\w.-]+$/.test(word)) return "computer";
   throw new Error(ADD_FORMS_LINE);
 }
@@ -40,9 +42,10 @@ export function projectNameOf(source: ProjectSource): string {
   return last.replace(/\.git$/, "");
 }
 
-/** Where a project's checkout sits inside a workspace of it: the folder itself where the workspace is this
- * computer working in place, and the home every copy of the image carries where the workspace is a machine. */
-export function projectPathOn(kind: WorkspaceKind, source: ProjectSource, name: string): string {
+/** Where a project's checkout sits inside a workspace of it: the folder itself where the source is one on this
+ * computer, worked in place, and the home every copy of the image carries where the source is a repo a computer
+ * clones. The source says which, so the workspace's kind is not asked for here. */
+export function projectPathOn(source: ProjectSource, name: string): string {
   if (source.kind === "folder") return source.path;
   return `${GUEST_PROJECT_HOME}/${name}`;
 }
@@ -157,6 +160,20 @@ export function worksInPlace(kind: WorkspaceKind): boolean {
  * kind, so no road anywhere compares that id itself. */
 export function kindForComputer(computer: string): WorkspaceKind {
   return computer === HERE_PLACE_ID ? "local" : "cloud";
+}
+
+/** Why a workspace worked in place takes none of the words a fork takes: it is the project's own folder where it
+ * already sits, so there is no image to start from, no machine to size and no engine to hand it. The words are
+ * named in the order the command line lists them, so the sentence says exactly which to drop. */
+export const worksInPlaceTakesNone = (project: string, words: readonly string[]): string =>
+  `${project} is worked in place on ${THIS_COMPUTER}, which forks nothing, so it takes no ${words.join(", ")}`;
+
+/** What a computer is called in a row or a line: the name this wsp holds for it, and this computer's own word
+ * where the record names this one. `named` is the places table by id, which every caller already reads for its
+ * other columns. The one reading, so a project's row, a workspace's row and the line a recorded project answers
+ * with can never print one computer three ways. */
+export function computerNamed(computer: string, named?: ReadonlyMap<string, string>, platform: "darwin" | "linux" = "darwin"): string {
+  return computer === HERE_PLACE_ID ? thisComputer(platform) : (named?.get(computer) ?? computer);
 }
 
 /** Why a thread opened with no workspace named, from a folder that is not inside a repo, opens nothing; `named` is

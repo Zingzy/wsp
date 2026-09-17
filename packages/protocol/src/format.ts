@@ -2409,6 +2409,16 @@ export function noWorkspaceRefusal(ref: string): string {
   return `no workspace ${ref}`;
 }
 
+/** How much of an id a word has to carry before it names a workspace by its start: enough that a name with spaces
+ * has a way round the quotes, and enough that two or three characters never reach for a workspace nobody meant. */
+export const ID_PREFIX_MIN = 4;
+
+/** What a word that starts more than one workspace's id is refused with: both ids, so the next word is typed off
+ * this line rather than off another listing. */
+export function idPrefixRefusal(ref: string, ids: readonly string[]): string {
+  return `${ids.length} workspaces start with ${ref} (${ids.join(", ")}); give more of the id`;
+}
+
 /** The workspace table's cell for the switch: empty where agents spawn nothing, which is nearly every row, so the
  * column is quiet until a workspace has one. */
 export function agentsWord(agents: { spawn: boolean; maxMachines: number } | undefined): string {
