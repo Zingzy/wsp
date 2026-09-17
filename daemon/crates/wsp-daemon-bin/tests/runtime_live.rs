@@ -1413,6 +1413,11 @@ async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
         );
     }
     assert_eq!(fs::read(token).ok(), box_token, "a workspace's write reached the computer's own daemon token");
+    // And no workspace's folder is mounted at the computer's own path while both are up: a bind left in the
+    // computer's peer group would put one there, where every process on the box reads it instead of its own.
+    let table = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    let at_the_computers_own = table.lines().filter(|line| line.contains(&format!(" {} ", wsp_frames::numbers::GUEST_WSP_HOME))).count();
+    assert_eq!(at_the_computers_own, 0, "a workspace's wsp folder is mounted at {}", wsp_frames::numbers::GUEST_WSP_HOME);
     // A package installed inside is the workspace's alone: the overlay's upper takes it and the box has nothing.
     let (code, out, err) =
         w.exec(&id, "mkdir -p /usr/local/lib/wsp-probe && echo mine > /usr/local/lib/wsp-probe/x && cat /usr/local/lib/wsp-probe/x").await;

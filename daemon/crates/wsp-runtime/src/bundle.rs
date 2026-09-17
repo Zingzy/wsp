@@ -384,11 +384,13 @@ const SKELETON: [&str; 15] =
 const EMPTIED_AT_BOOT: [&str; 2] = ["run", "tmp"];
 
 /// The rootfs of a workspace on a computer somebody owns, made fresh at every boot: the box's own top-level
-/// symlinks as the box writes them, an empty directory for everything else, /run and /tmp emptied, an overlay
-/// over each of the computer's system directories, the box's /root bound in read-write so the agents' sign-ins
-/// and caches are the person's own, the workspace's own wsp folder over the box's, and an empty directory of the
-/// workspace's own over each path under it nothing inside may read. The copy of a project and youki's own mounts
-/// come after, in the boot.
+/// symlinks as the box writes them, an empty directory for everything else, /run and /tmp emptied, the rootfs
+/// made a mount of its own that propagates nothing, an overlay over each of the computer's system directories,
+/// the box's /root bound in read-write so the agents' sign-ins and caches are the person's own, the workspace's
+/// own wsp folder over the box's, and an empty directory of the workspace's own over each path under it nothing
+/// inside may read. The copy of a project and youki's own mounts come after, in the boot.
+///
+/// Every mount here is the workspace's alone: `bind_into` says why that takes two calls rather than one.
 ///
 /// Nothing here is reached under a root that sits inside one of the overlaid directories: the open refuses such
 /// a root before it makes anything and `crate::doctor::root_under_a_lower` says which lower it sits under. The
@@ -416,6 +418,13 @@ pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
         let dir = rootfs.join(name);
         fs::create_dir_all(&dir).map_err(at(&dir))?;
     }
+    // The rootfs itself, bound to its own path and made to receive only, before one overlay or bind goes under
+    // it: the volume this root sits on may be in a shared peer group of its own (a loop volume on a box was
+    // shared:32), and a mount placed under a shared parent lands on every peer at the same relative path. With
+    // the rootfs as its own mount and slave, nothing mounted under it can reach a peer of that volume, whatever
+    // the volume is. youki binds the rootfs to itself as it pivots in any case; this is the same bind, made
+    // early and made quiet.
+    bind_into(&rootfs, &rootfs)?;
     // Read off the box, never written down here: on a merged-usr box bin, sbin, lib and lib64 are links into usr,
     // and a box may hold links of its own beside them. A wake finds the links its own first boot wrote, and one
     // the box has since pointed somewhere else is written again: the link itself is read, never what it points
@@ -538,13 +547,33 @@ pub fn unmount(target: &Path) -> Result<(), Error> {
     }
 }
 
-/// The copy bound into the workspace's rootfs at the path the project has inside it, from this daemon's own
-/// mount namespace and before youki's create: youki rebinds the rootfs recursively as it pivots, so the copy
-/// travels into the workspace with it, and the daemon keeps seeing it at the same path outside, which is the
-/// path the engine fence already rewrites a bind source to.
+/// One bind under a workspace's rootfs, made from this daemon's own mount namespace and before youki's create:
+/// youki rebinds the rootfs recursively as it pivots, so what is bound here travels into the workspace with it,
+/// and the daemon keeps seeing it at the same path outside, which is the path the engine fence already rewrites
+/// a bind source to.
+///
+/// Every bind here is made to receive only, the moment it exists and before anything is mounted under it. A
+/// computer's own `/` is in a shared peer group on every box that boots systemd, and a bind of a mount in such a
+/// group stays in it: a mount placed under that bind then lands at the same relative path on every peer, which
+/// includes the computer itself. Measured on a box: the workspace's own folder bound at `rootfs/root/.wsp`
+/// appeared at the computer's own `/root/.wsp` for as long as the workspace lived, hiding that computer's daemon
+/// files, its token and its socket from every process on it, and a second workspace's recursive bind of `/root`
+/// picked up the first workspace's folder and then covered it. Slave, not private: what the computer mounts
+/// later under a bound directory still reaches the workspaces, which is what a person plugging a disk in
+/// expects, and nothing a workspace mounts reaches the computer.
 pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     fs::create_dir_all(target).map_err(at(target))?;
-    mount(Some(source), target, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).map_err(nix_at(target))
+    for (from, at_path, flags) in bind_steps(source, target) {
+        mount(from, at_path, None::<&str>, flags, None::<&str>).map_err(nix_at(at_path))?;
+    }
+    Ok(())
+}
+
+/// The two calls one bind is made of, in order: the bind itself, then the propagation that makes it receive
+/// only. Written as a list so a test reads what the boot will do without mounting anything, and so the second
+/// call cannot drift away from the first.
+fn bind_steps<'a>(source: &'a Path, target: &'a Path) -> [(Option<&'a Path>, &'a Path, MsFlags); 2] {
+    [(Some(source), target, MsFlags::MS_BIND | MsFlags::MS_REC), (None, target, MsFlags::MS_SLAVE | MsFlags::MS_REC)]
 }
 
 /// The file a bind mount is to land on, made where the image carries none: a file bind needs the file to be
@@ -852,6 +881,27 @@ mod tests {
         assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
     }
 
+    /// Every bind the boot makes is two calls in one order: the bind, then the propagation that makes it
+    /// receive only. Read off the list the boot walks, so a bind added later cannot skip the second call, and
+    /// nothing is mounted to read it.
+    #[test]
+    fn a_bind_under_a_rootfs_is_made_to_receive_only_right_after_it_is_made() {
+        let (source, target) = (Path::new("/root"), Path::new("/wsp/run/wsp-a/rootfs/root"));
+        let steps = bind_steps(source, target);
+        assert_eq!(steps.len(), 2);
+        // The bind itself, recursive, so what the computer holds under the source comes along.
+        assert_eq!(steps[0].0, Some(source));
+        assert_eq!(steps[0].1, target);
+        assert_eq!(steps[0].2, MsFlags::MS_BIND | MsFlags::MS_REC);
+        // Then the same path made a slave of its source, recursively: it receives what the computer mounts
+        // later and propagates nothing back, which is what keeps a workspace's own folder off the computer's
+        // own path. Second, not first: the propagation is of the mount, and before the bind there is none.
+        assert_eq!(steps[1].0, None);
+        assert_eq!(steps[1].1, target);
+        assert_eq!(steps[1].2, MsFlags::MS_SLAVE | MsFlags::MS_REC);
+        assert!(!steps[1].2.contains(MsFlags::MS_SHARED) && !steps[1].2.contains(MsFlags::MS_PRIVATE));
+    }
+
     /// What a workspace's /etc/resolv.conf is after the boot writes it, on a rootfs made by hand: the link the
     /// box keeps there on every computer that runs systemd-resolved is gone, a regular file stands in its place,
     /// and what it holds is a nameserver a workspace can reach. No mount and no root: this is the write the boot
@@ -993,6 +1043,74 @@ mod tests {
         }
         assert_eq!(fs::read(inside(&rootfs, wsp_frames::numbers::DEFAULT_TOKEN_PATH).unwrap()).unwrap(), b"a-token-of-this-workspace\n");
         unmount_under(&rootfs).unwrap();
+    }
+
+    /// A bind whose source is in a shared peer group, which is what the computer's own `/` is on a box: what
+    /// the boot mounts under that bind may not appear at the source's own path. The source here is a temp
+    /// directory this case makes shared itself, never the computer's `/root`, which this case neither reads nor
+    /// writes. Root and the live flag, as every mount case here is.
+    #[test]
+    fn nothing_mounted_under_a_bind_reaches_the_peer_group_its_source_is_in() {
+        if !live_and_root() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        // The stand-in for the computer's own home and the folder under it a workspace covers: a marker in it,
+        // so a mount that reached the source would hide this file and the case would read that.
+        let (home, under) = (dir.path().join("home"), dir.path().join("home/.wsp"));
+        let (own, rootfs) = (dir.path().join("own"), dir.path().join("rootfs"));
+        for made in [&home, &under, &own, &rootfs] {
+            fs::create_dir_all(made).unwrap();
+        }
+        fs::write(
+            under.join("token"),
+            b"the computer's own
+",
+        )
+        .unwrap();
+        // The source made a mount of its own and shared, which is the shape a box's / has.
+        mount(Some(&home), &home, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).unwrap();
+        mount(None::<&str>, &home, None::<&str>, MsFlags::MS_SHARED | MsFlags::MS_REC, None::<&str>).unwrap();
+        let table = || fs::read_to_string(MOUNTINFO).unwrap();
+        let at_path = |p: &Path| mount_points(&table()).iter().filter(|point| *point == p).count();
+        assert_eq!(at_path(&home), 1, "the stand-in source is not its own mount");
+
+        // The boot's own road: the source bound under a rootfs, then the workspace's own folder over a path
+        // inside that bind.
+        bind_into(&rootfs, &rootfs).unwrap();
+        bind_into(&home, &rootfs.join("root")).unwrap();
+        bind_into(&own, &rootfs.join("root/.wsp")).unwrap();
+        assert_eq!(at_path(&rootfs.join("root/.wsp")), 1, "the workspace's own folder is not mounted");
+        // The whole of it: nothing new at the source's own path, and what the source holds there is still what
+        // it held. A bind left in the source's peer group would have put the workspace's empty folder here.
+        assert_eq!(at_path(&under), 0, "a mount under the bind reached the source's own path");
+        assert_eq!(
+            fs::read_to_string(under.join("token")).unwrap(),
+            "the computer's own
+"
+        );
+        assert_eq!(fs::read_dir(&under).unwrap().count(), 1);
+        // And the workspace reads its own folder at that path, which is the point of the bind.
+        fs::write(
+            rootfs.join("root/.wsp/token"),
+            b"the workspace's own
+",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(own.join("token")).unwrap(),
+            "the workspace's own
+"
+        );
+        assert_eq!(
+            fs::read_to_string(under.join("token")).unwrap(),
+            "the computer's own
+"
+        );
+
+        unmount_under(&rootfs).unwrap();
+        assert_eq!(at_path(&under), 0);
+        unmount(&home).unwrap();
     }
 
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself
