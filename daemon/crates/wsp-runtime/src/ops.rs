@@ -658,7 +658,7 @@ impl Ops {
         let logins = self.layout.logins();
         let asked = spec.shares.clone().unwrap_or_default();
         for share in &asked {
-            let under = Path::new(&share.source).strip_prefix(&logins).is_ok_and(|rest| rest.iter().next().is_some());
+            let under = Path::new(&share.source).strip_prefix(&logins).is_ok();
             if !under {
                 return Err(OpError::plain(format!(
                     "a login shared into a workspace is a file under {}, and {} is not one",

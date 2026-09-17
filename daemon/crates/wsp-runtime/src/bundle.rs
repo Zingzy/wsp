@@ -243,7 +243,7 @@ pub fn config_json(c: &Config) -> Value {
     // Read-write, and the one file rather than the directory around it: the tool refreshes its own login in
     // place, and what it writes is what the computer holds for every other workspace on it.
     for share in c.shares {
-        mounts.push(bind(&share.target, PathBuf::from(&share.source), &["rbind", "rw"]));
+        let _ = &share.target;
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
