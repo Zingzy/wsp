@@ -289,13 +289,11 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actionsOf, "rename"))}
         />
+        {/* The child's own row, drawn in the list this thread's rows sit in: the sub list is already one step in,
+            and a row is a list item of that list rather than one nested inside another. */}
         {forked.map(child => {
           const pane = visible.find(v => v.project.id === child.id);
-          return pane === undefined ? null : (
-            <SidebarMenuSubItem key={child.id} data-forked-workspace={child.id}>
-              {listItem(pane)}
-            </SidebarMenuSubItem>
-          );
+          return pane === undefined ? null : listItem(pane);
         })}
       </Fragment>
     );
