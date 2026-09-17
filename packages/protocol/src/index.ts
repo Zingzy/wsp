@@ -3245,6 +3245,7 @@ const DAEMON_CONTENTS = [
   "8308517d14718d8b82e1e129f1e48a8a511aa9fdaae26b60c900b6280fa85051",
   "a51cf26e554a02935fda02942869ddd7251b41e84625e500336c7ce171a4d667",
   "c2f00944a79a850450b11b4610b93ac4894b7da39282755a9bfef55776a11dff",
+  "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3355,7 +3356,14 @@ const DAEMON_CONTENTS = [
  * Version 43 names the run of the daemon that opened a guest session: every opened frame carries a marker minted
  * once per start, so the host tells a session it still holds from a session of the same name on a machine that
  * was rebuilt under it, whose names count from the start again. Without it a guest carrying no turn token, running
- * the same line from the same folder under the same token, was glued to the earlier session's output. */
+ * the same line from the same folder under the same token, was glued to the earlier session's output.
+ * Version 44 gives a workspace on a computer you own its project as a copy made once for it: a btrfs snapshot where
+ * the checkout is a subvolume, a reflink copy where the disk shares blocks, a plain copy everywhere else with its
+ * time said in the create's notice, chosen by asking the disk and never by a filesystem's name or id, bound into the
+ * workspace at the project's own path before the runtime starts and unmounted deepest first at stop. The place report
+ * carries the word for what the computer's disk can do, so the computers row says it. Before this a workspace shared
+ * its project through an overlay whose lower directory the box could change under it, which the kernel leaves
+ * undefined. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
