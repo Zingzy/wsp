@@ -1279,9 +1279,10 @@ export interface Runtime {
      * Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
     execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: Caller): Promise<RunningExec>;
     /** Pushes the branch this workspace's copy is on and opens or finds its pull request against the base. The
-     * base is the parent workspace's current branch for a child and the project's own base otherwise, and the
-     * base branch itself is refused: work leaves a workspace as a branch of its own. A machine with no signed-in
-     * command line for the git host still pushes, and says why the pull request waits as the result's note. */
+     * base is the branch its parent was on at the fork for a child, read off the child's own record and never off
+     * the parent again, and the project's own base otherwise; the base branch itself is refused: work leaves a
+     * workspace as a branch of its own. A machine with no signed-in command line for the git host still pushes,
+     * and says why the pull request waits as the result's note. */
     bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;

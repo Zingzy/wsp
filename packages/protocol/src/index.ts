@@ -4414,8 +4414,9 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * record alone changes: nothing on the machine is touched. */
   z.object({ id: reqId, op: z.literal("workspaces.look"), workspaceId: z.string() }).extend(WorkspaceLook.shape),
   /** Pushes the branch the workspace's copy is on and opens or finds its pull request, and replies with a
-   * BringBackResult. The base is the parent workspace's current branch for a child and the project's own base
-   * otherwise; the base branch itself is refused, since work leaves a workspace as a branch of its own. */
+   * BringBackResult. The base is the branch its parent was on at the fork for a child, whatever that parent does
+   * after, and the project's own base otherwise; the base branch itself is refused, since work leaves a workspace
+   * as a branch of its own. */
   z.object({ id: reqId, op: z.literal("workspaces.bringBack"), workspaceId: z.string(), title: z.string().optional(), body: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
