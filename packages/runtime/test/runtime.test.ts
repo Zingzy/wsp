@@ -7028,7 +7028,8 @@ describe("a workspace behind the golden's head", () => {
   });
 
   it.each([
-    ["napping" as const, "api is paused; wake it to move it to a newer image"],
+    // The sentence reads the state word with no pause mode behind it, which is the stopping word.
+    ["napping" as const, "api is stopped; wake it to move it to a newer image"],
     ["gone" as const, "api's machine is gone; rebuild it to move it to a newer image"],
   ])("a %s workspace is refused with the sentence the app shows: the move replaces the machine, so only a running one takes it", async (phase, why) => {
     const { backend, store, rt } = await seeded();

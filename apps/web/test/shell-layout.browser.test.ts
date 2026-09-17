@@ -479,7 +479,9 @@ describe.skipIf(renderSkipped !== undefined)("the shell's chrome laid out in Chr
         }),
       );
       console.info(`state slots at ${theme}: ${JSON.stringify(slots)}`);
-      expect(slots.map(s => s.state)).toEqual(["Unreachable", "Paused", "Gone"]);
+      // The stopping words: a row reads the pause mode of the computer its project lands on, and this shell is
+      // served no landing, so it reads what every computer but a provider with memory pauses does.
+      expect(slots.map(s => s.state)).toEqual(["Unreachable", "Stopped", "Gone"]);
       // The slot is one width on every row, so the name beside it is too: the name used to give back 16 px the
       // moment a long word arrived, which moved it under a person reading it.
       expect(new Set(slots.map(s => Math.round(s.slotWidth))).size).toBe(1);
