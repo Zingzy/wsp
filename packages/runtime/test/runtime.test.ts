@@ -146,13 +146,14 @@ describe("runtime", () => {
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
-    // The adapter is handed the machine's login environment: who the guest runs as, the golden's PATH, so a launch served by a bare-PATH exec still finds the binary, and the variable that points this harness at its store on the guest.
+    // The adapter is handed the machine's login environment: who the guest runs as, the golden's PATH, so a launch served by a bare-PATH exec still finds the binary, the variable that points this harness at its store on the guest, and the key the project's own memory and sessions sit under there.
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
     // A turn's own launch carries one thing over that login, the token naming its thread; no other road carries it.
     expect(contexts.length).toBeGreaterThan(0);
+    const project = (await rt.projects.list())[0]!;
     for (const ctx of contexts) {
       const { [TURN_TOKEN_ENV]: token, ...login } = ctx.env;
-      expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
+      expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg", CLAUDE_CODE_PROJECT_DIR_NAME: project.memoryKey });
       if (token !== undefined) expect(token).toMatch(/^[0-9a-f]{32}$/);
     }
     expect(contexts.filter(c => c.env[TURN_TOKEN_ENV] !== undefined)).toHaveLength(1);
@@ -3403,7 +3404,8 @@ describe("runtime create stages", () => {
         "hostname set to task-1",
         "Preview route to the daemon minted.",
         "Daemon answered.",
-        expect.stringMatching(/^Cloning stub-\d+ into \/root\/stub-\d+\.$/),
+        // The remote the record keeps, which is what the clone on the machine takes, and where it lands inside.
+        expect.stringMatching(/^Cloning https:\/\/github\.com\/wsp\/stub-\d+\.git into \/root\/stub-\d+\.$/),
         "ready",
       ]);
       for (const e of stages) expect(e.message).not.toContain(backend.machines[0]!.id);

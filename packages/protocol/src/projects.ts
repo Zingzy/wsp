@@ -16,29 +16,43 @@ import { kindWords } from "./workspace-state.js";
  * and the tool answers it, so both doors say the same thing about the same record. The computer is named the way
  * every table names it, off the same places reading and the same platform word; a caller with no map says the id. */
 export function addedProjectLine(project: ProjectView, named: ReadonlyMap<string, string> | undefined, platform: "darwin" | "linux"): string {
-  const from = project.source.kind === "git" ? project.source.url : project.source.path;
-  return `${project.name} ${project.id}: ${from} on ${computerNamed(project.computer, named, platform)}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
+  return `${project.name} ${project.id}: ${sourceWord(project.source)} on ${computerNamed(project.computer, named, platform)}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
 
-/** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones, or a
- * folder a computer holds. Read once here, so the command line, the tool and the runtime cannot each decide for
- * themselves what somebody typed. A word that is none of the three throws with the three forms. */
-export function sourceKind(word: string): "computer" | "git" | "folder" {
+/** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones by its own
+ * url, `owner/repo` on a host whose signed-in command line the image carries, or a folder a computer holds. Read
+ * once here, so the command line, the tool and the runtime cannot each decide for themselves what somebody typed.
+ * A word that is none of them throws with the forms. */
+export function sourceKind(word: string): "computer" | "git" | "github" | "gitlab" | "folder" {
   // A path is a path first: /Users/me/repo.git is a folder somebody named that way, not a url.
   if (word.startsWith("/") || word.startsWith("~") || word.startsWith(".")) return "folder";
+  // A host named in front of the path is that host's, which is how gitlab is named: the bare owner/repo form is
+  // github's, the same word `gh repo clone` itself takes.
+  const host = /^(github|gitlab)\.com\/[^/]+\/[^/]+$/.exec(word);
+  if (host !== null) return host[1] === "gitlab" ? "gitlab" : "github";
   if (word.includes("://") || /^[\w.-]+@[\w.-]+:/.test(word) || word.endsWith(".git")) return "git";
   if (/^[\w.-]+@[\w.-]+$/.test(word)) return "computer";
+  if (/^[\w.-]+\/[\w.-]+$/.test(word)) return "github";
   throw new Error(ADD_FORMS_LINE);
 }
 
-/** The three forms `wsp add` takes, which is what a word matching none of them is refused with. */
+/** The forms `wsp add` takes, which is what a word matching none of them is refused with. */
 export const ADD_FORMS_LINE =
-  "wsp add takes user@host for a computer of yours, a folder on this computer for a project here, or a repo's url with --on <computer> for a project there";
+  "wsp add takes user@host for a computer of yours, a folder on this computer for a project here, or a repo with --on <computer> for a project there: its url, owner/repo on github, or gitlab.com/owner/repo";
+
+/** The one word a source is written as, whichever kind it is: the folder's path, the repo's url, or the
+ * `owner/repo` a host's own command line takes. Read by every line that says where a project's code comes from,
+ * so no road spells one kind of source two ways. */
+export function sourceWord(source: ProjectSource): string {
+  if (source.kind === "folder") return source.path;
+  return source.kind === "git" ? source.url : source.repo;
+}
 
 /** What a project is called: the repo's last word without .git, or the folder's own name. */
 export function projectNameOf(source: ProjectSource): string {
   if (source.kind === "folder") return folderName(source.path);
-  const last = source.url.replace(/\/+$/, "").split(/[/:]/).pop() ?? source.url;
+  const word = sourceWord(source);
+  const last = word.replace(/\/+$/, "").split(/[/:]/).pop() ?? word;
   return last.replace(/\.git$/, "");
 }
 
@@ -48,6 +62,14 @@ export function projectNameOf(source: ProjectSource): string {
 export function projectPathOn(source: ProjectSource, name: string): string {
   if (source.kind === "folder") return source.path;
   return `${GUEST_PROJECT_HOME}/${name}`;
+}
+
+/** The source one word names, off the kind that word is: the shape the record keeps. A word naming a computer is
+ * no project's source and is refused by its caller before this. */
+export function projectSourceOf(word: string, kind: Exclude<ReturnType<typeof sourceKind>, "computer">, folderPath?: string): ProjectSource {
+  if (kind === "folder") return { kind, path: folderPath ?? word };
+  if (kind === "git") return { kind, url: word };
+  return { kind, repo: word.replace(/^(github|gitlab)\.com\//, "") };
 }
 
 /** The folder a copy's projects are cloned under: the home a fork's own login lands in. */
@@ -62,6 +84,12 @@ export const sameSourceRefusal = (name: string, computer: string): string =>
  * url needs the computer that clones it, with the ones that do. */
 export const noComputerForSourceLine = (word: string, computers: readonly string[]): string =>
   `${word} is a repo, and ${THIS_COMPUTER} takes a folder of yours; name the computer that clones it with --on ${computers.length === 0 ? "<computer>, once you have added one" : computers.join(" | ")}`;
+
+/** Why a folder on this computer seeding a project on another computer needs the person's answer first: what git
+ * ignores in that folder is theirs, and nothing of it leaves this computer until they have read the menu and
+ * ticked what travels. */
+export const seedChoiceNeeded = (folder: string): string =>
+  `${folder} would seed the project on that computer, so what travels is yours to pick: read the menu and add it again with your ticks, or --yes for the ones the catalogue ticks itself`;
 
 /** Why a folder that is no repo is not a project: a workspace of it starts on a branch, and a folder with no git
  * in it has none. */
@@ -152,7 +180,7 @@ export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "project
 /** Whether a workspace of this kind works its project where it already sits rather than holding a copy of it: the
  * one reading of the kind table both the create and the folder rule take. */
 export function worksInPlace(kind: WorkspaceKind): boolean {
-  return kindWords(kind).projectSources.includes("folder");
+  return kindWords(kind).worksInPlace;
 }
 
 /** The kind of workspace a computer makes: the computer the app runs on works a folder of the person's own in

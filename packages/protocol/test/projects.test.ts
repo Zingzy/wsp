@@ -20,6 +20,10 @@ const project = (over: Partial<ProjectView>): ProjectView => ({
   computer: "here",
   source: folderSource("/Users/dev/wsp"),
   path: "/Users/dev/wsp",
+  remote: "https://github.com/dev/wsp.git",
+  defaultBranch: "main",
+  memoryKey: "-Users-dev-wsp",
+  memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory",
   createdAt: "2026-09-17T00:00:00.000Z",
   ...over,
 });
@@ -100,7 +104,18 @@ describe("what a computer is called in a row", () => {
   });
 
   it("the line a recorded project answers with names the computer the same way, and says the command that makes its workspace", () => {
-    const project = { id: "pr_1", name: "spoo-landing", computer: "pl_box", source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+    const project = {
+      id: "pr_1",
+      name: "spoo-landing",
+      computer: "pl_box",
+      source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" },
+      path: "/root/spoo-landing",
+      remote: "https://github.com/dev/spoo.git",
+      defaultBranch: "main",
+      memoryKey: "-root-spoo-landing",
+      memoryDir: "/var/lib/wsp/projects/pr_1/memory",
+      createdAt: "t",
+    };
     expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin")).toBe(
       'spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing inside a workspace of it\nmake one with: wsp new \'spoo-landing\' "<what you are working on>"',
     );

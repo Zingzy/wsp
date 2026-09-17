@@ -306,6 +306,7 @@ export class LinkBackend implements MachineBackend {
   readonly listTemplates?: () => Promise<TemplateRow[]>;
   readonly deleteTemplate?: (id: string) => Promise<void>;
   readonly logins?: string;
+  readonly projects?: string;
 
   /** Asks the place what its backend is and builds it from the answer. */
   static async open(link: MachineLink): Promise<LinkBackend> {
@@ -325,6 +326,7 @@ export class LinkBackend implements MachineBackend {
   ) {
     this.capabilities = facts.capabilities;
     if (facts.logins !== undefined) this.logins = facts.logins;
+    if (facts.projects !== undefined) this.projects = facts.projects;
     this.pricing = {
       // The rate the place's own sizes say, and nothing for a size it does not offer, which on a computer somebody
       // owns is every size: the function is not a thing a wire carries, so it is rebuilt from the offers.

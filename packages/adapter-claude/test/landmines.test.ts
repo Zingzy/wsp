@@ -23,6 +23,15 @@ describe("buildEnv", () => {
     expect(env.PATH).toBe(base.PATH);
   });
 
+  it("keeps the project key the runtime sets, and still drops every mark of a run this one inherited", () => {
+    // The key says which folder under the config dir this turn's memory and sessions sit in; it is wsp's own to
+    // set on every launch, so the strip that removes a nesting mark must not take it with them.
+    const env = buildEnv({ base: { ...base, CLAUDE_CODE_PROJECT_DIR_NAME: "-Users-z-spoo-landing" } });
+    expect(env.CLAUDE_CODE_PROJECT_DIR_NAME).toBe("-Users-z-spoo-landing");
+    expect(env.CLAUDECODE).toBeUndefined();
+    expect(env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+  });
+
   it("never sets CLAUDE_CONFIG_DIR or IS_SANDBOX of its own: the login environment carries them where they are true", () => {
     // Claude keys its Keychain item by whether the variable is set, so a person's own Mac must see it unset unless
     // their shell sets it; a machine's login carries its own, the sandbox flag with it.

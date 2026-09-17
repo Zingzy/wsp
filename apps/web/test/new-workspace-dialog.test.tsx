@@ -35,12 +35,27 @@ const cloned = (id: string, name: string, computer: string): ProjectView => ({
   computer,
   source: { kind: "git", url: `https://github.com/dev/${name}.git` },
   path: `/root/${name}`,
+  remote: `https://github.com/dev/${name}.git`,
+  defaultBranch: "main",
+  memoryKey: `-root-${name}`,
+  memoryDir: `/root/.claude-cfg/projects/-root-${name}/memory`,
   createdAt: "2026-09-12T09:31:00.000Z",
 });
 /** The project a workspace is made of in most of these: one repo on the computer that clones it. */
 const SPOO = cloned("pr_1", "spoo-landing", "p_1");
 const SITE = cloned("pr_2", "site", "box");
-const IN_PLACE: ProjectView = { id: "pr_3", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: "2026-09-12T09:31:00.000Z" };
+const IN_PLACE: ProjectView = {
+  id: "pr_3",
+  name: "wsp",
+  computer: "here",
+  source: { kind: "folder", path: "/Users/dev/wsp" },
+  path: "/Users/dev/wsp",
+  remote: "https://github.com/dev/wsp.git",
+  defaultBranch: "main",
+  memoryKey: "-Users-dev-wsp",
+  memoryDir: "/Users/dev/.claude/projects/-Users-dev-wsp/memory",
+  createdAt: "2026-09-12T09:31:00.000Z",
+};
 
 /** What a keycap is drawn as, read the way ui/button.test.tsx reads it: the outline carries the input's hairline. */
 const isOutline = (button: HTMLElement): boolean => button.className.split(" ").includes("border-input") && !button.className.split(" ").includes("bg-primary");

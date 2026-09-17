@@ -223,13 +223,16 @@ impl Ops {
             fs::create_dir_all(&dir).map_err(|source| store::Error::Io { path: dir.clone(), source })?;
         }
         // The logins directory is made before any sign-in on this computer asks for it, and only this login may
-        // read it: what lands under it is the person's own sign-in for every workspace here.
-        let logins = layout.logins();
-        std::fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&logins)
-            .map_err(|source| store::Error::Io { path: logins.clone(), source })?;
+        // read it: what lands under it is the person's own sign-in for every workspace here. The projects
+        // directory is made the same way and for the same reason: a project's checkout and its agent's memory are
+        // the person's, and the add binds this directory into the workspace that clones into it.
+        for dir in [layout.logins(), layout.projects()] {
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&dir)
+                .map_err(|source| store::Error::Io { path: dir.clone(), source })?;
+        }
         // Before anything reads the run directory as a list of workspaces: what a create that died left is not
         // one, and a copy that was still being made is not a copy.
         let unfinished = sweep_unfinished(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
@@ -527,6 +530,7 @@ impl Ops {
             }),
             base_templates: Some(BaseTemplates { sandbox: BASE_IMAGE.to_owned(), desktop: BASE_IMAGE.to_owned() }),
             logins: Some(self.layout.logins().to_string_lossy().into_owned()),
+            projects: Some(self.layout.projects().to_string_lossy().into_owned()),
         }
     }
 
@@ -609,6 +613,7 @@ impl Ops {
         // Before the claim and before anything is mounted: a source this daemon does not share out is refused,
         // and a refusal here costs nothing to take back.
         let shares = self.shares_of(&spec)?;
+        let binds = self.binds_of(&spec)?;
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
             None => format!("wsp-{}", store::random_word()),
@@ -637,7 +642,7 @@ impl Ops {
             None => None,
         };
         let notice = notices([size.clamped.clone(), copy.as_ref().and_then(|made| self.plain_copy_notice(made))]);
-        match self.build(&id, &image, &spec, &size, copy.clone(), shares).await {
+        match self.build(&id, &image, &spec, &size, copy.clone(), shares, binds).await {
             Ok(record) => Ok(noticed(self.handle(&record, None, None), notice)),
             Err(e) => {
                 // A workspace that would not come up is ours and nobody else's: nothing of it stays behind, the
@@ -672,6 +677,29 @@ impl Ops {
                     share.source
                 )));
             }
+        }
+        Ok(asked)
+    }
+
+    /// The folders a create asks to have mounted into the workspace, held to one rule: a directory under this
+    /// daemon's own root. A bind mount lands on the workspace's own files and is the one thing a slip cannot be
+    /// taken back, so nothing outside what this daemon holds is bound, and a source that is there and is not a
+    /// directory is refused rather than passed over without a word. A source that is not there yet is made: the
+    /// add binds the projects directory before it has cloned anything into it.
+    fn binds_of(&self, spec: &MachineSpec) -> Result<Vec<Bind>, OpError> {
+        let root = self.layout.root();
+        let asked = spec.binds.clone().unwrap_or_default();
+        for bind in &asked {
+            let at = Path::new(&bind.source);
+            let under = wsp_frames::is_plain_path(&bind.source) && at.strip_prefix(root).is_ok_and(|rest| rest.iter().next().is_some());
+            if !under || (at.exists() && !at.is_dir()) {
+                return Err(OpError::plain(format!(
+                    "a folder bound into a workspace is a directory under {}, and {} is not one",
+                    root.display(),
+                    bind.source
+                )));
+            }
+            fs::create_dir_all(at).map_err(|e| OpError::plain(format!("{}: {e}", at.display())))?;
         }
         Ok(asked)
     }
@@ -721,6 +749,7 @@ impl Ops {
         size: &SizeOnBox,
         copy: Option<CopyMade>,
         shares: Vec<Share>,
+        binds: Vec<Bind>,
     ) -> Result<Workspace, OpError> {
         // Held until the record is on disk, which is what makes the sweep keep the chain: a delete of the snapshot
         // or template the fork boots from waits here instead of taking the layer from under the mount.
@@ -747,6 +776,7 @@ impl Ops {
             engine,
             copy,
             shares,
+            binds,
         };
         self.boot(record).await
     }
@@ -779,6 +809,11 @@ impl Ops {
             bundle::empty_file(&bundle::inside(&self.layout.rootfs(&id), &share.target)?)?;
             shares.push(share.clone());
         }
+        // The directory the bind lands on inside, made where the image carries none: a folder bind needs the
+        // folder to be there inside, and the runtime makes it rather than trusting the container runtime to.
+        for bind in &record.binds {
+            bundle::empty_dir(&bundle::inside(&self.layout.rootfs(&id), &bind.target)?)?;
+        }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {
             fs::create_dir_all(dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
@@ -798,6 +833,7 @@ impl Ops {
             etc: &self.layout.etc(&id),
             engine: engine_dir.as_deref(),
             shares: &shares,
+            binds: &record.binds,
         };
         bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
         self.runtime.create(&id).await?;

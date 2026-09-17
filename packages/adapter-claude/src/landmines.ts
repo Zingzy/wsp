@@ -15,6 +15,12 @@ export const ENV_STRIP_PATTERNS: readonly RegExp[] = [
   /^FORCE_CODE_TERMINAL$/,
 ];
 
+// The CLAUDE_CODE_* variables that are not a nesting mark and are read before
+// the patterns above: the project key the runtime exports on every launch says
+// which folder under the config dir this turn's memory and sessions sit in,
+// which is wsp's to set rather than a run it inherited.
+export const ENV_KEEP: ReadonlySet<string> = new Set(["CLAUDE_CODE_PROJECT_DIR_NAME"]);
+
 // From t3code's probe options: headless runs must not probe for IDEs, or the
 // CLI spawns discovery process trees on every invocation.
 const HEADLESS_OVERRIDES = {
@@ -38,7 +44,7 @@ export function stripLandmineEnv(
   const clean: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
     if (value === undefined) continue;
-    if (ENV_STRIP_PATTERNS.some((pattern) => pattern.test(key))) continue;
+    if (!ENV_KEEP.has(key) && ENV_STRIP_PATTERNS.some((pattern) => pattern.test(key))) continue;
     clean[key] = value;
   }
   return clean;

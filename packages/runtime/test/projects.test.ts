@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { folderOnCopyRefusal, gitOnThisMacRefusal, HERE_PLACE_ID, worksInPlaceTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, type AdapterEvent, type EventUnion, type TurnResult } from "@wsp/protocol";
-import { createRuntime, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime } from "../src/runtime.js";
+import { gitOnThisMacRefusal, HERE_PLACE_ID, noRemoteLine, worksInPlaceTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { createRuntime, NO_IMAGE_FOR_SEED, NO_SEED_WIRING, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend } from "./stub-backend.js";
 
@@ -48,10 +48,26 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function withLocal(backend: StubBackend = stubBackend()): { rt: Runtime; backend: StubBackend; starts: HarnessStartOptions[] } {
+function withLocal(backend: StubBackend = stubBackend(), seed?: SeedWiring): { rt: Runtime; backend: StubBackend; starts: HarnessStartOptions[] } {
   const { adapter, starts } = recording();
-  const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local: fakeLocal(here()) });
+  const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: adapter }, local: fakeLocal(here()), ...(seed !== undefined ? { seed } : {}) });
   return { rt, backend, starts };
+}
+
+/** What the host's own reader would answer for a folder here, as a test hands it in: the menu is the collector's
+ * and is proved there, so these cases hand in one plan and watch what the add does with it. */
+function seedPlanFor(folder: string): SeedPlan {
+  return {
+    source: folder,
+    remote: REPO,
+    branch: "main",
+    defaultBranch: "main",
+    unpushed: null,
+    uncommitted: 0,
+    memory: null,
+    files: [{ path: ".env.local", dir: false, bytes: 4096, kind: "config", row: { id: "next", name: "Next" }, ticked: true }],
+    remembered: false,
+  };
 }
 
 describe("recording a project", () => {
@@ -97,12 +113,43 @@ describe("recording a project", () => {
     await expect(rt.projects.add({ source: REPO, on: "default" })).rejects.toMatchObject({ message: sameSourceRefusal("spoo-landing", "default"), kind: "conflict" });
   });
 
-  it("each computer takes the source its kind takes and refuses the other in one sentence", async () => {
+  it("a repo's url on this computer is refused: it works the folder you already have", async () => {
+    const { rt } = withLocal();
+    await expect(rt.projects.add({ source: REPO, on: HERE_PLACE_ID })).rejects.toThrow(gitOnThisMacRefusal);
+  });
+
+  it("a folder seeding a computer that clones is refused until the person has said what travels", async () => {
+    const folder = tempRepo();
+    const plan = seedPlanFor(folder);
+    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0 }) });
+    await expect(rt.projects.add({ source: folder, on: "default" })).rejects.toThrow(seedChoiceNeeded(folder));
+    expect(await rt.projects.list()).toEqual([]);
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it("a folder seeding a computer this host has sealed no image for is refused: the seed has nowhere to land", async () => {
+    const folder = tempRepo();
+    const plan = seedPlanFor(folder);
+    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0 }) });
+    await expect(rt.projects.add({ source: folder, on: "default", seed: { files: [], memory: false, commits: false } })).rejects.toThrow(NO_IMAGE_FOR_SEED);
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it("a folder with no remote cannot seed a computer that clones: there is nothing for it to clone", async () => {
+    const folder = tempRepo();
+    const plan = { ...seedPlanFor(folder), remote: null };
+    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0 }) });
+    await expect(rt.projects.add({ source: folder, on: "default", seed: { files: [], memory: false, commits: false } })).rejects.toThrow(noRemoteLine(folder));
+    rmSync(folder, { recursive: true, force: true });
+  });
+
+  it("a runtime the host wired no folder reader into records a folder here and refuses to seed one elsewhere", async () => {
     const { rt } = withLocal();
     const folder = tempRepo();
-    await expect(rt.projects.add({ source: folder, on: "default" })).rejects.toThrow(folderOnCopyRefusal("default"));
-    await expect(rt.projects.add({ source: REPO, on: HERE_PLACE_ID })).rejects.toThrow(gitOnThisMacRefusal);
-    rmSync(folder, { recursive: true, force: true });
+    expect(await rt.projects.add({ source: folder })).toMatchObject({ path: folder });
+    const second = tempRepo();
+    await expect(rt.projects.add({ source: second, on: "default" })).rejects.toThrow(NO_SEED_WIRING);
+    for (const dir of [folder, second]) rmSync(dir, { recursive: true, force: true });
   });
 
   it("a project is dropped once no workspace stands on it, and the drop goes out as an event", async () => {
@@ -192,7 +239,18 @@ describe("naming a workspace", () => {
    * random ids, and an ambiguous prefix is only ambiguous where two ids are known to share one. */
   function twoSharing(): Runtime {
     const store = memoryStore();
-    const project = { id: "pr_1", name: "spoo-landing", computer: "default", source: { kind: "git" as const, url: REPO }, path: "/root/spoo-landing", createdAt: "2026-09-01T00:00:00.000Z" };
+    const project = {
+      id: "pr_1",
+      name: "spoo-landing",
+      computer: "default",
+      source: { kind: "git" as const, url: REPO },
+      path: "/root/spoo-landing",
+      remote: REPO,
+      defaultBranch: "main",
+      memoryKey: "-root-spoo-landing",
+      memoryDir: "/root/.claude-cfg/projects/-root-spoo-landing/memory",
+      createdAt: "2026-09-01T00:00:00.000Z",
+    };
     void store.put("projects", project.id, project);
     for (const [id, name] of [["ws_1a2b3c4d", "pricing page"], ["ws_1a2bffff", "landing copy"]] as const) {
       void store.put("workspaces", id, { id, name, kind: "cloud", project: project.id, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", spec: {}, size: { cpu: 2, memMb: 4096 }, firstLife: true });

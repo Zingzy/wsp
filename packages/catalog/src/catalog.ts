@@ -79,6 +79,10 @@ export interface AgentEntry extends EntryBase {
   guestStateHome?: string;
   /** The variable that points the agent at guestStateHome; a golden with the agent carries it in its envs. */
   stateHomeEnv?: string;
+  /** The variable that pins which folder under the state home this agent keeps a project's memory and sessions in,
+   * whatever the working directory; the runtime exports it as the project's key on every launch, so one project's
+   * memory follows it across the computers it sits on. Absent, the agent keys on the path alone. */
+  projectKeyEnv?: string;
   /** Every store that holds the project's path. */
   projectState: readonly ProjectState[];
   /** Absent while the agent's session format has no reader: its history reads as none. */
@@ -167,6 +171,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     stateHome: ".claude",
     guestStateHome: CLAUDE_CONFIG_DIR,
     stateHomeEnv: "CLAUDE_CONFIG_DIR",
+    projectKeyEnv: "CLAUDE_CODE_PROJECT_DIR_NAME",
     name: "Claude Code",
     context: CLAUDE_CONTEXT,
     skills: "~/.claude/skills",

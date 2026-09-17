@@ -9,13 +9,13 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use wsp_frames::{CopyWord, Share};
+use wsp_frames::{Bind, CopyWord, Share};
 
 use crate::profile;
 use crate::store::Chain;
@@ -164,6 +164,11 @@ pub struct Workspace {
     /// takes whatever the file says now, which is what makes one sign-in on the computer the workspaces' own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shares: Vec<Share>,
+    /// The folders of this computer's own this workspace was made with, mounted into it by every boot: a
+    /// project's memory folder is one, so every workspace of that project works the same memory. A record
+    /// written before any workspace took one reads as a workspace with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub binds: Vec<Bind>,
 }
 
 /// The copy one workspace was made with, as the create made it: where it came from, where it is mounted inside,
@@ -196,6 +201,8 @@ pub struct Config<'a> {
     pub engine: Option<&'a Path>,
     /// The computer's own logins, each bound at the path its tool reads inside; empty where none is shared.
     pub shares: &'a [Share],
+    /// The computer's own folders, each bound at the path the workspace reads inside; empty where there are none.
+    pub binds: &'a [Bind],
 }
 
 #[derive(Debug)]
@@ -244,6 +251,11 @@ pub fn config_json(c: &Config) -> Value {
     // place, and what it writes is what the computer holds for every other workspace on it.
     for share in c.shares {
         mounts.push(bind(&share.target, PathBuf::from(&share.source), &["rbind", "rw"]));
+    }
+    // A whole folder of the computer's, read-write unless the bind says otherwise: what the workspace writes in
+    // it is what the computer holds for every other workspace of the same project.
+    for b in c.binds {
+        mounts.push(bind(&b.target, PathBuf::from(&b.source), if b.read_only { &["rbind", "rprivate", "ro"] } else { &["rbind", "rprivate", "rw"] }));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -362,6 +374,16 @@ pub fn empty_file(path: &Path) -> Result<(), Error> {
         fs::create_dir_all(dir).map_err(at(dir))?;
     }
     fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path).map(|_| ()).map_err(at(path))
+}
+
+/// The directory a folder bind is to land on, made where the image carries none: a bind needs the directory to be
+/// there inside, and the runtime makes it rather than trusting the container runtime to. Mode 0700, since what
+/// lands on it is the person's own work; a directory already there is left as it is.
+pub fn empty_dir(path: &Path) -> Result<(), Error> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path).map_err(at(path))
 }
 
 /// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own, held

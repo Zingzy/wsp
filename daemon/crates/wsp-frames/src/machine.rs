@@ -61,6 +61,25 @@ pub struct MachineSpec {
     /// workspace that shares none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shares: Option<Vec<Share>>,
+    /// Folders this computer holds, each mounted into the workspace at `target`: a project's memory folder rides
+    /// this, so every workspace of one project reads and writes the memory the computer keeps for it. Absent is a
+    /// workspace with none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binds: Option<Vec<Bind>>,
+}
+
+/// One folder the computer running a workspace mounts into it, read-write unless the bind says otherwise. Both
+/// paths are absolute and are read as paths by the wire itself, as a share's are: a bind mount lands on the
+/// workspace's own files and is the one thing a slip cannot be taken back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bind {
+    #[serde(deserialize_with = "plain_path")]
+    pub source: String,
+    #[serde(deserialize_with = "plain_path")]
+    pub target: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub read_only: bool,
 }
 
 /// One file the computer running a workspace keeps outside every one of them and mounts into each at `target`:
@@ -367,6 +386,10 @@ pub struct BackendFacts {
     /// shares none, which is every provider: a machine somebody else runs has no file of this person's on it.
     #[serde(default, deserialize_with = "plain_path_opt", skip_serializing_if = "Option::is_none")]
     pub logins: Option<String>,
+    /// Where this computer keeps the project checkouts it holds and each project's own memory, absolute. Absent
+    /// from a backend that keeps none, which is every provider: what a project is there lives in an image.
+    #[serde(default, deserialize_with = "plain_path_opt", skip_serializing_if = "Option::is_none")]
+    pub projects: Option<String>,
 }
 
 /// Which optional calls a handle carries, so the client builds a machine whose methods are present exactly where
@@ -678,6 +701,7 @@ mod tests {
             engine: None,
             copy: None,
             shares: None,
+            binds: None,
         };
         let written = serde_json::to_string(&bare).unwrap();
         assert_eq!(written, r#"{"kind":"sandbox"}"#);
