@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import type { DaemonEvent } from "@wsp/protocol";
-import { NO_IMAGES_HERE } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, GUEST_WSP_HOME, NO_IMAGES_HERE } from "@wsp/protocol";
 import { LinkBackend, OWNER_LABEL, type ExecResult, type Machine, type MachineSpec } from "@wsp/engine";
 import { connectDaemon } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, placePair, testPlaceFile } from "../../daemon/test/fake-place-host.js";
@@ -298,20 +298,32 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     await expect(backend.deleteSnapshot("sha256:aa")).rejects.toThrow(NO_IMAGES_HERE);
   }, 120_000);
 
-  it("takes a workspace of the computer itself: the box's own tools inside, and the daemon's own folder blanked", async () => {
+  it("takes a workspace of the computer itself: the box's own tools inside, and a wsp folder of its own", async () => {
     const machine = await create({ kind: "sandbox" });
-    // The box's own /usr and /etc, read through the workspace's own overlay.
-    const seen = await exec(machine, "command -v sh; head -1 /etc/os-release; ls -A /root/.wsp | wc -l; ls -A /var/lib/docker | wc -l");
+    // The box's own /usr and /etc, read through the workspace's own overlay; its own wsp folder and the
+    // engine's data empty inside, whatever the computer holds at either path.
+    const seen = await exec(machine, `command -v sh; head -1 /etc/os-release; find ${GUEST_WSP_HOME} /var/lib/docker -mindepth 1 | wc -l`);
     expect(seen.exitCode).toBe(0);
     const onTheBox = readFileSync("/etc/os-release", "utf8").split("\n")[0]!;
     expect(seen.stdout).toContain(onTheBox);
-    expect(seen.stdout.trimEnd().split("\n").slice(-2)).toEqual(["0", "0"]);
+    expect(seen.stdout.trimEnd().split("\n").at(-1)).toBe("0");
     // A second workspace of the same computer while the first is up, each with its own view of it.
     const second = await create({ kind: "sandbox" });
     expect((await exec(second, "hostname")).stdout.trim()).toBe(second.id);
     expect(await exec(second, "echo mine > /usr/local/lib/second-probe")).toMatchObject({ exitCode: 0 });
     expect(await exec(machine, "cat /usr/local/lib/second-probe")).toMatchObject({ exitCode: 1 });
     expect(existsSync("/usr/local/lib/second-probe")).toBe(false);
+    // And the daemon's own token: each workspace writes one at the path the daemon reads by default and reads
+    // its own back, where a folder shared with the computer would have the second rewriting the first.
+    const held = existsSync(DAEMON_TOKEN_PATH) ? readFileSync(DAEMON_TOKEN_PATH, "utf8") : undefined;
+    for (const [w, word] of [[machine, "first"], [second, "second"]] as const) {
+      expect(await exec(w, `printf '%s' token-of-the-${word} > ${DAEMON_TOKEN_PATH}`)).toMatchObject({ exitCode: 0 });
+    }
+    for (const [w, word] of [[machine, "first"], [second, "second"]] as const) {
+      expect((await exec(w, `cat ${DAEMON_TOKEN_PATH}`)).stdout).toBe(`token-of-the-${word}`);
+      expect(readFileSync(join(root, "run", w.id, "wsp-home/daemon-token"), "utf8")).toBe(`token-of-the-${word}`);
+    }
+    expect(existsSync(DAEMON_TOKEN_PATH) ? readFileSync(DAEMON_TOKEN_PATH, "utf8") : undefined).toBe(held);
   }, 180_000);
 
   it("naps by stopping, and the wake boots the saved layer with the same id, address and forward, under 200 ms", async () => {

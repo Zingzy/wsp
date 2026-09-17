@@ -142,13 +142,13 @@ fn euid_is_root() -> bool {
     nix::unistd::geteuid().is_root()
 }
 
-/// The directories a workspace's rootfs takes as overlay lowers, as the bundle mounts them. Read here too, since
-/// the one thing that can make every one of those mounts fail is where the daemon's own root was put, and that is
-/// a thing the doctor answers before anything is mounted.
-#[cfg(target_os = "linux")]
-const OVERLAID: [&str; 5] = crate::bundle::OVERLAID;
-#[cfg(not(target_os = "linux"))]
-const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
+/// The computer's own system directories, one overlay each: what a workspace here is made of. Each is the box's
+/// directory as it is now, read through an upper of the workspace's own, so a workspace installs a package and
+/// the box does not have it, and the box upgrades its tools and a workspace that boots next reads them. The one
+/// list, read by the bundle that mounts them and by the reading below, which is the one thing that can make
+/// every one of those mounts fail; this module compiles on every target, so the reading and the mount cannot
+/// part ways on a Mac.
+pub const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
 
 /// The four names a computer with merged usr keeps as symlinks into /usr. A workspace's rootfs recreates them as
 /// the links they are and reads everything under them through the overlay over /usr; a computer that keeps them
@@ -283,7 +283,7 @@ mod tests {
             assert!(said.contains(root) && said.contains(lower), "{said}");
             assert!(said.contains(crate::DEFAULT_ROOT), "{said}");
         }
-        for clear in [crate::DEFAULT_ROOT, "/wsp/one", "/root/wsp-904/plain-root", "/tmp/x", "/home/z/wsp"] {
+        for clear in [crate::DEFAULT_ROOT, "/wsp/one", "/root/wsp-roots/plain-root", "/tmp/x", "/home/z/wsp"] {
             assert_eq!(root_under_a_lower(Path::new(clear)), None, "{clear}");
         }
         // A name that only starts with a lower's letters is not under it.

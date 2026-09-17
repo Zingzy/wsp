@@ -7,7 +7,7 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { SSH_FACTS_SCRIPT } from "@wsp/engine";
-import { DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, kindWords, NO_NODE_LINE, noSshDaemonLine, rootsPathIn, sshDaemonPaths, type WorkspaceStatus } from "@wsp/protocol";
+import { DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_TOKEN_PATH, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, kindWords, NO_NODE_LINE, noSshDaemonLine, rootsPathIn, sshDaemonPaths, type WorkspaceStatus } from "@wsp/protocol";
 import type { Clock } from "../src/clock.js";
 import { createRuntime, DAEMON_LACKS_AGAIN_MS, type ProjectImportOptions, type Runtime, type SshWiring } from "../src/runtime.js";
 import { POLL_INTERVAL_MS } from "../src/status.js";
@@ -99,7 +99,7 @@ describe("the road to that daemon", () => {
     // The token rides the view, and the file it came from is under that machine's own home, never the guest constant.
     expect(road.daemonToken).toBe(TOKEN);
     expect(carried.some(c => c.script.includes(`test -f '${AT.tokenPath}'`))).toBe(true);
-    expect(carried.some(c => c.script.includes("/root/.wsp-daemon-token"))).toBe(false);
+    expect(carried.some(c => c.script.includes(DAEMON_TOKEN_PATH))).toBe(false);
     // No command on that machine ever names it: a command sits in /proc/<pid>/cmdline while it runs and every
     // account there can read it, so the token travels the connection's stdin and the script names only the path.
     expect(carried.filter(c => c.script.includes(TOKEN))).toEqual([]);

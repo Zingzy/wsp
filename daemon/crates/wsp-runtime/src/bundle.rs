@@ -15,8 +15,10 @@ use std::path::{Path, PathBuf};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use wsp_frames::numbers::GUEST_WSP_HOME;
 use wsp_frames::CopyWord;
 
+use crate::doctor::OVERLAID;
 use crate::profile;
 
 /// Every path the runtime writes under its root.
@@ -57,11 +59,18 @@ impl Layout {
     pub fn work_of(&self, id: &str, dir: &str) -> PathBuf {
         self.work(id).join(dir.trim_start_matches('/'))
     }
+    /// The workspace's own wsp folder, bound over the box's at `GUEST_WSP_HOME`: where the daemon inside writes
+    /// its token, its inbox and its manifest. Its own rather than the computer's, since the box's /root is
+    /// shared by every workspace on it and a token is not a thing two workspaces may take turns writing. Kept
+    /// by a stop as the uppers are, so a wake reads back what the daemon inside wrote.
+    pub fn wsp_home(&self, id: &str) -> PathBuf {
+        self.workspace(id).join("wsp-home")
+    }
     /// An empty directory of the workspace's own, bound over a path inside it that the computer's own directory
-    /// holds something at: the daemon's folder under /root, and the engine's data under /var/lib. One directory
-    /// per path, since what the workspace writes at one of them is not what it writes at another.
-    pub fn blank_at(&self, id: &str, at: &str) -> PathBuf {
-        self.workspace(id).join("blank").join(at.trim_start_matches('/'))
+    /// holds something at: the engine's data under /var/lib. One directory per path, since what the workspace
+    /// writes at one of them is not what it writes at another.
+    pub fn empty_at(&self, id: &str, at: &str) -> PathBuf {
+        self.workspace(id).join("empty").join(at.trim_start_matches('/'))
     }
     /// The three files bound over the container's /etc.
     pub fn etc(&self, id: &str) -> PathBuf {
@@ -338,27 +347,28 @@ pub fn mount_overlay(lower: &Path, upper: &Path, work: &Path, target: &Path) -> 
     mount(Some("overlay"), target, Some("overlay"), MsFlags::MS_NODEV, Some(data.as_str())).map_err(nix_at(target))
 }
 
-/// The computer's own system directories, one overlay each: what a workspace here is made of. Each is the box's
-/// directory as it is now, read through an upper of the workspace's own, so a workspace installs a package and
-/// the box does not have it, and the box upgrades its tools and a workspace that boots next reads them.
-pub const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
-
-/// The paths a workspace's own empty directory is bound over, after the box's /root came in with it: the
-/// daemon's own folder, where its key and its token live and no workspace may read them, and the two folders a
-/// container engine keeps its images and its containers in, which are the box's and not a workspace's to see.
-/// The engine reaches a workspace through the fenced socket alone.
-pub const BLANKED: [&str; 3] = ["/root/.wsp", "/var/lib/docker", "/var/lib/containerd"];
+/// The paths a workspace's own empty directory is bound over, after the box's /root came in with it: the two
+/// folders a container engine keeps its images and its containers in, which are the box's and not a workspace's
+/// to see. The engine reaches a workspace through the fenced socket alone.
+pub const EMPTY_BINDS: [&str; 2] = ["/var/lib/docker", "/var/lib/containerd"];
 
 /// The directories a rootfs carries whatever the box holds: the mount points of the overlays and the binds
 /// above, the ones youki mounts the kernel's own filesystems at, and the ones a login expects to be there.
 const SKELETON: [&str; 15] =
     ["usr", "etc", "opt", "var", "srv", "root", "home", "tmp", "run", "proc", "sys", "dev", "mnt", "media", "boot"];
 
+/// The two a boot empties: every distribution expects /run and /tmp empty at boot, since what is in them is pid
+/// files and sockets of processes that are gone. They are plain directories of the workspace's own on the
+/// daemon's disk rather than a tmpfs, which is what keeps the box's own engine socket at /run/docker.sock out of
+/// a workspace, so emptying them is this function's to do and not the kernel's.
+const EMPTIED_AT_BOOT: [&str; 2] = ["run", "tmp"];
+
 /// The rootfs of a workspace on a computer somebody owns, made fresh at every boot: the box's own top-level
-/// symlinks as the box writes them, an empty directory for everything else, an overlay over each of the
-/// computer's system directories, the box's /root bound in read-write so the agents' sign-ins and caches are the
-/// person's own, and an empty directory of the workspace's own over each path under it nothing inside may read.
-/// The copy of a project and youki's own mounts come after, in the boot.
+/// symlinks as the box writes them, an empty directory for everything else, /run and /tmp emptied, an overlay
+/// over each of the computer's system directories, the box's /root bound in read-write so the agents' sign-ins
+/// and caches are the person's own, the workspace's own wsp folder over the box's, and an empty directory of the
+/// workspace's own over each path under it nothing inside may read. The copy of a project and youki's own mounts
+/// come after, in the boot.
 ///
 /// A mount here may fail on a box whose root sits under one of the overlaid directories: the kernel refuses an
 /// overlay whose upper is inside its lower. `crate::doctor::root_under_a_lower` is read before any of this and
@@ -371,6 +381,16 @@ pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
         return Err(Error { path: PathBuf::from("/"), source: io::Error::new(io::ErrorKind::Unsupported, reason) });
     }
     fs::create_dir_all(&rootfs).map_err(at(&rootfs))?;
+    // A wake finds what the last boot wrote at /run and /tmp, which every distribution expects empty: the pid
+    // files and sockets in them name processes the stop took away.
+    for name in EMPTIED_AT_BOOT {
+        let dir = rootfs.join(name);
+        match fs::remove_dir_all(&dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(at(&dir)(e)),
+        }
+    }
     for name in SKELETON {
         let dir = rootfs.join(name);
         fs::create_dir_all(&dir).map_err(at(&dir))?;
@@ -399,17 +419,29 @@ pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
     // The person's own home on the box, shared by every workspace on it: the agents' sign-ins, their memory and
     // their caches are the computer's and last past any one workspace, last writer wins.
     bind_into(Path::new(BOX_ROOT), &rootfs.join("root"))?;
-    for at_path in BLANKED {
-        let blank = layout.blank_at(id, at_path);
-        fs::create_dir_all(&blank).map_err(at(&blank))?;
-        // The mount point is under a bind of the box's own directory, so the daemon makes it where the box has
-        // none: /root/.wsp is this daemon's own folder and the two engine folders are made by an engine that
-        // may not be installed here at all.
-        let target = inside(&rootfs, at_path)?;
-        fs::create_dir_all(&target).map_err(at(&target))?;
-        bind_into(&blank, &target)?;
+    // And over it, the one folder under that home that is the workspace's own rather than the computer's: the
+    // daemon inside writes its token, its inbox and its manifest there by default, and two workspaces on one
+    // computer would otherwise take turns rewriting each other's token in a folder they share. It is made at the
+    // first boot, kept by a stop as the uppers are, and goes with the workspace.
+    let home = layout.wsp_home(id);
+    fs::create_dir_all(&home).map_err(at(&home))?;
+    bind_over(&home, &rootfs, GUEST_WSP_HOME)?;
+    for at_path in EMPTY_BINDS {
+        let empty = layout.empty_at(id, at_path);
+        fs::create_dir_all(&empty).map_err(at(&empty))?;
+        bind_over(&empty, &rootfs, at_path)?;
     }
     Ok(())
+}
+
+/// One of the workspace's own directories bound over a path inside it. The mount point is under a bind of the
+/// box's own directory or inside an overlay, so the daemon makes it where the box has none: the box's own wsp
+/// folder is there on a computer somebody joined and the two engine folders are made by an engine that may not
+/// be installed at all.
+fn bind_over(source: &Path, rootfs: &Path, at_path: &str) -> Result<(), Error> {
+    let target = inside(rootfs, at_path)?;
+    fs::create_dir_all(&target).map_err(at(&target))?;
+    bind_into(source, &target)
 }
 
 /// The box's own /root, bound into every workspace at the same path.
@@ -583,11 +615,19 @@ mod tests {
         assert_eq!(l.upper_of("wsp-a", "/usr"), PathBuf::from("/wsp/run/wsp-a/upper/usr"));
         assert_eq!(l.work_of("wsp-a", "/var"), PathBuf::from("/wsp/run/wsp-a/work/var"));
         assert!(OVERLAID.iter().all(|dir| l.upper_of("wsp-a", dir).starts_with(l.upper("wsp-a"))));
-        assert_eq!(l.blank_at("wsp-a", "/root/.wsp"), PathBuf::from("/wsp/run/wsp-a/blank/root/.wsp"));
-        // A blank directory per path and no two of them one directory: what a workspace writes at one of them is
-        // not what it writes at another.
-        let blanks: std::collections::BTreeSet<PathBuf> = BLANKED.iter().map(|at| l.blank_at("wsp-a", at)).collect();
-        assert_eq!(blanks.len(), BLANKED.len());
+        // The workspace's own wsp folder, which the daemon inside writes its token into: one per workspace, so
+        // no two of them are one directory however many run on the computer.
+        assert_eq!(l.wsp_home("wsp-a"), PathBuf::from("/wsp/run/wsp-a/wsp-home"));
+        assert_ne!(l.wsp_home("wsp-a"), l.wsp_home("wsp-b"));
+        assert_eq!(l.empty_at("wsp-a", "/var/lib/docker"), PathBuf::from("/wsp/run/wsp-a/empty/var/lib/docker"));
+        // An empty directory per path and no two of them one directory: what a workspace writes at one of them
+        // is not what it writes at another.
+        let empties: std::collections::BTreeSet<PathBuf> = EMPTY_BINDS.iter().map(|at| l.empty_at("wsp-a", at)).collect();
+        assert_eq!(empties.len(), EMPTY_BINDS.len());
+        // Every one of them under the workspace's own folder, so a stop keeps them and a remove takes them all.
+        for made in [l.wsp_home("wsp-a"), l.empty_at("wsp-a", EMPTY_BINDS[0]), l.upper("wsp-a")] {
+            assert!(made.starts_with(l.workspace("wsp-a")), "{}", made.display());
+        }
         // The mark a copy being made carries is written and read in one place.
         assert_eq!(l.copy_being_made("wsp-a"), PathBuf::from("/wsp/copies/.wsp-a.partial"));
         assert_eq!(Layout::copy_belongs_to(".wsp-a.partial"), "wsp-a");
@@ -779,23 +819,49 @@ mod tests {
         assert_eq!(fs::read(layout.upper_of(id, "/usr").join("lib/wsp-computer-probe")).unwrap(), b"the workspace wrote this\n");
         assert!(!Path::new("/usr/lib/wsp-computer-probe").exists(), "a workspace's write reached the box");
 
-        // The person's own /root is the box's, shared and writable; the daemon's own folder under it and the
-        // engine's two folders are empty directories of the workspace's own.
+        // The person's own /root is the box's, shared and writable; the engine's two folders are empty
+        // directories of the workspace's own.
         assert!(mounted(&rootfs.join("root")));
-        for at in BLANKED {
+        for at in EMPTY_BINDS {
             let at_path = inside(&rootfs, at).unwrap();
-            assert!(mounted(&at_path), "{at} is not blanked");
+            assert!(mounted(&at_path), "{at} is not an empty directory of the workspace's own");
             assert_eq!(fs::read_dir(&at_path).unwrap().count(), 0, "{at} is not empty");
             fs::write(at_path.join("probe"), b"w").unwrap();
-            assert!(layout.blank_at(id, at).join("probe").is_file(), "{at} wrote somewhere else");
+            assert!(layout.empty_at(id, at).join("probe").is_file(), "{at} wrote somewhere else");
         }
-        // And nothing a workspace writes in one blanked path shows up in another.
-        assert_eq!(fs::read_dir(inside(&rootfs, BLANKED[1]).unwrap()).unwrap().count(), 1);
+        // And nothing a workspace writes in one of them shows up in another.
+        assert_eq!(fs::read_dir(inside(&rootfs, EMPTY_BINDS[1]).unwrap()).unwrap().count(), 1);
+
+        // The wsp folder under that home is the workspace's own: what the daemon inside writes at its token's
+        // default path lands under run/<id> and nothing of it reaches the box's own folder.
+        let home = inside(&rootfs, GUEST_WSP_HOME).unwrap();
+        assert!(mounted(&home), "the workspace's own wsp folder is not mounted");
+        let token = PathBuf::from(wsp_frames::numbers::DEFAULT_TOKEN_PATH);
+        let held = fs::read(&token).ok();
+        fs::write(inside(&rootfs, wsp_frames::numbers::DEFAULT_TOKEN_PATH).unwrap(), b"a-token-of-this-workspace\n").unwrap();
+        assert_eq!(fs::read(layout.wsp_home(id).join("daemon-token")).unwrap(), b"a-token-of-this-workspace\n");
+        assert_eq!(fs::read(&token).ok(), held, "a write inside reached the computer's own daemon token");
+
+        // /run and /tmp are the workspace's own and empty at every boot, which is what every distribution
+        // expects: a pid file or a socket left there names a process the stop took away.
+        for name in EMPTIED_AT_BOOT {
+            assert_eq!(fs::read_dir(rootfs.join(name)).unwrap().count(), 0, "/{name} is not empty at boot");
+            fs::write(rootfs.join(name).join("last-boot.pid"), b"4242\n").unwrap();
+        }
 
         unmount_under(&rootfs).unwrap();
         assert!(!table().contains(&rootfs.display().to_string()), "a mount of the workspace outlived the stop");
-        // What the workspace wrote is still on disk, which is what a wake boots over.
+        // What the workspace wrote is still on disk, which is what a wake boots over: the uppers, the wsp
+        // folder with the daemon's own token in it, and the empty directories' own writes.
         assert!(layout.upper_of(id, "/usr").join("lib/wsp-computer-probe").is_file());
+        assert_eq!(fs::read(layout.wsp_home(id).join("daemon-token")).unwrap(), b"a-token-of-this-workspace\n");
+        // And what it left at /run and /tmp is gone at the next boot, as a boot leaves them.
+        mount_computer(&layout, id).unwrap();
+        for name in EMPTIED_AT_BOOT {
+            assert_eq!(fs::read_dir(rootfs.join(name)).unwrap().count(), 0, "/{name} carried the last boot's files");
+        }
+        assert_eq!(fs::read(inside(&rootfs, wsp_frames::numbers::DEFAULT_TOKEN_PATH).unwrap()).unwrap(), b"a-token-of-this-workspace\n");
+        unmount_under(&rootfs).unwrap();
     }
 
     /// A root placed under one of the directories every workspace overlays: the kernel refuses an overlay whose
@@ -806,15 +872,15 @@ mod tests {
         if !live_and_root() {
             return;
         }
-        let under = Path::new("/var/lib/wsp-904-under-a-lower");
+        let under = Path::new("/var/lib/wsp-under-a-lower");
         let said = crate::doctor::root_under_a_lower(under).expect("a root under /var read as clear of it");
-        assert!(said.contains("/var/lib/wsp-904-under-a-lower") && said.contains("/var"), "{said}");
+        assert!(said.contains("/var/lib/wsp-under-a-lower") && said.contains("/var"), "{said}");
         let layout = Layout::new(under);
         let refused = mount_computer(&layout, "wsp-under").unwrap_err().to_string();
         let _ = unmount_under(&layout.rootfs("wsp-under"));
         fs::remove_dir_all(under).unwrap();
         // EINVAL is all the kernel says about it, which is why the sentence above is the one a person reads.
-        assert!(refused.contains("/var/lib/wsp-904-under-a-lower"), "{refused}");
+        assert!(refused.contains("/var/lib/wsp-under-a-lower"), "{refused}");
     }
 
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself

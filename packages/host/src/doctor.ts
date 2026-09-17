@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend } from "@wsp/engine";
-import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { boxRoomLines, placeBehindLine, placeDaemonBehind, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type Runtime } from "@wsp/runtime";
 import WebSocket from "ws";
 import { assetDir, assetName, assetProof, copyAsset, stagedAsset } from "./assets.js";
@@ -302,11 +302,11 @@ export const CLOUD_PLACE: DaemonPlace = {
   kind: "cloud",
   dir: GUEST_DIR,
   bundle: `${GUEST_DIR}.tgz`,
-  inbox: "/root/inbox",
+  inbox: GUEST_INBOX_DIR,
   tokenPath: DAEMON_TOKEN_PATH,
   rootsPath: DAEMON_ROOTS_PATH,
   root: "/root",
-  make: [GUEST_DIR, "/root/inbox"],
+  make: [GUEST_DIR, GUEST_INBOX_DIR],
   exportEnv: [EXEC_ENV],
   wsp: "shim",
   quotePaths: false,
@@ -315,7 +315,7 @@ export const CLOUD_PLACE: DaemonPlace = {
   runDir: RUN_DIR,
   binDir: GUEST_BIN,
   openShim: `${GUEST_BIN}/wsp-open`,
-  openSocket: "/root/.wsp/open.sock",
+  openSocket: OPEN_SOCKET_PATH,
   manifestPath: GUEST_MANIFEST_PATH,
   profileFile: "/etc/profile.d/wsp-open.sh",
   supervise: SYSTEMD,
@@ -1431,7 +1431,7 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
           });
         });
         await s.op("inbox.watch");
-        await rt.workspaces.exec(workspaceId!, "echo doctor > /root/inbox/doctor-ping.txt");
+        await rt.workspaces.exec(workspaceId!, `echo doctor > ${GUEST_INBOX_DIR}/doctor-ping.txt`);
         await got;
       },
       () => "REST touch -> inbox.file over the preview socket (~2s watcher quiet window)",

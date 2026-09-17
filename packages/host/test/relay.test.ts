@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { BROWSER_SHIM_PATH, type GoldenManifest, type Machine } from "@wsp/engine";
-import type { ForwardEvent } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, type ForwardEvent } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, createRuntime, memoryStore, type Clock, type GoldenRecipe, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
@@ -144,7 +144,7 @@ function fakeConnect(): {
 /** Machines answer as a guest with a daemon: a preview route to `guestUrl` and the token file. */
 function relayRuntime(guestUrl: string, goldenRecipe?: GoldenRecipe): { rt: Runtime; backend: StubBackend } {
   const backend = stubBackend();
-  backend.execImpl = (_m, cmd) => (cmd.includes("/root/.wsp-daemon-token") ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+  backend.execImpl = (_m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
   const create = backend.create.bind(backend);
   backend.create = async spec => {
     const m: Machine = await create(spec);

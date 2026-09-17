@@ -801,7 +801,7 @@ describe("deployScript", () => {
     expect(DAEMON_MEMORY_MAX_PERCENT).toBe(80);
     // Enabled with an install section, so a machine that reboots or comes back from a snapshot has its daemon.
     expect(unit).toContain("WantedBy=multi-user.target");
-    expect(unit).toContain("ExecStart=/root/wsp-daemon/wsp/assets/daemon/x86_64-unknown-linux-musl/wsp-daemon --host 0.0.0.0 --port 7070 --token-path /root/.wsp-daemon-token --root /root --roots-path /root/.wsp/roots --kind cloud --inbox /root/inbox --manifest /root/.wsp/manifest.json --open-socket /root/.wsp/open.sock");
+    expect(unit).toContain("ExecStart=/root/wsp-daemon/wsp/assets/daemon/x86_64-unknown-linux-musl/wsp-daemon --host 0.0.0.0 --port 7070 --token-path /root/.wsp/daemon-token --root /root --roots-path /root/.wsp/roots --kind cloud --inbox /root/.wsp/inbox --manifest /root/.wsp/manifest.json --open-socket /root/.wsp/open.sock");
     // The journal, which rotates itself: nothing else on the guest bounds a log, and restarts here have no limit.
     expect(unit).toContain("StandardOutput=journal");
     expect(unit).toContain("StandardError=journal");
@@ -818,7 +818,9 @@ describe("deployScript", () => {
     expect(daemonSupervisorScript(CONTAINER_PLACE, GUEST_TARGET)).toContain(`  ${daemonExecLine(CONTAINER_PLACE, GUEST_TARGET)} >>`);
     for (const text of [daemonUnit(CLOUD_PLACE, GUEST_TARGET), daemonSupervisorScript(CONTAINER_PLACE, GUEST_TARGET), deployScript(CLOUD_PLACE, "aabbcc")]) expect(text).not.toMatch(/\bnode\b/);
     // The flags name every file the daemon reads or writes, so nothing is left to a default the guest may not have.
-    expect(daemonFlags(CLOUD_PLACE)).toEqual(["--host", "0.0.0.0", "--port", "7070", "--token-path", "/root/.wsp-daemon-token", "--root", "/root", "--roots-path", "/root/.wsp/roots", "--kind", "cloud", "--inbox", "/root/inbox", "--manifest", "/root/.wsp/manifest.json", "--open-socket", "/root/.wsp/open.sock"]);
+    // Every one of them under root's own wsp folder, which is the same shape the login's own place below reads
+    // under its home: on a computer somebody joined that folder is the workspace's own and not the computer's.
+    expect(daemonFlags(CLOUD_PLACE)).toEqual(["--host", "0.0.0.0", "--port", "7070", "--token-path", "/root/.wsp/daemon-token", "--root", "/root", "--roots-path", "/root/.wsp/roots", "--kind", "cloud", "--inbox", "/root/.wsp/inbox", "--manifest", "/root/.wsp/manifest.json", "--open-socket", "/root/.wsp/open.sock"]);
     // A login's own place quotes each path, since a home may carry a space; the flags and the words stay bare.
     const login = sshDaemonPlace({ home: "/home/maya doe", path: "/usr/bin:/bin" });
     expect(daemonUnit(login, GUEST_TARGET)).toContain(

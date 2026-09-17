@@ -300,6 +300,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("daemonDefaultHost", Value::from(numbers::DEFAULT_HOST));
     m.insert("daemonDefaultPort", Value::from(numbers::DEFAULT_PORT));
     m.insert("daemonSamplerIntervalMs", Value::from(numbers::SAMPLER_INTERVAL_MS));
+    m.insert("guestWspHome", Value::from(numbers::GUEST_WSP_HOME));
     m.insert("daemonTokenPath", Value::from(numbers::DEFAULT_TOKEN_PATH));
     m.insert("daemonRootsPath", Value::from(numbers::DAEMON_ROOTS_PATH));
     m.insert("guestInboxDir", Value::from(numbers::DEFAULT_INBOX_DIR));

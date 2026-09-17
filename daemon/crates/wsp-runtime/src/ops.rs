@@ -472,7 +472,7 @@ impl Ops {
         let (upper, work, merged) = (check.join("upper"), check.join("work"), check.join("merged"));
         // One of the overlays a workspace is made of, over the box's own directory rather than over an empty
         // one: what a create does, done once here, so a box that refuses it says so at the dial.
-        let lower = Path::new(bundle::OVERLAID[0]);
+        let lower = Path::new(crate::doctor::OVERLAID[0]);
         let overlay = (|| -> Result<(), String> {
             for dir in [&upper, &work, &merged] {
                 fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;

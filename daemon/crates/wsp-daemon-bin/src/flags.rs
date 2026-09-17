@@ -163,7 +163,10 @@ mod tests {
         let f = parse(&[]).unwrap();
         assert_eq!(f.host, "0.0.0.0");
         assert_eq!(f.port, 7070);
-        assert_eq!(f.token_path, PathBuf::from("/root/.wsp-daemon-token"));
+        // Under root's own wsp folder, which is the folder a workspace on a computer somebody joined has of
+        // its own: the default a machine's daemon starts with is never a path in a folder it shares.
+        assert_eq!(f.token_path, PathBuf::from("/root/.wsp/daemon-token"));
+        assert_eq!(f.token_path, PathBuf::from(numbers::DEFAULT_TOKEN_PATH));
         assert_eq!(f.kind, "cloud");
         assert!(f.root.is_none());
     }

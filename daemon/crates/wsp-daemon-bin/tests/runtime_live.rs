@@ -1349,16 +1349,20 @@ fn checkout(at: &Path) {
 /// A workspace of this computer and nothing else: no image named, no project handed in. What it holds is what
 /// the box holds, read through an overlay of its own; what the box keeps to itself is an empty directory inside.
 #[tokio::test]
-async fn a_workspace_is_the_computer_it_runs_on_with_the_daemons_own_folder_blanked() {
+async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
     if !live() {
         return;
     }
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
-    // The box's own tools and the box's own /etc, through the overlays; the box's /root, through the bind. What
-    // the box has under /root/.wsp is its daemon's own, and no workspace may read a name of it.
+    // The box's own tools and the box's own /etc, through the overlays; the box's /root, through the bind. The
+    // wsp folder under that home is the workspace's own, bound over the box's, so what the computer's own daemon
+    // keeps there is not a name a workspace can read.
     let (code, out, err) = w
-        .exec(&id, "command -v sh; command -v git || echo no-git-on-this-box; head -1 /etc/os-release; ls -A /root/.wsp; ls -A /var/lib/docker /var/lib/containerd | wc -l")
+        .exec(
+            &id,
+            "command -v sh; command -v git || echo no-git-on-this-box; head -1 /etc/os-release; ls -A /root/.wsp; find /var/lib/docker /var/lib/containerd -mindepth 1 | wc -l",
+        )
         .await;
     assert_eq!((code, err.as_str()), (0, ""), "{err}");
     eprintln!("== what a workspace of this computer reads: {out}");
@@ -1377,11 +1381,31 @@ async fn a_workspace_is_the_computer_it_runs_on_with_the_daemons_own_folder_blan
     eprintln!("== what a workspace of this computer holds at its top level: {}", out.lines().next().unwrap_or(""));
     // /root is the person's own home on this computer, shared by every workspace on it: what the box holds there
     // is what a workspace reads, and what a workspace writes there the box has.
-    let mark = format!("/root/.wsp-904-{}", checkout_key());
+    let mark = format!("/root/.wsp-live-{}", checkout_key());
     let (code, _, err) = w.exec(&id, &format!("echo from-inside > {mark}")).await;
     assert_eq!((code, err.as_str()), (0, ""));
     assert_eq!(fs::read_to_string(&mark).unwrap(), "from-inside\n", "the box's /root is not the workspace's own");
     fs::remove_file(&mark).unwrap();
+    // The daemon's own folder inside is the workspace's own, not the computer's: two workspaces each write a
+    // token at the path the daemon reads by default, each reads its own back, and the computer's own token file
+    // is the same bytes after as before. The box's names were read as invisible inside above, which is what
+    // makes this write safe to make.
+    let token = wsp_frames::numbers::DEFAULT_TOKEN_PATH;
+    let box_token = fs::read(token).ok();
+    let second = w.create(spec(json!({}))).await;
+    for (workspace, word) in [(&id, "first"), (&second, "second")] {
+        let (code, _, err) = w.exec(workspace, &format!("printf '%s' token-of-the-{word} > {token}")).await;
+        assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    }
+    for (workspace, word) in [(&id, "first"), (&second, "second")] {
+        let (code, out, _) = w.exec(workspace, &format!("cat {token}")).await;
+        assert_eq!((code, out.as_str()), (0, format!("token-of-the-{word}").as_str()), "a workspace read another's token");
+        assert_eq!(
+            fs::read(root().join("run").join(workspace).join("wsp-home/daemon-token")).unwrap(),
+            format!("token-of-the-{word}").into_bytes()
+        );
+    }
+    assert_eq!(fs::read(token).ok(), box_token, "a workspace's write reached the computer's own daemon token");
     // A package installed inside is the workspace's alone: the overlay's upper takes it and the box has nothing.
     let (code, out, err) =
         w.exec(&id, "mkdir -p /usr/local/lib/wsp-probe && echo mine > /usr/local/lib/wsp-probe/x && cat /usr/local/lib/wsp-probe/x").await;
@@ -1394,11 +1418,11 @@ async fn a_workspace_is_the_computer_it_runs_on_with_the_daemons_own_folder_blan
     assert!(under(&fs::read_to_string("/proc/self/mountinfo").unwrap()) >= 9, "the overlays and the binds are not all there");
     w.ok("machine.pause", json!({ "machineId": &id })).await;
     assert_eq!(under(&fs::read_to_string("/proc/self/mountinfo").unwrap()), 0, "the nap left a mount of the box's directories");
-    // And the wake mounts the computer again over what the workspace wrote.
+    // And the wake mounts the computer again over what the workspace wrote, its own wsp folder included.
     w.ok("machine.resume", json!({ "machineId": &id })).await;
-    let (code, out, _) = w.exec(&id, "cat /usr/local/lib/wsp-probe/x; head -1 /etc/os-release").await;
+    let (code, out, _) = w.exec(&id, &format!("cat /usr/local/lib/wsp-probe/x; cat {token}; head -1 /etc/os-release")).await;
     assert_eq!(code, 0);
-    assert!(out.starts_with("mine\n"), "{out}");
+    assert!(out.starts_with("mine\ntoken-of-the-first"), "{out}");
     w.close().await;
 }
 
@@ -1414,12 +1438,12 @@ async fn a_create_that_names_an_image_is_refused_and_the_snapshot_ops_are_gone()
     let refused = w
         .ask(
             "machine.create",
-            json!({ "spec": spec(json!({ "template": "ubuntu:24.04", "idempotencyKey": format!("live-904-image-{key}") })) }),
+            json!({ "spec": spec(json!({ "template": "ubuntu:24.04", "idempotencyKey": format!("live-image-{key}") })) }),
         )
         .await;
     assert_eq!(refused["ok"], false, "{refused}");
     assert_eq!(refused["error"], wsp_frames::words::NO_IMAGES_HERE, "{refused}");
-    assert!(!root().join("run").join(format!("wsp-live-904-image-{key}")).exists(), "the refused create claimed a folder");
+    assert!(!root().join("run").join(format!("wsp-live-image-{key}")).exists(), "the refused create claimed a folder");
     for (op, fields) in [
         ("machine.snapshot", json!({ "machineId": "wsp-x", "name": "v1", "life": { "firstLife": true } })),
         ("machine.listSnapshots", json!({})),
@@ -1478,6 +1502,10 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
     assert!(["reflink", "snapshot", "plain"].contains(&copy["made"].as_str().unwrap()), "{copy}");
     assert!(copy["ms"].as_u64().is_some(), "{copy}");
     assert!(root().join("copies").join(&id).is_dir());
+    // What a boot leaves at /run and /tmp is not what a nap keeps: the project's copy comes back with the line
+    // the workspace wrote in it, and the pid file a process inside left at /run is gone, as it is on any boot.
+    let (code, _, err) = w.exec(&id, "echo 4242 > /run/inside.pid; echo scratch > /tmp/inside.tmp").await;
+    assert_eq!((code, err.as_str()), (0, ""));
     // A nap keeps the copy and the file the workspace wrote in it, and the wake binds it back at the same path.
     w.ok("machine.pause", json!({ "machineId": &id })).await;
     assert!(root().join("copies").join(&id).is_dir(), "the nap took the copy");
@@ -1485,6 +1513,8 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
     w.ok("machine.resume", json!({ "machineId": &id })).await;
     let (code, out, _) = w.exec(&id, &format!("cat {at}/README.md")).await;
     assert_eq!((code, out.as_str()), (0, "the checkout\nwritten-inside\n"));
+    let (code, out, _) = w.exec(&id, "find /run /tmp -mindepth 1 | wc -l").await;
+    assert_eq!((code, out.trim()), (0, "0"), "the wake carried the last boot's /run or /tmp");
     // The kill takes the copy with the workspace, and leaves the checkout on the box where it was.
     w.ok("machine.kill", json!({ "machineId": &id })).await;
     assert!(!root().join("copies").join(&id).exists(), "the copy stayed after the kill");

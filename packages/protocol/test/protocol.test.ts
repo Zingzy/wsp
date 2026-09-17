@@ -340,7 +340,7 @@ describe("protocol event union", () => {
       { type: "session.end", workspaceId: "ws_1", sessionId: "s1", exitCode: 0, sawResult: true },
       { type: "port.open", workspaceId: "ws_1", port: 8080, pid: 123 },
       { type: "port.close", workspaceId: "ws_1", port: 8080 },
-      { type: "inbox.file", workspaceId: "ws_1", path: "/root/inbox/a.png", bytes: 168 },
+      { type: "inbox.file", workspaceId: "ws_1", path: "/root/.wsp/inbox/a.png", bytes: 168 },
     ];
     for (const s of samples) expect(EventUnion.parse(s)).toEqual(s);
     expect(() => EventUnion.parse({ type: "workspace.exploded" })).toThrow();
@@ -632,7 +632,7 @@ describe("daemon wire types (one home for the ops the daemon answers)", () => {
       { type: "pty.exit", ptyId: "p1", exitCode: 0, signal: undefined },
       { type: "port.open", port: 8080, pid: 12 },
       { type: "port.close", port: 8080 },
-      { type: "inbox.file", path: "/root/inbox/x.png", bytes: 10 },
+      { type: "inbox.file", path: "/root/.wsp/inbox/x.png", bytes: 10 },
     ];
     for (const e of events) expect(DaemonEvent.parse(e)).toBeTruthy();
     expect(() => DaemonEvent.parse({ type: "daemon.hello" })).toThrow();

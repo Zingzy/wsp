@@ -27,6 +27,7 @@ import {
   DAEMON_ROOTS_PATH,
   DAEMON_SAMPLER_INTERVAL_MS,
   DAEMON_TOKEN_PATH,
+  GUEST_WSP_HOME,
   DAEMON_TOKEN_REFUSED,
   DAEMON_VERSION,
   DaemonAuthRequest,
@@ -100,6 +101,7 @@ import {
   hostRefusedLine,
   linkedLine,
   notAFrameLine,
+  placeDaemonPaths,
   portScopeRefusal,
   unknownOpLine,
   workScoreLine,
@@ -244,6 +246,7 @@ const numbers = (): Record<string, number | string> => ({
   daemonDefaultHost: DAEMON_DEFAULT_HOST,
   daemonDefaultPort: DAEMON_DEFAULT_PORT,
   daemonSamplerIntervalMs: DAEMON_SAMPLER_INTERVAL_MS,
+  guestWspHome: GUEST_WSP_HOME,
   daemonTokenPath: DAEMON_TOKEN_PATH,
   daemonRootsPath: DAEMON_ROOTS_PATH,
   guestInboxDir: GUEST_INBOX_DIR,
@@ -435,6 +438,27 @@ describe("the words and numbers are what this package exports", () => {
       expect(readFileSync(join(CONTRACT, name), "utf8")).toBe(text);
     });
   }
+
+  it("puts every file the daemon inside a machine writes for itself under one folder, by the names a joined computer uses", () => {
+    // A workspace on a computer somebody joined has this folder of its own bound over the computer's, so a path
+    // that slipped out of it would be written into a /root every workspace there shares: the second workspace's
+    // deploy would rewrite the first one's token.
+    for (const path of [DAEMON_TOKEN_PATH, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, OPEN_SOCKET_PATH, DAEMON_ROOTS_PATH]) {
+      expect(path.startsWith(`${GUEST_WSP_HOME}/`), path).toBe(true);
+    }
+    // And they are the names a daemon uses under the home of a computer somebody joined: one daemon, one rule.
+    const at = placeDaemonPaths("/root");
+    expect({ wsp: at.wsp, token: at.tokenPath, inbox: at.inbox, manifest: at.manifestPath, socket: at.openSocket, roots: at.rootsPath }).toEqual({
+      wsp: GUEST_WSP_HOME,
+      token: DAEMON_TOKEN_PATH,
+      inbox: GUEST_INBOX_DIR,
+      manifest: GUEST_MANIFEST_PATH,
+      socket: OPEN_SOCKET_PATH,
+      roots: DAEMON_ROOTS_PATH,
+    });
+    // The binary the host deploys is not one of them: it is the host's to land and sits beside the folder.
+    expect(GUEST_DAEMON_DIR.startsWith(GUEST_WSP_HOME)).toBe(false);
+  });
 
   it("holds every 4401 reason once, and the listening line names a host and a port", () => {
     const w = words();
