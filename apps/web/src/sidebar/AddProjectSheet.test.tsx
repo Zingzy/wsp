@@ -10,7 +10,7 @@ import { ADD_PROJECT_WORDS } from "./words.js";
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false } as PlaceView;
 const BOX: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true } as PlaceView;
 
-const recorded: ProjectView = { id: "pr_1", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", createdAt: "t" };
+const recorded: ProjectView = { id: "pr_1", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-Users-dev-spoo", memoryDir: "/Users/dev/.claude-cfg/projects/-Users-dev-spoo/memory", createdAt: "t" };
 
 function mount(places: PlaceView[], add: Api["projectsAdd"] = async () => recorded) {
   const projectsAdd = vi.fn(add);

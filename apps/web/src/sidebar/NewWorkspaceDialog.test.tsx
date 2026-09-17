@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Capabilities, PlaceView, ProjectView } from "@wsp/protocol";
-import type { Landing } from "../protocol/client.js";
+import type { Capabilities, PlaceView, ProjectView , WorkspaceLanding } from "@wsp/protocol";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { NEW_WORKSPACE, SAY_THE_WORK, WORK_GHOST, WORK_QUESTION } from "./words.js";
 
@@ -12,6 +11,10 @@ const project = (id: string, name: string, computer = "here"): ProjectView => ({
   computer,
   source: { kind: "folder", path: `/Users/dev/${name}` },
   path: `/Users/dev/${name}`,
+  remote: `https://github.com/dev/${name}.git`,
+  defaultBranch: "main",
+  memoryKey: `-Users-dev-${name}`,
+  memoryDir: `/Users/dev/.claude-cfg/projects/-Users-dev-${name}/memory`,
   createdAt: "2026-09-17T00:00:00.000Z",
 });
 
@@ -22,10 +25,10 @@ const PLACES = [
   { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true },
 ] as unknown as PlaceView[];
 // The runtime answers the id of the computer it runs on here, which the line names off the places list.
-const HERE: Landing = { name: "here", capabilities: caps({}) };
-const BOX: Landing = { place: "p_1", name: "spoo", capabilities: caps({ copies: false, ownNetwork: true }) };
+const HERE: WorkspaceLanding = { name: "here", capabilities: caps({}) };
+const BOX: WorkspaceLanding = { place: "p_1", name: "spoo", capabilities: caps({ copies: false, ownNetwork: true }) };
 
-function mount(projects: ProjectView[], landings: Record<string, Landing | null> = {}, picked: string | null = null) {
+function mount(projects: ProjectView[], landings: Record<string, WorkspaceLanding | null> = {}, picked: string | null = null) {
   const onCreate = vi.fn();
   const onCancel = vi.fn();
   render(<NewWorkspaceDialog projects={projects} landings={landings} places={PLACES} picked={picked} onCreate={onCreate} onCancel={onCancel} />);

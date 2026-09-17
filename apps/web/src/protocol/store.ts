@@ -3,12 +3,12 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
-import { DisconnectedError, RequestError, type Api, type ConnStatus, type Landing, type ProtocolEvent } from "./client.js";
+import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
@@ -118,7 +118,7 @@ interface State {
    * the flags a row's words about its copy's ports and its state word are read off. A key with null under it is a
    * project the runtime refused a landing for, which is what keeps that refusal from being asked again on every
    * render; its rows say what their records carry and nothing more. */
-  landings: Record<string, Landing | null>;
+  landings: Record<string, WorkspaceLanding | null>;
   /** Whether the host has answered about that list yet. An empty list is an answer and a list not asked for yet is
    * not: what draws only while this computer is the only row would otherwise draw on every load and go again. */
   placesRead: boolean;
@@ -1094,17 +1094,6 @@ export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
 }
 export function usePlaces(): PlaceView[] { return useStore(s => s.places); }
 export function useProjects(): ProjectView[] { return useStore(s => s.projects); }
-/** Where a workspace of this project lands, once the host has answered for it; null until then and for a project
- * whose landing was refused. Every surface that says anything about a copy's ports or a stopped machine's word
- * reads it here, so the row, the dialog and the first run cannot answer that question three ways. */
-export function useLanding(project: string | null): Landing | null {
-  const landing = useStore(s => (project === null ? undefined : s.landings[project]));
-  const load = useStore(s => s.loadLanding);
-  useEffect(() => {
-    if (project !== null) void load(project);
-  }, [load, project]);
-  return landing ?? null;
-}
 export function usePlacesRead(): boolean { return useStore(s => s.placesRead); }
 export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }
 export function useConnectProviderOpen(): boolean { return useStore(s => s.connectProviderOpen); }

@@ -174,25 +174,6 @@ export function placeWorkspaceCounts(places: readonly PlaceView[], workspaces: r
  * runs on is never among them: it is already the one workspace it can be. */
 export const whereSegments = (places: readonly PlaceView[]): PlaceView[] => places.filter((place, at) => at !== 0 && placeTakesWorkspaces(place));
 
-/** The words the Where control says about the row a person has picked, and the two notes it says instead when
- * there is no row to pick. Each clause is a fact of the place; what joins them is the caption below. */
-export const WHERE_PICK_WORDS = {
-  label: "Where",
-  /** What a workspace on a computer of the person's own costs them: nothing, which is the point of having one. */
-  free: FREE_WORD,
-  whileAwake: "while awake",
-  napsToZero: "naps to $0",
-  room: (n: number): string => `room for ${plural(n, "workspace")}`,
-  /** The room clause when there is none left, and what to do about it. */
-  full: (n: number): string => `${n} of ${plural(n, "workspace")}`,
-  fullFix: "pause or delete one there",
-  /** How long the first workspace there takes, which is the image being built before it. */
-  firstBuild: "builds your image there first, about 4 min",
-  imageThere: (version: number): string => `your image is there, v${version}`,
-  /** Why Create is held with no name typed. */
-  nameFirst: "give the workspace a name",
-} as const;
-
 /** The project pick on the new-workspace dialog: a workspace is one project's copy, so the project is what the
  * dialog asks for and the computer comes with it. With no project there is nothing to make a workspace of, and the
  * two notes say so and what records one, in the command line's own words. */
@@ -202,27 +183,3 @@ export const PROJECT_PICK_WORDS = {
   addOne: "Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.",
 } as const;
 
-/** The one caption line under the Where control, built from the facts the row itself carries: what a workspace
- * there costs, how much room is left on it, and whether the image is there already or is built first. A fact the
- * row has not reported is left out rather than guessed, so a caption says only what this host knows.
- *
- * The rate is the one the workspace being made will be charged at: the size the person picked where they picked
- * one, since a caption quoting the row's default while another size is ticked prices a machine nobody asked for.
- *
- * Every figure is the protocol's own formatter (fmtRate, plural), never a second spelling of one. */
-export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined, rateUsdPerHour = place.rateUsdPerHour): string {
-  // Nothing an hour is free, said in that word and read the protocol's one way: a caption reading $0.00/hr while
-  // awake · naps to $0 prices a workspace nobody is billed for in three clauses that all say nothing.
-  const cost = chargesNothing(rateUsdPerHour) ? [WHERE_PICK_WORDS.free] : [`${fmtRate(rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
-  const forks = place.forks;
-  // A row with no room left ends on what to do about it: where the image stands is no longer the question, since
-  // nothing can be created there until a workspace goes.
-  if (forks !== undefined && forks.room === 0) return [...cost, WHERE_PICK_WORDS.full(forks.running), WHERE_PICK_WORDS.fullFix].join(" · ");
-  const room = forks === undefined ? [] : [WHERE_PICK_WORDS.room(forks.room)];
-  const image = copy === undefined ? WHERE_PICK_WORDS.firstBuild : WHERE_PICK_WORDS.imageThere(copy.version);
-  return [...cost, ...room, image].join(" · ");
-}
-
-/** Whether a row is out of room for another workspace, which holds Create with the caption as its reason. A row
- * that has not said what it forks with is not refused: nothing here knows it is full. */
-export const placeIsFull = (place: PlaceView): boolean => place.forks !== undefined && place.forks.room === 0;

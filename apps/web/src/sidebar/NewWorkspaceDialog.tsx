@@ -11,8 +11,7 @@
 // own words, so this dialog holds no second spelling of a computer's name or
 // of what a copy's ports are.
 import { useState } from "react";
-import { portsWord, type PlaceView, type ProjectView } from "@wsp/protocol";
-import type { Landing } from "../protocol/client.js";
+import { portsWord, type PlaceView, type ProjectView , type WorkspaceLanding } from "@wsp/protocol";
 import { PROJECT_PICK_WORDS, landingName } from "../settings/places.js";
 import { Button } from "../components/ui/button.js";
 import {
@@ -46,7 +45,7 @@ export function NewWorkspaceDialog({
   projects: readonly ProjectView[];
   /** Where a workspace of each project lands, by the project's id, as the host answered; a project it has not
    * answered for yet has no line under the pick rather than a guessed one. */
-  landings: Readonly<Record<string, Landing | null>>;
+  landings: Readonly<Record<string, WorkspaceLanding | null>>;
   /** Every computer this wsp holds, so the line under the pick names one the way every other surface names it. */
   places: readonly PlaceView[];
   /** The project whose plus was pressed; with none the first project this host holds is picked. */
@@ -136,7 +135,7 @@ export function NewWorkspaceDialog({
 /** Where the work lands: the computer, and what a copy there has for a network, both in the protocol's own words.
  * No road word: which road the next workspace of this project takes is the runtime's own rule, and the row reads
  * it off the record the create answers with. */
-export function landsLine(places: readonly PlaceView[], landing: Landing): string {
+export function landsLine(places: readonly PlaceView[], landing: WorkspaceLanding): string {
   return [landingName(places, landing), portsWord(landing.capabilities, undefined, "darwin")].filter(part => part !== "").join(" · ");
 }
 

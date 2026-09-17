@@ -7,7 +7,7 @@ import type { Api } from "./protocol/client.js";
 import { useStore } from "./protocol/store.js";
 import { FIRST_RUN_WORDS } from "./sidebar/words.js";
 
-const project: ProjectView = { id: "pr_1", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", createdAt: "t" };
+const project: ProjectView = { id: "pr_1", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", remote: "https://github.com/dev/spoo.git", defaultBranch: "main", memoryKey: "-Users-dev-spoo", memoryDir: "/Users/dev/.claude-cfg/projects/-Users-dev-spoo/memory", createdAt: "t" };
 const workspace: WorkspaceView = {
   id: "ws_a",
   name: "pricing page",

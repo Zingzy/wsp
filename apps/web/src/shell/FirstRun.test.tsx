@@ -9,7 +9,7 @@ import { FIRST_RUN_WORDS } from "../sidebar/words.js";
 
 const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false } as PlaceView;
 const CLAUDE: InitAgent = { id: "claude", name: "Claude Code", configured: true, takesTools: true };
-const recorded: ProjectView = { id: "pr_1", name: "repo", computer: "here", source: { kind: "folder", path: "/tmp/repo" }, path: "/tmp/repo", createdAt: "t" };
+const recorded: ProjectView = { id: "pr_1", name: "repo", computer: "here", source: { kind: "folder", path: "/tmp/repo" }, path: "/tmp/repo", remote: "https://github.com/dev/repo.git", defaultBranch: "main", memoryKey: "-tmp-repo", memoryDir: "/tmp/.claude-cfg/projects/-tmp-repo/memory", createdAt: "t" };
 
 const setup = (agents: readonly InitAgent[]): InitSetup => ({ keys: { solari: false }, home: "/Users/dev", agents: [...agents], pricing: null, job: null });
 

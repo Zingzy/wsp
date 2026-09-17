@@ -2,10 +2,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_PREFERENCES, type Capabilities, type ProjectView, type WorkspaceView } from "@wsp/protocol";
+import { DEFAULT_PREFERENCES, type Capabilities, type ProjectView, type WorkspaceView , type WorkspaceLanding } from "@wsp/protocol";
 import { workspaceActions } from "../actions/workspaceActions.js";
 import { SidebarProvider } from "../components/ui/sidebar.js";
-import type { Api, Landing } from "../protocol/client.js";
+import type { Api } from "../protocol/client.js";
 import { useStore } from "../protocol/store.js";
 import { WorkspaceSidebar } from "./WorkspaceSidebar.js";
 import { NEW_WORKSPACE, PROJECT_WORDS } from "./words.js";
@@ -25,6 +25,10 @@ const project = (id: string, name: string): ProjectView => ({
   computer: "here",
   source: { kind: "folder", path: `/Users/dev/${name}` },
   path: `/Users/dev/${name}`,
+  remote: `https://github.com/dev/${name}.git`,
+  defaultBranch: "main",
+  memoryKey: `-Users-dev-${name}`,
+  memoryDir: `/Users/dev/.claude-cfg/projects/-Users-dev-${name}/memory`,
   createdAt: "2026-09-17T00:00:00.000Z",
 });
 
@@ -42,7 +46,7 @@ const workspace = (id: string, name: string, projectId: string): WorkspaceView =
 });
 
 const SHARES = { copies: true, ownNetwork: false } as unknown as Capabilities;
-const landing: Landing = { name: "This Mac", capabilities: SHARES };
+const landing: WorkspaceLanding = { name: "This Mac", capabilities: SHARES };
 
 function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
   const create = vi.fn(async (_project: string, name: string) => ({ ...workspace("ws_new", name, "pr_1") }));

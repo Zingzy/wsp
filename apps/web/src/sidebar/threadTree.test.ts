@@ -10,6 +10,10 @@ const project = (id: string, name: string, computer = "here"): ProjectView => ({
   computer,
   source: { kind: "folder", path: `/Users/dev/${name}` },
   path: `/Users/dev/${name}`,
+  remote: `https://github.com/dev/${name}.git`,
+  defaultBranch: "main",
+  memoryKey: `-Users-dev-${name}`,
+  memoryDir: `/Users/dev/.claude-cfg/projects/-Users-dev-${name}/memory`,
   createdAt: "2026-09-17T00:00:00.000Z",
 });
 

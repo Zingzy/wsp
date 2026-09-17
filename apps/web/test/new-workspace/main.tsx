@@ -6,9 +6,8 @@
 // a workspace of, and with ?projects=one the single project reads as a line of
 // text instead of a control.
 import { createRoot } from "react-dom/client";
-import type { Capabilities, PlaceView, ProjectView } from "@wsp/protocol";
+import type { Capabilities, PlaceView, ProjectView , WorkspaceLanding } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
-import type { Landing } from "../../src/protocol/client";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import "../../src/index.css";
 
@@ -48,7 +47,7 @@ const project = (id: string, name: string, computer: string): ProjectView => ({
 const here = project("pr_1", "spoo-landing", "here");
 const box = project("pr_2", "wsp", "p_1");
 const projects = params.get("projects") === "none" ? [] : params.get("projects") === "one" ? [here] : [here, box];
-const landings: Record<string, Landing> = {
+const landings: Record<string, WorkspaceLanding> = {
   pr_1: { name: "here", capabilities: SHARES },
   pr_2: { place: "p_1", name: "spoo", capabilities: OWN },
 };
