@@ -3502,6 +3502,7 @@ const DAEMON_CONTENTS = [
   "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
   "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
   "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
+  "4453f856251c047172490b84c8502f74b6a1d25744f6878a382ac32fe45f2c46",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3635,7 +3636,12 @@ const DAEMON_CONTENTS = [
  * Version 48 lets a machine specification name binds: folders on the computer bound into a workspace at create,
  * read-write or read-only, refused where the source is not a directory on the computer; the runtime binds a project's
  * memory folder this way so every workspace of the project on that computer reads and writes the one memory, keyed on
- * the project and not on a path. */
+ * the project and not on a path.
+ * Version 49 makes a workspace on a box awake or stopped and nothing else: pause stops it with SIGTERM to its cgroup
+ * after a real quiet window read off its published ports and its commands, and the reading carries how long it has
+ * been quiet; a service bound to loopback inside answers through the published port; a create the box has no room for
+ * is refused in one sentence naming the quietest workspace; root inside drops the standard capability list and sees
+ * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
