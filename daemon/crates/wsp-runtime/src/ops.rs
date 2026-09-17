@@ -579,6 +579,12 @@ impl Ops {
     }
 
     async fn create(&self, spec: MachineSpec) -> Result<MachineHandle, OpError> {
+        self.create_with_room(spec, crate::size::free_mem_mb()).await
+    }
+
+    /// `free_mb` is what the box says it has free, read by the create above and handed in, so the room rule is
+    /// read against a figure the caller holds rather than against the moment the check runs.
+    async fn create_with_room(&self, spec: MachineSpec, free_mb: Option<u64>) -> Result<MachineHandle, OpError> {
         // A workspace here is made of this computer's own directories, so a name for an image to boot from is
         // not something to fall back from: it is a create meant for another kind of place.
         if spec.template.is_some() || spec.from_snapshot.is_some() {
@@ -587,12 +593,6 @@ impl Ops {
         // Read before the claim below, so the answer to a create the first one already made carries the same
         // sentence about the same size rather than going quiet on the second ask.
         let size = size_on_box(&self.facts, spec.cpu, spec.mem_mb);
-        // And before anything is claimed, copied or mounted: a box with no room for another workspace says so in
-        // one sentence naming the one to stop, rather than booting a workspace that pushes the computer somebody
-        // is using into reclaim.
-        if let Some(refusal) = self.no_room_for(size.mem_mb, crate::size::free_mem_mb())? {
-            return Err(OpError::plain(refusal));
-        }
         // Before the claim and before anything is mounted: a source this daemon does not share out is refused,
         // and a refusal here costs nothing to take back.
         let shares = self.shares_of(&spec)?;
@@ -610,6 +610,16 @@ impl Ops {
                 Some(record) => Ok(noticed(self.handle(&record, Some(true), None), size.clamped)),
                 None => Err(OpError::plain(format!("workspace {id} is being created"))),
             };
+        }
+        // After the claim, and before a byte is copied or anything is mounted: a box with no room for another
+        // workspace says so in one sentence naming the one to stop, rather than booting a workspace that pushes
+        // the computer somebody is using into reclaim. After the claim because a create under a key this box
+        // already holds a workspace for is that workspace's handle and needs no room at all: the client's retry
+        // of a create whose answer the link dropped must not be refused for the room its own workspace holds.
+        // The claim is given back with the refusal, so the next create under that key is not wedged by it.
+        if let Some(refusal) = self.no_room_for(size.mem_mb, free_mb)? {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(OpError::plain(refusal));
         }
         // Before anything is mounted and before youki: a copy of the checkout is the slowest thing a create does
         // and the one thing a person waits on, and a refusal here costs nothing else.
@@ -1382,6 +1392,56 @@ mod tests {
             bundle::write_json(&layout.record(id), &record).unwrap();
         }
         assert_eq!(ops.no_room_for(2582, Some(900)).unwrap().unwrap(), box_full_refusal(2582, 900, None));
+    }
+
+    /// A create retried under a key this box already holds a workspace for is that workspace's handle, whatever
+    /// the room: the client retries a create whose answer the link dropped, and the workspace it is asking about
+    /// is already holding the memory the room check would refuse it for. The refusal is for a create that would
+    /// make a new one, and it gives the claim back so the key is not wedged.
+    #[tokio::test]
+    async fn a_retry_under_a_key_the_box_already_holds_a_workspace_for_is_answered_and_not_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        let key = "landing-a";
+        let id = format!("wsp-{}", workspace_word(key));
+        let asking = MachineSpec { idempotency_key: Some(key.to_owned()), ..bare_spec() };
+
+        // No room at all, and no workspace under the key yet: one sentence, and the claim it took is given back.
+        let refused = ops.create_with_room(asking.clone(), Some(1)).await.unwrap_err().message;
+        assert_eq!(refused, box_full_refusal(ops.facts().machine_mem_mb(), 1, None));
+        assert!(!layout.workspace(&id).exists(), "the refusal kept the claim");
+
+        // The same create once its workspace stands: the handle of the workspace the first one made, marked as
+        // the answer to a create that was already served, and no refusal though the box is just as full.
+        fs::create_dir_all(layout.upper(&id)).unwrap();
+        let mut record = awake(&id, Some(key));
+        record.init = Init { pid: i32::MAX, started: 0, boot_id: String::new() };
+        bundle::write_json(&layout.record(&id), &record).unwrap();
+        let handle = ops.create_with_room(asking, Some(1)).await.unwrap();
+        assert_eq!((handle.id.as_str(), handle.replayed), (id.as_str(), Some(true)));
+        // And the create that would make a new one is still refused, key or no key.
+        assert!(ops.create_with_room(bare_spec(), Some(1)).await.is_err());
+    }
+
+    /// A spec asking for nothing at all: the kind, and no image, size, copy or login.
+    fn bare_spec() -> MachineSpec {
+        MachineSpec {
+            kind: MachineKind::Sandbox,
+            template: None,
+            from_snapshot: None,
+            cpu: None,
+            mem_mb: None,
+            disk_gb: None,
+            envs: None,
+            labels: None,
+            on_idle: None,
+            idle_timeout_ms: None,
+            idempotency_key: None,
+            engine: None,
+            copy: None,
+            shares: None,
+        }
     }
 
     /// The compose project of a workspace is its own id, so two pieces of work on one project are two stacks; and

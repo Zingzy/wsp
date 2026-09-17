@@ -63,12 +63,20 @@ fn bin() -> PathBuf {
 
 /// What every workspace here runs to answer a line on its port 7070, from every address it has: the base image
 /// carries perl and nothing else that listens.
-/// The same bound to the loopback inside and nowhere else: what a dev server started with no address of its own
-/// binds. From the box the workspace's own address answers nothing there, and the published port answers all the
-/// same, since the listener on the box dials from inside the workspace's namespace.
-const ANSWER_ON_LOOPBACK_7070: &str = "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"127.0.0.1\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) { print $c \"hello from inside\\n\"; close $c }' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err";
+/// The address every case that wants a listener on every address the workspace has asks for, and the one a dev
+/// server started with no address of its own binds: from the box the workspace's own address answers nothing at
+/// that one, and its published port answers all the same, since the listener out here dials from inside the
+/// workspace's own namespace.
+const EVERY_ADDRESS: &str = "0.0.0.0";
+const LOOPBACK_INSIDE: &str = "127.0.0.1";
 
-const ANSWER_ON_7070: &str = "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"0.0.0.0\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) { print $c \"hello from inside\\n\"; close $c }' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err";
+/// What a workspace here runs to answer a line on a port, bound to the address given, written once because three
+/// cases want it at two addresses and two ports.
+fn answer_on(address: &str, port: u16) -> String {
+    format!(
+        "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"{address}\", LocalPort => {port}, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) {{ print $c \"hello from inside\\n\"; close $c }}' > /dev/null 2> /tmp/listen-{port}.err & sleep 0.5; cat /tmp/listen-{port}.err"
+    )
+}
 
 impl World {
     /// Opens the ops on the fixed root and kills whatever an earlier case left under the live label, every one
@@ -110,7 +118,7 @@ impl World {
 
     /// The workspace answers on 7070 from inside, checked from the box at its own address.
     async fn listen_inside(&self, id: &str) -> Ipv4Addr {
-        let (code, _, err) = self.exec(id, ANSWER_ON_7070).await;
+        let (code, _, err) = self.exec(id, &answer_on(EVERY_ADDRESS, 7070)).await;
         assert_eq!((code, err.as_str()), (0, ""));
         let address = self.network(id).address;
         assert_eq!(read_line(SocketAddrV4::new(address, 7070)).await.unwrap(), "hello from inside");
@@ -443,7 +451,7 @@ async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() 
     }
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
-    let (code, _, err) = w.exec(&id, ANSWER_ON_LOOPBACK_7070).await;
+    let (code, _, err) = w.exec(&id, &answer_on(LOOPBACK_INSIDE, 7070)).await;
     assert_eq!((code, err.as_str()), (0, ""));
     // Not at the workspace's own address: nothing is listening there, which is the whole difference.
     let address = w.network(&id).address;
@@ -453,17 +461,39 @@ async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() 
     assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap(), "hello from inside");
     // And the same port after a stop and a wake, where the listener is bound again on the new namespace.
     w.ok("machine.pause", json!({ "machineId": id })).await;
+    // A port published while it is stopped, which is a road the reach op leaves open: the box port is held and
+    // answers nothing, and the wake is what gives it the namespace to dial. Two ports now, so the wake has one
+    // held from before it and one published under it.
+    let while_stopped = w.publish(&id, 7071).await;
+    assert_ne!(while_stopped, port);
+    assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, while_stopped)).await.unwrap(), "", "a stopped workspace answered");
+    assert_eq!(w.network(&id).forwards, [(7070, port), (7071, while_stopped)].into());
+
     w.ok("machine.resume", json!({ "machineId": id })).await;
-    let (code, _, err) = w.exec(&id, ANSWER_ON_LOOPBACK_7070).await;
-    assert_eq!((code, err.as_str()), (0, ""));
+    for port_inside in [7070, 7071] {
+        let (code, _, err) = w.exec(&id, &answer_on(LOOPBACK_INSIDE, port_inside)).await;
+        assert_eq!((code, err.as_str()), (0, ""), "{port_inside}");
+    }
+    // Both box ports are the ones the record already carried, and both reach the service inside now: the one
+    // held across the stop and the one published while there was nothing to dial.
     assert_eq!(w.publish(&id, 7070).await, port);
+    assert_eq!(w.publish(&id, 7071).await, while_stopped);
     assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap(), "hello from inside");
+    assert_eq!(
+        read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, while_stopped)).await.unwrap(),
+        "hello from inside",
+        "the port published while it was stopped dials nothing after the wake"
+    );
     w.close().await;
 }
 
-/// What the box keeps of its own that a turn inside a workspace may not read: the password hashes, the sudo
-/// rules, the keys it answers ssh on, the keys that open other computers, and every other home on it. Each of
-/// them is the workspace's own empty file or directory, and what the box holds is untouched.
+/// What the box keeps of its own that a turn inside a workspace may not read: the password hashes, the keys it
+/// answers ssh on and the keys that open other computers. Each of them is the workspace's own empty file or
+/// directory, and what the box holds is untouched.
+///
+/// /home reads empty here for a second reason as well as the cover: today's rootfs overlays /usr, /etc, /opt,
+/// /var and /srv, so the box's own /home is not inside one at all. The case reads it all the same, since what
+/// it asks is that no other person's home on the box shows through, however the rootfs comes to be made.
 #[tokio::test]
 async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
     if !live() {

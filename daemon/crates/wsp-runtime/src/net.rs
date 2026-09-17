@@ -708,11 +708,18 @@ enum Dial {
     /// A port on the box's own loopback, dialled from here: how a workspace reaches a port its own containers
     /// published, which the engine bound out here.
     Box(SocketAddrV4),
+    /// Nowhere yet: a port published while its workspace was stopped. The box port is held so nothing else on the
+    /// box takes it before the wake, and a connection to it is taken and closed with no byte, since a stopped
+    /// workspace has no namespace to dial. The wake's own restore is what gives it one.
+    Nowhere,
 }
 
 impl Dial {
     async fn connect(&self) -> io::Result<TcpStream> {
         match *self {
+            Dial::Nowhere => {
+                Err(io::Error::new(io::ErrorKind::NotConnected, "this workspace is stopped, so its published port dials nothing"))
+            }
             Dial::Box(addr) => TcpStream::connect(addr).await,
             Dial::Inside { pid, port } => {
                 let ns_path = format!("/proc/{pid}/ns/net");
@@ -841,18 +848,31 @@ impl Net {
         }
     }
 
-    /// The listeners of every running workspace, bound again on the ports their records name; a port somebody else
-    /// took meanwhile moves and the record says where. A forward already held is left as it is.
+    /// The listeners of every running workspace, bound again on the ports their records name and dialling the
+    /// namespace of the init their record names now; a port somebody else took meanwhile moves and the record says
+    /// where.
+    ///
+    /// Every published port, held or not. A port published while the workspace was stopped is held on nothing at
+    /// all, and a port held from before the last boot dials a namespace that is gone: this is the one place a
+    /// forward is given the live init to dial, so a wake answers at the box ports the record already carries.
     pub async fn restore(&self, running: &[String]) -> Result<(), Error> {
         for id in running {
             let Some(mut network) = self.record(id)? else { continue };
+            // The init its record names now, read once before any port is bound: a workspace whose init is not
+            // the process its record names has no namespace for any of them to dial, and nothing here holds a
+            // listener that dials nowhere while calling it restored.
+            let Some(pid) = self.init_pid(id)? else { continue };
             // A workspace this daemon has just found running gets a clock counted from now, as a boot does.
             let quiet = self.quiet_of(id);
             let mut moved = false;
             for (port, box_port) in network.forwards.clone() {
-                if self.listeners.lock().await.get(id).is_some_and(|m| m.contains_key(&port)) {
-                    continue;
+                // Whatever was held for this port goes first, and its task with it: the socket has to be free
+                // before this binds it again, and what it dialled is not this boot's namespace.
+                if let Some(held) = self.listeners.lock().await.get_mut(id) {
+                    held.remove(&port);
                 }
+                // The dropped listener's task ends at the next turn of the runtime, and its port with it.
+                tokio::task::yield_now().await;
                 let bound = match bind(box_port).await {
                     Ok(listener) => listener,
                     Err(e) if e.kind() == io::ErrorKind::AddrInUse => bind(0).await.map_err(at("binding a forward"))?,
@@ -863,7 +883,6 @@ impl Net {
                     network.forwards.insert(port, got);
                     moved = true;
                 }
-                let Some(pid) = self.init_pid(id)? else { continue };
                 self.hold(id, port, bound, Dial::Inside { pid, port }, Some(Arc::clone(&quiet))).await;
             }
             if moved {
@@ -978,7 +997,7 @@ impl Net {
 
     /// The port on the box's loopback that dials the workspace's port: the one already open for it, else a new one.
     /// The record is written whatever the workspace is doing, so a port published while it is stopped is one the
-    /// wake binds; nothing is dialled for it until then.
+    /// wake gives a namespace to dial; until then the box port is held on nothing and answers nothing.
     pub async fn publish(&self, id: &str, port: u16) -> Result<u16, Error> {
         if let Some(held) = self.listeners.lock().await.get(id).and_then(|m| m.get(&port)) {
             return Ok(held.box_port);
@@ -989,13 +1008,16 @@ impl Net {
         let box_port = bound.local_addr().map_err(at("reading a forward's port"))?.port();
         network.forwards.insert(port, box_port);
         bundle::write_json(&self.layout.net(id), &network)?;
-        // A port published while the workspace is stopped is bound here all the same, which keeps the port from
-        // being taken by something else before the wake: with no live init there is no namespace to dial, the
-        // dial's own read of /proc answers nothing, and the connection closes with no byte, as one to a port
-        // nothing listens on inside does.
-        let pid = self.init_pid(id)?.unwrap_or(0);
+        // Held whatever the workspace is doing, which keeps the box port from being taken by something else
+        // before the wake, and dialled only where there is a namespace to dial: a pid that is not the process the
+        // record names is not a namespace, and a listener holding one would go on dialling it for the life of the
+        // daemon, since a wake makes a new one. The wake's restore is what turns this into the dial.
+        let dial = match self.init_pid(id)? {
+            Some(pid) => Dial::Inside { pid, port },
+            None => Dial::Nowhere,
+        };
         let quiet = self.quiet_of(id);
-        self.hold(id, port, bound, Dial::Inside { pid, port }, Some(quiet)).await;
+        self.hold(id, port, bound, dial, Some(quiet)).await;
         Ok(box_port)
     }
 
@@ -1186,6 +1208,60 @@ mod tests {
         drop(asking);
         assert_eq!(counted.read(&mut held).await.unwrap(), 0);
         assert!(quiet.quiet_for() >= Duration::from_millis(50), "the end of a stream started the clock over");
+    }
+
+    /// A port published while its workspace is stopped, which is a road `machine.previewUrl` leaves open: the
+    /// record carries it so the wake binds the same box port, the port is held so nothing else on the box takes
+    /// it meanwhile, and nothing is dialled for it, since a stopped workspace has no namespace to dial. What
+    /// turns it into a dial is the wake's own restore, which the live case reads through.
+    #[tokio::test]
+    async fn a_port_published_while_the_workspace_is_stopped_is_recorded_and_held_on_nothing() {
+        use tokio::io::AsyncReadExt;
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+        let id = "wsp-stopped";
+        fs::create_dir_all(layout.workspace(id)).unwrap();
+        // What a stop leaves: the network record with its block, and a record whose init is a pid nothing holds.
+        let network = Network {
+            link: "wsp-3".into(),
+            address: Ipv4Addr::new(10, 65, 0, 14),
+            gateway: Ipv4Addr::new(10, 65, 0, 13),
+            prefix: BLOCK_PREFIX,
+            forwards: BTreeMap::new(),
+        };
+        bundle::write_json(&layout.net(id), &network).unwrap();
+        bundle::write_json(&layout.record(id), &stopped_record(id)).unwrap();
+
+        let (net, _) = Net::open(Layout::new(dir.path()), &[]).unwrap();
+        let box_port = net.publish(id, 7070).await.unwrap();
+        // The record says which box port the port inside answers at, so the wake binds that one and the reach
+        // the host already handed out still names it.
+        assert_eq!(net.record(id).unwrap().unwrap().forwards, BTreeMap::from([(7070, box_port)]));
+        // And the same port every time it is asked for, off the listener held for it.
+        assert_eq!(net.publish(id, 7070).await.unwrap(), box_port);
+        // Taken and closed with no byte, rather than refused: the port is ours until the wake, and nothing
+        // inside is dialled for it.
+        let mut asking = TcpStream::connect(SocketAddrV4::new(Ipv4Addr::LOCALHOST, box_port)).await.unwrap();
+        let mut answered = Vec::new();
+        asking.read_to_end(&mut answered).await.unwrap();
+        assert!(answered.is_empty(), "{answered:?}");
+    }
+
+    /// A workspace as a stop leaves it: every field a record carries, and an init pid nothing holds.
+    fn stopped_record(id: &str) -> crate::bundle::Workspace {
+        crate::bundle::Workspace {
+            id: id.to_owned(),
+            hostname: id.to_owned(),
+            labels: BTreeMap::new(),
+            envs: BTreeMap::new(),
+            cpu: Some(1.0),
+            mem_mb: Some(1024),
+            created_at: "1970-01-01T00:00:00.000Z".to_owned(),
+            init: crate::bundle::Init { pid: i32::MAX, started: 0, boot_id: String::new() },
+            engine: false,
+            copy: None,
+            shares: Vec::new(),
+        }
     }
 
     #[test]

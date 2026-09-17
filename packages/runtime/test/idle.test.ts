@@ -308,6 +308,30 @@ describe("idle policy in the runtime", () => {
     expect(backend.machines[0]!.paused).toBe(true);
   });
 
+  it("reads the figure off a lifecycle that writes it as a method, which keeps that lifecycle's own fields", async () => {
+    const { rt, backend, fc } = testRuntime();
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    // A lifecycle written as a method reading a field of its own: pulled off the interface and called detached,
+    // the read of that field throws or answers nothing, and the workspace stops under somebody using it.
+    const said = {
+      budgets: backend.lifecycle.budgets,
+      figure: 60_000,
+      quietForMs(this: { figure: number }): Promise<number | undefined> {
+        return Promise.resolve(this.figure);
+      },
+    };
+    backend.lifecycle = said;
+    fc.advance(WINDOW);
+    await until(async () => (await rt.status.list())[0]!.idleAt === fc.clock.now() + WINDOW);
+    expect(await phaseOf(rt, ws.id)).toBe("running");
+    expect(backend.machines[0]!.paused).toBe(false);
+    // And the same lifecycle once its own figure is past the window: the stop goes ahead.
+    said.figure = WINDOW;
+    fc.advance(WINDOW);
+    await napping(rt, ws.id);
+    expect(backend.machines[0]!.paused).toBe(true);
+  });
+
   it("stops a workspace whose computer cannot say how quiet it is, and one whose reading fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

@@ -3664,9 +3664,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const quietOf = async (id: string): Promise<number | undefined> => {
     const entry = live.get(id);
     if (entry === undefined || entry.record.phase !== "running") return undefined;
-    const quiet = backendFor(entry.record).lifecycle?.quietForMs;
-    if (quiet === undefined) return undefined;
-    return quiet(entry.machine).catch((e: unknown) => {
+    // Called on the lifecycle itself, as the backstop below is, rather than pulled off it and called detached:
+    // one interface, and an implementer is free to write this as a method, which keeps its own object only if
+    // the call goes through it.
+    return backendFor(entry.record).lifecycle?.quietForMs?.(entry.machine).catch((e: unknown) => {
       console.warn(`quiet figure of ${id} not read: ${e instanceof Error ? e.message : String(e)}`);
       return undefined;
     });
