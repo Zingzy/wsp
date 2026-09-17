@@ -31,7 +31,8 @@ export type LandOutcome = "installed" | "present" | "kept" | "failed";
  * under, the folder it loads skills from, every config path the catalog names for it and the file it keeps its
  * MCP servers in. */
 function agentPaths(a: (typeof CATALOG_AGENTS)[number]): string[] {
-  return [`~/${a.stateHome}`, a.skills, ...a.configPaths, ...(a.mcp?.files ?? [])].map(p => p.replace(/\/+$/, ""));
+  // Under the home and nowhere else: a path the catalog writes some other way names no file this may land.
+  return [`~/${a.stateHome}`, a.skills, ...a.configPaths, ...(a.mcp?.files ?? [])].filter(p => p.startsWith("~/")).map(p => p.replace(/\/+$/, ""));
 }
 
 /** Whether one planned file may land in an agent's home on a computer somebody owns: its row is that agent's own

@@ -2532,8 +2532,8 @@ export const MachineBind = z.object({
 });
 export type MachineBind = z.infer<typeof MachineBind>;
 
-/** What one row of the recipe came to on a computer you own. `present` is a row the computer already had at the
- * version asked, so nothing ran for it; `skipped` waited on a row that did not land, or was set aside by the plan. */
+/** What a row of the recipe job puts on a computer you own: a tool or agent installed, a file of the person's own
+ * landed in an agent's home there, or an MCP server written into an agent's config. */
 export const PlaceProvisionKind = z.enum(["tool", "file", "server"]);
 export type PlaceProvisionKind = z.infer<typeof PlaceProvisionKind>;
 
@@ -2548,6 +2548,8 @@ export function provisionCountWord(counts: Partial<Record<PlaceProvisionKind, nu
   return said.length === 0 ? plural(0, PROVISION_KIND_WORDS.tool) : said.join(", ");
 }
 
+/** What one row of the recipe came to on a computer you own. `present` is a row the computer already had at the
+ * version asked, so nothing ran for it; `skipped` waited on a row that did not land, or was set aside by the plan. */
 export const PlaceProvisionRow = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
