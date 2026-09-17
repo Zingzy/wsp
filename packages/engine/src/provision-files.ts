@@ -10,6 +10,7 @@ import { agentOfRow, placeProvisionPaths, shellQuote, type PlaceProvisionRow } f
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
+import type { PackedFiles } from "./golden.js";
 import { parseMcpId } from "./golden-mcp.js";
 import type { Machine } from "./machine.js";
 import { importInto } from "./vault.js";
@@ -79,7 +80,9 @@ export function landFilesScript(home: string): string {
     '  if [ ! -e "$dest" ]; then act=installed',
     "  else",
     '    d=$(sha256sum "$dest" 2>/dev/null | cut -d" " -f1)',
-    '    known=$(awk -F"\\t" -v r="$rel" \'$1==r { print $2" "$3; exit }\' "$ledger" 2>/dev/null)',
+    // The path goes to awk through the environment: an assigned variable would have every backslash in it read
+    // as an escape, and a path holding one would match no line of the list.
+    '    known=$(wsp_rel="$rel" awk -F"\\t" \'$1==ENVIRON["wsp_rel"] { print $2" "$3; exit }\' "$ledger" 2>/dev/null)',
     '    if [ "$d" = "$s" ]; then act=present',
     // The person's own file stands unless the bytes there are the ones wsp left: then the copy is wsp's to
     // replace, and it is replaced only where their computer's copy has itself changed since.
@@ -93,6 +96,29 @@ export function landFilesScript(home: string): string {
     `  printf '${LAND_MARK}\\t%s\\t%s\\t%s\\n' "$act" "$s" "$rel"`,
     '  if [ "$act" != kept ] && [ "$act" != failed ]; then printf "%s\\t%s\\n" "$rel" "$s" >> "$landing"; fi',
     "done",
+    "exit 0",
+  ].join("\n");
+}
+
+/** What the ownership read prints for one path of the list, so no path of the person's reads as the run's own words. */
+export const OWN_MARK = "wsp-own";
+
+/** The run that reads what wsp owns in the agents' homes on that computer: every path the list beside the job
+ * names whose bytes there are still the ones wsp left. It reads the computer and the list, never this run, so a
+ * run whose files never got off this Mac still knows wsp's own copies from the person's. */
+export function landedFilesScript(home: string): string {
+  const at = placeProvisionPaths(home);
+  return [
+    "set -u",
+    `home=${shellQuote(home)}; ledger=${shellQuote(at.landed)}`,
+    '[ -f "$ledger" ] || exit 0',
+    'tab=$(printf "\t")',
+    'while IFS="$tab" read -r rel from at; do',
+    '  dest="$home/$rel"',
+    '  [ -f "$dest" ] || continue',
+    '  d=$(sha256sum "$dest" | cut -d" " -f1)',
+    `  [ "$d" = "$at" ] && printf '${OWN_MARK}\t%s\n' "$rel"`,
+    'done < "$ledger"',
     "exit 0",
   ].join("\n");
 }
@@ -155,7 +181,7 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
     if (owner === undefined) loose.push(l);
     else (byOwner.get(owner.dest) ?? byOwner.set(owner.dest, []).get(owner.dest)!).push(l);
   }
-  const rowOf = (id: string, label: string, dest: string, rows: readonly Landed[]): PlaceProvisionRow => {
+  const rowOf = (id: string, label: string | undefined, dest: string, rows: readonly Landed[]): PlaceProvisionRow => {
     const under = (outcome: LandOutcome): string[] => rows.filter(r => r.outcome === outcome).map(r => r.rel);
     const failed = under("failed");
     const installed = under("installed");
@@ -167,11 +193,14 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
     const outcome: PlaceProvisionRow["outcome"] =
       failed.length > 0 ? "failed" : installed.length > 0 ? "installed" : rows.length === 0 || kept.length === rows.length ? "skipped" : "present";
     const note = failed.length > 0 ? `could not be written: ${listOf(failed)}` : rows.length === 0 ? "nothing of it travelled" : notes.join("; ");
-    return { id, label: `${label} ${home}/${dest}`, outcome, kind: "file", ...(note !== "" ? { note } : {}) };
+    const at = `${home}/${dest}`;
+    return { id, label: label === undefined ? at : `${label} ${at}`, outcome, kind: "file", ...(note !== "" ? { note } : {}) };
   };
   return [
     ...lands.map(l => rowOf(`files/${l.dest}`, l.label, l.dest, byOwner.get(l.dest) ?? [])),
-    ...loose.map(l => rowOf(`files/${l.rel}`, "", l.rel, [l])),
+    // A path no planned row names is read by its path alone: the hook script a copied setting names travels
+    // beside it, and no recipe row is its own.
+    ...loose.map(l => rowOf(`files/${l.rel}`, undefined, l.rel, [l])),
   ];
 }
 
@@ -207,6 +236,39 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
     owned: new Map(landed.flatMap(l => (l.outcome === "installed" || l.outcome === "present" ? [[`${o.home}/${l.rel}`, l.outcome] as const] : []))),
     skipped: landed.filter(l => l.outcome === "kept").map(l => ({ id: ownerOf(l.rel, o.lands)?.id ?? `files/${l.rel}`, path: `${o.home}/${l.rel}`, note: "already there with other content; wsp did not write over it" })),
   };
+}
+
+/** What wsp owns in the agents' homes on that computer, off the list beside the job and the bytes standing there.
+ * Nothing this run did is in it: a path is wsp's where the list says wsp left those bytes and they are still
+ * there. Empty where the computer has no list yet or would not answer, which keeps every file of the person's. */
+export async function landedFiles(machine: Machine, home: string): Promise<Map<string, "present">> {
+  const res = await machine.run(landedFilesScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
+  if (res === undefined || res.exitCode !== 0) return new Map();
+  return new Map(
+    res.stdout.split("\n").flatMap(line => {
+      const words = line.split("\t");
+      return words[0] === OWN_MARK && words.length > 1 ? [[`${home}/${words.slice(1).join("\t")}`, "present"] as const] : [];
+    }),
+  );
+}
+
+/** The files round of the job: the archive read off this computer and landed on that one, with a row per planned
+ * path and what this run itself put there. A pack or a landing that throws is one failed row per planned path
+ * with the reason, since the archive is the person's whole set of agent files and one row of it cannot fail
+ * alone, and the round then says it put nothing there rather than anything about whose the files are. */
+export async function provisionFiles(machine: Machine, o: { home: string; lands: readonly ProvisionLanding[]; pack: () => Promise<PackedFiles> }): Promise<LandFilesResult> {
+  try {
+    const packed = await o.pack();
+    const landed = await landAgentFiles(machine, { home: o.home, tar: packed.tar, lands: o.lands });
+    return { ...landed, skipped: [...packed.skipped, ...landed.skipped] };
+  } catch (e) {
+    const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
+    return {
+      rows: o.lands.map(l => ({ id: `files/${l.dest}`, label: `${l.label} ${o.home}/${l.dest}`, outcome: "failed" as const, kind: "file" as const, note })),
+      owned: new Map(),
+      skipped: [],
+    };
+  }
 }
 
 /** Writes down what wsp owns on that computer and takes the tree that travelled away again. Nothing here fails

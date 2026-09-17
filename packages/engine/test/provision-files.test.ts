@@ -7,7 +7,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { placeProvisionPaths } from "@wsp/protocol";
-import { agentStateFile, closeAgentFiles, filesRows, landAgentFiles, parseLanded, type ProvisionLanding } from "../src/provision-files.js";
+import { MCP_SERVERS_JSON } from "@wsp/catalog";
+import { agentStateFile, closeAgentFiles, filesRows, landAgentFiles, landedFiles, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
+import type { McpPlan } from "../src/golden-mcp.js";
+import type { PackedFiles } from "../src/golden.js";
+import { provisionMcp, theirConfigLine } from "../src/provision-mcp.js";
 import { tarOf } from "../src/vault.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
 
@@ -69,6 +73,8 @@ describe("the rows one landing answers with", () => {
     ]);
     expect(rows.every(r => r.kind === "file")).toBe(true);
     expect(rows[0]!.label).toBe("Claude Code /root/.claude-cfg/skills");
+    // No recipe row is that path's, so it reads by its path alone rather than with an empty name in front of it.
+    expect(rows[3]!.label).toBe("/root/.claude-cfg/settings.json");
   });
 
   it("is failed where a path could not be written, and skipped where nothing of a planned path travelled", () => {
@@ -96,15 +102,32 @@ const write = (root: string, rel: string, text: string): void => {
 };
 const read = (root: string, rel: string): string => readFileSync(join(root, rel), "utf8");
 
+/** A packed archive as the host's own pack answers with one, with the sizes nothing here reads. */
+const packed = (tar: Buffer): PackedFiles => ({ tar, bytes: tar.length, unpacked: tar.length, skipped: [], cut: [], silenced: [], macPaths: [] });
+
+/** The claude scope over the config the landing puts there, for the run that reads whose that config is. */
+const mcpPlanOn = (root: string): McpPlan => ({
+  agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github"], drop: [] }], aside: [] }],
+  guestHome: root,
+  rewrites: [],
+  binDirs: [],
+  tools: [],
+});
+
 const LANDS: ProvisionLanding[] = [
   { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/skills" },
   { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/CLAUDE.md" },
   { id: "agents/codex", label: "Codex", dest: ".codex/AGENTS.md" },
 ];
 
+/** A skill folder whose name holds a backslash: the list beside the job is read by a shell, and a path handed to
+ * awk as a variable would have that backslash read as an escape. */
+const ODD = ".claude-cfg/skills/back\\slash/SKILL.md";
+
 const TAR = (over: Record<string, string> = {}): Buffer =>
   tarOf([
     file(".claude-cfg/skills/why/SKILL.md", over["skill"] ?? "the why skill\n"),
+    file(ODD, over["odd"] ?? "a skill with a backslash in its folder\n"),
     file(".claude-cfg/CLAUDE.md", "his standing rules\n"),
     file(".codex/AGENTS.md", over["agents"] ?? "the same rules for codex\n"),
   ]);
@@ -126,6 +149,7 @@ describe("the landing on the computer itself", () => {
     expect(landed.rows[2]!.note).toContain("already there with other content");
     expect([...landed.owned].sort()).toEqual([
       [`${root}/.claude-cfg/CLAUDE.md`, "present"],
+      [`${root}/${ODD}`, "installed"],
       [`${root}/.claude-cfg/skills/why/SKILL.md`, "installed"],
     ]);
     expect(landed.skipped).toEqual([{ id: "agents/codex", path: `${root}/.codex/AGENTS.md`, note: "already there with other content; wsp did not write over it" }]);
@@ -139,6 +163,7 @@ describe("the landing on the computer itself", () => {
     // What wsp owns there is written down, and the tree that travelled is gone from its folder.
     expect(readFileSync(at.landed, "utf8").split("\n").filter(l => l !== "").map(l => l.split("\t")[0]).sort()).toEqual([
       ".claude-cfg/CLAUDE.md",
+      ODD,
       ".claude-cfg/skills/why/SKILL.md",
       ".codex/AGENTS.md",
     ]);
@@ -155,11 +180,54 @@ describe("the landing on the computer itself", () => {
     expect(read(root, ".claude-cfg/skills/why/SKILL.md")).toBe("the why skill, rewritten\n");
     await closeAgentFiles(machine, root);
 
-    // The person wrote that file themselves on the box: their words stand, and the row says so.
+    // The person wrote that file themselves on the box: their words stand, and the row names the path it kept.
     write(root, ".claude-cfg/skills/why/SKILL.md", "his own skill now\n");
     const theirs = await landAgentFiles(machine, { home: root, tar: TAR({ skill: "a third copy\n" }), lands: LANDS });
-    expect(theirs.rows[0]!.outcome).toBe("skipped");
+    expect(theirs.rows[0]!.note).toContain("already there with other content: .claude-cfg/skills/why/SKILL.md");
     expect(read(root, ".claude-cfg/skills/why/SKILL.md")).toBe("his own skill now\n");
+  });
+
+  it("reads its own copy of a path holding a backslash off the list, and replaces it when this computer's copy changed", async () => {
+    const { root, machine } = box();
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await closeAgentFiles(machine, root);
+    expect(read(root, ODD)).toBe("a skill with a backslash in its folder\n");
+    const changed = await landAgentFiles(machine, { home: root, tar: TAR({ odd: "the same skill, rewritten\n" }), lands: LANDS });
+    // The path is read back off the list by the bytes, not by a name a shell read the backslash out of.
+    expect(changed.rows[0]!.outcome).toBe("installed");
+    expect(changed.rows[0]!.note).not.toContain("other content");
+    expect(read(root, ODD)).toBe("the same skill, rewritten\n");
+  });
+
+  it("reads what wsp owns there off the list and the bytes, so a round whose files never left this computer says the failure and nothing about whose the files are", async () => {
+    const { root, machine } = box();
+    const config = `${root}/.claude-cfg/.claude.json`;
+    const lands: ProvisionLanding[] = [...LANDS, { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json" }];
+    const tar = (server: string): Buffer => tarOf([file(".claude-cfg/.claude.json", `${JSON.stringify({ mcpServers: { [server]: { command: "npx" } } }, null, 2)}\n`)]);
+
+    // The first run lands the config, and the list beside the job records what it left there.
+    const first = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("github")) });
+    expect(first.rows.at(-1)!.outcome).toBe("installed");
+    await closeAgentFiles(machine, root);
+
+    // The second run never gets the files off this computer: every path says why, and the round claims nothing.
+    const failed = await provisionFiles(machine, { home: root, lands, pack: () => Promise.reject(new Error("Keychain: user cancelled")) });
+    expect(failed.rows.map(r => r.outcome)).toEqual(lands.map(() => "failed"));
+    expect(failed.rows.every(r => r.note === "Keychain: user cancelled")).toBe(true);
+    expect([...failed.owned]).toEqual([]);
+
+    // What wsp owns there is still read off that computer, so the config it wrote reads as its own.
+    const owned = await landedFiles(machine, root);
+    expect(owned.get(config)).toBe("present");
+    const servers = await provisionMcp(machine, mcpPlanOn(root), { home: root, owned, tools: [], stage: () => {} });
+    expect(servers.map(r => r.outcome)).toEqual(["present"]);
+    expect(servers.some(r => (r.note ?? "").includes("is Claude Code's own"))).toBe(false);
+    expect(servers.some(r => r.note === theirConfigLine("Claude Code", config))).toBe(false);
+
+    // The third run has a new copy of it on this computer: the one on that computer is wsp's own and is replaced.
+    const third = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("gsc")) });
+    expect(third.rows.at(-1)!.outcome).toBe("installed");
+    expect(read(root, ".claude-cfg/.claude.json")).toContain("gsc");
   });
 
   it("puts what travels under wsp's own folder on that computer, never the folder every login there shares", async () => {

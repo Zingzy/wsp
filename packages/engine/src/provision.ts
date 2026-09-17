@@ -14,7 +14,7 @@ import { installTools, type ToolResult } from "./golden-tools.js";
 import type { GoldenImport, ImportResult, PackedFiles } from "./golden.js";
 import { applyMachineContext } from "./machine-context.js";
 import type { Machine } from "./machine.js";
-import { closeAgentFiles, landAgentFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
+import { closeAgentFiles, landedFiles, provisionFiles, type OwnedPaths, type ProvisionLanding } from "./provision-files.js";
 import { provisionMcp } from "./provision-mcp.js";
 
 /** What the recipe comes to on a computer you own, in run order: the node step, the agents after it, the tools by
@@ -175,27 +175,23 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     },
   );
   let skippedFiles: SkippedPath[] = [];
-  let owned: OwnedPaths = new Map();
+  /** What this run itself landed in the agents' homes there; what stands there from before is read on the box. */
+  let thisRun: OwnedPaths = new Map();
   if (plan.files !== undefined) {
     const files = plan.files;
     stage(`${FILES_LABEL}: ${plural(files.lands.length, "path")}`, round(FILES_LABEL));
-    try {
-      const packed = await files.pack();
-      const landed = await landAgentFiles(machine, { home: on.home, tar: packed.tar, lands: files.lands });
-      skippedFiles = [...packed.skipped, ...landed.skipped];
-      owned = landed.owned;
-      for (const row of landed.rows) say(row, round(FILES_LABEL));
-    } catch (e) {
-      // The archive is the person's whole set of agent files: it is packed and landed as one, so one row of the
-      // job cannot fail alone. Every path it carried says the same reason, and the run goes on to the rest of the
-      // recipe rather than leaving a computer with its tools on and no word of why its files are not there.
-      const note = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
-      for (const l of files.lands) say({ id: `files/${l.dest}`, label: `${l.label} ${on.home}/${l.dest}`, outcome: "failed", kind: "file", note }, round(FILES_LABEL));
-    }
+    const landed = await provisionFiles(machine, { home: on.home, lands: files.lands, pack: files.pack });
+    skippedFiles = landed.skipped;
+    thisRun = landed.owned;
+    for (const row of landed.rows) say(row, round(FILES_LABEL));
     done++;
   }
   if (plan.mcp !== undefined) {
     stage(`${MCP_LABEL}: ${plural(plan.mcp.agents.length, "agent")}`, round(MCP_LABEL));
+    // What wsp owns in the agents' homes there: what the list beside the job says it still owns, and what this
+    // run landed on top of it. Read off that computer and not off this run, so a round whose files never got off
+    // this Mac still leaves the configs wsp wrote there as wsp's rather than calling them the person's.
+    const owned: OwnedPaths = new Map([...(await landedFiles(machine, on.home)), ...thisRun]);
     const servers = await provisionMcp(machine, plan.mcp, {
       home: on.home,
       owned,

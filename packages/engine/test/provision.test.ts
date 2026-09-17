@@ -15,6 +15,7 @@ import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type T
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { OWN_MARK } from "../src/provision-files.js";
 import { tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
@@ -316,6 +317,9 @@ describe("the person's own files and their servers, on the same run", () => {
     ]);
     // The machine context still lands: a computer with its tools on and no word of why is worse than the failure.
     expect(calls.some(c => c.includes("echo WSP_CTX"))).toBe(true);
+    // Whose the files on that computer are is asked of the computer, not answered off this run: the list beside
+    // the job is read even where nothing was packed, so a config wsp wrote there before is still wsp's.
+    expect(calls.some(c => c.includes(OWN_MARK))).toBe(true);
   });
 
   it("asks the computer nothing about files or servers when the recipe names none", async () => {
