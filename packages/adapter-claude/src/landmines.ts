@@ -22,6 +22,11 @@ const HEADLESS_OVERRIDES = {
   CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL: "1",
 } as const;
 
+/** The variable that tells the CLI which folder under its projects directory to keep this run's sessions and its
+ * auto memory in. Set after the strip, never through `base`: the strip drops every inherited CLAUDE_CODE_* as a
+ * nesting mark, and this one is ours. */
+export const PROJECT_DIR_ENV = "CLAUDE_CODE_PROJECT_DIR_NAME";
+
 export interface ClaudeEnvOptions {
   /** The machine's login environment: a guest's carries its config dir and IS_SANDBOX, a person's own carries theirs. */
   base?: Readonly<Record<string, string | undefined>>;
@@ -30,6 +35,10 @@ export interface ClaudeEnvOptions {
    * as a nesting mark, and this one is ours. An API key beside it wins inside the CLI, so the caller hands one or
    * the other and never both, decided by what the vault holds: its token where there is one, else its key. */
   oauthToken?: string;
+  /** The folder under the CLI's projects directory this run keys its sessions and its memory to. What a copy of a
+   * project folder is given, so every copy and the person's own terminal in that folder share one memory and one
+   * sessions list. Absent leaves the CLI keying off the folder the turn runs in. */
+  projectDirName?: string;
 }
 
 export function stripLandmineEnv(
@@ -58,6 +67,7 @@ export function buildEnv(options: ClaudeEnvOptions = {}): Record<string, string>
     ...HEADLESS_OVERRIDES,
     ...(options.apiKey === undefined ? {} : { ANTHROPIC_API_KEY: options.apiKey }),
     ...(options.oauthToken === undefined ? {} : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
+    ...(options.projectDirName === undefined ? {} : { [PROJECT_DIR_ENV]: options.projectDirName }),
   };
 }
 

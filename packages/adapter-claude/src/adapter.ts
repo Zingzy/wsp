@@ -76,6 +76,9 @@ export interface AdapterDeps {
    * CLAUDE_CONFIG_DIR names, else the CLI's own default under its home. Never exported from here; see buildEnv. */
   configDir: string;
   baseEnv?: Readonly<Record<string, string | undefined>>;
+  /** The folder under the CLI's projects directory this workspace's sessions and memory are keyed to; absent
+   * leaves the CLI keying off the folder each turn runs in. */
+  projectDirName?: string;
   apiKey?: string;
   /** The long-lived token the vault holds for this agent; set on every turn's environment. */
   oauthToken?: string;
@@ -351,7 +354,12 @@ function normalizeEvent(event: Record<string, unknown>, fallbackSessionId: strin
 export function createClaudeAdapter(deps: AdapterDeps): ClaudeAdapter {
   if (!deps.configDir.trim().startsWith("/")) throw new Error(`configDir must be an absolute path, got "${deps.configDir}"`);
   const sessions = new Map<string, ClaudeSession>();
-  const env = buildEnv({ base: deps.baseEnv, apiKey: deps.apiKey, ...(deps.oauthToken !== undefined ? { oauthToken: deps.oauthToken } : {}) });
+  const env = buildEnv({
+    base: deps.baseEnv,
+    apiKey: deps.apiKey,
+    ...(deps.oauthToken !== undefined ? { oauthToken: deps.oauthToken } : {}),
+    ...(deps.projectDirName !== undefined ? { projectDirName: deps.projectDirName } : {}),
+  });
 
   /** wsp's half for a refusal the CLI named a cause for: the road the caller handed this adapter, which is the one
    * rule every door reads for how this workspace is signed in, and the cause the failure is classed by. */

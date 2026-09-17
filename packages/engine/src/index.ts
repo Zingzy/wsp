@@ -16,6 +16,7 @@ export * from "./place-machine.js";
 export { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
 export * from "./ssh-forward.js";
 export * from "./child-exec.js";
+export * from "./copier.js";
 export * from "./no-provider-backend.js";
 export * from "./fake-backend.js";
 export * from "./lifecycle.js";

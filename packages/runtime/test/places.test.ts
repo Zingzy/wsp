@@ -1668,6 +1668,8 @@ const PLACE_FACTS = {
     snapshotListing: true,
     templates: true,
     kept: false,
+    copies: true,
+    ownNetwork: true,
     sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0 }],
   },
   pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },

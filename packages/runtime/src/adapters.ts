@@ -33,6 +33,14 @@ export function secretsOf(vault: Readonly<Record<string, string>>, id: ThreadAge
 }
 
 export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactory>> = {
-  claude: ctx => createClaudeAdapter({ exec: ctx.execStream, configDir: ctx.home("claude"), baseEnv: ctx.env, signInRefusal: ctx.signInRefusal, ...secretsOf(ctx.vault, "claude") }),
+  claude: ctx =>
+    createClaudeAdapter({
+      exec: ctx.execStream,
+      configDir: ctx.home("claude"),
+      baseEnv: ctx.env,
+      signInRefusal: ctx.signInRefusal,
+      ...(ctx.projectKey !== undefined ? { projectDirName: ctx.projectKey } : {}),
+      ...secretsOf(ctx.vault, "claude"),
+    }),
   codex: ctx => createCodexAdapter({ exec: ctx.execStream, home: ctx.home("codex"), login: machineLogin("codex"), baseEnv: ctx.env, ...secretsOf(ctx.vault, "codex") }),
 };
