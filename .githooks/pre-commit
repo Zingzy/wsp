@@ -2,7 +2,15 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # What a review keeps finding in a diff, refused before the commit exists.
 # Every check reads the staged content and never the working tree, so what is
-# refused is what the commit would carry.
+# refused is what the commit would carry. A staged path can carry a space, so
+# every list of them here is read a line at a time, the way git writes it.
+# The two content rules below do not run while a merge is in progress: the
+# lines a merge stages are the other side's, and they were judged when that
+# side took them. The .base-sha rule runs on a merge as well, since a merge is
+# how that file reaches a branch.
+nl='
+'
+IFS="$nl"
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 [ -n "$staged" ] || exit 0
 
@@ -14,16 +22,18 @@ for f in $staged; do
   esac
 done
 
+git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
+
 # A fixture is content under test: it says what it says, and no rule here reads it.
 prose=""
 labelled=""
 for f in $staged; do
   case "$f" in */fixtures/*|fixtures/*) continue ;; esac
   case "$f" in
-    *.ts|*.tsx|*.js|*.mjs|*.cjs|*.rs|*.md|*.mdx|*.yml|*.yaml|*.toml|*.sh|*.css|*.html|*.txt|*.json) prose="$prose $f" ;;
+    *.ts|*.tsx|*.js|*.mjs|*.cjs|*.rs|*.md|*.mdx|*.yml|*.yaml|*.toml|*.sh|*.css|*.html|*.txt|*.json) prose="$prose$nl$f" ;;
   esac
   case "$f" in
-    *.rs|*.ts|*.tsx) labelled="$labelled $f" ;;
+    *.rs|*.ts|*.tsx) labelled="$labelled$nl$f" ;;
   esac
 done
 

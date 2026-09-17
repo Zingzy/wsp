@@ -15,7 +15,10 @@ const ROBOT = String.fromCodePoint(0x1f916);
 // Built rather than written: a guard on this computer blocks a command that carries the trailer whole.
 const COAUTHOR = ["Co", "Authored", "By"].join("-");
 
-const git = (dir: string, ...args: string[]): string => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+// stderr is captured rather than inherited, so what a merge says about itself stays out of the run's log;
+// a failure still reads it back, since node puts a piped stderr in the error's message.
+const git = (dir: string, ...args: string[]): string =>
+  execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
 let dirs: string[] = [];
 afterEach(() => {
@@ -195,6 +198,41 @@ describe("what the pre-commit hook refuses", () => {
       stage(dir, file, text);
       expect(commit(dir, "host: the deploy writes the token"), file).toBe(said(file));
     }
+  });
+
+  it("takes a merge that brings an em dash from the other side, and still refuses a .base-sha staged in one", () => {
+    const dir = repo();
+    stage(dir, "src/a.ts", "export const a = 1;\n");
+    git(dir, "commit", "-q", "--no-verify", "-m", "host: the deploy writes the token");
+    git(dir, "checkout", "-q", "-b", "other");
+    stage(dir, "docs/a.md", `a line with the token ${EM_DASH} the one written\n`);
+    git(dir, "commit", "-q", "--no-verify", "-m", "docs: the token the deploy writes");
+    git(dir, "checkout", "-q", "main");
+    stage(dir, "src/b.ts", "export const b = 2;\n");
+    git(dir, "commit", "-q", "-m", "host: a second file");
+    git(dir, "merge", "--no-commit", "--no-ff", "-q", "other");
+    // The .base-sha rule is not exempt from a merge, since a merge is how that file reaches a branch.
+    stage(dir, ".base-sha", "79c0320c5\n");
+    expect(commit(dir, "merge other into main before the gate")).toBe(
+      "refused: .base-sha is a working file of the landing gate and never lands; run git rm --cached .base-sha",
+    );
+    git(dir, "rm", "-q", "--cached", ".base-sha");
+    expect(commit(dir, "merge other into main before the gate")).toBe("");
+    expect(git(dir, "log", "--oneline", "-1")).toContain("merge other into main before the gate");
+  });
+
+  it("reads a staged path that carries a space", () => {
+    const n = "904";
+    const em = repo();
+    stage(em, "docs/a b.md", `a line with the token ${EM_DASH} the one written\n`);
+    expect(commit(em, "host: the deploy writes the token")).toBe(
+      "refused: a line staged in docs/a b.md has an em dash; write it with a comma, a colon or two sentences",
+    );
+    const labelled = repo();
+    stage(labelled, "src/a b.ts", `export const tree = "wsp-${n}";\n`);
+    expect(commit(labelled, "host: the deploy writes the token")).toBe(
+      "refused: a line staged in src/a b.ts carries a ticket label; name what the code does and leave the number on the tracker",
+    );
   });
 
   it("reads a fake key, a number word, a version and a hex sha as what they are, not as a label", () => {
