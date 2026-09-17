@@ -757,7 +757,12 @@ describe("runtime wire types", () => {
     expect(() => wire.DaemonFrame.parse({ op: "auth", token: "t" })).toThrow();
     expect(() => wire.DaemonFrame.parse({ ptyId: "p1" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.send", channel: "ch_1", frame: { op: "auth", token: "t" } })).toThrow();
-    expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.open" })).toThrow();
+    // A channel is one daemon's, and which one is the caller's to say: a workspace of this host's, or a computer
+    // the person owns. Naming both, or neither, is refused by the runtime in one sentence rather than by the shape,
+    // which carries the two roads as one op.
+    expect(RuntimeRequest.parse({ id: 1, op: "daemon.open", workspaceId: "w_1" })).toMatchObject({ workspaceId: "w_1" });
+    expect(RuntimeRequest.parse({ id: 1, op: "daemon.open", placeId: "p_1" })).toMatchObject({ placeId: "p_1" });
+    expect(wire.DAEMON_OPEN_ONE_OF).toContain("one daemon");
     expect(() => RuntimeRequest.parse({ id: 1, op: "daemon.close" })).toThrow();
 
     expect(wire.DaemonOpenReply.parse({ channel: "ch_1" })).toEqual({ channel: "ch_1" });

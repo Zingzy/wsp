@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths, mintsToken } from "@wsp/catalog";
+import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginSignIn, loginStatePaths, mintsToken } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
 import { Recipe, SIGN_IN_ANSWERS, type LoginChoice, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
@@ -139,7 +139,7 @@ export function initialChoice(e: ManifestEntry): LoginChoice {
   if (e.choice !== undefined) return e.choice;
   // A tool that mints its token on this computer has one road and it is not a machine's, so an unanswered row of
   // its own opens there rather than on a sign-in nobody would ever run.
-  const signIn = loginRow(agentName(e))?.signIn;
+  const signIn = loginSignIn(e.id);
   if (signIn !== undefined && mintsToken(signIn)) return "token";
   if (!isTickable(e)) return WITHOUT_A_COPY;
   if (e.bring !== undefined) return e.bring ? "copy" : WITHOUT_A_COPY;

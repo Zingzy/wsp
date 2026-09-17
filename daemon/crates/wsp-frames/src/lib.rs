@@ -29,7 +29,7 @@ pub use machine::{
     MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
     MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
     MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
-    OnIdle, PauseMode, PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
+    OnIdle, PauseMode, PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks, Share, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
     TemplateRow, TemplateStatus, WorkspaceCopy, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
 };
 pub use place::{

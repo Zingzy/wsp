@@ -105,6 +105,7 @@ async fn runtime_exec_refuses_a_filter_with_a_notify_action_and_exits_125() {
         init: std::path::Path::new(BIN),
         etc: &layout.etc("wsp-n"),
         engine: None,
+        shares: &[],
     });
     spec["linux"]["seccomp"]["syscalls"].as_array_mut().unwrap().push(json!({ "names": ["getcwd"], "action": "SCMP_ACT_NOTIFY" }));
     wsp_runtime::bundle::write_json(&layout.config("wsp-n"), &spec).unwrap();

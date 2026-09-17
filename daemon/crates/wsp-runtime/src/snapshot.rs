@@ -27,12 +27,14 @@ const OPAQUE_XATTR: &str = "trusted.overlay.opaque";
 const PAX_XATTR: &str = "SCHILY.xattr.";
 
 /// The upper directory as a tar on `out`, parents before children. `written` counts the tar's bytes as they go
-/// out, which is what a job reports while a layer that takes minutes is read.
-pub fn write_layer(upper: &Path, out: &mut dyn Write, written: &AtomicU64) -> io::Result<()> {
+/// out, which is what a job reports while a layer that takes minutes is read. `without` is every path inside the
+/// workspace that may not travel, workspace-relative: a login the computer shares in is mounted over a file this
+/// runtime made for it to land on, and neither that file nor the login behind it belongs in an image.
+pub fn write_layer(upper: &Path, out: &mut dyn Write, written: &AtomicU64, without: &[PathBuf]) -> io::Result<()> {
     let mut counting = Counting { inner: out, written };
     let mut tar = Builder::new(&mut counting as &mut dyn Write);
     tar.follow_symlinks(false);
-    walk(&mut tar, upper, Path::new(""), &mut HashMap::new())?;
+    walk(&mut tar, upper, Path::new(""), &mut HashMap::new(), without)?;
     tar.finish()
 }
 
@@ -55,13 +57,22 @@ impl Write for Counting<'_> {
 
 /// `linked` is every inode already written that has more than one name, by device and inode, so its next name is
 /// a link to the first.
-fn walk(tar: &mut Builder<&mut dyn Write>, dir: &Path, rel: &Path, linked: &mut HashMap<(u64, u64), PathBuf>) -> io::Result<()> {
+fn walk(
+    tar: &mut Builder<&mut dyn Write>,
+    dir: &Path,
+    rel: &Path,
+    linked: &mut HashMap<(u64, u64), PathBuf>,
+    without: &[PathBuf],
+) -> io::Result<()> {
     let mut entries: Vec<fs::DirEntry> = fs::read_dir(dir)?.collect::<io::Result<_>>()?;
     entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let path = entry.path();
         let name = entry.file_name();
         let here = rel.join(&name);
+        if without.contains(&here) {
+            continue;
+        }
         let meta = fs::symlink_metadata(&path)?;
         let kind = meta.file_type();
         if kind.is_char_device() && meta.rdev() == 0 {
@@ -90,7 +101,7 @@ fn walk(tar: &mut Builder<&mut dyn Write>, dir: &Path, rel: &Path, linked: &mut 
             if xattr::get(&path, OPAQUE_XATTR)?.as_deref() == Some(b"y") {
                 empty_file(tar, &here.join(OPAQUE), &meta)?;
             }
-            walk(tar, &path, &here, linked)?;
+            walk(tar, &path, &here, linked, without)?;
         }
     }
     Ok(())
@@ -138,6 +149,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_login_the_computer_shares_into_a_workspace_never_travels_in_its_layer() {
+        let dir = tempfile::tempdir().unwrap();
+        let upper = dir.path().join("upper");
+        fs::create_dir_all(upper.join("root/.codex")).unwrap();
+        // What the boot made for the mount to land on, and what the workspace itself wrote beside it.
+        fs::write(upper.join("root/.codex/auth.json"), b"").unwrap();
+        fs::write(upper.join("root/.codex/config.toml"), b"model = \"gpt-5\"\n").unwrap();
+        let mut bytes = Vec::new();
+        write_layer(&upper, &mut bytes, &AtomicU64::new(0), &[PathBuf::from("root/.codex/auth.json")]).unwrap();
+        let names: Vec<String> =
+            tar::Archive::new(bytes.as_slice()).entries().unwrap().map(|e| e.unwrap().path().unwrap().display().to_string()).collect();
+        assert!(names.contains(&"root/.codex/config.toml".to_owned()), "{names:?}");
+        assert!(!names.iter().any(|name| name.contains("auth.json")), "{names:?}");
+    }
+
+    #[test]
     fn a_deleted_file_is_a_whiteout_and_an_opaque_directory_carries_its_marker() {
         let dir = tempfile::tempdir().unwrap();
         let upper = dir.path().join("upper");
@@ -170,7 +197,7 @@ mod tests {
         fs::hard_link(deep.join("index.js"), upper.join("opt/linked.js")).unwrap();
         let mut bytes = Vec::new();
         let written = AtomicU64::new(0);
-        write_layer(&upper, &mut bytes, &written).unwrap();
+        write_layer(&upper, &mut bytes, &written, &[]).unwrap();
         assert_eq!(written.load(Ordering::Relaxed), bytes.len() as u64);
         // The upper's own bytes: the two names of one inode count once, as the layer carries them once.
         let counted = crate::store::tree_bytes(&upper).unwrap();
