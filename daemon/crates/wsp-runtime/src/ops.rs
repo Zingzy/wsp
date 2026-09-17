@@ -651,18 +651,21 @@ impl Ops {
         }
     }
 
-    /// The logins a create asks for, held to the one directory this daemon shares them out of: a source anywhere
-    /// else on the box is refused, since a bind mount lands on the workspace's own files and is the one thing a
-    /// slip cannot be taken back. The wire has already read both paths as paths; this is what reads where they are.
+    /// The logins a create asks for, held to one rule: a file under the directory this daemon shares them out of.
+    /// A source anywhere else on the box is refused, since a bind mount lands on the workspace's own files and is
+    /// the one thing a slip cannot be taken back; so is one that is there and is not a file, which the boot would
+    /// otherwise pass over without a word. A source that is not there yet is a login nobody has signed in on this
+    /// computer: the boot passes that over and the wake after the sign-in binds it. The wire has already read both
+    /// paths as paths; this is what reads where the source is and what it is.
     fn shares_of(&self, spec: &MachineSpec) -> Result<Vec<Share>, OpError> {
         let logins = self.layout.logins();
         let asked = spec.shares.clone().unwrap_or_default();
         for share in &asked {
             // Held to the wire's own rule rather than to a copy of it, as the bind under a rootfs is: a source
             // that walks up out of the logins directory resolves to a path on the box like any other.
-            let under = wsp_frames::is_plain_path(&share.source)
-                && Path::new(&share.source).strip_prefix(&logins).is_ok_and(|rest| rest.iter().next().is_some());
-            if !under {
+            let at = Path::new(&share.source);
+            let under = wsp_frames::is_plain_path(&share.source) && at.strip_prefix(&logins).is_ok_and(|rest| rest.iter().next().is_some());
+            if !under || (at.exists() && !at.is_file()) {
                 return Err(OpError::plain(format!(
                     "a login shared into a workspace is a file under {}, and {} is not one",
                     logins.display(),
@@ -1689,11 +1692,18 @@ mod tests {
         // login there before any workspace asks for it.
         assert!(logins.is_dir());
         assert_eq!(fs::metadata(&logins).unwrap().permissions().mode() & 0o777, 0o700);
+        // A login nobody has signed in here yet is taken: the boot passes it over and the wake after the sign-in
+        // binds it, which is what lets a workspace be made on a box before its owner has signed anything in.
         let asked = ops.shares_of(&asking_for(&logins.join("codex/auth.json"))).unwrap();
         assert_eq!(asked.iter().map(|s| s.target.as_str()).collect::<Vec<_>>(), ["/root/.codex/auth.json"]);
-        // Anywhere else on the box, and the directory itself, which is not a file of a login: refused in one
-        // sentence naming where a shared login does live.
-        for outside in [dir.path().join("root/.ssh/id_ed25519"), logins.clone(), logins.join("../copies/wsp-a")] {
+        // And the file itself once it is there.
+        fs::create_dir_all(logins.join("codex")).unwrap();
+        fs::write(logins.join("codex/auth.json"), b"{}\n").unwrap();
+        assert_eq!(ops.shares_of(&asking_for(&logins.join("codex/auth.json"))).unwrap().len(), 1);
+        // Anywhere else on the box, the directory this daemon shares them out of, and a directory under it: each
+        // refused in one sentence naming where a shared login does live. A directory is refused rather than
+        // passed over, since a boot reading it as no file would skip it without a word.
+        for outside in [dir.path().join("root/.ssh/id_ed25519"), logins.clone(), logins.join("codex"), logins.join("../copies/wsp-a")] {
             let refused = ops.shares_of(&asking_for(&outside)).unwrap_err().message;
             assert!(refused.contains(&logins.display().to_string()) && refused.ends_with("is not one"), "{outside:?}: {refused}");
         }

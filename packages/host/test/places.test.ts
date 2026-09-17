@@ -1400,6 +1400,9 @@ describe("wsp add <place> --sign-in <agent>", () => {
     expect(await addCommand(io, opts(tmp("signin-place")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
     expect(run.asked).toEqual([{ agent: "codex", logins: "/var/lib/wsp/logins" }]);
     expect(io.lines.join("\n")).toContain("Codex is signed in on spoo (ChatGPT); every workspace there shares that login.");
+    // A row that says where that computer keeps its logins is never turned away: the host asks its backend again
+    // whenever a computer dials back on another daemon, so a box that has just taken this one is ready here.
+    expect(io.errors.join("\n")).not.toContain(placeNoLoginsLine("spoo"));
   });
 
   it("answers a sign-in that did not land with what the tool said and the line that runs it again", async () => {
