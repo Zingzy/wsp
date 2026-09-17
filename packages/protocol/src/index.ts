@@ -3265,6 +3265,7 @@ const DAEMON_CONTENTS = [
   "a51cf26e554a02935fda02942869ddd7251b41e84625e500336c7ce171a4d667",
   "c2f00944a79a850450b11b4610b93ac4894b7da39282755a9bfef55776a11dff",
   "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
+  "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3382,7 +3383,11 @@ const DAEMON_CONTENTS = [
  * workspace at the project's own path before the runtime starts and unmounted deepest first at stop. The place report
  * carries the word for what the computer's disk can do, so the computers row says it. Before this a workspace shared
  * its project through an overlay whose lower directory the box could change under it, which the kernel leaves
- * undefined. */
+ * undefined.
+ * Version 45 lets a machine specification name shares: files the computer keeps outside every workspace under the
+ * daemon's logins directory and binds into each workspace at a target path, so a login signed in once on the computer
+ * is the same file in every workspace there and a refresh in one is the computer's refresh; a share whose source sits
+ * outside that directory is refused at create. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
