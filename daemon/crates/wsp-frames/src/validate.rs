@@ -123,6 +123,28 @@ where
     Ok(s)
 }
 
+/// The protocol's isPlainPath: absolute, made of what a path is made of, no empty part in it and no part that
+/// walks up out of it. A path off the wire lands in a mount and in the commands a turn runs, so a semicolon, a
+/// quote, a backtick, a glob or a `..` in one is refused here rather than quoted or resolved at each of twenty
+/// places. A space is a path on macOS and stays allowed, and a name that merely begins with a dot is a name.
+pub fn is_plain_path(path: &str) -> bool {
+    path.starts_with('/')
+        && !path.contains("//")
+        && path.chars().all(|c| c.is_ascii_alphanumeric() || " ._+@:,/-".contains(c))
+        && !path.split('/').any(|part| part == "." || part == "..")
+}
+
+pub(crate) fn plain_path<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(d)?;
+    if !is_plain_path(&s) {
+        return Err(de::Error::custom("an absolute path made of what a path is made of"));
+    }
+    Ok(s)
+}
+
 pub(crate) fn positive<'de, D>(d: D) -> Result<Option<u32>, D::Error>
 where
     D: Deserializer<'de>,
@@ -181,6 +203,20 @@ mod tests {
         assert!(!is_http_url("https://a\u{1f}b"));
         assert!(!is_http_url("日本語://x"));
         assert!(!is_http_url("ħttps://x"));
+    }
+
+    #[test]
+    fn plain_paths_are_read_as_the_protocol_reads_them() {
+        assert!(is_plain_path("/Users/zingzy/wsp") && is_plain_path("/wsp/projects/my project/checkout"));
+        assert!(!is_plain_path("wsp") && !is_plain_path("") && !is_plain_path("/a//b"));
+        assert!(!is_plain_path("/a; rm -rf /") && !is_plain_path("/a'b") && !is_plain_path("/a*"));
+        assert!(!is_plain_path("/日本語"));
+        // A path that walks up out of itself is refused here, since what it resolves to is a mount on the box
+        // rather than a path inside a workspace.
+        assert!(!is_plain_path("/Users/../../etc") && !is_plain_path("/..") && !is_plain_path("/a/../b"));
+        assert!(!is_plain_path("/a/./b") && !is_plain_path("/.") && !is_plain_path("/a/.."));
+        // A name is still a name where it begins with a dot, which half a home folder does.
+        assert!(is_plain_path("/root/.claude/projects") && is_plain_path("/a/...") && is_plain_path("/a/.b"));
     }
 
     #[test]

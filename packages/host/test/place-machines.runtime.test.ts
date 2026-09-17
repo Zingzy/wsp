@@ -155,6 +155,26 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect((await exec(machine, "echo awake")).stdout).toBe("awake\n");
   }, 60_000);
 
+  it("takes a project of the computer's own in as a copy, at the path that project has outside", async () => {
+    const from = join(ownDir("wsp-runtime-checkout-"), "checkout");
+    const at = "/Users/zingzy/wsp";
+    execFileSync("mkdir", ["-p", join(from, "src")]);
+    writeFileSync(join(from, "README.md"), "the checkout\n");
+    writeFileSync(join(from, "src/index.js"), "module.exports = 1\n");
+    const machine = await create({ kind: "sandbox", copy: { from, at } });
+    // The project is inside at its own path, and what the checkout holds is what the workspace reads there.
+    const seen = await exec(machine, `cat ${at}/README.md; cat ${at}/src/index.js`);
+    expect(seen.stdout).toBe("the checkout\nmodule.exports = 1\n");
+    // Written inside, and the checkout on the computer is not the workspace's to change.
+    expect((await exec(machine, `echo inside >> ${at}/README.md`)).exitCode).toBe(0);
+    expect(readFileSync(join(from, "README.md"), "utf8")).toBe("the checkout\n");
+    expect(existsSync(join(root, "copies", machine.id))).toBe(true);
+    await machine.kill();
+    made.splice(made.indexOf(machine), 1);
+    expect(existsSync(join(root, "copies", machine.id))).toBe(false);
+    expect(readFileSync("/proc/self/mountinfo", "utf8")).not.toContain(join(root, "run", machine.id));
+  }, 120_000);
+
   it("kills by removing the container it was given, and nothing of it stays on the box", async () => {
     const machine = await create({ kind: "sandbox" });
     const id = machine.id;

@@ -7,6 +7,13 @@
 
 #[cfg(target_os = "linux")]
 pub mod bundle;
+pub mod copy;
+#[cfg(target_os = "linux")]
+pub mod copy_plain;
+#[cfg(target_os = "linux")]
+pub mod copy_reflink;
+#[cfg(target_os = "linux")]
+pub mod copy_snapshot;
 pub mod doctor;
 #[cfg(target_os = "linux")]
 pub mod engine;

@@ -13,7 +13,7 @@ import { chmodSync, mkdirSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { join, posix } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { shellQuote } from "@wsp/protocol";
+import { isPlainPath, shellQuote } from "@wsp/protocol";
 import type { Capabilities, MachineFacts } from "@wsp/protocol";
 import { runChild } from "./child-exec.js";
 import { keyFingerprint } from "./key-fingerprint.js";
@@ -409,15 +409,6 @@ export async function readSshMachine(reach: SshReach, transport: SshTransport = 
     shape: { cpu, memMb },
     ...(arch !== undefined ? { arch } : {}),
   };
-}
-
-/** Every folder a turn's paths are built from is held to this: absolute, and made of what a path is made of. A
- * machine can answer with anything, and what it answers lands in the commands a turn runs there, so a home carrying
- * a semicolon, a quote, a backtick or a glob is refused at the one door rather than quoted at each of twenty places
- * (the paths are quoted too; this is what keeps a machine from deciding what those paths mean). A space is a path
- * on macOS and stays allowed. */
-export function isPlainPath(path: string): boolean {
-  return path.startsWith("/") && /^[A-Za-z0-9 ._+@:,/-]+$/.test(path) && !path.includes("//");
 }
 
 function homeRefusal(reach: SshReach, home: string | undefined): string {

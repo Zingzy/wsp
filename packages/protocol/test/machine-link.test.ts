@@ -6,6 +6,7 @@ import {
   MACHINE_PUT_PART_BYTES,
   MachineLinkRequest,
   PlaceView,
+  WorkspaceCopy,
   WorkspaceView,
   forkRoom,
   placeDaemonPaths,
@@ -45,6 +46,29 @@ describe("the machine ops on a place link", () => {
       { id: 26, op: "machine.putBytes", machineId: "c1", path: "/root/a", uploadId: "u1", seq: 0, last: true, data: "AAAA" },
     ];
     for (const frame of frames) expect(MachineLinkRequest.safeParse(frame).success, JSON.stringify(frame)).toBe(true);
+  });
+
+  it("takes a create that brings a project of the computer's own, and refuses one whose paths are not paths", () => {
+    const copy = { from: "/wsp/projects/wsp/checkout", at: "/Users/zingzy/wsp" };
+    const create = (spec: unknown): boolean => MachineLinkRequest.safeParse({ id: 1, op: "machine.create", spec }).success;
+    expect(create({ kind: "sandbox", copy })).toBe(true);
+    // A workspace of the computer with no project in it is the same frame without the field.
+    expect(create({ kind: "sandbox" })).toBe(true);
+    expect(WorkspaceCopy.safeParse(copy).success).toBe(true);
+    // Both sides are absolute and plain: a relative path, a path that is not one, and an empty one are refused
+    // at the wire rather than quoted in a mount command on the far side.
+    expect(create({ kind: "sandbox", copy: { ...copy, from: "projects/wsp/checkout" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "wsp" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/zingzy/wsp; rm -rf /" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, from: "" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { from: copy.from } })).toBe(false);
+    // A path that walks up out of itself is refused on both halves: what it resolves to is a folder on the
+    // computer, and a bind mount over one of those cannot be taken back.
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/../../etc" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, from: "/wsp/projects/../../root/.ssh" } })).toBe(false);
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/./wsp" } })).toBe(false);
+    // A folder whose name begins with a dot is a folder, and half a home is made of them.
+    expect(create({ kind: "sandbox", copy: { ...copy, at: "/root/.claude/projects" } })).toBe(true);
   });
 
   it("refuses an op it does not carry, a part out of range and a command over the body cap", () => {

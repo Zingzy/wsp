@@ -98,9 +98,11 @@ fn blocking_reason(facts: &Facts) -> Option<String> {
     None
 }
 
-/// The facts read off this box: nothing is mounted or created, so it costs a few file reads and can run at every
-/// dial. Off Linux only the engine is read; the rest stand false, and the doctor names Linux as the reason a
-/// workspace does not run here, since youki's kernel work has no answer on another kernel.
+/// The facts read off this box: nothing is mounted, created or written, so it costs a few file reads and can
+/// run at every dial and on every engine socket lookup. Off Linux only the engine is read; the rest stand false,
+/// and the doctor names Linux as the reason a workspace does not run here, since youki's kernel work has no
+/// answer on another kernel. How a copy is made here is not a kernel fact but a probe on the disk, so it is read
+/// where it is reported and where a copy is about to be made, never here.
 pub fn read_facts() -> Facts {
     let engine = engine_on_path(&std::env::var("PATH").unwrap_or_default());
     #[cfg(target_os = "linux")]
@@ -177,6 +179,23 @@ mod tests {
         assert_eq!(d.blocked, None);
         assert!(d.kvm);
         assert_eq!(d.engine, Engine::None);
+    }
+
+    #[test]
+    fn reading_the_box_writes_nothing_on_it_and_the_copy_word_is_asked_for_on_its_own() {
+        // The engine socket lookup reads these facts on every create, every wake and every remove, so the read
+        // may not touch a disk: it takes no root and can write under none. How a copy is made here is a probe
+        // rather than a kernel fact, and it lives in the copy module, which the report and the create call.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root");
+        for _ in 0..3 {
+            let _ = read_facts();
+        }
+        assert!(!root.exists(), "reading the box made something under a root");
+        let word = crate::copy::copies_word(&root);
+        assert!(matches!(word, wsp_frames::CopyWord::Plain | wsp_frames::CopyWord::Reflink), "{word:?}");
+        // And the probe that answered it left the root as it found it.
+        assert_eq!(std::fs::read_dir(&root).map(Iterator::count).unwrap_or(0), 0);
     }
 
     #[test]
