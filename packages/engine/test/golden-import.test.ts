@@ -1444,7 +1444,8 @@ describe("the agents as steps of the one tools loop", () => {
     // catalog's road pins is what the step asks for, so a computer that answers at it installs nothing.
     expect(codex.check).toBe(AGENT_INSTALLERS["codex"]!.smoke);
     expect(codex.bin).toBe("codex");
-    expect(codex.asks).toBe(catalogEntry("codex").installRoad.version);
+    const road = catalogEntry("codex")!.installRoad;
+    expect(codex.asks).toBe(road.road === "npm" ? road.version : undefined);
     expect(codex.pin).toEqual(AGENT_INSTALLERS["codex"]!.pin);
     // The install line runs on the tools PATH with the Node the step put on ahead of it.
     expect(codex.cmd.startsWith(PATH_LINE)).toBe(true);
@@ -1479,7 +1480,7 @@ describe("the version a step asks for", () => {
     expect(asks("tools/npm/bun")).toBe("1.4.0");
     // apt installs the distribution's own package: the line names no version, so the step asks for none, whatever
     // the row says this computer runs.
-    expect(catalogEntry("tmux").installRoad.road).toBe("apt");
+    expect(catalogEntry("tmux")!.installRoad.road).toBe("apt");
     expect(asks(`${CATALOG_PREFIX}tmux`)).toBeUndefined();
   });
 });

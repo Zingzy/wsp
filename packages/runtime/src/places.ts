@@ -861,7 +861,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const stage: ProvisionStage = (detail, at, row) => {
       log.write(detail);
       provisionStage(addId, "running", detail);
-      if (row === undefined && at === undefined) return;
+      // The record is written when the job moved, not on every line a step prints: a step's output is hundreds of
+      // lines and each write is the whole state file.
+      const moved = at !== undefined && (held.at?.index !== at.index || held.at.label !== at.label);
+      if (row === undefined && !moved) return;
       push({ ...held, rows: row === undefined ? held.rows : [...held.rows, row], ...(at === undefined ? {} : { at }) });
     };
     try {
@@ -877,7 +880,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       await writing;
       provisionStage(addId, "failed", said);
     }
-    await log.close(held);
+    // Behind the job rather than inside it: the outcome on that computer is the last write and a link that has
+    // gone waits out its own retries, and a second update is refused only while rows are actually going on.
+    void log.close(held);
   };
 
   /** Starts the recipe job on one computer and answers how it stands the moment it is under way, so a person who
