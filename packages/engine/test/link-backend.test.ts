@@ -303,6 +303,28 @@ describe("a machine over a link", () => {
     expect(l.sent.filter(s => s.op === "machine.resume").length).toBe(1);
   });
 
+  it("reads how long the machine has been quiet off one reading, and nothing where the far side does not count it", async () => {
+    const reading = { state: "running" as const, cgroup: "/sys/fs/cgroup/wsp/c1", upper: "/wsp/run/c1/upper" };
+    const l = opened(sent => {
+      if (sent.op === "machine.create") return { machine: HANDLE };
+      if (sent.op === "machine.metrics") return { reading: { ...reading, quietForMs: 143_000 } };
+      return {};
+    });
+    const backend = await LinkBackend.open(l.link);
+    const machine = await backend.create({ kind: "sandbox" });
+    expect(await backend.lifecycle!.quietForMs!(machine)).toBe(143_000);
+    expect(l.sent.at(-1)).toMatchObject({ op: "machine.metrics", params: { machineId: "c1" } });
+    // A daemon that does not count it answers a reading without the figure, and the host is left with its own
+    // clock: undefined and not zero, since zero would read as a workspace that was busy a moment ago.
+    const quiet = opened(sent => {
+      if (sent.op === "machine.create") return { machine: HANDLE };
+      if (sent.op === "machine.metrics") return { reading };
+      return {};
+    });
+    const older = await LinkBackend.open(quiet.link);
+    expect(await older.lifecycle!.quietForMs!(await older.create({ kind: "sandbox" }))).toBeUndefined();
+  });
+
   it("reads the capacity of the computer on the far side", async () => {
     const capacity = { cores: 3, memMb: 3900, memRoomMb: 1950, machineMemMb: 1950, diskFreeBytes: 10, images: [], machines: { running: 1, paused: 0 } };
     const l = opened(sent => (sent.op === "machine.capacity" ? capacity : {}));

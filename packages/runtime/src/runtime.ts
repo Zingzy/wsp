@@ -3981,12 +3981,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   });
 
+  /** How long the machine behind a record has been quiet by its own computer's reading, where that computer
+   * counts one. A read that fails says nothing about the workspace, and the stop goes ahead: a backend that
+   * cannot be asked is a backend that does not answer. */
+  const quietOf = async (id: string): Promise<number | undefined> => {
+    const entry = live.get(id);
+    if (entry === undefined || entry.record.phase !== "running") return undefined;
+    // Called on the lifecycle itself, as the backstop below is, rather than pulled off it and called detached:
+    // one interface, and an implementer is free to write this as a method, which keeps its own object only if
+    // the call goes through it.
+    return backendFor(entry.record).lifecycle?.quietForMs?.(entry.machine).catch((e: unknown) => {
+      console.warn(`quiet figure of ${id} not read: ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
+    });
+  };
+
   const idle = createIdlePolicy({
     windowOf: id => {
       const entry = live.get(id);
       return entry === undefined ? null : idleWindowOf(entry.record);
     },
     onIdle: async (id, windowMs) => {
+      // What the computer running it can see of the workspace working, asked once here rather than counted by
+      // the timer: a dev server somebody is clicking through and a build somebody started answer with a figure
+      // inside the window, and the window starts over instead of the workspace stopping under them. A backend
+      // that cannot say leaves the stop to this host's own clock, which is every provider.
+      const quiet = await quietOf(id);
+      if (quiet !== undefined && quiet < windowMs) {
+        idle.touch(id);
+        return;
+      }
       try {
         await napWith(id, IDLE_REASON.of(windowMs));
       } catch (e) {

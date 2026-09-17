@@ -398,6 +398,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
           cpuUsageUsec: 41200000,
           uptimeMs: 5430000,
           procs: 37,
+          quietForMs: 143000,
           address: "10.65.0.6",
           cgroup: "/sys/fs/cgroup/wsp/wsp-8fef733ad77786dc",
           upper: "/var/lib/wsp/run/wsp-8fef733ad77786dc/upper",
