@@ -8196,6 +8196,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     },
     close: async () => {
       idle.close();
+      // What this host started on a machine finishes before it lets that machine go: the boot fires a daemon sync
+      // at every running workspace without waiting for it, and a write landing after the close is this process
+      // touching a computer it no longer holds. Each sync is a read and a write, so the wait is milliseconds.
+      await Promise.allSettled([...daemonSyncs.values()]);
       await local?.close?.();
       await ssh?.close?.();
       await placeDoor?.close();
