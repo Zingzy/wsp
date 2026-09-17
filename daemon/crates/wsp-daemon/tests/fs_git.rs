@@ -521,3 +521,29 @@ async fn roots_beyond_home_are_listed_and_read_what_is_outside_every_root_is_ref
     fs::write(t.roots_path(), format!("{}\n{}\n", project.path().display(), t.outside().display())).unwrap();
     assert_eq!(c.request("fs.list", json!({ "path": t.outside() })).await["ok"], true);
 }
+
+#[tokio::test]
+async fn git_push_goes_through_the_op_switch_and_refuses_the_base_and_a_path_outside_every_root() {
+    let t = build();
+    let repo = t.repo();
+    let origin = t.root().join("origin.git");
+    git(t.root(), &["init", "-q", "--bare", "-b", "main", origin.to_str().unwrap()]);
+    git(&repo, &["remote", "add", "origin", origin.to_str().unwrap()]);
+    git(&repo, &["push", "-q", "origin", "main"]);
+    let d = start(t.root(), &t.roots_path()).await;
+    let mut c = Client::connect(d.addr).await;
+    let pushed = c.request("git.push", json!({ "cwd": "repo", "base": "main" })).await;
+    assert_eq!(pushed["error"].as_str(), None, "{pushed}");
+    assert_eq!((pushed["ok"].as_bool(), pushed["branch"].as_str(), pushed["base"].as_str()), (Some(true), Some("feature"), Some("main")));
+    assert_eq!((pushed["remote"].as_str(), pushed["ahead"].as_u64()), (Some("origin"), Some(1)));
+    assert!(pushed["uncommitted"].as_u64().unwrap() >= 4, "{pushed}");
+    assert!(pushed["stat"].as_array().unwrap().iter().any(|l| l.as_str().unwrap().contains("feature.txt")), "{pushed}");
+    assert_eq!(git(&origin, &["rev-parse", "feature"]).trim(), git(&repo, &["rev-parse", "feature"]).trim());
+    git(&repo, &["checkout", "-q", "main"]);
+    let onbase = c.request("git.push", json!({ "cwd": "repo", "base": "main" })).await;
+    assert_eq!(
+        (onbase["ok"].as_bool(), onbase["error"].as_str()),
+        (Some(false), Some(wsp_frames::words::on_base_refusal("main").as_str()))
+    );
+    refused(&c.request("git.push", json!({ "cwd": "repo/escape", "base": "main" })).await, "outside-root");
+}

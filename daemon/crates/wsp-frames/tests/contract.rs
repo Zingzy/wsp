@@ -11,9 +11,10 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, BackendFacts, CopyReport, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GuestCliMessage,
-    GuestOpenReply, MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
-    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    numbers, words, BackendFacts, CopyReport, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply,
+    GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply, MachineAnswersReply, MachineExecReply, MachineHandleReply,
+    MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
+    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -201,6 +202,15 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
+                "GitPushReply" => {
+                    round_trip::<GitPushReply>(&sample, &at);
+                }
+                "GitPrReply" => {
+                    round_trip::<GitPrReply>(&sample, &at);
+                }
+                "GitPrStateReply" => {
+                    round_trip::<GitPrStateReply>(&sample, &at);
+                }
                 "GuestOpenReply" => {
                     round_trip::<GuestOpenReply>(&sample, &at);
                 }
@@ -216,6 +226,9 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
     let mut expected = vec![
         "CopyReport",
         "DaemonErrorResponse",
+        "GitPrReply",
+        "GitPrStateReply",
+        "GitPushReply",
         "GuestCliMessage",
         "GuestOpenReply",
         "MachineAnswersReply",
@@ -255,6 +268,11 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("guestQueueFull", words::GUEST_QUEUE_FULL.to_owned());
     m.insert("guestUnwatched", words::GUEST_UNWATCHED.to_owned());
     m.insert("guestNoDaemon", words::guest_no_daemon_line("{port}"));
+    m.insert("onBase", words::on_base_refusal("{base}"));
+    m.insert("notOnABranch", words::NOT_ON_A_BRANCH.to_owned());
+    m.insert("nothingAhead", words::nothing_ahead("{branch}", "{base}"));
+    m.insert("noRemote", words::NO_REMOTE.to_owned());
+    m.insert("noHostCli", words::no_host_cli("{host}"));
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
     m.insert("listening", words::listening_line("{host}", "{port}"));
     m.insert("sysSamplerStarted", words::SYS_SAMPLER_STARTED.to_owned());

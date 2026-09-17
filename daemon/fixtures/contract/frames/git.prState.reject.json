@@ -1,0 +1,11 @@
+[
+  {
+    "id": 1,
+    "op": "git.prState"
+  },
+  {
+    "id": 1,
+    "op": "git.prState",
+    "cwd": null
+  }
+]

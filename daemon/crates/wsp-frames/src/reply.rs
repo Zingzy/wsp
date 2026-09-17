@@ -4,7 +4,7 @@
 use serde::de::{self, Deserializer, Visitor};
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::{DaemonErrorCode, FsEntryType, MachineErrorKind, RequestId};
+use crate::{DaemonErrorCode, FsEntryType, MachineErrorKind, PullRequestState, RequestId};
 
 /// The literal `true` the ok envelope carries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -264,4 +264,44 @@ pub struct PlaceLeaveReply {
 pub struct PlaceUpdateReply {
     pub at: String,
     pub kept: String,
+}
+
+/// One pull request as its host's command line answered with it, read off that command's JSON and never its prose.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequest {
+    pub number: u64,
+    pub url: String,
+    pub state: PullRequestState,
+    /// The git host it lives on, as the remote's url names it: github.com and the like.
+    pub host: String,
+}
+
+/// What a push carried: the branch, the branch it is measured against, the remote it went to, how many commits it
+/// has that the base lacks, how many changes were left uncommitted here and the diffstat of what travelled.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPushReply {
+    pub branch: String,
+    pub base: String,
+    pub remote: String,
+    pub ahead: u64,
+    pub uncommitted: u64,
+    pub stat: Vec<String>,
+}
+
+/// The pull request for the branch, and whether this call is what opened it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrReply {
+    pub pr: PullRequest,
+    pub created: bool,
+}
+
+/// The pull request for the branch as it stands, absent where the host knows none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitPrStateReply {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<PullRequest>,
 }

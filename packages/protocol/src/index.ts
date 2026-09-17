@@ -642,6 +642,10 @@ export const WorkspaceView = z.object({
    * workspace a person made. The root is what the machine cap counts against. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** The workspace this one was forked out of, by id; absent on every workspace that is not a fork of another. A
+   * child holds the same project as its parent and starts on the branch the parent was on, and its work goes back
+   * into that branch. */
+  parentWorkspaceId: z.string().optional(),
   /** The place a fork lives on, by id; absent on a fork at the host's own provider and on every workspace that is
    * not a fork. The command line and the app show its name after the workspace's. */
   place: z.string().optional(),
@@ -694,7 +698,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true, copy: true, portBase: true,
+  agents: true, parentThreadId: true, rootThreadId: true, parentWorkspaceId: true, place: true, provider: true, copy: true, portBase: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -3001,6 +3005,15 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string() }),
   z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional() }),
+  /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
+   * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
+   * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
+  z.object({ id: reqId, op: z.literal("git.push"), cwd: z.string(), base: z.string().optional() }),
+  /** Opens the branch's pull request against the base through the git host's own signed-in command line, or
+   * answers with the one already open. Refused with code no-host-cli where that command line is not there. */
+  z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional() }),
+  /** Where the branch's pull request stands, read back through that same command line. */
+  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -3454,6 +3467,9 @@ export const DaemonErrorCode = z.enum([
   "not-a-git-repo",
   "bad-request",
   "forbidden",
+  /** No command line for the git host the remote names is on the machine, so the pull request waits; the push
+   * itself landed, which is why a client reads this one as a note beside the push and not as a failure. */
+  "no-host-cli",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
@@ -3560,6 +3576,7 @@ const DAEMON_CONTENTS = [
   "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
   "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
   "4453f856251c047172490b84c8502f74b6a1d25744f6878a382ac32fe45f2c46",
+  "4605e734f4735405ddefd0478583032757ca8ad0b2dc8ce9a14e92789c2800a0",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3698,7 +3715,10 @@ const DAEMON_CONTENTS = [
  * after a real quiet window read off its published ports and its commands, and the reading carries how long it has
  * been quiet; a service bound to loopback inside answers through the published port; a create the box has no room for
  * is refused in one sentence naming the quietest workspace; root inside drops the standard capability list and sees
- * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace. */
+ * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace.
+ * Version 50 adds the git road out of a workspace: a push of the branch the copy is on with a refusal to push the
+ * base, the pull request opened or found through the signed-in host command line on the computer and its state read
+ * back, three operations behind one trait with one module per host. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4352,6 +4372,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
     agents: WorkspaceAgents.partial().optional(),
     /** Auto-nap window for this workspace; absent takes the runtime default (20 min), null turns it off. */
     idleWindowMs: z.number().nullable().optional(),
+    /** The workspace this one is forked out of, by id: a child of it, holding the same project and starting on the
+     * branch that workspace is on right now where the remote has that branch. A create a thread asked for is a
+     * child of the thread's own workspace whether or not this names one. */
+    parent: z.string().optional(),
     /** The workspace gets the place's container engine through the fenced socket; absent takes the image's recipe. */
     engine: z.boolean().optional(),
   }),
@@ -4393,6 +4417,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * null clears it, so the colour picker and the icon picker each send their own without reading the other's. The
    * record alone changes: nothing on the machine is touched. */
   z.object({ id: reqId, op: z.literal("workspaces.look"), workspaceId: z.string() }).extend(WorkspaceLook.shape),
+  /** Pushes the branch the workspace's copy is on and opens or finds its pull request, and replies with a
+   * BringBackResult. The base is the branch its parent was on at the fork for a child, whatever that parent does
+   * after, and the project's own base otherwise; the base branch itself is refused, since work leaves a workspace
+   * as a branch of its own. */
+  z.object({ id: reqId, op: z.literal("workspaces.bringBack"), workspaceId: z.string(), title: z.string().optional(), body: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
    * holds, so the two flags a person gives on one line never clear the third. */
@@ -4719,6 +4748,9 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.touch",
   "workspaces.wake",
   "workspaces.exec",
+  // A thread's work leaves its workspace the one way any work does, as a branch on the project's remote: the tree
+  // rule refuses every workspace but its own, and the guard reads the switch as it does for a fork.
+  "workspaces.bringBack",
   "harnesses.list",
   "sessions.start",
   "sessions.list",
@@ -4978,6 +5010,7 @@ export {
   type ThemePreset,
 } from "./workspace-look.js";
 export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
