@@ -842,7 +842,7 @@ mod tests {
         let fenced = config_json(&Config { binds: &read_only, ..c });
         assert_eq!(
             fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap()["options"],
-            json!(["rbind", "rprivate", "ro"])
+            json!(["rbind", "ro"])
         );
         assert!(mounts.iter().all(|m| m["destination"] != memory));
     }

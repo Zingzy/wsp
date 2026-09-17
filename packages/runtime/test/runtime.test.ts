@@ -146,16 +146,18 @@ describe("runtime", () => {
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
-    // The adapter is handed the machine's login environment: who the guest runs as, the golden's PATH, so a launch served by a bare-PATH exec still finds the binary, the variable that points this harness at its store on the guest, and the key the project's own memory and sessions sit under there.
+    // The adapter is handed the machine's login environment: who the guest runs as, the golden's PATH, so a launch served by a bare-PATH exec still finds the binary, and the variable that points this harness at its store on the guest.
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
     // A turn's own launch carries one thing over that login, the token naming its thread; no other road carries it.
     expect(contexts.length).toBeGreaterThan(0);
     const project = (await rt.projects.list())[0]!;
-    // The key the record was written with, which is the key every launch on this workspace carries.
+    // The key the record was written with is handed to the adapter beside that environment and never in it: the
+    // CLI's own strip drops an inherited one, and the adapter sets the key it was told after it.
     expect(project.memoryKey).toMatch(/^-root-/);
+    expect(contexts.every(ctx => ctx.projectKey === project.memoryKey)).toBe(true);
     for (const ctx of contexts) {
       const { [TURN_TOKEN_ENV]: token, ...login } = ctx.env;
-      expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg", CLAUDE_CODE_PROJECT_DIR_NAME: project.memoryKey });
+      expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
       if (token !== undefined) expect(token).toMatch(/^[0-9a-f]{32}$/);
     }
     expect(contexts.filter(c => c.env[TURN_TOKEN_ENV] !== undefined)).toHaveLength(1);

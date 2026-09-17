@@ -2174,9 +2174,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // folder on this computer to copy and nothing to take away when the record goes.
       makeCopy: () => Promise.reject(new Error(kindMakesNoCopy("cloud"))),
       dropCopy: async () => {},
-      // The project sits at its own path inside the fork, which is the path the person's own terminal would key
-      // its state off: nothing has to be told a name.
-      memoryKey: () => undefined,
+      // The key the project was recorded with, which is the folder's own on the computer it was seeded from: a
+      // fork holds the checkout at a path of the machine's, and keying off that path would give one project as
+      // many memories as it has computers.
+      memoryKey: (entry, agentId) => projectMemoryKey(agentId, projectHeld(entry.record.project)),
     },
     local:
       local === undefined
@@ -2224,7 +2225,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // The original folder's key, which is the one the person's own terminal already writes under: every
             // copy of that folder and their own agent in it share one memory directory and one sessions list,
             // with nothing seeded and nothing moved.
-            memoryKey: (entry, agentId) => projectStateKey(agentId, projectHeld(entry.record.project).path),
+            memoryKey: (entry, agentId) => projectMemoryKey(agentId, projectHeld(entry.record.project)),
           },
     ssh:
       ssh === undefined
@@ -2322,6 +2323,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting): ExecStreamFactory =>
     moduleOf(entry.record.kind).execStream(entry, opts.machineExec === undefined ? o : { ...opts.machineExec, ...o }, waiting);
+  /** What one agent on a workspace of this project keys its sessions and its memory to. The project's own key
+   * where that agent's catalog row names the variable that pins it, since that key was fixed when the project was
+   * recorded and follows it onto whichever computer holds it; every other agent keys off the folder it is worked
+   * at, which is the rule the resolver for that agent carries. Read off the catalog row and never off an agent's
+   * id, and read here alone, so every kind answers the same way. */
+  const projectMemoryKey = (agentId: string, project: ProjectView): string | undefined =>
+    CATALOG_AGENTS.find(a => a.id === agentId)?.projectKeyEnv !== undefined ? project.memoryKey : projectStateKey(agentId, project.path);
+
   /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else
    * the folder this workspace holds its project in, which is the kind's own reading, else the project's own path.
    * The kind is asked rather than the project read directly, because on a computer that makes a workspace by
@@ -5155,16 +5164,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     void entry.machine.exec(`rm -rf ${shellQuote(dir)}`, { timeoutMs: INLINE_EXEC_MS }).catch((e: unknown) => {
       console.warn(`images for a finished turn not removed from ${entry.record.id}: ${e instanceof Error ? e.message : String(e)}`);
     });
-  };
-
-  /** The variables one agent's launch carries for the project a turn runs in: the key the project's memory and
-   * sessions sit under, for an agent whose catalog row names the variable that pins it. Read off the catalog row
-   * and never off an agent's id, and read here alone, so a turn and a command on one workspace cannot disagree
-   * about which project's memory the agent opens. An agent whose row names none keys on the path, which is what
-   * it did before this existed. */
-  const projectKeyEnv = (agentId: string, project: ProjectView): Readonly<Record<string, string>> => {
-    const variable = CATALOG_AGENTS.find(a => a.id === agentId)?.projectKeyEnv;
-    return variable === undefined ? {} : { [variable]: project.memoryKey };
   };
 
   /** The adapter for a harness on this workspace's current machine; unnamed means the runtime's default. `turnEnv` is

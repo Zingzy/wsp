@@ -16,13 +16,14 @@ import { fakeLocal, stubBackend, type StubBackend } from "./stub-backend.js";
 const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-17T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } };
 const REMOTE = "https://github.com/spoo-me/frontend.git";
 
-/** What every adapter this file wires was handed at its launch: the harness and the environment. */
-const launches: { harness: string; env: Record<string, string> }[] = [];
+/** What every adapter this file wires was handed at its launch: the harness, the environment and the folder its
+ * agent keys this project's sessions and memory to. */
+const launches: { harness: string; env: Record<string, string>; projectKey?: string }[] = [];
 
 /** An adapter that records the environment it was built with and answers a turn at once, one per harness. */
 function recordingAdapter(harness: string): HarnessAdapterFactory {
   return ctx => {
-    launches.push({ harness, env: { ...ctx.env } });
+    launches.push({ harness, env: { ...ctx.env }, ...(ctx.projectKey !== undefined ? { projectKey: ctx.projectKey } : {}) });
     return {
       steers: false,
       start: o => {
@@ -315,23 +316,21 @@ describe("the key an agent's launch carries", () => {
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
     const ws = await rt.workspaces.create({ project: project.id, name: "work" });
-    for (const [harness, expected] of [
-      ["claude", { CLAUDE_CODE_PROJECT_DIR_NAME: project.memoryKey }],
-      ["codex", {}],
-    ] as const) {
-      const env = await launchEnv(rt, ws.id, harness);
-      expect(env).toMatchObject(expected);
-      if (harness === "codex") expect(Object.keys(env).some(key => key.endsWith("PROJECT_DIR_NAME"))).toBe(false);
-    }
+    // The agent whose row names the variable is told the project's own key, which is the folder's key on the
+    // computer it was seeded from and not the path the checkout took there.
+    expect(await launchKey(rt, ws.id, "claude")).toBe(project.memoryKey);
+    // An agent whose row names none is told nothing and keys off the folder its turn runs in.
+    expect(await launchKey(rt, ws.id, "codex")).toBeUndefined();
+    // Nothing of it rides the launch environment: the adapter sets it after its own strip.
+    expect(Object.keys(launches.at(-1)?.env ?? {}).some(key => key.endsWith("PROJECT_DIR_NAME"))).toBe(false);
   });
 });
 
-/** The environment one harness's launch on a workspace is handed, read off the adapter the runtime built for it. */
-async function launchEnv(rt: Runtime, workspaceId: string, harness: string): Promise<Record<string, string>> {
+/** The key one harness's launch on a workspace was handed, read off the adapter the runtime built for it. */
+async function launchKey(rt: Runtime, workspaceId: string, harness: string): Promise<string | undefined> {
   const session = await rt.sessions.start(workspaceId, { prompt: "hi", harness });
   await session.finished;
-  const seen = launches.splice(0).filter(l => l.harness === harness);
-  return seen.at(-1)?.env ?? {};
+  return launches.filter(l => l.harness === harness).at(-1)?.projectKey;
 }
 
 describe("the menu a folder's add reads", () => {
