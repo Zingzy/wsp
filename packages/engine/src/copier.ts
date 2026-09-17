@@ -46,8 +46,19 @@ export function verbCopier(binary: string, run: typeof runChild = runChild): Cop
     async make(ask) {
       const res = await run(binary, argvFor(ask), { timeoutMs: COPY_TIMEOUT_MS });
       if (res.exitCode !== 0) throw new Error(line(res));
-      const parsed = CopyReport.safeParse(JSON.parse(res.stdout.trim()));
-      if (!parsed.success) throw new Error(`the copy verb answered something this host does not read: ${res.stdout.trim().slice(0, 200)}`);
+      const said = res.stdout.trim();
+      // Its own sentence for a line that is not the report, since a JSON parser's is about a character offset and
+      // says nothing about a copy: a verb killed at its deadline prints nothing at all and would otherwise reach a
+      // person as "unexpected end of input".
+      const printed: unknown = ((): unknown => {
+        try {
+          return JSON.parse(said);
+        } catch {
+          return undefined;
+        }
+      })();
+      const parsed = CopyReport.safeParse(printed);
+      if (!parsed.success) throw new Error(`the copy verb answered something this host does not read: ${said.slice(0, 200) || "nothing at all"}`);
       return parsed.data;
     },
     async remove(from, to, road) {

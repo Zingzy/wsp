@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fakeCopier, LocalBackend, projectStateKey } from "@wsp/engine";
 import { PATH_BOUND_DIR_NAMES } from "@wsp/catalog";
 import { copyPathFor, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
-import { COPY_SIZE_LINE_BYTES, createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
+import { COPY_SIZE_LINE_BYTES, createRuntime, oneWorkspacePerProject, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { stubBackend, tempRepo, testPlatform } from "./stub-backend.js";
@@ -82,6 +82,38 @@ function withCopier(): { rt: Runtime; copier: ReturnType<typeof fakeCopier>; tol
   };
   return { rt: createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: adapter }, local }), copier, told };
 }
+
+/** This computer with the copy road turned off at the backend, which is what a computer that makes no copy of a
+ * folder says about itself: the one workspace per project is that computer's rule and not this Mac's. */
+function withoutCopies(): Runtime {
+  const root = scratch();
+  const backend = new LocalBackend({ root });
+  Object.defineProperty(backend, "capabilities", { value: { ...backend.capabilities, copies: false } });
+  const { adapter } = telling();
+  const local: LocalWiring = {
+    backend,
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+    platform: testPlatform(),
+    copier: fakeCopier(),
+  };
+  return createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: adapter }, local });
+}
+
+describe("a computer that makes no copy of a folder", () => {
+  it("has one workspace per project and names the one standing, whatever copy road the host holds", async () => {
+    const rt = withoutCopies();
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    await rt.workspaces.create({ project: project.id, name: "one" });
+    await expect(rt.workspaces.create({ project: project.id, name: "two" })).rejects.toMatchObject({
+      message: oneWorkspacePerProject(project.name, "one"),
+      kind: "conflict",
+    });
+  });
+});
 
 describe("a second piece of work on a project here", () => {
   it("is a copy of the folder at a sibling path, asked for with the catalog's path-bound directories and the size line", async () => {

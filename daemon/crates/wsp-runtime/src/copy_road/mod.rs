@@ -88,7 +88,7 @@ pub fn make(ask: &CopyAsk) -> Result<CopyReport, String> {
         .ok_or_else(|| format!("{} has no {branch} to copy", from.display()))?;
     let (road, fell_back) = pick(from, to, &walked, ask)?;
     road.make(from, to, &base).map_err(|e| e.to_string())?;
-    match finish(road, from, to, &branch, &base, ask) {
+    match finish(road, to, &branch, &base, ask) {
         Ok((sha, fetched, excluded)) => Ok(CopyReport {
             road: road.name(),
             path: ask.to.clone(),
@@ -112,19 +112,11 @@ pub fn make(ask: &CopyAsk) -> Result<CopyReport, String> {
 /// clean checkout of the base. The fetch runs in the copy's own git directory, so a copy starts level with the
 /// remote rather than behind the person's last pull; a worktree shares the folder's git directory, so it takes no
 /// fetch at all and nothing of the folder's refs moves.
-fn finish(
-    road: &'static dyn CopyRoad,
-    from: &Path,
-    to: &Path,
-    branch: &str,
-    base: &str,
-    ask: &CopyAsk,
-) -> Result<(String, bool, Vec<String>), String> {
+fn finish(road: &'static dyn CopyRoad, to: &Path, branch: &str, base: &str, ask: &CopyAsk) -> Result<(String, bool, Vec<String>), String> {
     let excluded = rules::exclude(to, &ask.exclude)?;
     if road.name() == CopyRoadName::Worktree {
         return Ok((base.to_owned(), false, excluded));
     }
-    let _ = from;
     // A base the caller named is the base; the fetch only moves a copy that was going to take the folder's own
     // default branch.
     let fetched = if ask.base.is_none() { rules::fetch(to, branch) } else { None };
@@ -154,8 +146,15 @@ fn pick(from: &Path, to: &Path, walked: &Walked, ask: &CopyAsk) -> Result<(&'sta
     Err(passed.join("; "))
 }
 
+/// Why the folder somebody works in place is never taken away: it is theirs, and the record that named it is all
+/// a delete has to drop.
+pub const IN_PLACE_STAYS: &str = "a folder worked in place is the person's own; a delete takes its record and nothing on disk";
+
 /// The copy taken away by the road that made it, which is the road the record carries.
 pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> {
+    if road == CopyRoadName::InPlace {
+        return Err(IN_PLACE_STAYS.to_owned());
+    }
     if ROADS.is_empty() {
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
@@ -192,6 +191,15 @@ mod tests {
             assert!(refused.contains("is not a git repository"), "{refused}");
         }
         assert!(!to.exists());
+    }
+
+    #[test]
+    fn a_folder_worked_in_place_is_never_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("work");
+        repo(&from);
+        assert_eq!(remove(&from, &from, CopyRoadName::InPlace).unwrap_err(), IN_PLACE_STAYS);
+        assert!(from.join("README.md").exists());
     }
 
     #[cfg(not(target_os = "macos"))]

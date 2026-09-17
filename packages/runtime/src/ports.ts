@@ -10,11 +10,19 @@
 // around.
 import { PORT_BASE_FIRST, PORT_BASE_STEP } from "@wsp/protocol";
 
+/** The last base the range holds: the highest one a step apart from the first that still leaves a whole step of
+ * ports under the ceiling. Past it there is no port left to bind, which is six hundred copies on one computer and
+ * a wall worth a sentence rather than a number no app can listen on. */
+export const PORT_BASE_LAST = PORT_BASE_FIRST + Math.floor((65535 - PORT_BASE_STEP - PORT_BASE_FIRST) / PORT_BASE_STEP) * PORT_BASE_STEP;
+
+export const NO_PORT_BASE_LEFT = `every port base from ${PORT_BASE_FIRST} to ${PORT_BASE_LAST} is held; delete a workspace here first`;
+
 /** The first base no copy on this computer holds: 3100, then 3200, in steps, counting from the first free one
  * rather than from the highest taken, so a base freed by a delete is handed out again. */
 export function nextPortBase(taken: readonly number[]): number {
   const held = new Set(taken);
-  for (let base = PORT_BASE_FIRST; ; base += PORT_BASE_STEP) {
+  for (let base = PORT_BASE_FIRST; base <= PORT_BASE_LAST; base += PORT_BASE_STEP) {
     if (!held.has(base)) return base;
   }
+  throw new Error(NO_PORT_BASE_LEFT);
 }
