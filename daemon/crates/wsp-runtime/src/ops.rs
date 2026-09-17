@@ -1135,21 +1135,31 @@ fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
     Ok(stopped)
 }
 
-/// Every half made copy and every claimed run directory holding no record, taken away. A create claims its run
-/// directory first and writes its record last, so a daemon that died between the two leaves a directory that
-/// names no workspace and, where the create was copying, a copy of part of a checkout under the name the copy
-/// is made under. Neither is anything a machine op can reach, and a create under the same key would be refused
-/// by the claim that outlived it, so the open is where they go.
+/// Every copy and every claimed run directory that no record names, taken away. A create claims its run
+/// directory first and writes its record last, so a daemon that died anywhere between the two leaves a
+/// directory naming no workspace and, where the create had got that far, a copy of a checkout or of part of
+/// one. None of it is anything a machine op can reach, and all of it wedges the key it was claimed under until
+/// somebody removes it by hand, so the open is where it goes.
 fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
     let mut swept = Unfinished::default();
     if let Some(entries) = read_dir_or_none(&layout.copies())? {
         for entry in entries {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if !name.ends_with(Layout::PARTIAL) {
+            // A copy belongs to one workspace and to nothing else, so at open a copy whose workspace has no
+            // record is a create that died, whether it died before the rename that takes the mark off or
+            // after it. Both wedge the same key the same way: the next create under it claims the run
+            // directory again and then cannot put its own copy where that one sits.
+            if bundle::read_record(&layout.record(&copy_belongs_to(&name)))?.is_some() {
                 continue;
             }
             let path = entry.path();
-            // However it was made: a snapshot that never finished is a subvolume, and a tree is a tree.
+            if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                // A probe file a daemon died beside, which is a file and not a copy.
+                fs::remove_file(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
+                swept.copies.push(name);
+                continue;
+            }
+            // However it was made: a snapshot is a subvolume the kernel takes away, and a tree is a tree.
             if copy::copier_of(CopyWord::Snapshot).remove(&path).is_err() {
                 copy::copier_of(CopyWord::Plain).remove(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
             }
@@ -1162,11 +1172,27 @@ fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
             if bundle::read_record(&layout.record(&id))?.is_some() {
                 continue;
             }
-            fs::remove_dir_all(entry.path()).map_err(|e| OpError::plain(format!("{}: {e}", entry.path().display())))?;
+            // Everything under the rootfs first, as the stop and the sweep of a stopped workspace both do: a
+            // daemon that died between the mounts and the record left the overlay standing with the copy bound
+            // into it, and a remove that walked in would delete the copy's files through that bind and then
+            // answer EBUSY on the mount point itself, which refuses the open rather than clearing it.
+            bundle::unmount_under(&layout.rootfs(&id))?;
+            let path = entry.path();
+            fs::remove_dir_all(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
             swept.claims.push(id);
         }
     }
+    // A directory hands its entries back in whatever order it keeps them, and this is read by a person in a
+    // log line and by a test.
+    swept.copies.sort();
+    swept.claims.sort();
     Ok(swept)
+}
+
+/// The workspace a name under the copies directory belongs to: the name itself, or what the mark of a copy
+/// still being made wraps.
+fn copy_belongs_to(name: &str) -> String {
+    name.strip_suffix(Layout::PARTIAL).and_then(|rest| rest.strip_prefix('.')).unwrap_or(name).to_owned()
 }
 
 /// The entries of a directory, or nothing where there is no such directory.
@@ -1595,15 +1621,71 @@ mod tests {
         left_on_disk(root, "wsp-whole", &chain);
         fs::create_dir_all(layout.copy_of("wsp-whole")).unwrap();
 
+        // And a copy that finished but whose create died before the record: it lost the mark at the rename,
+        // so only the missing record tells it apart from a workspace's own copy.
+        let finished = layout.copy_of("wsp-done");
+        fs::create_dir_all(finished.join("src")).unwrap();
+        fs::write(finished.join("src/index.js"), b"a whole checkout\n").unwrap();
+        fs::create_dir_all(layout.workspace("wsp-done")).unwrap();
+        // A probe file a daemon died beside is a file rather than a copy, and the open may not trip on it.
+        fs::write(layout.copies().join(".clone-probe-4242-0"), b"w").unwrap();
+
         let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
-        assert_eq!(again.unfinished_at_open().copies, vec![".wsp-half.partial".to_owned()]);
-        assert_eq!(again.unfinished_at_open().claims, vec!["wsp-half".to_owned()]);
+        let swept = again.unfinished_at_open();
+        assert_eq!(swept.copies.iter().filter(|name| name.contains("wsp-half")).count(), 1, "{swept:?}");
+        assert!(swept.copies.contains(&"wsp-done".to_owned()) && swept.copies.contains(&".clone-probe-4242-0".to_owned()), "{swept:?}");
+        assert_eq!(swept.claims, vec!["wsp-done".to_owned(), "wsp-half".to_owned()]);
         assert!(!half.exists() && !layout.workspace("wsp-half").exists());
+        assert!(!finished.exists() && !layout.workspace("wsp-done").exists());
         assert!(layout.copy_of("wsp-whole").is_dir() && layout.workspace("wsp-whole").is_dir());
         assert_eq!(again.list(None).unwrap().len(), 1);
-        // And an open of a root nothing died under says nothing.
+        // The key the dead create held is free again: a copy under it is made rather than refused.
+        let from = dir.path().join("checkout");
+        fs::create_dir_all(&from).unwrap();
+        fs::write(from.join("index.js"), b"module.exports = 1\n").unwrap();
+        let want = WorkspaceCopy { from: from.display().to_string(), at: "/Users/zingzy/wsp".to_owned() };
+        let made = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(again.make_copy("wsp-done", &want))
+            .unwrap();
+        assert_eq!(made.at, "/Users/zingzy/wsp");
+        assert_eq!(fs::read(layout.copy_of("wsp-done").join("index.js")).unwrap(), b"module.exports = 1\n");
+        // And an open of a root nothing died under says nothing; the copy just made has no record yet, so it
+        // is swept in its turn, which is what a create that died right there left.
         let third = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
-        assert!(third.unfinished_at_open().is_empty());
+        assert_eq!(third.unfinished_at_open().copies, vec!["wsp-done".to_owned()]);
+        let fourth = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        assert!(fourth.unfinished_at_open().is_empty());
+    }
+
+    /// The claim of a create that died with its mounts up: the open takes the mounts down before it takes the
+    /// directory, or the remove walks into the copy through the bind and then answers EBUSY on the mount point
+    /// and the daemon does not come up at all. Root and the live flag, as the mount cases are.
+    #[test]
+    fn the_open_unmounts_what_a_dead_create_left_under_a_claim_before_it_takes_the_claim() {
+        if std::env::var("WSP_RUNTIME_LIVE").as_deref() != Ok("1") || !nix::unistd::geteuid().is_root() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let layout = Layout::new(root);
+        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
+        // A copy of a checkout, and the claim of the create that was binding it in when the daemon died.
+        let copy = layout.copy_of("wsp-mounted");
+        fs::create_dir_all(&copy).unwrap();
+        fs::write(copy.join("README.md"), b"the copy\n").unwrap();
+        let rootfs = layout.rootfs("wsp-mounted");
+        bundle::bind_into(&copy, &bundle::inside(&rootfs, "/Users/zingzy/wsp").unwrap()).unwrap();
+        let mounted = || fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&rootfs.display().to_string());
+        assert!(mounted());
+
+        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        assert!(!mounted(), "the open left the bind of a claim it removed");
+        assert!(!layout.workspace("wsp-mounted").exists());
+        assert!(!copy.exists(), "the copy of a create that never finished stayed");
+        assert_eq!(again.unfinished_at_open().claims, vec!["wsp-mounted".to_owned()]);
     }
 
     /// A copy that fails partway leaves nothing under the name a workspace's copy has, so the next create under
