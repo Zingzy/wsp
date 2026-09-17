@@ -1373,6 +1373,13 @@ async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
         assert!(!inside.contains(&name.as_str()), "the daemon's own {name} is readable inside: {out}");
     }
     assert_eq!(inside.last(), Some(&"0"), "the engine's own folders are not empty inside: {out}");
+    // The resolvers a workspace reads: a regular file the boot wrote, never the box's link into a /run the
+    // workspace does not share, and never the box's own stub address, which inside this network namespace is
+    // the workspace's own loopback. A name resolved from inside is the proof the file is usable.
+    let (code, out, err) = w.exec(&id, "test -L /etc/resolv.conf && echo a-link || echo a-file; grep '^nameserver' /etc/resolv.conf").await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert!(out.starts_with("a-file\n") && out.contains("nameserver ") && !out.contains("127.0.0.53"), "{out}");
+    eprintln!("== the resolvers a workspace of this computer reads: {out}");
     // What the box keeps out of a workspace: the daemon's own root, where every other workspace's copy lives,
     // and the box's own engine socket, since /run is the workspace's own directory and not the box's.
     let (code, out, _) = w.exec(&id, &format!("ls -A / | tr '\n' ' '; echo; test -e {} && echo root-inside || echo root-outside; test -e /run/docker.sock && echo socket-inside || echo socket-outside", root().display())).await;

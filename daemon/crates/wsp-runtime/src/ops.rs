@@ -184,6 +184,14 @@ impl Ops {
     /// sweeps the network of every workspace that is not running. `exe` is this binary. The forwards of the
     /// workspaces still running come back with `restore`, which wants the runtime the listeners live on.
     pub fn open(root: &Path, exe: PathBuf) -> Result<Ops, OpError> {
+        // Where the root was put, before a directory is made under it: every workspace here reads the computer's
+        // own system directories through an overlay whose upper sits under this root, so a root inside one of
+        // them gives every workspace its own upper, and its neighbours', to read inside the tree it overlays.
+        // Refused whole rather than served: a daemon that made its folders and then failed every create left a
+        // person reading `ready` and nothing else.
+        if let Some(reason) = crate::doctor::root_under_a_lower(root) {
+            return Err(OpError::plain(reason));
+        }
         let layout = Layout::new(root);
         for dir in [layout.run(), layout.state(), layout.copies()] {
             fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
@@ -456,10 +464,10 @@ impl Ops {
         if let Some(reason) = crate::doctor::assess(&crate::doctor::read_facts()).blocked {
             return Err(reason);
         }
-        // Where the root was put, before anything is mounted: every workspace here reads the computer's own
-        // system directories through an overlay whose upper is under this root, and the kernel refuses an
-        // overlay whose upper sits inside its lower. The mount below would fail with an argument error that
-        // names neither path, so the reading that does is made first.
+        // Where the root was put, in the same words the open refuses it with: every workspace here reads the
+        // computer's own system directories through an overlay whose upper is under this root, so a root inside
+        // one of them gives a workspace its own upper to read. The open makes nothing under such a root, and
+        // this is the sentence the host reads when it asks.
         if let Some(reason) = crate::doctor::root_under_a_lower(layout.root()) {
             return Err(reason);
         }
@@ -1439,6 +1447,27 @@ mod tests {
         assert!(!layout.copy_being_made("wsp-x").exists(), "a failed copy left what it was making");
         let left: Vec<_> = fs::read_dir(layout.copies()).unwrap().flatten().map(|e| e.file_name()).collect();
         assert!(left.is_empty(), "{left:?}");
+    }
+
+    /// A root under one of the five directories every workspace overlays: the open refuses it in the doctor's
+    /// own sentence and makes nothing under it, since a workspace there would read its own upper inside the tree
+    /// it overlays. No root and no disk needed: the reading is of the path, and the refusal comes before the
+    /// first directory.
+    #[test]
+    fn a_root_under_a_directory_every_workspace_overlays_is_refused_by_the_open_and_nothing_is_made() {
+        let under = Path::new("/var/lib/wsp-under-a-lower");
+        let refused = match Ops::open(under, PathBuf::from("/bin/true")) {
+            Ok(_) => panic!("a root under /var opened"),
+            Err(e) => e.message,
+        };
+        assert_eq!(refused, crate::doctor::root_under_a_lower(under).unwrap());
+        assert!(refused.contains("/var/lib/wsp-under-a-lower") && refused.contains("/var"), "{refused}");
+        assert!(!under.exists(), "the open made a folder under a root it refused");
+        // And the same root a directory deeper, since the reading is of the whole path.
+        assert!(Ops::open(Path::new("/etc/wsp/one"), PathBuf::from("/bin/true")).is_err());
+        // A root clear of all five opens as ever.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Ops::open(dir.path(), PathBuf::from("/bin/true")).is_ok());
     }
 
     #[test]

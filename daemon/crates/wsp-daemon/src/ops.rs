@@ -309,13 +309,15 @@ async fn place_update(ctx: &Arc<Ctx>, id: Option<RequestId>, frame: &Value) -> O
     }
 }
 
-/// A machine op on the link: the workspace runtime answers where this daemon opened one, else the refusal that
-/// names the op.
+/// A machine op on the link: the workspace runtime answers where this daemon opened one; where the root it was
+/// given is the reason it opened none, the reading of that root is the answer, so somebody asking what this
+/// computer can do reads why rather than a line that names the op; and for every other reason, that line.
 #[cfg(target_os = "linux")]
 async fn machine_answer(ctx: &Ctx, id: Option<RequestId>, name: &str, frame: &Value) -> String {
-    match &ctx.runtime {
-        Some(ops) => ops.answer(id, frame).await,
-        None => text(&wsp_runtime::answer_machine_op(id, name)),
+    match (&ctx.runtime, &ctx.runtime_refusal) {
+        (Some(ops), _) => ops.answer(id, frame).await,
+        (None, Some(reason)) => text(&DaemonErrorResponse::new(id, reason.clone())),
+        (None, None) => text(&wsp_runtime::answer_machine_op(id, name)),
     }
 }
 
@@ -813,6 +815,33 @@ mod tests {
         )
         .await;
         assert_eq!(said(&bad)["code"], json!("bad-request"));
+    }
+
+    /// A root the open refuses: nothing is made under it and every machine op answers the open's own sentence,
+    /// so the person asking what this computer can do reads why rather than a line that names the op. The root
+    /// here is a path under one of the directories every workspace overlays; it is never created, since the
+    /// refusal comes before the first directory.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_root_the_open_refuses_leaves_its_reason_on_every_machine_op() {
+        let mut token = tempfile::NamedTempFile::new().unwrap();
+        writeln!(token, "t").unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let under = std::path::Path::new("/var/lib/wsp-under-a-lower");
+        let mut options = Options::new(token.path());
+        options.place_file = Some(home.path().join("place.json"));
+        options.runtime_root = Some(under.to_path_buf());
+        let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
+        let (link, _rx) = conn_on(None, Road::Link);
+        let said = wsp_runtime::doctor::root_under_a_lower(under).expect("a root under /var read as clear of it");
+        for op in ["machine.backend", "machine.checkKey", "machine.create", "machine.list"] {
+            let reply: Value = serde_json::from_str(
+                handle(&link, &ctx, &json!({"id": 6, "op": op, "spec": {"kind": "sandbox"}}).to_string()).await.text(),
+            )
+            .unwrap();
+            assert_eq!(reply, json!({"id": 6, "ok": false, "error": said}), "{op}");
+        }
+        assert!(!under.exists(), "the open made a folder under a root it refused");
     }
 
     #[cfg(target_os = "linux")]

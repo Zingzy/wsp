@@ -37,8 +37,9 @@ pub mod size;
 use wsp_frames::{DaemonErrorResponse, RequestId};
 
 /// Where the runtime keeps everything it owns on a computer somebody joined: the workspaces, their copies and the
-/// checkouts those are made from. Not under any directory a workspace's overlay takes as a lower, since the kernel
-/// refuses an overlay whose upper sits inside its lower, which is what `/var/lib/wsp` was.
+/// checkouts those are made from. Not under any directory a workspace's overlay takes as a lower, which is what
+/// `/var/lib/wsp` was: a workspace's upper would sit inside the tree it reads through the overlay, and the open
+/// refuses such a root rather than serving workspaces that read their own uppers.
 pub const DEFAULT_ROOT: &str = "/wsp";
 
 /// What a machine op gets on a computer whose daemon holds no backend for it.

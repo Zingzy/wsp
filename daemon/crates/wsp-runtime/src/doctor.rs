@@ -172,13 +172,15 @@ pub fn root_not_merged(directories: &[&str]) -> Option<String> {
 }
 
 /// Why this computer runs no workspace under the root it was given: the root sits inside one of the directories
-/// every workspace overlays, and the kernel refuses an overlay whose upper directory is inside its lower. One
-/// sentence naming both paths, since the fix is to move the root and the person has to know what to move it out
-/// of. Nothing where the root is clear of all five, which `/wsp` is.
+/// every workspace overlays, so a workspace's upper directory would sit inside the tree that workspace reads
+/// through the overlay. The kernel takes that mount (measured on 6.8.0-139) and what it gives is a workspace
+/// reading its own upper, and every other workspace's, inside the directory it overlays. One sentence naming
+/// both paths, since the fix is to move the root and the person has to know what to move it out of. Nothing
+/// where the root is clear of all five, which `/wsp` is.
 pub fn root_under_a_lower(root: &Path) -> Option<String> {
     let lower = OVERLAID.iter().find(|lower| root.starts_with(lower))?;
     Some(format!(
-        "{} sits under {lower}, which every workspace here reads through an overlay: the kernel refuses an overlay whose upper directory is inside its lower, so this daemon's root belongs somewhere else, {} by default",
+        "{} sits under {lower}, which every workspace here reads through an overlay; a workspace's upper would then sit inside the tree it overlays, so the root belongs somewhere else, {} by default",
         root.display(),
         crate::DEFAULT_ROOT
     ))
@@ -271,9 +273,11 @@ mod tests {
         assert_eq!(Engine::Podman.word(), "podman");
     }
 
-    /// The one reading that decides whether a workspace can be built under a root at all, in the words the self
-    /// check refuses with: a root under any of the five directories a workspace overlays, named with the lower it
-    /// sits under, and nothing for the default root.
+    /// The one reading that decides whether a workspace can be built under a root at all, in the words the open
+    /// and the self check both refuse with: a root under any of the five directories a workspace overlays, named
+    /// with the lower it sits under, and nothing for the default root. The sentence says what is wrong with the
+    /// root and claims nothing about the kernel, which takes the mount and gives a workspace its own upper to
+    /// read inside the directory it overlays.
     #[test]
     fn a_root_under_a_directory_every_workspace_overlays_is_named_with_that_directory() {
         for (root, lower) in
@@ -282,6 +286,10 @@ mod tests {
             let said = root_under_a_lower(Path::new(root)).unwrap_or_else(|| panic!("{root} read as clear of {lower}"));
             assert!(said.contains(root) && said.contains(lower), "{said}");
             assert!(said.contains(crate::DEFAULT_ROOT), "{said}");
+            // What is wrong is where the upper would sit, which is this daemon's own doing; the kernel takes
+            // that mount, so the sentence may not blame it.
+            assert!(said.contains("upper would then sit inside the tree it overlays"), "{said}");
+            assert!(!said.contains("kernel"), "{said}");
         }
         for clear in [crate::DEFAULT_ROOT, "/wsp/one", "/root/wsp-roots/plain-root", "/tmp/x", "/home/z/wsp"] {
             assert_eq!(root_under_a_lower(Path::new(clear)), None, "{clear}");

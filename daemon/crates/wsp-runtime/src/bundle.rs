@@ -106,8 +106,8 @@ impl Layout {
         self.root.join("put").join(upload_id)
     }
     /// Scratch for the self check's overlay mount and the clone probe the copies word is read from. Its upper
-    /// sits under the root, which is the whole point: a root under one of the directories a workspace overlays
-    /// makes an overlay the kernel refuses, and the check is where that is found.
+    /// sits under the root, as a workspace's own does, which is why a root under one of the directories a
+    /// workspace overlays is refused before either is made.
     pub fn check(&self) -> PathBuf {
         self.root.join("check")
     }
@@ -298,6 +298,9 @@ pub fn hosts_text(hostname: &str, gateway: Option<Ipv4Addr>) -> String {
 const BOX_RESOLV: &str = "/etc/resolv.conf";
 /// Where systemd-resolved keeps the resolvers it forwards to, when the box's own file names only its stub.
 const UPSTREAM_RESOLV: &str = "/run/systemd/resolve/resolv.conf";
+/// Where a workspace reads its resolvers, which is where the box has a link on every computer that runs
+/// systemd-resolved.
+const RESOLV_INSIDE: &str = "etc/resolv.conf";
 /// The resolvers Docker hands a container when the box names none it can use.
 const DEFAULT_NAMESERVERS: [&str; 2] = ["8.8.8.8", "8.8.4.4"];
 
@@ -370,9 +373,10 @@ const EMPTIED_AT_BOOT: [&str; 2] = ["run", "tmp"];
 /// workspace's own over each path under it nothing inside may read. The copy of a project and youki's own mounts
 /// come after, in the boot.
 ///
-/// A mount here may fail on a box whose root sits under one of the overlaid directories: the kernel refuses an
-/// overlay whose upper is inside its lower. `crate::doctor::root_under_a_lower` is read before any of this and
-/// says so by name, and DEFAULT_ROOT is `/wsp` for that reason.
+/// Nothing here is reached under a root that sits inside one of the overlaid directories: the open refuses such
+/// a root before it makes anything and `crate::doctor::root_under_a_lower` says which lower it sits under. The
+/// kernel takes that mount, and what it gives is a workspace reading its own upper inside the directory it
+/// overlays, which is why DEFAULT_ROOT is `/wsp`.
 pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
     let rootfs = layout.rootfs(id);
     // Before anything: a computer whose /bin is a directory of its own rather than a link into /usr would give a
@@ -416,6 +420,9 @@ pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
         }
         mount_overlay(Path::new(dir), &upper, &work, &rootfs.join(dir.trim_start_matches('/')))?;
     }
+    // The overlays are up, so this lands in the workspace's own upper: a regular resolv.conf where the box has a
+    // link into a /run the workspace does not share.
+    write_resolv_inside(&rootfs)?;
     // The person's own home on the box, shared by every workspace on it: the agents' sign-ins, their memory and
     // their caches are the computer's and last past any one workspace, last writer wins.
     bind_into(Path::new(BOX_ROOT), &rootfs.join("root"))?;
@@ -446,6 +453,31 @@ fn bind_over(source: &Path, rootfs: &Path, at_path: &str) -> Result<(), Error> {
 
 /// The box's own /root, bound into every workspace at the same path.
 const BOX_ROOT: &str = "/root";
+
+/// The workspace's own /etc/resolv.conf, written through the merged view of the /etc overlay so it lands in the
+/// workspace's upper and the computer's own file is untouched.
+///
+/// Two reasons it is written here rather than left to the box's. A computer that runs systemd-resolved, which is
+/// every stock Ubuntu, keeps /etc/resolv.conf as a link into /run, and /run inside a workspace is the
+/// workspace's own empty folder: the runtime resolves its own bind of the file inside the root, the link leads
+/// nowhere there, and the boot fails before the first process with nothing but `failed to prepare rootfs`
+/// (measured on a box, 6.8.0-139). And the address that link leads to is 127.0.0.53, the box's own stub, which
+/// inside a workspace's network namespace is the workspace's loopback and answers nothing.
+///
+/// So: the link in the upper goes, a regular file takes its place, and what it holds is the resolvers the box
+/// forwards to, read by `resolv_text` from the upstream file where systemd-resolved keeps them and from the
+/// box's own file where that is a file of its own.
+fn write_resolv_inside(rootfs: &Path) -> Result<(), Error> {
+    let path = rootfs.join(RESOLV_INSIDE);
+    match fs::symlink_metadata(&path) {
+        // A link, whatever it points at: removed through the merged view, which leaves the box's own alone.
+        Ok(held) if held.file_type().is_symlink() => fs::remove_file(&path).map_err(at(&path))?,
+        Ok(_) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => return Err(at(&path)(e)),
+    }
+    fs::write(&path, resolv_text(&read_or_empty(BOX_RESOLV), &read_or_empty(UPSTREAM_RESOLV))).map_err(at(&path))
+}
 
 /// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own
 /// sentence: read off `/` here, where the rootfs is made, and asked again by the self check so a box that cannot
@@ -729,6 +761,11 @@ mod tests {
         assert_eq!(resolv_text("nameserver 1.1.1.1\nsearch lan\n", upstream), "nameserver 1.1.1.1\nsearch lan\n");
         assert_eq!(resolv_text("nameserver ::1\n", ""), "nameserver 8.8.8.8\nnameserver 8.8.4.4\n");
         assert_eq!(resolv_text("", ""), "nameserver 8.8.8.8\nnameserver 8.8.4.4\n");
+        // The stub's own address never travels into a workspace whatever the box's two files hold: inside a
+        // workspace's network namespace that loopback is the workspace's own and answers nothing.
+        for (box_file, upstream) in [(stub, upstream), (stub, ""), ("nameserver 127.0.0.53\n", "nameserver 127.0.0.53\n")] {
+            assert!(!resolv_text(box_file, upstream).contains("127.0.0.53"), "{box_file:?} {upstream:?}");
+        }
     }
 
     #[test]
@@ -767,6 +804,36 @@ mod tests {
         assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
     }
 
+    /// What a workspace's /etc/resolv.conf is after the boot writes it, on a rootfs made by hand: the link the
+    /// box keeps there on every computer that runs systemd-resolved is gone, a regular file stands in its place,
+    /// and what it holds is a nameserver a workspace can reach. No mount and no root: this is the write the boot
+    /// makes through the merged view, and the live case below is the same write over a real overlay.
+    #[test]
+    fn the_workspaces_own_resolv_conf_is_a_file_where_the_box_keeps_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let rootfs = dir.path().join("rootfs");
+        fs::create_dir_all(rootfs.join("etc")).unwrap();
+        fs::create_dir_all(rootfs.join("run")).unwrap();
+        // The link every stock Ubuntu keeps, pointing into a /run the workspace's own is empty of.
+        std::os::unix::fs::symlink("../run/systemd/resolve/stub-resolv.conf", rootfs.join(RESOLV_INSIDE)).unwrap();
+        assert!(fs::read_to_string(rootfs.join(RESOLV_INSIDE)).is_err(), "the link resolves inside this rootfs");
+
+        write_resolv_inside(&rootfs).unwrap();
+        let held = fs::symlink_metadata(rootfs.join(RESOLV_INSIDE)).unwrap();
+        assert!(held.file_type().is_file(), "the workspace's resolv.conf is not a regular file");
+        let text = fs::read_to_string(rootfs.join(RESOLV_INSIDE)).unwrap();
+        assert!(text.lines().any(|line| line.starts_with("nameserver ")), "{text}");
+        assert!(!text.contains("127.0.0.53"), "{text}");
+        // Written again, as a wake writes it, over the file the last boot left.
+        write_resolv_inside(&rootfs).unwrap();
+        assert_eq!(fs::read_to_string(rootfs.join(RESOLV_INSIDE)).unwrap(), text);
+        // And on a rootfs whose /etc has nothing there at all, which is a box with no resolv.conf of its own.
+        let bare = dir.path().join("bare");
+        fs::create_dir_all(bare.join("etc")).unwrap();
+        write_resolv_inside(&bare).unwrap();
+        assert!(fs::read_to_string(bare.join(RESOLV_INSIDE)).unwrap().contains("nameserver "));
+    }
+
     /// Whether a live mount case may run here: the flag the live suite sets and root, since every mount below
     /// needs both. A run as anyone else is a return at the first line, as every live case in this crate is.
     fn live_and_root() -> bool {
@@ -785,6 +852,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let layout = Layout::new(&dir.path().join("root"));
         let (id, rootfs) = ("wsp-computer", layout.rootfs("wsp-computer"));
+        // What the computer keeps at its own resolv.conf, read before anything is mounted: a link on every
+        // computer that runs systemd-resolved, and whatever it is, this leaves it alone.
+        let box_resolv = (fs::symlink_metadata(BOX_RESOLV).map(|m| m.file_type().is_symlink()).ok(), fs::read_link(BOX_RESOLV).ok());
         mount_computer(&layout, id).unwrap();
         let table = || fs::read_to_string(MOUNTINFO).unwrap();
         let mounted = |at: &Path| mount_points(&table()).contains(&at.to_path_buf());
@@ -811,6 +881,19 @@ mod tests {
             assert!(layout.upper_of(id, lower).is_dir() && layout.work_of(id, lower).is_dir(), "{lower}");
         }
         assert!(rootfs.join("etc/os-release").is_file(), "the box's /etc did not come in");
+        // The one file in the box's /etc a workspace may not take as it is: the boot writes a regular
+        // resolv.conf in the workspace's own upper, whatever the box keeps there, and the box's own is
+        // untouched. Without it the runtime's bind of that file resolves inside the root to nothing.
+        let inside_resolv = rootfs.join(RESOLV_INSIDE);
+        assert!(fs::symlink_metadata(&inside_resolv).unwrap().file_type().is_file(), "the workspace's resolv.conf is not a file");
+        let text = fs::read_to_string(&inside_resolv).unwrap();
+        assert!(text.lines().any(|line| line.starts_with("nameserver ")) && !text.contains("127.0.0.53"), "{text}");
+        assert!(layout.upper_of(id, "/etc").join("resolv.conf").is_file(), "the write did not land in the workspace's upper");
+        assert_eq!(
+            (fs::symlink_metadata(BOX_RESOLV).map(|m| m.file_type().is_symlink()).ok(), fs::read_link(BOX_RESOLV).ok()),
+            box_resolv,
+            "the computer's own resolv.conf changed"
+        );
 
         // A write through the merged view lands in the workspace's own upper, and the box's directory does not
         // have it: a workspace installs a package and the computer does not.
@@ -862,25 +945,6 @@ mod tests {
         }
         assert_eq!(fs::read(inside(&rootfs, wsp_frames::numbers::DEFAULT_TOKEN_PATH).unwrap()).unwrap(), b"a-token-of-this-workspace\n");
         unmount_under(&rootfs).unwrap();
-    }
-
-    /// A root placed under one of the directories every workspace overlays: the kernel refuses an overlay whose
-    /// upper sits inside its lower, so the doctor's reading is what a person is told and it is read before
-    /// anything is mounted. The mount is tried here too, so the refusal is not a guess about the kernel.
-    #[test]
-    fn a_root_under_one_of_the_lowers_is_a_mount_the_kernel_refuses() {
-        if !live_and_root() {
-            return;
-        }
-        let under = Path::new("/var/lib/wsp-under-a-lower");
-        let said = crate::doctor::root_under_a_lower(under).expect("a root under /var read as clear of it");
-        assert!(said.contains("/var/lib/wsp-under-a-lower") && said.contains("/var"), "{said}");
-        let layout = Layout::new(under);
-        let refused = mount_computer(&layout, "wsp-under").unwrap_err().to_string();
-        let _ = unmount_under(&layout.rootfs("wsp-under"));
-        fs::remove_dir_all(under).unwrap();
-        // EINVAL is all the kernel says about it, which is why the sentence above is the one a person reads.
-        assert!(refused.contains("/var/lib/wsp-under-a-lower"), "{refused}");
     }
 
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself
