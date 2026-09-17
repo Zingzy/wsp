@@ -3,7 +3,7 @@
 // daemon channel, which base each carries, and what a machine with no
 // signed-in command line for the git host answers with.
 import { describe, expect, it, afterEach } from "vitest";
-import { noHostCliLine, onBaseRefusal, type DaemonFrame, type DaemonResponse } from "@wsp/protocol";
+import { branchUnreadRefusal, noHostCliLine, noParentWorkspaceLine, onBaseRefusal, type DaemonFrame, type DaemonResponse } from "@wsp/protocol";
 import { createRuntime, type RuntimeDaemonChannel, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, projectOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
@@ -112,6 +112,42 @@ describe("workspaces.bringBack", () => {
     backend.machines[1]!.previewUrl = async () => ({ url: "http://127.0.0.1:7071", token: "e", expiresAt: Date.now() + 3_600_000 });
     await rt!.workspaces.bringBack({ workspaceId: child.id });
     expect(daemon.frames.map(f => f["base"])).toEqual(["main", "main"]);
+  });
+
+  it("a parent that did not say which branch it is on stops the fork, and no child is made", async () => {
+    const daemon = fakeDaemon();
+    const { backend, id, projectId } = await withWorkspace(daemon, "main");
+    // The machine is there and the read is not: what a stopped machine, a shell that failed and the read's own
+    // bound all come back as. A child started at the project's base here would land its work at the project's base.
+    backend.execImpl = (m, cmd) => {
+      if (!cmd.includes("rev-parse --abbrev-ref HEAD")) return tokenGuest(m, cmd);
+      throw new Error("machine is paused");
+    };
+    const refused = await rt!.workspaces.create({ project: projectId, golden: "snap_g", name: "second look", parent: id }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe(branchUnreadRefusal("pricing page", "machine is paused"));
+    expect((await rt!.workspaces.list()).map(w => w.name)).toEqual(["pricing page"]);
+  });
+
+  it("a bring back whose parent will not say which branch it is on stops too, and sends nothing", async () => {
+    const daemon = fakeDaemon();
+    const { backend, id, projectId } = await withWorkspace(daemon, "main");
+    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: "pricing-page\norigin/pricing-page\n", stderr: "" } : tokenGuest(m, cmd));
+    const child = await rt!.workspaces.create({ project: projectId, golden: "snap_g", name: "second look", parent: id });
+    backend.machines[1]!.previewUrl = async () => ({ url: "http://127.0.0.1:7071", token: "e", expiresAt: Date.now() + 3_600_000 });
+    // The parent stops answering after the child exists, which is the state a stopped parent leaves behind.
+    backend.execImpl = (m, cmd) => (cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 1, stdout: "", stderr: "fatal: not a git repository\n" } : tokenGuest(m, cmd));
+    const refused = await rt!.workspaces.bringBack({ workspaceId: child.id }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe(branchUnreadRefusal("pricing page", "fatal: not a git repository"));
+    expect(daemon.frames).toEqual([]);
+    expect(daemon.dials).toEqual([]);
+  });
+
+  it("a create naming a parent this host does not hold is refused, not landed as a root", async () => {
+    const daemon = fakeDaemon();
+    const { projectId } = await withWorkspace(daemon, "main");
+    const refused = await rt!.workspaces.create({ project: projectId, golden: "snap_g", name: "orphan", parent: "ws_nobody" }).catch((e: unknown) => e);
+    expect((refused as Error).message).toBe(noParentWorkspaceLine("ws_nobody"));
+    expect((await rt!.workspaces.list()).map(w => w.name)).toEqual(["pricing page"]);
   });
 
   it("a child workspace measures against the branch its parent is on right now", async () => {

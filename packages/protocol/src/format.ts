@@ -2426,6 +2426,19 @@ export function spawnReachRefusal(threadId: string, name: string): string {
   return `thread ${threadWord(threadId)} may drive the workspace it runs on and the ones it forked, and ${name} is neither`;
 }
 
+/** The one sentence a fork is refused with when the workspace it would be a child of did not say which branch it
+ * is on: a child starts on its parent's branch and its work lands back in that branch, so a parent that could not
+ * be read stops the fork rather than quietly starting it somewhere else. The machine's own words ride it. */
+export function branchUnreadRefusal(workspace: string, said: string): string {
+  return `${workspace} did not say which branch it is on (${said}); wake it and try again, since a workspace forked from it starts on that branch`;
+}
+
+/** The one sentence a create naming a parent this host does not hold is refused with: a child is made out of a
+ * workspace that is here, since its branch and its work are what the child starts from and lands in. */
+export function noParentWorkspaceLine(ref: string): string {
+  return `no workspace ${ref} to fork from; a child workspace is made out of one this computer holds`;
+}
+
 /** The one sentence a name no workspace of this host carries is refused with. Absence is the only thing it says: a
  * workspace that exists and cannot be driven from here is refused by the rule that hides it, never as missing. */
 export function noWorkspaceRefusal(ref: string): string {

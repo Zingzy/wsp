@@ -2899,7 +2899,7 @@ export const VERBS: readonly Verb[] = [
     },
     tool: tool({
       description:
-        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the parent workspace's current branch for a workspace forked out of another and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. A machine with no signed-in command line for the git host still pushes, and note says why the pull request waits.",
+        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the parent workspace's current branch for a workspace forked out of another and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. A machine with no signed-in command line for the git host still pushes, and the note says why the pull request waits.",
       input: {
         workspace: WorkspaceIn,
         title: z.string().optional().describe("the pull request's title; without one the host fills the title and the body from the commits"),

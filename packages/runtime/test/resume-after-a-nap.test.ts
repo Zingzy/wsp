@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// A workspace stops and a send wakes it: the thread comes back by its own
-// session id, at the access its last turn ran at. The adapters are the real
-// ones and the exec is scripted, so the line each harness would run on the
-// machine is read here word for word.
+// A workspace stops, whoever sends wakes it as the send verb does, and the
+// thread comes back by its own session id at the access its last turn ran at.
+// What these cases prove is the launch line: the adapters are the real ones and
+// the exec is scripted, so the line each harness would run on the machine is
+// read here word for word.
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExecStream, ExecStreamFactory } from "@wsp/protocol";
@@ -66,7 +67,7 @@ async function stoppedAfterOneTurn(harness: "claude" | "codex", lines: string[])
 }
 
 describe("a send after a stop", () => {
-  it("wakes the machine and launches claude with the thread's own session id and the access its last turn ran at", async () => {
+  it("launches claude on the woken machine with the thread's own session id and the access its last turn ran at", async () => {
     const { backend, commands, workspaceId, threadId } = await stoppedAfterOneTurn("claude", fixture("../../adapter-claude/test/fixtures/stream-session.jsonl"));
     expect(commands).toHaveLength(1);
     expect(commands[0]).toMatch(/--session-id [0-9a-f-]{36}$/);

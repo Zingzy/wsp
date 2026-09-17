@@ -93,6 +93,10 @@ export function mcpConfigRead(cmd: string, configs: (file: string) => string | u
 
 /** What a bare guest answers: nothing, except a Node step, which keeps the base's Node when it meets the step's floor
  * and installs the pinned release when it does not, and the reach check. */
+/** The branch the stub guest's checkout is on, and the remote's copy of it: what a fork of such a workspace
+ * starts from, and what a bring back from it measures against. */
+export const GUEST_BRANCH = "work";
+
 export function guestAnswer(cmd: string, configs?: (file: string) => string | undefined): ExecResult {
   if (cmd.includes("NODE_HAVE")) {
     const floor = Number(/-ge (\d+) \]/.exec(cmd)?.[1] ?? 0);
@@ -104,6 +108,9 @@ export function guestAnswer(cmd: string, configs?: (file: string) => string | un
   if (mcp !== undefined) return { exitCode: 0, stdout: `${mcp}\n`, stderr: "" };
   // The machine context probe answers with its markers and nothing found, as a bare guest would.
   if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" };
+  // The checkout inside a guest is on a branch the remote has, which is what a workspace forked from it starts
+  // on. A guest that answered nothing here would be a machine that did not say, which the fork refuses.
+  if (cmd.includes("rev-parse --abbrev-ref HEAD")) return { exitCode: 0, stdout: `${GUEST_BRANCH}\norigin/${GUEST_BRANCH}\n`, stderr: "" };
   return { exitCode: 0, stdout: "", stderr: "" };
 }
 

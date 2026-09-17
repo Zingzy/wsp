@@ -12,10 +12,22 @@ import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } f
 import { localExecStream } from "../src/local-exec.js";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 
+/** The branch the stub guest's checkout is on, and the remote's copy of it: what a workspace forked from such a
+ * guest starts on, and what a bring back from it measures against. A guest that answered nothing to the branch
+ * read would be a machine that did not say, which a fork refuses. */
+export const GUEST_BRANCH = "work";
+
+/** What every stub guest answers whatever else it is told: the branch read, since a create with a parent makes it
+ * before it mints anything. Written once here so a test that wants another answer overrides that one line. */
+export const guestBranchAnswer = (cmd: string): ExecResult | undefined =>
+  cmd.includes("rev-parse --abbrev-ref HEAD") ? { exitCode: 0, stdout: `${GUEST_BRANCH}\norigin/${GUEST_BRANCH}\n`, stderr: "" } : undefined;
+
 /** An execImpl for a guest that has a daemon: the runtime's token write lands and everything else is silently
  * fine. Written once here, since a reach, a channel and a relay all need the same guest to exist. */
 export const tokenGuest = (_m: unknown, cmd: string): ExecResult =>
-  cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" };
+  cmd.includes(DAEMON_TOKEN_PATH)
+    ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" }
+    : (guestBranchAnswer(cmd) ?? { exitCode: 0, stdout: "", stderr: "" });
 
 export interface StubMachine extends Machine {
   spec: MachineSpec;
@@ -143,7 +155,7 @@ export function stubBackend(mark?: string): StubBackend {
     templates,
     promoted,
     // The machine context probe answers with its markers and nothing found, as a bare guest would.
-    execImpl: (_m, cmd) => ({ exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" }),
+    execImpl: (_m, cmd) => guestBranchAnswer(cmd) ?? { exitCode: 0, stdout: cmd.includes("echo WSP_CTX") ? "WSP_CTX\nWSP_CTX_END\n" : "", stderr: "" },
     async create(spec: MachineSpec): Promise<Machine> {
       if (spec.template !== undefined && !BUILTIN_TEMPLATES.has(spec.template) && templates.get(spec.template)?.status !== "ready") {
         throw Object.assign(new Error(`TemplateNotReady ${spec.template}`), { kind: "missing", status: 404 });

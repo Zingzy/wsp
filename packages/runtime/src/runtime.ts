@@ -207,7 +207,7 @@ import type {
 } from "@wsp/protocol";
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
-import { BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, projectPathOn, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
@@ -627,8 +627,6 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
    * what says a second workspace would stand on a machine one already stands on. A kind whose id is the machine
    * (a fork at the provider, this computer) carries none and is compared by that id. */
   machineIdentity?: string;
-  /** The workspace this one was forked out of, by id; absent on every workspace that is not a fork of another. */
-  parentWorkspaceId?: string;
   /** With phase gone: the provider's words when the machine was found missing; cleared when a fresh machine lands. */
   gone?: string;
   /** That this host put a daemon on the machine, and which one. Only a kind whose machine wsp did not make carries
@@ -2960,20 +2958,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     }
   };
 
+  /** What a machine that did not answer the branch read exits with, so a read that never happened is told apart
+   * from a checkout that is on no branch the remote has. */
+  const BRANCH_UNREAD_EXIT = 3;
   /** The branch a workspace's checkout is on right now and the remote has, read off the machine itself rather than
    * off the record: a person or an agent switches branches inside a workspace and nothing here is told. The
    * upstream is what makes it an answer: a branch only this copy holds is one no clone can start from and no pull
-   * request can be opened against, so a child of such a workspace starts where the project starts instead.
-   * Nothing where the machine would not answer, where it is on no branch, or where the branch is this copy's own. */
+   * request can be opened against, so a child of such a workspace starts where the project starts instead, and so
+   * does a child of one on no branch at all. A machine that did not answer is neither of those: it is refused in
+   * one sentence, since a child that quietly started somewhere else would land its work somewhere else. */
   const branchOn = async (entry: LiveWorkspace): Promise<string | undefined> => {
     const at = shellQuote(checkoutOf(entry.record));
+    const said = (line: string): never => {
+      throw new Error(branchUnreadRefusal(entry.record.name, line));
+    };
     const read = await entry.machine
-      .exec(`git -C ${at} rev-parse --abbrev-ref HEAD; git -C ${at} rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true`, {
-        timeoutMs: BRANCH_READ_MS,
-      })
-      .catch(() => undefined);
-    const [branch = "", tracked = ""] = read?.exitCode === 0 ? read.stdout.split("\n").map(line => line.trim()) : [];
-    return branch === "" || branch === "HEAD" || tracked === "" ? undefined : branch;
+      .exec(
+        `git -C ${at} rev-parse --abbrev-ref HEAD || exit ${BRANCH_UNREAD_EXIT}; git -C ${at} rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true`,
+        { timeoutMs: BRANCH_READ_MS },
+      )
+      .catch((e: unknown) => said(e instanceof Error ? e.message : String(e)));
+    if (read.exitCode !== 0) said(lastLineOf(read.stderr) || lastLineOf(read.stdout) || `git exited ${read.exitCode}`);
+    const [branch = "", tracked = ""] = read.stdout.split("\n").map(line => line.trim());
+    if (branch === "") said("it answered with no branch name");
+    return branch === "HEAD" || tracked === "" ? undefined : branch;
+  };
+
+  /** The project a child of that workspace starts from: the branch its parent is on where the remote has it, else
+   * the project as it was recorded. One reading for both roads a create takes. */
+  const seededFrom = async (project: ProjectView, parent: LiveWorkspace | undefined): Promise<ProjectView> => {
+    const branch = parent === undefined ? undefined : await branchOn(parent);
+    return branch === undefined ? project : { ...project, base: branch };
   };
 
   const view = (r: WorkspaceRecord): WorkspaceView => ({
@@ -4429,7 +4444,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
       // fork that is still landing already holds its place and two forks at once cannot both pass the count.
       ...(spawned !== undefined ? { parentThreadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : {}),
-      ...(o.parent !== undefined && live.has(o.parent) ? { parentWorkspaceId: o.parent } : {}),
+      ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
       // A fork a thread asked for stores no switch of its own: it carries the tree it belongs to, and the switch is
       // read off that tree's root wherever it is asked for, so one workspace holds the answer for the whole tree.
       ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
@@ -4586,7 +4601,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       project: project.id,
       copy,
       ...(portBase !== undefined ? { portBase } : {}),
-      ...(o.parent !== undefined && live.has(o.parent) ? { parentWorkspaceId: o.parent } : {}),
+      ...(o.parent !== undefined ? { parentWorkspaceId: o.parent } : {}),
       spec: {},
       size: mine.pricing.defaultSize,
       firstLife: false,
@@ -4641,12 +4656,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // relayed request at all and says so in its own words below.
       const inPlace = worksInPlace(kind);
       if (!inPlace) refuseRelayed({ kind, name: o.name, project: project.id }, origin);
-      // A child of another workspace starts where that workspace is now, not where the project starts: the branch
-      // is read off the parent's own machine, and the child's work goes back into it.
+      // A child of another workspace starts where that workspace is now, not where the project starts. A parent
+      // this host does not hold is refused rather than dropped, since a create that dropped it would land as
+      // somebody's root; the branch itself is read off the parent's machine below, once this create is allowed.
       const parent = o.parent === undefined ? undefined : live.get(o.parent);
-      const branch = parent === undefined ? undefined : await branchOn(parent);
-      const seeded: ProjectView = branch === undefined ? project : { ...project, base: branch };
-      if (inPlace) return recordExisting(seeded, o, origin);
+      if (o.parent !== undefined && parent === undefined) throw Object.assign(new Error(noParentWorkspaceLine(o.parent)), { kind: "invalid" });
+      if (inPlace) return recordExisting(await seededFrom(project, parent), o, origin);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on.
       const freePlace = spawnGuard("fork", origin);
@@ -4682,7 +4697,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
       };
       try {
-        return await createStaged(o, seeded, id, report, spawned, freePlace);
+        // Read inside the try, so a parent that did not answer gives the name and the slot back the way every
+        // other end of this create does, and after the guard, so what a thread may do is decided before anything
+        // is asked of a machine.
+        return await createStaged(o, await seededFrom(project, parent), id, report, spawned, freePlace);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
         // will not part with keeps its record instead, since a machine nobody records bills unseen.
