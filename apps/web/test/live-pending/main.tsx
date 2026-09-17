@@ -18,8 +18,8 @@ import { noDaemonApi } from "../fake-daemon-api.js";
 
 document.documentElement.classList.toggle("dark", new URLSearchParams(window.location.search).get("theme") !== "light");
 
-const box: WorkspaceView = { id: "ws_box", name: "build-box", machineId: "ssh:dev@box", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "ssh" };
-const mac: WorkspaceView = { id: "ws_mac", name: "zingzy-mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
+const box: WorkspaceView = { id: "ws_box", name: "build-box", machineId: "ssh:dev@box", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "ssh" };
+const mac: WorkspaceView = { id: "ws_mac", name: "zingzy-mac", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
 const statusOf = (w: WorkspaceView): WorkspaceStatus => ({ ...w, machineState: "running", reach: { state: w.kind === "ssh" ? "unsupported" : "reachable" }, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 });
 
 const GiB = 1024 ** 3;
@@ -38,7 +38,6 @@ const api: Api = {
   listWorkspaces: async () => [box, mac],
   getWorkspace: async id => (id === box.id ? box : mac),
   createWorkspace: async () => mac,
-  createFromGoldenHead: async () => mac,
   watchStatuses: async () => [statusOf(box), statusOf(mac)],
   nap: async () => mac,
   wake: async () => mac,

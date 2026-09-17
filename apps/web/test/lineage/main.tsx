@@ -13,7 +13,7 @@ import { noDaemonApi } from "../fake-daemon-api.js";
 
 document.documentElement.classList.toggle("dark", new URLSearchParams(window.location.search).get("theme") !== "light");
 
-const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api_0123456789abcdef", phase: "running", golden: "snap_golden-v12", createdAt: "2026-08-30T09:00:00Z" };
+const workspace: WorkspaceView = { id: "ws_api", name: "api", machineId: "m_api_0123456789abcdef", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_golden-v12", createdAt: "2026-08-30T09:00:00Z" };
 const status: WorkspaceStatus = { ...workspace, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
 const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, baseTemplate: "base", setupSha: `sha${n}`, createdAt: `2026-08-${10 + n}T00:00:00.000Z`, smoke: { cmd: "true", exitCode: 0 } });
 const lineage: SnapshotLineage = {
@@ -46,7 +46,6 @@ const api: Api = {
   listWorkspaces: async () => [workspace],
   getWorkspace: async () => workspace,
   createWorkspace: async () => workspace,
-  createFromGoldenHead: async () => workspace,
   watchStatuses: async () => [status],
   nap: async () => workspace,
   wake: async () => workspace,

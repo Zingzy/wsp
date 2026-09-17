@@ -14,6 +14,7 @@ import { killUntilGone, SolariBackend, type WspError } from "@wsp/engine";
 import { backstopMs, DEFAULT_IDLE_WINDOW_MS } from "../src/idle.js";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
+import { createOn } from "./stub-backend.js";
 
 const LIVE = process.env.WSP_LIVE === "1";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -110,7 +111,7 @@ describe.runIf(LIVE)("workspace create canary, live", () => {
     let failure: unknown;
     let ws: Awaited<ReturnType<Runtime["workspaces"]["create"]>> | undefined;
     try {
-      ws = await rt.workspaces.create({ golden: snapshotId, name: "canary", labels: TEST_LABEL });
+      ws = await createOn(rt, { golden: snapshotId, name: "canary", labels: TEST_LABEL });
     } catch (e) {
       failure = e;
     }

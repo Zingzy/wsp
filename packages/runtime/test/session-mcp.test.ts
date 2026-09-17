@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { noMcpServersLine, type AdapterEvent, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const SESSION_ID = "22222222-2222-4222-8222-222222222222";
 const WSP: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] };
@@ -40,7 +40,7 @@ function recording(takes: boolean): { factory: HarnessAdapterFactory; starts: Ha
 async function workspaceOn(adapters: Record<string, HarnessAdapterFactory>) {
   const backend = stubBackend();
   const rt = createRuntime({ backend, store: memoryStore(), adapters });
-  const ws = await rt.workspaces.create({ golden: "snap_g", name: "tools" });
+  const ws = await createOn(rt, { golden: "snap_g", name: "tools" });
   const mark = backend.machines[0]!.execLog.length;
   return { rt, ws, execs: () => backend.machines[0]!.execLog.slice(mark) };
 }

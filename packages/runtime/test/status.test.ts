@@ -8,7 +8,7 @@ import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { POLL_INTERVAL_MS, createStatusTracker, probeReach, type StatusRecord, type StatusWatchOptions } from "../src/status.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -94,7 +94,7 @@ async function stepped(costs: Cost[], step: () => Promise<unknown>): Promise<voi
 describe("status.list", () => {
   it("enriches views with machine state, reach, size, and rate from backend pricing", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const statuses = await rt.status.list();
     expect(statuses).toHaveLength(1);
     expect(statuses[0]).toMatchObject({
@@ -110,7 +110,7 @@ describe("status.list", () => {
 
   it("probes the daemon through a minted preview URL and reuses fresh reach", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     // Plain HTTP against the daemon's ws port answers 426 (measured, ticket-6 spike).
     const probe = await httpStub(426);
     openServers.push(probe.server);
@@ -143,8 +143,8 @@ describe("status.list", () => {
 
   it("maps napping and gone machines without probing", async () => {
     const { rt, backend } = testRuntime();
-    const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    const a = await createOn(rt, { golden: "snap_g", name: "a" });
+    await createOn(rt, { golden: "snap_g", name: "b" });
     await rt.workspaces.nap(a.id);
     await backend.machines[1]!.kill();
     const statuses = await rt.status.list();
@@ -155,7 +155,7 @@ describe("status.list", () => {
 
   it("an explicit list() asks the provider once per machine and never list()", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const calls = countProvider(backend);
     const statuses = await rt.status.list();
     expect(statuses[0]).toMatchObject({ machineState: "running" });
@@ -190,7 +190,7 @@ describe("status.list", () => {
       openServers.push(stub.server);
       // A fresh runtime per case so no cached reach carries the previous stub over.
       const fresh = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock });
-      await fresh.workspaces.create({ golden: "snap_g", name: `case-${code}-${took}` });
+      await createOn(fresh, { golden: "snap_g", name: `case-${code}-${took}` });
       const last = backend.machines.at(-1)!;
       last.previewUrl = async port => ({
         url: `http://127.0.0.1:${stub.port}/?port=${port}&case=${code}-${took}`,
@@ -210,7 +210,7 @@ describe("status.list", () => {
 describe("a machine that answers for its own daemon", () => {
   it("takes the guest's own word and never dials the route: a container whose published port is on another computer's loopback reads reachable while its turns run", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     // The route mints and the row carries it, but nothing on this computer answers it: on a box dialling another
     // computer's Docker daemon that is the whole of what the old reading saw.
     const edge = await httpStub(502);
@@ -228,7 +228,7 @@ describe("a machine that answers for its own daemon", () => {
 
   it("a guest that says the daemon's port is dead reads Unreachable, and a machine that will not answer at all reads unreachable too", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const machine = backend.machines[0]!;
     machine.previewUrl = async port => ({ url: `http://127.0.0.1:1/?port=${port}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER });
     machine.daemonAnswers = async () => false;
@@ -244,7 +244,7 @@ describe("a machine that answers for its own daemon", () => {
 
   it("a route the machine has none of is no silence: the reach is still the guest's word, with no url on the row", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const machine = backend.machines[0]!;
     machine.previewUrl = async () => {
       throw new Error("container 7d8f publishes no port 7070; only the daemon's own port is published");
@@ -259,7 +259,7 @@ describe("a machine that answers for its own daemon", () => {
 
   it("a machine with no route at all is asked all the same: only a machine with neither road reads unsupported", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const machine = backend.machines[0]!;
     expect(machine.previewUrl).toBeUndefined();
     machine.daemonAnswers = async () => true;
@@ -275,7 +275,7 @@ describe("a machine that answers for its own daemon", () => {
 
   it("a status pushed between polls makes the same claim: a machine with no route but an answer of its own is not called unsupported", async () => {
     const { rt, backend } = testRuntime();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const machine = backend.machines[0]!;
     expect(machine.previewUrl).toBeUndefined();
     machine.daemonAnswers = async () => true;
@@ -296,7 +296,7 @@ describe("a machine that answers for its own daemon", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const machine = backend.machines[0]!;
     // The clock moves as the guest answers, so slow is what the clock says and not how fast this Mac ran.
     let took = 0;
@@ -315,7 +315,7 @@ describe("a machine that answers for its own daemon", () => {
 
   it("the caller's bound is the whole ask: a machine that never answers reads unreachable rather than holding the read open", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const machine = backend.machines[0]!;
     machine.previewUrl = async port => ({ url: `http://127.0.0.1:1/?port=${port}`, token: "", expiresAt: Number.MAX_SAFE_INTEGER });
     let bound: number | undefined;
@@ -334,11 +334,11 @@ describe("a machine that answers for its own daemon", () => {
 describe("status.watch provider calls", () => {
   it("asks the provider nothing across healthy polls", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5 });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const probe = await httpStub(426);
     openServers.push(probe.server);
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${probe.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
-    await rt.workspaces.create({ golden: "snap_g", name: "no-preview" }); // unsupported reach is healthy too
+    await createOn(rt, { golden: "snap_g", name: "no-preview" }); // unsupported reach is healthy too
     const calls = countProvider(backend);
     const stop = rt.status.watch();
     await until(() => probe.hits() >= 8);
@@ -348,7 +348,7 @@ describe("status.watch provider calls", () => {
 
   it("asks the provider once after a failed reach, then not again inside the reconcile window", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const dead = await httpStub(502);
     openServers.push(dead.server);
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${dead.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
@@ -366,7 +366,7 @@ describe("status.watch provider calls", () => {
 describe("status.watch cost events", () => {
   it("emits workspace.cost on a timer with awake-time accrual, zero rate while napping", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha", cpu: 4, memMb: 8192 });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha", cpu: 4, memMb: 8192 });
     const costs: (EventUnion & { type: "workspace.cost" })[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as EventUnion & { type: "workspace.cost" }));
 
@@ -396,7 +396,7 @@ describe("status.watch cost events", () => {
 
   it("emits workspace.status when the enriched status changes, not on every poll", async () => {
     const { rt } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 15 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const seen: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => seen.push((e as { status: WorkspaceStatus }).status));
 
@@ -419,7 +419,7 @@ describe("status.watch cost events", () => {
 describe("the status ticks", () => {
   it("an answer the guest did not send sends the poll to the provider once, and leaves the row running", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     // The edge refusing a token it minted itself: the request never reached the guest, so it says nothing about it.
     const edge = await httpStub(401);
     openServers.push(edge.server);
@@ -451,6 +451,7 @@ describe("the status ticks", () => {
       kind: "ssh",
       phase: "running",
       golden: "",
+      project: { id: "pr_1a2b3c4d", name: "box", path: "/home/dev/box", computer: "pl_box" },
       createdAt: new Date(fc.clock.now()).toISOString(),
       size: { cpu: 2, memMb: 2048 },
       rateUsdPerHour: 0,
@@ -517,7 +518,7 @@ describe("the status ticks", () => {
 describe("a pause the provider made", () => {
   it("the poll asks the provider when the edge answers for the machine instead of the daemon, and the record follows", async () => {
     const { rt, backend } = testRuntime({ costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 0 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     // The edge answers for a machine it cannot hand the request to; only the daemon's own 426 proves a live guest.
     const edge = await httpStub(404);
     openServers.push(edge.server);
@@ -549,7 +550,7 @@ describe("a pause the provider made", () => {
     const store = memoryStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
@@ -589,7 +590,7 @@ describe("a pause the provider made", () => {
     const fc = fakeClock();
     const status = { ...ticking, promptMs: 10_000, probeTimeoutMs: 50, reconcileMinMs: 0 };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status, idle });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const live = await httpStub(426);
     openServers.push(live.server);
     // Under the refresh margin, so every poll mints the route again and the probe follows the machine's current one.
@@ -641,7 +642,7 @@ describe("accrued cost", () => {
     const store = memoryStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const small = backend.pricing.rateUsdPerHour(backend.pricing.defaultSize);
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
@@ -692,7 +693,7 @@ describe("accrued cost", () => {
   it("a rebuild at an unchanged rate lands no cost event: an event's tick rides the bus only when it changed the series", async () => {
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     await until(async () => (await rt.status.history(ws.id)).length === 1);
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
@@ -718,7 +719,7 @@ describe("a rename and the machine's own accounting", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const rate = backend.pricing.rateUsdPerHour(backend.pricing.defaultSize);
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
@@ -747,7 +748,7 @@ describe("a rename and the machine's own accounting", () => {
     const fc = fakeClock();
     const windowMs = 20 * 60_000;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle: { defaultWindowMs: windowMs } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const armed = (await rt.status.list())[0]!.idleAt;
     expect(armed).toBeDefined();
 
@@ -781,7 +782,7 @@ describe("status.history", () => {
   it("holds the folded ticks since metering began and hands them out over the wire", async () => {
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     // The create opens the stretch with a tick of its own, before anything watches.
     await until(async () => (await rt.status.history(ws.id)).length === 1);
     expect(await rt.status.history(ws.id)).toMatchObject([{ phase: "running", awakeMs: 0, accruedUsd: 0 }]);
@@ -825,7 +826,7 @@ describe("status.history", () => {
     const { store, puts } = countingStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
@@ -882,7 +883,7 @@ describe("status.history", () => {
     const store = memoryStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
@@ -912,7 +913,7 @@ describe("status.history", () => {
     const store = memoryStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
@@ -942,7 +943,7 @@ describe("status.history", () => {
     const backend = stubBackend();
     const { store, deletes } = countingStore();
     const rt = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
@@ -968,7 +969,7 @@ describe("status.history", () => {
     const { store, deletes } = countingStore();
     const fc = fakeClock(Date.parse("2026-09-13T09:00:00.000Z"));
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = first.status.watch();
@@ -988,8 +989,8 @@ describe("status.history", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
-    const alpha = await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
-    const beta = await rt.workspaces.create({ golden: "snap_g", name: "beta" });
+    const alpha = await createOn(rt, { golden: "snap_g", name: "alpha" });
+    const beta = await createOn(rt, { golden: "snap_g", name: "beta" });
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
@@ -1019,7 +1020,7 @@ describe("status.history", () => {
     const backend = stubBackend();
     const fc = fakeClock(Date.parse("2026-09-15T09:00:00.000Z"));
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, status: ticking, idle });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     rt.events.on("workspace.cost", e => costs.push(e as Cost));
     const stop = rt.status.watch();
@@ -1032,7 +1033,7 @@ describe("status.history", () => {
 
   it("is refused on a socket let in on a ticket, as the places list it feeds is", async () => {
     const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     const host = await WsClient.connect(srv.port, { token: "secret" });
     const own = await host.request("cost.spend");
@@ -1051,7 +1052,7 @@ describe("status.history", () => {
 describe("serveRuntime status.subscribe", () => {
   it("returns a snapshot and pushes cost events to a subscribed socket", async () => {
     const { rt } = testRuntime({ costIntervalMs: 15, pollIntervalMs: 60_000 });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
     srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     await c.request("events.subscribe");
@@ -1083,7 +1084,7 @@ describe("status zombie at rest", () => {
 
   it("reach slow past the window and a failing exec probe mark the workspace zombie, with the machine id and timings in the reason, once", async () => {
     const { rt, backend } = testRuntime(opts);
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "hello" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "hello" });
     await slowMachine(backend);
     backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? { exitCode: 1, stdout: "", stderr: "502 exec failed" } : { exitCode: 0, stdout: "", stderr: "" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1115,7 +1116,7 @@ describe("status zombie at rest", () => {
 
   it("a slow spell where exec answers never flags, and the probe repeats once per window rather than per poll", async () => {
     const { rt, backend } = testRuntime(opts);
-    await rt.workspaces.create({ golden: "snap_g", name: "weather" });
+    await createOn(rt, { golden: "snap_g", name: "weather" });
     const slow = await slowMachine(backend);
     backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? { exitCode: 0, stdout: "ok\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const seen = statuses(rt);
@@ -1133,7 +1134,7 @@ describe("status zombie at rest", () => {
 
   it("an exec probe that never returns is cut at its timeout and counts as failed", async () => {
     const { rt, backend } = testRuntime({ ...opts, zombieProbeTimeoutMs: 60 });
-    await rt.workspaces.create({ golden: "snap_g", name: "hang" });
+    await createOn(rt, { golden: "snap_g", name: "hang" });
     await slowMachine(backend);
     backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? new Promise<never>(() => {}) : { exitCode: 0, stdout: "", stderr: "" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1150,7 +1151,7 @@ describe("status zombie at rest", () => {
 
   it("a listing that will not wait spends no exec probe on a machine dark past the window: it reads the word the poller settled, and the poller still flags it", async () => {
     const { rt, backend } = testRuntime(opts);
-    await rt.workspaces.create({ golden: "snap_g", name: "dark" });
+    await createOn(rt, { golden: "snap_g", name: "dark" });
     await slowMachine(backend);
     // A probe that never returns: had the listing started one it would have cost the whole zombie timeout.
     backend.execImpl = (_m, cmd) => (cmd === "echo ok" ? new Promise<never>(() => {}) : { exitCode: 0, stdout: "", stderr: "" });
@@ -1178,7 +1179,7 @@ describe("status zombie at rest", () => {
 
   it("a machine the provider says is paused gets no probe: the divergence already explains the slow reach", async () => {
     const { rt, backend } = testRuntime(opts);
-    await rt.workspaces.create({ golden: "snap_g", name: "behind-our-back" });
+    await createOn(rt, { golden: "snap_g", name: "behind-our-back" });
     await slowMachine(backend);
     backend.machines[0]!.paused = true;
     const seen = statuses(rt);
@@ -1200,7 +1201,7 @@ describe("gone machines and the meter", () => {
     const store = memoryStore();
     const fc = fakeClock();
     const first = createRuntime({ backend, store, adapters: {}, clock: fc.clock, status: ticking, idle });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "alpha" });
+    const ws = await createOn(first, { golden: "snap_g", name: "alpha" });
     const costs: Cost[] = [];
     first.events.on("workspace.cost", e => costs.push(e as Cost));
     let stop = first.status.watch();
@@ -1269,7 +1270,7 @@ describe("the reach word a row shows", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
-    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    await createOn(rt, { golden: "snap_g", name: "steady" });
     const daemon = await switchable();
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     const calls = countProvider(backend);
@@ -1301,8 +1302,8 @@ describe("the reach word a row shows", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
-    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
-    await rt.workspaces.create({ golden: "snap_g", name: "dark" });
+    await createOn(rt, { golden: "snap_g", name: "steady" });
+    await createOn(rt, { golden: "snap_g", name: "dark" });
     const daemon = await switchable();
     const dead = await closedPort();
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
@@ -1337,7 +1338,7 @@ describe("the reach word a row shows", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
-    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    await createOn(rt, { golden: "snap_g", name: "steady" });
     const daemon = await switchable();
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     // No watcher and no poll anywhere in this test: every probe of this machine is a table read's own.
@@ -1360,7 +1361,7 @@ describe("the reach word a row shows", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
-    await rt.workspaces.create({ golden: "snap_g", name: "steady" });
+    await createOn(rt, { golden: "snap_g", name: "steady" });
     const mode = { answer: true };
     const server = createServer((_req, res) => res.writeHead(mode.answer ? 426 : 502).end());
     await new Promise<void>(r => server.listen(0, "127.0.0.1", r));
@@ -1388,7 +1389,7 @@ describe("the reach word a row shows", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle, status: { ...opts, costIntervalMs: 24 * 3_600_000 } });
-    await rt.workspaces.create({ golden: "snap_g", name: "watched" });
+    await createOn(rt, { golden: "snap_g", name: "watched" });
     const daemon = await switchable();
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${daemon.port}/?port=${port}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     const seen: WorkspaceStatus[] = [];
@@ -1442,8 +1443,8 @@ describe("the reach word a row shows", () => {
     const backend = stubBackend();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, clock: fc.clock, idle });
-    await rt.workspaces.create({ golden: "snap_g", name: "alpha" });
-    await rt.workspaces.create({ golden: "snap_g", name: "beta" });
+    await createOn(rt, { golden: "snap_g", name: "alpha" });
+    await createOn(rt, { golden: "snap_g", name: "beta" });
     const alpha = await switchable();
     const beta = await switchable();
     // An expired mint, so every poll asks for the route again and the test can fail the mint itself the way a DNS miss does.

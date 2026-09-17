@@ -4,9 +4,7 @@
 // a person's answers count as consent, the one request those ticks become,
 // and the words for a row's tick. The app's dialog, the command line and the
 // MCP server read one plan the same way and send the same request.
-import { folderName } from "./project-path.js";
-import { kindWords, workspaceKind } from "./workspace-state.js";
-import type { ProjectAgent, ProjectPlan, ProjectSecret, WorkspaceView } from "./index.js";
+import type { ProjectAgent, ProjectPlan, ProjectSecret } from "./index.js";
 
 /** A rewrite removes the credentials, so it starts ticked; a file that would travel as it is never does. */
 export function defaultConsent(secrets: readonly ProjectSecret[]): ReadonlySet<string> {
@@ -59,27 +57,11 @@ export interface ProjectImportRequest {
   replace?: true;
 }
 
-/** Where a folder lands on the machine when the caller named no path: the kind's own rule, read off the one table
- * every client reads, so the line the plan shows and the path the folder takes cannot differ. A workspace whose
- * machine answered with no home falls back to the path it has here, which is a machine no kind that lands under
- * a home ever records. */
-export function importDest(source: string, workspace: Pick<WorkspaceView, "kind" | "home">): string {
-  const home = workspace.home;
-  if (kindWords(workspaceKind(workspace)).importsAt === "same path" || home === undefined) return source;
-  return `${home.replace(/\/+$/, "")}/${folderName(source)}`;
-}
-
-/** The one request every client sends from a plan and its ticks; the folder lands where its kind lands folders. */
-export function importRequest(plan: ProjectPlan, source: string, ticked: ReadonlySet<string>, agents: ReadonlySet<string>, replace?: boolean, workspace?: Pick<WorkspaceView, "kind" | "home">): ProjectImportRequest {
+/** The one request every client sends from a plan and its ticks; the folder lands at the path it has here, which
+ * is where init's road puts a project on the machine it seals. */
+export function importRequest(plan: ProjectPlan, source: string, ticked: ReadonlySet<string>, agents: ReadonlySet<string>, replace?: boolean): ProjectImportRequest {
   const travelling = agentsRequest(plan.agents, agents);
-  const dest = workspace === undefined ? plan.source : importDest(plan.source, workspace);
-  return { source, dest, ...consentRequest(plan.secrets, ticked), ...(travelling !== undefined ? { agents: travelling } : {}), ...(replace === true ? { replace: true } : {}) };
-}
-
-/** The request that registers a folder already on this computer: it stays at its own path, so nothing is carried,
- * rewritten or sent, and no plan is read for it. */
-export function registerRequest(source: string): ProjectImportRequest {
-  return { source, dest: source, carry: [], rewrite: [] };
+  return { source, dest: plan.source, ...consentRequest(plan.secrets, ticked), ...(travelling !== undefined ? { agents: travelling } : {}), ...(replace === true ? { replace: true } : {}) };
 }
 
 /** The row's words for its tick, short for the row's end and full for its title: left out, travels as is, or rewritten

@@ -36,6 +36,7 @@ interface Reading {
 /** The host as its own process: the wiring `wsp up` builds, a local workspace, and one harness that answers with a
  * turn's worth of events instead of starting an agent, so no machine and no agent is involved in the measurement. */
 const hostScript = (home: string): string => `
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -75,7 +76,12 @@ const runtime = createRuntime({
   adapters: { claude: scripted },
 });
 const host = await startHost({ runtime, webDir, port: 0, wsPort: 0, statePath });
-const workspace = await host.createLocalWorkspace();
+// A workspace is one project's copy, so the measurement records a repo of its own here and works it in place.
+const folder = join(home, "repo");
+mkdirSync(folder, { recursive: true });
+execFileSync("git", ["init", "-q", folder]);
+const project = await host.addProject(folder);
+const workspace = await host.createWorkspace("here", undefined, project.id);
 
 const turn = async (thread) => {
   const handle = await runtime.sessions.start(workspace.id, { prompt: "go", harness: "claude", ...(thread === undefined ? {} : { thread }) });

@@ -32,7 +32,7 @@ const gaveUp = params.has("gave-up");
 const workspace: WorkspaceView = {
   id: "ws_b1",
   name: "b1",
-  machineId: "sbx_9f2c41",
+  machineId: "sbx_9f2c41", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: gaveUp ? "napping" : "waking",
   golden: "snap_golden-v12",
   createdAt: "2026-09-07T09:00:00Z",
@@ -61,12 +61,11 @@ const api: Api = {
   listWorkspaces: async () => [workspace],
   getWorkspace: async () => workspace,
   createWorkspace: async () => workspace,
-  createFromGoldenHead: async () => workspace,
   watchStatuses: async () => [status],
   nap: async () => workspace,
   wake: async () => workspace,
   stopWake: async () => ({ ...workspace, phase: "napping" as const }),
-  rebuild: async () => ({ ...workspace, phase: "running" as const, machineId: "sbx_new", wakeRefused: undefined }),
+  rebuild: async () => ({ ...workspace, phase: "running" as const, machineId: "sbx_new", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, wakeRefused: undefined }),
   listSessions: async () => [],
   getGolden: async () => undefined,
   subscribe: fn => {

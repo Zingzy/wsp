@@ -45,7 +45,7 @@ export { joinedAlready, placeFilePath, placeKeyPath, placeReport, readPlaceFile,
 export { DAEMON_BIN, DAEMON_TARGETS, GUEST_DAEMON_TARGETS, daemonArtifactName, daemonBinaryIn, daemonTargetHere, type DaemonTarget } from "./daemon-binary.js";
 export { setDefaultHost } from "./hosts.js";
 export { reachAddresses } from "./pairing.js";
-export { dialHost } from "./verbs.js";
+export { dialHost, NO_PROJECT_YET } from "./verbs.js";
 export {
   startCallbackRelay,
   systemOpener,

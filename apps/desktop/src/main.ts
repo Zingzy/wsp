@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { adoptLoginPath, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
+import { adoptLoginPath, agentsHere, assetDir, currentHome, installEach, mcpServerSpec, NO_PROJECT_YET, runningWsp, shimPath, wspHome, type CliIO } from "@wsp/host";
 import { DEFAULT_PORT, DEFAULT_WS_PORT, HOST_WORDS, InitNeedsYou, ThemePreference, hereWord, hostMenuAction, hostsMenuItems } from "@wsp/protocol";
 import type { Runtime } from "@wsp/runtime";
 import { BrowserWindow, Menu, Notification, app, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from "electron";
@@ -13,7 +13,7 @@ import { offerMove, type MoveGate } from "./move.js";
 import { sayNeedsYou, type Notifier } from "./needs-you.js";
 import { fromAppPage, fromOnboardingPage } from "./origin.js";
 import { pagePreviews } from "./previews.js";
-import { checkSetup, recordThisComputer } from "./setup.js";
+import { checkSetup, openThisComputer } from "./setup.js";
 import { installShim, shimText } from "./shim.js";
 import { sshRoad, systemSshDeps } from "./ssh-road.js";
 import { windowOptions } from "./window.js";
@@ -300,8 +300,8 @@ async function showOnboarding(located: Located): Promise<void> {
   // The one way out of the screen: this computer recorded and the app opened on it.
   const finish = (): Promise<void> =>
     (finishing ??= (async () => {
-      const { runtime, workspace } = await recordThisComputer({ statePath });
-      io.log(`${workspace.name} (${workspace.id}) is this computer`);
+      const { runtime, workspace } = await openThisComputer({ statePath });
+      io.log(workspace === null ? NO_PROJECT_YET : `${workspace.name} (${workspace.id}) is this computer`);
       await showApp(located, runtime);
       for (const channel of ONBOARDING_CHANNELS) ipcMain.removeHandler(channel);
       page.close();

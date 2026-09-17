@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The new-workspace dialog in a real Chromium, both themes: the size rows
-// share one height with each other, read in the muted mono voice the Where
+// share one height with each other, read in the muted mono voice the Project
 // caption uses, carry no border or fill of their own, and the rates read at AA;
 // at 1280 by 800 the card hangs 160 px down and grows to hold all three of them
 // with its footer under the last;
 // and with nothing to fork yet, the Create keycap is held as the outline with
-// its reason in the caption under Where. Photographed in each state and theme.
+// its reason in the caption under the Project control. Photographed in each state and theme.
 // Runs only when asked for (WSP_RENDER=1) and skips without Playwright's
 // Chromium.
 import { mkdirSync } from "node:fs";
@@ -136,9 +136,9 @@ describe.skipIf(renderSkipped !== undefined)("the new-workspace dialog laid out 
       console.info(`390: live Create ${live.width} px at ${live.left}, held ${held.width} px at ${held.left}`);
       expect(held).toEqual(live);
       expect(live.width).toBeGreaterThan(300);
-      // And the nowhere state, whose Create is held for another reason and stands beside a second outline button.
-      const nowhere = await rect(`${base}?theme=dark&places=none`);
-      expect(nowhere).toEqual(live);
+      // And the state with no project, whose Create is held for another reason and stands beside a second button.
+      const nothing = await rect(`${base}?theme=dark&projects=none`);
+      expect(nothing).toEqual(live);
     } finally {
       await phone.close();
     }

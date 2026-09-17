@@ -16,7 +16,6 @@ export const WORKSPACE_WORDS = {
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
   openMachine: "Open the workspace pane",
-  importProject: "Import project",
   exportProject: "Export project",
   rename: "Rename workspace",
   theme: "Edit theme colour",
@@ -120,7 +119,6 @@ export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
 export const CLIENT_CANNOT_START_DAEMON = "This client cannot start a daemon";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
-export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
 export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";
@@ -215,10 +213,3 @@ export const noDiffLine = (fileName: string, scopeLabel: string): string => `${f
 export const rowVerb = (verb: string, name: string): string => `${verb} ${name}`;
 export const rowNewThread = (name: string): string => `New thread in ${name}`;
 
-/** What the road to this computer says under its name: what a pick will do, since there is one local workspace per
- * host and the second pick is a selection, and why it cannot be picked at all. */
-export const THIS_COMPUTER_HINTS = {
-  fresh: "This computer itself, nothing to copy",
-  existing: "Already a workspace; go to it",
-  offline: "Not connected to wsp",
-} as const;

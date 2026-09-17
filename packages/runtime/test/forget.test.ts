@@ -7,12 +7,14 @@
 // with no turn that ever did work is dropped, a turn the agent refused outright
 // among them, while one whose turn worked is refused in one sentence.
 import { randomUUID } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { codexNotSignedInLine, foldThreads, forgetUndrivenRefusal, OVER_SSH, signInRefusalLine, threadForgetRefusal, type EventUnion, type TurnResult } from "@wsp/protocol";
+import { codexNotSignedInLine, foldThreads, forgetUndrivenRefusal, HERE_PLACE_ID, THIS_COMPUTER, signInRefusalLine, threadForgetRefusal, type EventUnion, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
-import { fakeSsh } from "./fake-ssh.js";
-import { stubBackend } from "./stub-backend.js";
+import { fakeLocal, stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 describe("workspaces.forget", () => {
   it("drops a workspace whose machine is gone: record, transcripts and sessions leave the store and workspace.deleted follows", async () => {
@@ -21,7 +23,7 @@ describe("workspaces.forget", () => {
     const rt = createRuntime({ backend, store, adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "first" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "first" });
     await store.put("transcripts", ws.id, { events: [{ type: "session.start", sessionId: "s1" }] });
     await store.put("sessions", ws.id, { rows: [{ id: "s1", workspaceId: ws.id, harness: "claude", status: "completed" }] });
     backend.machines[0]!.killed = true;
@@ -37,11 +39,10 @@ describe("workspaces.forget", () => {
   });
 
   it("sends a workspace on a computer wsp does not run to delete: its machine is never gone and there is no provider to pause it at", async () => {
-    const { wiring } = fakeSsh();
-    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, ssh: wiring });
-    const ws = await rt.workspaces.createSsh("dev@box");
+    const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: fakeLocal(mkdtempSync(join(tmpdir(), "wsp-forget-"))) });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
 
-    await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({ message: forgetUndrivenRefusal("box", OVER_SSH), kind: "conflict" });
+    await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({ message: forgetUndrivenRefusal("mac", THIS_COMPUTER), kind: "conflict" });
 
     expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
     await rt.close();
@@ -51,7 +52,7 @@ describe("workspaces.forget", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "live" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "live" });
 
     await expect(rt.workspaces.forget(ws.id)).rejects.toMatchObject({
       message: "live's machine m1 is still running; pause it or delete it at the provider first",
@@ -108,7 +109,7 @@ describe("a launch refused before the agent started", () => {
     });
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: refusing } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
 
     await expect(rt.sessions.start(ws.id, { prompt: "build it" })).rejects.toThrow("the harness would not launch");
     // Named again, as the person who tried twice did: a second refusal is a second nothing, not a second row.
@@ -124,7 +125,7 @@ describe("a launch refused before the agent started", () => {
   it("is refused before the machine is asked when no adapter here runs that agent, and leaves nothing either", async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: working } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
 
     await expect(rt.sessions.start(ws.id, { prompt: "build it", harness: "gemini" })).rejects.toThrow(/no adapter registered for harness "gemini"/);
 
@@ -139,7 +140,7 @@ describe("sessions.forget", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: working, codex: dying } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const ran = await rt.sessions.start(ws.id, { prompt: "build it" });
     await ran.finished;
     const junk = await rt.sessions.start(ws.id, { prompt: "build it", harness: "codex" });
@@ -166,7 +167,7 @@ describe("sessions.forget", () => {
   it("refuses a thread whose turn did work, in one sentence, and keeps its row and its transcript whole", async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: working } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "build it" });
     await handle.finished;
     const thread = handle.view().threadId!;
@@ -208,7 +209,7 @@ describe("a turn the agent refused for want of a sign-in", () => {
   it("is a thread that ran nothing on either agent, whatever the row's session id says, and the forget takes it", async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: refusingSignIn(CLAUDE), codex: refusingSignIn(CODEX) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = await rt.sessions.start(ws.id, { prompt: "ship it" });
     await first.finished.catch(() => {});
     const second = await rt.sessions.start(ws.id, { prompt: "ship it", harness: "codex" });
@@ -248,7 +249,7 @@ describe("a turn the agent refused for want of a sign-in", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: refusesUntilSignedIn } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const refused = await rt.sessions.start(ws.id, { prompt: "ship it" });
     await refused.finished.catch(() => {});
     const thread = refused.view().threadId!;

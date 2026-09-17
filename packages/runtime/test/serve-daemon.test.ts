@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
 import { fakeProcTree } from "../../daemon/test/fake-proc.js";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
-import { relayedRefusal, rootsPathIn } from "@wsp/protocol";
+import { HERE_PLACE_ID, relayedRefusal, rootsPathIn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
 import { DAEMON_TOKEN_NONE, DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 import { localExecStream } from "../src/local-exec.js";
@@ -18,7 +18,7 @@ import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { startRefusingDoor, type RefusingDoor } from "./refusing-door.js";
-import { stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
+import { stubBackend, tokenGuest, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { startTcpProxy, type TcpProxy } from "./tcp-proxy.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -49,7 +49,7 @@ async function served(url: string, opts: { execImpl?: StubBackend["execImpl"] } 
   backend.execImpl = opts.execImpl ?? tokenGuest;
   rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN });
   srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
-  const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+  const ws = await createOn(rt, { golden: "snap_g", name: "x" });
   backend.machines[0]!.previewUrl = async () => ({ url, token: "e", expiresAt: Date.now() + 3_600_000 });
   return { backend, workspaceId: ws.id };
 }
@@ -244,7 +244,7 @@ describe("who may open a channel", () => {
     };
     rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, daemonToken: DAEMON_TOKEN, local });
     srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
-    const ws = await rt.workspaces.createLocal("this computer");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "this computer" });
 
     const here = await client();
     expect(await here.request("daemon.open", { workspaceId: ws.id })).toMatchObject({ ok: true, channel: expect.any(String) });

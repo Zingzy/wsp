@@ -17,15 +17,3 @@ export function workspaceKindGlyph(kind: WorkspaceKind): LucideIcon {
   return GLYPHS[kind];
 }
 
-/** What the road that makes a workspace of this kind is called, on the sidebar's plus menu and in the palette. A
- * kind wsp forks says what it makes; a kind that already exists says what it is, in the one phrase every local
- * surface uses. Adding a kind is a row here, beside its glyph. */
-const NEW_TITLES: Record<WorkspaceKind, string> = {
-  cloud: "New workspace",
-  local: "This computer",
-  ssh: "A computer over ssh",
-};
-
-export function newWorkspaceTitle(kind: WorkspaceKind): string {
-  return NEW_TITLES[kind];
-}

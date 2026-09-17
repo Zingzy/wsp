@@ -8,7 +8,7 @@ import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -271,7 +271,7 @@ describe("idle policy in the runtime", () => {
     const statuses: WorkspaceStatus[] = [];
     rt.events.on("workspace.napped", e => napped.push(e));
     rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const [before] = await rt.status.list();
     expect(before!.idleAt).toBe(fc.clock.now() + WINDOW);
     fc.advance(WINDOW - 1);
@@ -293,7 +293,7 @@ describe("idle policy in the runtime", () => {
     const { rt, fc } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
     const statuses: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
-    await rt.workspaces.create({ golden: "snap_g", name: "a", idleWindowMs: 3 * 60_000 });
+    await createOn(rt, { golden: "snap_g", name: "a", idleWindowMs: 3 * 60_000 });
     fc.advance(3 * 60_000);
     await until(() => statuses.some(s => s.phase === "napping"));
     expect(statuses.at(-1)!.reason).toBe("idle 3 min");
@@ -303,7 +303,7 @@ describe("idle policy in the runtime", () => {
 
   it("workspaces.touch over the wire starts the window over", async () => {
     const { rt, fc } = testRuntime();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     const c = await WsClient.connect(srv.port, { token: "secret" });
     for (let i = 0; i < 8; i++) {
@@ -324,7 +324,7 @@ describe("idle policy in the runtime", () => {
   it("a running session holds the workspace awake; the window starts when it ends", async () => {
     const held = heldSession();
     const { rt, fc } = testRuntime({ adapters: { claude: held.factory } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     fc.advance(WINDOW * 3);
     expect(await phaseOf(rt, ws.id)).toBe("running");
@@ -339,8 +339,8 @@ describe("idle policy in the runtime", () => {
 
   it("off means never; a per-workspace window beats the default", async () => {
     const { rt, fc } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
-    const off = await rt.workspaces.create({ golden: "snap_g", name: "off", idleWindowMs: null });
-    const fast = await rt.workspaces.create({ golden: "snap_g", name: "fast", idleWindowMs: WINDOW });
+    const off = await createOn(rt, { golden: "snap_g", name: "off", idleWindowMs: null });
+    const fast = await createOn(rt, { golden: "snap_g", name: "fast", idleWindowMs: WINDOW });
     fc.advance(WINDOW);
     await napping(rt, fast.id);
     fc.advance(40 * 60_000);
@@ -354,7 +354,7 @@ describe("idle policy in the runtime", () => {
     const store = memoryStore();
     const fc = fakeClock();
     const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, idle: { defaultWindowMs: WINDOW } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     fc.advance(WINDOW);
     await napping(rt, ws.id);
     await rt.workspaces.wake(ws.id);
@@ -378,7 +378,7 @@ describe("idle policy in the runtime", () => {
     const { rt, backend, fc } = testRuntime();
     const statuses: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
     const pause = m.pause.bind(m);
     let calls = 0;
@@ -416,7 +416,7 @@ describe("idle policy in the runtime", () => {
     const { rt, backend, fc } = testRuntime();
     const statuses: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const deadline = (await rt.status.list())[0]!.idleAt!;
     const m = backend.machines[0]!;
     const pause = m.pause.bind(m);
@@ -462,13 +462,13 @@ describe("idle policy in the runtime", () => {
 describe("provider backstop on the fork spec", () => {
   it("pauses on idle at twice the policy window", async () => {
     const { rt, backend } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
-    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await createOn(rt, { golden: "snap_g", name: "a" });
     expect(backend.machines[0]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: 40 * 60_000 });
   });
 
   it("follows the per-workspace window, and a resurrected fork carries it too", async () => {
     const { rt, backend } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a", idleWindowMs: 5 * 60_000 });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a", idleWindowMs: 5 * 60_000 });
     expect(backend.machines[0]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: 10 * 60_000 });
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true;
@@ -485,7 +485,7 @@ describe("provider backstop on the fork spec", () => {
       heard.push({ machine: machine.id, until });
     };
     const t0 = fc.clock.now();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     expect(heard).toEqual([{ machine: "m1", until: t0 + 40 * 60_000 }]);
     fc.advance(5_000);
     await rt.workspaces.touch(ws.id);
@@ -499,7 +499,7 @@ describe("provider backstop on the fork spec", () => {
     await rt.workspaces.touch(ws.id);
     expect(heard).toHaveLength(2);
     // With auto-nap off the runtime still hands over its six-hour instant, so a dead host never leaves a machine billing.
-    const off = await rt.workspaces.create({ golden: "snap_g", name: "b", idleWindowMs: null });
+    const off = await createOn(rt, { golden: "snap_g", name: "b", idleWindowMs: null });
     expect(heard.at(-1)).toEqual({ machine: "m2", until: fc.clock.now() + IDLE_OFF_BACKSTOP_MS });
     // A call the provider refuses is logged, and the window is armed all the same.
     refuse = true;
@@ -518,14 +518,14 @@ describe("provider backstop on the fork spec", () => {
   it("a backend without a backstop is never asked: the window arms as before", async () => {
     const { rt, backend, fc } = testRuntime();
     expect(backend.lifecycle.backstop).toBeUndefined();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.workspaces.touch(ws.id);
     expect((await rt.status.list())[0]!.idleAt).toBe(fc.clock.now() + WINDOW);
   });
 
   it("off still leaves a long pause backstop so a crashed runtime stops billing", async () => {
     const { rt, backend } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
-    await rt.workspaces.create({ golden: "snap_g", name: "a", idleWindowMs: null });
+    await createOn(rt, { golden: "snap_g", name: "a", idleWindowMs: null });
     expect(backend.machines[0]!.spec).toMatchObject({ onIdle: "pause", idleTimeoutMs: IDLE_OFF_BACKSTOP_MS });
     expect(IDLE_OFF_BACKSTOP_MS).toBeGreaterThanOrEqual(60 * 60_000);
   });

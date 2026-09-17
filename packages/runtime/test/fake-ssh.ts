@@ -3,8 +3,7 @@
 // that records or drives a machine over ssh is proved against the real
 // SshBackend and the real address rules with nothing on the network. One home
 // for it, read by the runtime's own tests and by the host's keyless roads.
-import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, knownHostTarget, parseSshAddress, sshControlPath, sshIdentity, sshMachineName, type ExecResult, type SshHostKeyReader, type SshReach, type SshTransport } from "@wsp/engine";
-import { machineLacking, machineUnanswered, sshDaemonPaths } from "@wsp/protocol";
+import { SSH_BYTES_OK, SSH_FACTS_SCRIPT, SSH_READ_SCRIPT, SshBackend, knownHostTarget, sshControlPath, type ExecResult, type SshHostKeyReader, type SshReach, type SshTransport } from "@wsp/engine";
 import type { SshWiring } from "../src/runtime.js";
 
 /** The key the box in this fake holds, which is what the client on this computer knows it by: two addresses for
@@ -33,7 +32,7 @@ export const FAKE_UPTIME_S = 90_061;
 
 /** An ssh client that never leaves this computer: each machine answers the read with its own facts, every script it
  * was asked to carry is recorded, and a case scripts the answers. */
-export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<ExecResult> = () => ({}), deployed?: FakeSshDaemon): { wiring: SshWiring; carried: { reach: SshReach; script: string; stdin?: Uint8Array }[]; masters: Set<string> } {
+export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<ExecResult> = () => ({})): { wiring: SshWiring; carried: { reach: SshReach; script: string; stdin?: Uint8Array }[]; masters: Set<string> } {
   const carried: { reach: SshReach; script: string; stdin?: Uint8Array }[] = [];
   /** What is on the machine, as the writes this fake saw left it. */
   const files = new Set<string>();
@@ -84,69 +83,9 @@ export function fakeSsh(answer: (script: string, reach: SshReach) => Partial<Exe
   return {
     wiring: {
       backend,
-      adopt: async (address, opts) => {
-        const reach = parseSshAddress(address, opts);
-        const { machine, login, shape, hostKey } = await backend.adopt(reach);
-        return { machine, name: sshMachineName(reach), login, shape, ...(hostKey !== undefined ? { identity: sshIdentity(hostKey, login.USER), hostKey } : {}) };
-      },
-      ...(deployed === undefined
-        ? {}
-        : {
-            deployDaemon: async (machine, login) => {
-              deployed.deploys.push({ machineId: machine.id, ...login });
-              if (deployed.refuse !== undefined) {
-                if (deployed.lacks === true) throw machineLacking(deployed.refuse);
-                if (deployed.unanswered === true) throw machineUnanswered(deployed.refuse);
-                throw new Error(deployed.refuse);
-              }
-              // The real deploy lands the token file over this same road before it starts the daemon, and the
-              // rotation afterwards reads that the file is there; a fake that skipped it would prove neither.
-              await machine.putBytes!(sshDaemonPaths(login.home).tokenPath, new TextEncoder().encode("0".repeat(48)));
-              return "daemon on node v22.23.2";
-            },
-            forward: async (machine, remotePort) => {
-              const held = deployed.forwards.find(f => f.machineId === machine.id && !f.dropped);
-              if (held !== undefined && held.remotePort === remotePort) return { localPort: held.localPort };
-              const made = { machineId: machine.id, remotePort, localPort: 40000 + deployed.forwards.length, dropped: false };
-              deployed.forwards.push(made);
-              return { localPort: made.localPort };
-            },
-            removeDaemon: async (machine, login) => {
-              deployed.removals.push({ machineId: machine.id, ...login });
-              if (deployed.refuseRemoval !== undefined) throw new Error(deployed.refuseRemoval);
-            },
-            dropForward: async machine => {
-              for (const f of deployed.forwards) if (f.machineId === machine.id) f.dropped = true;
-            },
-            close: async () => {
-              for (const f of deployed.forwards) f.dropped = true;
-              deployed.closed = true;
-            },
-          }),
     },
     carried,
     masters,
   };
 }
 
-/** A host that puts daemons on machines over ssh and holds the forwards to them, all in this process: what was
- * deployed and where, every forward it opened and whether it was dropped, and whether the host closed. */
-export interface FakeSshDaemon {
-  deploys: { machineId: string; home: string; path: string }[];
-  /** Every machine the daemon was taken off again, in order. */
-  removals: { machineId: string; home: string; path: string }[];
-  forwards: { machineId: string; remotePort: number; localPort: number; dropped: boolean }[];
-  closed: boolean;
-  /** Set to make the deploy refuse, the way a machine with no compiler does. */
-  refuse?: string;
-  /** That the refusal is the machine's own words about what it lacks, which is what the real preflight marks its
-   * throw with; without it the refusal is a deploy that failed further in, the way npm does. */
-  lacks?: boolean;
-  /** That the check never reached the machine, the way a box switched off ends it: the words are the ssh client's
-   * own, and the real preflight marks that throw apart from a machine's refusal. */
-  unanswered?: boolean;
-  /** Set to make the removal refuse, the way a machine that will not answer the dial does. */
-  refuseRemoval?: string;
-}
-
-export const fakeSshDaemon = (over: Partial<FakeSshDaemon> = {}): FakeSshDaemon => ({ deploys: [], removals: [], forwards: [], closed: false, ...over });

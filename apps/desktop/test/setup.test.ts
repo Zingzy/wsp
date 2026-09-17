@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalBackend, NoProviderBackend, type GoldenManifest } from "@wsp/engine";
-import { isLocalWorkspace } from "@wsp/protocol";
+import { isLocalWorkspace, type WorkspaceView } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fakeSsh } from "../../../packages/runtime/test/fake-ssh.js";
 import { stubBackend } from "../../../packages/host/test/stub-backend.js";
-import { checkSetup, recordThisComputer } from "../src/setup.js";
+import { checkSetup, openThisComputer } from "../src/setup.js";
 import type { Keys, ProviderEnv } from "@wsp/host";
 
 const SOLARI = "slr_live_fake_desktop_key";
@@ -25,6 +26,15 @@ const GOLDEN: GoldenManifest = {
     },
   ],
 };
+
+/** A project on this computer and its workspace, which is what a workspace here is: a folder of the person's own
+ * worked in place. */
+async function here(rt: Runtime, name: string): Promise<WorkspaceView> {
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-desktop-")));
+  execFileSync("git", ["init", "-q", folder]);
+  const project = await rt.projects.add({ source: folder, name });
+  return rt.workspaces.create({ project: project.id, name });
+}
 
 describe("checkSetup", () => {
   let dir: string;
@@ -66,18 +76,13 @@ describe("checkSetup", () => {
   });
 
   it("opens on a computer with no provider key whose state holds this computer", async () => {
-    await keyless.workspaces.createLocal("thisbox");
-    expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyless });
-  });
-
-  it("opens on a computer with no provider key whose state holds a machine over ssh", async () => {
-    await keyless.workspaces.createSsh("dev@box");
+    await here(keyless, "thisbox");
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyless });
   });
 
   it("carries the Claude key on that road, since a thread here uses it as a fork would", async () => {
     sources.env = { ANTHROPIC_API_KEY: "sk-ant-x-fake-desktop-key" };
-    await keyless.workspaces.createLocal("thisbox");
+    await here(keyless, "thisbox");
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyless });
     expect(made).toEqual([{ keys: { anthropic: "sk-ant-x-fake-desktop-key" }, statePath: join(dir, "state.json") }]);
   });
@@ -101,28 +106,29 @@ describe("checkSetup", () => {
     expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyed });
   });
 
-  describe("recordThisComputer", () => {
-    it("records this computer as the one local workspace with no key, the road wsp new --local takes, and hands back the runtime to serve", async () => {
-      const made = await recordThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
-      expect(made.runtime).toBe(keyless);
-      expect(isLocalWorkspace(made.workspace)).toBe(true);
-      expect((await keyless.workspaces.list()).map(w => w.id)).toEqual([made.workspace.id]);
-      // The state now has something to show, so the next launch opens without this step.
-      expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: true, runtime: keyless });
+  describe("openThisComputer", () => {
+    it("records nothing: a workspace is one project's copy, so a first launch hands back the runtime and no workspace", async () => {
+      const opened = await openThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
+      expect(opened.runtime).toBe(keyless);
+      expect(opened.workspace).toBeNull();
+      expect(await keyless.workspaces.list()).toEqual([]);
+      // Nothing was made, so the state still has nothing to show and the next launch opens on the same screen.
+      expect(await checkSetup({ statePath: join(dir, "state.json"), sources, runtimeFor })).toEqual({ ready: false });
     });
 
-    it("keeps a local workspace already recorded rather than refusing a second", async () => {
-      const first = await keyless.workspaces.createLocal("thisbox");
-      const made = await recordThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
-      expect(made.workspace.id).toBe(first.id);
+    it("hands back the workspace on this computer where one already stands", async () => {
+      const first = await here(keyless, "thisbox");
+      const opened = await openThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
+      expect(opened.workspace!.id).toBe(first.id);
+      expect(isLocalWorkspace(opened.workspace!)).toBe(true);
       expect(await keyless.workspaces.list()).toHaveLength(1);
     });
 
-    it("takes the same road with a provider key and no golden: this computer first, the cloud later", async () => {
+    it("takes the same road with a provider key and no golden", async () => {
       sources.env = { SOLARI_API_KEY: SOLARI };
-      const made = await recordThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
-      expect(made.runtime).toBe(keyed);
-      expect(isLocalWorkspace(made.workspace)).toBe(true);
+      const opened = await openThisComputer({ statePath: join(dir, "state.json"), sources, runtimeFor });
+      expect(opened.runtime).toBe(keyed);
+      expect(opened.workspace).toBeNull();
     });
   });
 });

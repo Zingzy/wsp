@@ -80,3 +80,14 @@ export async function wsRequest(
   c.close();
   return res;
 }
+
+let wired = 0;
+
+/** A project over the wire and a workspace of it. A test about the frames is not about the project, and a
+ * workspace is one project's copy, so this is the one line that makes both: a fresh repo on the computer this
+ * host forks at, since one source on one computer is one project. */
+export async function createOverWire(c: Pick<WsClient, "request">, name: string, body: Record<string, unknown> = {}): Promise<WireMsg> {
+  const answer = await c.request("projects.add", { source: `https://github.com/wsp/wire-${++wired}.git`, on: "default" });
+  const project = (answer["project"] as { id: string } | undefined)?.id;
+  return c.request("workspaces.create", { ...(project !== undefined ? { project } : {}), name, ...body });
+}

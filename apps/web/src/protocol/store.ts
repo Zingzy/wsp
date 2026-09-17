@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, withProject, workspaceProjects, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, kindForComputer, worksInPlace, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -45,13 +45,15 @@ export interface Creation {
    * nothing from it; a line this app stamps itself (the image build's) measures from here, since the build runs
    * before the runtime's own clock on this create starts. */
   readonly askedAt: number;
-  /** The snapshot the create forks, when it is not the golden's head: a project golden's. */
+  /** The project this work is on, by its id: what the create was asked with, and what a retry asks again. Absent on
+   * a row another client started, whose creating frames name the workspace and not the project it came from. */
+  readonly project?: string;
+  /** The snapshot the create forks, when it is not the image's head: a project image's. */
   readonly golden?: string;
   /** The size the person picked; absent, the golden's. */
   readonly size?: WorkspaceSize;
-  /** The computer or provider the person picked in Where, by the word the create was asked with; absent, wherever
-   * a fork last landed. The image build's own frames name their place, so this is what says which are this
-   * create's. */
+  /** The computer the work lands on, which is the project's own, by the id its row carries. The image build's own
+   * frames name their place, so this is what says which are this create's. */
   readonly where?: string;
   /** The id the runtime minted, known from its first stage event. */
   readonly workspaceId: string | null;
@@ -110,6 +112,8 @@ interface State {
   connectOpen: boolean;
   /** Every computer this wsp runs on, as the Settings table shows them; the four place events keep it current. */
   places: PlaceView[];
+  /** Every project this wsp holds, which is what a workspace is made of; the two project events keep it current. */
+  projects: ProjectView[];
   /** Whether the host has answered about that list yet. An empty list is an answer and a list not asked for yet is
    * not: what draws only while this computer is the only row would otherwise draw on every load and go again. */
   placesRead: boolean;
@@ -158,14 +162,10 @@ interface State {
   toggleSettings(): void;
   /** Paints the patch at once and sends it; the host's answer settles the record, a refusal is a toast and the host's record is read again. */
   setPreferences(patch: PreferencesPatch): Promise<void>;
-  /** Starts a create from the golden head, or from `golden` (a project golden's snapshot) when given, selects its row,
-   * and follows it through the stage events; resolves with the runtime's id for the new workspace, or null when the
-   * create was refused. */
-  createWorkspace(name: string, golden?: string, size?: WorkspaceSize, on?: string): Promise<string | null>;
-  /** Makes this computer the host's local workspace and selects it, or selects the one it already is: there is one
-   * per host, so a second pick is a selection, not a create. Null when the road is not there or the host refused,
-   * whose own sentence lands as the toast. */
-  createLocalWorkspace(): Promise<string | null>;
+  /** Starts a workspace for one piece of work on the project named, by the project's id, selects its row and follows
+   * it through the stage events; resolves with the runtime's id for the new workspace, or null when the create was
+   * refused. `picked` carries a project image or a size only where the person chose one. */
+  createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null>;
   /** Runs a failed creation again under the same row. */
   retryCreation(key: string): Promise<void>;
   dismissCreation(key: string): void;
@@ -182,7 +182,6 @@ interface State {
   /** The project an import landed, onto the workspace it landed on: the host answers the record it has just kept, so
    * the pane lists the folder as soon as the import returns, whether or not the machine's daemon is up to say
    * anything about what is in it. */
-  landProject(workspaceId: string, project: WorkspaceProject): void;
   /** The row leaves on the host's forward.close; a refusal is a toast. */
   stopForward(workspaceId: string, port: number): Promise<void>;
   clearToast(): void;
@@ -304,21 +303,22 @@ export const useStore = create<State>((set, get) => {
     }));
     if (opened) writeAddress({ workspaceId });
   };
-  /** Whether a fork of the golden head is held back, having said so in the toast: the refusal is spoken before a
+  /** Whether a fork of the image head is held back, having said so in the toast: the refusal is spoken before a
    * creation row exists, so a person who asks too early reads where the image is rather than a row that only failed.
-   * A fork of a named snapshot has its own image and is never held back here. */
-  const holdCreate = (golden: string | undefined): boolean => {
-    if (golden !== undefined) return false;
+   * A project worked in place forks nothing and a fork of a named project image has its own image, so neither is
+   * held back here. */
+  const holdCreate = (computer: string | undefined, golden: string | undefined): boolean => {
+    if (golden !== undefined || (computer !== undefined && worksInPlace(kindForComputer(computer)))) return false;
     const refusal = cloudCreateRefusal({ hasGolden: get().hasGolden, job: get().initJob });
     if (refusal === null) return false;
     set({ toast: refusal.line, toastAction: { for: refusal.line, word: refusal.word, run: () => get().openSetup() } });
     return true;
   };
-  const runCreation = async (key: string, name: string, golden?: string, size?: WorkspaceSize, on?: string): Promise<string | null> => {
+  const runCreation = async (key: string, project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
     try {
-      const { notice, ...workspace } = await (golden === undefined ? api.createFromGoldenHead(name, size, on) : api.createWorkspace(golden, name, size, on));
+      const { notice, ...workspace } = await api.createWorkspace(project, name, picked);
       if (notice !== undefined) set({ toast: notice });
       // The created event normally lands first; when the reply beats it, the row still has a workspace to become.
       set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
@@ -395,6 +395,7 @@ export const useStore = create<State>((set, get) => {
     const placesAsked = api.placesList?.();
     if (placesAsked === undefined) set({ placesRead: true });
     else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
+    void api.projectsList?.().then(projects => set({ projects })).catch(() => {});
     void api
       .preferences?.()
       .then(preferences => {
@@ -424,6 +425,7 @@ export const useStore = create<State>((set, get) => {
     setupOpen: false,
     connectOpen: false,
     places: [],
+    projects: [],
     placesRead: false,
     addComputerOpen: false,
     connectProviderOpen: false,
@@ -494,42 +496,28 @@ export const useStore = create<State>((set, get) => {
         if (preferenceSetsInFlight === 0) void api.preferences?.().then(preferences => set({ preferences })).catch(() => {});
       }
     },
-    async createWorkspace(name, golden, size, on) {
-      if (!get().api || holdCreate(golden)) return null;
+    async createWorkspace(project, name, picked) {
+      // The computer is the project's own, so the row that waits on an image build is keyed by it and nothing asks
+      // the person where the work goes.
+      const computer = get().projects.find(p => p.id === project)?.computer;
+      if (!get().api || holdCreate(computer, picked?.golden)) return null;
       const key = `creating:${++creationSeq}`;
       set(s => ({
-        creations: [...s.creations, { key, name, askedAt: Date.now(), ...(golden !== undefined ? { golden } : {}), ...(size !== undefined ? { size } : {}), ...(on !== undefined ? { where: on } : {}), workspaceId: null, lines: NO_LINES, failed: null }],
+        creations: [
+          ...s.creations,
+          { key, name, project, askedAt: Date.now(), ...(picked?.golden !== undefined ? { golden: picked.golden } : {}), ...(picked?.size !== undefined ? { size: picked.size } : {}), ...(computer !== undefined ? { where: computer } : {}), workspaceId: null, lines: NO_LINES, failed: null },
+        ],
         selectedId: key,
         selectedThreadId: null,
       }));
-      return runCreation(key, name, golden, size, on);
-    },
-    async createLocalWorkspace() {
-      const api = get().api;
-      if (api?.createLocalWorkspace === undefined) return null;
-      // One local workspace per host: the second pick is the row this computer already is.
-      const existing = get().workspaces.find(w => isLocalWorkspace(w));
-      if (existing !== undefined) {
-        get().select(existing.id);
-        return existing.id;
-      }
-      try {
-        const workspace = await api.createLocalWorkspace();
-        set(s => (s.workspaces.some(w => w.id === workspace.id) ? {} : { workspaces: [...s.workspaces, workspace].sort((a, b) => a.id.localeCompare(b.id)) }));
-        get().select(workspace.id);
-        return workspace.id;
-      } catch (e) {
-        // This computer forks nothing and boots nothing, so there is no creation row to carry a refusal: the host's
-        // own sentence is what the person reads, as the command line gives it.
-        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
-        return null;
-      }
+      return runCreation(key, project, name, picked);
     },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
-      if (!creation || holdCreate(creation.golden)) return;
+      // A row another client started carries no project, so there is nothing here to ask again.
+      if (!creation || creation.project === undefined || holdCreate(creation.where, creation.golden)) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
-      await runCreation(key, creation.name, creation.golden, creation.size, creation.where);
+      await runCreation(key, creation.project, creation.name, { ...(creation.golden !== undefined ? { golden: creation.golden } : {}), ...(creation.size !== undefined ? { size: creation.size } : {}) });
     },
     dismissCreation(key) {
       set(s => ({
@@ -708,13 +696,6 @@ export const useStore = create<State>((set, get) => {
         statuses: s.statuses[workspace.id] ? { ...s.statuses, [workspace.id]: { ...s.statuses[workspace.id]!, ...workspace } } : s.statuses,
       }));
     },
-    landProject(workspaceId, project) {
-      const put = <T extends WorkspaceView>(w: T): T => (w.id === workspaceId ? { ...w, projects: withProject(workspaceProjects(w), project) } : w);
-      set(s => ({
-        workspaces: s.workspaces.map(put),
-        statuses: s.statuses[workspaceId] ? { ...s.statuses, [workspaceId]: put(s.statuses[workspaceId]!) } : s.statuses,
-      }));
-    },
     applyEvent(e) {
       switch (e.type) {
         case "workspace.renamed":
@@ -763,6 +744,12 @@ export const useStore = create<State>((set, get) => {
           return;
         case "place.removed":
           set(s => ({ places: s.places.filter(p => p.id !== e.placeId) }));
+          return;
+        case "project.added":
+          set(s => ({ projects: [...s.projects.filter(p => p.id !== e.project.id), e.project] }));
+          return;
+        case "project.removed":
+          set(s => ({ projects: s.projects.filter(p => p.id !== e.projectId) }));
           return;
         case "forward.open":
           set(s => ({ forwards: [...s.forwards.filter(f => !(f.workspaceId === e.forward.workspaceId && f.port === e.forward.port)), e.forward] }));

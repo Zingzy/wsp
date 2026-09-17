@@ -44,7 +44,7 @@ const WS = CHAT_WS;
 const workspace: WorkspaceView = {
   id: WS,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -81,7 +81,6 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, statuses: Work
     listSessions: async () => [],
     listHarnesses: async () => [TABLE_CATALOG],
     watchStatuses: async () => statuses,
-    createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {

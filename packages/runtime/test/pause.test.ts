@@ -12,7 +12,7 @@ import { createRuntime, type HarnessAdapterFactory, type RuntimeOptions } from "
 import { serveRuntime } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
 
@@ -61,7 +61,7 @@ describe("the pause mode gates the two moves", () => {
   it("nap and wake are refused with the provider's own sentence on a backend without a pause mode, and taken on one declaring disk", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     delete backend.capabilities.pauseMode;
     // A machine wsp forks whose provider does not pause is not a machine wsp does not run: the refusal names the
     // provider's limit, as every other verb this machine cannot take does.
@@ -87,7 +87,7 @@ describe("nap phase order", () => {
     const rt = createRuntime({ backend, store, adapters: {} });
     const pushed: string[] = [];
     rt.events.on("workspace.status", e => e.type === "workspace.status" && pushed.push(`${e.status.phase}/${e.status.machineState}/${e.status.reach.state}`));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const m = backend.machines[0]!;
     const pause = m.pause.bind(m);
     let midPause: { stored: string; read: string; pushed: string[] } | undefined;
@@ -108,7 +108,7 @@ describe("nap phase order", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: factory } });
     const pushed: EventUnion[] = [];
     rt.events.on("*", e => pushed.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const handle = await rt.sessions.start(ws.id, { prompt: "hi" });
     backend.machines[0]!.pause = async () => {
       throw new Error("provider down");
@@ -123,7 +123,7 @@ describe("nap phase order", () => {
   it("a wake asked during the pause waits for it and then wakes; a second nap joins the first", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const m = backend.machines[0]!;
     const gate = holdable<void>();
     const pause = m.pause.bind(m);
@@ -149,7 +149,7 @@ describe("the start guard", () => {
     const backend = stubBackend();
     const { factory } = hangingAdapter();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: factory } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const m = backend.machines[0]!;
     const pauseGate = holdable<void>();
     const pause = m.pause.bind(m);
@@ -196,8 +196,8 @@ describe("sessions end with the machine", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: factory } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    const a = await createOn(rt, { golden: "snap_g", name: "a" });
+    const b = await createOn(rt, { golden: "snap_g", name: "b" });
     const one = await rt.sessions.start(a.id, { prompt: "one" });
     const two = await rt.sessions.start(a.id, { prompt: "two" });
     const other = await rt.sessions.start(b.id, { prompt: "other" });
@@ -240,7 +240,7 @@ describe("sessions end with the machine", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: factory } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "one" });
     await rt.workspaces.delete(ws.id);
     expect(ends(events)).toHaveLength(1);
@@ -255,7 +255,7 @@ describe("a record left at pausing", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const first = createRuntime({ backend, store, adapters: {} });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(first, { golden: "snap_g", name: "x" });
     const stored = (await store.get("workspaces", ws.id)) as { phase: string };
     await store.put("workspaces", ws.id, { ...stored, phase: "pausing" });
     backend.machines[0]!.paused = true;
@@ -273,7 +273,7 @@ describe("a record left at pausing", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const first = createRuntime({ backend, store, adapters: {} });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(first, { golden: "snap_g", name: "x" });
     const stored = (await store.get("workspaces", ws.id)) as { phase: string };
     await store.put("workspaces", ws.id, { ...stored, phase: left });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -300,7 +300,7 @@ describe("a record that says napping over a machine the provider runs", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.workspaces.nap(ws.id);
     const m = backend.machines[0]!;
     m.paused = false;
@@ -341,7 +341,7 @@ describe("a record that says napping over a machine the provider runs", () => {
   it("pause on a record that says napping over a machine the provider holds paused asks once and pauses nothing", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.workspaces.nap(ws.id);
     const m = backend.machines[0]!;
     let asked = 0;
@@ -398,7 +398,7 @@ describe("a pause the runtime did not start", () => {
     });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "one" });
     await darkReach(backend);
     const m = backend.machines[0]!;
@@ -426,7 +426,7 @@ describe("a pause the runtime did not start", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const first = createRuntime({ backend, store, adapters: {} });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(first, { golden: "snap_g", name: "x" });
     const stored = (await store.get("workspaces", ws.id)) as { phase: string };
     // The host died inside a wake the provider never finished, and the machine is paused at the provider.
     await store.put("workspaces", ws.id, { ...stored, phase: "waking" });
@@ -448,7 +448,7 @@ describe("a pause the runtime did not start", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const first = createRuntime({ backend, store, adapters: {} });
-    const ws = await first.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(first, { golden: "snap_g", name: "x" });
     const stored = (await store.get("workspaces", ws.id)) as { phase: string };
     // The resume landed and the host died before it could write the record.
     await store.put("workspaces", ws.id, { ...stored, phase: "waking" });
@@ -466,7 +466,7 @@ describe("a pause the runtime did not start", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const m = backend.machines[0]!;
     const resume = m.resume.bind(m);
@@ -490,7 +490,7 @@ describe("a pause the runtime did not start", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
     let asked = 0;
     const state = m.state.bind(m);
@@ -542,7 +542,7 @@ describe("a provider move the backend gave up on", () => {
 
   it("a pause that ends in MoveUnansweredError puts the record back to running with the backend's words on the row, and the next pause works", async () => {
     const { backend, store, rt, events } = rig();
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const hung = unanswered(backend, "pause");
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(PAUSE_WORDS);
     expect(hung.calls).toBe(1);
@@ -558,7 +558,7 @@ describe("a provider move the backend gave up on", () => {
   it("a wake that ends in ResumeUnansweredError says so on the row, leaves the wake control open, and the next wake works", async () => {
     const { backend, store, rt, events } = rig();
     delete backend.lifecycle.budgets.resumeAsks;
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const hung = unanswered(backend, "resume");
@@ -583,7 +583,7 @@ describe("a provider move the backend gave up on", () => {
   it("a resume that lands after the wake gave up is found by one later read: the record follows to running instead of billing under a paused row", async () => {
     const { backend, store, fc, rt, events } = rig({ wake: { lateReadMs: 50 } });
     delete backend.lifecycle.budgets.resumeAsks;
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     unanswered(backend, "resume");
@@ -605,7 +605,7 @@ describe("a provider move the backend gave up on", () => {
   it("the runtime sends a pause once and never reads the machine inside it; a wake reads the machine before its resume and before a second ask, never inside a move", async () => {
     const { backend, fc, rt } = rig();
     backend.lifecycle.budgets.resumeAsks = { everyMs: 60, forMs: 120 };
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const m = backend.machines[0]!;
     const log: string[] = [];
     const realState = m.state.bind(m);

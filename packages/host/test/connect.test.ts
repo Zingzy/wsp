@@ -281,7 +281,7 @@ describe("a verb against a connected host", () => {
     const err: string[] = [];
     let startedHere = false;
     const newWorkspace = CLI_VERBS.find(v => v.name === "new")!;
-    await runVerb(newWorkspace, ["new", "here", "--on", "nowhere", "--host", "box"], io([], err), () => STATE, {
+    await runVerb(newWorkspace, ["new", "nowhere", "here", "--host", "box"], io([], err), () => STATE, {
       env: { WSP_HOME: box.home },
       start: () => {
         startedHere = true;
@@ -301,9 +301,9 @@ describe("a verb against a connected host", () => {
     // Refused on its own words before anything dials, which is where a verb that reads the state file and never
     // dials would be: nothing has been left unread, so nothing says it was.
     const newWorkspace = CLI_VERBS.find(v => v.name === "new")!;
-    const ran = await runVerb(newWorkspace, ["new", "one", "two", "--host", "box", "--state", STATE], io([], err), () => STATE, { env: { WSP_HOME: box.home } });
+    const ran = await runVerb(newWorkspace, ["new", "one", "two", "three", "--host", "box", "--state", STATE], io([], err), () => STATE, { env: { WSP_HOME: box.home } });
     expect(ran).toBe(3);
-    expect(err.join("\n")).toContain("wsp new takes one name");
+    expect(err.join("\n")).toContain("wsp new takes the work you are doing");
     expect(err.join("\n")).not.toContain("--state names");
   });
 

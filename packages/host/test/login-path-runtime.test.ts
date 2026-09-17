@@ -1,3 +1,4 @@
+import { HERE_PLACE_ID } from "@wsp/protocol";
 // SPDX-License-Identifier: AGPL-3.0-only
 // The login shell PATH and the turns that run under it: the read comes before
 // anything builds a runtime, and a runtime built before it still runs its turns
@@ -7,6 +8,7 @@
 //
 // Its own file: the shell is read once per process, so a case sharing a file
 // with another host start would read the PATH that start already took.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +17,7 @@ import type { Runtime } from "@wsp/runtime";
 import { cli, makeRuntime, serve } from "../src/cli.js";
 import { LAUNCHD_PATH, takeLoginPath } from "../src/login-path.js";
 import type { HostHandle } from "../src/server.js";
-import { PAGE, captured } from "./verbs-fixture.js";
+import { PAGE, captured, createOn, projectOn } from "./verbs-fixture.js";
 
 describe("the login shell PATH and the runtime built over it", () => {
   let dir: string;
@@ -60,7 +62,10 @@ describe("the login shell PATH and the runtime built over it", () => {
     const io = captured();
     // opts.runtime absent: this is the road the desktop's host takes, where serve builds what it serves.
     handle = await serve(io, { port: 0, wsPort: 0, statePath, webDir });
-    const workspace = await handle.createLocalWorkspace();
+    const folder = mkdtempSync(join(tmpdir(), "wsp-login-path-"));
+    execFileSync("git", ["init", "-q", folder]);
+    const project = await handle.addProject(folder);
+    const workspace = await handle.createWorkspace(project.name, undefined, project.id);
 
     const ran = captured();
     const code = await cli(["exec", "--state", statePath, workspace.id, "--", "sh", "-c", 'printf %s "$PATH"'], ran);
@@ -70,7 +75,7 @@ describe("the login shell PATH and the runtime built over it", () => {
 
   it("a runtime built on launchd's PATH runs its turns under the PATH the read leaves afterwards", async () => {
     runtime = makeRuntime({}, statePath);
-    const workspace = await runtime.workspaces.createLocal("mac");
+    const workspace = await createOn(runtime, { on: HERE_PLACE_ID, name: "mac" });
     // The read is what moves this process's PATH, and here it lands after the runtime was built.
     await takeLoginPath({ env: process.env, log: () => {} });
     expect(process.env["PATH"]).toBe(shellPath);

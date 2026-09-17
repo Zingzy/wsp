@@ -6,7 +6,7 @@ import { createRuntime, memoryStore, serveRuntime, type HarnessAdapterFactory, t
 import { afterEach, describe, expect, it } from "vitest";
 import { makeApi, ProtocolClient, type ConnStatus, type ProtocolEvent } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
-import { stubBackend } from "../../../packages/runtime/test/stub-backend.js";
+import { createOn, stubBackend } from "../../../packages/runtime/test/stub-backend.js";
 import { startTcpProxy, type TcpProxy } from "../../../packages/runtime/test/tcp-proxy.js";
 
 const TOKEN = "runtime-token";
@@ -59,14 +59,14 @@ describe("runtime socket reconnect", () => {
     proxy.cutAll();
     await until(() => useStore.getState().conn === "reconnecting");
     // Made while the tab was dark: the event reaches this tab only through replay on the next subscribe.
-    const dark = await rt.workspaces.create({ golden: "snap_g", name: "made-in-the-dark" });
+    const dark = await createOn(rt, { golden: "snap_g", name: "made-in-the-dark" });
     expect(events.some(e => e.type === "workspace.created")).toBe(false);
 
     await until(() => useStore.getState().conn === "live");
     await until(() => useStore.getState().workspaces.some(w => w.id === dark.id));
     await until(() => useStore.getState().statuses[dark.id] !== undefined);
 
-    const lit = await rt.workspaces.create({ golden: "snap_g", name: "after" });
+    const lit = await createOn(rt, { golden: "snap_g", name: "after" });
     await until(() => events.some(e => e.type === "workspace.created" && e.workspace.id === lit.id));
     expect(statuses).toEqual(["live", "reconnecting", "live"]);
 
@@ -103,7 +103,7 @@ describe("runtime socket reconnect", () => {
     await client.connect();
     useStore.getState().bind(makeApi(client));
     await until(() => useStore.getState().ready);
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "chatty" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "chatty" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     await until(() => events.some(e => e.type === "session.start"));
 
@@ -137,7 +137,7 @@ describe("runtime socket reconnect", () => {
     await client.connect();
     useStore.getState().bind(makeApi(client));
     await until(() => useStore.getState().ready);
-    await rtA.workspaces.create({ golden: "snap_g", name: "before" });
+    await createOn(rtA, { golden: "snap_g", name: "before" });
     await until(() => events.some(e => e.type === "workspace.created"));
 
     await srv.close();
@@ -145,12 +145,12 @@ describe("runtime socket reconnect", () => {
     const rtB: Runtime = createRuntime({ backend: stubBackend(), store, adapters: {} });
     srv = await serveRuntime(rtB, { port, authToken: TOKEN });
     // The new process is already past the old cursor when the tab comes back.
-    const unseen = await rtB.workspaces.create({ golden: "snap_g", name: "unseen" });
-    const later = await rtB.workspaces.create({ golden: "snap_g", name: "later" });
+    const unseen = await createOn(rtB, { golden: "snap_g", name: "unseen" });
+    const later = await createOn(rtB, { golden: "snap_g", name: "later" });
 
     await until(() => useStore.getState().conn === "live");
     await until(() => useStore.getState().gaps === 1);
-    const lit = await rtB.workspaces.create({ golden: "snap_g", name: "after-restart" });
+    const lit = await createOn(rtB, { golden: "snap_g", name: "after-restart" });
     await until(() => events.some(e => e.type === "workspace.created" && e.workspace.id === lit.id));
     expect(events.filter(e => e.type === "workspace.created").map(e => e.workspace.name)).toEqual(["before", "after-restart"]);
     // The store still converges: the reconnect pulls the list.

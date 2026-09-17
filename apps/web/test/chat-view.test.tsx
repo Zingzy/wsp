@@ -39,7 +39,7 @@ const T0 = CHAT_T0;
 const workspace: WorkspaceView = {
   id: WS,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   // A fork, so its record carries the provider it was made at; that is the word the waking line names.
   provider: "solari",
   phase: "running",
@@ -72,7 +72,6 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     capabilities: async () => (caps()),
     listSessions: async () => sessions,
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => ({ id: "s1", workspaceId: opts.workspaceId, harness: "claude", status: "running" }),
@@ -828,7 +827,7 @@ describe("ChatView", () => {
 });
 
 describe("the threads a thread opened", () => {
-  const BENCH: WorkspaceView = { id: "ws_bench", name: "spoo-bench", machineId: "m2", provider: "ascii", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+  const BENCH: WorkspaceView = { id: "ws_bench", name: "spoo-bench", machineId: "m2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "ascii", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
   const PARENT = "thr_lead";
   const scoped = { workspaceId: WS, sessionId: "sess_lead", turnId: "turn_lead", threadId: PARENT };
   const lead: SessionEvent[] = [

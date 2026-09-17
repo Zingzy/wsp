@@ -25,7 +25,7 @@ const URL_A = "https://dash.example.com/oauth2/auth?redirect_uri=http%3A%2F%2Flo
 const URL_B = "https://mcp-server.zomato.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A15384%2Fcallback&state=T";
 const DEVICE = "https://github.com/login/device";
 
-const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
+const view = (id: string, name: string): WorkspaceView => ({ id, name, machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" });
 
 const pages = () => useSignInStore.getState().pages;
 

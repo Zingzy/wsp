@@ -95,6 +95,7 @@ describe("a guest session on the host", () => {
     rt = createRuntime({ backend, store, adapters: {}, placeLinks: placeWiring(statePath, {}) });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     vi.stubEnv("SOLARI_API_KEY", "");
+    await handle.addProject("https://github.com/dev/alpha.git", "default");
     workspaceId = (await handle.createWorkspace("alpha")).id;
     sent = [];
     link = {

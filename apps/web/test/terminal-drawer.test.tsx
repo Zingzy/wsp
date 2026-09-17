@@ -166,7 +166,7 @@ describe("WorkspaceTerminalDrawer", () => {
   }, 20_000);
 });
 
-const view: WorkspaceView = { id: WS, name: "drawer", machineId: "m_drawer", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+const view: WorkspaceView = { id: WS, name: "drawer", machineId: "m_drawer", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 
 function Panel() {
   const state = useRightPanelStore(s => selectWorkspaceRightPanelState(s.byWorkspaceId, WS));
@@ -179,7 +179,7 @@ describe("terminal as a right-panel surface", () => {
   });
 
   it("a computer that is not answering refuses the Terminal and Processes panels in the panel itself, and asks for no pty", async () => {
-    const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" };
+    const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" };
     const { count } = fakeLink();
     act(() =>
       useStore.setState({
@@ -211,7 +211,7 @@ describe("terminal as a right-panel surface", () => {
   });
 
   it("asks for no pty on an absent computer from the shortcut, the split or the panel's own button either, so nothing toasts", async () => {
-    const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" };
+    const onPlace: WorkspaceView = { ...view, kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" };
     const { count } = fakeLink();
     act(() =>
       useStore.setState({
@@ -452,7 +452,7 @@ describe("drawer resilience", () => {
 });
 
 // The pane reads the workspace's state from the store; these set it by hand, the way a status push would.
-const PANE_WS: WorkspaceView = { id: WS, name: "api", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+const PANE_WS: WorkspaceView = { id: WS, name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 function paneStatus(over: Partial<WorkspaceStatus>): WorkspaceStatus {
   return { ...PANE_WS, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, ...over };
 }

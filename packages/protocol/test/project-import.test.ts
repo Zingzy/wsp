@@ -49,18 +49,14 @@ describe("importRequest", () => {
   });
 
   it("is assembled once: the command line and the MCP tool reach it through the verb table, the dialog and the wizard's first import call it, and none spells the request out again", () => {
-    const callers = ["packages/host/src/verbs.ts", "apps/web/src/sidebar/ImportProjectDialog.tsx", "packages/host/src/init-first.ts"];
+    // The import verb left the command line with the projects recut, so init's own first import is the one caller.
+    const callers = ["packages/host/src/init-first.ts"];
     for (const rel of callers) {
       const source = readFileSync(join(ROOT, rel), "utf8");
       expect(source, rel).toContain("importRequest(");
       expect(source, rel).not.toMatch(/dest: plan\.source/);
       expect(source, rel).not.toMatch(/consentRequest\(/);
     }
-    // The verb table holds both doors of import: one call and one consent read per door, nothing spelled out.
-    const verbs = readFileSync(join(ROOT, "packages/host/src/verbs.ts"), "utf8");
-    expect(verbs.match(/importRequest\(/g)).toHaveLength(2);
-    expect(verbs.match(/importConsented\(/g)).toHaveLength(2);
-    expect(verbs).not.toMatch(/keep\.length === 0 && cut\.length === 0/);
     // The MCP server registers the table and assembles no request of its own.
     const mcp = readFileSync(join(ROOT, "packages/host/src/mcp.ts"), "utf8");
     expect(mcp).not.toMatch(/importRequest\(|project\.import|\b(source|dest|keep|cut|agents):/);

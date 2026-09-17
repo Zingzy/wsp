@@ -2,7 +2,7 @@
 // The store's session folding: rows come from the sessions.list op, the
 // session.* events decide when to refetch and what to patch in between.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type SessionView, type WorkspaceView } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, DEFAULT_THEME, HOSTNAME_KEPT, type GoldenManifest, type InitJob, type PlaceView, type ProjectView, type SessionView, type WorkspaceView } from "@wsp/protocol";
 import { DisconnectedError, RequestError, type Api, type ProtocolEvent } from "../src/protocol/client.js";
 import { LAST_WORKSPACE_KEY } from "../src/protocol/lastWorkspace.js";
 import { useStore } from "../src/protocol/store.js";
@@ -13,7 +13,7 @@ import { onNewThreadRequest } from "../src/shell/shellRequests.js";
 const view = (id: string): WorkspaceView => ({
   id,
   name: id,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -37,7 +37,6 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
     },
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
-    createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => {
       pulls.statuses++;
       return workspaces.map(w => ({ ...w, machineState: "running" as const, reach: { state: "reachable" as const }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 }));
@@ -72,7 +71,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -253,6 +252,8 @@ describe("the address is the one record of what the person is reading", () => {
 describe("store creations", () => {
   const HERE_PLACE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, present: true };
   const HETZNER_PLACE: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: true, engine: "docker", present: true, takesForks: true };
+  /** The project every create here is made of: a repo on the computer that clones it, so the work goes there. */
+  const PROJECT_ON_HETZNER: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
 
   const stage = (over: Partial<Extract<ProtocolEvent, { type: "workspace.creating" }>> = {}): ProtocolEvent => ({
     type: "workspace.creating",
@@ -264,57 +265,14 @@ describe("store creations", () => {
     ...over,
   });
 
-  it("this computer is created once and selected, and a second call selects the row it already is", async () => {
-    const { api } = fakeApi([view("ws_a")], []);
-    const local: WorkspaceView = { ...view("ws_mac"), kind: "local", golden: "" };
-    api.createLocalWorkspace = vi.fn(async () => local);
-    useStore.getState().bind(api);
-    await flush();
-
-    expect(await useStore.getState().createLocalWorkspace()).toBe("ws_mac");
-    expect(useStore.getState().selectedId).toBe("ws_mac");
-    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_mac"]);
-    // This computer forks nothing and boots nothing: there is no creation row to watch and no stage to log.
-    expect(useStore.getState().creations).toEqual([]);
-    // The name is this computer's own, which the host is the one to know.
-    expect(api.createLocalWorkspace).toHaveBeenCalledWith();
-
-    useStore.getState().select("ws_a");
-    expect(await useStore.getState().createLocalWorkspace()).toBe("ws_mac");
-    expect(useStore.getState().selectedId).toBe("ws_mac");
-    // One local workspace per host, so the second call asked the host nothing.
-    expect(api.createLocalWorkspace).toHaveBeenCalledTimes(1);
-  });
-
-  it("a host that refuses this computer says so in its own sentence, with no creation row to carry it", async () => {
-    const { api } = fakeApi([view("ws_a")], []);
-    api.createLocalWorkspace = async () => {
-      throw new Error("this computer is already the workspace mac; one workspace stands on one machine");
-    };
-    useStore.getState().bind(api);
-    await flush();
-    expect(await useStore.getState().createLocalWorkspace()).toBeNull();
-    expect(useStore.getState().toast).toBe("this computer is already the workspace mac; one workspace stands on one machine");
-    expect(useStore.getState().creations).toEqual([]);
-  });
-
-  it("a client with no road to this computer offers none: nothing is asked and nothing is selected", async () => {
-    const { api } = fakeApi([view("ws_a")], []);
-    delete api.createLocalWorkspace;
-    useStore.getState().bind(api);
-    await flush();
-    expect(await useStore.getState().createLocalWorkspace()).toBeNull();
-    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);
-  });
-
   it("createWorkspace adds a selected row, adopts the runtime's id from the first stage by name, logs each stage, and swaps to the workspace when created", async () => {
     const workspaces = [view("ws_a")];
     const { api, emit } = fakeApi(workspaces, []);
     let finish!: (w: WorkspaceView) => void;
-    api.createFromGoldenHead = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
+    api.createWorkspace = () => new Promise<WorkspaceView>(resolve => { finish = resolve; });
     useStore.getState().bind(api);
     await flush();
-    const done = useStore.getState().createWorkspace("beta");
+    const done = useStore.getState().createWorkspace("pr_1", "beta");
     const [creation] = useStore.getState().creations;
     expect(creation).toMatchObject({ name: "beta", workspaceId: null, lines: [], failed: null });
     expect(useStore.getState().selectedId).toBe(creation!.key);
@@ -344,11 +302,13 @@ describe("store creations", () => {
 
   it("the image being built where the create is going reads as the first lines of that create's log", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
-    api.createFromGoldenHead = () => new Promise<WorkspaceView>(() => {});
+    api.createWorkspace = () => new Promise<WorkspaceView>(() => {});
     useStore.getState().bind(api);
     await flush();
     useStore.setState({ places: [HERE_PLACE, HETZNER_PLACE] });
-    void useStore.getState().createWorkspace("beta", undefined, undefined, "p_1");
+    useStore.setState({ projects: [PROJECT_ON_HETZNER] });
+    void useStore.getState().createWorkspace("pr_1", "beta");
+    // The computer the build's frames are matched by is the project's own, never a pick of its own.
     expect(useStore.getState().creations[0]!.where).toBe("p_1");
 
     // The build names the place by the word its backend table keys it with, which is the same row.
@@ -386,10 +346,10 @@ describe("store creations", () => {
 
   it("a reply that lands before the created event finishes the row from the reply, and carries its notice as the toast", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
-    api.createFromGoldenHead = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from image v1 to make room at the machine cap." });
+    api.createWorkspace = async () => ({ ...view("ws_new"), notice: "Stopped the builder kept from image v1 to make room at the machine cap." });
     useStore.getState().bind(api);
     await flush();
-    expect(await useStore.getState().createWorkspace("beta")).toBe("ws_new");
+    expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBe("ws_new");
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_new");
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a", "ws_new"]);
@@ -400,9 +360,9 @@ describe("store creations", () => {
 
   it("a refusal keeps the row with the failing line and the explanation; retry starts the same name over under the same key; dismiss drops it", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
-    const calls: string[] = [];
-    api.createFromGoldenHead = async name => {
-      calls.push(name);
+    const calls: Array<[string, string]> = [];
+    api.createWorkspace = async (project, name) => {
+      calls.push([project, name]);
       if (calls.length === 1) {
         emit(stage());
         emit(stage({ stage: "failed", message: "Sandbox limit reached (2)", elapsedMs: 900 }));
@@ -412,19 +372,20 @@ describe("store creations", () => {
     };
     useStore.getState().bind(api);
     await flush();
-    expect(await useStore.getState().createWorkspace("beta")).toBeNull();
+    expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBeNull();
     const failed = useStore.getState().creations[0]!;
     expect(failed.failed?.title).toBe("The provider refused: no more workspaces can run there now");
     expect(failed.lines.map(l => l.stage)).toEqual(["fork-requested", "failed"]);
     expect(useStore.getState().selectedId).toBe(failed.key);
 
     await useStore.getState().retryCreation(failed.key);
-    expect(calls).toEqual(["beta", "beta"]);
+    // The retry asks for the same work on the same project, under the same row.
+    expect(calls).toEqual([["pr_1", "beta"], ["pr_1", "beta"]]);
     expect(useStore.getState().creations).toEqual([]);
     expect(useStore.getState().selectedId).toBe("ws_new");
 
-    api.createFromGoldenHead = async () => { throw new Error("no golden image yet"); };
-    await useStore.getState().createWorkspace("gamma");
+    api.createWorkspace = async () => { throw new Error("no golden image yet"); };
+    await useStore.getState().createWorkspace("pr_1", "gamma");
     const again = useStore.getState().creations[0]!;
     expect(again.failed).toEqual({ title: "Could not create the workspace", detail: "no golden image yet" });
     // No failed stage arrived, so the refusal is the failing line.
@@ -434,14 +395,11 @@ describe("store creations", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
-  it("createWorkspace with a snapshot forks that image instead of the golden's head, and a retry keeps it", async () => {
+  it("createWorkspace with a project image forks that image instead of the computer's head, and a retry keeps it", async () => {
     const { api, emit } = fakeApi([view("ws_a")], []);
-    const calls: [string, string | undefined][] = [];
-    api.createFromGoldenHead = async () => {
-      throw new Error("the head is not what was asked for");
-    };
-    api.createWorkspace = async (golden, name) => {
-      calls.push([golden, name]);
+    const calls: Array<[string, string, string | undefined]> = [];
+    api.createWorkspace = async (project, name, picked) => {
+      calls.push([project, name, picked?.golden]);
       if (calls.length === 1) {
         emit(stage({ name: "proj-fork" }));
         emit(stage({ name: "proj-fork", stage: "failed", message: "Sandbox limit reached (2)", elapsedMs: 900 }));
@@ -451,10 +409,10 @@ describe("store creations", () => {
     };
     useStore.getState().bind(api);
     await flush();
-    expect(await useStore.getState().createWorkspace("proj-fork", "snap_project")).toBeNull();
+    expect(await useStore.getState().createWorkspace("pr_1", "proj-fork", { golden: "snap_project" })).toBeNull();
     const failed = useStore.getState().creations[0]!;
     await useStore.getState().retryCreation(failed.key);
-    expect(calls).toEqual([["snap_project", "proj-fork"], ["snap_project", "proj-fork"]]);
+    expect(calls).toEqual([["pr_1", "proj-fork", "snap_project"], ["pr_1", "proj-fork", "snap_project"]]);
     expect(useStore.getState().selectedId).toBe("ws_new");
   });
 
@@ -478,7 +436,7 @@ describe("store creations", () => {
     const { api } = fakeApi([view("ws_a")], []);
     const asked: string[] = [];
     api.getGolden = async () => undefined;
-    api.createFromGoldenHead = async name => {
+    api.createWorkspace = async name => {
       asked.push(name);
       return view("ws_new");
     };
@@ -487,7 +445,7 @@ describe("store creations", () => {
     useStore.setState({
       initJob: { id: "init_1", road: "manual", phase: "building", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" }, { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "running" }], progress: { done: 1, total: 2 }, log: [] },
     });
-    expect(await useStore.getState().createWorkspace("beta")).toBeNull();
+    expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBeNull();
     expect(asked).toEqual([]);
     // No row: the sidebar never gains a workspace that only failed, so there is nothing to retry or dismiss.
     expect(useStore.getState().creations).toEqual([]);
@@ -500,12 +458,12 @@ describe("store creations", () => {
     expect(useStore.getState().setupOpen).toBe(true);
     // With no build to point at, the same road says the image instead and its word opens the screens that build it.
     useStore.setState({ initJob: null, setupOpen: false });
-    expect(await useStore.getState().createWorkspace("gamma")).toBeNull();
+    expect(await useStore.getState().createWorkspace("pr_1", "gamma")).toBeNull();
     expect(useStore.getState().toast).toBe(CLOUD_SETUP_WORDS.create.none);
     expect(useStore.getState().toastAction!.word).toBe(CLOUD_SETUP_WORDS.create.build);
     // A named snapshot carries its own image, so that fork is never held back by the golden's absence.
     api.createWorkspace = async () => view("ws_new");
-    expect(await useStore.getState().createWorkspace("proj-fork", "snap_project")).toBe("ws_new");
+    expect(await useStore.getState().createWorkspace("pr_1", "proj-fork", { golden: "snap_project" })).toBe("ws_new");
     // The sentence the person reads is never the one that names a command to run.
     expect(JSON.stringify([useStore.getState().toast, CLOUD_SETUP_WORDS.create])).not.toMatch(/wspx|golden build/);
   });
@@ -851,6 +809,41 @@ describe("store connection", () => {
   });
 });
 
+describe("the projects a workspace is made of", () => {
+  const SPOO: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+  const WSP: ProjectView = { id: "pr_2", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: "t" };
+
+  it("are read at bind and kept by the two project events: one added shows, one removed goes, and an id nothing holds leaves the list as it was", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.projectsList = async () => [SPOO];
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_1"]);
+
+    // A project recorded anywhere, by this app or by the command line, lands here off the host's own event.
+    useStore.getState().applyEvent({ type: "project.added", project: WSP });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_1", "pr_2"]);
+    expect(useStore.getState().projects.find(p => p.id === "pr_2")).toEqual(WSP);
+    // The same project again is the record as it now stands, never a second row of it.
+    useStore.getState().applyEvent({ type: "project.added", project: { ...WSP, name: "wsp-renamed" } });
+    expect(useStore.getState().projects.map(p => p.name)).toEqual(["spoo-landing", "wsp-renamed"]);
+
+    useStore.getState().applyEvent({ type: "project.removed", projectId: "pr_1" });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_2"]);
+    // An id this app holds no record for changes nothing: the list is what the host said, not what an event guessed.
+    useStore.getState().applyEvent({ type: "project.removed", projectId: "pr_nobody" });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_2"]);
+  });
+
+  it("a host whose wire carries no project list leaves the list empty rather than waiting on a reply that is never coming", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    delete api.projectsList;
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().projects).toEqual([]);
+  });
+});
+
 describe("store workspaces", () => {
   it("a refused nap reverts the optimistic phase and toasts the reason", async () => {
     const { api } = fakeApi([view("ws_a")], []);
@@ -936,7 +929,7 @@ describe("store workspaces", () => {
     const was = useStore.getState().statuses["ws_a"]!;
     emit({ type: "workspace.renamed", workspaceId: "ws_a", name: "the name he typed" });
     expect(useStore.getState().workspaces[0]!.name).toBe("the name he typed");
-    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ name: "the name he typed", phase: was.phase, machineId: was.machineId, machineState: was.machineState });
+    expect(useStore.getState().statuses["ws_a"]).toMatchObject({ name: "the name he typed", phase: was.phase, machineId: was.machineId, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, machineState: was.machineState });
     // A workspace no row holds is not invented by a name.
     emit({ type: "workspace.renamed", workspaceId: "ws_gone", name: "nobody" });
     expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_a"]);

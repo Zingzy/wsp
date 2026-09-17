@@ -94,7 +94,7 @@ describe("what wsp says when it will not run a line", () => {
     expect(relay.code).toBe(EXIT_CODES.usage);
     expect(relay.io.errors).toEqual(["unknown command: relay. Run wsp --help for the list."]);
     // A flag wsp used to read is the parser's own unknown option, with the line's usage under it.
-    for (const argv of [["import", "/tmp/x", "--to", "alpha"], ["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"]]) {
+    for (const argv of [["threads", "--in", "alpha"], ["new", "x", "--local"], ["new", "x", "--ssh", "maya@box"], ["new", "x", "--on", "here"]]) {
       const { code, io } = await run(...argv);
       const line = argv.join(" ");
       expect(code, line).toBe(EXIT_CODES.usage);

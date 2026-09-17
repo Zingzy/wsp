@@ -1,69 +1,82 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The projects a workspace holds and the one rule for which of them a thread
-// starts in: the composer, the command line and the runtime all read it here.
+// What one word to wsp add names, what a project is called, where its
+// checkout sits inside a workspace of it, and which workspace a folder on
+// this computer belongs to: the command line, the runtime and the app all
+// read these here.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PREFERENCES, dropTileLine, folderName, hiddenFolder, isMacMachine, goldenForkName, homeShortened, lastTargetLine, noProjectLine, noWorkspaceForFolderLine, projectAt, projectCountCell, projectFor, ProjectGolden, projectsInPlace, REGISTERING_LINE, registeredLine, registerRequest, registerTakesNoConsentLine, THIS_COMPUTER, threadOpenedLine, withProject, workspaceForFolder, workspaceProjects, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, ADD_FORMS_LINE, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
-const view = { id: "ws_1", name: "b2", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-06T09:00:00.000Z" };
+const ref = { id: "pr_1a2b3c4d", name: "spoo-landing", path: "/root/spoo-landing", computer: "pl_box" };
+const view = { id: "ws_1", name: "b2", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-06T09:00:00.000Z", project: ref };
 
-describe("the projects on a workspace", () => {
-  it("a workspace view carries its projects as a list, each with a size when the import measured one; the old single field is not a view", () => {
-    expect(WorkspaceView.parse({ ...view, projects: [spoo, wsp] })).toEqual({ ...view, projects: [spoo, wsp] });
+const folderSource = (path: string): ProjectSource => ({ kind: "folder", path });
+const gitSource = (url: string): ProjectSource => ({ kind: "git", url });
+
+const project = (over: Partial<ProjectView>): ProjectView => ({
+  id: "pr_1",
+  name: "wsp",
+  computer: "here",
+  source: folderSource("/Users/dev/wsp"),
+  path: "/Users/dev/wsp",
+  createdAt: "2026-09-17T00:00:00.000Z",
+  ...over,
+});
+
+describe("what one word to wsp add names", () => {
+  it("a login is a computer, a url or a repo path is a repo, a path is a folder, and anything else is refused with the three forms", () => {
+    expect(sourceKind("root@spoo")).toBe("computer");
+    expect(sourceKind("root@178.156.161.168")).toBe("computer");
+    expect(sourceKind("git@github.com:spoo-me/frontend.git")).toBe("git");
+    expect(sourceKind("https://github.com/spoo-me/frontend")).toBe("git");
+    expect(sourceKind("spoo-me/frontend.git")).toBe("git");
+    expect(sourceKind("/Users/dev/wsp")).toBe("folder");
+    expect(sourceKind("~/spoo/spoo-landing")).toBe("folder");
+    expect(sourceKind("./frontend")).toBe("folder");
+    // A path is a path first: a folder somebody called repo.git is theirs on this computer, not a url.
+    expect(sourceKind("/Users/me/repo.git")).toBe("folder");
+    expect(() => sourceKind("spoo")).toThrow(ADD_FORMS_LINE);
+  });
+
+  it("a project is named by its repo's last word without .git, or by the folder's own name", () => {
+    expect(projectNameOf(gitSource("https://github.com/spoo-me/frontend.git"))).toBe("frontend");
+    expect(projectNameOf(gitSource("https://github.com/spoo-me/frontend"))).toBe("frontend");
+    expect(projectNameOf(gitSource("git@github.com:spoo-me/frontend.git"))).toBe("frontend");
+    expect(projectNameOf(folderSource("/Users/z/spoo/spoo-landing"))).toBe("spoo-landing");
+    expect(projectNameOf(folderSource("/Users/z/spoo/spoo-landing/"))).toBe("spoo-landing");
+  });
+
+  it("the checkout sits where the workspace's kind puts it: the folder itself on this computer, the copy's own home on a machine", () => {
+    expect(projectPathOn(gitSource("https://github.com/spoo-me/frontend"), "spoo-landing")).toBe("/root/spoo-landing");
+    expect(projectPathOn(folderSource("/Users/z/spoo/spoo-landing"), "spoo-landing")).toBe("/Users/z/spoo/spoo-landing");
+  });
+
+  it("which sources a computer takes is its kind's own row, so no road decides it for itself", () => {
+    expect(kindWords("local").projectSources).toEqual(["folder"]);
+    expect(kindWords("cloud").projectSources).toEqual(["git"]);
+    expect(kindWords("ssh").projectSources).toEqual([]);
+  });
+
+  it("the refusals name the project, the folder and the computer", () => {
+    expect(sameSourceRefusal("spoo-landing", "spoo")).toBe("that source is already a project on spoo, spoo-landing; one source on one computer is one project");
+    expect(NOT_A_REPO_LINE).toBe("is not a git repo; git init makes it one, or name a repo's url with --on <computer>");
+  });
+});
+
+describe("the project a workspace holds", () => {
+  it("a workspace view carries exactly one project; a view with none, and one still carrying the old list, is not a view", () => {
     expect(WorkspaceView.parse(view)).toEqual(view);
-    expect(WorkspaceView.safeParse({ ...view, projects: [{ name: "proj" }] }).success).toBe(false);
-    expect("project" in WorkspaceView.parse({ ...view, project: spoo })).toBe(false);
+    const { project: _dropped, ...noProject } = view;
+    expect(WorkspaceView.safeParse(noProject).success).toBe(false);
+    expect(WorkspaceView.safeParse({ ...noProject, projects: [spoo, wsp] }).success).toBe(false);
+    // A view that carries both does not carry the list on: one stored home per fact, and the wire says so.
+    expect("projects" in WorkspaceView.parse({ ...view, projects: [spoo] })).toBe(false);
   });
 
   it("a view carries the kind's own folder where the kind names one, the last branch of the rule, so a client shows the folder the runtime will open rather than guessing it", () => {
     expect(WorkspaceView.parse({ ...view, kind: "local", folder: "/Users/dev/wsp-work" })).toEqual({ ...view, kind: "local", folder: "/Users/dev/wsp-work" });
     expect(WorkspaceView.parse(view)).not.toHaveProperty("folder");
-  });
-
-  it("a view without the list reads as none, so no client guards an absent field", () => {
-    expect(workspaceProjects({})).toEqual([]);
-    expect(workspaceProjects({ ...view, projects: [spoo] })).toEqual([spoo]);
-  });
-
-  it("a landed import goes on the end, and a folder imported again is the one project at what the last import made of it", () => {
-    const again: WorkspaceProject = { ...spoo, importedAt: "2026-09-12T10:00:00Z", size: 2048 };
-    expect(withProject([], spoo)).toEqual([spoo]);
-    expect(withProject([spoo], wsp)).toEqual([spoo, wsp]);
-    expect(withProject([spoo, wsp], again)).toEqual([wsp, again]);
-  });
-
-  it("the default project: the one named, else the last used on the workspace, else the only one, else none", () => {
-    expect(projectFor([spoo, wsp], { named: "wsp", last: "spoo" })).toEqual(wsp);
-    expect(projectFor([spoo, wsp], { named: undefined, last: "spoo" })).toEqual(spoo);
-    expect(projectFor([spoo, wsp], { named: undefined, last: undefined })).toBeNull();
-    expect(projectFor([spoo], { named: undefined, last: undefined })).toEqual(spoo);
-    expect(projectFor([], { named: undefined, last: undefined })).toBeNull();
-    // A remembered pick the workspace no longer holds drops through; a named one that is not there is refused.
-    expect(projectFor([spoo, wsp], { named: undefined, last: "gone" })).toBeNull();
-    expect(projectFor([spoo], { named: undefined, last: "gone" })).toEqual(spoo);
-    expect(() => projectFor([spoo, wsp], { named: "gone", last: undefined })).toThrow(noProjectLine("gone", [spoo, wsp]));
-  });
-
-  it("the refusal names the project asked for and the ones the workspace has", () => {
-    expect(noProjectLine("gone", [spoo, wsp])).toBe('no project named "gone" on this workspace; its projects are spoo, wsp');
-    expect(noProjectLine("gone", [])).toBe('no project named "gone" on this workspace; it has no projects');
-  });
-
-  it("the project a folder sits in: the folder itself or one under it, the nearest when projects nest, none outside them all", () => {
-    const nested: WorkspaceProject = { name: "host", dest: "/root/wsp/packages/host", importedAt: "2026-09-03T00:00:00Z" };
-    expect(projectAt([spoo, wsp], "/root/spoo")).toEqual(spoo);
-    expect(projectAt([spoo, wsp], "/root/wsp/packages/host")).toEqual(wsp);
-    expect(projectAt([spoo, wsp, nested], "/root/wsp/packages/host/src")).toEqual(nested);
-    expect(projectAt([spoo, wsp], "/root/spoo-fork")).toBeNull();
-    expect(projectAt([spoo, wsp], undefined)).toBeNull();
-    expect(projectAt([], "/root/spoo")).toBeNull();
-  });
-
-  it("the count a workspace listing shows: nothing for none, the number otherwise", () => {
-    expect(projectCountCell([])).toBe("");
-    expect(projectCountCell([spoo])).toBe("1");
-    expect(projectCountCell([spoo, wsp])).toBe("2");
   });
 
   it("a view carries the machine's home where the kind knows it, so a client shortens a folder under it to ~ the way the machine's own shell would", () => {
@@ -76,16 +89,31 @@ describe("the projects on a workspace", () => {
   });
 });
 
-describe("getting a project onto a workspace", () => {
-  it("the drop tile's words follow the kind: a machine is imported to by name, this computer registers", () => {
-    expect(dropTileLine("cloud", "b2")).toBe("import to b2");
-    expect(dropTileLine("local", "zingzy-mac")).toBe(`register on ${THIS_COMPUTER}`);
-    // A machine over ssh takes a folder the way a fork does, over the connection that carries its commands.
-    expect(dropTileLine("ssh", "pi")).toBe("import to pi");
+describe("what a computer is called in a row", () => {
+  it("is this computer's own word for the computer the host runs on, and the name this wsp holds for every other", () => {
+    const named = new Map([["pl_box", "hetzner"]]);
+    expect(computerNamed(HERE_PLACE_ID, named, "darwin")).toBe("this Mac");
+    expect(computerNamed(HERE_PLACE_ID, named, "linux")).toBe("this computer");
+    expect(computerNamed("pl_box", named, "linux")).toBe("hetzner");
+    // A caller that could not read the list says the id rather than inventing a name for it.
+    expect(computerNamed("pl_box", undefined, "darwin")).toBe("pl_box");
   });
 
-  it("a register asks for the folder at its own path with nothing carried, rewritten or travelling, and the lines say nothing was copied", () => {
-    expect(registerRequest("/Users/dev/wsp")).toEqual({ source: "/Users/dev/wsp", dest: "/Users/dev/wsp", carry: [], rewrite: [] });
+  it("the line a recorded project answers with names the computer the same way, and says the command that makes its workspace", () => {
+    const project = { id: "pr_1", name: "spoo-landing", computer: "pl_box", source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+    expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin")).toBe(
+      'spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing inside a workspace of it\nmake one with: wsp new \'spoo-landing\' "<what you are working on>"',
+    );
+    // This computer's own word is the host's platform's, never a default: a line written on a Linux host says
+    // this computer where a Mac says this Mac, and neither reads the other's word.
+    const here = { ...project, id: "pr_2", name: "wsp", computer: HERE_PLACE_ID, source: { kind: "folder" as const, path: "/Users/dev/wsp" }, path: "/Users/dev/wsp" };
+    expect(addedProjectLine(here, new Map(), "darwin")).toContain("on this Mac, at /Users/dev/wsp");
+    expect(addedProjectLine(here, new Map(), "linux")).toContain("on this computer, at /Users/dev/wsp");
+  });
+});
+
+describe("getting a project onto a machine", () => {
+  it("a register says nothing was copied, and the flags a copy takes have no meaning here", () => {
     expect(REGISTERING_LINE).toBe("already on this computer, registering");
     expect(registeredLine("/Users/dev/wsp")).toBe("wsp registered at /Users/dev/wsp; nothing was copied.");
     expect(registerTakesNoConsentLine(["--keep"])).toBe("--keep has no meaning on this computer: the folder is registered at its path and nothing is carried, cut or replaced");
@@ -123,50 +151,35 @@ describe("getting a project onto a workspace", () => {
     expect(isMacMachine(undefined)).toBe(false);
     expect(isMacMachine("")).toBe(false);
   });
-
-  it("with no --to the import goes to the workspace the last thread started on, and the line says so", () => {
-    expect(lastTargetLine("b2")).toBe("importing to b2, the workspace the last thread started on");
-  });
 });
 
 describe("the workspace a folder on this computer belongs to", () => {
-  const b2 = { id: "ws_b2", name: "b2", kind: "cloud" as const, projects: [spoo, wsp] };
-  const b3 = { id: "ws_b3", name: "b3", kind: "cloud" as const, projects: [{ ...wsp, importedAt: "2026-09-05T00:00:00Z" }] };
-  const mac = { id: "ws_mac", name: "mac", kind: "local" as const, projects: [{ name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-06T00:00:00Z" }] };
+  const here = project({ id: "pr_wsp", name: "wsp", path: "/Users/dev/wsp", source: folderSource("/Users/dev/wsp") });
+  const nested = project({ id: "pr_host", name: "host", path: "/Users/dev/wsp/packages/host", source: folderSource("/Users/dev/wsp/packages/host") });
+  const cloned = project({ id: "pr_front", name: "frontend", computer: "pl_box", path: "/root/frontend", source: gitSource("https://github.com/spoo-me/frontend") });
+  const on = (p: ProjectView, id = `ws_${p.id}`) => ({ id, name: p.name, project: { id: p.id, name: p.name, path: p.path, computer: p.computer } });
 
-  it("a folder registered on this computer matches by its path; a folder imported to a box matches the project of its name on the workspace the last thread on it used, else the last target, else the first that holds it", () => {
-    const none = DEFAULT_PREFERENCES;
-    expect(workspaceForFolder([b2, b3, mac], "/Users/dev/wsp", none)).toEqual({ workspace: mac, project: mac.projects[0] });
-    // A repo of the same name elsewhere on this computer is not the registered one: a path is matched by its path, and
-    // only a copy on a box, whose folder here is unknown, is matched by its name.
-    expect(workspaceForFolder([mac], "/Users/dev/other/wsp", none)).toBeNull();
-    expect(workspaceForFolder([mac, b3], "/Users/dev/other/wsp", none)).toEqual({ workspace: b3, project: b3.projects[0] });
-    expect(workspaceForFolder([b2, b3], "/Users/dev/wsp", none)).toEqual({ workspace: b2, project: wsp });
-    expect(workspaceForFolder([b2, b3], "/Users/dev/wsp", { ...none, project: { ws_b3: "wsp" } })).toEqual({ workspace: b3, project: b3.projects[0] });
-    expect(workspaceForFolder([b2, b3], "/Users/dev/wsp", { ...none, target: { workspace: "ws_b3", project: "wsp" } })).toEqual({ workspace: b3, project: b3.projects[0] });
-    // The target wins over a per-workspace memory, since it is the later fact.
-    expect(workspaceForFolder([b2, b3], "/Users/dev/wsp", { ...none, project: { ws_b2: "wsp" }, target: { workspace: "ws_b3", project: "wsp" } })).toEqual({ workspace: b3, project: b3.projects[0] });
-    // A last thread in another project of that workspace says nothing about this folder.
-    expect(workspaceForFolder([b2, b3], "/Users/dev/wsp", { ...none, project: { ws_b3: "other" }, target: { workspace: "ws_b3" } })).toEqual({ workspace: b2, project: wsp });
-    expect(workspaceForFolder([b2, b3, mac], "/Users/dev/elsewhere", none)).toBeNull();
-    expect(workspaceForFolder([], "/Users/dev/wsp", none)).toBeNull();
+  it("a folder under a project worked in place picks that project's workspace, the nearest when projects nest", () => {
+    const wspWorkspace = on(here);
+    const hostWorkspace = on(nested);
+    expect(workspaceForFolder([wspWorkspace], [here], "/Users/dev/wsp")).toEqual({ workspace: wspWorkspace, project: here });
+    expect(workspaceForFolder([wspWorkspace], [here], "/Users/dev/wsp/packages/host/src")).toEqual({ workspace: wspWorkspace, project: here });
+    expect(workspaceForFolder([wspWorkspace, hostWorkspace], [here, nested], "/Users/dev/wsp/packages/host/src")).toEqual({ workspace: hostWorkspace, project: nested });
   });
 
-  it("a real import lands a box's copy at the folder's own path, and that path decides nothing among boxes: the target and the last project do, and only a copy registered on this computer wins by its path", () => {
-    const none = DEFAULT_PREFERENCES;
-    const here = { name: "spoo", dest: "/Users/dev/spoo", importedAt: "2026-09-04T00:00:00Z" };
-    const c2 = { id: "ws_c2", name: "c2", kind: "cloud" as const, projects: [here] };
-    const c3 = { id: "ws_c3", name: "c3", kind: "cloud" as const, projects: [{ ...here, importedAt: "2026-09-05T00:00:00Z" }] };
-    const home = { id: "ws_home", name: "home", kind: "local" as const, projects: [{ ...here, importedAt: "2026-09-06T00:00:00Z" }] };
-    expect(workspaceForFolder([c2, c3], "/Users/dev/spoo", { ...none, target: { workspace: "ws_c3", project: "spoo" } })).toEqual({ workspace: c3, project: c3.projects[0] });
-    expect(workspaceForFolder([c2, c3], "/Users/dev/spoo", { ...none, project: { ws_c3: "spoo" } })).toEqual({ workspace: c3, project: c3.projects[0] });
-    expect(workspaceForFolder([c2, c3], "/Users/dev/spoo", none)).toEqual({ workspace: c2, project: here });
-    // The folder is that project on this computer, whatever ran last elsewhere.
-    expect(workspaceForFolder([c2, home], "/Users/dev/spoo", { ...none, target: { workspace: "ws_c2", project: "spoo" } })).toEqual({ workspace: home, project: home.projects[0] });
+  it("a folder no project holds, and a project no workspace stands on, name nothing", () => {
+    expect(workspaceForFolder([on(here)], [here], "/Users/dev/elsewhere")).toBeNull();
+    expect(workspaceForFolder([], [here], "/Users/dev/wsp")).toBeNull();
+    expect(workspaceForFolder([on(here)], [], "/Users/dev/wsp")).toBeNull();
   });
 
-  it("the refusal names the folder and the road that lands it", () => {
-    expect(noWorkspaceForFolderLine("/Users/dev/my repo", "<workspace>")).toBe("no workspace holds a project for /Users/dev/my repo; name one with <workspace>, or wsp import <workspace> '/Users/dev/my repo' lands it there");
+  it("a project a computer cloned is on that computer, not here, so a folder of this name here is not it", () => {
+    expect(workspaceForFolder([on(cloned)], [cloned], "/root/frontend")).toBeNull();
+    expect(workspaceForFolder([on(cloned)], [cloned], "/Users/dev/frontend")).toBeNull();
+  });
+
+  it("the refusal names the folder and the road that records it", () => {
+    expect(noWorkspaceForFolderLine("/Users/dev/my repo", "<workspace>")).toBe("no workspace holds a project for /Users/dev/my repo; name one with <workspace>, or wsp add '/Users/dev/my repo' records it as a project here");
     // The tool has no flag to pass, so its refusal names its own word.
     expect(noWorkspaceForFolderLine("/Users/dev/spoo", "workspace")).toContain("name one with workspace,");
   });

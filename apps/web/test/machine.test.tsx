@@ -41,7 +41,7 @@ vi.mock("../src/components/ui/tooltip.js", () => ({
 const view = (id: string, name: string, phase: WorkspacePhase = "running"): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}_0123456789abcdef`,
+  machineId: `m_${id}_0123456789abcdef`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_golden01",
   createdAt: new Date(2026, 7, 30, 9, 0).toISOString(),
@@ -90,8 +90,6 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     snapshotWorkspace: ReturnType<typeof vi.fn<(id: string) => Promise<ProjectGolden>>>;
     createWorkspace: ReturnType<typeof vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>>;
   } = {
-    planProject: vi.fn(async () => ({ source: "/Users/dev/proj", repo: true, files: 1, bytes: 20, secrets: [], excluded: [], skipped: [], agents: [] })),
-    importProject: vi.fn(async () => ({ dest: "/root/proj", files: 1, bytes: 20, parts: 1, cut: [], rewritten: [], agents: [], project: { name: "proj", dest: "/root/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 20 } })),
     listProjectGoldens: vi.fn<() => Promise<ProjectGolden[]>>(async () => projects),
     snapshotWorkspace: vi.fn<(id: string) => Promise<ProjectGolden>>(async id => {
       const taken = pg(`snap_taken-${projects.length + 1}`, "snap_golden-v12", { workspaceId: id, createdAt: new Date(Date.now() + projects.length).toISOString() });
@@ -113,8 +111,7 @@ function fakeApi(workspaces: WorkspaceView[], capabilities: Capabilities = CAPS,
     }),
     listWorkspaces: vi.fn(async () => workspaces),
     getWorkspace: vi.fn(async id => workspaces.find(w => w.id === id)!),
-    createWorkspace: vi.fn<(golden: string, name?: string) => Promise<WorkspaceView>>(async () => workspaces[0]!),
-    createFromGoldenHead: vi.fn(async (name: string) => view("ws_new", name)),
+    createWorkspace: vi.fn<(project: string, name: string) => Promise<WorkspaceView>>(async (_project, name) => view("ws_new", name)),
     watchStatuses: vi.fn(async () => workspaces.map(w => status(w))),
     nap: vi.fn(async (id: string) => view(id, "?", "napping")),
     wake: vi.fn(async (id: string) => view(id, "?", "running")),
@@ -238,7 +235,7 @@ describe("machine facts", () => {
   });
 
   it("a machine that told the host what it lacks reads the whole sentence here, where the command it names has room", async () => {
-    const w = { ...view("ws_a", "api"), kind: "ssh" as const, daemonRefusedAt: { machineId: "ssh://dev@box:22", at: "2026-09-11T14:04:50.380Z", why: NO_LINGER_LINE } };
+    const w = { ...view("ws_a", "api"), kind: "ssh" as const, daemonRefusedAt: { machineId: "ssh://dev@box:22", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, at: "2026-09-11T14:04:50.380Z", why: NO_LINGER_LINE } };
     const api = await mount([w]);
     // The sidebar row shows the first clause, since it cuts from the right; the command to type is at the end of
     // the sentence, so this surface carries all of it.
@@ -749,7 +746,7 @@ describe("a workspace behind the golden's head", () => {
 
     cleanup();
     // The runtime looks at the image it forked from, not at what was imported into it afterwards; so does this.
-    await mount([{ ...onV11(), projects: [PROJECT] }], CAPS, twoVersions);
+    await mount([{ ...onV11(), project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }], CAPS, twoVersions);
     await waitFor(() => expect(marks("v11")).toEqual([THIS_ONE, VOLATILE]));
     expect(screen.getByRole("button", { name: "update api to v12" })).toHaveProperty("disabled", false);
   });
@@ -836,7 +833,7 @@ describe("project goldens in the lineage", () => {
   const rowsUnder = (version: string): string[] => [...document.querySelectorAll(`[data-k='${version}']`)[0]!.closest("li")!.querySelectorAll("[data-k^='pg-']")].map(el => el.getAttribute("data-k")!);
 
   it("lists each project golden under the version it stands on, newest first, marks the one this workspace forks from, and a fork creates a workspace from its snapshot", async () => {
-    const api = await mount([{ ...view("ws_a", "api"), golden: "snap_p2", projects: [PROJECT] }], CAPS, twoVersions, undefined, goldens);
+    const api = await mount([{ ...view("ws_a", "api"), golden: "snap_p2", project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }], CAPS, twoVersions, undefined, goldens);
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_p2", "pg-snap_p1"]));
     expect(rowsUnder("v11")).toEqual(["pg-snap_p3"]);
     expect(marks("v12")).toEqual([HEAD, VOLATILE]);
@@ -852,26 +849,26 @@ describe("project goldens in the lineage", () => {
     expect(screen.getAllByRole("button", { name: /^new workspace from the image of/ })[0]!.textContent).toBe("New workspace from this");
     fireEvent.click(screen.getByRole("button", { name: "new workspace from the image of proj taken on api, v12" }));
     // The name a person reads on the row it makes: a copy of the project, never the verb under it.
-    await waitFor(() => // A fork of a project golden names no computer: it goes where the image it carries already stands.
-    expect(api.createWorkspace).toHaveBeenCalledWith("snap_p1", "proj-copy", undefined, undefined));
-    expect(api.createFromGoldenHead).not.toHaveBeenCalled();
+    // A fork of a project image is a copy of this workspace's own project, at the version that image holds, so the
+    // project is what it names and nothing says where: the project's computer is already where the image stands.
+    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_api", "proj-copy", { golden: "snap_p1" }));
   });
 
   it("without any project golden the versions render as before and nothing is listed under them", async () => {
     await mount([onV12()], CAPS, twoVersions);
     await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(document.querySelector("[data-k^='pg-']")).toBeNull();
-    // Nothing to image yet: the projects section holds the button, dead until a project lands.
-    expect(screen.getByRole("button", { name: /^snapshot / })).toHaveProperty("disabled", true);
+    // A workspace is one project's copy, so the button is live from the first second: there is always a project.
+    expect(screen.getByRole("button", { name: /^snapshot / })).toHaveProperty("disabled", false);
   });
 
   it("snapshot as image sits in the projects section once a project is loaded: it calls the api, the lineage lists the new golden and the section says what it is for; a refusal shows the runtime's sentence", async () => {
-    const api = await mount([{ ...onV12(), projects: [PROJECT] }], CAPS, twoVersions);
+    const api = await mount([{ ...onV12(), project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }], CAPS, twoVersions);
     await waitFor(() => expect(marks("v12")).toEqual([HEAD, THIS_ONE, VOLATILE]));
     expect(api.listProjectGoldens).toHaveBeenCalledTimes(1);
     const button = screen.getByRole("button", { name: "snapshot api as an image" });
     expect(button.textContent).toBe("Snapshot as image");
-    expect(button.closest("section")!.textContent).toContain("Projects");
+    expect(button.closest("section")!.textContent).toContain("Project");
     fireEvent.click(button);
     await waitFor(() => expect(api.snapshotWorkspace).toHaveBeenCalledWith("ws_a"));
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken-1"]));
@@ -880,7 +877,7 @@ describe("project goldens in the lineage", () => {
     await waitFor(() => expect(api.listProjectGoldens).toHaveBeenCalledTimes(2));
     // The row the take added is stamped at the take, so it reads as the new thing it is.
     expect(screen.getByText(/^snapshot today \d\d:\d\d · from api$/)).toBeDefined();
-    expect(fact("projects-note")).toBe("Image of proj taken. New workspace from this starts with the projects in place.");
+    expect(fact("projects-note")).toBe("Image of proj taken. New workspace from this starts with the project in place.");
 
     fireEvent.click(button);
     await waitFor(() => expect(rowsUnder("v12")).toEqual(["pg-snap_taken-2", "pg-snap_taken-1"]));
@@ -898,59 +895,12 @@ describe("the projects section", () => {
   const WSP = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-05T09:30:00Z" };
   const rows = (): HTMLElement[] => [...document.querySelectorAll<HTMLElement>("[data-k^='project-']")];
 
-  it("lists the workspace's projects oldest first, name, folder, size where one was measured and the day it landed, one mono row each at one height, then import a folder and snapshot as image", async () => {
-    await mount([{ ...view("ws_a", "api"), projects: [SPOO, WSP] }]);
-    expect(rows().map(r => r.getAttribute("data-k"))).toEqual(["project-spoo", "project-wsp"]);
-    const cells = (r: HTMLElement) => [...r.querySelectorAll("[data-cell]")].map(c => [c.getAttribute("data-cell"), c.textContent]);
-    expect(cells(rows()[0]!)).toEqual([["name", "spoo"], ["folder", "/root/spoo"], ["size", fmtBytes(48_200_000)], ["imported", "2026-09-04"]]);
-    expect(cells(rows()[1]!)).toEqual([["name", "wsp"], ["folder", "/root/wsp"], ["size", ""], ["imported", "2026-09-05"]]);
-    for (const r of rows()) {
-      expect(r.className).toContain("h-7");
-      expect(r.className).toContain("font-mono");
-      expect(r.querySelector("[data-slot='badge']")).toBeNull();
-    }
-    expect(rows()[0]!.querySelector("[data-cell='folder']")!.getAttribute("title")).toBe("/root/spoo");
-    const section = rows()[0]!.closest("section")!;
-    expect(within(section).getByRole("button", { name: "Import a folder" })).toBeDefined();
-    expect(within(section).getByRole("button", { name: "snapshot api as an image" }).textContent).toBe("Snapshot as image");
-    expect(document.querySelector("[data-k='projects-none']")).toBeNull();
-  });
 
-  it("with none it says so in one line, import a folder is still offered and snapshot as image waits for a project", async () => {
-    await mount([view("ws_a", "api")]);
-    expect(rows()).toEqual([]);
-    // A browser tab has no drop, so the line names the one road it has.
-    expect(fact("projects-none")).toBe("No projects yet. Import a folder.");
-    expect(screen.getByRole("button", { name: "Import a folder" })).toHaveProperty("disabled", false);
-    expect(screen.getByRole("button", { name: "snapshot api as an image" })).toHaveProperty("disabled", true);
-  });
 
-  it("import a folder asks through the registry's request for this workspace, so the sidebar's dialog opens as the row's menu would open it", async () => {
-    await mount([view("ws_a", "api")]);
-    const asked: ProjectTripRequest[] = [];
-    const off = onProjectTripRequest(request => asked.push(request));
-    fireEvent.click(screen.getByRole("button", { name: "Import a folder" }));
-    expect(asked).toEqual([{ workspaceId: "ws_a", trip: "import" }]);
-    off();
-  });
 
-  it("this computer lists the folders registered on it, says a folder there is registered and not copied, and offers no snapshot", async () => {
-    const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", projects: [{ name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-06T00:00:00Z", size: 133_000_000 }] };
-    const api = fakeApi([mac]);
-    api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
-    useStore.getState().bind(api);
-    render(<MachineSurface workspaceId="ws_m" />);
-    await waitFor(() => expect(rows().map(r => r.getAttribute("data-k"))).toEqual(["project-wsp"]));
-    expect(screen.getByRole("button", { name: "Import a folder" })).toBeDefined();
-    expect(screen.queryByRole("button", { name: /as an image$/ })).toBeNull();
-    // Nothing is carried here, which a person about to import a large folder is owed before they press it.
-    expect(fact("projects-note")).toBe("On this Mac a folder is registered where it is, not copied.");
-    // No lineage draws and no snapshot is offered here, so the tab asks the host for no project goldens.
-    expect(api.listProjectGoldens).not.toHaveBeenCalled();
-  });
 
   it("a workspace that copies says nothing about registering, and what a snapshot did takes the same slot", async () => {
-    await mount([{ ...view("ws_a", "api"), projects: [SPOO] }]);
+    await mount([{ ...view("ws_a", "api"), project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }]);
     expect(fact("projects-note")).toBe("");
   });
 });
@@ -962,7 +912,7 @@ describe("where a workspace runs", () => {
 
   it("names the computer a workspace stands on and what that computer is", async () => {
     useStore.setState({ places: [HERE_PLACE, HETZNER, ASCII] });
-    const on: WorkspaceView = { ...view("ws_p", "box-build"), kind: "cloud", machineId: "ctr_9f", place: "p_1", golden: "" };
+    const on: WorkspaceView = { ...view("ws_p", "box-build"), kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_1", golden: "" };
     const api = fakeApi([on]);
     api.watchStatuses = vi.fn(async () => [{ ...status(on), kind: "cloud" as const, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0 }]);
     useStore.getState().bind(api);
@@ -976,7 +926,7 @@ describe("where a workspace runs", () => {
     expect(fact("where")).toBe("ASCII · a provider");
     cleanup();
 
-    const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "" };
+    const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
     const api = fakeApi([mac]);
     api.watchStatuses = vi.fn(async () => [{ ...status(mac), kind: "local" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]);
     useStore.getState().bind(api);
@@ -987,7 +937,7 @@ describe("where a workspace runs", () => {
   it("a fork on a computer that is not answering reads Unreachable, with the whole sentence on the State row and no id in it", async () => {
     const away: PlaceView = { ...HETZNER, name: "old-laptop", present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString() };
     useStore.setState({ places: [HERE_PLACE, away, ASCII] });
-    const on: WorkspaceView = { ...view("ws_p", "old-laptop"), kind: "cloud", machineId: "ctr_9f", place: "p_1", golden: "" };
+    const on: WorkspaceView = { ...view("ws_p", "old-laptop"), kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_1", golden: "" };
     const api = fakeApi([on]);
     // The status the host pushes for a machine on a computer it cannot ask anything of: running at the provider,
     // answering nothing, with the one sentence as its reason.
@@ -1381,7 +1331,7 @@ describe("live", () => {
 });
 
 describe("this computer as a workspace", () => {
-  const MAC: WorkspaceView = { id: "ws_m", name: "zingzy-mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
+  const MAC: WorkspaceView = { id: "ws_m", name: "zingzy-mac", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
 
   const FACTS = { os: "macOS 15.5", uptimeMs: 3 * 86_400_000 + 4 * 3_600_000, folder: "/Users/zingzy/wsp" };
 
@@ -1564,7 +1514,7 @@ describe("this computer as a workspace", () => {
 });
 
 describe("a machine over ssh as a workspace", () => {
-  const BOX: WorkspaceView = { id: "ws_b", name: "box", machineId: "ssh://dev@10.0.0.5:2222", phase: "running", golden: "", createdAt: "2026-09-10T09:00:00Z", kind: "ssh" };
+  const BOX: WorkspaceView = { id: "ws_b", name: "box", machineId: "ssh://dev@10.0.0.5:2222", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-10T09:00:00Z", kind: "ssh" };
 
   const FACTS = { os: "Ubuntu 24.04.3 LTS", uptimeMs: 26 * 3_600_000, folder: "/home/dev" };
 

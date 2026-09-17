@@ -128,7 +128,7 @@ describe("the words a person reads", () => {
     expect(app.length).toBeGreaterThan(100);
     const said = app.flatMap(saidIn);
     expect(said.length).toBeGreaterThan(1000);
-    expect(said.some(s => s.text === "Import a folder")).toBe(true);
+    expect(said.some(s => s.text === "Snapshot as image")).toBe(true);
   });
 
   it("the app says none of the words the spec cut", () => {

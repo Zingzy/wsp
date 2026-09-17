@@ -34,6 +34,7 @@ import {
   PlaceSpend,
   PlaceStageEvent,
   PlaceView,
+  ProjectView,
   placeAddSheetWord,
   type PlaceAddStep,
   type InitScreenId,
@@ -352,16 +353,11 @@ export interface InstallStage {
 export interface Api {
   listWorkspaces(): Promise<WorkspaceView[]>;
   getWorkspace(id: string): Promise<WorkspaceView>;
-  /** `size` is one of capabilities().sizes; absent, the workspace takes the golden's size. `on` is the computer or
-   * provider it lands on, by the id its own row carries; absent, wherever a fork last landed. */
-  createWorkspace(golden: string, name?: string, size?: WorkspaceSize, on?: string): Promise<CreatedWorkspace>;
-  /** Makes this computer the host's one local workspace, named after this computer, which the host is the one to
-   * know. It forks nothing, so there is no image, no size and no boot to wait on: the record is written and the
-   * reply is the workspace. Rejects with the host's own sentence when this computer already is one. Optional so
-   * fixtures without the road need not fake it; a client without it offers no road to this computer. */
-  createLocalWorkspace?(): Promise<WorkspaceView>;
-  /** Resolves the default golden manifest's head so the UI never handles snapshot ids. */
-  createFromGoldenHead(name: string, size?: WorkspaceSize, on?: string): Promise<CreatedWorkspace>;
+  /** A workspace for one piece of work: a copy of the project's computer with the project inside, named by the
+   * work. `project` is the project's id, off projectsList; the computer is the project's own, so nothing says
+   * where. `size` is one of capabilities().sizes and `golden` a project image, each sent only when picked;
+   * absent, the workspace takes the project's computer's image head at its own size. */
+  createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<CreatedWorkspace>;
   /** Snapshot of enriched statuses; keeps the runtime's poller + cost ticker running for this socket. */
   watchStatuses(): Promise<WorkspaceStatus[]>;
   nap(id: string): Promise<WorkspaceView>;
@@ -460,6 +456,9 @@ export interface Api {
   /** Every computer this wsp runs on: this one, the ones joined to it, and the provider it forks on. Optional so a
    * fixture with no Settings page need not fake it. */
   placesList?(): Promise<PlaceView[]>;
+  /** Every project this wsp holds, which is what the new-workspace dialog picks one of. Optional so a fixture that
+   * makes no workspace need not fake it; without it the dialog says there is no project yet. */
+  projectsList?(): Promise<ProjectView[]>;
   /** Opens the door a computer you own dials and answers where it is. Refused in the host's own words when this
    * host serves none. */
   placesDoor?(): Promise<PlaceDoorView>;
@@ -475,12 +474,6 @@ export interface Api {
   preferences?(): Promise<Preferences>;
   /** The patch over the host's record; resolves with the record as it now stands, and every client hears preferences.changed. */
   setPreferences?(patch: PreferencesPatch): Promise<Preferences>;
-  /** What importing a folder on this computer would carry; nothing is read into memory or uploaded. Optional so
-   * fixtures that never import need not fake it; the sidebar offers no import without it. */
-  planProject?(source: string): Promise<ProjectPlan>;
-  /** Packs the folder and lands it on the workspace's machine; progress rides project.import events, this resolves
-   * with what landed. carry and rewrite name paths from the plan's secrets; an existing dest is refused unless replace. */
-  importProject?(opts: ImportProjectOptions): Promise<ProjectImportResult>;
   /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
    * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
    * fixtures that never export need not fake it; the sidebar offers no export without it. */
@@ -581,19 +574,6 @@ export interface StartSessionOptions {
   attachments?: readonly ImageAttachment[];
 }
 
-export interface ImportProjectOptions {
-  workspaceId: string;
-  /** The folder on this computer as the person picked it; events echo this spelling. */
-  source: string;
-  /** Where it lands on the machine, absolute. */
-  dest: string;
-  replace?: boolean;
-  carry?: string[];
-  rewrite?: string[];
-  /** The plan's agents whose sessions travel, by catalog id; absent, none do. */
-  agents?: string[];
-}
-
 export interface ExportProjectOptions {
   workspaceId: string;
   /** The folder on the machine, absolute. */
@@ -611,22 +591,14 @@ export interface CreatedWorkspace extends WorkspaceView {
 }
 
 export function makeApi(c: ProtocolClient): Api {
-  const create = async (golden: string, name?: string, size?: WorkspaceSize, on?: string): Promise<CreatedWorkspace> => {
-    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { golden, ...(name ? { name } : {}), ...size, ...(on === undefined ? {} : { on }) });
+  const create = async (project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<CreatedWorkspace> => {
+    const { workspace, notice } = await c.request<WorkspaceCreateResult>("workspaces.create", { project, name, ...(picked?.golden === undefined ? {} : { golden: picked.golden }), ...picked?.size });
     return notice === undefined ? workspace : { ...workspace, notice };
   };
   return {
     listWorkspaces: async () => (await c.request<{ workspaces: WorkspaceView[] }>("workspaces.list")).workspaces,
     getWorkspace: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.get", { workspaceId: id })).workspace,
     createWorkspace: create,
-    createLocalWorkspace: async () => (await c.request<{ workspace: WorkspaceView }>("workspaces.createLocal", {})).workspace,
-    createFromGoldenHead: async (name, size, on) => {
-      const { manifest } = await c.request<{ manifest?: GoldenManifest }>("golden.get", { name: "default" });
-      const head = goldenHead(manifest);
-      // A golden gone between the store's read and this ask: the app's own sentence, never a command to run.
-      if (!head) throw new Error(CLOUD_SETUP_WORDS.create.none);
-      return create(head.snapshotId, name, size, on);
-    },
     watchStatuses: async () => (await c.request<{ statuses: WorkspaceStatus[] }>("status.subscribe")).statuses,
     nap: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.nap", { workspaceId: id })).workspace,
     wake: async id => (await c.request<{ workspace: WorkspaceView }>("workspaces.wake", { workspaceId: id })).workspace,
@@ -697,6 +669,7 @@ export function makeApi(c: ProtocolClient): Api {
       }
     },
     placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
+    projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
     placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
     pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
     account: async () => AccountView.parse((await c.request<{ account?: unknown }>("account.get")).account),
@@ -704,9 +677,7 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
-    // Parsed, not trusted: the consent step renders only what the wire type vouches for.
-    planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
-    importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),
+    // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
     // Parsed, not trusted: the modal draws screens and rows only as the wire type vouches for them.
     initGet: async () => InitSetup.parse((await c.request<{ setup?: unknown }>("init.get")).setup),

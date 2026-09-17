@@ -3,7 +3,7 @@
 // a timing table. fork -> deploy daemon -> previewUrl -> heartbeat client ->
 // inbox round trip -> kill, with a check at the end that this host left none.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
@@ -1216,7 +1216,15 @@ export interface DoctorOptions {
   /** The state file whose records decided which rows are orphans; named in the offer, since a run under a different
    * --state reads the usual file's goldens as recorded by nothing. */
   statePath?: string;
+  /** The repo the fork's project clones. A workspace is one project's copy, so the doctor records one for its run
+   * and the clone inside the fork is part of what it proves; a run behind a proxy or on a private network names
+   * one its machines can reach. */
+  repo?: string;
 }
+
+/** The repo the doctor's own project clones when nobody names one: a public repo of one commit, small enough that
+ * the clone is a reach test and not a download. */
+export const DOCTOR_REPO = "https://github.com/octocat/Hello-World.git";
 
 /** The word the local road asks the agent for and reads back: random per run, so a reply that carries it was written
  * by a turn this run started rather than left in a store by an earlier one. */
@@ -1230,6 +1238,8 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
   const timings = new Timings();
   let failed: string | undefined;
   let made: string | undefined;
+  let madeProject: string | undefined;
+  let madeFolder: string | undefined;
   try {
     io.log(`doctor: proving a thread on ${THIS_COMPUTER}, with no machine and nothing billing`);
 
@@ -1238,7 +1248,14 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
       async () => {
         const held = (await rt.workspaces.list()).find(isLocalWorkspace);
         if (held !== undefined) return held;
-        const fresh = await rt.workspaces.createLocal();
+        // A workspace is one project's copy, so the run records a repo of its own on this computer and works it
+        // in place; both go at the end.
+        const folder = mkdtempSync(join(tmpdir(), "wsp-doctor-"));
+        execFileSync("git", ["init", "-q", folder]);
+        madeFolder = folder;
+        const project = await rt.projects.add({ source: folder });
+        madeProject = project.id;
+        const fresh = await rt.workspaces.create({ project: project.id, name: project.name });
         made = fresh.id;
         return fresh;
       },
@@ -1278,13 +1295,19 @@ export async function localDoctor(rt: Runtime, io: CliIO): Promise<number> {
       async () => {
         // Delete on this kind drops the record and nothing else: this computer is not a machine to stop.
         if (made !== undefined) await rt.workspaces.delete(made);
+        if (madeProject !== undefined) await rt.projects.remove(madeProject);
+        if (madeFolder !== undefined) rmSync(madeFolder, { recursive: true, force: true });
       },
-      () => (made === undefined ? "the workspace was already here and stays" : "the workspace this run made is forgotten"),
+      () => (made === undefined ? "the workspace was already here and stays" : "the workspace, the project and the folder this run made are gone"),
     );
     made = undefined;
+    madeProject = undefined;
+    madeFolder = undefined;
   } catch (e) {
     failed = e instanceof Error ? e.message : String(e);
     if (made !== undefined) await rt.workspaces.delete(made).catch(() => {});
+    if (madeProject !== undefined) await rt.projects.remove(madeProject).catch(() => {});
+    if (madeFolder !== undefined) rmSync(madeFolder, { recursive: true, force: true });
   }
 
   timings.print(io.log);
@@ -1351,8 +1374,14 @@ export async function doctor(rt: Runtime, io: CliIO, opts: DoctorOptions = {}): 
     const view = await timings.time(
       "a workspace forked from it",
       async () => {
+        // A workspace is one project's copy, so this run records one on the computer this host forks at and the
+        // clone inside the fork is part of what the run proves.
+        const computers = (await rt.places?.list(Date.now())) ?? [];
+        const on = (computers.find(c => c.takesForks === true) ?? computers.find(c => c.kind === "provider"))?.id;
+        const project = await rt.projects.add({ source: opts.repo ?? DOCTOR_REPO, ...(on !== undefined ? { on } : {}) });
         const spec = {
           golden,
+          project: project.id,
           name: `doctor-${Date.now().toString(36)}`,
           ...(opts.envs !== undefined ? { envs: opts.envs } : {}),
           labels: { [WSP_LABEL]: "1", [DOCTOR_LABEL]: "1", [CREATED_AT_LABEL]: new Date().toISOString() },

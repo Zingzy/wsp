@@ -6,7 +6,7 @@ import { deriveSidebarProjects, pausedLine, threadIndicator, turnWait, workspace
 import { LIVE_RUN_1, LIVE_RUN_1_RESTART, LIVE_WORKSPACE_1, LIVE_WORKSPACE_2, LIVE_WS } from "./fixtures/live-run-1.js";
 
 const status = (phase: WorkspacePhase, machineState: MachineState, reach: ReachState, id = "ws_a"): WorkspaceStatus => ({
-  id, name: id, machineId: `m_${id}`, phase, golden: "snap", createdAt: "2026-09-01T00:00:00Z",
+  id, name: id, machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase, golden: "snap", createdAt: "2026-09-01T00:00:00Z",
   machineState, reach: { state: reach }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11,
 });
 
@@ -93,15 +93,15 @@ describe("deriveSidebarProjects", () => {
     ]);
     expect(projects[0]).toMatchObject({ projectKey: LIVE_WS, environmentPresence: "remote-only", groupedProjectCount: 1, allRemoteMembersAreDesktopLocal: false, machineState: "running", reach: "reachable", state: "running" });
     expect(projects[0]?.threads).toEqual([
-      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null },
-      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: null, parentThreadId: null, asking: null, costUsd: null },
+      { id: "s1", threadId: null, sessionId: "s1", workspaceId: LIVE_WS, title: "hello", status: "completed", ran: true, startedAt: "2026-09-02T17:19:35.668Z", endedAt: "2026-09-02T17:19:37.768Z", indicator: { label: "Idle", tone: "neutral", pulse: false }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null },
+      { id: "s0", threadId: null, sessionId: "s0", workspaceId: LIVE_WS, title: "59094224", status: "running", ran: true, startedAt: null, endedAt: null, indicator: { label: "Working", tone: "neutral", pulse: true }, harness: "claude", startedBy: "person", project: "the-project", parentThreadId: null, asking: null, costUsd: null },
     ]);
   });
 
-  it("a thread carries the name of the project its folder sits in, the folder itself or one under it, and none outside every project", () => {
-    const projects = [{ name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" }, { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" }];
+  it("a thread carries the name of its workspace's project, whatever folder the turn ran in: a workspace is one project's copy", () => {
+    const project = { id: "pr_spoo", name: "spoo", path: "/root/spoo", computer: "default" };
     const [p] = deriveSidebarProjects({
-      workspaces: [{ ...LIVE_WORKSPACE_1, projects }],
+      workspaces: [{ ...LIVE_WORKSPACE_1, project }],
       sessions: {
         [LIVE_WS]: [
           { id: "s1", workspaceId: LIVE_WS, harness: "claude", status: "completed", prompt: "in spoo", cwd: "/root/spoo", startedAt: 1_000 },
@@ -111,7 +111,7 @@ describe("deriveSidebarProjects", () => {
         ],
       },
     });
-    expect(p!.threads.map(t => [t.title, t.project])).toEqual([["in spoo", "spoo"], ["deep in wsp", "wsp"], ["elsewhere", null], ["nowhere yet", null]]);
+    expect(p!.threads.map(t => [t.title, t.project])).toEqual([["in spoo", "spoo"], ["deep in wsp", "spoo"], ["elsewhere", "spoo"], ["nowhere yet", "spoo"]]);
   });
 
   it("turns sharing a threadId fold into one thread titled by the opening prompt, in the state of the latest turn", () => {
@@ -141,7 +141,7 @@ describe("deriveSidebarProjects", () => {
     const HOUR = 60 * 60_000;
     const T = Date.parse("2026-09-06T12:00:00Z");
     const ws = (id: string, phase: WorkspacePhase, createdAgoMs: number): WorkspaceView => ({
-      id, name: id, machineId: `m_${id}`, phase, golden: "snap", createdAt: new Date(T - createdAgoMs).toISOString(),
+      id, name: id, machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase, golden: "snap", createdAt: new Date(T - createdAgoMs).toISOString(),
     });
     const at = (w: WorkspaceView, machineState: MachineState, reach: ReachState, over: Partial<WorkspaceStatus> = {}): WorkspaceStatus => ({
       ...w, machineState, reach: { state: reach }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, ...over,
