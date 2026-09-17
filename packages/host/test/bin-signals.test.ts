@@ -80,7 +80,7 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
     expect(await canListen(ports.wsPort)).toBe(true);
   }, 30_000);
 
-  it("serves a state file that holds nothing, recording this computer first, and stops on the signal", async () => {
+  it("serves a state file that holds nothing, records no workspace, and stops on the signal", async () => {
     // The command road a person types on a box with nothing on it: no golden, no workspace, no state file at all.
     const statePath = join(home, "state", "state.json");
     mkdirSync(join(home, "state"));
@@ -91,10 +91,11 @@ describeWithBin("the wsp bin stops cleanly on a signal", () => {
       stdio: ["ignore", "pipe", "pipe"],
     });
     const ports = await untilServing(child, output);
-    expect(output.join(""), output.join("")).toMatch(/^Workspace .+ \(ws_[0-9a-f]+\) is this computer; its threads run here, under your own sign-ins\.$/m);
+    // A workspace is one project's copy, so a state with nothing in it records none and the line says the road.
+    expect(output.join(""), output.join("")).toMatch(/^no projects yet; wsp add <folder> records one here/m);
     expect((await fetch(`http://127.0.0.1:${ports.port}/`)).status).toBe(200);
-    const workspaces = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { kind: string }> };
-    expect(Object.values(workspaces.workspaces).map(w => w.kind)).toEqual(["local"]);
+    const held = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces?: Record<string, unknown> };
+    expect(Object.values(held.workspaces ?? {})).toEqual([]);
 
     child.kill("SIGINT");
     expect(await exited(child), output.join("")).toEqual({ code: 0, signal: null });

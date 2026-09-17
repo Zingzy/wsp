@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The workspace's actions, one registry: what a workspace row, the palette,
 // the Machine tab and the row's context menu offer for one machine.
-import { CopyIcon, FolderInputIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, FolderOutputIcon, GlobeIcon, GitForkIcon, MessageSquarePlusIcon, PaletteIcon, PauseIcon, PencilIcon, PlayIcon, RefreshCwIcon, ServerIcon, ShapesIcon, SquareIcon, SquareTerminalIcon, Trash2Icon } from "lucide-react";
 import { goneRoadRefusal, isBilling, kindWords, machineWord, needsRebuild, undrivenRefusal, workspaceKind, workspaceState, type AbsentComputer, type LookPart, type MachineState, type PlaceView, type ReachState, type WorkspaceKind, type WorkspacePhase, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import {
   CLIENT_CANNOT_EXPORT,
   CLIENT_CANNOT_FORGET,
-  CLIENT_CANNOT_IMPORT,
   CLIENT_CANNOT_LOOK,
   CLIENT_CANNOT_REBUILD,
   CLIENT_CANNOT_RENAME_WORKSPACE,
@@ -93,7 +92,6 @@ export interface WorkspaceVerbs {
   /** Opens the picker for one fact of the workspace's look; absent on a client whose host cannot hold it. */
   readonly pickLook?: ((workspaceId: string, part: LookPart) => void) | undefined;
   /** Open the trip's dialog; absent on a client whose host cannot read or land folders here. */
-  readonly importProject?: ((workspaceId: string) => void) | undefined;
   readonly exportProject?: ((workspaceId: string) => void) | undefined;
 }
 
@@ -190,15 +188,6 @@ export const workspaceActions: ReadonlyArray<ActionEntry<WorkspaceTarget, Worksp
     title: () => WORKSPACE_WORDS.openMachine,
     refusal: () => null,
     run: (target, verbs) => verbs.openMachine(target.id),
-  },
-  {
-    id: "import-project",
-    group: "project",
-    icon: () => FolderInputIcon,
-    searchTerms: ["import project", "import folder", "upload"],
-    title: () => WORKSPACE_WORDS.importProject,
-    refusal: (target, verbs) => (dead(target) ? PROJECTS_WAIT : verbs.importProject === undefined ? CLIENT_CANNOT_IMPORT : null),
-    run: (target, verbs) => verbs.importProject?.(target.id),
   },
   {
     id: "export-project",

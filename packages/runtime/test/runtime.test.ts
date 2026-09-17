@@ -20,7 +20,7 @@ import { serveRuntime } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { until } from "./until.js";
 import { wsRequest } from "./ws-client.js";
-import { stubBackend, tokenGuest, type StubBackend, type StubMachine } from "./stub-backend.js";
+import { stubBackend, tokenGuest, type StubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 import { WebSocketServer } from "ws";
 
@@ -35,7 +35,7 @@ describe("runtime", () => {
     const events: string[] = [];
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     rt.events.on("*", e => events.push(e.type));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     expect(ws.id).toBeTruthy();
     expect(events).toContain("workspace.created");
     await rt.workspaces.nap(ws.id);
@@ -45,13 +45,13 @@ describe("runtime", () => {
   it("a create that asks for an offered size forks the machine at it and the record and the rate follow; one off the list is refused with the list before any machine is forked", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
+    const ws = await createOn(rt, { golden: "snap_g", name: "big", cpu: 2, memMb: 8192 });
     expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
     const [status] = await rt.status.list();
     expect(status).toMatchObject({ id: ws.id, size: { cpu: 2, memMb: 8192 } });
     expect(status!.rateUsdPerHour).toBeCloseTo(0.15, 10);
 
-    await expect(rt.workspaces.create({ golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
+    await expect(createOn(rt, { golden: "snap_g", name: "odd", cpu: 8, memMb: 16384 })).rejects.toMatchObject({
       kind: "invalid",
       message: "8x16 is not a size this provider offers; the sizes are 2x2 ($0.09/hr), 2x4 ($0.11/hr), 2x8 ($0.15/hr), 4x8 ($0.22/hr). Ask for one of those instead.",
     });
@@ -59,14 +59,14 @@ describe("runtime", () => {
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["big"]);
 
     // No size asked: the golden's own, whether or not the provider offers it today.
-    const plain = await rt.workspaces.create({ golden: "snap_g", name: "plain" });
+    const plain = await createOn(rt, { golden: "snap_g", name: "plain" });
     expect((await rt.status.list()).find(s => s.id === plain.id)!.size).toEqual({ cpu: 2, memMb: 4096 });
   });
 
   it("same behavior over the wire: serveRuntime round-trips create via WS", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
     const srv = await serveRuntime(rt, { port: 0, authToken: "t" });
-    const res = await wsRequest(srv.port, "t", { op: "workspaces.create", golden: "snap_g", name: "x" });
+    const res = await wsRequest(srv.port, "t", { op: "workspaces.create", project: (await projectOn(rt)).id, golden: "snap_g", name: "x" });
     expect(res["ok"]).toBe(true);
     await srv.close();
   });
@@ -77,8 +77,8 @@ describe("runtime", () => {
     // IS_SANDBOX is a machine's fact, a cloud fork's here and an ssh machine's in its own test: it is what lets
     // --dangerously-skip-permissions run as root there, and this computer never carries it.
     expect(GUEST_LOGIN_ENV).toEqual({ HOME: "/root", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1" });
-    await rt.workspaces.create({ golden: "snap_g", name: "plain" });
-    await rt.workspaces.create({ golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
+    await createOn(rt, { golden: "snap_g", name: "plain" });
+    await createOn(rt, { golden: "snap_g", name: "own", envs: { FOO: "1", HOME: "/home/dev" } });
     expect(backend.machines[0]!.spec.envs).toEqual(GUEST_LOGIN_ENV);
     expect(backend.machines[1]!.spec.envs).toEqual({ HOME: "/home/dev", USER: "root", PATH: TOOLS_PATH, IS_SANDBOX: "1", FOO: "1" });
   });
@@ -88,7 +88,7 @@ describe("runtime", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x", envs: { FOO: "1" } });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x", envs: { FOO: "1" } });
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true; // paused machine vanished overnight
     const woken = await rt.workspaces.wake(ws.id);
@@ -103,7 +103,7 @@ describe("runtime", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "x" });
     await rt1.workspaces.nap(ws.id);
 
     const rt2 = createRuntime({ backend, store, adapters: {} });
@@ -142,7 +142,7 @@ describe("runtime", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: scripted } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     const session = await rt.sessions.start(ws.id, { prompt: "say hi" });
     const result = await session.finished;
     expect(result.status).toBe("completed");
@@ -172,7 +172,7 @@ describe("runtime", () => {
   it("delete kills the machine and reap sweeps only unclaimed wsp machines", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     // a stray wsp-labeled machine nothing claims, old enough to reap
     await backend.create({
       kind: "sandbox",
@@ -210,8 +210,8 @@ describe("runtime session history", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: scripted("hello") } });
-    const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    const a = await createOn(rt, { golden: "snap_g", name: "a" });
+    const b = await createOn(rt, { golden: "snap_g", name: "b" });
     await (await rt.sessions.start(a.id, { prompt: "say hello", requestId: "req_a1" })).finished;
 
     const history = await rt.sessions.history(a.id);
@@ -283,7 +283,7 @@ describe("runtime session history", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: scripted } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const before = Date.now();
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume: sessionId })).finished;
@@ -322,7 +322,7 @@ describe("runtime session history", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: twice } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
 
     const history = await rt.sessions.history(ws.id);
@@ -360,7 +360,7 @@ describe("runtime session history", () => {
     const live: EventUnion[] = [];
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
     rt.events.on("*", e => live.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
@@ -382,7 +382,7 @@ describe("runtime session history", () => {
 
   it("a resumed start joins the thread of the session it resumes, across a CLI re-key; an unknown resume id starts a new one", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded(id => `${id.slice(0, 8)}-rekeyed`) } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     const first = (await rt.workspaces.get(ws.id)).claudeSessionId!;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume: first })).finished;
@@ -401,7 +401,7 @@ describe("runtime session history", () => {
 
   it("a row says who opened its thread: a resumed turn keeps the answer of the turn it resumes, a fresh start gives its own", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first", startedBy: "cli" })).finished;
     const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume })).finished;
@@ -414,7 +414,7 @@ describe("runtime session history", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: threaded() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const titles = async (r: typeof rt) => foldThreads(await r.sessions.list(ws.id)).map(t => [t.title, t.status]);
     await (await rt.sessions.start(ws.id, { prompt: "You are a builder for the wsp repo", startedBy: "cli" })).finished;
     const resume = (await rt.workspaces.get(ws.id)).claudeSessionId!;
@@ -435,8 +435,8 @@ describe("runtime session history", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const setup = createRuntime({ backend, store, adapters: {} });
-    const a = await setup.workspaces.create({ golden: "snap_g", name: "a" });
-    const b = await setup.workspaces.create({ golden: "snap_g", name: "b" });
+    const a = await createOn(setup, { golden: "snap_g", name: "a" });
+    const b = await createOn(setup, { golden: "snap_g", name: "b" });
     await setup.close();
     const legacy = (workspaceId: string, sessionId: string) => [
       { type: "session.start", workspaceId, sessionId, prompt: "old" },
@@ -480,7 +480,7 @@ describe("runtime session history", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const setup = createRuntime({ backend, store, adapters: {} });
-    const ws = await setup.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(setup, { golden: "snap_g", name: "a" });
     await setup.close();
     const scope = { workspaceId: ws.id, sessionId: "X", turnId: "turn_x", threadId: "T" };
     await store.put("transcripts", ws.id, {
@@ -506,7 +506,7 @@ describe("runtime session history", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const setup = createRuntime({ backend, store, adapters: {} });
-    const ws = await setup.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(setup, { golden: "snap_g", name: "a" });
     await setup.close();
     await store.put("transcripts", ws.id, {
       workspaceId: ws.id,
@@ -522,7 +522,7 @@ describe("runtime session history", () => {
 
   it("sessions.history over the socket carries the threadId", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: threaded() } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     const srv = await serveRuntime(rt, { port: 0, authToken: "t" });
     const res = await wsRequest(srv.port, "t", { op: "sessions.history", workspaceId: ws.id });
@@ -537,7 +537,7 @@ describe("runtime session history", () => {
   it("SessionView carries the prompt, when it started and when it ended", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const before = Date.now();
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
@@ -560,7 +560,7 @@ describe("runtime session history", () => {
   it("keeps the row running while the process lives past its reply, refuses a send until it exits, then completes", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     m.done("here is the reply");
@@ -586,7 +586,7 @@ describe("runtime session history", () => {
   it("passes the picked model, effort and permission mode to the harness and records them on the SessionView", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-5", effort: "high", permissionMode: "plan" });
     expect(m.lastStart()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
     expect(handle.view()).toMatchObject({ model: "claude-opus-5", effort: "high", permissionMode: "plan" });
@@ -602,7 +602,7 @@ describe("runtime session history", () => {
   it("a harness with an adapter but no table row gets the picks as named and nothing else of the request", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { aider: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go", harness: "aider", model: "gpt-9", cwd: "/w", startedBy: "cli", requestId: "r1" });
     expect(Object.keys(m.lastStart()!).sort()).toEqual(["cwd", "model", "onEvent", "prompt"]);
     expect(m.lastStart()).toMatchObject({ model: "gpt-9", cwd: "/w" });
@@ -617,9 +617,10 @@ describe("runtime session history", () => {
   it("a start without picks hands the harness the model, effort and access the catalog marks, the ones the composer shows, and nothing else", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
-    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "model", "effort", "permissionMode", "onEvent"]);
+    // cwd rides every start now: a workspace is one project's copy and the thread opens in that project's folder.
+    expect(Object.keys(m.lastStart()!)).toEqual(["prompt", "cwd", "model", "effort", "permissionMode", "onEvent"]);
     const view = handle.view();
     expect(view.model).toBe("claude-opus-5");
     expect(view.effort).toBe("high");
@@ -652,7 +653,7 @@ describe("runtime session history", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const catalogs = await rt.harnesses.list(ws.id);
       const claude = catalogs.find(c => c.harness === "claude")!;
       // The wire's isDefault is the harness an unnamed start runs, whichever source answered.
@@ -670,7 +671,7 @@ describe("runtime session history", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await rt.sessions.start(ws.id, { prompt: "first" });
       const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(claude).toMatchObject({ source: "harness", version: "2.1.257", isDefault: true });
@@ -682,7 +683,7 @@ describe("runtime session history", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded() } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const claude = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(claude).toMatchObject({ source: "table", version: CLAUDE_PIN });
       expect(probes(backend)).toHaveLength(0);
@@ -709,7 +710,7 @@ describe("runtime session history", () => {
       const backend = stubBackend();
       twoBinaries(backend);
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter, codex: codexProbing } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const catalogs = await rt.harnesses.list(ws.id);
       expect(catalogs.find(c => c.harness === "claude")).toMatchObject({ source: "harness", version: "2.1.257" });
       const codex = catalogs.find(c => c.harness === "codex")!;
@@ -725,7 +726,7 @@ describe("runtime session history", () => {
       const quiet = stubBackend();
       twoBinaries(quiet);
       const rt2 = createRuntime({ backend: quiet, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
-      const ws2 = await rt2.workspaces.create({ golden: "snap_g", name: "b" });
+      const ws2 = await createOn(rt2, { golden: "snap_g", name: "b" });
       const later = await rt2.harnesses.list(ws2.id);
       expect(later.find(c => c.harness === "claude")).toMatchObject({ source: "table", version: CLAUDE_PIN });
       expect(later.find(c => c.harness === "codex")).toMatchObject({ source: "harness", version: "0.9.0" });
@@ -739,7 +740,7 @@ describe("runtime session history", () => {
       backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
       const refusing: HarnessAdapterFactory = ctx => ({ ...threaded()(ctx), probeCatalog: exec => exec("codex --describe").then(() => ({ refused: "Codex is not signed in where this workspace runs; run codex login there" })) });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { codex: refusing } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const codex = (await rt.harnesses.list(ws.id)).find(c => c.harness === "codex")!;
       expect(codex).toMatchObject({ source: "table", version: harnessCatalog("codex")!.version, refusal: "Codex is not signed in where this workspace runs; run codex login there" });
       expect(codex.models.map(m => m.value)).toEqual(harnessCatalog("codex")!.models.map(m => m.value));
@@ -751,7 +752,7 @@ describe("runtime session history", () => {
       const backend = stubBackend();
       twoBinaries(backend);
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: threaded(), codex: codexProbing } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await (await rt.sessions.start(ws.id, { prompt: "go", harness: "codex" })).finished;
       await new Promise(r => setImmediate(r));
       expect(codexProbes(backend)).toHaveLength(1);
@@ -768,7 +769,7 @@ describe("runtime session history", () => {
       const fc = fakeClock();
       const m = manual();
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter }, clock: fc.clock });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const handle = await rt.sessions.start(ws.id, { prompt: "go" });
       await new Promise(r => setImmediate(r));
       expect(probes(backend)).toHaveLength(1);
@@ -792,7 +793,7 @@ describe("runtime session history", () => {
       };
       const fc = fakeClock();
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter }, clock: fc.clock });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const first = (await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!;
       expect(first).toMatchObject({ source: "table", version: CLAUDE_PIN });
       expect(first.models.map(m => m.value)).toEqual(["claude-fable-5-1", "claude-opus-5", "claude-sonnet-5"]);
@@ -811,7 +812,7 @@ describe("runtime session history", () => {
       backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
       const m = manual();
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: m.adapter } });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await expect(rt.sessions.start(ws.id, { prompt: "go", model: "claude-opus-4-1" })).rejects.toThrow(
         'model "claude-opus-4-1" is not one claude takes; one of: Opus 5 (claude-opus-5), Fable 5.1 (claude-fable-5-1), Sonnet 5 (claude-sonnet-5), Haiku (claude-haiku-4-5-20251001)',
       );
@@ -837,8 +838,8 @@ describe("runtime session history", () => {
       const backend = stubBackend();
       backend.execImpl = (_m, cmd) => (cmd.includes("claude --help") ? { exitCode: 0, stdout: PROBE_OUTPUT, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
       const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: manual().adapter } });
-      const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-      const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+      const a = await createOn(rt, { golden: "snap_g", name: "a" });
+      const b = await createOn(rt, { golden: "snap_g", name: "b" });
       await rt.harnesses.list(a.id);
       await rt.harnesses.list(a.id);
       await rt.harnesses.list(b.id);
@@ -855,7 +856,7 @@ describe("runtime session history", () => {
   it("SessionView carries the folder: the start request's until the harness announces its own", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go", cwd: "/root/app" });
     expect(handle.view().cwd).toBe("/root/app");
     m.start("/root/app/packages/web");
@@ -869,7 +870,7 @@ describe("runtime session history", () => {
   it("SessionView keeps the harness folder when a tool call moves the shell; the delta event carries the move", async () => {
     const m = manual();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: m.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const deltas: Array<string | undefined> = [];
     rt.events.on("session.delta", e => { if (e.type === "session.delta") deltas.push(e.cwd); });
     const handle = await rt.sessions.start(ws.id, { prompt: "go", cwd: "/root" });
@@ -915,7 +916,7 @@ describe("runtime session history", () => {
     const m = manual();
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     for (let i = 0; i < 20; i++) m.done(`t${i}`);
@@ -933,7 +934,7 @@ describe("runtime session history", () => {
   it("session.end lands in the store at once, without waiting out the debounce", async () => {
     const { store, stored, puts } = countingStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "go" })).finished;
     expect(await until(async () => (await stored(ws.id)).length === 4, 100)).toBe(true);
     expect((await stored(ws.id)).map(e => e.type)).toEqual(["session.start", "session.delta", "session.done", "session.end"]);
@@ -945,7 +946,7 @@ describe("runtime session history", () => {
     const m = manual();
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     expect(fc.pending()).toBe(1);
     expect(fc.holding()).toBe(0);
     await rt.sessions.start(ws.id, { prompt: "go" });
@@ -965,7 +966,7 @@ describe("runtime session history", () => {
     const m = manual();
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     m.done("t0");
@@ -983,7 +984,7 @@ describe("runtime session history", () => {
     const m = manual();
     const fc = fakeClock();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: m.adapter }, clock: fc.clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     m.done("t0");
@@ -1001,7 +1002,7 @@ describe("runtime session history", () => {
   it("caps the persisted transcript so a chatty workspace cannot grow the store without bound", { timeout: 20_000 }, async () => {
     const { store, stored } = countingStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: scripted("x") } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     for (let i = 0; i < 1300; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
     const history = await rt.sessions.history(ws.id);
     expect(history.length).toBeLessThanOrEqual(5000);
@@ -1052,7 +1053,7 @@ describe("runtime session index", () => {
     const store = memoryStore();
     const t = turns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await (await rt1.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
     await rt1.sessions.start(ws.id, { prompt: "second", harness: "hung" });
     const before = await rt1.sessions.list(ws.id);
@@ -1084,7 +1085,7 @@ describe("runtime session index", () => {
     const store = memoryStore();
     const t = turns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: t.adapter, hung } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await rt1.sessions.start(ws.id, { prompt: "first", harness: "hung" });
     await rt1.close();
 
@@ -1118,12 +1119,13 @@ describe("runtime session index", () => {
 
   it("a resume after a turn the transport cut stamps afterCut; a turn that failed with an exit code, or finished, leaves the next start plain", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: cutting, dying } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "cut" })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "second", resume: CUT_ID })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "third", resume: CUT_ID })).finished;
     await (await rt.sessions.start(ws.id, { prompt: "dies", resume: CUT_ID, harness: "dying" })).finished;
-    await (await rt.sessions.start(ws.id, { prompt: "fifth", resume: CUT_ID })).finished;
+    // Named again: a start with no agent would take the one the project last used, which is the dying one.
+    await (await rt.sessions.start(ws.id, { prompt: "fifth", resume: CUT_ID, harness: "claude" })).finished;
     const starts = (await rt.sessions.history(ws.id)).filter(e => e.type === "session.start");
     expect(starts.map(e => [e.prompt, e.afterCut])).toEqual([["cut", undefined], ["second", true], ["third", undefined], ["fifth", undefined]]);
     // a fresh thread has no previous turn
@@ -1153,7 +1155,7 @@ describe("runtime session index", () => {
   it("a harness that dies before init leaves its row and the workspace without a session id: no harness announced one", async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: dying } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "first" });
     await handle.finished;
     const [row] = await rt.sessions.list(ws.id);
@@ -1171,7 +1173,7 @@ describe("runtime session index", () => {
   it("a resumed turn that dies before init keeps the resume id on its row: the harness answered that id in an earlier turn", async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: turns().adapter, dying } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first" })).finished;
     const [first] = await rt.sessions.list(ws.id);
     const resume = first!.claudeSessionId!;
@@ -1212,8 +1214,8 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: bornDead } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    const other = await rt.workspaces.create({ golden: "snap_g", name: "b" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    const other = await createOn(rt, { golden: "snap_g", name: "b" });
     const dead = await rt.sessions.start(ws.id, { prompt: "first" });
     expect((await dead.finished).status).toBe("failed");
     const thread = dead.view().threadId!;
@@ -1247,7 +1249,7 @@ describe("runtime session index", () => {
     const probed = new Promise<void>(r => (letProbe = r));
     const slow: HarnessAdapterFactory = ctx => ({ ...turns().adapter(ctx), probeCatalog: async () => (await probed, null) });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const starting = rt.sessions.start(ws.id, { prompt: "build it", startedBy: "cli" });
     await until(async () => (await rt.sessions.list(ws.id)).length === 1);
     const [pending] = await rt.sessions.list(ws.id);
@@ -1280,7 +1282,7 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const ends: SessionEvent[] = [];
     rt.events.on("session.end", e => ends.push(e as SessionEvent));
     const first = rt.sessions.start(ws.id, { prompt: "build it" });
@@ -1307,7 +1309,7 @@ describe("runtime session index", () => {
       [true, undefined],
       [false, "the harness would not launch"],
     ]);
-    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "completed", cwd: "/root/work", turns: 1 }]);
+    expect(foldThreads(await rt.sessions.list(ws.id))).toMatchObject([{ id: thread, status: "completed", cwd: ws.project.path, turns: 1 }]);
     await rt.close();
   });
 
@@ -1322,7 +1324,7 @@ describe("runtime session index", () => {
     const t = turns();
     const slow: HarnessAdapterFactory = ctx => ({ ...t.adapter(ctx), probeCatalog: async () => (await probed, null) });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = rt.sessions.start(ws.id, { prompt: "A first" });
     await until(async () => (await rt.sessions.list(ws.id)).length === 1);
     const thread = (await rt.sessions.list(ws.id))[0]!.threadId!;
@@ -1352,7 +1354,7 @@ describe("runtime session index", () => {
     const probed = new Promise<void>(r => (letProbe = r));
     const slow: HarnessAdapterFactory = ctx => ({ ...turns().adapter(ctx), probeCatalog: async () => (await probed, null) });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: slow } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = rt.sessions.start(ws.id, { prompt: "a", notify: [NOTIFY_ME] });
     await until(async () => (await rt.sessions.list(ws.id)).length === 1);
     const thread = (await rt.sessions.list(ws.id))[0]!.threadId!;
@@ -1380,7 +1382,7 @@ describe("runtime session index", () => {
     const probed = new Promise<void>(r => (letProbe = r));
     const slow: HarnessAdapterFactory = ctx => ({ ...turns().adapter(ctx), probeCatalog: async () => (await probed, null) });
     const rt = createRuntime({ backend, store, adapters: { claude: slow, quick: turns().adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const starting = rt.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt.sessions.list(ws.id)).length === 1);
     // Another thread on the workspace runs to its end while the first is still reaching the machine, and its turn
@@ -1408,7 +1410,7 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: refusing } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const ends: SessionEvent[] = [];
     rt.events.on("session.end", e => ends.push(e as SessionEvent));
     await expect(rt.sessions.start(ws.id, { prompt: "build it" })).rejects.toThrow("the harness would not launch");
@@ -1440,7 +1442,7 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: oneThenNothing } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = await rt.sessions.start(ws.id, { prompt: "build it" });
     await first.finished;
     const thread = first.view().threadId!;
@@ -1468,7 +1470,7 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: steering } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const running = await rt.sessions.start(ws.id, { prompt: "build it" });
     const thread = running.view().threadId!;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.claudeSessionId !== undefined);
@@ -1498,7 +1500,7 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: holding } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const running = await rt.sessions.start(ws.id, { prompt: "build it" });
     const thread = running.view().threadId!;
     await until(async () => (await rt.sessions.list(ws.id))[0]?.claudeSessionId !== undefined);
@@ -1523,7 +1525,7 @@ describe("runtime session index", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: { claude: turns().adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await (await rt1.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
     const [first] = await rt1.sessions.list(ws.id);
     await rt1.close();
@@ -1548,8 +1550,8 @@ describe("runtime session index", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: { claude: turns().adapter } });
-    const a = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
-    const b = await rt1.workspaces.create({ golden: "snap_g", name: "b" });
+    const a = await createOn(rt1, { golden: "snap_g", name: "a" });
+    const b = await createOn(rt1, { golden: "snap_g", name: "b" });
     await (await rt1.sessions.start(a.id, { prompt: "on a" })).finished;
     await (await rt1.sessions.start(b.id, { prompt: "on b" })).finished;
     await rt1.close();
@@ -1569,7 +1571,7 @@ describe("runtime session index", () => {
     const store = memoryStore();
     const t = turns();
     const rt = createRuntime({ backend, store, adapters: { claude: t.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await (await rt.sessions.start(ws.id, { prompt: "first", cwd: "/root/app" })).finished;
     const [first] = await rt.sessions.list(ws.id);
     await (await rt.sessions.start(ws.id, { prompt: "from another folder", resume: first!.claudeSessionId, cwd: "/root/other" })).finished;
@@ -1601,7 +1603,7 @@ describe("runtime session index", () => {
       },
     });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pending } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "slow" });
     await rt.workspaces.delete(ws.id);
     expect(await store.get("sessions", ws.id)).toBeUndefined();
@@ -1616,7 +1618,7 @@ describe("runtime session index", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await rt1.close();
     await store.put("sessions", ws.id, { workspaceId: ws.id });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1634,13 +1636,14 @@ describe("runtime session index", () => {
   it("keeps at most 200 rows per workspace: the oldest finished row falls off first, a running row never does", { timeout: 20_000 }, async () => {
     const store = memoryStore();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: turns().adapter, hung } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "stuck", harness: "hung" });
-    for (let i = 0; i < 199; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}` })).finished;
+    // Named: a start with no agent would take the hung one the first start left on the project.
+    for (let i = 0; i < 199; i++) await (await rt.sessions.start(ws.id, { prompt: `t${i}`, harness: "claude" })).finished;
     const full = await rt.sessions.list(ws.id);
     expect(full).toHaveLength(200);
     expect(full.slice(0, 2).map(s => s.prompt)).toEqual(["stuck", "t0"]);
-    await (await rt.sessions.start(ws.id, { prompt: "t199" })).finished;
+    await (await rt.sessions.start(ws.id, { prompt: "t199", harness: "claude" })).finished;
     const rows = await rt.sessions.list(ws.id);
     expect(rows.map(s => s.prompt)).toEqual(["stuck", ...Array.from({ length: 199 }, (_, i) => `t${i + 1}`)]);
     await rt.close();
@@ -1735,7 +1738,7 @@ describe("a turn the host comes back to", () => {
   /** A workspace with one turn running on the machine, the host stopped under it, and what that turn's run is. */
   const hostWentDown = async (h: ReturnType<typeof machineRuns>, store: Store, backend: StubBackend): Promise<{ workspaceId: string; run: string }> => {
     const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const run = h.handles()[0]!;
@@ -1873,7 +1876,7 @@ describe("a turn the host comes back to", () => {
     const store = memoryStore();
     const h = machineRuns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const run = h.handles()[0]!;
@@ -1896,7 +1899,7 @@ describe("a turn the host comes back to", () => {
     const store = memoryStore();
     const h = machineRuns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const run = h.handles()[0]!;
@@ -1923,7 +1926,7 @@ describe("a turn the host comes back to", () => {
     const store = memoryStore();
     const h = machineRuns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     const turn = await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const threadId = turn.view().threadId!;
@@ -1952,7 +1955,7 @@ describe("a turn the host comes back to", () => {
     const h = machineRuns();
     const agents = { reach: { url: "http://10.0.0.2:4700" } };
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter }, agents });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a", agents: { spawn: true, maxMachines: 3, maxDepth: 1 } });
     await rt1.sessions.start(ws.id, { prompt: "coordinate the builders" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const device = (await rt1.devices.list())[0]!;
@@ -1991,7 +1994,7 @@ describe("a turn the host comes back to", () => {
     const store = memoryStore();
     const h = machineRuns();
     const rt1 = createRuntime({ backend, store, adapters: { claude: h.adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     const run = h.handles()[0]!;
@@ -2016,7 +2019,7 @@ describe("runtime daemon reach", () => {
     let minted = 0;
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     backend.machines[0]!.previewUrl = async port => {
       minted++;
       return { url: `https://m1-${port}.preview.example/?pt_token=edge`, token: "edge", expiresAt: Date.now() + 3_600_000 };
@@ -2040,7 +2043,7 @@ describe("runtime daemon reach", () => {
         return { exitCode: 0, stdout: DAEMON_TOKEN_SET, stderr: "" };
       };
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       backend.machines[0]!.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
       tokens.push((await rt.workspaces.daemonReach(ws.id)).daemonToken!);
     }
@@ -2055,7 +2058,7 @@ describe("runtime daemon reach", () => {
     const backend = stubBackend();
     backend.execImpl = (_m, cmd) => (cmd.includes(TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_NONE}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("without preview URLs");
 
     backend.machines[0]!.previewUrl = async () => ({ url: "https://m1-7070.preview.example/?pt_token=e", token: "e", expiresAt: Date.now() + 3_600_000 });
@@ -2078,7 +2081,7 @@ describe("runtime daemon reach", () => {
       },
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, daemonHelloTimeoutMs: 50 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
     m.previewUrl = async port => ({ url: `https://m1-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
     expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
@@ -2104,7 +2107,7 @@ describe("runtime daemon reach", () => {
     const daemon = await helloingDaemon(1);
     try {
       const before = createRuntime({ backend, store, adapters: {} });
-      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(before, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       m.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
 
@@ -2152,7 +2155,7 @@ describe("runtime daemon reach", () => {
     const daemon = await helloingDaemon(1);
     try {
       const before = createRuntime({ backend, store, adapters: {} });
-      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(before, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       m.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
 
@@ -2218,7 +2221,7 @@ describe("runtime daemon reach", () => {
     });
     try {
       const before = createRuntime({ backend, store, adapters: {} });
-      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(before, { golden: "snap_g", name: "a" });
       backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
 
       const deployed: string[] = [];
@@ -2257,7 +2260,7 @@ describe("runtime daemon reach", () => {
     try {
       const store = memoryStore();
       const before = createRuntime({ backend, store, adapters: {} });
-      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(before, { golden: "snap_g", name: "a" });
       backend.machines[0]!.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
 
       const deployed: string[] = [];
@@ -2281,17 +2284,16 @@ describe("runtime daemon reach", () => {
     }
   });
 
-  it("writes the folders the record names on every connect, and again after the update, so a project imported before the daemon read that file is browsable", async () => {
+  it("writes the folder the record's project names on every connect, and again after the update, so it is browsable without a second import", async () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const store = memoryStore();
     const daemon = await helloingDaemon(1);
-    const roots = writeDaemonRootsScript(["/Users/dev/wsp"]);
+    let roots = "";
     try {
       const before = createRuntime({ backend, store, adapters: {} });
-      const ws = await before.workspaces.create({ golden: "snap_g", name: "a" });
-      const stored = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
-      await store.put("workspaces", ws.id, { ...stored, project: { name: "wsp", dest: "/Users/dev/wsp", importedAt: "2026-09-01T00:00:00Z" } });
+      const ws = await createOn(before, { golden: "snap_g", name: "a" });
+      roots = writeDaemonRootsScript([ws.project.path]);
       const m = backend.machines[0]!;
       m.previewUrl = async () => ({ url: `ws://127.0.0.1:${daemon.port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
 
@@ -2352,7 +2354,7 @@ describe("runtime daemon reach", () => {
       },
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
     const pushed: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
@@ -2383,7 +2385,7 @@ describe("runtime daemon reach", () => {
     const deployed: string[] = [];
     const recipe = { setup: "true", smoke: "true", deployDaemon: async (machine: { id: string }) => void deployed.push(machine.id) };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
-    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await createOn(rt, { golden: "snap_g", name: "a" });
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
     const stop = rt.status.watch();
     try {
@@ -2409,7 +2411,7 @@ describe("runtime daemon reach", () => {
       },
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, clock: fc.clock, goldenRecipe: recipe, status: { costIntervalMs: 24 * 3_600_000, reconcileMinMs: 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: fc.clock.now() + 3_600_000 });
     const pushed: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => pushed.push((e as { status: WorkspaceStatus }).status));
@@ -2470,7 +2472,7 @@ describe("runtime daemon reach", () => {
       },
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const edgeOn = (m: StubMachine): void => {
       m.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
     };
@@ -2498,7 +2500,7 @@ describe("runtime daemon reach", () => {
     const deployed: string[] = [];
     const recipe = { setup: "true", smoke: "true", deployDaemon: async (machine: { id: string }) => void deployed.push(machine.id) };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN, goldenRecipe: recipe, status: { costIntervalMs: 60_000, pollIntervalMs: 5, reconcileMinMs: 60_000 } });
-    await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    await createOn(rt, { golden: "snap_g", name: "a" });
     backend.machines[0]!.previewUrl = async port => ({ url: `http://127.0.0.1:${edge.port}/?port=${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
     const stop = rt.status.watch();
     try {
@@ -2512,7 +2514,7 @@ describe("runtime daemon reach", () => {
   it("updateDaemon refuses on a runtime whose recipe carries no deploy", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await expect(rt.workspaces.updateDaemon(ws.id)).rejects.toThrow("cannot deploy a daemon");
     await expect(rt.workspaces.updateDaemon("ws_nobody")).rejects.toThrow("no such workspace");
   });
@@ -2521,7 +2523,7 @@ describe("runtime daemon reach", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const mint = async (port: number) => ({ url: `https://x-${port}.preview.example/?pt_token=e`, token: "e", expiresAt: Date.now() + 3_600_000 });
     backend.machines[0]!.previewUrl = mint;
     expect((await rt.workspaces.daemonReach(ws.id)).daemonToken).toBe(TOKEN);
@@ -2540,7 +2542,7 @@ describe("runtime port reach", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const minted: number[] = [];
     backend.machines[0]!.previewUrl = async port => {
       minted.push(port);
@@ -2589,7 +2591,7 @@ describe("runtime port probe", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const guest = await guestPort(403, VITE_BLOCKED);
     closing.push(guest.server);
     const minted: number[] = [];
@@ -2606,7 +2608,7 @@ describe("runtime port probe", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const guest = await guestPort(200, "<html>".padEnd(PORT_PROBE_BODY_CAP + 500, "x"));
     closing.push(guest.server);
     backend.machines[0]!.previewUrl = async () => ({ url: guest.url, token: "edge", expiresAt: Date.now() + 3_600_000 });
@@ -2620,7 +2622,7 @@ describe("runtime port probe", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const seen: string[] = [];
     const server = createServer((req, res) => {
       seen.push(req.url ?? "");
@@ -2641,7 +2643,7 @@ describe("runtime port probe", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const server = createServer((_req, res) => {
       res.writeHead(200, { "content-type": "text/html" });
       res.write("<html>".padEnd(PORT_PROBE_BODY_CAP + 500, "x"));
@@ -2662,7 +2664,7 @@ describe("runtime port probe", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const server = createServer((req, res) => {
       if (req.url?.endsWith("pt_token=t1")) res.writeHead(401).end("token expired");
       else res.writeHead(200).end("<!doctype html>");
@@ -2690,7 +2692,7 @@ describe("runtime port probe", () => {
     const backend = stubBackend();
     backend.execImpl = tokenGuest;
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const guest = await guestPort(200, "");
     await new Promise<void>(r => guest.server.close(() => r()));
     backend.machines[0]!.previewUrl = async () => ({ url: guest.url, token: "edge", expiresAt: Date.now() + 3_600_000 });
@@ -2868,7 +2870,7 @@ describe("runtime golden builders", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, goldenRecipe: recipe });
     const b = await rt.golden.prepare();
     await rt.golden.seal(b.id);
-    await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.golden.build({ setup: "true", smoke: "true" });
     const owners = backend.machines.map(m => m.spec.labels?.["wsp-owner"]);
     expect(owners).toHaveLength(5);
@@ -3068,7 +3070,7 @@ describe("runtime golden builders", () => {
     };
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     await rt.golden.builders();
-    const creating = rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const creating = createOn(rt, { golden: "snap_g", name: "x" });
     await vi.waitFor(() => expect(backend.machines).toHaveLength(1));
     // Well past the minute a fresh own machine gets anyway: only the claim protects it now.
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -3118,7 +3120,7 @@ describe("runtime upgrade vault", () => {
     );
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       const upgraded = await rt.workspaces.upgrade(ws.id);
       expect(upgraded.machineId).toBe("m2");
       const tar = tarCmds.find(c => c.startsWith("m1:"));
@@ -3147,7 +3149,7 @@ describe("runtime golden rollback", () => {
     const store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), { head: 2, versions: [version(1), version(2)] });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_golden-v2", name: "a" });
 
     const rolled = await rt.golden.rollback(1);
     expect(rolled).toEqual({ head: 1, versions: [version(1), version(2)] });
@@ -3179,7 +3181,7 @@ describe("runtime machine context", () => {
     const store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), { head: 4, versions: [version] });
     const rt = createRuntime({ backend, store, adapters: {} });
-    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await createOn(rt, { golden: "snap_g", name: "task-1" });
     const m = backend.machines[0]!;
     expect(writes(backend, m)).toHaveLength(1);
     expect(m.execLog.some(c => c.includes("base64 --decode"))).toBe(false);
@@ -3198,14 +3200,14 @@ describe("runtime machine context", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
       expect(docOf(writes(backend, backend.machines[0]!)[0]!)).toContain("- Golden: version not recorded.");
       await rt.workspaces.upgrade(ws.id);
       expect(writes(backend, backend.machines[1]!)).toHaveLength(1);
       expect(docOf(writes(backend, backend.machines[1]!)[0]!)).toContain("- Workspace: task-1.");
 
       backend.execImpl = () => ({ exitCode: 0, stdout: "", stderr: "" });
-      const silent = await rt.workspaces.create({ golden: "snap_g", name: "task-2" });
+      const silent = await createOn(rt, { golden: "snap_g", name: "task-2" });
       expect(silent.name).toBe("task-2");
       expect(writes(backend, backend.machines[2]!)).toHaveLength(0);
       expect(warn.mock.calls.some(c => String(c[0]).includes("machine context for") && String(c[0]).includes("without its markers"))).toBe(true);
@@ -3222,7 +3224,7 @@ describe("runtime guest hostname", () => {
   it("names the fresh guest after the workspace on create", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await createOn(rt, { golden: "snap_g", name: "task-1" });
     expect(hostnameCmds(backend.machines[0]!)).toEqual(["hostname task-1 && echo task-1 > /etc/hostname"]);
   });
 
@@ -3237,7 +3239,7 @@ describe("runtime guest hostname", () => {
     );
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
       await rt.workspaces.upgrade(ws.id);
       expect(hostnameCmds(backend.machines[1]!)).toEqual(["hostname task-1 && echo task-1 > /etc/hostname"]);
     } finally {
@@ -3248,9 +3250,9 @@ describe("runtime guest hostname", () => {
   it("sanitizes a name that is not a valid hostname", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    await rt.workspaces.create({ golden: "snap_g", name: "  My Workspace!! (v2) " });
-    await rt.workspaces.create({ golden: "snap_g", name: "a".repeat(70) });
-    await rt.workspaces.create({ golden: "snap_g", name: "!!!" });
+    await createOn(rt, { golden: "snap_g", name: "  My Workspace!! (v2) " });
+    await createOn(rt, { golden: "snap_g", name: "a".repeat(70) });
+    await createOn(rt, { golden: "snap_g", name: "!!!" });
     expect(hostnameCmds(backend.machines[0]!)).toEqual(["hostname my-workspace-v2 && echo my-workspace-v2 > /etc/hostname"]);
     expect(hostnameCmds(backend.machines[1]!)).toEqual([`hostname ${"a".repeat(63)} && echo ${"a".repeat(63)} > /etc/hostname`]);
     expect(hostnameCmds(backend.machines[2]!)).toEqual(["hostname wsp && echo wsp > /etc/hostname"]);
@@ -3262,7 +3264,7 @@ describe("runtime guest hostname", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
       expect(ws.phase).toBe("running");
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("you must be root"));
     } finally {
@@ -3279,7 +3281,7 @@ describe("runtime guest hostname", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-      await expect(rt.workspaces.create({ golden: "snap_g", name: "task-1" })).resolves.toMatchObject({ phase: "running" });
+      await expect(createOn(rt, { golden: "snap_g", name: "task-1" })).resolves.toMatchObject({ phase: "running" });
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("exec timed out"));
     } finally {
       warn.mockRestore();
@@ -3391,9 +3393,9 @@ describe("runtime create stages", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
       const stages = creating(events);
-      expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+      expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "project-cloned", "ready"]);
       // No line for the machine coming up and no fork's id anywhere: the starting line is the step a person waits
       // through, and the row draws it for the whole boot.
       expect(stages.map(e => e.message)).toEqual([
@@ -3401,6 +3403,7 @@ describe("runtime create stages", () => {
         "hostname set to task-1",
         "Preview route to the daemon minted.",
         "Daemon answered.",
+        expect.stringMatching(/^Cloning stub-\d+ into \/root\/stub-\d+\.$/),
         "ready",
       ]);
       for (const e of stages) expect(e.message).not.toContain(backend.machines[0]!.id);
@@ -3421,7 +3424,7 @@ describe("runtime create stages", () => {
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "clone-test" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "clone-test" });
     warn.mockRestore();
     const stages = creating(events);
     expect(stages[0]!.message).toBe("starting clone-test on ascii");
@@ -3445,9 +3448,9 @@ describe("runtime create stages", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "task-1" });
     const stages = creating(events);
-    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "ready"]);
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "preview-route", "daemon-answering", "project-cloned", "ready"]);
     expect(stages[3]).toMatchObject({ message: "Daemon did not answer.", notice: expect.stringMatching(/daemon on m1 did not answer within 300 ms/) });
     expect(backend.machines[0]!.killed).toBe(false);
     expect((await rt.workspaces.list()).map(w => w.id)).toEqual([ws.id]);
@@ -3470,7 +3473,7 @@ describe("runtime create stages", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await createOn(rt, { golden: "snap_g", name: "task-1" });
     const stages = creating(events);
     expect(stages[3]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
     expect("notice" in stages[3]!).toBe(false);
@@ -3489,10 +3492,10 @@ describe("runtime create stages", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await createOn(rt, { golden: "snap_g", name: "task-1" });
     const stages = creating(events);
     expect(backend.machines[0]!.previewUrl).toBeUndefined();
-    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "daemon-answering", "ready"]);
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "daemon-answering", "project-cloned", "ready"]);
     expect(stages[2]).toMatchObject({ message: "Daemon answered." });
     expect("notice" in stages[2]!).toBe(false);
   });
@@ -3512,7 +3515,7 @@ describe("runtime create stages", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    await rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    await createOn(rt, { golden: "snap_g", name: "task-1" });
     const stages = creating(events);
     expect(stages[2]).toMatchObject({ stage: "preview-route", message: "No preview route to the daemon.", notice: expect.stringMatching(/publishes no port 7070/) });
     expect(stages[3]).toMatchObject({ stage: "daemon-answering", message: "Daemon answered." });
@@ -3530,9 +3533,10 @@ describe("runtime create stages", () => {
     const rt = createRuntime({ backend, store, adapters: {} });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    await expect(rt.workspaces.create({ golden: "snap_g", name: "task-1" })).rejects.toThrow("disk full");
+    await expect(createOn(rt, { golden: "snap_g", name: "task-1" })).rejects.toThrow("disk full");
     const stages = creating(events);
-    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "failed"]);
+    // The project goes in before the record is written, so the clone stands and the store's own failure ends it.
+    expect(stages.map(e => e.stage)).toEqual(["fork-requested", "hostname-set", "project-cloned", "failed"]);
     expect(stages.at(-1)!.message).toBe("disk full");
     expect(backend.machines[0]!.killed).toBe(true);
     expect(await rt.workspaces.list()).toEqual([]);
@@ -3550,7 +3554,7 @@ describe("runtime create stages", () => {
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
     const ids: string[] = [];
     rt.events.on("workspace.creating", e => { if (e.type === "workspace.creating") ids.push(e.workspaceId); });
-    const made = rt.workspaces.create({ golden: "snap_g", name: "task-1" });
+    const made = createOn(rt, { golden: "snap_g", name: "task-1" });
     await vi.waitFor(() => expect(backend.machines[0]!.execLog.some(c => c.startsWith("hostname "))).toBe(true));
     expect(await rt.workspaces.list()).toEqual([]);
     expect((await rt.status.list()).map(s => s.id)).toEqual([]);
@@ -3594,7 +3598,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store, adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       const m1 = backend.machines[0]!;
       m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
 
@@ -3630,7 +3634,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       const m1 = backend.machines[0]!;
       m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
       let pauses = 0;
@@ -3660,7 +3664,7 @@ describe("runtime verified wake", () => {
       const port = await deadPort();
       backend.lifecycle.budgets.daemonAnswersMs = 300;
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       const m1 = backend.machines[0]!;
       // The route mints and nothing on this computer answers it: a container's published port on a box belongs to
       // that box's own loopback, and the wake check used to read that silence as a dead guest.
@@ -3689,7 +3693,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       const m1 = backend.machines[0]!;
       m1.daemonAnswers = async () => false;
       await rt.workspaces.nap(ws.id);
@@ -3709,7 +3713,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       const m1 = backend.machines[0]!;
       m1.daemonAnswers = async () => {
         throw new Error("container m1 is not running");
@@ -3731,7 +3735,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x", memMb: 4096 });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x", memMb: 4096 });
       const m1 = backend.machines[0]!;
       let minted = 0;
       m1.previewUrl = async () => { minted++; return { url: "ws://127.0.0.1:1", token: "e", expiresAt: Date.now() + 3_600_000 }; };
@@ -3760,7 +3764,7 @@ describe("runtime verified wake", () => {
         const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, daemonToken: TOKEN });
         const events: EventUnion[] = [];
         rt.events.on("*", e => events.push(e));
-        const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+        const ws = await createOn(rt, { golden: "snap_g", name: "x" });
         const m1 = backend.machines[0]!;
         m1.previewUrl = async () => ({ url: `ws://127.0.0.1:${port}`, token: "e", expiresAt: Date.now() + 3_600_000 });
         await rt.workspaces.nap(ws.id);
@@ -3792,7 +3796,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store, adapters: {}, clock: fc.clock, wake: { vaultCapBytes: 5_000 }, vaultCaches: { dirs: ["node_modules", "dist"], files: [".DS_Store"], markers: [".git"] } });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       // This workspace's own last status and its own warnings. Another workspace's line landing in the window would
       // otherwise decide both reads, which is the kind of thing that shows up only when the whole suite runs.
       const napReason = (): string | undefined =>
@@ -3846,7 +3850,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store, adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "hello", memMb: 2048 });
+      const ws = await createOn(rt, { golden: "snap_g", name: "hello", memMb: 2048 });
       const m1 = backend.machines[0]!;
       await rt.workspaces.nap(ws.id);
       expect(await store.getBlob("vaults", ws.id)).toEqual(Buffer.from("tarbytes"));
@@ -3878,7 +3882,7 @@ describe("runtime verified wake", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "fresh" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "fresh" });
       const rebuilt = await rt.workspaces.rebuild(ws.id);
       expect(rebuilt.machineId).toBe("m2");
       expect(backend.machines[0]!.killed).toBe(true);
@@ -3907,8 +3911,8 @@ describe("runtime workspace size", () => {
   it("create asks for an explicit size: the pricing default when the caller names none", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
-    await rt.workspaces.create({ golden: "snap_g", name: "a" });
-    await rt.workspaces.create({ golden: "snap_g", name: "b", memMb: 2048 });
+    await createOn(rt, { golden: "snap_g", name: "a" });
+    await createOn(rt, { golden: "snap_g", name: "b", memMb: 2048 });
     expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
     expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
   });
@@ -3917,7 +3921,7 @@ describe("runtime workspace size", () => {
     const backend = clampingBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {}, status: { costIntervalMs: 15, pollIntervalMs: 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     expect(backend.machines[0]!.spec.memMb).toBe(4096);
     const built = { cpu: 2, memMb: 2048 };
     const [status] = await rt.status.list();
@@ -3944,7 +3948,7 @@ describe("runtime workspace size", () => {
       const rt = createRuntime({ backend, store: memoryStore(), adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("workspace.status", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       await rt.workspaces.nap(ws.id);
       backend.machines[0]!.killed = true;
       await rt.workspaces.wake(ws.id);
@@ -3967,9 +3971,9 @@ describe("runtime workspace size", () => {
     const version = { version: 1, snapshotId: "snap_golden-v1", baseTemplate: "base", setupSha: "s", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 8192 } };
     await store.put("goldens", copyKey("default", "big"), { head: 1, versions: [version] });
     const rt = createRuntime({ backend, store, adapters: {} });
-    await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
-    await rt.workspaces.create({ golden: "snap_golden-v1", name: "b", memMb: 2048 });
-    await rt.workspaces.create({ golden: "snap_elsewhere", name: "c" });
+    await createOn(rt, { golden: "snap_golden-v1", name: "a" });
+    await createOn(rt, { golden: "snap_golden-v1", name: "b", memMb: 2048 });
+    await createOn(rt, { golden: "snap_elsewhere", name: "c" });
     expect(backend.machines[0]!.spec).toMatchObject({ cpu: 2, memMb: 8192 });
     expect(backend.machines[1]!.spec).toMatchObject({ cpu: 2, memMb: 2048 });
     expect(backend.machines[2]!.spec).toMatchObject({ cpu: 2, memMb: 4096 });
@@ -3990,7 +3994,7 @@ describe("runtime workspace size", () => {
     const backend = clampingBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     const raw = (await store.get("workspaces", ws.id)) as Record<string, unknown>;
     delete raw["size"];
     await store.put("workspaces", ws.id, raw);
@@ -4012,13 +4016,13 @@ describe("runtime workspace screen", () => {
   it("a desktop machine's stream rides the view and the status; a sandbox carries no screen", async () => {
     const desktop = desktopBackend();
     const rt = createRuntime({ backend: desktop, store: memoryStore(), adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
     expect((await rt.workspaces.get(ws.id)).screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
     expect((await rt.status.list())[0]!.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
 
     const headless = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
-    const sandbox = await headless.workspaces.create({ golden: "snap_g", name: "b" });
+    const sandbox = await createOn(headless, { golden: "snap_g", name: "b" });
     expect(sandbox).not.toHaveProperty("screen");
     expect((await headless.status.list())[0]).not.toHaveProperty("screen");
   });
@@ -4027,7 +4031,7 @@ describe("runtime workspace screen", () => {
     const backend = desktopBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     await rt1.workspaces.nap(ws.id);
 
     const rt2 = createRuntime({ backend, store, adapters: {} });
@@ -4066,7 +4070,7 @@ describe("runtime fork kind", () => {
     await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version("desktop")] });
     const rt = createRuntime({ backend, store, adapters: {} });
 
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "a" });
     expect(backend.machines[0]!.spec.kind).toBe("desktop");
     expect(ws.screen).toEqual({ streamUrl: "wss://stub/stream/m1" });
 
@@ -4086,7 +4090,7 @@ describe("runtime fork kind", () => {
     const store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), { head: 1, versions: [version()] });
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "a" });
     expect(backend.machines[0]!.spec.kind).toBe("sandbox");
     expect(ws.screen).toBeUndefined();
   });
@@ -4099,7 +4103,7 @@ describe("nap vault against the stub backend", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const rt = createRuntime({ backend, store, adapters: {} });
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       expect(warn).not.toHaveBeenCalled();
       const vault = await store.getBlob("vaults", ws.id);
@@ -4118,7 +4122,7 @@ describe("nap vault against the stub backend", () => {
       const rt = createRuntime({ backend, store, adapters: {} });
       const events: EventUnion[] = [];
       rt.events.on("*", e => events.push(e));
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       const first = await store.getBlob("vaults", ws.id);
       await rt.workspaces.wake(ws.id);
@@ -5203,7 +5207,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const b = await rt.golden.prepare();
     const { version: one } = await rt.golden.seal(b.id);
     expect(one.templateId).toBe("tpl_wsp-h1-default-v1");
-    const ws = await rt.workspaces.create({ golden: one.snapshotId, name: "on-v1" });
+    const ws = await createOn(rt, { golden: one.snapshotId, name: "on-v1" });
     expect(backend.machines.find(m => m.id === ws.machineId)!.spec).toMatchObject({ template: "tpl_wsp-h1-default-v1" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const two = await rt.golden.upgrade({ delta: deltaOf("h2"), keepPrevious: false });
@@ -5455,7 +5459,7 @@ describe("runtime golden update and the post-seal grace", () => {
       return create(spec);
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "one" });
+    const ws = await createOn(rt, { golden: version.snapshotId, name: "one" });
     const said = warn.mock.calls.map(c => String(c[0]));
     warn.mockRestore();
     expect(backend.machines[0]!.killed).toBe(true);
@@ -5466,7 +5470,7 @@ describe("runtime golden update and the post-seal grace", () => {
     expect(said).toEqual([`workspace ${ws.id}: stopped the builder kept from image v1 to make room at the machine cap (${b.id})`]);
 
     // Nothing left to stop: the refusal reaches the caller with its kind, and nothing of ours is killed.
-    await expect(rt.workspaces.create({ golden: version.snapshotId, name: "two" })).rejects.toMatchObject({ kind: "concurrency" });
+    await expect(createOn(rt, { golden: version.snapshotId, name: "two" })).rejects.toMatchObject({ kind: "concurrency" });
     expect(backend.machines.filter(m => m.killed).map(m => m.id)).toEqual([backend.machines[0]!.id, backend.machines[1]!.id]);
   });
 
@@ -5475,8 +5479,8 @@ describe("runtime golden update and the post-seal grace", () => {
     const b = await rt.golden.prepare();
     const { version } = await rt.golden.seal(b.id);
     await rt.golden.kill(b.id);
-    const first = await rt.workspaces.create({ golden: version.snapshotId, name: "first" });
-    await rt.workspaces.create({ golden: version.snapshotId, name: "t-cap" });
+    const first = await createOn(rt, { golden: version.snapshotId, name: "first" });
+    await createOn(rt, { golden: version.snapshotId, name: "t-cap" });
     const create = backend.create.bind(backend);
     backend.create = async spec => {
       if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
@@ -5484,7 +5488,7 @@ describe("runtime golden update and the post-seal grace", () => {
     };
     const stages: EventUnion[] = [];
     rt.events.on("workspace.creating", e => stages.push(e));
-    const refused = await rt.workspaces.create({ golden: version.snapshotId, name: "f2" }).catch((e: unknown) => e);
+    const refused = await createOn(rt, { golden: version.snapshotId, name: "f2" }).catch((e: unknown) => e);
     expect(refused).toMatchObject({ kind: "concurrency", status: 429, message: "both machine slots are in use: first, t-cap. Pause one or wait for a nap." });
     // The provider's own sentence is kept for whoever reads the log, never as the answer.
     expect((refused as { cause?: Error }).cause?.message).toBe("Too many concurrent sessions");
@@ -5495,7 +5499,7 @@ describe("runtime golden update and the post-seal grace", () => {
     await rt.workspaces.nap(first.id);
     const kept = await rt.golden.prepare({ name: "wsp-golden" }).catch((e: unknown) => e);
     expect(kept).toMatchObject({ id: expect.any(String) });
-    const again = await rt.workspaces.create({ golden: version.snapshotId, name: "f3" }).catch((e: unknown) => e);
+    const again = await createOn(rt, { golden: version.snapshotId, name: "f3" }).catch((e: unknown) => e);
     expect((again as Error).message).toBe("both machine slots are in use: t-cap, wsp-golden (builder). Pause one or wait for a nap.");
   });
 
@@ -5518,14 +5522,14 @@ describe("runtime golden update and the post-seal grace", () => {
       }
       await put(collection, id, value);
     };
-    const slow = rt.workspaces.create({ golden: version.snapshotId, name: "slow" });
+    const slow = createOn(rt, { golden: version.snapshotId, name: "slow" });
     await inFlight;
     const create = backend.create.bind(backend);
     backend.create = async spec => {
       if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
       return create(spec);
     };
-    const refused = await rt.workspaces.create({ golden: version.snapshotId, name: "f2" }).catch((e: unknown) => e);
+    const refused = await createOn(rt, { golden: version.snapshotId, name: "f2" }).catch((e: unknown) => e);
     expect((refused as Error).message).toBe("a machine slot is in use: slow. Pause it or wait for a nap.");
     land();
     expect(await slow).toMatchObject({ name: "slow" });
@@ -5543,16 +5547,16 @@ describe("runtime golden update and the post-seal grace", () => {
     const stages: EventUnion[] = [];
     rt.events.on("workspace.creating", e => stages.push(e));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "one" });
+    const ws = await createOn(rt, { golden: version.snapshotId, name: "one" });
     warn.mockRestore();
-    expect(stages.map(e => (e.type === "workspace.creating" ? e.stage : e.type))).toEqual(["fork-requested", "fork-requested", "hostname-set", "ready"]);
+    expect(stages.map(e => (e.type === "workspace.creating" ? e.stage : e.type))).toEqual(["fork-requested", "fork-requested", "hostname-set", "project-cloned", "ready"]);
     expect(stages[0]).not.toHaveProperty("notice");
     expect(stages[1]).toMatchObject({
       workspaceId: ws.id,
       message: "starting one on default again",
       notice: "Stopped the builder kept from image v1 to make room at the machine cap.",
     });
-    expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(4).fill("one"));
+    expect(stages.map(e => (e.type === "workspace.creating" ? e.name : ""))).toEqual(Array<string>(5).fill("one"));
   });
 
   it("a create that needs no room carries no notice, on the result and on the wire; one that made room carries it beside the workspace", async () => {
@@ -5561,7 +5565,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const { version } = await rt.golden.seal(b.id);
     const srv = await serveRuntime(rt, { port: 0, authToken: "t" });
     await rt.golden.kill(b.id);
-    const quiet = await wsRequest(srv.port, "t", { op: "workspaces.create", golden: version.snapshotId, name: "quiet" });
+    const quiet = await wsRequest(srv.port, "t", { op: "workspaces.create", project: (await projectOn(rt)).id, golden: version.snapshotId, name: "quiet" });
     expect(quiet["ok"]).toBe(true);
     expect(quiet).not.toHaveProperty("notice");
     expect(quiet["workspace"]).not.toHaveProperty("notice");
@@ -5573,7 +5577,7 @@ describe("runtime golden update and the post-seal grace", () => {
       return create(spec);
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const made = await wsRequest(srv.port, "t", { op: "workspaces.create", golden: version.snapshotId, name: "room" });
+    const made = await wsRequest(srv.port, "t", { op: "workspaces.create", project: (await projectOn(rt)).id, golden: version.snapshotId, name: "room" });
     warn.mockRestore();
     expect(made["ok"]).toBe(true);
     expect(made["notice"]).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
@@ -5587,7 +5591,7 @@ describe("runtime golden update and the post-seal grace", () => {
     const { version } = await rt.golden.seal(b.id);
     await rt.golden.kill(b.id);
     backend.createNotice = "size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB";
-    const ws = await rt.workspaces.create({ golden: version.snapshotId, name: "on-the-box" });
+    const ws = await createOn(rt, { golden: version.snapshotId, name: "on-the-box" });
     expect(ws.notice).toBe("size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB");
     // The sentence is the whole of what travels: the size a reader wants is the machine's own, not the ask.
     expect(ws).not.toHaveProperty("cpu");
@@ -5605,7 +5609,7 @@ describe("runtime golden update and the post-seal grace", () => {
       return create(spec);
     };
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const ws = await rt.workspaces.create({ golden: sealedA.version.snapshotId, name: "one" });
+    const ws = await createOn(rt, { golden: sealedA.version.snapshotId, name: "one" });
     warn.mockRestore();
     const stopped = [a.id, b.id].filter(id => backend.machines.find(m => m.id === id)!.killed);
     expect(stopped).toHaveLength(1);
@@ -5618,7 +5622,7 @@ describe("runtime golden update and the post-seal grace", () => {
       return create(spec);
     };
     const quiet = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const two = await rt.workspaces.create({ golden: sealedA.version.snapshotId, name: "two" });
+    const two = await createOn(rt, { golden: sealedA.version.snapshotId, name: "two" });
     quiet.mockRestore();
     expect(await store.list("builders")).toEqual([]);
     expect(two.notice).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
@@ -5637,7 +5641,7 @@ describe("runtime golden update and the post-seal grace", () => {
       if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Sandbox limit reached (2)"), { kind: "concurrency" });
       return create(spec);
     };
-    await expect(next.workspaces.create({ golden: version.snapshotId, name: "one" })).rejects.toMatchObject({ kind: "concurrency" });
+    await expect(createOn(next, { golden: version.snapshotId, name: "one" })).rejects.toMatchObject({ kind: "concurrency" });
     expect(first.backend.machines[0]!.killed).toBe(false);
   });
 
@@ -5723,7 +5727,7 @@ describe("create idempotency keys", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     expect(backend.machines[0]!.spec.idempotencyKey).toMatch(new RegExp(`^workspace/${ws.id}:[0-9a-f]{16}$`));
     expect(await store.list("creates")).toEqual([]);
   });
@@ -5732,7 +5736,7 @@ describe("create idempotency keys", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true;
     let lose = true;
@@ -5758,7 +5762,7 @@ describe("create idempotency keys", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.upgrade(ws.id);
     const [first, second] = backend.machines.map(m => m.spec.idempotencyKey);
     expect(backend.machines[0]!.killed).toBe(true);
@@ -5799,7 +5803,7 @@ describe("create idempotency keys", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     let dead = true;
     const specs = intercept(backend, (spec, real) => {
       if (dead) {
@@ -5821,7 +5825,7 @@ describe("create idempotency keys", () => {
     const rt = createRuntime({ backend, store, adapters: {} });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "x" });
       await rt.workspaces.nap(ws.id);
       backend.machines[0]!.killed = true;
       const specs = intercept(backend, async (spec, real) => {
@@ -5845,7 +5849,7 @@ describe("create idempotency keys", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: {} });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await rt.workspaces.nap(ws.id);
     backend.machines[0]!.killed = true;
     let losses = 2;
@@ -5933,7 +5937,7 @@ describe("runtime session steer", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go", requestId: "req_1" });
     h.init();
     expect(await rt.sessions.steer(handle.id, { prompt: "and say pineapple", requestId: "req_2" })).toEqual({ outcome: "accepted" });
@@ -5960,7 +5964,7 @@ describe("runtime session steer", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "write it" });
     h.init();
     await rt.sessions.steer(handle.id, { prompt: "hurry" });
@@ -5987,7 +5991,7 @@ describe("runtime session steer", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: late.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     late.init();
     expect(await rt.sessions.steer(handle.id, { prompt: "racing" })).toEqual({ outcome: "not-running" });
@@ -6026,7 +6030,7 @@ describe("runtime session steer", () => {
     });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     await vi.waitFor(() => expect(events.some(e => e.type === "session.start")).toBe(true));
     exitFile = "1";
@@ -6041,7 +6045,7 @@ describe("runtime session steer", () => {
   it("unsupported when the session's harness takes no message mid-turn; the catalog says so before the turn runs", async () => {
     const plain = steerable({ steers: false });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: plain.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!.steers).toBe(false);
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     plain.init();
@@ -6054,7 +6058,7 @@ describe("runtime session steer", () => {
 
   it("harnesses.list carries steers from the adapter on a workspace; the table alone, with no machine to ask, says false", async () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: steerable().adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     expect((await rt.harnesses.list(ws.id)).find(c => c.harness === "claude")!.steers).toBe(true);
     expect((await rt.harnesses.list()).find(c => c.harness === "claude")!.steers).toBe(false);
     await rt.close();
@@ -6065,7 +6069,7 @@ describe("runtime session steer", () => {
     const fc = fakeClock();
     const WINDOW = 5 * 60_000;
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fc.clock, idle: { defaultWindowMs: WINDOW }, status: { costIntervalMs: 60_000, pollIntervalMs: 60_000 } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     h.init();
     fc.advance(WINDOW * 2);
@@ -6084,7 +6088,7 @@ describe("runtime session steer", () => {
     const backend = stubBackend();
     const h = steerable();
     const rt = createRuntime({ backend, store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "go" });
     h.init();
     const m = backend.machines[0]!;
@@ -6166,7 +6170,7 @@ describe("a start on a thread whose turn is running", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = await rt.sessions.start(ws.id, { prompt: "loop for a minute", requestId: "req_1" });
     expect(first.outcome).toBe("started");
     const sid = first.view().claudeSessionId!;
@@ -6191,7 +6195,7 @@ describe("a start on a thread whose turn is running", () => {
   it("on a harness that cannot steer, the start waits for the running turn and follows its done: one turn at a time on the session", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const first = await rt.sessions.start(ws.id, { prompt: "one" });
@@ -6222,7 +6226,7 @@ describe("a start on a thread whose turn is running", () => {
   it("two sends queued behind one turn run in order, each after the one before it ended", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const sid = (await rt.sessions.start(ws.id, { prompt: "one" })).view().claudeSessionId!;
@@ -6251,7 +6255,7 @@ describe("a start on a thread whose turn is running", () => {
   it("a send that meets the reply tail queues instead of being refused, and two of them keep their order", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = await rt.sessions.start(ws.id, { prompt: "one" });
     const threadId = first.view().threadId!;
     // The turn has answered and its process has not exited: the row still reads running.
@@ -6276,7 +6280,7 @@ describe("a start on a thread whose turn is running", () => {
   it("a harness that takes a message mid-turn takes none once its turn has answered: that send queues for the next turn too", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const first = await rt.sessions.start(ws.id, { prompt: "one" });
     const threadId = first.view().threadId!;
     h.reply(0, "answered");
@@ -6295,7 +6299,7 @@ describe("a start on a thread whose turn is running", () => {
   it("a start on another thread of the same workspace is not held back by the running turn", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await rt.sessions.start(ws.id, { prompt: "one" });
     const other = await rt.sessions.start(ws.id, { prompt: "elsewhere" });
     expect(other.outcome).toBe("started");
@@ -6308,7 +6312,7 @@ describe("what a turn cost, on the row it ran on", () => {
   it("is kept on the row the listing answers with, and adds up over the turns that ran there, so a reader of the list needs no transcript to say what a thread spent", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const one = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     h.end(0, "done", { durationMs: 1_000, costUsd: 0.75 });
     await one.finished;
@@ -6325,7 +6329,7 @@ describe("what a turn cost, on the row it ran on", () => {
   it("is absent on a row whose harness reported no figure, so nothing reads a missing number as nothing spent", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     h.end(0, "done", { durationMs: 1_000 });
     await turn.finished;
@@ -6338,7 +6342,7 @@ describe("a thread whose start named who to tell", () => {
   it("a running parent that steers is told by one steer: the line, with the outcome, duration, cost and the reply whole, and the child's transcript holds a session.notify naming the parent", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread], startedBy: "agent" });
@@ -6360,7 +6364,7 @@ describe("a thread whose start named who to tell", () => {
   it("an idle parent is told by a turn of its own: a start that resumes the parent's session with the line as its prompt", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate", startedBy: "cli" });
     const parentThread = parent.view().threadId!;
     const parentSid = parent.view().claudeSessionId!;
@@ -6387,7 +6391,7 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
     const parentSid = parent.view().claudeSessionId!;
@@ -6419,7 +6423,7 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const turn = await rt.sessions.start(ws.id, { prompt: "orchestrate", notify: ["me"] });
     h.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
     const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.00): the reply`;
@@ -6437,7 +6441,7 @@ describe("a thread whose start named who to tell", () => {
     const store = memoryStore();
     const h1 = held(false);
     const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     const turn = await rt1.sessions.start(ws.id, { prompt: "orchestrate", notify: ["me"] });
     h1.reply(0, "the reply", { durationMs: 1_500, costUsd: 0.0042 });
     const line = `thread ${turn.view().threadId!.slice(0, 8)} finished (completed, 1.5s, $0.00): the reply`;
@@ -6460,7 +6464,7 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
@@ -6481,7 +6485,7 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const failing = await rt.sessions.start(ws.id, { prompt: "die", notify: ["me"] });
     h.end(0, "", { status: "failed", error: "the harness died", durationMs: 3_000 });
     const stopped = await rt.sessions.start(ws.id, { prompt: "run", notify: ["me"] });
@@ -6503,7 +6507,7 @@ describe("a thread whose start named who to tell", () => {
   it("a thread id no thread carries is refused before anything starts", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: ["thread_nobody"]})).rejects.toThrow("no thread thread_nobody to notify");
     expect(h.starts).toEqual([]);
     expect(await rt.sessions.list(ws.id)).toEqual([]);
@@ -6515,7 +6519,7 @@ describe("a thread whose start named who to tell", () => {
     const store = memoryStore();
     const backend = stubBackend();
     const rt = createRuntime({ backend, store, adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parentThread] });
@@ -6545,7 +6549,7 @@ describe("a thread whose start named who to tell", () => {
   it("a thread cannot notify itself: a resumed start that names its own thread is refused, and nothing starts", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const own = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const sid = own.view().claudeSessionId!;
     h.end(0, "ready");
@@ -6559,7 +6563,7 @@ describe("a thread whose start named who to tell", () => {
   it("a cycle is refused: a start whose notify already leads back to this thread, at any length of the chain", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const a = await rt.sessions.start(ws.id, { prompt: "a" });
     const b = await rt.sessions.start(ws.id, { prompt: "b", notify: [a.view().threadId!] });
     const c = await rt.sessions.start(ws.id, { prompt: "c", notify: [b.view().threadId!] });
@@ -6584,7 +6588,7 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     h.end(0, "waiting");
     await parent.finished;
@@ -6606,7 +6610,7 @@ describe("a thread whose start named who to tell", () => {
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await rt.workspaces.nap(ws.id);
     const kinds = events.filter(e => "turnId" in e && e.turnId === kid.turnId).map(e => e.type);
@@ -6621,11 +6625,11 @@ describe("a thread whose start named who to tell", () => {
     const h1 = held(true);
     const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
     // The child's workspace has the older sessions document, so the sweep meets the child before its parent.
-    const kidWs = await rt1.workspaces.create({ golden: "snap_g", name: "builder" });
+    const kidWs = await createOn(rt1, { golden: "snap_g", name: "builder" });
     const warmup = await rt1.sessions.start(kidWs.id, { prompt: "warm up" });
     h1.end(0, "ready");
     await warmup.finished;
-    const parentWs = await rt1.workspaces.create({ golden: "snap_g", name: "lead" });
+    const parentWs = await createOn(rt1, { golden: "snap_g", name: "lead" });
     const parent = await rt1.sessions.start(parentWs.id, { prompt: "orchestrate" });
     const parentThread = parent.view().threadId!;
     const kid = await rt1.sessions.start(kidWs.id, { prompt: "build it", notify: [parentThread], startedBy: "agent" });
@@ -6660,7 +6664,7 @@ describe("a thread whose start named who to tell", () => {
     const store = memoryStore();
     const h1 = held(true);
     const rt1 = createRuntime({ backend, store, adapters: { claude: h1.adapter } });
-    const ws = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt1, { golden: "snap_g", name: "a" });
     const kid = await rt1.sessions.start(ws.id, { prompt: "build it", notify: ["me"] });
     await rt1.close();
 
@@ -6683,7 +6687,7 @@ describe("a thread whose start named who to tell", () => {
   it("me is the thread the request came out of: two turns on one machine launch under a token each, and each token resolves me to its own thread", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const one = await rt.sessions.start(ws.id, { prompt: "coordinate one" });
     const two = await rt.sessions.start(ws.id, { prompt: "coordinate two" });
     const tokens = h.envs.map(e => e[TURN_TOKEN_ENV]!);
@@ -6709,7 +6713,7 @@ describe("a thread whose start named who to tell", () => {
   it("a turn the runtime ended rather than its own process leaves its token naming nobody", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const turn = await rt.sessions.start(ws.id, { prompt: "coordinate" });
     const token = h.envs[0]![TURN_TOKEN_ENV]!;
     // A nap ends the turn from this side: its harness process never exits, so nothing on that road clears the row.
@@ -6723,7 +6727,7 @@ describe("a thread whose start named who to tell", () => {
   it("a token no turn on this host carries is refused, and nothing starts", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     await expect(rt.sessions.start(ws.id, { prompt: "build it", notify: ["me"], turnToken: "f".repeat(32) })).rejects.toThrow(NO_SUCH_TURN);
     expect(h.starts).toEqual([]);
     expect(await rt.sessions.list(ws.id)).toEqual([]);
@@ -6733,7 +6737,7 @@ describe("a thread whose start named who to tell", () => {
   it("the token dies with the turn that carried it, and a start with no token still reaches the person", async () => {
     const h = held(false);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const turn = await rt.sessions.start(ws.id, { prompt: "coordinate" });
     const token = h.envs[0]![TURN_TOKEN_ENV]!;
     h.end(0, "handed off");
@@ -6751,8 +6755,8 @@ describe("a thread whose start named who to tell", () => {
   it("notify takes several targets: a builder's end reaches its orchestrator and a reviewer, each once, with the same line", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const lead = await rt.workspaces.create({ golden: "snap_g", name: "lead" });
-    const box = await rt.workspaces.create({ golden: "snap_g", name: "box" });
+    const lead = await createOn(rt, { golden: "snap_g", name: "lead" });
+    const box = await createOn(rt, { golden: "snap_g", name: "box" });
     const orchestrator = await rt.sessions.start(lead.id, { prompt: "orchestrate" });
     const reviewer = await rt.sessions.start(lead.id, { prompt: "review what lands" });
     const builder = await rt.sessions.start(box.id, { prompt: "build it", notify: [orchestrator.view().threadId!, reviewer.view().threadId!], startedBy: "agent" });
@@ -6770,8 +6774,8 @@ describe("a thread whose start named who to tell", () => {
   it("a target whose thread is gone when the child ends falls back to the person, and the person is told once however many fell away", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const lead = await rt.workspaces.create({ golden: "snap_g", name: "lead" });
-    const box = await rt.workspaces.create({ golden: "snap_g", name: "box" });
+    const lead = await createOn(rt, { golden: "snap_g", name: "lead" });
+    const box = await createOn(rt, { golden: "snap_g", name: "box" });
     const orchestrator = await rt.sessions.start(lead.id, { prompt: "orchestrate" });
     const builder = await rt.sessions.start(box.id, { prompt: "build it", notify: [orchestrator.view().threadId!, "me"], startedBy: "agent" });
     // The orchestrator's workspace is deleted while the builder works, so the thread the report was addressed to is
@@ -6789,7 +6793,7 @@ describe("a thread whose start named who to tell", () => {
   it("a target list never holds the sender: its own thread by id or through me is refused, and a target named twice is one target", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const one = await rt.sessions.start(ws.id, { prompt: "one" });
     const oneThread = one.view().threadId!;
     const token = h.envs[0]![TURN_TOKEN_ENV]!;
@@ -6809,7 +6813,7 @@ describe("a thread whose start named who to tell", () => {
   it("the line into a thread carries the final message whole; the person's stays its last line", async () => {
     const h = held(true);
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const parent = await rt.sessions.start(ws.id, { prompt: "orchestrate" });
     const kid = await rt.sessions.start(ws.id, { prompt: "build it", notify: [parent.view().threadId!], startedBy: "agent" });
     const mine = await rt.sessions.start(ws.id, { prompt: "build mine", notify: ["me"] });
@@ -6850,8 +6854,8 @@ describe("gone machines", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt1 = createRuntime({ backend, store, adapters: {} });
-    const a = await rt1.workspaces.create({ golden: "snap_g", name: "a" });
-    const b = await rt1.workspaces.create({ golden: "snap_g", name: "b" });
+    const a = await createOn(rt1, { golden: "snap_g", name: "a" });
+    const b = await createOn(rt1, { golden: "snap_g", name: "b" });
     await rt1.workspaces.nap(b.id);
     await rt1.close();
     for (const m of backend.machines) m.killed = true;
@@ -6905,7 +6909,7 @@ describe("gone machines", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 }, goneConfirmMs: 5 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const port = await closedPort();
     backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
     await rt.sessions.start(ws.id, { prompt: "work" });
@@ -6945,7 +6949,7 @@ describe("gone machines", () => {
     const backend = stubBackend();
     const store = memoryStore();
     const rt = createRuntime({ backend, store, adapters: { claude: held }, status: { pollIntervalMs: 5, costIntervalMs: 5, reconcileMinMs: 0 }, goneConfirmMs: 5 });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const m = backend.machines[0]!;
     const port = await closedPort();
     m.previewUrl = async p => ({ url: `http://127.0.0.1:${port}/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
@@ -6997,7 +7001,7 @@ describe("a workspace behind the golden's head", () => {
     const { backend, store, rt } = await seeded();
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
     expect(moved.workspace.golden).toBe("snap_golden-v2");
     expect(moved.workspace.machineId).toBe("m2");
@@ -7010,7 +7014,7 @@ describe("a workspace behind the golden's head", () => {
 
   it("one already on the head is handed back untouched: no machine is replaced", async () => {
     const { backend, rt } = await seeded();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v2", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v2", name: "api" });
     // The one place that knows no machine was replaced says so, rather than leaving every client to work it out.
     expect(await rt.workspaces.updateImage(ws.id)).toMatchObject({ workspace: { golden: "snap_golden-v2", machineId: "m1" }, moved: false, kept: [] });
     expect(backend.machines).toHaveLength(1);
@@ -7022,7 +7026,7 @@ describe("a workspace behind the golden's head", () => {
     ["gone" as const, "api's machine is gone; rebuild it to move it to a newer image"],
   ])("a %s workspace is refused with the sentence the app shows: the move replaces the machine, so only a running one takes it", async (phase, why) => {
     const { backend, store, rt } = await seeded();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const record = (await store.get("workspaces", ws.id)) as { phase: string };
     await store.put("workspaces", ws.id, { ...record, phase });
     // The store's word has to be the provider's too: a record over a machine that runs hydrates running, whichever
@@ -7051,7 +7055,7 @@ describe("a workspace behind the golden's head", () => {
       workspaceName: "old",
       createdAt: "2026-09-02T00:00:00.000Z",
     });
-    const ws = await rt.workspaces.create({ golden: "snap_project", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_project", name: "api" });
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toMatchObject({ kind: "conflict" });
     expect(backend.machines).toHaveLength(1);
     expect(backend.machines[0]!.killed).toBe(false);
@@ -7062,7 +7066,7 @@ describe("a workspace behind the golden's head", () => {
   // the image it names must be the one the workspace is on, so the rebuild that follows restores that version.
   it("a move that fails leaves the record on the image the workspace came from, so the rebuild after it forks that one", async () => {
     const { backend, store, rt } = await seeded();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const create = backend.create.bind(backend);
     let refused = true;
     backend.create = async spec => {
@@ -7081,7 +7085,7 @@ describe("a workspace behind the golden's head", () => {
 
   it("one forked from a snapshot no golden of this host knows is refused by name", async () => {
     const { rt } = await seeded();
-    const ws = await rt.workspaces.create({ golden: "snap_elsewhere", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_elsewhere", name: "api" });
     await expect(rt.workspaces.updateImage(ws.id)).rejects.toThrow("api's image is not one of the versions this host knows");
   });
 });
@@ -7140,7 +7144,7 @@ describe("what a move onto a newer image does with the files the image itself wr
 
   it("the files it never touched are left to the new image, its own edits travel and are named, and a directory holding one of them travels as its contents", async () => {
     const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
     expect(moved.kept).toEqual([".gitconfig"]);
     expect(moved.moved).toBe(true);
@@ -7160,7 +7164,7 @@ describe("what a move onto a newer image does with the files the image itself wr
 
   it("a version sealed before the manifest existed falls back: nothing is read off the fork, nothing is dropped, and the result says so", async () => {
     const { backend, rt } = await seeded([version(1), version(2, V2)]);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
     expect(moved).toMatchObject({ kept: [], fallback: true });
     expect(backend.machines[0]!.execLog.some(c => c.includes(READ))).toBe(false);
@@ -7169,7 +7173,7 @@ describe("what a move onto a newer image does with the files the image itself wr
 
   it("a fork that changed nothing of the image's keeps nothing and every one of those files comes from the new image", async () => {
     const { backend, rt } = await seeded([version(1, V1.map(f => ({ ...f, sha256: ON_FORK[f.path] ?? f.sha256 }))), version(2, V2)]);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     expect((await rt.workspaces.updateImage(ws.id)).kept).toEqual([]);
     const script = tarScript(backend.machines[0]!);
     for (const path of [".zshrc", ".gitconfig", ".claude/settings.json"]) expect(script).toContain(`-path 'root/${path}'`);
@@ -7178,7 +7182,7 @@ describe("what a move onto a newer image does with the files the image itself wr
 
   it("a volatile file is never read off the fork and never named: its bytes move on their own, so the line stays the person's own edits", async () => {
     const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     expect((await rt.workspaces.updateImage(ws.id)).kept).toEqual([".gitconfig"]);
     const read = backend.machines[0]!.execLog.find(c => c.includes(READ))!;
     expect(read).not.toContain(".claude.json");
@@ -7197,7 +7201,7 @@ describe("what a move onto a newer image does with the files the image itself wr
       home: [".zshrc", ".claude.json", "proj"],
       fork: { ".zshrc": sha("1"), ".claude.json": sha("b") },
     });
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
     const read = backend.machines[0]!.execLog.find(c => c.includes(READ))!;
     expect(read).toContain("'.claude.json'");
@@ -7213,7 +7217,7 @@ describe("what a move onto a newer image does with the files the image itself wr
 
   it("the comparison is read off the machine before it is killed, so the fork's own copies are what the archive judges", async () => {
     const { backend, rt } = await seeded([version(1, V1), version(2, V2)]);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     await rt.workspaces.updateImage(ws.id);
     const log = backend.machines[0]!.execLog;
     expect(log.findIndex(c => c.includes(READ))).toBeGreaterThan(-1);

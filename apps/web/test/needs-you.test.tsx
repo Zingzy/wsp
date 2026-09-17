@@ -207,7 +207,7 @@ describe("a thread stopped on a permission prompt while the person looked away",
 });
 
 describe("a machine that came up while the person looked away", () => {
-  const WOKEN = { id: "ws_1", name: "b1", machineId: "m1", phase: "running" as const, golden: "snap_g", createdAt: "2026-09-10T00:00:00Z", projects: [] };
+  const WOKEN = { id: "ws_1", name: "b1", machineId: "m1", phase: "running" as const, golden: "snap_g", createdAt: "2026-09-10T00:00:00Z", project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } };
 
   it("says the workspace is awake on the same road as a build's need, and a click opens that workspace", () => {
     const emit = bindEvents();

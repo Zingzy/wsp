@@ -250,9 +250,6 @@ const api: Api = {
   createWorkspace: async () => {
     throw new Error("none");
   },
-  createFromGoldenHead: async () => {
-    throw new Error("none");
-  },
   watchStatuses: async () => [],
   nap: async () => {
     throw new Error("none");

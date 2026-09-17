@@ -8,8 +8,8 @@ import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { goneRefusal, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
-import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THIS_COMPUTER_HINTS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
-import { NEW_LOCAL_ACTION, SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
+import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -46,7 +46,6 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     forget: vi.fn(),
     rename: vi.fn(),
     pickLook: vi.fn(),
-    importProject: vi.fn(),
     exportProject: vi.fn(),
     ...over,
   };
@@ -67,7 +66,6 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
       WORKSPACE_WORDS.openMachine,
-      WORKSPACE_WORDS.importProject,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.icon,
@@ -76,7 +74,7 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "import-project", "export-project", "rename", "icon", "theme", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "export-project", "rename", "icon", "theme", "copy-id"]);
     expect(actionById(actions, "rename").refusal).toBeNull();
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
@@ -136,12 +134,11 @@ describe("workspace actions", () => {
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
     expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild workspaces");
     expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
-    // The project trips: the machine must answer, and the client must have the folder ops; a browser tab without them says so.
-    expect(actionById(gone, "import-project").refusal).toBe("Projects wait for the rebuild");
+    // Bringing a folder home: the machine must answer, and the client must have the folder ops; a browser tab
+    // without them says so. Nothing imports any more: a project is recorded with wsp add and a workspace is one's copy.
     expect(actionById(zombie, "export-project").refusal).toBe("Projects wait for the rebuild");
-    expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "import-project").refusal).toBeNull();
-    const noTrips = resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ importProject: undefined, exportProject: undefined }));
-    expect(actionById(noTrips, "import-project").refusal).toBe("This client cannot import projects");
+    expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "export-project").refusal).toBeNull();
+    const noTrips = resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ exportProject: undefined }));
     expect(actionById(noTrips, "export-project").refusal).toBe("This client cannot export projects");
     expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "open-browser").refusal).toBe("Workspace is paused; wake it to preview");
     expect(actionById(resolveActions(workspaceActions, workspace("waking"), verbs), "open-browser").refusal).toBe("Workspace is waking; previews open when it is running");
@@ -156,9 +153,7 @@ describe("workspace actions", () => {
     await actionById(actions, "open-browser").run();
     await actionById(actions, "open-machine").run();
     await actionById(actions, "copy-id").run();
-    await actionById(actions, "import-project").run();
     await actionById(actions, "export-project").run();
-    expect(verbs.importProject).toHaveBeenCalledWith("ws_a");
     expect(verbs.exportProject).toHaveBeenCalledWith("ws_a");
     expect(verbs.togglePhase).toHaveBeenCalledWith("ws_a");
     expect(verbs.newThread).toHaveBeenCalledWith("ws_a");
@@ -196,8 +191,8 @@ describe("workspace actions", () => {
   });
 
   it("one target builder serves every surface: the status's phase, machine state, reach and reason lead, the record fills in", () => {
-    const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
-    const status: WorkspaceStatus = { ...view, machineId: "m_new", phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
+    const view: WorkspaceView = { id: "ws_a", name: "api", machineId: "m_old", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z", gone: "the record's words" };
+    const status: WorkspaceStatus = { ...view, machineId: "m_new", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "napping", machineState: "paused", reach: { state: "napping" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, reason: "the status's words" };
     expect(workspaceTarget(view, status, [])).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_new", phase: "napping", machineState: "paused", reach: "napping", reason: "the status's words", wakeRefused: null, absent: null });
     expect(workspaceTarget(view, null, [])).toEqual({ id: "ws_a", displayName: "api", kind: "cloud", machineId: "m_old", phase: "running", machineState: null, reach: null, reason: "the record's words", wakeRefused: null, absent: null });
     // The record's own wake words ride apart from the reason, which the next status push replaces.
@@ -453,7 +448,6 @@ describe("menu items from actions", () => {
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],
       ["open-machine", WORKSPACE_WORDS.openMachine, "open", true],
-      ["import-project", WORKSPACE_WORDS.importProject, "project", true],
       ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", true],
       ["icon", WORKSPACE_WORDS.icon, "edit", true],
@@ -491,44 +485,22 @@ describe("placing the in-app menu", () => {
 });
 
 describe("the Workspaces section registry", () => {
-  const target = (over: Partial<SidebarTarget> = {}): SidebarTarget => ({ mode: "list", hasLocal: false, connected: true, ...over });
+  const target = (over: Partial<SidebarTarget> = {}): SidebarTarget => ({ mode: "list", ...over });
   const verbs = (): SidebarVerbs & { calls: string[] } => {
     const calls: string[] = [];
-    return { calls, setMode: mode => calls.push(`mode:${mode}`), newLocal: () => calls.push("newLocal") };
+    return { calls, setMode: mode => calls.push(`mode:${mode}`) };
   };
 
-  it("offers one road to this computer, saying whether the pick makes it or goes to the one there is", () => {
-    const row = (over?: Partial<SidebarTarget>) => actionById(resolveActions(sidebarActions, target(over), verbs()), NEW_LOCAL_ACTION)!;
-    expect(row().title).toBe("This computer");
-    expect(row().hint).toBe(THIS_COMPUTER_HINTS.fresh);
-    expect(row().refusal).toBeNull();
-    // One per host: the second pick is a selection, and the row says so rather than offering a second create.
-    expect(row({ hasLocal: true }).hint).toBe(THIS_COMPUTER_HINTS.existing);
-    expect(row({ hasLocal: true }).refusal).toBeNull();
-    // Nothing to ask while there is no host to ask.
-    expect(row({ connected: false }).refusal).toBe(THIS_COMPUTER_HINTS.offline);
+  it("offers the body toggle alone: a workspace is made of a project, which the new workspace dialog picks", () => {
+    const rows = resolveActions(sidebarActions, target(), verbs());
+    expect(rows.map(a => a.id)).toEqual([SIDEBAR_MODE_ACTION]);
+    const menu = toMenuItems(rows, DEFAULT_RESOLVED_KEYBINDINGS);
+    expect(menu.map(item => [item.label, item.group, item.enabled])).toEqual([[SIDEBAR_MODE_WORDS.spaces.title, "view", true]]);
   });
 
-  it("running it asks the store, and the mode row still runs the toggle: one registry, two rows", () => {
+  it("running the mode row runs the toggle, which is the one verb the registry takes", () => {
     const v = verbs();
-    const rows = resolveActions(sidebarActions, target(), v);
-    actionById(rows, NEW_LOCAL_ACTION)!.run();
-    actionById(rows, SIDEBAR_MODE_ACTION)!.run();
-    expect(v.calls).toEqual(["newLocal", "mode:spaces"]);
-  });
-
-  it("both rows reach the palette and the section menu from the same list, so neither can say two things", () => {
-    const ids = resolveActions(sidebarActions, target(), verbs()).map(a => a.id);
-    expect(ids).toEqual([SIDEBAR_MODE_ACTION, NEW_LOCAL_ACTION]);
-    const menu = toMenuItems(resolveActions(sidebarActions, target(), verbs()), DEFAULT_RESOLVED_KEYBINDINGS);
-    expect(menu.map(item => [item.label, item.group, item.enabled])).toEqual([
-      [SIDEBAR_MODE_WORDS.spaces.title, "view", true],
-      ["This computer", "create", true],
-    ]);
-    // A row the host cannot answer carries its refusal into the menu rather than reading as available.
-    expect(toMenuItems(resolveActions(sidebarActions, target({ connected: false }), verbs()), DEFAULT_RESOLVED_KEYBINDINGS).at(-1)).toMatchObject({
-      enabled: false,
-      refusal: THIS_COMPUTER_HINTS.offline,
-    });
+    actionById(resolveActions(sidebarActions, target(), v), SIDEBAR_MODE_ACTION)!.run();
+    expect(v.calls).toEqual(["mode:spaces"]);
   });
 });

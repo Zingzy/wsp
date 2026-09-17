@@ -13,6 +13,7 @@ import { SolariBackend, type MachineShape } from "@wsp/engine";
 import { GoldenManifest, goldenHead, type EventUnion } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
+import { createOn } from "./stub-backend.js";
 
 const LIVE = process.env.WSP_LIVE === "1";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -79,7 +80,7 @@ describe.runIf(LIVE)("verified wake, live", () => {
     rt.events.on("workspace.woken", e => { if (e.type === "workspace.woken") created.push(e.machineId); });
 
     const t0 = Date.now();
-    const ws = await rt.workspaces.create({ golden, name: "wake-live", labels: TEST_LABEL });
+    const ws = await createOn(rt, { golden, name: "wake-live", labels: TEST_LABEL });
     const born = await (await backend.get(ws.machineId)).describe!();
     console.log(`fork ${ws.machineId} in ${fmt(Date.now() - t0)} from ${golden}; shape ${JSON.stringify(born)}`);
     await rt.workspaces.exec(ws.id, "echo nap-vault-marker > /root/nap-marker.txt");

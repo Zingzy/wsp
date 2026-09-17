@@ -9,7 +9,7 @@
 import { readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { hiddenFolder, workspaceProjects, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
+import { hiddenFolder, type HostFolder, type HostFolderListing, type WorkspaceView } from "@wsp/protocol";
 import type { HostFolders } from "@wsp/runtime";
 import { under } from "./init-import.js";
 import { isRepoFolder } from "./project-bundle.js";
@@ -26,7 +26,7 @@ export interface HostFolderPaths {
 /** The project folders the records name, each once: an import lands a folder on the machine at the path it has here,
  * so a record's dest names the folder on this computer as well. */
 export function importedProjectFolders(workspaces: readonly WorkspaceView[]): string[] {
-  return [...new Set(workspaces.flatMap(w => workspaceProjects(w).map(p => p.dest)))];
+  return [...new Set(workspaces.map(w => w.project.path))];
 }
 
 function isFolder(path: string): boolean {

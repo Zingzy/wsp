@@ -316,7 +316,7 @@ describe("processes surface", () => {
   it("says the computer is not answering in the pane itself, in two halves, when that computer is the one holding the workspace", async () => {
     act(() =>
       useStore.setState({
-        workspaces: [{ ...view, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" }],
+        workspaces: [{ ...view, kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" }],
         places: [{ id: "p_oldlaptop", kind: "computer", name: "old-laptop", default: true, present: false, lastSeenAt: new Date(Date.now() - 38 * 60_000).toISOString() }],
       }),
     );
@@ -334,7 +334,7 @@ describe("processes surface", () => {
       useStore.setState({
         api: { subscribe: () => () => {}, restartDaemon: async (id: string) => void asked.push(id) } as never,
         workspaces: [{ ...view, kind: "local", machineId: "local" }],
-        statuses: { [WS]: { ...view, kind: "local", machineId: "local", machineState: "running", reach: { state: "no-daemon" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never },
+        statuses: { [WS]: { ...view, kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, machineState: "running", reach: { state: "no-daemon" }, size: { cpu: 8, memMb: 16384 }, rateUsdPerHour: 0 } as never },
       }),
     );
     render(<ProcessesSurface workspaceId={WS} />);

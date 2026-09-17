@@ -156,7 +156,7 @@ describe("how many forks a place takes", () => {
 });
 
 describe("what the views carry about a place", () => {
-  const workspace = { id: "ws_1", name: "x", machineId: "c1", phase: "running" as const, golden: "sha256:aa", createdAt: "2026-09-12T00:00:00.000Z" };
+  const workspace = { id: "ws_1", name: "x", machineId: "c1", phase: "running" as const, golden: "sha256:aa", createdAt: "2026-09-12T00:00:00.000Z", project: { id: "pr_1a2b3c4d", name: "x", path: "/root/x", computer: "here" } };
 
   it("reads a fork with a place and one without", () => {
     expect(WorkspaceView.parse({ ...workspace, place: "p_ab12cd34" }).place).toBe("p_ab12cd34");

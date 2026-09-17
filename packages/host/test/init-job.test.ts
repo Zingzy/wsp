@@ -14,7 +14,7 @@ import { basename, join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { BUILDER_DISK_GB, NoProviderBackend, SMOKE_LABEL, SNAPSHOT_STORAGE, checkProviderKey, type BackendPricing, type MachineBackend } from "@wsp/engine";
-import { CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
+import { HERE_PLACE_ID, CLOUD_SETUP_WORDS, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, NO_BUILD_PLACE_LINE, buildPlaceAskLine, INIT_ROW_STATES, initSignInOutcome, InitJob, InitNeedsYouEvent, KEY_REFUSED, KEY_UNCHECKED, MACHINE_GONE_LINE, MACHINE_SWEEP_LINE, NETWORK_LOST_LINE, NEVER_REACHED, NO_FIRST_WORKSPACE, Recipe, SAVED_KEY_STOPPED_LINE, SIGN_IN_NEVER_REACHED, SIGN_IN_OPEN_STATE, SIGN_IN_STAGE_ID, STOP_LEFT_MACHINE_LINE, initAgentNoRecipeLine, initAgentPrompt, initAgentStep, initBuildRows, MACHINE_ROW_LABEL, initProgressLine, initRowFailed, initRowOver, initStageCount, keyRefusedLine, SIGN_IN_DEFERRED_WORD, keyUncheckedLine, noMcpServersLine, savedKeyRefusedLine, type InitJobEvent, type InitRoad } from "@wsp/protocol";
 import { runLogPath } from "../src/init-log.js";
 import { createRuntime, goldenHead, memoryStore, smallestModel, harnessCatalog, type HarnessAdapterFactory, type HarnessStartOptions, type PlaceBackends, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +30,7 @@ import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { DEVICE_URL, GEMINI_URL, scriptedLink } from "./init-link.js";
 import type { HostHooks } from "../src/init-signin.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
-import { holdingAgent, scriptedAgent } from "./verbs-fixture.js";
+import { holdingAgent, scriptedAgent, createOn, projectOn } from "./verbs-fixture.js";
 
 const SOLARI = "slr_live_fake_solari_key";
 const PRICING: BackendPricing = { rateUsdPerHour: s => s.cpu * 0.035 + (s.memMb / 1024) * 0.01, defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: SNAPSHOT_STORAGE, builderDiskGb: BUILDER_DISK_GB };
@@ -141,6 +141,12 @@ interface Fake {
   /** The callback relay's hooks as the run wired them, and how often the relay was closed. */
   relay: { hooks: HostHooks[]; closed: number };
   settled(): Promise<void>;
+}
+
+/** The project the build's first workspace is a copy of: a workspace is one project's, and the job records none
+ * of its own, so the fixture records one on the computer this host forks at. */
+async function forkable(f: Fake): Promise<void> {
+  await f.rt.projects.add({ source: "https://github.com/dev/first.git", on: "default" });
 }
 
 function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean } = {}): Fake {
@@ -306,7 +312,8 @@ describe("the init job, manual road", () => {
     const f = fake({ env: { SOLARI_API_KEY: SOLARI } });
     process.env["ANTHROPIC_API_KEY"] = "sk-ant-x-from-shell";
     try {
-      await f.jobs.start({ road: "manual" });
+      await forkable(f);
+    await f.jobs.start({ road: "manual" });
       await f.settled();
       const logins = f.jobs.view()!.screens.find(s => s.id === "logins")!;
       expect(logins.items.find(i => i.id === "logins/claude")!.key).toEqual({ name: "ANTHROPIC_API_KEY", saved: false });
@@ -347,6 +354,7 @@ describe("the init job, manual road", () => {
     f.onJob(job => {
       if (job.phase === "reading") seen.push(job.rows.map(r => `${r.label}: ${r.state}${r.detail !== undefined ? ` (${r.detail})` : ""}`));
     });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     const all = seen.flat();
@@ -372,6 +380,7 @@ describe("the init job, manual road", () => {
 
   it("the step follows the answers and a step back, so a setup shut mid-way reopens where it was; a step off the screens is refused", async () => {
     const f = fake({ read: { scan: async () => [JQ] } });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     expect(f.jobs.view()!.step).toBe(0);
@@ -387,6 +396,7 @@ describe("the init job, manual road", () => {
 
   it("what a step ticked and typed and did not send is kept beside the step, so a sheet shut mid-answer reopens on it; Continue spends it and a step the job has not got is refused", async () => {
     const f = fake({ read: { scan: async () => [JQ] } });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     // Everything ticked since the last Continue rides the job, not the client: a view taken now carries it.
@@ -408,6 +418,7 @@ describe("the init job, manual road", () => {
 
   it("start reads this computer once and hands the screens over; answers move the recipe; the build is wsp init's own run on the host's runtime, its sign-ins as rows, ending with the golden sealed and the first workspace forked", async () => {
     const f = fake({ read: { scan: async () => [JQ] } });
+    await forkable(f);
     const started = await f.jobs.start({ road: "manual" });
     expect(started).toMatchObject({ road: "manual", phase: "reading", keys: { solari: true }, step: 0 });
     await f.settled();
@@ -500,7 +511,8 @@ describe("the init job, manual road", () => {
       ["darwin", "copied from this Mac"],
     ] as const) {
       const f = fake({ platform });
-      await f.jobs.start({ road: "manual" });
+      await forkable(f);
+    await f.jobs.start({ road: "manual" });
       await f.settled();
       await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
       await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "copy", "logins/claude": "token", "logins/codex": "later" } });
@@ -521,6 +533,7 @@ describe("the init job, manual road", () => {
     const f = fake();
     const link = scriptedLink({ signedIn: true, hold: false, missing: false });
     f.setLink(link);
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
@@ -547,6 +560,7 @@ describe("the init job, manual road", () => {
 
   it("nothing a build on a Linux computer draws names a Mac: not a row, not a screen, not a line of the log", async () => {
     const f = fake({ platform: "linux", read: { scan: async () => [JQ] } });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "later" } });
@@ -560,7 +574,8 @@ describe("the init job, manual road", () => {
   it("a name forks the first workspace whatever the list already holds: this computer is a workspace and the build still ends with the cloud one on the golden it just sealed", async () => {
     const f = fake();
     // The app's list is never empty: this computer is a workspace of its own from the first launch.
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -577,7 +592,8 @@ describe("the init job, manual road", () => {
 
   it("a build with an empty name forks nothing and says so on the row it still draws, so the list never ends on a step nobody can read", async () => {
     const f = fake();
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -594,6 +610,7 @@ describe("the init job, manual road", () => {
 
   it("an empty name forks nothing and imports nothing on an empty list too, so the answer decides it and never the count of workspaces", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -611,6 +628,7 @@ describe("the init job, manual road", () => {
 
   it("one project row per import, whatever the folder was spelled as: the row the build draws is the row the import lands on", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -626,6 +644,7 @@ describe("the init job, manual road", () => {
   it("the job carries what it waits on the person for and the event says it arrived, once per need: each sign-in's open page and nothing else, cleared when the row moves on, and never the screens the person just opened", async () => {
     let clock = 1_760_000_000_000;
     const f = fake({ now: () => (clock += 1_000), tokenHeld: false });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     // The screens wait on the person, but they are what the person is looking at: no need, no event, and the phase
@@ -668,6 +687,7 @@ describe("the init job, manual road", () => {
 
   it("cancel during the sign-ins stops the job: the sign-in in flight ends not signed in, the machine goes, nothing is sealed; a cancel during the seal is refused and the view says the job cannot be stopped", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "skip" } });
@@ -702,6 +722,7 @@ describe("the init job, manual road", () => {
 
   it("a sign-in that ran out reads not signed in and can be retried while the build runs, through the run's own relay so a callback page still returns; the build waits on none of it and the relay closes with the job", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -765,6 +786,7 @@ describe("the init job, manual road", () => {
   it("a sign-in whose page hands a code back takes it from the app: the code reaches that login's own pty on the machine, the row signs in, and nothing of the code is kept", async () => {
     const PASTED = "4/0AfakeCodeFromThePage";
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     // Gemini CLI's login alone: the page it prints hands a code back, which is the road with no terminal to paste into.
@@ -836,6 +858,7 @@ describe("the init job, manual road", () => {
 
   it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with that sentence, never the raw error", async () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -916,6 +939,7 @@ describe("the init job, manual road", () => {
       const row = job.rows.find(r => r.id === "stage/creating");
       if (row !== undefined && row.state === INIT_ROW_STATES.slot) waits.push({ state: row.state, lines: row.lines ?? [], since: row.since });
     });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -933,6 +957,7 @@ describe("the init job, manual road", () => {
 
   it("a build the person stopped says it was them, with the stage it stopped at, and the first workspace reads not made", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -967,6 +992,7 @@ describe("the init job, manual road", () => {
         return "";
       },
     });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -983,6 +1009,7 @@ describe("the init job, manual road", () => {
 
   it("a stop the provider would not take the kill for leaves a row saying the machine is still running, and the kill is tried again until it lands", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -1024,6 +1051,7 @@ describe("the init job, manual road", () => {
 
   it("the sweep belongs to the host, not to the job that died: Start over leaves the machine's row on the new job and on the sidebar's line until the provider takes it", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -1082,6 +1110,7 @@ describe("the init job, manual road", () => {
     // the provider either. Live it was never retried and the machine billed until the reap loop caught it.
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
     const outage = downFor(f.backend, 2);
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -1111,6 +1140,7 @@ describe("the init job, manual road", () => {
   it("the sheet's rows close the base tools stage's block on the still-billing sentence, over the machine's own row", async () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("fetch failed; fetch failed")) });
     const outage = downFor(f.backend, 2);
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -1133,6 +1163,7 @@ describe("the init job, manual road", () => {
     const guest = f.backend.execImpl;
     f.backend.execImpl = (m, cmd) => (m.spec.labels?.[SMOKE_LABEL] === "1" ? { exitCode: 1, stdout: "", stderr: "the fork did not boot" } : guest(m, cmd));
     const outage = downFor(f.backend, 2, m => m.spec.labels?.[SMOKE_LABEL] === "1");
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -1178,6 +1209,7 @@ describe("the init job, manual road", () => {
     f.backend.beforeSnapshot = () => {
       down = true;
     };
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip" } });
@@ -1197,6 +1229,7 @@ describe("the init job, manual road", () => {
 
   it("one count for one build: the host's progress is the sheet's own bar, over the same rows", async () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("the daemon would not deploy")) });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "later" } });
@@ -1219,6 +1252,7 @@ describe("the init job, manual road", () => {
 
   it("cancel while the screens wait drops the job; a build cannot start without answers", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     expect((await f.jobs.cancel()).phase).toBe("cancelled");
@@ -1230,6 +1264,7 @@ describe("the init job, manual road", () => {
     // No key saved and no provider wired is what the keys step is for; the reading is the runtime's provider, so a
     // host forking containers with no key is not caught by it.
     const f = fake({ env: {}, provider: new NoProviderBackend() });
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await expect(f.jobs.build({})).rejects.toThrow(NO_BUILD_PLACE_LINE);
@@ -1282,6 +1317,7 @@ describe("the init job, manual road", () => {
 
   it("a saved key the provider refuses stops the build before its first stage, in the provider's words, with the keys step as the way on", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     f.backend.keyRefusal = Object.assign(new Error("Unauthorized"), { kind: "auth", status: 401 });
@@ -1314,6 +1350,7 @@ describe("the init job, manual road", () => {
 
   it("a build the provider could not be asked about fails on that, and offers no key step: the saved key may be fine", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     f.backend.keyRefusal = Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } });
@@ -1328,6 +1365,7 @@ describe("the init job, manual road", () => {
 
   it("a key the provider takes leaves the build as it was: one check, then the first stage", async () => {
     const f = fake();
+    await forkable(f);
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.build({ firstWorkspace: "first" });
@@ -1341,7 +1379,7 @@ describe("the init job, manual road", () => {
 describe("the init job, agent road", () => {
   it("adds the wsp tools to the agent, opens a thread on this computer with the cheapest model and the one prompt, and shows the screens prefilled from the recipe the thread wrote", async () => {
     const f = fake();
-    const local = await f.rt.workspaces.createLocal("this-mac");
+    const local = await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     const started = await f.jobs.start({ road: "agent", harness: "claude" });
     expect(started.phase).toBe("agent");
     await f.settled();
@@ -1363,7 +1401,7 @@ describe("the init job, agent road", () => {
 
   it("two agent-road starts in flight leave one job: the second is refused while the first's thread is still being opened", async () => {
     const f = fake();
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     const [first, second] = await Promise.allSettled([f.jobs.start({ road: "agent", harness: "claude" }), f.jobs.start({ road: "agent", harness: "claude" })]);
     expect(first.status).toBe("fulfilled");
     expect(second.status).toBe("rejected");
@@ -1375,7 +1413,7 @@ describe("the init job, agent road", () => {
   it("an agent already carrying the wsp tools gets no second install, and a harness with no local workspace is refused", async () => {
     const f = fake({ configured: true });
     await expect(f.jobs.start({ road: "agent", harness: "claude" })).rejects.toThrow(/this computer/);
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     await f.jobs.start({ road: "agent", harness: "claude" });
     await f.settled();
     expect(f.installed).toEqual([]);
@@ -1388,7 +1426,7 @@ describe("the init job, agent road", () => {
       agents: [{ id: "claude", name: "Claude Code", found: true, configured: true }, { id: "codex", name: "Codex", found: true, configured: false }],
       adapters: { codex: () => ({ steers: false, start: () => ({ localId: "s_codex", finished: Promise.resolve({ status: "completed" as const }), interrupt: async () => {} }) }) },
     });
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     // Codex's adapter renders no MCP server for its CLI, so its thread would write no recipe: the road says so and
     // the picker reads the same fact off the setup.
     await expect(f.jobs.start({ road: "agent", harness: "codex" })).rejects.toThrow(noMcpServersLine("Codex"));
@@ -1402,14 +1440,14 @@ describe("the init job, agent road", () => {
 
   it("a harness the runtime cannot run refuses the start in one line, and the job is not left behind", async () => {
     const f = fake();
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     await expect(f.jobs.start({ road: "agent", harness: "codex" })).rejects.toThrow();
     expect(f.jobs.view()).toBeNull();
   });
 
   it("launches the thread with the wsp server on it and the harness's bypass access, and carries the thread, its turn and its agent on the view", async () => {
     const f = fake();
-    const local = await f.rt.workspaces.createLocal("this-mac");
+    const local = await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     const started = await f.jobs.start({ road: "agent", harness: "claude" });
     const launch = f.starts[0]!;
     expect(launch.mcpServers).toEqual({ wsp: WSP_SERVER });
@@ -1423,7 +1461,7 @@ describe("the init job, agent road", () => {
   it("shows the thread's own latest line: the tool it is running, and the prompt it is blocked on", async () => {
     const asks = holdingAgent();
     const f = fake({ agent: asks });
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     await f.jobs.start({ road: "agent", harness: "claude" });
     asks.say({ type: "turn.delta", kind: "tool_use", text: JSON.stringify({ command: "wsp recipe scan --json" }), toolName: "Bash", toolUseId: "toolu_1" });
     expect(f.jobs.view()!.line).toBe("$ wsp recipe scan --json");
@@ -1436,7 +1474,7 @@ describe("the init job, agent road", () => {
 
   it("a recipe already beside the state is not the thread's: a turn that ends without writing one fails the job and shows no screens", async () => {
     const f = fake({ writesRecipe: false });
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     // The first launch's own recipe, sitting where the brief tells the agent to write.
     saveSmallRecipe(smallRecipePath(f.statePath), RECIPE);
     await f.jobs.start({ road: "agent", harness: "claude" });
@@ -1451,7 +1489,7 @@ describe("the init job, agent road", () => {
   it("the recipe file's arrival moves the setup on, with the thread's turn still running", async () => {
     const writes = holdingAgent();
     const f = fake({ agent: writes });
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     await f.jobs.start({ road: "agent", harness: "claude" });
     saveSmallRecipe(smallRecipePath(f.statePath), AGENT_RECIPE);
     await f.settled();
@@ -1463,7 +1501,7 @@ describe("the init job, agent road", () => {
 
   it("the road runs twice in one job: Start over on the first pass leaves the second reading the recipe its own thread wrote, through the same phases", async () => {
     const f = fake();
-    await f.rt.workspaces.createLocal("this-mac");
+    await createOn(f.rt, { on: HERE_PLACE_ID, name: "this-mac" });
     await f.jobs.start({ road: "agent", harness: "claude" });
     await f.settled();
     expect(f.jobs.view()!.phase).toBe("answering");
@@ -1483,6 +1521,7 @@ describe("the init job, agent road", () => {
 describe("the init job, terminal road", () => {
   it("builds the recipe wsp init wrote beside the state on the host's own runtime, writes no wsp tools, and refuses with no recipe there", async () => {
     const f = fake();
+    await forkable(f);
     const path = smallRecipePath(f.statePath);
     await expect(f.jobs.start({ road: "terminal" })).rejects.toThrow(path);
     expect(f.jobs.view()).toBeNull();

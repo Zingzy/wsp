@@ -34,7 +34,7 @@ const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
 const workspace: WorkspaceView = {
   id: WS,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -75,7 +75,6 @@ function fixtureApi(history: Record<string, SessionEvent[]> = {}, rows: SessionV
     capabilities: async () => (caps()),
     listSessions: async () => rows,
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspace,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {

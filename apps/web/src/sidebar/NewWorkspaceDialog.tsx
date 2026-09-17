@@ -1,22 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The new-workspace dialog: a name with a default, where it runs, and the
-// sizes the provider offers under the pick that has them, the image's own
+// The new-workspace dialog: a name with a default, the project the work is on,
+// and the sizes that project's computer offers under it, the image's own
 // checked. Enter creates, Escape cancels. The parent keys this component per
 // opening so the initial name resets; a refusal shows on the creation view,
 // not here.
 //
-// Where lists the computers and providers that can hold another workspace,
-// never this computer, which is already the one workspace it can be; with none
-// of them the control is gone and two notes say why. Every word under the
-// control is a fact of that row as the places list already formats it
-// (whereCaption), so this dialog holds no second spelling of a rate, a count
-// or an image version. The sizes are the picked row's own, off the same list,
-// since one list for every row quoted one provider's prices under another's
-// name.
+// A workspace is one project's copy, so the project is the whole of the pick
+// and its computer comes with it: nothing here asks where the work goes. One
+// project is preselected and its control is a line of text; with none the
+// control is gone and two notes say what records one. Every word under the
+// control is a fact of the project's computer as the places list already
+// formats it (whereCaption), so this dialog holds no second spelling of a
+// rate, a count or an image version. The sizes are that computer's own, off
+// the same list, since one list for every row quoted one provider's prices
+// under another's name.
 import { useState } from "react";
-import { PLACES_WORDS, fmtPrice, fmtSize, offeredSize, sizeOffer, sizeWord, type PlaceView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
+import { PLACES_WORDS, fmtPrice, fmtSize, offeredSize, sizeOffer, sizeWord, type PlaceView, type ProjectView, type SealedImageCopy, type WorkspaceSize } from "@wsp/protocol";
 import { copyOn } from "../settings/image.js";
-import { WHERE_PICK_WORDS, placeIsFull, placeName, whereCaption, whereSegments } from "../settings/places.js";
+import { PROJECT_PICK_WORDS, WHERE_PICK_WORDS, placeIsFull, placeName, whereCaption } from "../settings/places.js";
 import { Button } from "../components/ui/button.js";
 import {
   Dialog,
@@ -41,6 +42,7 @@ const SEGMENT_CAP = 4;
 export function NewWorkspaceDialog({
   initialName,
   places,
+  projects,
   copies,
   goldenSize,
   refusal,
@@ -49,25 +51,28 @@ export function NewWorkspaceDialog({
   onAddComputer,
 }: {
   initialName: string;
-  /** Every computer and provider this wsp holds, this computer first, as the places list gives them. */
+  /** Every computer and provider this wsp holds, as the places list gives them; a project's row is read off it for
+   * the sizes and the caption. */
   places: readonly PlaceView[];
+  /** Every project this wsp holds; the work goes on one of them and the only one is already picked. */
+  projects: readonly ProjectView[];
   /** The copies of the image that are already built, so a row says whether one is there or is built first. */
   copies: readonly SealedImageCopy[];
   /** The image's own size, the row checked until the person picks; null while unknown or when no image says. */
   goldenSize: WorkspaceSize | null;
   /** Why there is nothing to fork yet, which holds the keycap and stands in the caption; null when the fork can go ahead. */
   refusal: string | null;
-  /** `where` is the row the person picked, by its id; `size` is the row they picked under it. */
-  onCreate: (name: string, where?: string, size?: WorkspaceSize) => void;
+  /** `project` is the project the work is on, by its id; `size` is the row they picked under it. */
+  onCreate: (name: string, project: string, size?: WorkspaceSize) => void;
   onCancel: () => void;
-  /** Opens the road to a first computer, from the dialog that has nowhere to put a workspace. */
+  /** Opens the road to a first computer, from the dialog that has no project to make a workspace of. */
   onAddComputer: () => void;
 }) {
-  const segments = whereSegments(places);
   const [name, setName] = useState(initialName);
-  const [pickedWhere, setPickedWhere] = useState<string | null>(null);
+  const [pickedProject, setPickedProject] = useState<string | null>(null);
   const [picked, setPicked] = useState<WorkspaceSize | null>(null);
-  const where = segments.find(p => p.id === pickedWhere) ?? segments.find(p => p.default) ?? segments[0];
+  const project = projects.find(p => p.id === pickedProject) ?? projects[0];
+  const where = project === undefined ? undefined : places.find(p => p.id === project.computer);
   const trimmed = name.trim();
   // The row's own sizes at the row's own rates: a place that offers no pick hides the rows and the workspace takes
   // the image's size.
@@ -82,12 +87,12 @@ export function NewWorkspaceDialog({
   // own. With nowhere to put a workspace there is no caption to write in and no row to create on: the two notes
   // under the label are the reason, and Create is held on that alone.
   const reason = refusal !== null ? refusal : trimmed.length === 0 ? WHERE_PICK_WORDS.nameFirst : where !== undefined && placeIsFull(where) ? caption : null;
-  const held = where === undefined || reason !== null;
+  const held = project === undefined || reason !== null;
   const submit = (): void => {
-    if (held || where === undefined) return;
-    // Only a row that offers sizes carries one: a size picked for the provider and then a pick of a computer would
-    // otherwise ask that computer for a shape it never offered.
-    onCreate(trimmed, where.id, offers.length === 0 ? undefined : (picked ?? undefined));
+    if (held || project === undefined) return;
+    // Only a computer that offers sizes carries one: a size picked for one project and then a pick of a project on
+    // another computer would otherwise ask that computer for a shape it never offered.
+    onCreate(trimmed, project.id, offers.length === 0 ? undefined : (picked ?? undefined));
   };
 
   return (
@@ -130,19 +135,19 @@ export function NewWorkspaceDialog({
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label id="new-workspace-where">{WHERE_PICK_WORDS.label}</Label>
-              {where === undefined ? (
+              <Label id="new-workspace-project">{PROJECT_PICK_WORDS.label}</Label>
+              {project === undefined ? (
                 <>
-                  <p className="text-[13px] text-muted-foreground" data-k="nowhere-here">
-                    {WHERE_PICK_WORDS.nowhereYet}
+                  <p className="text-[13px] text-muted-foreground" data-k="no-project-here">
+                    {PROJECT_PICK_WORDS.noneYet}
                   </p>
-                  <p className="text-[13px] text-muted-foreground" data-k="nowhere-add">
-                    {WHERE_PICK_WORDS.addOne}
+                  <p className="text-[13px] text-muted-foreground" data-k="no-project-add">
+                    {PROJECT_PICK_WORDS.addOne}
                   </p>
                 </>
               ) : (
                 <>
-                  <WherePick segments={segments} checked={where} onPick={setPickedWhere} />
+                  <ProjectPick projects={projects} checked={project} onPick={setPickedProject} />
                   <span className={cn(FACT, "min-h-4")} data-k="where-caption">
                     {reason ?? caption}
                   </span>
@@ -176,7 +181,7 @@ export function NewWorkspaceDialog({
             {/* With nowhere to put a workspace, Add a computer is the one road forward, so it is the loud one and
                 Create stands held beside it: a held keycap is drawn as the outline, so a dialog that made this one
                 the outline too would have nothing to press first. */}
-            {where === undefined && (
+            {project === undefined && (
               <Button type="button" data-k="add-computer" onClick={onAddComputer}>
                 {PLACES_WORDS.addComputer}
               </Button>
@@ -191,19 +196,27 @@ export function NewWorkspaceDialog({
   );
 }
 
-/** The rows themselves: a segmented control while they fit one line, the same words in a select beyond that. The
- * checked row is the one the person picked, else the row this wsp marks as its default. */
-function WherePick({ segments, checked, onPick }: { segments: readonly PlaceView[]; checked: PlaceView; onPick: (id: string) => void }) {
-  if (segments.length > SEGMENT_CAP) {
+/** The projects themselves: the one there is reads as its own name and takes no pick, since a control offering one
+ * row asks a question with one answer. Beyond that a segmented control while they fit one line, and the same names
+ * in a select beyond that. The checked project is the one the person picked, else the first this host holds. */
+function ProjectPick({ projects, checked, onPick }: { projects: readonly ProjectView[]; checked: ProjectView; onPick: (id: string) => void }) {
+  if (projects.length === 1) {
+    return (
+      <p className="text-[13px] text-foreground" data-project={checked.id}>
+        {checked.name}
+      </p>
+    );
+  }
+  if (projects.length > SEGMENT_CAP) {
     return (
       <Select value={checked.id} onValueChange={value => { if (typeof value === "string") onPick(value); }}>
-        <SelectButton size="sm" aria-labelledby="new-workspace-where" className="w-full">
-          <SelectValue>{() => placeName(checked)}</SelectValue>
+        <SelectButton size="sm" aria-labelledby="new-workspace-project" className="w-full">
+          <SelectValue>{() => checked.name}</SelectValue>
         </SelectButton>
         <SelectPopup>
-          {segments.map(place => (
-            <SelectItem key={place.id} value={place.id} data-where={place.id}>
-              {placeName(place)}
+          {projects.map(project => (
+            <SelectItem key={project.id} value={project.id} data-project={project.id}>
+              {project.name}
             </SelectItem>
           ))}
         </SelectPopup>
@@ -212,10 +225,10 @@ function WherePick({ segments, checked, onPick }: { segments: readonly PlaceView
   }
   return (
     <SegmentedControl
-      aria-labelledby="new-workspace-where"
+      aria-labelledby="new-workspace-project"
       className="self-start"
       value={checked.id}
-      segments={segments.map(place => ({ value: place.id, label: placeName(place) }))}
+      segments={projects.map(project => ({ value: project.id, label: project.name }))}
       onChange={onPick}
     />
   );

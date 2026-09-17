@@ -12,6 +12,7 @@ import { fakeProcTree, setListeners, writeSys, type FakeListener, type FakeProc,
 import { daemonUnderTest, type DaemonArgs, type DaemonUnderTest } from "../../../packages/daemon/test/harness.js";
 import { stubBackend, tokenGuest, type StubBackend } from "../../../packages/runtime/test/stub-backend.js";
 import { makeApi, ProtocolClient, type Api } from "../src/protocol/client.js";
+import { createOn } from "../../../packages/runtime/test/stub-backend.js";
 
 const HOST_TOKEN = "relay-harness-host-token";
 const DAEMON_TOKEN = "cafef00d".repeat(3);
@@ -82,7 +83,7 @@ export async function startRelayHarness(opts: RelayHarnessOptions = {}): Promise
   const roads = new Map<string, string>();
   const add = async (name: string, url: string): Promise<string> => {
     const at = backend.machines.length;
-    const workspace = await runtime.workspaces.create({ golden: "snap_g", name });
+    const workspace = await createOn(runtime, { golden: "snap_g", name });
     roads.set(workspace.id, url);
     // Minted just inside the engine's refresh margin, so every dial reads the road as it stands now: a test that
     // moves it is playing an edge whose answer changed, which is the wall this exists for.

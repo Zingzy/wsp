@@ -6,6 +6,7 @@ import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@
 import { describe, expect, it } from "vitest";
 import { describeOrphanOffer, describeOrphans, describeRetention, describeStorage, retentionOffer } from "../src/storage.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 const GB = 1e9;
 const PRICING = SNAPSHOT_STORAGE;
@@ -136,7 +137,7 @@ describe("the retention offer over the stub backend", () => {
 
   it("a version a running or paused workspace was forked from is named and never offered", async () => {
     const g = await golden();
-    const alpha = await g.rt.workspaces.create({ golden: "snap_golden-v1", name: "alpha" });
+    const alpha = await createOn(g.rt, { golden: "snap_golden-v1", name: "alpha" });
     await g.rt.workspaces.nap(alpha.id);
     await retentionOffer({ rt: g.rt, interactive: false, yes: false, ...streams(g) });
     const out = g.text();
@@ -166,7 +167,7 @@ describe("the retention offer over the stub backend", () => {
     const h = await golden();
     await h.rt.golden.rollback(2);
     await sealed(h);
-    await h.rt.workspaces.create({ golden: "snap_golden-v4", name: "alpha" });
+    await createOn(h.rt, { golden: "snap_golden-v4", name: "alpha" });
     await retentionOffer({ rt: h.rt, interactive: false, yes: true, ...streams(h) });
     expect(h.text()).toContain("Image v4 stays: workspace alpha was forked from it.");
     expect(h.text()).toContain("Delete image v1 and v3, 18.0 GB, saving about $0.90/month from 2026-10-01? v5 and v2 stay. v3 is an abandoned branch: v5 was not built through it. Taken as yes (--yes).");

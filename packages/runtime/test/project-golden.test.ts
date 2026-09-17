@@ -9,7 +9,7 @@ import { copyKey, createRuntime, type PackedProject, type ProjectBundler, type R
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { WsClient } from "./ws-client.js";
 
 let srv: RuntimeServer | undefined;
@@ -52,25 +52,26 @@ async function setup(store: Store = memoryStore()): Promise<{ rt: Runtime; backe
   return { rt, backend, store, advance };
 }
 
-/** A workspace forked from the golden's head with the project landed in it. */
-async function loaded(rt: Runtime, advance: (ms: number) => void, name = "task") {
-  const ws = await rt.workspaces.create({ golden: "snap_golden-v12", name });
+/** A workspace of the project, forked from the golden's head: the project is what a workspace is made for, so it
+ * is in place from the create and the snapshot is named after it. */
+async function loaded(rt: Runtime, advance: (ms: number) => void, name = "task", project?: string) {
+  const id = project ?? (await projectOn(rt, "default", "https://github.com/dev/proj.git")).id;
+  const ws = await rt.workspaces.create({ project: id, golden: "snap_golden-v12", name });
   advance(60_000);
-  await rt.projects.import({ workspaceId: ws.id, source: SOURCE, dest: DEST, bundler: bundler() });
   return ws;
 }
 
-const PROJECT = { name: "proj", dest: DEST, importedAt: "2026-09-06T10:01:00.000Z", size: 20 };
+/** What a snapshot lists: the workspace's own project, at the path a copy holds it, stamped when the workspace was made. */
+const PROJECT = { name: "proj", dest: "/root/proj", importedAt: "2026-09-06T10:00:00.000Z" };
 
 describe("a project golden", () => {
-  it("an import records the project on the workspace, named by the folder's last segment, and the record outlives the process", async () => {
+  it("a workspace carries the project it was made for, and the record outlives the process", async () => {
     const { rt, advance, store, backend } = await setup();
     const ws = await loaded(rt, advance);
-    expect(ws).not.toHaveProperty("projects");
-    expect(await rt.workspaces.get(ws.id)).toMatchObject({ projects: [PROJECT] });
-    expect((await rt.workspaces.list())[0]).toMatchObject({ projects: [PROJECT] });
+    expect(ws.project).toMatchObject({ name: "proj", path: "/root/proj", computer: "default" });
+    expect((await rt.workspaces.list())[0]!.project.id).toBe(ws.project.id);
     const again = createRuntime({ backend, store, adapters: {}, hostId: HOST });
-    expect(await again.workspaces.get(ws.id)).toMatchObject({ projects: [PROJECT] });
+    expect((await again.workspaces.get(ws.id)).project).toEqual(ws.project);
   });
 
   it("snapshot takes the disk under the project's name, keeps the record with the golden version, the project and the workspace, and leaves the machine first-life", async () => {
@@ -125,14 +126,13 @@ describe("a project golden", () => {
     const golden = await rt.workspaces.snapshot(ws.id);
     expect(golden).toMatchObject({ workspaceId: ws.id, workspaceName: "task", projects: [PROJECT] });
     expect(backend.snapshots.map(s => s.id)).toEqual([golden.snapshotId]);
-    const fork = await rt.workspaces.create({ golden: golden.snapshotId, name: "task-a" });
-    expect(fork).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
+    const fork = await rt.workspaces.create({ project: ws.project.id, golden: golden.snapshotId, name: "task-a" });
+    expect(fork).toMatchObject({ golden: golden.snapshotId });
+    expect(fork.project.name).toBe("proj");
   });
 
-  it("a workspace without a project, a napping one and one that was ever resumed are refused in one sentence, and no snapshot is taken", async () => {
+  it("a napping workspace and one that was ever resumed are refused in one sentence, and no snapshot is taken", async () => {
     const { rt, advance, backend } = await setup();
-    const bare = await rt.workspaces.create({ golden: "snap_golden-v12", name: "bare" });
-    await expect(rt.workspaces.snapshot(bare.id)).rejects.toThrow("bare has no project loaded; import one before snapshotting it");
     const ws = await loaded(rt, advance);
     await rt.workspaces.nap(ws.id);
     await expect(rt.workspaces.snapshot(ws.id)).rejects.toThrow("task is napping; only a running machine can be snapshotted");
@@ -147,13 +147,13 @@ describe("a project golden", () => {
     const { rt, advance, backend } = await setup();
     const ws = await loaded(rt, advance);
     const golden = await rt.workspaces.snapshot(ws.id);
-    const fork = await rt.workspaces.create({ golden: golden.snapshotId, name: "task-a" });
-    expect(fork).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
+    const fork = await rt.workspaces.create({ project: ws.project.id, golden: golden.snapshotId, name: "task-a" });
+    expect(fork).toMatchObject({ golden: golden.snapshotId });
     const machine = backend.machines.find(m => m.id === fork.machineId)!;
     expect(machine.spec).toMatchObject({ fromSnapshot: golden.snapshotId, kind: "desktop", cpu: 4, memMb: 8192 });
     expect(backend.puts.filter(p => p.machine === machine.id).some(p => gunzipSync(p.body).toString("utf8").includes("Golden: v12"))).toBe(true);
-    const sibling = await rt.workspaces.create({ golden: fork.golden, name: "task-b" });
-    expect(sibling).toMatchObject({ golden: golden.snapshotId, projects: [PROJECT] });
+    const sibling = await rt.workspaces.create({ project: ws.project.id, golden: fork.golden, name: "task-b" });
+    expect(sibling).toMatchObject({ golden: golden.snapshotId });
     advance(60_000);
     const again = await rt.workspaces.snapshot(fork.id);
     expect(again).toMatchObject({ golden: "snap_golden-v12", version: 12, projects: [PROJECT], workspaceId: fork.id, workspaceName: "task-a" });

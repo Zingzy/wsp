@@ -4,11 +4,12 @@
 // the guest side of the exec stream over the stub backend.
 import { randomUUID } from "node:crypto";
 import { PERMISSION_ALLOW, PERMISSION_DENY } from "@wsp/protocol";
-import type { AdapterEvent, PermissionAsk, PermissionOutcome, SessionRenameWrite, TurnResult } from "@wsp/protocol";
+import type { AdapterEvent, Caller, PermissionAsk, PermissionOutcome, ProjectView, SessionRenameWrite, TurnResult } from "@wsp/protocol";
 import { tarOf, type ExecResult } from "@wsp/engine";
-import type { HarnessAdapterFactory, HarnessStartOptions, ProjectBundler } from "@wsp/runtime";
+import type { CreatedWorkspace, HarnessAdapterFactory, HarnessStartOptions, ProjectBundler, Runtime } from "@wsp/runtime";
 import type { CliIO } from "../src/cli.js";
 import type { StubBackend } from "./stub-backend.js";
+import { createOn as createOnRuntime, projectOn as projectOnRuntime, type CreateOn } from "../../runtime/test/stub-backend.js";
 
 export const PAGE = `<!doctype html>
 <html><head><script type="module" crossorigin src="/assets/app.js"></script></head>
@@ -407,3 +408,17 @@ export function launchedScripts(backend: StubBackend): string[] {
 export function launchedScript(backend: StubBackend): string {
   return launchedScripts(backend)[0]!;
 }
+
+/** The project every workspace in a host test stands on, and a workspace of it. A workspace is one project's copy,
+ * so a test about a verb, a table or a thread still needs one; these are the two lines that make them, and the one
+ * place a host test writes down what a project record is. */
+export function projectOn(rt: ProjectMaker, computer?: string, source?: string, named?: { name?: string; base?: string }): Promise<ProjectView> {
+  return projectOnRuntime(rt, computer, source, named);
+}
+
+export function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, origin?: Caller): Promise<CreatedWorkspace> {
+  return createOnRuntime(rt, o, origin);
+}
+
+type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
+type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create"> };

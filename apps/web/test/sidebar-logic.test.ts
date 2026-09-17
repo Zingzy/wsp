@@ -129,7 +129,7 @@ describe("copied traversal and rollup", () => {
 });
 
 const status = (over: Partial<WorkspaceStatus>): WorkspaceStatus => ({
-  id: "ws_a", name: "api", machineId: "m1", phase: "running", golden: "snap", createdAt: "2026-09-01T00:00:00Z",
+  id: "ws_a", name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap", createdAt: "2026-09-01T00:00:00Z",
   machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11, ...over,
 });
 
@@ -310,7 +310,7 @@ describe("workspace row labels", () => {
   });
 
   it("this computer's own daemon is read off its workspace's reach, and says so in every slot the row has", () => {
-    const here = { id: "ws_m", name: "mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" } as const;
+    const here = { id: "ws_m", name: "mac", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" } as const;
     const silent = { ...status({ reach: { state: "unreachable" } }), kind: "local" as const };
     // The places list holds no link for the computer the host runs on, so the reading comes off the workspace.
     const reading = absenceOf([], here, silent, null)!;
@@ -382,7 +382,7 @@ describe("workspace row labels", () => {
 
   it("a workspace whose computer is not answering reads one state on the row: the word in the slot, the silence on line three, the whole sentence on its title", () => {
     const absent = absentComputer("old-laptop", awayMsOf({ lastSeenAt: new Date(now - 38 * 60_000).toISOString() }, now));
-    const on = project({ reach: { state: "unreachable" } }, { kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" });
+    const on = project({ reach: { state: "unreachable" } }, { kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" });
     // The computer's own silence outranks the row's word: the slot reads what the person can act on, which is the
     // computer, and a blank slot there was the row that said nothing beside readings of unreachable.
     expect(stateSlotWord({ ...on, indicator: { label: "Unreachable", tone: "neutral", pulse: false } }, absent)).toBe(absent!.word);
@@ -595,9 +595,9 @@ describe("a thread row's words", () => {
     expect(whereWord(runs({}, { kind: "local" }))).toBe(THIS_COMPUTER);
     // A fork runs at the provider its own record names, never the opaque id that provider minted for the machine,
     // and never a word read off the kind: this host is wired to one provider of several and only the record says which.
-    expect(whereWord(runs({ machineId: "sb_9f2c1d8a", provider: "solari" }))).toBe("solari");
-    expect(whereWord(runs({ machineId: "bx_4c11e0", provider: "box" }))).toBe("box");
-    expect(whereWord(runs({ machineId: "wsp-api", provider: "docker" }))).toBe("docker");
+    expect(whereWord(runs({ machineId: "sb_9f2c1d8a", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "solari" }))).toBe("solari");
+    expect(whereWord(runs({ machineId: "bx_4c11e0", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "box" }))).toBe("box");
+    expect(whereWord(runs({ machineId: "wsp-api", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, provider: "docker" }))).toBe("docker");
     // A record from before the provider rode the wire says what the machine is; the id the provider minted for it
     // names nothing to the person reading the row, and no row anywhere shows one.
     expect(whereWord(runs({ machineId: "sb_9f2c1d8a" }))).toBe("a provider");

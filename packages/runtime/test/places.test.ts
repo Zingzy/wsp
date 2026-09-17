@@ -47,7 +47,7 @@ import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/eng
 import { NO_PLACE_UPDATER, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -1840,20 +1840,18 @@ describe("a fork at a provider this host is not wired to", () => {
     for (const row of rows.filter(p => p.kind === "provider")) expect(row.takesForks, row.id).toBe(true);
 
     // Named on the line: the machine is minted by that provider and the record says where it stands.
-    const there = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "box" });
+    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "box" });
     expect(box.machines).toHaveLength(1);
     expect(solari.machines).toHaveLength(0);
     expect(there.place).toBe("box");
     expect(await runtime.workspaces.get(there.id)).toMatchObject({ place: "box" });
-    // The place the last fork landed on is where the next one lands when nobody says.
-    expect((await placesOf()).find(p => p.default)!.id).toBe("box");
-    const again = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    // A second workspace of a project on that computer lands there too: the project says where, not a default.
+    const again = await createOn(runtime, { golden: "snap_g", name: "y", on: "box" });
     expect(box.machines).toHaveLength(2);
     expect(again.place).toBe("box");
 
-    // The wired provider named on the line is the road a record with no place word already takes.
-    await runtime.places!.markUsed(undefined);
-    const here = await runtime.workspaces.create({ golden: "snap_g", name: "z", on: "solari" });
+    // A project on the wired provider is the road a record with no place word already takes.
+    const here = await createOn(runtime, { golden: "snap_g", name: "z", on: "solari" });
     expect(solari.machines).toHaveLength(1);
     expect(here.place).toBeUndefined();
   });
@@ -1895,7 +1893,7 @@ describe("a fork at a provider this host is not wired to", () => {
       placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }),
     });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    await expect(runtime.workspaces.create({ golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*solari.*box/);
+    await expect(createOn(runtime, { golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*solari.*box/);
   });
 });
 
@@ -1909,7 +1907,7 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
     expect(made.place).toBe(placeId);
@@ -1926,18 +1924,17 @@ describe("a fork on a computer you joined", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
-    const there = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const there = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     // The fork stands on a computer that offers Docker, and this host forks at Solari: the row says Docker, which
     // is what made it, and place says which computer it is on.
     expect(there.provider).toBe("docker");
     expect(there.place).toBeDefined();
-    await runtime.places!.markUsed(undefined);
-    const here = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    const here = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
     expect(here.provider).toBe("solari");
     expect(here.place).toBeUndefined();
   });
 
-  it("takes the default place when nobody names one, and the host's own provider when that is the default", async () => {
+  it("lands where the project's computer is, whatever the default mark says: a workspace is that computer's copy", async () => {
     const backend = stubBackend();
     const hostKey = newPlaceKeyPair();
     runtime = createRuntime({ backend, store: memoryStore(), adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
@@ -1945,12 +1942,13 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    await runtime.workspaces.create({ golden: "snap_g", name: "x" });
+    await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
-    // The provider named as the place a fork lands on: the host's own backend takes it and the record carries none.
+    // A project on the provider this host forks at: the host's own backend takes it and the record carries no place,
+    // and the mark on the places table says nothing about either.
     await runtime.places!.markUsed(undefined);
-    const second = await runtime.workspaces.create({ golden: "snap_g", name: "y" });
+    const second = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
     expect(backend.machines).toHaveLength(1);
     expect(second.place).toBeUndefined();
     expect(place.created).toHaveLength(1);
@@ -1971,7 +1969,7 @@ describe("a fork on a computer you joined", () => {
     expect(rows.find(p => p.id === withDocker.placeId)!.takesForks).toBe(true);
     expect(rows.find(p => p.id === "solari")!.takesForks).toBe(true);
     // What the row promises is what the create does: the fork lands on that computer's own backend.
-    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     expect(place.created).toHaveLength(1);
     expect(backend.machines).toHaveLength(0);
     expect(made.place).toBe(withDocker.placeId);
@@ -1983,14 +1981,14 @@ describe("a fork on a computer you joined", () => {
     const { hostKey } = await serving({ provider: { id: "solari", rateUsdPerHour: 0.11 } });
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
-    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv.*solari/);
+    await expect(createOn(runtime!, { golden: "snap_g", name: "x", on: "nowhere" })).rejects.toThrow(/no place named nowhere; you have .*srv.*solari/);
   });
 
   it("never holds a computer that forks nowhere: the join turned it down, so no word names one", async () => {
     const { hostKey } = await serving();
     const { client } = await join(hostKey, { code: await code(), name: "srv", report: report("srv", { runsWorkspaces: false }), answers: c => forks(c) });
     sockets.push(client.ws);
-    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/no place named srv/);
+    await expect(projectOn(runtime!, "srv")).rejects.toThrow(/no place named srv/);
     expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
   });
 
@@ -2000,7 +1998,7 @@ describe("a fork on a computer you joined", () => {
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
     place.refuseCreate = { error: "no such image: snap_g", kind: "missing", status: 404 };
-    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv holds no copy of snap_g/);
+    await expect(createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" })).rejects.toThrow(/srv holds no copy of snap_g/);
     expect((await runtime!.workspaces.list()).filter(w => w.name === "x")).toEqual([]);
   });
 
@@ -2012,7 +2010,7 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     await runtime.workspaces.nap(made.id);
     // The daemon says no to the wake's first ask and yes to its second, which is a container still coming up off
     // its own layers; the machine that comes back is the one that napped and not a fresh fork of the image.
@@ -2030,7 +2028,7 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     await runtime.workspaces.nap(made.id);
     expect(place.paused).toBe(1);
     await runtime.workspaces.wake(made.id);
@@ -2057,7 +2055,7 @@ describe("a fork on a computer you joined", () => {
       workspaceName: "older",
       createdAt: "2026-09-12T00:00:00.000Z",
     });
-    const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_p", name: "x", on: "srv" });
     const golden = await runtime.workspaces.snapshot(made.id);
     expect(place.snapshots).toHaveLength(1);
     expect(place.snapshots[0]).toContain("proj");
@@ -2084,7 +2082,7 @@ describe("a fork on a computer you joined", () => {
       workspaceName: "older",
       createdAt: "2026-09-12T00:00:00.000Z",
     });
-    const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_p", name: "x", on: "srv" });
     const started = Date.now();
     const golden = await runtime.workspaces.snapshot(made.id);
     expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
@@ -2097,7 +2095,7 @@ describe("a fork on a computer you joined", () => {
     const { hostKey } = await serving();
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
-    const made = await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
     const away = (await runtime!.status.list()).find(r => r.id === made.id)!;
@@ -2116,12 +2114,12 @@ describe("a fork on a computer you joined", () => {
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(client.ws);
     // One fork made while the computer is here, so the road is warm and what follows is the wait and nothing else.
-    await runtime!.workspaces.create({ golden: "snap_g", name: "warm", on: "srv" });
+    await createOn(runtime!, { golden: "snap_g", name: "warm", on: "srv" });
     client.close();
     await until(async () => (await placesOf()).find(p => p.id === placeId)!.present === false);
 
     // A gap this host holds a closed socket for: a keyed frame waits, and the computer dialling back finishes it.
-    const waiting = runtime!.workspaces.create({ golden: "snap_g", name: "held", on: "srv" });
+    const waiting = createOn(runtime!, { golden: "snap_g", name: "held", on: "srv" });
     let back!: ForkingPlace;
     const linked = await relink(hostKey, placeId, key, report("srv"), c => (back = forks(c)));
     sockets.push(linked.client.ws);
@@ -2132,7 +2130,7 @@ describe("a fork on a computer you joined", () => {
     // Past the wait, the same frame is refused with the one sentence every road on an absent computer reads.
     await new Promise(r => setTimeout(r, 450));
     let asked = Date.now();
-    await expect(runtime!.workspaces.create({ golden: "snap_g", name: "late", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    await expect(createOn(runtime!, { golden: "snap_g", name: "late", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
     expect(Date.now() - asked).toBeLessThan(50);
 
     // And a host that has held no socket for that computer at all, which is every host at start, refuses at once
@@ -2142,7 +2140,7 @@ describe("a fork on a computer you joined", () => {
     runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: wiring(hostKey), placeRelinkWaitMs: 50_000 });
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     asked = Date.now();
-    await expect(runtime.workspaces.create({ golden: "snap_g", name: "cold", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    await expect(createOn(runtime, { golden: "snap_g", name: "cold", on: "srv" })).rejects.toThrow(absentComputer("srv", null).sentence);
     expect(Date.now() - asked).toBeLessThan(50);
   });
 
@@ -2151,7 +2149,7 @@ describe("a fork on a computer you joined", () => {
     let first!: ForkingPlace;
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (first = forks(c)) });
     sockets.push(client.ws);
-    const made = await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
     // A pause is the machine moving, not a reading: the far side has taken it by the time the answer is lost, and
     // a second one would be a second move. So the frame names no key and the gap is its end.
     first.swallow.add("machine.pause");
@@ -2173,7 +2171,7 @@ describe("a fork on a computer you joined", () => {
     let first!: ForkingPlace;
     const { client, placeId, pair: key } = await join(hostKey, { code: await code(), name: "srv", answers: c => (first = forks(c)) });
     sockets.push(client.ws);
-    const made = await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
     await runtime!.workspaces.nap(made.id);
     // A wake in flight across the relink: the machine resumes and its daemon says no, so the wake is still asking
     // when the computer's new socket lands.
@@ -2204,7 +2202,7 @@ describe("a fork on a computer you joined", () => {
     srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
     const first = await join(hostKey, { code: await code(), name: "srv", answers: c => forks(c) });
     sockets.push(first.client.ws);
-    const made = await runtime.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    const made = await createOn(runtime, { golden: "snap_g", name: "x", on: "srv" });
     await runtime.workspaces.nap(made.id);
     first.client.close();
     await srv.close();
@@ -2283,8 +2281,25 @@ describe("a fork on a computer you joined", () => {
       const frame = JSON.parse(String(raw)) as { op?: string };
       if (frame.op === "place.leave") swept.push("asked");
     });
-    await runtime!.workspaces.create({ golden: "snap_g", name: "x", on: "srv" });
+    await createOn(runtime!, { golden: "snap_g", name: "x", on: "srv" });
     await expect(runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a fork \(x\); delete them first/);
+    expect(swept).toEqual([]);
+    expect(place.killed).toEqual([]);
+  });
+
+  it("refuses to take a computer out from under the projects recorded on it, naming them, and sweeps nothing", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
+    sockets.push(client.ws);
+    const swept: string[] = [];
+    client.ws.on("message", raw => {
+      const frame = JSON.parse(String(raw)) as { op?: string };
+      if (frame.op === "place.leave") swept.push("asked");
+    });
+    // A project with no workspace of it: the forks refusal cannot be what answers here, so the projects one is.
+    await projectOn(runtime!, "srv", "https://github.com/wsp/spoo-landing.git", { name: "spoo-landing" });
+    await expect(runtime!.places!.remove(placeId)).rejects.toThrow(/srv still holds a project \(spoo-landing\); wsp projects remove each of them first/);
     expect(swept).toEqual([]);
     expect(place.killed).toEqual([]);
   });
@@ -2355,7 +2370,7 @@ describe("the image build and the computer whose doctor said no, or that does no
     await expect(runtime!.golden.buildPlace("srv")).rejects.toThrow(/no place named srv/);
     await expect(runtime!.image.build({ place: "srv" })).rejects.toThrow(/no place named srv/);
     await expect(runtime!.golden.prepare({ place: "srv", recipe: copyRecipe() })).rejects.toThrow(/no place named srv/);
-    await expect(runtime!.workspaces.landing({ on: "srv" })).rejects.toThrow(/no place named srv/);
+    await expect(projectOn(runtime!, "srv")).rejects.toThrow(/no place named srv/);
   });
 
   it("a default place that is not answering is the refusal the person reads, with its name in it, never a build sent to another place", async () => {

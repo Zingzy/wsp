@@ -14,6 +14,7 @@ import { SolariBackend } from "@wsp/engine";
 import { GoldenManifest, goldenHead, type EventUnion, type WorkspaceStatus } from "@wsp/protocol";
 import { createRuntime, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
+import { createOn } from "./stub-backend.js";
 
 const LIVE = process.env.WSP_LIVE === "1";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -85,7 +86,7 @@ describe.runIf(LIVE)("idle policy, live", () => {
     rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
 
     const t0 = Date.now();
-    const ws = await rt.workspaces.create({ golden: goldenId(), name: "idle-t51", labels: TEST_LABEL, idleWindowMs: WINDOW_MS });
+    const ws = await createOn(rt, { golden: goldenId(), name: "idle-t51", labels: TEST_LABEL, idleWindowMs: WINDOW_MS });
     created.push(ws.machineId);
     console.log(`${stamp()} created ${ws.machineId.slice(-16)} in ${Date.now() - t0} ms, window ${WINDOW_MS / 60_000} min`);
 

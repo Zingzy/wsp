@@ -4,7 +4,7 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineFacts, MachineState, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineFacts, MachineState, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -58,15 +58,11 @@ export interface WorkspaceKindWords {
   metrics: ReadingRoad;
   /** Where the Processes tab's list is read, which the same rule holds for. */
   processes: ReadingRoad;
-  /** What `import` does to a folder on this computer for a machine of this kind: copies it there and asks about the
-   * secret-shaped files first, or registers its path with nothing copied and nothing to ask, the folder being on
-   * this computer already. Null where no road lands a folder yet, so no tile and no verb offers one. */
-  imports: "copies" | "registers" | null;
-  /** Where the folder lands when the caller names no path. A machine wsp made carries the path the folder has on
-   * this computer, since its whole disk is wsp's and a path a person already knows is worth keeping; a machine
-   * somebody already owns takes the folder into their own home under its own name, since a path from this
-   * computer is neither theirs to write nor theirs to find. */
-  importsAt: "same path" | "under home";
+  /** Which kinds of project source a workspace of this kind can hold: this computer works a folder of the person's
+   * own in place, a machine wsp forks clones a repo into itself, and a machine wsp only reaches takes neither yet.
+   * The one table every road that records a project or makes a workspace reads, so no road decides for itself
+   * what a computer can be given. */
+  projectSources: readonly ProjectSource["kind"][];
   /** Whether the agents on a machine of this kind could drive this host at all, which is what says the spawn switch
    * means anything there. A fork's agents reach the host over the road a scoped token opens; this computer answers
    * no request relayed from a machine, and a machine somebody already owns is handed no wsp to drive one with, so
@@ -127,9 +123,9 @@ export type ReadingRoad = "daemon" | "host" | false;
 /** The words per kind, the one table every client reads instead of comparing a kind itself. Adding a kind (an ssh
  * machine) is a row here. */
 export const WORKSPACE_KIND_WORDS: Record<WorkspaceKind, WorkspaceKindWords> = {
-  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "same path", agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
-  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", imports: "registers", importsAt: "same path", agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
-  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", imports: "copies", importsAt: "under home", agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
+  cloud: { machine: MACHINE_WSP_FORKS, rowReadsMachine: true, cpu: "vCPU", where: A_PROVIDER, driven: true, daemon: true, metrics: "daemon", processes: "daemon", projectSources: ["git"], agents: true, onDelete: { asked: "machine is deleted at the provider", done: machineId => `machine ${machineId} is gone at the provider` }, panel: "Where it runs, its projects and what it costs.", access: "bypass" },
+  local: { machine: THIS_COMPUTER, rowReadsMachine: true, cpu: "cores", where: THIS_COMPUTER, driven: false, daemon: true, metrics: "host", processes: "daemon", projectSources: ["folder"], agents: false, onDelete: { asked: MACHINE_LEFT, done: () => `its ${MACHINE_LEFT}` }, panel: "What this Mac is running, its projects and how it is doing.", access: "bypass" },
+  ssh: { machine: OVER_SSH, rowReadsMachine: false, cpu: "cores", where: null, driven: false, daemon: true, metrics: "daemon", processes: "daemon", projectSources: [], agents: false, onDelete: { asked: SSH_SWEPT, done: () => `its ${SSH_SWEPT}` }, panel: OWN_COMPUTER_PANEL, access: "asks" },
 };
 
 /**

@@ -44,7 +44,7 @@ function seedStatus(extra: Partial<WorkspaceStatus> = {}) {
   const status: WorkspaceStatus = {
     id: WS,
     name: "desk",
-    machineId: "m_desk",
+    machineId: "m_desk", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
     phase: "running",
     golden: "snap_g",
     createdAt: "2026-09-01T00:00:00Z",

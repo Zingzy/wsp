@@ -4,7 +4,7 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, IDLE_REASON, projectAt, threadState, threadWordOf, waitingLine, workspaceProjects, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, IDLE_REASON, threadState, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
@@ -111,7 +111,7 @@ export function pausedLine(reason: string | undefined): string {
   return window === undefined ? "paused" : `paused after ${window} idle`;
 }
 
-function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projects">): SidebarThreadSnapshot {
+function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "project">): SidebarThreadSnapshot {
   return {
     id: thread.id,
     threadId: thread.threadId ?? null,
@@ -125,7 +125,7 @@ function deriveThread(thread: ThreadView, workspace: Pick<WorkspaceView, "projec
     indicator: threadIndicator(thread),
     harness: thread.harness,
     startedBy: thread.startedBy,
-    project: projectAt(workspaceProjects(workspace), thread.cwd)?.name ?? null,
+    project: workspace.project.name,
     parentThreadId: thread.parentThreadId ?? null,
     asking: waitingLine(thread) ?? null,
     costUsd: thread.costUsd ?? null,

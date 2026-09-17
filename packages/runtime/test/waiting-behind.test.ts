@@ -10,7 +10,7 @@ import { PERMISSION_ALLOW, PERMISSION_DENY, foldThreads, threadWordOf, turnSettl
 import { createRuntime, type HarnessAdapterFactory, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const ASK: PermissionAsk = {
   askId: "ask_1",
@@ -95,7 +95,7 @@ describe("a thread waiting on another thread's turn", () => {
 
   /** The two threads of the story: the one that sends, and the one it sends to. */
   const pair = async (): Promise<{ workspaceId: string; caller: SessionHandle; target: SessionHandle }> => {
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const caller = await rt.sessions.start(ws.id, { prompt: "ask the other one" });
     await vi.waitFor(() => expect(turns).toHaveLength(1));
     const target = await rt.sessions.start(ws.id, { prompt: "read the file" });
@@ -177,7 +177,7 @@ describe("what a settled turn reports as worked", () => {
     const wait = fakeClock();
     const turns: Turn[] = [];
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: drivenAdapter(turns) }, clock: wait.clock });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
     const handle = await rt.sessions.start(ws.id, { prompt: "read the file" });
     await vi.waitFor(() => expect(turns).toHaveLength(1));
 

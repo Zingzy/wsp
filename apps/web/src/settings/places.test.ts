@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, absentComputer, placeDaemonBehind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
+import { NOTHING_HELD, PROJECT_PICK_WORDS, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -116,9 +116,9 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
     expect(whereCaption(ascii, copy("box", 1), undefined)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
   });
 
-  it("says why this computer is not a row to pick, and what to do about it", () => {
-    expect(WHERE_PICK_WORDS.nowhereYet).toBe("this Mac is already a workspace, the only one it can be");
-    expect(WHERE_PICK_WORDS.addOne).toBe("Add a computer you own or connect a provider, and workspaces can be created there.");
+  it("says there is no project to make a workspace of yet, and the line that records one", () => {
+    expect(PROJECT_PICK_WORDS.noneYet).toBe("No projects yet, and a workspace is a copy of one.");
+    expect(PROJECT_PICK_WORDS.addOne).toBe("Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.");
   });
 
   it("reads a copy by the word it names its place with, the id or the name alike", () => {
@@ -129,7 +129,17 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
 });
 
 describe("which row a workspace stands on", () => {
-  const on = (id: string, kind: WorkspaceView["kind"], machineId: string, place?: string): WorkspaceView => ({ id, name: id, kind, machineId, phase: "running", golden: "", createdAt: ago(0), ...(place === undefined ? {} : { place }) });
+  const on = (id: string, kind: WorkspaceView["kind"], machineId: string, place?: string): WorkspaceView => ({
+    id,
+    name: id,
+    kind,
+    machineId,
+    phase: "running",
+    golden: "",
+    createdAt: ago(0),
+    project: { id: "pr_1", name: "api", path: "/root/api", computer: place ?? "default" },
+    ...(place === undefined ? {} : { place }),
+  });
 
   it("puts a fork on a joined computer on that computer's row", () => {
     expect(placeOf([here, hetzner, ascii], on("ws_a", "cloud", "ctr_1", "p_1"))?.id).toBe("p_1");

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -8,14 +9,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
+import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
-import { createRuntime, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { createRuntime, oneWorkspacePerProject, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
 import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 import { grandchild, sweepStrays } from "./strays.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
@@ -131,6 +132,15 @@ function tokenAdapter(): { factory: HarnessAdapterFactory; said: string[]; steer
   return { factory, said, steered, end: (nth: number) => ends[nth]!() };
 }
 
+/** A git repo inside the test's own root, so a project here is a real one and the folder a thread opens in is a
+ * folder the test can name. */
+function repoIn(root: string, name = "work"): string {
+  const folder = join(root, name);
+  mkdirSync(folder, { recursive: true });
+  execFileSync("git", ["init", "-q", folder]);
+  return realpathSync(folder);
+}
+
 describe("local workspace", () => {
   let root: string;
   let store: Store;
@@ -177,7 +187,7 @@ describe("local workspace", () => {
 
   it("wsp new --local makes the one local workspace, listed with kind local and no image", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("my-mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "my-mac" });
     expect(ws.kind).toBe("local");
     expect(ws.name).toBe("my-mac");
     expect(ws.golden).toBe("");
@@ -193,7 +203,7 @@ describe("local workspace", () => {
   it("a listing names the process a turn runs in on this computer while it runs, and never once it is over", async () => {
     const { factory, end } = pidAdapter();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: factory }, local: localWiring });
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const handle = await rt.sessions.start(ws.id, { prompt: "work" });
     const running = (await rt.sessions.list(ws.id))[0]!;
     expect(running.status).toBe("running");
@@ -206,10 +216,14 @@ describe("local workspace", () => {
     expect(over.pid).toBeUndefined();
   });
 
-  it("there is one local workspace per host", async () => {
+  it("a project worked in place has one workspace: a second on it names the one standing", async () => {
     const rt = runtime();
-    await rt.workspaces.createLocal("mac");
-    await expect(rt.workspaces.createLocal("mac2")).rejects.toThrow(alreadyRecorded(THIS_COMPUTER, "mac"));
+    const project = await projectOn(rt, HERE_PLACE_ID, repoIn(root));
+    await rt.workspaces.create({ project: project.id, name: "mac" });
+    await expect(rt.workspaces.create({ project: project.id, name: "mac2" })).rejects.toThrow(oneWorkspacePerProject(project.name, "mac"));
+    // A second project here is a second workspace: this computer runs as many as there are folders to work in.
+    const second = await projectOn(rt, HERE_PLACE_ID, repoIn(root, "other"));
+    expect((await rt.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
   });
 
   it("a turn on this computer runs under the person's own login and no sandbox flag: this computer is not a machine", async () => {
@@ -219,7 +233,7 @@ describe("local workspace", () => {
       return echoAdapter(ctx);
     };
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: seeing }, local: localWiring });
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
     expect(seen.length).toBeGreaterThan(0);
     expect(seen.every(c => c.env["IS_SANDBOX"] === undefined)).toBe(true);
@@ -235,7 +249,7 @@ describe("local workspace", () => {
     let bin = "/first/bin";
     localWiring.env = () => ({ PATH: bin });
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: seeing }, local: localWiring });
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
     bin = "/second/bin";
     await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
@@ -244,7 +258,7 @@ describe("local workspace", () => {
 
   it("a thread starts on the local workspace and its reply lands, run through the local exec stream", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const handle = await rt.sessions.start(ws.id, { prompt: "say pong" });
     const result = await handle.finished;
     expect(result.status).toBe("completed");
@@ -254,7 +268,7 @@ describe("local workspace", () => {
   it("a turn on this computer launches its real child process with its own token, and that token resolves notify me to its thread", async () => {
     const held = tokenAdapter();
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: held.factory }, local: localWiring });
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const turn = await rt.sessions.start(ws.id, { prompt: "coordinate" });
     const until = async (has: () => boolean): Promise<void> => {
       for (let i = 0; i < 200 && !has(); i++) await new Promise(r => setTimeout(r, 10));
@@ -306,7 +320,7 @@ describe("local workspace", () => {
     };
     const token = "sk-ant-oat01-TESTONLY";
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: throughClaude }, local: localWiring, vault: () => ({ CLAUDE_CODE_OAUTH_TOKEN: token }) });
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "vault"))).id });
     await (await rt.sessions.start(ws.id, { prompt: "read your environment" })).finished;
     // What the real child process printed out of its own environment, not what the test handed the adapter.
     expect(said).toEqual([token]);
@@ -315,7 +329,7 @@ describe("local workspace", () => {
 
   it("the registry hands the local factory the same limits a cloud turn gets: the turn's own by default, none for the exec verb", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(ws.id, { prompt: "say pong" })).finished;
     const stream = await rt.workspaces.execStream(ws.id, ["true"]);
     for await (const _line of stream.lines) void _line;
@@ -326,41 +340,44 @@ describe("local workspace", () => {
     expect(handed.at(-1)).toEqual({ idleMs: Number.POSITIVE_INFINITY, deadlineMs: Number.POSITIVE_INFINITY });
   });
 
-  it("the view names the workspace's own folder, the one a thread starts in when no project does, so the app's line under the box says what the runtime will do", async () => {
+  it("the view names the project's own folder, which is what a workspace worked in place is, so the app's line under the box says what the runtime will do", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
-    expect(ws.folder).toBe(root);
-    expect((await rt.workspaces.get(ws.id)).folder).toBe(root);
-    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(root);
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    // The workspace here is the folder the project was recorded on, and a thread on it starts there.
+    expect(ws.folder).toBe(ws.project.path);
+    expect((await rt.workspaces.get(ws.id)).folder).toBe(ws.project.path);
+    expect((await rt.status.list()).find(s => s.id === ws.id)?.folder).toBe(ws.project.path);
     await rt.close();
   });
 
   it("a turn over the wire starts in the workspace's own folder, never the person's home, and the thread's row names it", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: pwdAdapter }, local: localWiring });
-    const ws = await rt.workspaces.createLocal("mac");
+    const folder = repoIn(root);
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const result = await (await rt.sessions.start(ws.id, { prompt: "where are you" })).finished;
-    expect(realpathSync(result.text!.trim())).toBe(realpathSync(root));
+    expect(realpathSync(result.text!.trim())).toBe(realpathSync(folder));
     const [session] = await rt.sessions.list(ws.id);
-    expect(session!.cwd).toBe(root);
+    expect(session!.cwd).toBe(folder);
     await rt.close();
   });
 
   it("a command over the wire, the road wsp exec takes, starts in that same folder", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const folder = repoIn(root);
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, folder)).id });
     const stream = await rt.workspaces.execStream(ws.id, ["pwd"]);
     // The stream says which folder it resolved, so the client that prints it never restates the rule.
-    expect(stream.ranIn).toBe(root);
+    expect(stream.ranIn).toBe(folder);
     let out = "";
     for await (const line of stream.lines) out += line;
     expect(await stream.exited).toBe(0);
-    expect(realpathSync(out.trim())).toBe(realpathSync(root));
+    expect(realpathSync(out.trim())).toBe(realpathSync(folder));
     await rt.close();
   });
 
   it("exec runs on this computer and returns the exit code; files read and write under the folder", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     expect((await rt.workspaces.exec(ws.id, "exit 4")).exitCode).toBe(4);
     expect((await rt.workspaces.exec(ws.id, "printf saved > f.txt")).exitCode).toBe(0);
     expect(readFileSync(join(root, "f.txt"), "utf8")).toBe("saved");
@@ -369,7 +386,7 @@ describe("local workspace", () => {
 
   it("every verb its machine cannot take refuses with the capability's sentence", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const cannot = /is this computer, which wsp does not run; it cannot/;
     await expect(rt.workspaces.nap(ws.id)).rejects.toThrow(cannot);
     // A computer is running while the host is: the wake every thread road sends first is a no-op, not a refusal.
@@ -382,7 +399,7 @@ describe("local workspace", () => {
 
   it("every verb refuses a request relayed from a machine with the one sentence", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const thread = await rt.sessions.start(ws.id, { prompt: "hi" });
     await thread.finished;
     const sessionId = thread.view().id;
@@ -427,15 +444,15 @@ describe("local workspace", () => {
     expect(answered).toEqual([]);
     // Recording one is refused by the rule about who records a machine, not by the kind: its own sentence, since a
     // relayed request may not make a workspace of any kind on this computer.
-    await expect(rt.workspaces.createLocal("mac2", "relayed")).rejects.toThrow(relayedRecordRefusal("mac2"));
+    await expect(createOn(rt, { on: HERE_PLACE_ID, name: "mac2" }, "relayed")).rejects.toThrow(relayedRecordRefusal("mac2"));
     // Nothing was driven: the workspace is still there under its own name, and a request from this computer runs.
     expect((await rt.workspaces.get(ws.id)).name).toBe("mac");
     expect((await rt.sessions.start(ws.id, { prompt: "hi" }, "here").then(h => h.finished)).status).toBe("completed");
   });
 
-  it("import on this computer registers the folder at its own path and copies nothing: the record lists it with the size the plan read, the events say so, and the daemon's roots file names it", async () => {
+  it("import on this computer registers the folder at its own path and copies nothing: the result carries the size the plan read, the events say so, and the daemon's roots file names it beside the workspace's own project", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const folder = join(root, "spoo");
     mkdirSync(folder);
     const events: EventUnion[] = [];
@@ -461,23 +478,26 @@ describe("local workspace", () => {
       ["landing", REGISTERING_LINE],
       ["done", registeredLine(folder)],
     ]);
-    expect((await rt.workspaces.get(ws.id)).projects).toEqual([{ name: "spoo", dest: folder, importedAt: expect.any(String), size: 900 }]);
-    // The roots file sits beside this computer's daemon's home, the person's, not the guest constant's.
-    expect(readFileSync(rootsPathIn(root), "utf8")).toBe(`${folder}\n`);
+    // The record names the one project the workspace was made for; an import beside it adds no second one.
+    const held = (await rt.workspaces.get(ws.id)).project;
+    expect(held.path).not.toBe(folder);
+    // The roots file sits beside this computer's daemon's home, the person's, not the guest constant's, and names
+    // the workspace's own project and the folder just landed.
+    expect(readFileSync(rootsPathIn(root), "utf8")).toBe(`${held.path}\n${folder}\n`);
     await rt.close();
   });
 
   it("a cloud workspace takes a relayed request, so the rule is the kind's and not the verb's", async () => {
     const rt = runtime();
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" }, "relayed");
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" }, "relayed");
     expect((await rt.workspaces.get(cloud.id, "relayed")).name).toBe("b1");
     await rt.workspaces.touch(cloud.id, "relayed");
   });
 
   it("the lists served to a relayed request leave the local workspace and its threads out", async () => {
     const rt = runtime();
-    const local = await rt.workspaces.createLocal("mac");
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
     await (await rt.sessions.start(local.id, { prompt: "hi" })).finished;
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["b1", "mac"]);
     expect((await rt.workspaces.list("relayed")).map(w => w.name)).toEqual(["b1"]);
@@ -489,7 +509,7 @@ describe("local workspace", () => {
 
   it("origin rides the wire on every verb, not only on a thread start", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     try {
       const c = await WsClient.connect(srv.port, { token: "secret" });
@@ -508,7 +528,7 @@ describe("local workspace", () => {
 
   it("a machine's socket is stamped relayed by the host, whatever origin its client sends", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     try {
       const here = await WsClient.connect(srv.port, { token: "secret" });
@@ -538,8 +558,8 @@ describe("local workspace", () => {
 
   it("status.list reads the same origin rule as every other listing, and hands over the state without the route the reach carries", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad: async () => ({ url: `http://127.0.0.1:${probe.port}`, expiresAt: Number.MAX_SAFE_INTEGER }) } });
-    await rt.workspaces.createLocal("mac");
-    await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    await createOn(rt, { golden: "snap_g", name: "b1" });
     const srv = await serveRuntime(rt, { port: 0, authToken: "secret" });
     type Row = { name: string; reach: Record<string, unknown> };
     try {
@@ -567,8 +587,8 @@ describe("local workspace", () => {
 
   it("the port forwards the host holds read the same rule: a relayed request neither lists nor stops one on this computer", async () => {
     const rt = runtime();
-    const local = await rt.workspaces.createLocal("mac");
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
     const row = (workspaceId: string, port: number, name: string): PortForward => ({ workspaceId, port, startedAt: "2026-09-08T00:00:00.000Z", name, kind: "url" });
     // The host forwards a builder's ports too, and no workspace record names a builder.
     const rows = [row(local.id, 8123, "mac"), row(cloud.id, 8124, "b1"), row("m_builder", 8125, "setup (builder)")];
@@ -611,7 +631,7 @@ describe("local workspace", () => {
 
   it("delete drops the record and nothing else; the computer is not stopped", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await rt.workspaces.delete(ws.id);
     expect(await rt.workspaces.list()).toEqual([]);
     // The record survives a delete only in the store's absence of it; a fresh runtime lists none.
@@ -621,7 +641,7 @@ describe("local workspace", () => {
 
   it("the local workspace survives a runtime restart, hydrated straight off the local backend as running", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const rt2 = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: localWiring });
     const listed = await rt2.workspaces.list();
     expect(listed).toHaveLength(1);
@@ -633,7 +653,7 @@ describe("local workspace", () => {
 
   it("the local row's rate is zero: its rate follows the local backend's pricing, not the cloud one's", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const status = (await rt.status.list()).find(s => s.id === ws.id)!;
     expect(status.rateUsdPerHour).toBe(0);
     expect(status.kind).toBe("local");
@@ -641,8 +661,8 @@ describe("local workspace", () => {
 
   it("the local row's status carries this computer's facts: the system's name, its uptime and the folder its commands start in; a cloud row carries none", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
     const statuses = await rt.status.list();
     const local = statuses.find(s => s.id === ws.id)!;
     expect(local.facts).toBeDefined();
@@ -656,7 +676,7 @@ describe("local workspace", () => {
     const road = { url: "http://127.0.0.1:54321", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t0ken" };
     localWiring = { ...localWiring, daemonRoad: async () => road };
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     expect(await rt.workspaces.daemonReach(ws.id)).toEqual(road);
   });
 
@@ -664,7 +684,7 @@ describe("local workspace", () => {
     let started = 0;
     localWiring = { ...localWiring, restartDaemon: async () => void started++, daemonRoad: async () => ({ url: "http://127.0.0.1:1", expiresAt: Number.MAX_SAFE_INTEGER, daemonToken: "t" }) };
     const rt = runtime();
-    const here = await rt.workspaces.createLocal("mac");
+    const here = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const statuses: WorkspaceStatus[] = [];
     rt.events.on("workspace.status", e => statuses.push((e as { status: WorkspaceStatus }).status));
     await rt.workspaces.restartDaemon(here.id);
@@ -674,29 +694,29 @@ describe("local workspace", () => {
     const said = statuses.filter(s => s.id === here.id).at(-1);
     expect(said?.reach.state).toBe("reachable");
     // Every other kind's daemon runs on a machine this host reaches and does not hold the process of.
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "fork" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "fork" });
     await expect(rt.workspaces.restartDaemon(cloud.id)).rejects.toThrow(/does not hold the process of/);
   });
 
   it("says a host that wires no such road cannot start one, rather than answering the button with nothing", async () => {
     const rt = runtime();
-    const here = await rt.workspaces.createLocal("mac");
+    const here = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await expect(rt.workspaces.restartDaemon(here.id)).rejects.toThrow(/does not hold the process of/);
   });
 
   it("a host that wired no daemon for this computer says so rather than minting a preview route", async () => {
     const rt = runtime();
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await expect(rt.workspaces.daemonReach(ws.id)).rejects.toThrow("wired no daemon for its local workspace");
   });
 
   it("the status probe reads the local road: reachable with one wired, unsupported without", async () => {
     const withRoad = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, daemonRoad: async () => ({ url: `http://127.0.0.1:${probe.port}`, expiresAt: Number.MAX_SAFE_INTEGER }) } });
-    const dialled = await withRoad.workspaces.createLocal("mac");
+    const dialled = await createOn(withRoad, { on: HERE_PLACE_ID, name: "mac" });
     expect((await withRoad.status.list()).find(s => s.id === dialled.id)!.reach.state).toBe("reachable");
     await withRoad.close();
     const bare = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: echoAdapter }, local: localWiring });
-    const alone = await bare.workspaces.createLocal("mac");
+    const alone = await createOn(bare, { on: HERE_PLACE_ID, name: "mac" });
     expect((await bare.status.list()).find(s => s.id === alone.id)!.reach.state).toBe("unsupported");
     await bare.close();
   });
@@ -704,7 +724,7 @@ describe("local workspace", () => {
   it("closing the runtime frees what the local wiring holds open on this computer", async () => {
     let closed = 0;
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter }, local: { ...localWiring, close: async () => void closed++ } });
-    await rt.workspaces.createLocal("mac");
+    await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await rt.close();
     expect(closed).toBe(1);
   });
@@ -712,31 +732,31 @@ describe("local workspace", () => {
   it("this computer holds no machine slot: at the cap one cloud record still leaves a slot, and the refusal never names the local row", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store, adapters: { claude: echoAdapter }, local: localWiring });
-    await rt.workspaces.createLocal("zingzys-MacBook-Pro.local");
-    await rt.workspaces.create({ golden: "snap_g", name: "b2" });
+    await createOn(rt, { on: HERE_PLACE_ID, name: "zingzys-MacBook-Pro.local" });
+    await createOn(rt, { golden: "snap_g", name: "b2" });
     const create = backend.create.bind(backend);
     backend.create = async spec => {
       if (spec.fromSnapshot !== undefined) throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
       return create(spec);
     };
-    const refused = await rt.workspaces.create({ golden: "snap_g", name: "b3" }).catch((e: unknown) => e);
+    const refused = await createOn(rt, { golden: "snap_g", name: "b3" }).catch((e: unknown) => e);
     expect((refused as Error).message).toBe("a machine slot is in use: b2. Pause it or wait for a nap.");
   });
 
   it("with no cloud record at all the refusal claims no holder, since this computer holds none", async () => {
     const backend = stubBackend();
     const rt = createRuntime({ backend, store, adapters: { claude: echoAdapter }, local: localWiring });
-    await rt.workspaces.createLocal("zingzys-MacBook-Pro.local");
+    await createOn(rt, { on: HERE_PLACE_ID, name: "zingzys-MacBook-Pro.local" });
     backend.create = async () => {
       throw Object.assign(new Error("Too many concurrent sessions"), { kind: "concurrency", status: 429 });
     };
-    const refused = await rt.workspaces.create({ golden: "snap_g", name: "b1" }).catch((e: unknown) => e);
+    const refused = await createOn(rt, { golden: "snap_g", name: "b1" }).catch((e: unknown) => e);
     expect((refused as Error).message).toBe("the provider is at its machine cap and no machine of this computer holds a slot; free one at the provider and try again");
   });
 
   it("createLocal is refused when no local backend is wired", async () => {
     const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: echoAdapter } });
-    await expect(rt.workspaces.createLocal("mac")).rejects.toThrow("no local backend wired");
+    await expect(createOn(rt, { on: HERE_PLACE_ID, name: "mac" })).rejects.toThrow("no local backend wired");
   });
 });
 
@@ -807,7 +827,7 @@ describe("a local turn and a host restart", () => {
     // still holding the reader the first host left and two readers would race to reap the run at its end, which is
     // an artifact of running both hosts here: a real one goes with its process.
     const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter(`echo $$ > ${marker}; echo reading the ticket; while [ ! -f ${gate} ]; do sleep 0.05; done; echo wrote the fix; sleep 30`) }, local: localWiring });
-    const ws = await rt1.workspaces.createLocal("mac");
+    const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
     await rt1.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.delta"));
     await grandchild(marker);
@@ -836,7 +856,7 @@ describe("a local turn and a host restart", () => {
 
   it("a run this computer no longer holds ends its turn as cut, with the truth and no false failure in between", async () => {
     const rt1 = createRuntime({ backend: stubBackend(), store, adapters: { claude: runAdapter("sleep 30") }, local: localWiring });
-    const ws = await rt1.workspaces.createLocal("mac");
+    const ws = await createOn(rt1, { on: HERE_PLACE_ID, name: "mac" });
     const handle = await rt1.sessions.start(ws.id, { prompt: "build it" });
     await until(async () => (await rt1.sessions.history(ws.id)).some(e => e.type === "session.start"));
     await rt1.close();

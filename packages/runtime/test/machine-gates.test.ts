@@ -7,7 +7,7 @@ import { MACHINE_WSP_FORKS, NO_PROVIDER_LINE, providerCannotRefusal, THIS_COMPUT
 import { describe, expect, it } from "vitest";
 import { copyKey, createRuntime, wiredPlace, type Runtime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const version = (n: number) => ({ version: n, snapshotId: `snap_golden-v${n}`, baseTemplate: "base", setupSha: `s${n}`, createdAt: `2026-09-0${n}T00:00:00.000Z`, smoke: { cmd: "true", exitCode: 0 } });
 
@@ -38,7 +38,7 @@ describe("the provider a workspace's view names", () => {
   it("a fork carries the id of the provider module this host is wired with, so a row on Box never reads Solari", async () => {
     for (const id of ["box", "solari"]) {
       const rt = await wiredTo(id);
-      const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+      const ws = await createOn(rt, { on: id, golden: "snap_golden-v1", name: "api" });
       expect([id, ws.provider]).toEqual([id, id]);
       expect([id, (await rt.workspaces.list()).map(w => w.provider)]).toEqual([id, [id]]);
       await rt.close();
@@ -50,7 +50,7 @@ describe("each verb that moves a machine reads its own capability", () => {
   it("a provider that stands a fresh machine in for another moves a workspace onto a newer image, though its forks boot cold", async () => {
     const { rt, backend, store } = await setup();
     forksBootCold(backend);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const moved = await rt.workspaces.updateImage(ws.id);
     expect(moved).toMatchObject({ moved: true, workspace: { golden: "snap_golden-v2", machineId: "m2" } });
     expect(await store.get("workspaces", ws.id)).toMatchObject({ golden: "snap_golden-v2" });
@@ -60,7 +60,7 @@ describe("each verb that moves a machine reads its own capability", () => {
   it("that same provider rebuilds a workspace's machine, though its forks boot cold", async () => {
     const { rt, backend } = await setup();
     forksBootCold(backend);
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     const rebuilt = await rt.workspaces.rebuild(ws.id);
     expect(rebuilt.machineId).toBe("m2");
     expect(backend.machines.map(m => m.killed)).toEqual([true, false]);
@@ -69,7 +69,7 @@ describe("each verb that moves a machine reads its own capability", () => {
 
   it("a provider that stands no machine in refuses the replacement, and the machine is untouched", async () => {
     const { rt, backend } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     backend.capabilities.replacesMachine = false;
     await expect(rt.workspaces.upgrade(ws.id)).rejects.toThrow(providerCannotRefusal("api", MACHINE_WSP_FORKS, "have its machine replaced"));
     // The machine is untouched: the gate refused before the engine was asked.
@@ -81,7 +81,7 @@ describe("each verb that moves a machine reads its own capability", () => {
 describe("what a refusal calls a machine wsp forks", () => {
   it("names the provider's limit, never this computer", async () => {
     const { rt, backend } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     backend.capabilities.replacesMachine = false;
     backend.capabilities.diskSnapshots = false;
     delete backend.capabilities.pauseMode;
@@ -102,7 +102,7 @@ describe("what a refusal calls a machine wsp forks", () => {
 
   it("a host holding cloud records with no provider says no provider is set up here", async () => {
     const { rt, backend, store } = await setup();
-    const ws = await rt.workspaces.create({ golden: "snap_golden-v1", name: "api" });
+    const ws = await createOn(rt, { golden: "snap_golden-v1", name: "api" });
     // The none row's shape at the gate: it offers no size, so this host forks no machine at all and the verbs that
     // move one name that rather than the machine.
     backend.capabilities.sizes = [];

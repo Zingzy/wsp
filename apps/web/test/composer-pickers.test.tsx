@@ -124,7 +124,7 @@ const WS = CHAT_WS;
 const BARE: WorkspaceView = {
   id: WS,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -217,7 +217,6 @@ function fixtureApi(opts: {
     capabilities: async () => (caps()),
     listSessions: async () => opts.sessions ?? [],
     watchStatuses: async () => [],
-    createFromGoldenHead: async () => workspace,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async o => {
@@ -676,73 +675,15 @@ describe("composer pickers", () => {
 
   const SPOO = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z" };
   const WSP = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
-  const withProjects: WorkspaceView = { ...BARE, projects: [SPOO, WSP] };
+  const withProjects: WorkspaceView = { ...BARE, project: { id: "pr_spoo", name: "spoo", path: "/root/spoo", computer: "default" } };
   const projectOption = (name: string) => document.querySelector<HTMLElement>(`[data-composer-project="${name}"]`);
   const folderLine = () => document.querySelector<HTMLElement>("[data-composer-folder]")?.dataset["composerFolder"];
 
-  it("the project pick sits beside the access pick, filled by the rule (the record's last project for this workspace), and a pick lands on the record and rides the start as project, the line under the box naming its folder", async () => {
-    const { api, patches, started } = fixtureApi({ table: [CLAUDE], workspace: withProjects });
-    await setup(api);
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, project: { [WS]: "spoo" } } });
-    await waitFor(() => expect(pickerValue("project")).toBe("spoo"));
-    const footer = document.querySelector("[data-chat-composer-footer]")!;
-    expect(footer.contains(picker("project"))).toBe(true);
-    expect(footer.contains(picker("permissionMode"))).toBe(true);
-    // The two triggers are one button: same size and the same muted label class, the project's name in mono; the
-    // project's alone is capped at the row, since its name is as long as the person made the folder's.
-    expect(picker("project")!.className).toBe(`${picker("permissionMode")!.className} max-w-full`);
-    expect(picker("project")!.querySelector("[data-composer-project-name]")!.className).toContain("font-mono");
-    expect(folderLine()).toBe("/root/spoo");
 
-    fireEvent.click(picker("project")!);
-    await waitFor(() => expect(projectOption("wsp")).not.toBeNull());
-    expect(Array.from(document.querySelectorAll<HTMLElement>("[data-composer-project]")).map(el => el.dataset["composerProject"])).toEqual(["spoo", "wsp"]);
-    expect(screen.getByRole("menuitem", { name: /other folder/ })).toBeTruthy();
-    fireEvent.click(projectOption("wsp")!);
-    await waitFor(() => expect(pickerValue("project")).toBe("wsp"));
-    expect(patches).toEqual([{ project: { [WS]: "wsp" } }]);
-    expect(useStore.getState().preferences.project).toEqual({ [WS]: "wsp" });
-    expect(folderLine()).toBe("/root/wsp");
-
-    const editor = composerEditor();
-    await typeInto(editor, "go");
-    await press(editor, "Enter");
-    await waitFor(() => expect(started).toHaveLength(1));
-    expect(started[0]).toMatchObject({ project: "wsp" });
-    expect(started[0]?.cwd).toBeUndefined();
-  });
-
-  it("with no pick on the record the only project fills it, two projects leave it empty and the start names nothing, and a workspace without projects has no pick at all", async () => {
-    const one = fixtureApi({ table: [CLAUDE], workspace: { ...BARE, projects: [SPOO] } });
-    const view = await setup(one.api);
-    await waitFor(() => expect(pickerValue("project")).toBe("spoo"));
-    expect(folderLine()).toBe("/root/spoo");
-    view.unmount();
-
-    const two = fixtureApi({ table: [CLAUDE], workspace: withProjects });
-    const second = await setup(two.api);
-    await waitFor(() => expect(picker("project")).not.toBeNull());
-    expect(pickerValue("project")).toBeUndefined();
-    expect(picker("project")!.textContent).toContain("Project");
-    expect(folderLine()).toBe("/root");
-    const editor = composerEditor();
-    await typeInto(editor, "go");
-    await press(editor, "Enter");
-    await waitFor(() => expect(two.started).toHaveLength(1));
-    expect(two.started[0]?.project).toBeUndefined();
-    expect(two.started[0]?.cwd).toBeUndefined();
-    second.unmount();
-
-    const none = fixtureApi({ table: [CLAUDE] });
-    await setup(none.api);
-    await waitFor(() => expect(picker("permissionMode")).not.toBeNull());
-    expect(picker("project")).toBeNull();
-  });
 
   it("other folder opens the folder picker under the box; the folder picked there is what the start names as cwd, and the pick reads as that folder until a project is picked again", async () => {
     const { api, started, patches } = fixtureApi({ table: [CLAUDE], workspace: withProjects });
     await setup(api);
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, project: { [WS]: "spoo" } } });
     await waitFor(() => expect(pickerValue("project")).toBe("spoo"));
     fireEvent.click(picker("project")!);
     fireEvent.click(screen.getByRole("menuitem", { name: /other folder/ }));
@@ -756,7 +697,7 @@ describe("composer pickers", () => {
     await waitFor(() => expect(folderLine()).toBe("/root/app"));
     expect(pickerValue("project")).toBeUndefined();
     expect(picker("project")!.textContent).toContain("app");
-    // A folder is not a project: the record's pick stands, so the next thread on this workspace still opens in spoo.
+    // A folder is not a project: the workspace's own project stands, so the next thread still opens in spoo.
     expect(patches).toEqual([]);
 
     const editor = composerEditor();

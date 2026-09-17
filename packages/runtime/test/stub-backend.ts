@@ -1,9 +1,15 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
-import { NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
+import { LocalBackend, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, type Caller, type ProjectView } from "@wsp/protocol";
+import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } from "../src/runtime.js";
+import { localExecStream } from "../src/local-exec.js";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
 
 /** An execImpl for a guest that has a daemon: the runtime's token write lands and everything else is silently
@@ -260,4 +266,61 @@ export function stubBackend(mark?: string): StubBackend {
     },
   };
   return backend;
+}
+
+/** The project every workspace in a test stands on. A workspace is one project's copy, so a test that is about a
+ * nap, a status or a thread still needs one; this is the one line that makes it, and the one place the shape of a
+ * project record is written down for the tests. `computer` is the row it lives on, the provider this host forks
+ * on by default; `source` is the repo a copy of that computer clones. */
+export async function projectOn(rt: ProjectMaker, computer?: string, source?: string, named?: { name?: string; base?: string }): Promise<ProjectView> {
+  // The computer a test never names is the one this host forks at, read off the places table so a runtime with a
+  // place door and one without both land somewhere real.
+  const on = computer ?? (await forkingComputer(rt));
+  // This computer works a folder of the person's own in place and takes no url, so a project here is a real repo
+  // in a folder of its own; every other computer clones. One source on one computer is one project, so the repo a
+  // test never names is a fresh one each call: two workspaces in one test are two projects.
+  return rt.projects.add({ source: source ?? (on === HERE_PLACE_ID ? tempRepo() : `https://github.com/wsp/stub-${++stubs}.git`), on, ...named });
+}
+
+/** The computer a test's workspaces land on when it names none: the first row that takes forks, else the first
+ * provider, else the one a host wired without places forks at. */
+async function forkingComputer(rt: ProjectMaker): Promise<string> {
+  const rows = await rt.projects.computers();
+  return (rows.find(r => r.id !== HERE_PLACE_ID) ?? rows[0])!.id;
+}
+
+let stubs = 0;
+
+/** A git repo in a folder of its own, for a project on this computer: `wsp add <folder>` refuses a folder that is
+ * not the top of one, so a test that wants a project here makes one. */
+export function tempRepo(): string {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "wsp-project-")));
+  execFileSync("git", ["init", "-q", dir]);
+  return dir;
+}
+
+/** A workspace of a fresh project, for every test whose subject is the workspace and not the project: `on` names
+ * the computer the project lives on, and a test that has a project already passes its id as `project`. Built on
+ * projectOn, so the project a test never names is still a real record with a real computer behind it. */
+export async function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, origin?: Caller): Promise<CreatedWorkspace> {
+  const { on, project, ...rest } = o;
+  const id = project ?? (await projectOn(rt, on)).id;
+  return rt.workspaces.create({ ...rest, project: id }, origin);
+}
+
+export type CreateOn = Omit<CreateWorkspaceOptions, "project"> & { project?: string; on?: string };
+type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
+type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create"> };
+
+/** This computer as a test wires it: a LocalBackend rooted in a folder of the test's own, so a project here is a
+ * real folder and the exec that reads whether it is a repo runs where the test can see it. Written here beside
+ * the fixtures because three test files need the same wiring and a second copy of it drifts. */
+export function fakeLocal(root: string): LocalWiring {
+  return {
+    backend: new LocalBackend({ root }),
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+  };
 }

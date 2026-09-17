@@ -2,20 +2,22 @@
 // wsp init with no machine provider key: what it says it will not do, the one
 // workspace it makes, and the app it opens on it. Nothing here touches a
 // provider: the runtime's provider module is the one that holds no machine.
+import { execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
 import { LocalBackend, NoProviderBackend } from "@wsp/engine";
-import { NO_PROVIDER_LINE } from "@wsp/protocol";
+import { HERE_PLACE_ID, NO_PROVIDER_LINE } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { ALSO_LOCAL_QUESTION } from "../src/init-first.js";
 import { runLocalInit, type LocalInitOptions } from "../src/init-local.js";
 import type { InitIO } from "../src/init.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 const ENTER = "\r";
 const dirs: string[] = [];
@@ -71,17 +73,21 @@ function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; js
     ...(over.json === true ? { json: (record: Record<string, unknown>) => records.push(record) } : {}),
   };
   const roads = (rt: Runtime): WorkspaceRoads => ({
-    createWorkspace: async () => { throw new Error("nothing forks on this road"); },
-    createLocalWorkspace: () => { trail.push("local"); return rt.workspaces.createLocal("this-mac"); },
+    createWorkspace: async () => { trail.push("local"); return createOn(rt, { on: HERE_PLACE_ID, name: "this-mac" }); },
+    addProject: (source: string) => projectOn(rt, HERE_PLACE_ID, source),
     planProject: async () => { throw new Error("no project in this fixture"); },
     importProject: async () => { throw new Error("no project in this fixture"); },
   });
+  const repo = realpathSync(mkdtempSync(join(root, "this-mac-")));
+  execFileSync("git", ["init", "-q", repo]);
   const opts: LocalInitOptions = {
     yes: over.yes ?? false,
     ...(over.nonInteractive === true ? { nonInteractive: true } : {}),
     statePath: join(root, "state.json"),
     ports: { port: 0, wsPort: 0, named: true },
     upCommand: "wsp up",
+    // A workspace here is a folder of the person's own worked in place, so the tick needs a folder to record.
+    importFolder: repo,
     runtime: () => (built ??= createRuntime({ backend: new NoProviderBackend(), store, adapters: {}, local: localWiring(root), hostId: "box:h1" })),
     roads,
     host: async rt => {

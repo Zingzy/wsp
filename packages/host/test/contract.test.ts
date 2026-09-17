@@ -83,6 +83,8 @@ describe("the agent contract on the command line and the tool door", () => {
       places: { wired: "default", backend: place => (place === "default" || place === "elsewhere" ? backend : undefined), list: () => ["default", "elsewhere"] },
     });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
+    // A workspace is one project's copy, so every line that makes one needs a project first.
+    await rt.projects.add({ source: "https://github.com/dev/alpha.git", on: "default" });
     vi.stubEnv("SOLARI_API_KEY", "");
     vi.stubEnv("ANTHROPIC_API_KEY", "");
   });
@@ -133,22 +135,16 @@ describe("the agent contract on the command line and the tool door", () => {
     });
     await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "off");
     await last("threads", "threads");
-    await last("places", "places");
+    await last("computers", "computers");
     await last("setup", "setup");
     // One level of this computer's own folders: the home folder this test stubbed, with a folder inside it to list.
     mkdirSync(join(dir, "user", "code"), { recursive: true });
     await last("folders", "folders");
     await last("terminal config", "terminal", "config");
-    // The streaming verbs: the frames carry a field of the tool's object and the result leaves it out. A plan nobody
-    // consented to is the plan frame alone, since nothing is left of the result once the plan is dropped.
-    const planned = await run("import", "alpha", proj, "--json");
-    expect(planned.code).toBe(0);
-    expect(objects(planned.io)).toEqual([{ plan: expect.objectContaining({ files: 1 }) }]);
-    const imported = await run("import", "alpha", proj, "--yes", "--json");
-    expect(imported.code).toBe(0);
-    expect(objects(imported.io)).toEqual([{ plan: expect.objectContaining({ files: 1 }) }, { imported: expect.objectContaining({ files: 1 }) }]);
-    covered.set("import", objects(imported.io).at(-1));
-    expect(await last("projects", "projects", "alpha")).toEqual({ projects: [expect.objectContaining({ name: "proj", size: 20 })] });
+    expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });
+    // A second project, recorded and dropped, so the verb that takes one out is run under --json too.
+    await rt.projects.add({ source: "https://github.com/dev/spare.git", on: "default" });
+    expect(await last("projects remove", "projects", "remove", "spare")).toEqual({ project: expect.objectContaining({ name: "spare" }) });
     // Renamed and named back, so the rest of this run still addresses it as alpha.
     expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
     await last("rename", "rename", "renamed", "alpha");
@@ -191,7 +187,7 @@ describe("the agent contract on the command line and the tool door", () => {
     // A streamed verb's frames carry the output and its result leaves it out, so no line prints twice.
     const ran = await run("exec", "alpha", "--json", "--", "true");
     expect(ran.code).toBe(0);
-    expect(objects(ran.io)).toEqual([{ type: "exec.output", execId: expect.any(String), text: "ok" }, { exitCode: 0, cwd: realpathSync(proj) }]);
+    expect(objects(ran.io)).toEqual([{ type: "exec.output", execId: expect.any(String), text: "ok" }, { exitCode: 0, cwd: "/root/alpha" }]);
     covered.set("exec", objects(ran.io).at(-1));
     const forked = await run("fork", "alpha", "--name", "worker", "--send", "build it", "--json");
     expect(forked.code).toBe(0);
@@ -220,7 +216,7 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(rebuilt.workspace.id).toBe(alpha);
     await last("delete", "delete", alpha, "--yes");
     const served = CLI_VERBS.filter(hasTool);
-    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([["fork", ["workspace", "notice"]], ["exec", ["output"]], ["import", ["plan"]]]);
+    expect(served.filter(v => v.tool.stream !== undefined).map(v => [v.name, v.tool.stream])).toEqual([["fork", ["workspace", "notice"]], ["exec", ["output"]]]);
 
     for (const verb of served) {
       const value = covered.get(verb.name);
@@ -240,7 +236,7 @@ describe("the agent contract on the command line and the tool door", () => {
 
     const bare = await run("new");
     expect(bare.code).toBe(3);
-    expect(bare.io.errors).toEqual([expect.stringMatching(/^wsp new takes one name\. usage: wsp new <name>/)]);
+    expect(bare.io.errors).toEqual([expect.stringMatching(/^wsp new takes the work you are doing/)]);
 
     await run("new", "alpha");
     const unasked = await run("delete", "alpha", "--json");

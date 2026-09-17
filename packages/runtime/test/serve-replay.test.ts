@@ -8,7 +8,7 @@ import type { TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { WsClient, type WireMsg } from "./ws-client.js";
+import { WsClient, type WireMsg, createOverWire } from "./ws-client.js";
 import { stubBackend } from "./stub-backend.js";
 import { fakeClock } from "./fake-clock.js";
 
@@ -61,16 +61,17 @@ function received(c: WsClient, n: number): Promise<WireMsg[]> {
 const seqs = (events: WireMsg[]): number[] => events.map(e => e["seq"] as number);
 const texts = (events: WireMsg[]): string[] => events.map(e => e["text"] as string);
 
-/** A runtime with one workspace and one running session: the create's three stages are seq 1 to 3, workspace.created is
- * seq 4, the cost tick the create lands (the meter's first point, at the machine's rate) is seq 5, session.start is seq 6,
- * and the preferences record moving to name that workspace as the last target is seq 7. */
+/** A runtime with one project, one workspace of it and one running session: project.added is seq 1, the create's
+ * stages are seq 2 to 5 (the project's clone is one of them), workspace.created is seq 6, the cost tick the create
+ * lands (the meter's first point, at the machine's rate) is seq 7, session.start is seq 8, and the preferences
+ * record moving to name that workspace as the last target is seq 9. */
 async function boot() {
   const h = drivenHarness();
   const fc = fakeClock();
   const runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: h.adapter }, clock: fc.clock });
   srv = await serveRuntime(runtime, { port: 0, authToken: "secret", now: fc.clock.now });
   const c = await WsClient.connect(srv.port, { token: "secret" });
-  const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+  const created = await createOverWire(c, "x", { golden: "snap_g" });
   const workspaceId = (created["workspace"] as { id: string }).id;
   await c.request("sessions.start", { workspaceId, prompt: "go" });
   return { h, runtime, workspaceId, c, port: srv.port };
@@ -81,14 +82,14 @@ describe("events.subscribe replay", () => {
     const { h, c, port } = await boot();
     h.delta("before");
     const sub = await c.request("events.subscribe");
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 8, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 10, stream: expect.any(String) });
 
     const other = await WsClient.connect(port, { token: "secret" });
-    expect((await other.request("events.subscribe"))["seq"]).toBe(8);
+    expect((await other.request("events.subscribe"))["seq"]).toBe(10);
 
     h.delta("live");
     const [mine, theirs] = await Promise.all([received(c, 1), received(other, 1)]);
-    expect(mine).toEqual([expect.objectContaining({ type: "session.delta", text: "live", seq: 9 })]);
+    expect(mine).toEqual([expect.objectContaining({ type: "session.delta", text: "live", seq: 11 })]);
     expect(theirs).toEqual(mine);
     c.close();
     other.close();
@@ -100,7 +101,7 @@ describe("events.subscribe replay", () => {
     h.delta("a");
     h.delta("b");
     const seen = await received(c, 2);
-    expect(seqs(seen)).toEqual([8, 9]);
+    expect(seqs(seen)).toEqual([10, 11]);
     const cursor = seen[seen.length - 1]!["seq"] as number;
     c.close();
     await c.closed();
@@ -111,11 +112,11 @@ describe("events.subscribe replay", () => {
 
     const back = await WsClient.connect(port, { token: "secret" });
     const sub = await back.request("events.subscribe", { after: cursor });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 12, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 14, stream: expect.any(String) });
     h.delta("live");
     const got = await received(back, 4);
     expect(texts(got)).toEqual(["dark 1", "dark 2", "dark 3", "live"]);
-    expect(seqs(got)).toEqual([10, 11, 12, 13]);
+    expect(seqs(got)).toEqual([12, 13, 14, 15]);
     back.close();
   });
 
@@ -123,15 +124,15 @@ describe("events.subscribe replay", () => {
     const { h, port } = await boot();
     for (const t of ["1", "2", "3", "4", "5", "6"]) h.delta(t);
     const late = await WsClient.connect(port, { token: "secret" });
-    const sub = await late.request("events.subscribe", { after: 10 });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 13, stream: expect.any(String) });
+    const sub = await late.request("events.subscribe", { after: 12 });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 15, stream: expect.any(String) });
     h.delta("live");
     const got = await received(late, 4);
-    expect(seqs(got)).toEqual([11, 12, 13, 14]);
+    expect(seqs(got)).toEqual([13, 14, 15, 16]);
     expect(texts(got)).toEqual(["4", "5", "6", "live"]);
 
     const caughtUp = await WsClient.connect(port, { token: "secret" });
-    expect(await caughtUp.request("events.subscribe", { after: 14 })).toEqual({ id: expect.any(Number), ok: true, seq: 14, stream: expect.any(String) });
+    expect(await caughtUp.request("events.subscribe", { after: 16 })).toEqual({ id: expect.any(Number), ok: true, seq: 16, stream: expect.any(String) });
     h.delta("only this");
     expect(texts(await received(caughtUp, 1))).toEqual(["only this"]);
     late.close();
@@ -140,16 +141,16 @@ describe("events.subscribe replay", () => {
 
   it("a cursor older than the ring gets gap and no replay; sessions.history is the refetch and holds the turn", async () => {
     const { h, workspaceId, port } = await boot();
-    // 5000 deltas after the create's stages and workspace.created (1 to 4), the create's cost tick (5), session.start
-    // (6) and the record's target (7): the ring keeps 8..5007 and drops the first seven.
+    // 5000 deltas after project.added (1), the create's stages and workspace.created (2 to 6), the create's cost
+    // tick (7), session.start (8) and the record's target (9): the ring keeps 10..5009 and drops the first nine.
     for (let i = 1; i <= 5000; i++) h.delta(`d${i}`);
 
     const stale = await WsClient.connect(port, { token: "secret" });
     const sub = await stale.request("events.subscribe", { after: 1 });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 5007, gap: true, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 5009, gap: true, stream: expect.any(String) });
     h.delta("live");
     const got = await received(stale, 1);
-    expect(got).toEqual([expect.objectContaining({ text: "live", seq: 5008 })]);
+    expect(got).toEqual([expect.objectContaining({ text: "live", seq: 5010 })]);
 
     // The transcript is capped at the same 5000, so it too starts past the first events; its tail is the truth the chat needs.
     const history = (await stale.request("sessions.history", { workspaceId }))["events"] as { type: string; text?: string }[];
@@ -157,15 +158,15 @@ describe("events.subscribe replay", () => {
     expect(history[history.length - 1]).toMatchObject({ type: "session.delta", text: "live" });
     stale.close();
 
-    // "live" made 5008 the head, so the ring now holds 9..5008: cursor 8 is the oldest that replays, 7 is a gap.
+    // "live" made 5010 the head, so the ring now holds 11..5010: cursor 10 is the oldest that replays, 9 is a gap.
     const edge = await WsClient.connect(port, { token: "secret" });
-    expect((await edge.request("events.subscribe", { after: 8 }))["gap"]).toBeUndefined();
+    expect((await edge.request("events.subscribe", { after: 10 }))["gap"]).toBeUndefined();
     const all = await received(edge, 5000);
-    expect(seqs(all)[0]).toBe(9);
-    expect(seqs(all)[4999]).toBe(5008);
+    expect(seqs(all)[0]).toBe(11);
+    expect(seqs(all)[4999]).toBe(5010);
     edge.close();
     const out = await WsClient.connect(port, { token: "secret" });
-    expect(await out.request("events.subscribe", { after: 7 })).toMatchObject({ ok: true, seq: 5008, gap: true });
+    expect(await out.request("events.subscribe", { after: 9 })).toMatchObject({ ok: true, seq: 5010, gap: true });
     out.close();
   });
 
@@ -173,9 +174,9 @@ describe("events.subscribe replay", () => {
     const { h, port } = await boot();
     const c = await WsClient.connect(port, { token: "secret" });
     const sub = await c.request("events.subscribe", { after: 90 });
-    expect(sub).toEqual({ id: sub.id, ok: true, seq: 7, gap: true, stream: expect.any(String) });
+    expect(sub).toEqual({ id: sub.id, ok: true, seq: 9, gap: true, stream: expect.any(String) });
     h.delta("live");
-    expect(seqs(await received(c, 1))).toEqual([8]);
+    expect(seqs(await received(c, 1))).toEqual([10]);
     c.close();
   });
 
@@ -187,7 +188,7 @@ describe("events.subscribe replay", () => {
     srv = await serveRuntime(rtA, { port: 0, authToken: "secret", now: fc.clock.now });
     const port = srv.port;
     const c = await WsClient.connect(port, { token: "secret" });
-    const created = await c.request("workspaces.create", { golden: "snap_g", name: "x" });
+    const created = await createOverWire(c, "x", { golden: "snap_g" });
     const workspaceId = (created["workspace"] as { id: string }).id;
     await c.request("sessions.start", { workspaceId, prompt: "go" });
     const subA = await c.request("events.subscribe");
@@ -195,7 +196,7 @@ describe("events.subscribe replay", () => {
     first.delta("old 1");
     const seen = await received(c, 1);
     const cursor = seen[0]!["seq"] as number;
-    expect([streamA, cursor]).toEqual([expect.any(String), 8]);
+    expect([streamA, cursor]).toEqual([expect.any(String), 10]);
     await srv.close();
     await c.closed();
 
@@ -205,20 +206,20 @@ describe("events.subscribe replay", () => {
     const rtB = createRuntime({ backend: stubBackend(), store, adapters: { claude: second.adapter }, clock: fc.clock });
     srv = await serveRuntime(rtB, { port, authToken: "secret", now: fc.clock.now });
     const back = await WsClient.connect(port, { token: "secret" });
-    const again = await back.request("workspaces.create", { golden: "snap_g", name: "y" });
+    const again = await createOverWire(back, "y", { golden: "snap_g" });
     await back.request("sessions.start", { workspaceId: (again["workspace"] as { id: string }).id, prompt: "go" });
     for (const t of ["new 1", "new 2", "new 3"]) second.delta(t);
 
     const subB = await back.request("events.subscribe", { after: cursor, stream: streamA });
-    expect(subB).toEqual({ id: subB.id, ok: true, seq: 11, gap: true, stream: expect.any(String) });
+    expect(subB).toEqual({ id: subB.id, ok: true, seq: 13, gap: true, stream: expect.any(String) });
     expect(subB["stream"]).not.toBe(streamA);
     second.delta("live");
     const got = await received(back, 1);
     expect(texts(got)).toEqual(["live"]);
-    expect(seqs(got)).toEqual([12]);
+    expect(seqs(got)).toEqual([14]);
     // Without the stream the same cursor would have replayed 9 to 11 of a stream this client never saw.
     const naive = await WsClient.connect(port, { token: "secret" });
-    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 12, stream: subB["stream"] });
+    expect(await naive.request("events.subscribe", { after: cursor })).toEqual({ id: expect.any(Number), ok: true, seq: 14, stream: subB["stream"] });
     expect(texts(await received(naive, 4))).toEqual(["new 1", "new 2", "new 3", "live"]);
     back.close();
     naive.close();

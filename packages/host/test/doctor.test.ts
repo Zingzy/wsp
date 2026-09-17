@@ -11,7 +11,7 @@ import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -58,6 +58,7 @@ import {
   type DaemonSocket,
 } from "../src/doctor.js";
 import { redact } from "../src/init-log.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 import type { CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -350,7 +351,7 @@ describe("verifyNoneLeft", () => {
     const store = memoryStore();
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     const rt = createRuntime({ backend, store, adapters: {} });
-    const view = await rt.workspaces.create({ golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: "doctor-fork" });
+    const view = await createOn(rt, { golden: SEALED_GOLDEN.versions[0]!.snapshotId, name: "doctor-fork" });
     expect(backend.machines[0]?.spec.labels?.["wsp-owner"]).toBe(await rt.owner());
     await expect(verifyNoneLeft(backend, await rt.owner(), () => {})).rejects.toThrow(`machines still up: ${view.machineId}`);
     await rt.workspaces.delete(view.id);
@@ -1146,7 +1147,7 @@ describe("the doctor's local road", () => {
     expect(out).toContain("doctor: proving a thread on this computer, with no machine and nothing billing");
     expect(out).toContain("Claude Code 9.9.9");
     expect(out).toContain("Claude Code answered with the word it was asked for");
-    expect(out).toContain("the workspace this run made is forgotten");
+    expect(out).toContain("the workspace, the project and the folder this run made are gone");
     expect(out).toContain("DOCTOR PASS: this computer is a workspace, a thread ran on it and its reply came back.");
     // The doctor left nothing behind: the state has no more workspaces than it started with.
     expect(await rt.workspaces.list()).toEqual([]);
@@ -1161,7 +1162,7 @@ describe("the doctor's local road", () => {
 
   it("a workspace this host already holds is the one it runs on, and it stays afterwards", async () => {
     const { rt } = localRuntime({ claude: scripted() });
-    const held = await rt.workspaces.createLocal("mac");
+    const held = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const io = record();
     expect(await localDoctor(rt, io)).toBe(0);
     expect(io.lines.join("\n")).toContain("mac (already here)");

@@ -9,7 +9,7 @@ import type { HarnessAdapterContext, HarnessAdapterFactory } from "../src/runtim
 import { createRuntime } from "../src/runtime.js";
 import { secretsOf } from "../src/adapters.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn } from "./stub-backend.js";
 import type { TurnResult } from "@wsp/protocol";
 
 const TOKEN = "sk-ant-oat01-TESTONLY";
@@ -40,7 +40,7 @@ describe("the vault a turn launches with", () => {
     const { factory, contexts } = recording();
     let held: Record<string, string> = {};
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, vault: () => held });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
     expect(contexts.at(-1)!.vault).toEqual({});
     held = { CLAUDE_CODE_OAUTH_TOKEN: TOKEN };
@@ -51,7 +51,7 @@ describe("the vault a turn launches with", () => {
   it("is empty for a host that wired none, so a turn carries nothing of one", async () => {
     const { factory, contexts } = recording();
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory } });
-    const ws = await rt.workspaces.create({ golden: "snap_g", name: "x" });
+    const ws = await createOn(rt, { golden: "snap_g", name: "x" });
     await (await rt.sessions.start(ws.id, { prompt: "one" })).finished;
     for (const ctx of contexts) expect(ctx.vault).toEqual({});
   });

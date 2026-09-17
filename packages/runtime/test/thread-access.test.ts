@@ -9,12 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { markedDefault, OVER_SSH, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, markedDefault, OVER_SSH, type TurnResult } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { fakeSsh } from "./fake-ssh.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 /** A harness that answers at once and keeps every start it was handed, so a case reads the access the runtime
  * resolved rather than what it asked for. */
@@ -79,24 +79,26 @@ describe("the access a thread starts at, on each kind of workspace", () => {
 
   it("a thread on this computer that names no access runs every action without asking, whichever agent it is on", async () => {
     const rt = runtime();
-    const mac = await rt.workspaces.createLocal("mac");
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     expect(await ran(mac.id, "claude")).toEqual({ start: "bypassPermissions", picker: "bypassPermissions" });
     expect(await ran(mac.id, "codex")).toEqual({ start: "danger-full-access", picker: "danger-full-access" });
   });
 
   it("a thread on this computer that names an access runs at that one, so every other mode stays a choice", async () => {
     const rt = runtime();
-    const mac = await rt.workspaces.createLocal("mac");
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     expect((await ran(mac.id, "claude", "plan")).start).toBe("plan");
     expect((await ran(mac.id, "claude", "default")).start).toBe("default");
     expect((await ran(mac.id, "codex", "read-only")).start).toBe("read-only");
     // Named or not, a mode the agent does not take is refused with its list; the pick is not silently dropped.
-    await expect(rt.sessions.start(mac.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/not one claude takes/);
+    await expect(rt.sessions.start(mac.id, { prompt: "go", harness: "claude", permissionMode: "yolo" })).rejects.toThrow(/not one claude takes/);
+    // A start that names no agent runs the one the last thread on this project used, so the refusal is that one's.
+    await expect(rt.sessions.start(mac.id, { prompt: "go", permissionMode: "yolo" })).rejects.toThrow(/not one codex takes/);
   });
 
   it("a thread on a machine wsp forked runs every action without asking, as it did", async () => {
     const rt = runtime();
-    const fork = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const fork = await createOn(rt, { golden: "snap_g", name: "a" });
     expect(await ran(fork.id, "claude")).toEqual({ start: "bypassPermissions", picker: "bypassPermissions" });
     expect(await ran(fork.id, "codex")).toEqual({ start: "danger-full-access", picker: "danger-full-access" });
     // Nothing of the person's is handed over by that pick there, so the menu names no computer on it.
@@ -104,20 +106,9 @@ describe("the access a thread starts at, on each kind of workspace", () => {
     expect(shown?.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe("Bypass");
   });
 
-  it("a thread on a computer somebody owns asks, and the pick that asks nothing names the machine it hands over", async () => {
-    const { wiring } = fakeSsh();
-    const rt = runtime(wiring);
-    const box = await rt.workspaces.createSsh("dev@box");
-    expect(await ran(box.id, "claude")).toEqual({ start: "default", picker: "default" });
-    expect(await ran(box.id, "codex")).toEqual({ start: "workspace-write", picker: "workspace-write" });
-    const shown = (await rt.harnesses.list(box.id)).find(c => c.harness === "claude");
-    // The machine that pick hands over is the box, so the menu says the box, not the computer the host runs on.
-    expect(shown?.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe(`Bypass on ${OVER_SSH}`);
-  });
-
   it("the picker on a workspace whose machine is not up still reads what its next thread would run", async () => {
     const rt = runtime();
-    const fork = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const fork = await createOn(rt, { golden: "snap_g", name: "a" });
     expect((await rt.workspaces.nap(fork.id)).phase).toBe("napping");
     const shown = (await rt.harnesses.list(fork.id)).find(c => c.harness === "claude");
     expect(markedDefault(shown?.permissionModes ?? [])?.value).toBe("bypassPermissions");
@@ -125,8 +116,8 @@ describe("the access a thread starts at, on each kind of workspace", () => {
 
   it("the menu says in one sentence what each mode does, on every kind and in the same words", async () => {
     const rt = runtime();
-    const mac = await rt.workspaces.createLocal("mac");
-    const fork = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const mac = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
+    const fork = await createOn(rt, { golden: "snap_g", name: "a" });
     const sentences = async (id: string): Promise<(string | undefined)[]> =>
       ((await rt.harnesses.list(id)).find(c => c.harness === "claude")?.permissionModes ?? []).map(o => o.description);
     const here = await sentences(mac.id);

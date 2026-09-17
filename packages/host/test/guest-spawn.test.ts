@@ -81,6 +81,7 @@ describe("the wsp command on a thread's machine", () => {
   const json = <T>(io: Captured): T => JSON.parse(io.lines.at(-1)!) as T;
 
   it("forks through wsp new with the launch's own token, under its root, and the cap refuses the third", async () => {
+    await rt.projects.add({ source: "https://github.com/dev/one.git", on: "default" });
     expect((await person("new", "one", "--spawn", "on", "--max-machines", "2")).code).toBe(0);
     const [one] = await rt.workspaces.list();
     const turn = await rt.sessions.start(one!.id, { prompt: "fork two machines" });

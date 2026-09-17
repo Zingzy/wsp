@@ -192,6 +192,7 @@ describe("protocol views", () => {
       phase: "running",
       golden: "snap_g",
       createdAt: "2026-09-01T00:00:00.000Z",
+      project: { id: "pr_1a2b3c4d", name: "task-1", path: "/root/task-1", computer: "here" },
     };
     expect(WorkspaceView.parse(ws)).toEqual(ws);
     expect(() => WorkspaceView.parse({ ...ws, phase: "hibernating" })).toThrow();
@@ -216,6 +217,7 @@ describe("protocol views", () => {
       phase: "running",
       golden: "snap_g",
       createdAt: "2026-09-01T00:00:00.000Z",
+      project: { id: "pr_1a2b3c4d", name: "task-1", path: "/root/task-1", computer: "here" },
       screen: { streamUrl: "wss://stream.example/m1" },
     };
     expect(WorkspaceView.parse(view)).toEqual(view);
@@ -238,6 +240,7 @@ describe("protocol views", () => {
       phase: "running",
       golden: "",
       createdAt: "2026-09-11T00:00:00.000Z",
+      project: { id: "pr_1a2b3c4d", name: "box", path: "/home/dev/box", computer: "pl_box" },
       kind: "ssh",
       machineState: "running",
       reach: { state: "reachable", url: "http://127.0.0.1:40000", expiresAt: 1789041249000 },
@@ -258,7 +261,7 @@ describe("protocol views", () => {
 });
 
 describe("a workspace's look", () => {
-  const view = { id: "ws_1", name: "task-1", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z" };
+  const view = { id: "ws_1", name: "task-1", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00.000Z", project: { id: "pr_1a2b3c4d", name: "task-1", path: "/root/task-1", computer: "here" } };
   const theme = { dots: [{ angle: 200, radius: 0.5 }, { angle: 20, radius: 0.5 }], harmony: "complementary", grain: 0.25, opacity: 0.6, mode: "auto" };
 
   it("about two dozen glyphs, each one word so its name needs no second table, and none of them an emoji", () => {
@@ -314,6 +317,7 @@ describe("protocol event union", () => {
           phase: "running",
           golden: "snap_g",
           createdAt: "2026-09-01T00:00:00.000Z",
+          project: { id: "pr_1a2b3c4d", name: "task-1", path: "/root/task-1", computer: "here" },
         },
       },
       { type: "workspace.napped", workspaceId: "ws_1" },
@@ -564,7 +568,7 @@ describe("event replay wire fields", () => {
   it("every event may carry seq, a positive integer that survives a JSON round trip; history events need not", () => {
     const events = [
       { type: "workspace.napped", workspaceId: "ws_1", seq: 1 },
-      { type: "workspace.status", status: { id: "ws_1", name: "x", machineId: "m1", phase: "running", golden: "g", createdAt: "t", machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.1 }, seq: 2 },
+      { type: "workspace.status", status: { id: "ws_1", name: "x", machineId: "m1", phase: "running", golden: "g", createdAt: "t", project: { id: "pr_1a2b3c4d", name: "x", path: "/root/x", computer: "here" }, machineState: "running", reach: { state: "unsupported" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.1 }, seq: 2 },
       { type: "session.delta", workspaceId: "ws_1", sessionId: "s1", kind: "text", text: "hi", seq: 3 },
       { type: "port.open", workspaceId: "ws_1", port: 8080, seq: 4 },
       { type: "golden.stage", name: "default", stage: "ready", seq: 5 },
@@ -701,7 +705,8 @@ describe("runtime wire types", () => {
       { id: 1, op: "auth", token: "t" },
       { id: 2, op: "ticket.issue", purpose: "connect" },
       { id: 3, op: "events.subscribe" },
-      { id: 4, op: "workspaces.create", golden: "snap_g", name: "x", cpu: 2 },
+      { id: 4, op: "workspaces.create", project: "spoo-landing", golden: "snap_g", name: "x", cpu: 2 },
+      { id: 4.5, op: "projects.add", source: "/Users/dev/wsp" },
       { id: 5, op: "workspaces.list" },
       { id: 6, op: "workspaces.get", workspaceId: "ws_1" },
       { id: 7, op: "workspaces.nap", workspaceId: "ws_1" },
@@ -725,7 +730,14 @@ describe("runtime wire types", () => {
     ];
     for (const r of reqs) expect(RuntimeRequest.parse(r)).toEqual(r);
     expect(() => RuntimeRequest.parse({ id: 21, op: "sessions.interrupt" })).toThrow(); // sessionId required
-    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // golden+name required
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create" })).toThrow(); // project+name required
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.create", name: "x" })).toThrow(); // a workspace is a project's
+    // The image is the project's computer's own head unless a project image is named outright.
+    expect(RuntimeRequest.parse({ id: 1, op: "workspaces.create", project: "spoo-landing", name: "x" })).not.toHaveProperty("golden");
+    // The two roads that recorded a workspace of their own leave with the projects recut: this computer is a
+    // project recorded with wsp add, and a machine somebody owns is a computer their projects are cloned onto.
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.createLocal" })).toThrow();
+    expect(() => RuntimeRequest.parse({ id: 1, op: "workspaces.createSsh", address: "dev@box" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.prepare", name: "d", kind: "browser" })).toThrow();
     expect(() => RuntimeRequest.parse({ id: 1, op: "golden.seal" })).toThrow(); // builderId required
     // The two roads that handed a daemon token out leave the wire with the relay: nothing outside the host dials a daemon.

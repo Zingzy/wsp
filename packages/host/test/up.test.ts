@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PERSON_HOME_ENV, thisComputerLine, type ExecStream } from "@wsp/protocol";
+import { PERSON_HOME_ENV, type ExecStream } from "@wsp/protocol";
+import { NO_PROJECT_YET } from "../src/verbs.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
@@ -96,9 +97,10 @@ describe("wsp up", () => {
     expect(readFileSync(tokenPath, "utf8")).toBe(handle.authToken);
   });
 
-  it("records this computer and serves when the state holds nothing, rather than sending a fresh computer to another command first", async () => {
+  it("serves a state that holds nothing and says the road, rather than recording a workspace nobody named a project for", async () => {
     // A manifest whose head names no version is a state with nothing to show, the same as an empty one: this is the
-    // box story's first line, where the host is installed before anyone has forked or sealed anything.
+    // box story's first line, where the host is installed before anyone has forked or sealed anything. A workspace
+    // is one project's copy, so this start records none and the line says what records one.
     stateFile({ goldens: { default: { ...SEALED_GOLDEN, head: 2 } } });
     const lines: string[] = [];
     const errors: string[] = [];
@@ -106,16 +108,16 @@ describe("wsp up", () => {
     const handle = await up(quietIO(lines, errors), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     handles.push(handle);
     expect(errors).toEqual([]);
-    const [recorded] = await rt.workspaces.list();
-    expect(recorded?.kind).toBe("local");
-    expect(lines[0]).toBe(thisComputerLine(recorded!.name, recorded!.id));
+    expect(await rt.workspaces.list()).toEqual([]);
+    expect(lines[0]).toBe(NO_PROJECT_YET);
     expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
   });
 
   it("serves a state that holds only a local workspace and no golden: this computer is something to show", async () => {
     stateFile({
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: localWorkFolder(home) }, path: localWorkFolder(home), createdAt: new Date().toISOString() } },
       workspaces: {
-        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), spec: {}, firstLife: false, idleWindowMs: null },
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
     });
     const lines: string[] = [];
@@ -127,13 +129,14 @@ describe("wsp up", () => {
     expect((await rt.workspaces.list()).map(w => [w.name, w.kind])).toEqual([["mac", "local"]]);
   });
 
-  it("a turn on this computer starts in the workspace's own work folder, never in the person's home", async () => {
+  it("a turn on this computer starts in the workspace's own project folder, never in the person's home", async () => {
+    const work = localWorkFolder(home);
     stateFile({
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: work }, path: work, createdAt: new Date().toISOString() } },
       workspaces: {
-        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), spec: {}, firstLife: false, idleWindowMs: null },
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
     });
-    const work = localWorkFolder(home);
     // Not made by building the wiring: a host that only asks whether it has anything to serve builds one too, and a
     // computer that was never set up is left as it was.
     const wiring = localWiring(home);
@@ -160,7 +163,11 @@ describe("wsp up", () => {
     // And the folder the turn road resolves is that same one, read off the backend the wiring published it on, which
     // is also the folder that backend's own machine runs in: one fact, so the two roads cannot split.
     expect(wiring.backend.folder).toBe(work);
-    expect((await rt.workspaces.execStream("ws_l", ["pwd"])).ranIn).toBe(work);
+    // Read off the stream and then waited on: a child still writing its run files under the wsp home while this
+    // test's folder is swept is a teardown that fails on the files it is racing.
+    const ran = await rt.workspaces.execStream("ws_l", ["pwd"]);
+    expect(ran.ranIn).toBe(work);
+    await printed(ran);
     // The harness's own store stays the person's, wherever their store variable puts it: a sign-in they made is the
     // one a turn uses, so nothing of it moved under the work folder.
     expect(wiring.home("claude").startsWith(work)).toBe(false);
@@ -217,8 +224,9 @@ describe("wsp up", () => {
 
   it("the panes of a local workspace dial a daemon this host starts on the first ask and closes with the runtime", async () => {
     stateFile({
+      projects: { pr_l: { id: "pr_l", name: "mac", computer: "here", source: { kind: "folder", path: localWorkFolder(home) }, path: localWorkFolder(home), createdAt: new Date().toISOString() } },
       workspaces: {
-        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), spec: {}, firstLife: false, idleWindowMs: null },
+        ws_l: { id: "ws_l", name: "mac", kind: "local", machineId: "local", phase: "running", golden: "", createdAt: new Date().toISOString(), project: "pr_l", spec: {}, firstLife: false, idleWindowMs: null },
       },
     });
     const wiring = localWiring(home);

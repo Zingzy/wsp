@@ -180,12 +180,17 @@ export const WHERE_PICK_WORDS = {
   /** How long the first workspace there takes, which is the image being built before it. */
   firstBuild: "builds your image there first, about 4 min",
   imageThere: (version: number): string => `your image is there, v${version}`,
-  /** The dialog with nowhere to put a workspace: why this computer is not on the list, since a person who has just
-   * read Settings knows it is a computer where agents run, and then what to do about it. */
-  nowhereYet: `${THIS_COMPUTER_WORD} is already a workspace, the only one it can be`,
-  addOne: "Add a computer you own or connect a provider, and workspaces can be created there.",
   /** Why Create is held with no name typed. */
   nameFirst: "give the workspace a name",
+} as const;
+
+/** The project pick on the new-workspace dialog: a workspace is one project's copy, so the project is what the
+ * dialog asks for and the computer comes with it. With no project there is nothing to make a workspace of, and the
+ * two notes say so and what records one, in the command line's own words. */
+export const PROJECT_PICK_WORDS = {
+  label: "Project",
+  noneYet: "No projects yet, and a workspace is a copy of one.",
+  addOne: "Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.",
 } as const;
 
 /** The one caption line under the Where control, built from the facts the row itself carries: what a workspace

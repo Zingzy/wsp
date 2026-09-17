@@ -21,6 +21,7 @@ import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { closeStandInGuests, fakeGuestAt } from "../src/fake-guest.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 runsFromItsOwnFolder();
 
@@ -284,6 +285,7 @@ describe("host serves the app", () => {
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
     const { rt, backend } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs(g) });
+    await handle.addProject("https://github.com/dev/first.git", "default");
     const first = await handle.createWorkspace("first");
     expect(first.name).toBe("first");
     expect(first.golden).toBe("snap_gold");
@@ -295,6 +297,7 @@ describe("host serves the app", () => {
     await handle.close();
     const bare = testRuntime(false);
     handle = await startHost({ runtime: bare.rt, port: 0, wsPort: 0, webDir: webDir() });
+    await handle.addProject("https://github.com/dev/first.git", "default");
     await expect(handle.createWorkspace("first")).rejects.toThrow("no image yet; run wsp init first");
   });
 
@@ -419,7 +422,7 @@ describe("host serves the app", () => {
 
   it("lists workspaces as JSON", async () => {
     const { rt } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
+    await createOn(rt, { golden: "snap_gold", name: "alpha" });
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
     const { status, body } = await getJson(`http://127.0.0.1:${handle.port}/api/workspaces`);
     expect(status).toBe(200);
@@ -435,6 +438,7 @@ describe("host serves the app", () => {
   it("creates a workspace from the golden head via POST", async () => {
     const { rt, backend } = testRuntime();
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
+    await handle.addProject("https://github.com/dev/beta.git", "default");
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -459,6 +463,7 @@ describe("host serves the app", () => {
       const rt = createRuntime({ backend, store, adapters: {} });
       const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs(g) });
       try {
+        await h.addProject("https://github.com/dev/beta.git", "default");
         const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "beta" }) });
         expect(res.status).toBe(200);
         const envs = backend.machines[0]?.spec.envs ?? {};
@@ -473,6 +478,7 @@ describe("host serves the app", () => {
   it("refuses workspace creation without an image", async () => {
     const { rt } = testRuntime(false);
     handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir() });
+    await handle.addProject("https://github.com/dev/beta.git", "default");
     const res = await fetch(`http://127.0.0.1:${handle.port}/api/workspaces`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -485,7 +491,7 @@ describe("host serves the app", () => {
 
   it("reports daemon reach by probing the minted preview URL", async () => {
     const { rt, backend } = testRuntime();
-    await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
+    await createOn(rt, { golden: "snap_gold", name: "alpha" });
 
     // Stands in for the Solari edge + guest daemon: plain HTTP against the
     // daemon's ws port answers 426 Upgrade Required (measured through the
@@ -560,7 +566,7 @@ describe("host close flushes transcripts", () => {
     dirs.push(dir);
     const handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: dir });
 
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "alpha" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "alpha" });
     await rt.sessions.start(ws.id, { prompt: "go" });
     m.start();
     m.done("t0");
@@ -629,7 +635,7 @@ describe("host sweeps orphaned machines", () => {
   it("a workspace machine from this setup that no record claims is recorded at start under the name its fork stamped, named in the log, listed by the app and deletable", async () => {
     const { rt, backend, store } = testRuntime();
     const earlier = createRuntime({ backend, store, adapters: {} });
-    const lost = await earlier.workspaces.create({ golden: "snap_gold", name: "first" });
+    const lost = await createOn(earlier, { golden: "snap_gold", name: "first" });
     await earlier.close();
     await store.delete("workspaces", lost.id);
     backend.machines[0]!.spec.labels!["createdAt"] = ago(2 * 60_000);

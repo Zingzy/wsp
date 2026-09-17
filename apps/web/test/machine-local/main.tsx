@@ -18,7 +18,7 @@ import { noDaemonApi } from "../fake-daemon-api.js";
 
 document.documentElement.classList.toggle("dark", new URLSearchParams(window.location.search).get("theme") !== "light");
 
-const workspace: WorkspaceView = { id: "ws_mac", name: "zingzy-mac", machineId: "local", phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
+const workspace: WorkspaceView = { id: "ws_mac", name: "zingzy-mac", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "", createdAt: "2026-09-08T09:00:00Z", kind: "local" };
 const status: WorkspaceStatus = { ...workspace, machineState: "running", reach: { state: "reachable" }, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, facts: { os: "macOS 15.5", uptimeMs: 3 * 86_400_000 + 4 * 3_600_000, folder: "/Users/zingzy/wsp" } };
 // A sealed golden the host still holds: the local tab must show none of it, whatever the host knows about images.
 const lineage: SnapshotLineage = { name: "default", head: 12, versions: [{ version: 12, snapshotId: "snap_golden-v12", baseTemplate: "base", setupSha: "sha12", createdAt: "2026-08-22T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }] };
@@ -36,7 +36,6 @@ const api: Api = {
   listWorkspaces: async () => [workspace],
   getWorkspace: async () => workspace,
   createWorkspace: async () => workspace,
-  createFromGoldenHead: async () => workspace,
   watchStatuses: async () => [status],
   nap: async () => workspace,
   wake: async () => workspace,
