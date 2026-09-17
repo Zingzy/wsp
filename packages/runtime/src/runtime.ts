@@ -1911,8 +1911,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   /** The copy of a project folder one piece of work on this computer gets: a sibling of the folder under the work's
    * own name, made by the daemon binary's copy verb, which picks the road, applies the two rules and says which
-   * road it took. The path is refused before the verb runs where something is already there, so a person reads
-   * which folder is in the way rather than the verb's own words for it. */
+   * road it took. Every refusal is the verb's, naming the folder in the way or the volume that could not take the
+   * copy, since the verb is what read the disk. */
   const makeLocalCopy = async (project: ProjectView, work: { slug: string; base?: string }): Promise<ProjectCopy> => {
     const copier = local?.copier;
     if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });

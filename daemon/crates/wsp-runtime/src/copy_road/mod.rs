@@ -25,6 +25,17 @@ pub enum Availability {
     No(String),
 }
 
+/// What a road's copy still needs once it stands, which is the road's own answer and never the picker's reading of
+/// which road it is: a copy holding a git directory of its own is fetched and reset to the base by the rules, and
+/// reports the branch it lands on; a copy sharing the folder's own git directory is the checkout it will be the
+/// moment it is made, takes no fetch (one there would move the person's own refs) and stands detached, so it
+/// reports no branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Settling {
+    OwnRepo,
+    Made,
+}
+
 /// One way of making a copy of a folder at another path on this computer.
 pub trait CopyRoad: Sync {
     fn name(&self) -> CopyRoadName;
@@ -35,6 +46,14 @@ pub trait CopyRoad: Sync {
     fn remove(&self, from: &Path, to: &Path) -> io::Result<()>;
     /// What the road carried into the copy, for the report and the row.
     fn carried(&self) -> Carried;
+    /// What this road's copy still needs once it stands.
+    fn settling(&self) -> Settling;
+    /// Whether this failure from `make` means the road's own `available` was wrong about this computer rather than
+    /// the copy having failed: the picker takes whatever the road left away, keeps the sentence and tries the next
+    /// road. False by default, so a road says nothing here unless the kernel can tell it its own reading was off.
+    fn misread(&self, _failed: &io::Error) -> bool {
+        false
+    }
 }
 
 /// The roads this platform has, first choice first. A computer that runs workspaces of its own has none: a
@@ -58,19 +77,33 @@ pub fn already_there(to: &Path) -> String {
     format!("{} is already there; a copy is made at a path of its own", to.display())
 }
 
+/// Why a road named on a line is no road here.
+pub fn no_such_road(road: CopyRoadName) -> String {
+    format!("{} is not a road this computer has", road.word())
+}
+
 /// The road of a name, for a remove that reads the road off the record rather than asking the disk again.
 pub fn road_named(name: CopyRoadName) -> Option<&'static dyn CopyRoad> {
     ROADS.iter().copied().find(|road| road.name() == name)
 }
 
-/// The copy, end to end: the folder read once, a road picked or taken as named, the copy made, then the two rules
-/// that make it a clean checkout of the base. Anything that fails after the copy exists takes the copy with it, so
-/// a refusal never leaves a folder that looks like a workspace and is not one.
+/// The copy, end to end, on the roads this computer has.
 pub fn make(ask: &CopyAsk) -> Result<CopyReport, String> {
+    make_on(ROADS, ask)
+}
+
+/// The copy, end to end, on a given list of roads: the folder read once, then each road in turn until one both
+/// says it can be taken and takes it, then the rules that road still needs. A road whose call tells it its own
+/// reading was wrong is passed over like one that refused outright, and what it left behind goes with it. The
+/// first sentence on the way is the report's `fellBack`, so a person who would have had a directory clone and got
+/// a worktree reads why. Anything that fails after a copy stands takes that copy with it, so a refusal never
+/// leaves a folder that looks like a workspace and is not one. The roads are handed in so the picker's own
+/// behaviour is testable without a second volume to mount.
+pub fn make_on(roads: &[&dyn CopyRoad], ask: &CopyAsk) -> Result<CopyReport, String> {
     let started = Instant::now();
     let from = Path::new(&ask.from);
     let to = Path::new(&ask.to);
-    if ROADS.is_empty() {
+    if roads.is_empty() {
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
     if !rules::is_repo_top(from) {
@@ -86,35 +119,51 @@ pub fn make(ask: &CopyAsk) -> Result<CopyReport, String> {
     let base = rules::sha_of(from, &branch)
         .or_else(|| rules::sha_of(from, &format!("origin/{branch}")))
         .ok_or_else(|| format!("{} has no {branch} to copy", from.display()))?;
-    let (road, fell_back) = pick(from, to, &walked, ask)?;
-    road.make(from, to, &base).map_err(|e| e.to_string())?;
-    match finish(road, to, &branch, &base, ask) {
-        Ok((sha, fetched, excluded)) => Ok(CopyReport {
-            road: road.name(),
-            path: ask.to.clone(),
-            base: sha,
-            branch: if road.name() == CopyRoadName::Worktree { String::new() } else { branch },
-            fetched,
-            carried: road.carried(),
-            excluded,
-            bytes: walked.bytes,
-            ms: started.elapsed().as_millis() as u64,
-            fell_back,
-        }),
-        Err(why) => {
-            let _ = road.remove(from, to);
-            Err(why)
+    let mut passed: Vec<String> = Vec::new();
+    for road in tried(roads, ask)? {
+        if let Availability::No(why) = road.available(from, to, &walked, ask.size_line_bytes) {
+            passed.push(why);
+            continue;
         }
+        if let Err(failed) = road.make(from, to, &base) {
+            if !road.misread(&failed) {
+                return Err(failed.to_string());
+            }
+            let _ = road.remove(from, to);
+            passed.push(failed.to_string());
+            continue;
+        }
+        return match settle(road, to, &branch, &base, ask) {
+            Ok((sha, fetched, excluded)) => Ok(CopyReport {
+                road: road.name(),
+                path: ask.to.clone(),
+                base: sha,
+                branch: match road.settling() {
+                    Settling::OwnRepo => branch,
+                    Settling::Made => String::new(),
+                },
+                fetched,
+                carried: road.carried(),
+                excluded,
+                bytes: walked.bytes,
+                ms: started.elapsed().as_millis() as u64,
+                fell_back: passed.first().cloned(),
+            }),
+            Err(why) => {
+                let _ = road.remove(from, to);
+                Err(why)
+            }
+        };
     }
+    Err(passed.join("; "))
 }
 
-/// The two rules on a copy that has just been made: the path-bound directories out so they rebuild here, then the
-/// clean checkout of the base. The fetch runs in the copy's own git directory, so a copy starts level with the
-/// remote rather than behind the person's last pull; a worktree shares the folder's git directory, so it takes no
-/// fetch at all and nothing of the folder's refs moves.
-fn finish(road: &'static dyn CopyRoad, to: &Path, branch: &str, base: &str, ask: &CopyAsk) -> Result<(String, bool, Vec<String>), String> {
+/// The rules on a copy that has just been made: the path-bound directories out so they rebuild here, and then
+/// whatever the road says its copy still needs. The fetch runs in the copy's own git directory, so a copy starts
+/// level with the remote rather than behind the person's last pull.
+fn settle(road: &dyn CopyRoad, to: &Path, branch: &str, base: &str, ask: &CopyAsk) -> Result<(String, bool, Vec<String>), String> {
     let excluded = rules::exclude(to, &ask.exclude)?;
-    if road.name() == CopyRoadName::Worktree {
+    if road.settling() == Settling::Made {
         return Ok((base.to_owned(), false, excluded));
     }
     // A base the caller named is the base; the fetch only moves a copy that was going to take the folder's own
@@ -125,25 +174,13 @@ fn finish(road: &'static dyn CopyRoad, to: &Path, branch: &str, base: &str, ask:
     Ok((sha, fetched.is_some(), excluded))
 }
 
-/// The road this copy takes: the one the caller named, or the first road that says it can be taken. Every refusal
-/// on the way is kept, so a copy that fell back says which road it would have taken and why it could not, and a
-/// copy with no road left refuses with every sentence rather than one.
-fn pick(from: &Path, to: &Path, walked: &Walked, ask: &CopyAsk) -> Result<(&'static dyn CopyRoad, Option<String>), String> {
-    if let Some(named) = ask.road {
-        let road = road_named(named).ok_or_else(|| format!("{} is not a road this computer has", named.word()))?;
-        return match road.available(from, to, walked, ask.size_line_bytes) {
-            Availability::Yes => Ok((road, None)),
-            Availability::No(why) => Err(why),
-        };
+/// The roads this copy may take, in order: the one the caller named alone, or every road there is. A named road
+/// that is no road here is refused rather than quietly taken as another.
+fn tried<'a>(roads: &'a [&'a dyn CopyRoad], ask: &CopyAsk) -> Result<Vec<&'a dyn CopyRoad>, String> {
+    match ask.road {
+        None => Ok(roads.to_vec()),
+        Some(named) => roads.iter().copied().find(|road| road.name() == named).map(|road| vec![road]).ok_or_else(|| no_such_road(named)),
     }
-    let mut passed = Vec::new();
-    for road in ROADS.iter().copied() {
-        match road.available(from, to, walked, ask.size_line_bytes) {
-            Availability::Yes => return Ok((road, passed.first().cloned())),
-            Availability::No(why) => passed.push(why),
-        }
-    }
-    Err(passed.join("; "))
 }
 
 /// Why the folder somebody works in place is never taken away: it is theirs, and the record that named it is all
@@ -158,7 +195,7 @@ pub fn remove(from: &Path, to: &Path, road: CopyRoadName) -> Result<(), String> 
     if ROADS.is_empty() {
         return Err(NOT_THIS_COMPUTER.to_owned());
     }
-    let taking = road_named(road).ok_or_else(|| format!("{} is not a road this computer has", road.word()))?;
+    let taking = road_named(road).ok_or_else(|| no_such_road(road))?;
     taking.remove(from, to).map_err(|e| e.to_string())
 }
 
@@ -191,6 +228,108 @@ mod tests {
             assert!(refused.contains("is not a git repository"), "{refused}");
         }
         assert!(!to.exists());
+    }
+
+    /// A road that says it can be taken and then finds it cannot: the reading was wrong, which is the one thing
+    /// `misread` is for. Beside the clone road, since the errnos that mean it are that road's own. `failed` is the errno its call answers with and `left` whether the call leaves a partial
+    /// destination behind, so the picker's cleanup can be read.
+    #[cfg(target_os = "macos")]
+    struct Misreading {
+        failed: i32,
+        left: bool,
+    }
+
+    #[cfg(target_os = "macos")]
+    impl CopyRoad for Misreading {
+        fn name(&self) -> CopyRoadName {
+            CopyRoadName::Clonefile
+        }
+        fn available(&self, _from: &Path, _to: &Path, _walked: &Walked, _size_line_bytes: u64) -> Availability {
+            Availability::Yes
+        }
+        fn make(&self, _from: &Path, to: &Path, _base: &str) -> io::Result<()> {
+            if self.left {
+                std::fs::create_dir_all(to.join("half"))?;
+            }
+            Err(io::Error::from_raw_os_error(self.failed))
+        }
+        fn remove(&self, _from: &Path, to: &Path) -> io::Result<()> {
+            match std::fs::remove_dir_all(to) {
+                Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            }
+        }
+        fn carried(&self) -> Carried {
+            Carried::DepsAndConfig
+        }
+        fn settling(&self) -> Settling {
+            Settling::OwnRepo
+        }
+        fn misread(&self, failed: &io::Error) -> bool {
+            matches!(failed.raw_os_error(), Some(libc::ENOTSUP) | Some(libc::EXDEV))
+        }
+    }
+
+    /// The picker's own behaviour, with the first road's answer handed in: a real volume that answers ENOTSUP from
+    /// the call after saying it clones is not something a test can mount, and what matters is what the picker does
+    /// when a road tells it that.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_road_that_finds_its_own_reading_wrong_is_passed_over_and_the_next_road_takes_the_copy() {
+        for failed in [libc::ENOTSUP, libc::EXDEV] {
+            let dir = tempfile::tempdir().unwrap();
+            let from = dir.path().join("work");
+            repo(&from);
+            let to = dir.path().join("work-other");
+            let roads: &[&dyn CopyRoad] = &[&Misreading { failed, left: true }, &worktree::Worktree];
+            let report = make_on(roads, &ask(&from, &to)).unwrap();
+            assert_eq!(report.road, CopyRoadName::Worktree, "errno {failed}");
+            assert_eq!(report.carried, Carried::ConfigOnly);
+            // The sentence the road failed with is what the report says it fell back from.
+            let why = report.fell_back.clone().unwrap();
+            assert_eq!(why, io::Error::from_raw_os_error(failed).to_string());
+            // What the passed-over road left behind went with it: the worktree stands where it was, not beside it.
+            assert!(to.join("README.md").exists() && !to.join("half").exists());
+            remove(&from, &to, report.road).unwrap();
+        }
+    }
+
+    /// Every other errno is a copy that failed: nothing is tried after it and the sentence is the call's own.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_road_whose_copy_simply_failed_ends_the_copy_and_no_later_road_is_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = dir.path().join("work");
+        repo(&from);
+        let to = dir.path().join("work-other");
+        let roads: &[&dyn CopyRoad] = &[&Misreading { failed: libc::EIO, left: true }, &worktree::Worktree];
+        let refused = make_on(roads, &ask(&from, &to)).unwrap_err();
+        assert_eq!(refused, io::Error::from_raw_os_error(libc::EIO).to_string());
+        // The worktree road was never asked, so nothing of it is there; what the failed road left is its own to
+        // clean, which the clonefile road's own call does.
+        assert!(!to.join("README.md").exists());
+    }
+
+    /// The two errnos the real clonefile road reads as its own misreading, and the ones it does not.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_clone_road_reads_only_the_two_errnos_that_say_this_volume_does_not_clone_directories() {
+        for failed in [libc::ENOTSUP, libc::EXDEV] {
+            assert!(clonefile::Clonefile.misread(&io::Error::from_raw_os_error(failed)), "errno {failed}");
+        }
+        for failed in [libc::EIO, libc::ENOSPC, libc::EACCES, libc::EEXIST, libc::ENOENT] {
+            assert!(!clonefile::Clonefile.misread(&io::Error::from_raw_os_error(failed)), "errno {failed}");
+        }
+        // And a road with nothing to say about its own failures says nothing.
+        assert!(!worktree::Worktree.misread(&io::Error::from_raw_os_error(libc::ENOTSUP)));
+    }
+
+    /// Each road answers what its copy still needs, and the picker reads that answer and never which road it is.
+    #[test]
+    fn each_road_says_for_itself_whether_its_copy_is_a_repository_of_its_own() {
+        assert_eq!(worktree::Worktree.settling(), Settling::Made);
+        #[cfg(target_os = "macos")]
+        assert_eq!(clonefile::Clonefile.settling(), Settling::OwnRepo);
     }
 
     #[test]

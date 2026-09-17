@@ -101,19 +101,14 @@ pub(crate) enum CopyVerb {
         from: PathBuf,
         #[arg(long, value_name = "dir")]
         to: PathBuf,
-        #[arg(long, value_name = "clonefile|worktree", value_parser = road_of)]
+        #[arg(long, value_name = "clonefile|worktree|in-place", value_parser = road_of)]
         road: CopyRoadName,
     },
 }
 
-/// The road a person or a host names on the line, in the words the wire carries.
+/// The road a person or a host names on the line, read through the words the wire carries and nothing of its own.
 fn road_of(word: &str) -> Result<CopyRoadName, String> {
-    match word {
-        "clonefile" => Ok(CopyRoadName::Clonefile),
-        "worktree" => Ok(CopyRoadName::Worktree),
-        "in-place" => Ok(CopyRoadName::InPlace),
-        other => Err(format!("{other} is not a road: clonefile, worktree or in-place")),
-    }
+    CopyRoadName::of_word(word).ok_or_else(|| format!("{word} is not a road: {}", CopyRoadName::words()))
 }
 
 /// The copy, with its report as the one line on stdout. Nothing else is printed there, so a caller reads the line

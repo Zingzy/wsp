@@ -12,7 +12,7 @@ use std::path::Path;
 use wsp_frames::{Carried, CopyRoadName};
 
 use super::rules::{config_files, git, Walked, READ_MS, WRITE_MS};
-use super::{Availability, CopyRoad};
+use super::{Availability, CopyRoad, Settling};
 
 pub struct Worktree;
 
@@ -70,6 +70,13 @@ impl CopyRoad for Worktree {
 
     fn carried(&self) -> Carried {
         Carried::ConfigOnly
+    }
+
+    /// A worktree shares the folder's own git directory, so the copy is the checkout it will be the moment git
+    /// writes it: nothing to fetch, since a fetch here would move the person's own refs, nothing to reset, and no
+    /// branch of its own to report.
+    fn settling(&self) -> Settling {
+        Settling::Made
     }
 }
 

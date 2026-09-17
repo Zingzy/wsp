@@ -13,7 +13,7 @@ use std::path::Path;
 use wsp_frames::{Carried, CopyRoadName};
 
 use super::rules::{bytes_word, Walked};
-use super::{Availability, CopyRoad};
+use super::{Availability, CopyRoad, Settling};
 
 pub struct Clonefile;
 
@@ -62,6 +62,20 @@ impl CopyRoad for Clonefile {
 
     fn carried(&self) -> Carried {
         Carried::DepsAndConfig
+    }
+
+    /// The clone carries the folder's own git directory, so the copy is a repository in its own right: the rules
+    /// fetch it and reset it to the base, and it stands on a branch of its own.
+    fn settling(&self) -> Settling {
+        Settling::OwnRepo
+    }
+
+    /// The two errnos that say this volume does not clone directories after all, whatever it answered when it was
+    /// asked: `man 2 clonefile` returns ENOTSUP where the filesystem has no clone and EXDEV where the two paths
+    /// turn out to be on different volumes. Either means the reading above was wrong rather than the copy having
+    /// failed, so the picker moves to the next road; every other errno is a copy that failed and is said out loud.
+    fn misread(&self, failed: &io::Error) -> bool {
+        matches!(failed.raw_os_error(), Some(libc::ENOTSUP) | Some(libc::EXDEV))
     }
 }
 

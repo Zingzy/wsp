@@ -18,6 +18,10 @@ pub enum CopyRoadName {
 }
 
 impl CopyRoadName {
+    /// Every road a record or a line can name. Adding a road is its variant, its row here and its word below,
+    /// and the test beside them holds all three to the words the wire carries.
+    pub const ALL: [CopyRoadName; 3] = [CopyRoadName::Clonefile, CopyRoadName::Worktree, CopyRoadName::InPlace];
+
     /// The word the wire carries, which is also the word the verb's `--road` takes.
     pub fn word(self) -> &'static str {
         match self {
@@ -25,6 +29,17 @@ impl CopyRoadName {
             CopyRoadName::Worktree => "worktree",
             CopyRoadName::InPlace => "in-place",
         }
+    }
+
+    /// The road a word names, or nothing where no road has that word: the one reading, so a command line taking
+    /// `--road` and a record read back off the wire cannot disagree about which words there are.
+    pub fn of_word(word: &str) -> Option<CopyRoadName> {
+        CopyRoadName::ALL.into_iter().find(|road| road.word() == word)
+    }
+
+    /// The words there are, for the refusal a word naming no road gets.
+    pub fn words() -> String {
+        CopyRoadName::ALL.map(CopyRoadName::word).join(", ")
     }
 }
 
@@ -83,10 +98,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_road_words_are_the_words_the_wire_carries() {
-        for road in [CopyRoadName::Clonefile, CopyRoadName::Worktree, CopyRoadName::InPlace] {
+    fn the_road_words_are_the_words_the_wire_carries_and_each_one_reads_back_to_its_road() {
+        for road in CopyRoadName::ALL {
             assert_eq!(serde_json::to_value(road).unwrap(), serde_json::Value::from(road.word()));
+            assert_eq!(CopyRoadName::of_word(road.word()), Some(road));
         }
+        // The list is every variant: one the wire carries and this list has not got would read back as no road.
+        assert_eq!(CopyRoadName::ALL.len(), 3);
+        assert_eq!(CopyRoadName::of_word("rsync"), None);
+        assert_eq!(CopyRoadName::words(), "clonefile, worktree, in-place");
     }
 
     #[test]
