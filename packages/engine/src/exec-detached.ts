@@ -58,6 +58,55 @@ export function execFits(command: string): boolean {
   return Buffer.byteLength(command) + EXEC_ENVELOPE_BYTES <= EXEC_BODY_MAX;
 }
 
+/** How many reads one exec carries. A read is a version line, a `command -v` or a `brew list`, about a second each
+ * on a computer somebody owns, and one exec has the inline bound above to answer inside; the body cap pages a long
+ * read as well. */
+export const READS_PER_EXEC = 8;
+
+/** One page of reads and what the exec that carried it answered. */
+export interface ReadPage<T> {
+  rows: readonly T[];
+  res: ExecResult;
+}
+
+/** Many short reads on a machine in as few execs as they fit in: `READS_PER_EXEC` to a page, and a page that would
+ * not fit one exec body is split again. `line` is handed the row's place inside its own page, since each page's
+ * output is read back on its own, and `head` opens every page (the PATH the reads run on).
+ *
+ * The pages are what a caller reads a failure off: an exec that could not be made fails the rows it carried and no
+ * others, where one unpaged read of everything would have failed every row on the machine. */
+export async function pagedReads<T>(machine: Machine, rows: readonly T[], line: (row: T, at: number) => string, head: string): Promise<ReadPage<T>[]> {
+  const out: ReadPage<T>[] = [];
+  let page: { row: T; line: string }[] = [];
+  const cmdOf = (lines: readonly string[]): string => [head, ...lines].join("\n");
+  const send = async (): Promise<void> => {
+    if (page.length === 0) return;
+    const sending = page;
+    page = [];
+    out.push({ rows: sending.map(p => p.row), res: await machine.exec(cmdOf(sending.map(p => p.line)), { timeoutMs: INLINE_EXEC_MS }) });
+  };
+  for (const row of rows) {
+    const next = line(row, page.length);
+    if (page.length > 0 && (page.length >= READS_PER_EXEC || !execFits(cmdOf([...page.map(p => p.line), next])))) {
+      await send();
+      page.push({ row, line: line(row, 0) });
+    } else page.push({ row, line: next });
+  }
+  await send();
+  return out;
+}
+
+/** What one page printed, by the place in that page the marker names: the one rule for reading a batched read back,
+ * so a reader of `pagedReads` never spells it again. A line that is not the marker's is not an answer. */
+export function markersOf(stdout: string, marker: string): Map<string, string> {
+  return new Map(
+    stdout.split("\n").flatMap(line => {
+      const words = line.trim().split(" ");
+      return words[0] === marker && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
+    }),
+  );
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }

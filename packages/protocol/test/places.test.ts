@@ -10,6 +10,15 @@ import {
   KNOWN_HOSTS,
   PLACE_ADD_WORDS,
   PLACE_LINK_NONCE_BYTES,
+  PlaceProvision,
+  PlaceUpdateReply,
+  PlaceView,
+  placeNoHomeLine,
+  placeNoRecipeLine,
+  placeProvisionPaths,
+  placeProvisioningLine,
+  provisionLines,
+  provisionWord,
   PLACE_PORT_OFFSET,
   PlaceAddStep,
   PlaceAuthRequest,
@@ -348,6 +357,96 @@ describe("the one word a row says about the daemon a place runs", () => {
   it("refuses a place already on this daemon and one whose chip this wsp builds none for, each naming what it read", () => {
     expect(placeCurrentLine("spoo", DAEMON_VERSION)).toBe(`spoo already runs daemon ${DAEMON_VERSION}, which is the one this wsp deploys`);
     expect(placeNoChipLine("spoo", "linux", "riscv64")).toBe("spoo says it is linux riscv64, and this wsp carries no daemon built for it");
+  });
+});
+
+describe("the recipe on a computer you own", () => {
+  const row = (over: Partial<PlaceProvision["rows"][number]> = {}) => ({ id: "agents/codex", label: "Codex", outcome: "installed" as const, ...over });
+  const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "Codex", index: 3, of: 7 } };
+  const done = (rows: PlaceProvision["rows"]): PlaceProvision => ({ state: "done", addId: "a_1", recipeAt: running.recipeAt, startedAt: running.startedAt, finishedAt: "2026-09-17T10:09:00.000Z", rows });
+
+  it("parses a job under way with the row it is on and one that is over with its rows, and refuses a job on no stream", () => {
+    expect(PlaceProvision.parse(running)).toEqual(running);
+    expect(PlaceProvision.parse(done([row(), row({ id: "tools/release/gh", label: "GitHub CLI", outcome: "failed", note: "no Linux build" })]))).toMatchObject({ state: "done" });
+    expect(PlaceProvision.safeParse({ ...running, addId: "" }).success).toBe(false);
+    expect(PlaceProvision.safeParse({ ...running, at: { label: "Codex", index: 0, of: 7 } }).success).toBe(false);
+    // A row off the wire says one of the four things that can have become of it and nothing else.
+    expect(PlaceProvision.safeParse(done([row({ outcome: "done" as never })])).success).toBe(false);
+  });
+
+  it("rides the row of the computer it is on, so wsp computers, the app's row and the MCP tool read one thing", () => {
+    const view = { id: "p_1", kind: "computer" as const, name: "spoo", default: false, provision: running };
+    expect(PlaceView.parse(view).provision).toEqual(running);
+    expect(PlaceView.parse({ id: "p_1", kind: "computer" as const, name: "spoo", default: false }).provision).toBeUndefined();
+  });
+
+  it("is what an update answers beside the daemon half, which is absent on a computer already running this daemon", () => {
+    expect(PlaceUpdateReply.parse({ name: "spoo", daemon: { from: 27, to: DAEMON_VERSION, road: "link", at: "/root/.wsp/daemon/wsp-daemon" }, provision: running })).toMatchObject({ name: "spoo" });
+    expect(PlaceUpdateReply.parse({ name: "spoo", provision: running }).daemon).toBeUndefined();
+    expect(PlaceUpdateReply.parse({ name: "spoo", said: "spoo got no agents or tools" }).provision).toBeUndefined();
+    expect(PlaceUpdateReply.safeParse({}).success).toBe(false);
+  });
+
+  it("is a step of the install, with words of its own, since a join puts it on too", () => {
+    expect(PlaceAddStep.options).toContain("provision");
+    // Last of them: the recipe goes on once the computer is a place at all.
+    expect(PlaceAddStep.options.at(-1)).toBe("provision");
+    expect(PLACE_ADD_WORDS.provision).toBe("installing the recipe's agents and tools");
+  });
+
+  it("says on the row what is under way, or what stands, in one word each", () => {
+    expect(provisionWord(undefined)).toBe("");
+    expect(provisionWord(running)).toBe("setting up 3/7: Codex");
+    expect(provisionWord({ ...running, at: undefined })).toBe("setting up");
+    // Tools, never rows: a row is the recipe's own word and nobody reading a computer's row has seen a recipe.
+    expect(provisionWord(done([row(), row({ id: "tools/uv/ruff", label: "ruff", outcome: "present" })]))).toBe("2 tools ready");
+    expect(provisionWord(done([row()]))).toBe("1 tool ready");
+    expect(provisionWord(done([row(), row({ id: "tools/release/gh", label: "GitHub CLI", outcome: "failed" }), row({ id: "tools/uv/uv", label: "uv", outcome: "failed" })]))).toBe(
+      "2 of 3 failed: GitHub CLI, uv",
+    );
+    expect(provisionWord({ ...running, state: "stopped", said: "spoo is not connected" })).toBe("stopped: spoo is not connected");
+  });
+
+  it("prints what installed by name, how many were already there, and every row that did not land with its reason", () => {
+    const lines = provisionLines("spoo", done([
+      row(),
+      row({ id: "tools/uv/ruff", label: "ruff", outcome: "present" }),
+      row({ id: "tools/release/gh", label: "GitHub CLI", outcome: "failed", note: "no Linux build" }),
+      row({ id: "tools/brew-cask/raycast", label: "Raycast", outcome: "skipped", note: "macOS app, no Linux build" }),
+    ]));
+    expect(lines).toEqual([
+      "spoo: 1 installed: Codex, 1 already there",
+      "  x GitHub CLI: no Linux build",
+      "  - Raycast: macOS app, no Linux build",
+    ]);
+    expect(provisionLines("spoo", done([row({ outcome: "present" })]))[0]).toBe("spoo: nothing installed, 1 already there");
+    // A job that stopped says so under its rows, since the rows it did get are still what landed.
+    expect(provisionLines("spoo", { ...running, state: "stopped", rows: [row()], said: "spoo is not connected" }).at(-1)).toBe("spoo: spoo is not connected");
+  });
+
+  it("says in one sentence why a workspace cannot be made there yet, and what to read, naming the row it is on", () => {
+    expect(placeProvisioningLine("spoo", running.at)).toBe(
+      "spoo is still being set up (Codex, 3 of 7); wsp computers shows it, and a workspace there can be made once it is done",
+    );
+    expect(placeProvisioningLine("spoo")).toBe("spoo is still being set up; wsp computers shows it, and a workspace there can be made once it is done");
+  });
+
+  it("says when this computer holds no recipe to put on, with the two lines that write one and put it on", () => {
+    expect(placeNoRecipeLine("spoo", "/Users/lena/.wsp/recipe.json")).toBe(
+      "spoo got no agents or tools: this computer has no recipe at /Users/lena/.wsp/recipe.json. wsp recipe writes one; wsp add spoo --update then puts it on spoo",
+    );
+  });
+
+  it("says a computer that reported no home folder got none either, in the same words", () => {
+    expect(placeNoHomeLine("spoo")).toBe("spoo got no agents or tools: it reported no home folder for its login, so nothing on it could be reached");
+    // The two read as one kind of answer: the computer is joined, the recipe went nowhere, and why.
+    for (const line of [placeNoHomeLine("spoo"), placeNoRecipeLine("spoo", "/x/recipe.json")]) expect(line.startsWith("spoo got no agents or tools: ")).toBe(true);
+  });
+
+  it("keeps its log and its outcome in the folder wsp already owns on that computer, never inside a workspace", () => {
+    const at = placeProvisionPaths("/root");
+    expect(at).toEqual({ dir: "/root/.wsp/provision", runDir: "/root/.wsp/provision/run", log: "/root/.wsp/provision/log", result: "/root/.wsp/provision/result.json" });
+    for (const path of Object.values(at)) expect(path.startsWith(`${placeDaemonPaths("/root").wsp}/`)).toBe(true);
   });
 });
 

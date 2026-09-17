@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -140,7 +140,7 @@ export const notTheLogin = (active: string): string => `${active} is the login i
 /** Why a copy leaves every account behind: the file lists more than one and names none in use, so there is nothing
  * to pick between; the sign-in runs on the machine instead. */
 export const NO_ACTIVE_LOGIN = "the file names no login in use here; sign in on the machine";
-const name = (e: RecipeEntry): string => e.id.slice(e.id.indexOf("/") + 1);
+const name = (e: Pick<RecipeEntry, "id">): string => e.id.slice(e.id.indexOf("/") + 1);
 
 /** An MCP server's row: under the agents rung, filed by the MCP id prefix; the one rule every reader of the agents rung asks. */
 export const isMcpRow = (e: Pick<RecipeEntry, "rung" | "id">): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
@@ -636,6 +636,9 @@ export interface ToolInstall {
   bin?: string;
   /** A command that exits 0 once the row is on the machine, run after the install for a row that carries its own. */
   check?: string;
+  /** The version the row asks for, off its road, so a presence read can compare; absent where the road installs
+   * what its source serves. */
+  asks?: string;
   /** The one line a person reads while the step runs: the manager's command, or where a download comes from. Absent, cmd is read. */
   shown?: string;
   /** What the result says beside the install once it lands: a road no golden build has proven yet, a version the road could not pin. */
@@ -652,6 +655,18 @@ export interface PinRead {
   fixed: boolean;
   words: string;
 }
+
+/** The version a road's install line asks for, for a presence read to compare against: the road's own where the
+ * road fixes one, nothing where it installs whatever its source serves that day. */
+export function asksVersion(road: InstallRoad): string | undefined {
+  return fixesVersion(road) ? versionOf(road) : undefined;
+}
+
+/** A step's `asks` as a field, so a caller spreads it rather than reading the rule twice. */
+const asksOf = (road: InstallRoad): { asks?: string } => {
+  const asks = asksVersion(road);
+  return asks === undefined ? {} : { asks };
+};
 
 /** The pin read a road gives a step: its module's version line on the command it puts on PATH, whether it fixes one, and its words. */
 export function pinReadOf(road: InstallRoad, bin: string): PinRead {
@@ -764,12 +779,17 @@ export const BREW_HOUSEKEEPING: readonly string[] = [`${PATH_LINE}\n${asLinuxbre
 /** Dependencies two or more of the formulae share install in one brew process before any
  * of them, marked as dependencies so autoremove still owns them; each formula then finds
  * its shared dependencies present and installs only its own. */
+/** The line that puts the dependencies two or more of the formulae share in `shared`, Homebrew's own toolchain
+ * left out: the step installs them and its check reads them back, so the list is derived once and the two cannot
+ * ask about different formulae. */
+const sharedDepsLine = (formulae: readonly string[]): string =>
+  `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${BREW_TOOLCHAIN.map(f => `-e ${f}`).join(" ")} | sort | uniq -d || true)`;
+
 function brewSharedDeps(formulae: readonly string[]): string {
-  const keep = BREW_TOOLCHAIN.map(f => `-e ${f}`).join(" ");
   return asLinuxbrewScript(
     [
       "set -uo pipefail",
-      `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
+      sharedDepsLine(formulae),
       'if [ -z "$shared" ]; then echo "no shared dependencies"; exit 0; fi',
       'echo "shared: $(echo $shared)"',
       `${BREW} install $shared; rc=$?`,
@@ -778,6 +798,19 @@ function brewSharedDeps(formulae: readonly string[]): string {
     ].join("\n"),
   );
 }
+
+/** Whether the dependencies the shared step installs are already on the machine: the same list that step derives,
+ * read back by Homebrew's own list. A list with nothing in it is a step with nothing to do rather than a row that
+ * failed, and a formula of its own that did not install is that row's failure and not this one's. */
+const brewSharedCheck = (formulae: readonly string[]): string =>
+  asLinuxbrewScript(
+    [
+      "set -uo pipefail",
+      sharedDepsLine(formulae),
+      'if [ -z "$shared" ]; then exit 0; fi',
+      `${BREW} list --versions $shared >/dev/null`,
+    ].join("\n"),
+  );
 
 function homebrewBootstrap(): string {
   return [
@@ -1010,6 +1043,14 @@ export function aptIndexStep(id: string, cmd: string): ToolInstall {
   return { id, label: "apt index", manager: "apt", cmd, shown: "apt-get update" };
 }
 
+/** Whether Homebrew already holds every formula named, as its own list answers it: the check a brew step reads as
+ * already done. `brew list --versions a b` exits non-zero as soon as one of them is not installed, and on a
+ * computer with no Homebrew at all the su itself fails, which reads the same way. */
+export const brewHasCheck = (...formulae: readonly string[]): string => asLinuxbrew(`list --versions ${formulae.join(" ")}`);
+
+/** Whether a tap is already tapped, off the list Homebrew prints of them. */
+export const brewTapCheck = (tap: string): string => `${asLinuxbrew("tap")} 2>/dev/null | grep -qx ${shellQuote(tap)}`;
+
 /** A formula's step, for the plan's own brew lines: the toolchain, a manager's formula. */
 function viaBrew(formula: string): { cmd: string; shown: string } {
   const step = viaRoad({ road: "brew", formula }, formula);
@@ -1041,7 +1082,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const toolchain = BREW_TOOLCHAIN.reduce<{ steps: ToolInstall[]; last: string }>(
     (acc, f) => {
       const id = `tools/brew-toolchain/${f}`;
-      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", ...viaBrew(f), after: acc.last });
+      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", ...viaBrew(f), after: acc.last, check: brewHasCheck(f) });
       return { steps: acc.steps, last: id };
     },
     { steps: [], last: "tools/homebrew" },
@@ -1096,10 +1137,12 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length + customOf("brew").length > 0) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()), shown: `git clone github.com/Homebrew/brew at ${HOMEBREW.tag}`, bin: "brew" });
     installs.push(...toolchain.steps);
-    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last });
+    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last, check: brewTapCheck(t) });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
-    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last });
-    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f) });
+    // The check reads the dependencies this step installs, not the formulae they belong to: a formula whose own
+    // step failed is that row's failure, and this one did its work.
+    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewSharedCheck(formulae) });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, check: brewHasCheck(f), pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on
   // it, the manager's step otherwise; a floor row is there already.
@@ -1138,7 +1181,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
       return;
     }
     const after = afterDep(depOf(planned), planned.road.road);
-    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
   const asManager = (id: string): boolean => [...managers.values()].some(m => m.row?.e.id === id);
@@ -1289,6 +1332,8 @@ export interface AgentInstaller {
   install: string;
   /** Exits 0 once the agent is on the machine. */
   smoke: string;
+  /** The road the install line walks, which is what bounds a step running it. */
+  road: RoadName;
   /** The lowest Node major its package's engines field accepts; absent when it declares none. */
   node?: number;
   /** How the agent's installed version is read back and whether a copy gets it; absent for an installer outside the catalog. */
@@ -1301,7 +1346,7 @@ export interface AgentInstall extends AgentInstaller {
 
 /** An agent's installer as the catalog gives it: its road's line, its version check, its Node floor and its pin read. */
 function agentInstaller(a: AgentEntry): AgentInstaller {
-  return { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}), pin: pinReadOf(a.installRoad, a.bin) };
+  return { name: a.name, install: installLine(a), smoke: smokeOf(a), road: a.installRoad.road, ...(a.node !== undefined ? { node: a.node } : {}), pin: pinReadOf(a.installRoad, a.bin) };
 }
 
 /** The line a guest gets when no supported pinned major meets an agent's floor. */
@@ -1324,7 +1369,7 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
 export function agentInstallers(agents: readonly AgentEntry[]): Record<string, AgentInstaller> {
   return {
     ...Object.fromEntries(agents.map(a => [a.id, agentInstaller(a)])),
-    aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
+    aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version", road: "uv" },
   };
 }
 
@@ -1419,6 +1464,46 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readon
   if (needs.length > 0 && major !== undefined) {
     const release = NODE_RELEASES[major];
     out.node = { floor, version: release.version, agents: needs.map(a => a.name), cmd: nodeInstallScript(floor, release) };
+  }
+  return out;
+}
+
+/** Where the Node install is filed when the agents ride the one tools loop, so an agent step waits on it by name. */
+export const AGENT_NODE_STEP = "agents/node";
+
+/** Whether the node on the machine already meets an agents plan's floor, read the way the install script reads it
+ * so the two cannot disagree: the step keeps such a node and installs nothing, so this is also what says the step
+ * has nothing to do on a computer that has been provisioned before. */
+export const nodeFloorCheck = (floor: number): string =>
+  `major="$(node --version 2>/dev/null | sed 's/^v//; s/\\..*//')"; [ "\${major:-0}" -ge ${floor} ]`;
+
+/** An agents plan as steps of the one tools loop: the node step first, then each agent, waiting on that step
+ * where its road runs on node. The install line runs on the tools PATH with the Node the step installed ahead of
+ * it, the agent's own version check is the step's check, the catalog's command is its bin and the version the
+ * catalog's road pins is what the step asks for, so a computer that already answers at that version installs
+ * nothing. The road is the step's manager, which is what bounds the run.
+ *
+ * The plan's own skipped rows are not here: they never became steps, and whoever runs the plan reports them. */
+export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CATALOG_AGENTS): ToolInstall[] {
+  const out: ToolInstall[] = [];
+  const node = plan.node;
+  if (node !== undefined) {
+    out.push({ id: AGENT_NODE_STEP, label: `Node ${node.version}`, manager: "script", cmd: node.cmd, shown: `Node ${node.version} for ${node.agents.join(", ")}`, check: nodeFloorCheck(node.floor) });
+  }
+  for (const a of plan.installs) {
+    const entry = agents.find(e => e.id === name(a));
+    const waits = node !== undefined && managerBehind(ROAD_MODULES[a.road].after) !== undefined ? { after: AGENT_NODE_STEP } : {};
+    out.push({
+      id: a.id,
+      label: a.name,
+      manager: a.road,
+      cmd: `${PATH_LINE}\n${NODE_PATH_LINE}\n${a.install}`,
+      shown: shownOf(a.install.split("\n")),
+      check: a.smoke,
+      ...waits,
+      ...(entry === undefined ? {} : { bin: entry.bin, ...asksOf(entry.installRoad) }),
+      ...(a.pin === undefined ? {} : { pin: a.pin }),
+    });
   }
   return out;
 }

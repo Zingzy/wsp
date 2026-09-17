@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// The recipe beside this host's state file, planned for a computer somebody
+// owns: the same rows a copy of the image is planned from, come to the steps
+// that run on the computer itself.
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Manifest } from "@wsp/collect";
+import { catalogEntry } from "@wsp/catalog";
+import type { Recipe } from "@wsp/protocol";
+import { AGENT_NODE_STEP, type ProvisionPlan } from "@wsp/engine";
+import { placeProvisioner } from "../src/place-provision.js";
+import { smallRecipePath } from "../src/recipe-file.js";
+import { FIXTURE, RECIPE } from "./init-fixture.js";
+
+/** The recipe this computer holds: the fixture's, with Codex ticked and one row the catalog has none for. */
+const SMALL: Recipe = {
+  ...RECIPE,
+  rows: RECIPE.rows.map(r => (r.id === "codex" ? { ...r, on: true } : r)),
+  custom: [{ kind: "custom", id: "wsp-map", name: "wsp-map", install: ["npm install -g wsp-map@1.0.0"], check: "wsp-map --version", manager: "npm", why: "added by the agent" }],
+};
+
+describe("the recipe this host holds, planned for a computer you own", () => {
+  let dir: string;
+  let home: string;
+  let statePath: string;
+
+  const planner = () =>
+    placeProvisioner({
+      statePath,
+      home,
+      platform: "linux",
+      collect: async (): Promise<Manifest> => FIXTURE,
+      brew: async () => new Map(),
+    });
+
+  const planned = async (): Promise<ProvisionPlan> => {
+    const answer = await planner().plan();
+    if ("noRecipe" in answer) throw new Error(`no recipe: ${answer.noRecipe}`);
+    return answer;
+  };
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "wsp-place-provision-"));
+    home = join(dir, "home");
+    statePath = join(dir, "state.json");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    mkdirSync(join(home, ".codex"), { recursive: true });
+    writeFileSync(join(home, ".gitconfig"), "[user]\n\tname = Test\n");
+    writeFileSync(join(home, ".zshrc"), "export PS1='$ '\n");
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  const write = (recipe: Recipe): void => writeFileSync(smallRecipePath(statePath), `${JSON.stringify(recipe, null, 2)}\n`);
+
+  it("says where a recipe would be written when this computer holds none, and reads nothing else", async () => {
+    const answer = await placeProvisioner({ statePath, home, platform: "linux", collect: async () => { throw new Error("this computer was read for a recipe that is not there"); }, brew: async () => new Map() }).plan();
+    expect(answer).toEqual({ noRecipe: smallRecipePath(statePath) });
+  });
+
+  it("plans the node step, each ticked agent by its own road after it, and the tools by theirs", async () => {
+    write(SMALL);
+    const plan = await planned();
+    expect(plan.recipeAt).toBe(SMALL.at);
+    const ids = plan.steps.map(t => t.id);
+    expect(ids[0]).toBe(AGENT_NODE_STEP);
+    expect(ids).toContain("agents/claude");
+    const codex = plan.steps.find(t => t.id === "agents/codex")!;
+    expect(codex.manager).toBe("npm");
+    expect(codex.after).toBe(AGENT_NODE_STEP);
+    // The version the catalog pins, since a computer somebody owns keeps no sealed version and so no pins.
+    const road = catalogEntry("codex")!.installRoad;
+    expect(codex.asks).toBe(road.road === "npm" ? road.version : undefined);
+    expect(codex.asks).toBe("0.153.0");
+    // A row this computer has as a Homebrew formula takes the Homebrew road on that computer too, as it does on
+    // the image: the formula's own step, after the Homebrew the plan bootstraps for it.
+    const gh = plan.steps.find(t => t.id === "tools/brew/gh")!;
+    expect(gh.manager).toBe("brew");
+    expect(ids).toContain("tools/homebrew");
+    expect(ids.indexOf("tools/homebrew")).toBeLessThan(ids.indexOf("tools/brew/gh"));
+  });
+
+  it("puts no sign-in on that computer: those are the vault's and the per-box login's", async () => {
+    write(SMALL);
+    const plan = await planned();
+    expect(plan.steps.some(t => t.id.startsWith("logins/"))).toBe(false);
+    expect([...plan.steps, ...plan.skipped].some(t => t.id.startsWith("logins/"))).toBe(false);
+  });
+
+  it("puts the rows the catalog has none for last, each after the manager its own line calls", async () => {
+    write(SMALL);
+    const plan = await planned();
+    const own = plan.steps.at(-1)!;
+    expect(own.id).toBe("tools/custom/wsp-map");
+    expect(own.check).toBe("wsp-map --version");
+    // The manager the row names is brought onto that computer before the row runs.
+    expect(own.after).toBeDefined();
+    expect(plan.steps.some(t => t.id === own.after)).toBe(true);
+  });
+
+  it("plans nothing at all for a row of this computer that has no Linux road, and sets nothing aside for it", async () => {
+    // The recipe locks such a row off before a plan sees it, so it is neither a step nor a row of the job: the
+    // rows the plan does set aside are the ones it could not walk, which the engine's own tests read.
+    write({ ...SMALL, rows: [...SMALL.rows, { id: "rectangle", kind: "tool", on: true, source: { kind: "installed", paths: [], bin: true } }] });
+    const plan = await planned();
+    expect(plan.steps.some(t => t.id === "tools/brew/rectangle")).toBe(false);
+    expect(plan.skipped).toEqual([]);
+  });
+});
