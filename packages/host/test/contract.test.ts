@@ -24,7 +24,7 @@ import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import { mcpServer } from "../src/mcp.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, hasTool } from "../src/verbs.js";
+import { CLI_VERBS, hasTool, noHostServingLine } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
@@ -345,7 +345,7 @@ describe("the agent contract on the command line and the tool door", () => {
     handle = undefined;
     const gone = captured();
     expect(await cli(["threads", "--json", "--state", statePath], gone, undefined, process.env, false)).toBe(1);
-    expect(failure(gone)).toEqual({ error: `no wsp host is serving ${statePath}`, class: "provider", exit: 1 });
+    expect(failure(gone)).toEqual({ error: noHostServingLine(statePath), class: "provider", exit: 1 });
   });
 
   it("the shared parse and the commands answer under the same classes: a bad flag, an unknown command and --json on a prose command are usage; a missing key is auth", async () => {

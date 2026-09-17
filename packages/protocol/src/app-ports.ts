@@ -191,6 +191,14 @@ export function portsPickedLine(ports: AppPorts, taken: number, holder: PortHold
 /** The last line when a port a person named is held: nothing has booted, and the two ways on. */
 export const PORT_TAKEN_REFUSAL = `Nothing was booted. Stop that process, or name a free app port with --port; the WebSocket port follows ${WS_PORT_OFFSET} above it unless --ws-port names another.`;
 
+/** The same last line where the run found a free pair above the held one: the line to type, spelled out, since a
+ * person whose port is taken is guessing at numbers otherwise. Both ports are named only where the pair is not the
+ * offset apart, which --port alone would not reproduce. */
+export function portInsteadLine(ports: AppPorts): string {
+  const flags = ports.wsPort === ports.port + WS_PORT_OFFSET ? `--port ${ports.port}` : `--port ${ports.port} --ws-port ${ports.wsPort}`;
+  return `Nothing was booted. The next free pair is ${ports.port} and ${ports.wsPort}: wsp up ${flags}. Or stop what holds the one you named.`;
+}
+
 /** Which state file a run sets up and the flag that starts a fresh one instead: a run on a file that already
  * carries a sealed golden offers the upgrade rather than a first setup, so a showcase or a second account is one
  * flag rather than a surprise. Said before anything is read, and again in every refusal that stops the run. */
