@@ -5,7 +5,7 @@
 // event stream.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, doorPortHeldLine, imageCopyStaysLine, joinToken, placeAddSheetWord, placeNoDialLine, readJoinToken, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
+import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PlaceAddStep, doorPortHeldLine, imageCopyStaysLine, joinToken, placeAddSheetWord, placeNoDialLine, readJoinToken, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
@@ -655,6 +655,8 @@ describe("the ssh road of the sheet", () => {
     [`${placeAddSheetWord("wsp", "running")}${PLACE_INSTALL.weight}`, "waiting"],
     [placeAddSheetWord("service", "running"), "waiting"],
     [placeAddSheetWord("join", "running"), "waiting"],
+    // The recipe's own step, last: the agents and tools go on once the computer is a place at all.
+    [placeAddSheetWord("provision", "running"), "waiting"],
   ];
 
   it("stands the plan under the note before Add is pressed, in the sheet's own words with the weight in its slot", async () => {
@@ -710,11 +712,12 @@ describe("the ssh road of the sheet", () => {
       [`installing wsp 0.2.0${PLACE_INSTALL.weight}`, "running"],
       [placeAddSheetWord("service", "running"), "waiting"],
       [placeAddSheetWord("join", "running"), "waiting"],
+      [placeAddSheetWord("provision", "running"), "waiting"],
     ]);
     // A step reported again is that line moving on, never a second line for the same step.
     act(() => report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "done", fact: "9 s" }));
     expect(plan()[2]).toEqual(["installing wsp 0.2.09 s", "done"]);
-    expect(plan()).toHaveLength(5);
+    expect(plan()).toHaveLength(PlaceAddStep.options.length);
   });
 
   it("reads the box as joined once the installer answers with it, and says it runs workspaces", async () => {
@@ -766,6 +769,7 @@ describe("the ssh road of the sheet", () => {
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
       [placeAddSheetWord("service", "done"), "done"],
       [placeAddSheetWord("join", "running"), "running"],
+      [placeAddSheetWord("provision", "running"), "waiting"],
     ]);
 
     await act(async () => {
@@ -785,6 +789,7 @@ describe("the ssh road of the sheet", () => {
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
       [placeAddSheetWord("service", "done"), "done"],
       [`${placeAddSheetWord("join", "done")}workspaces yes · engine none`, "done"],
+      [placeAddSheetWord("provision", "running"), "waiting"],
     ]);
     expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
   });

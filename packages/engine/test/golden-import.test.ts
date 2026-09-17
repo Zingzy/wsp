@@ -15,6 +15,10 @@ import {
   PATH_LINE,
   CATALOG_PREFIX,
   AGENT_INSTALLERS,
+  AGENT_NODE_STEP,
+  agentSteps,
+  nodeFloorCheck,
+  NODE_PATH_LINE,
   CURRENT_LTS,
   NODE_RELEASES,
   agentInstallsFor,
@@ -1332,7 +1336,9 @@ describe("agentInstallsFor", () => {
     }
     expect(Object.keys(AGENT_INSTALLERS).sort()).toEqual(["aider", "claude", "codex", "gemini", "hermes", "opencode", "pi"]);
     // The vendor's installer takes the current release, so its pin reads the command's own version and marks it latest.
-    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", pin: { read: expect.stringContaining("'claude' --version"), fixed: false, words: "by its own installer" } });
+    expect(AGENT_INSTALLERS["claude"]).toEqual({ name: "Claude Code", install: GOLDEN_SETUP, smoke: "claude --version", road: "script", pin: { read: expect.stringContaining("'claude' --version"), fixed: false, words: "by its own installer" } });
+    // The road each line walks, which is what bounds a step that runs it on a computer somebody owns.
+    expect(Object.fromEntries(Object.entries(AGENT_INSTALLERS).map(([k, a]) => [k, a.road]))).toEqual({ claude: "script", codex: "npm", gemini: "npm", opencode: "npm", aider: "uv", pi: "npm", hermes: "script" });
     expect(AGENT_INSTALLERS["codex"]!.pin).toEqual({ read: expect.stringContaining("npm root -g"), fixed: true, words: "as an npm global" });
     expect(AGENT_INSTALLERS["hermes"]!.pin).toEqual({ read: expect.stringContaining("'hermes' --version"), fixed: true, words: "by its own installer" });
     // Engines floors as the registry states them at the pinned versions.
@@ -1420,6 +1426,73 @@ describe("agentInstallsFor", () => {
     expect(hermes).toMatch(/rev-parse HEAD\)" = "[0-9a-f]{40}"/);
     expect(hermes).toContain("uv venv --python 3.11 /root/.hermes/venvs/hermes");
     expect(AGENT_INSTALLERS["aider"]!.install).toMatch(/uv tool install --force --python 3\.12 --with pip aider-chat==\d/);
+  });
+});
+
+describe("the agents as steps of the one tools loop", () => {
+  const ticked = (...ids: string[]): RecipeEntry[] => ids.map(id => row({ rung: "agents", id, bring: true }));
+
+  it("puts the node step first and every agent whose road runs on node after it, each by its own road", () => {
+    const steps = agentSteps(agentInstallsFor(ticked("agents/claude", "agents/codex")));
+    expect(steps.map(t => [t.id, t.manager, t.after])).toEqual([
+      [AGENT_NODE_STEP, "script", undefined],
+      // The vendor's own installer brings whatever it needs, so it waits on nothing.
+      ["agents/claude", "script", undefined],
+      ["agents/codex", "npm", AGENT_NODE_STEP],
+    ]);
+    const codex = steps.find(t => t.id === "agents/codex")!;
+    // The agent's own version check is the step's check, its command is the step's bin, and the version the
+    // catalog's road pins is what the step asks for, so a computer that answers at it installs nothing.
+    expect(codex.check).toBe(AGENT_INSTALLERS["codex"]!.smoke);
+    expect(codex.bin).toBe("codex");
+    const road = catalogEntry("codex")!.installRoad;
+    expect(codex.asks).toBe(road.road === "npm" ? road.version : undefined);
+    expect(codex.pin).toEqual(AGENT_INSTALLERS["codex"]!.pin);
+    // The install line runs on the tools PATH with the Node the step put on ahead of it.
+    expect(codex.cmd.startsWith(PATH_LINE)).toBe(true);
+    expect(codex.cmd).toContain(NODE_PATH_LINE);
+    expect(codex.cmd).toContain(AGENT_INSTALLERS["codex"]!.install);
+  });
+
+  it("names the node step after the release it installs, and reads the floor its script reads", () => {
+    const plan = agentInstallsFor(ticked("agents/codex"));
+    const node = agentSteps(plan).find(t => t.id === AGENT_NODE_STEP)!;
+    expect(node.label).toBe(`Node ${plan.node!.version}`);
+    expect(node.cmd).toBe(plan.node!.cmd);
+    // The check is the floor the script itself keeps a node for, so a computer that already meets it runs nothing
+    // and the row reads present on every run after the first.
+    expect(node.check).toBe(nodeFloorCheck(plan.node!.floor));
+    expect(node.check).toContain(`-ge ${plan.node!.floor}`);
+    expect(node.bin).toBeUndefined();
+  });
+
+  it("reads that floor the way the install script reads it, under a real shell", () => {
+    const here = Number(process.versions.node.split(".")[0]);
+    const run = (line: string): number => spawnSync("bash", ["-c", `( ${line} )`], { encoding: "utf8" }).status ?? -1;
+    expect(run(nodeFloorCheck(here))).toBe(0);
+    expect(run(nodeFloorCheck(here + 1))).not.toBe(0);
+    // A computer with no node at all reads as under every floor rather than as an error.
+    expect(spawnSync("bash", ["-c", `( PATH=/nonexistent; ${nodeFloorCheck(18)} )`], { encoding: "utf8" }).status).not.toBe(0);
+  });
+
+  it("carries no node step when nothing ticked runs on node, and nothing at all for no agent", () => {
+    expect(agentSteps(agentInstallsFor(ticked("agents/claude"))).map(t => t.id)).toEqual(["agents/claude"]);
+    expect(agentSteps(agentInstallsFor([]))).toEqual([]);
+  });
+});
+
+describe("the version a step asks for", () => {
+  it("is the row's own where its road installs at one, and nothing where the road installs what its source serves", () => {
+    const { installs } = toolInstallsFor([
+      row({ rung: "tools", id: "tools/npm/bun", label: "bun", version: "1.4.0" }),
+      row({ rung: "tools", id: `${CATALOG_PREFIX}tmux`, label: "tmux" }),
+    ]);
+    const asks = (id: string): string | undefined => installs.find(t => t.id === id)!.asks;
+    expect(asks("tools/npm/bun")).toBe("1.4.0");
+    // apt installs the distribution's own package: the line names no version, so the step asks for none, whatever
+    // the row says this computer runs.
+    expect(catalogEntry("tmux")!.installRoad.road).toBe("apt");
+    expect(asks(`${CATALOG_PREFIX}tmux`)).toBeUndefined();
   });
 });
 

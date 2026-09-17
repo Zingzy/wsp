@@ -8,7 +8,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Manifest, ManifestEntry } from "@wsp/collect";
 import type { Recipe, SealedImage } from "@wsp/protocol";
-import { copyGoldenRecipe, copyRows, planGoldenRecipe } from "../src/image-recipe.js";
+import { brewTableFor, copyGoldenRecipe, copyRows, planGoldenRecipe, wantsBrew } from "../src/image-recipe.js";
+import { ROOT, sourceFiles } from "../../protocol/test/source-files.js";
+import { readFileSync } from "node:fs";
 import { answeredRows, defaultAnswers, manifestFor } from "../src/init-recipe.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 
@@ -193,5 +195,35 @@ describe("the recipe a copy at another place is built from", () => {
       },
     });
     expect(asked).toEqual([]);
+  });
+});
+
+describe("the one reading of whether this computer needs Homebrew read", () => {
+  const withBrew = FIXTURE;
+  const without: Manifest = { entries: FIXTURE.entries.filter(e => !e.id.startsWith("tools/brew/")) };
+
+  it("is a brew row of this computer's own, and nothing else", () => {
+    expect(wantsBrew(withBrew)).toBe(true);
+    expect(wantsBrew(without)).toBe(false);
+  });
+
+  it("reads brew only then, answers an empty table where brew will not answer, and never asks twice", async () => {
+    const asked: string[] = [];
+    const table = new Map([["gh", { name: "gh", fullName: "gh", deps: [], macosOnly: false }]]);
+    expect(await brewTableFor(withBrew, async () => (asked.push("read"), table))).toBe(table);
+    expect(asked).toEqual(["read"]);
+    // A computer with no brew row of its own is not read at all, and a brew that throws leaves an empty table
+    // rather than failing the plan it was asked for.
+    expect([...(await brewTableFor(without, async () => (asked.push("read again"), table)))]).toEqual([]);
+    expect([...(await brewTableFor(withBrew, async () => { throw new Error("brew info failed"); }))]).toEqual([]);
+    // A caller with no reader at all, which is every road that was handed none.
+    expect([...(await brewTableFor(withBrew, undefined))]).toEqual([]);
+    expect(asked).toEqual(["read"]);
+  });
+
+  it("is the reading the planner for a computer you own takes, so neither road reads this Mac its own way", () => {
+    // The predicate lives once: a second copy is what let the two roads drift on which computer needs brew.
+    const copies = sourceFiles().filter(rel => rel !== join("packages", "host", "src", "image-recipe.ts") && /entries\.some\([^)]*BREW_ID_PREFIX/.test(readFileSync(join(ROOT, rel), "utf8")));
+    expect(copies).toEqual([]);
   });
 });
