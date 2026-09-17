@@ -255,7 +255,11 @@ pub fn config_json(c: &Config) -> Value {
     // A whole folder of the computer's, read-write unless the bind says otherwise: what the workspace writes in
     // it is what the computer holds for every other workspace of the same project.
     for b in c.binds {
-        mounts.push(bind(&b.target, PathBuf::from(&b.source), if b.read_only { &["rbind", "rprivate", "ro"] } else { &["rbind", "rprivate", "rw"] }));
+        mounts.push(bind(
+            &b.target,
+            PathBuf::from(&b.source),
+            if b.read_only { &["rbind", "rprivate", "ro"] } else { &["rbind", "rprivate", "rw"] },
+        ));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -550,6 +554,7 @@ mod tests {
             etc: Path::new("/var/lib/wsp/run/wsp-a/etc"),
             engine: None,
             shares: &[],
+            binds: &[],
         };
         let spec = config_json(&c);
         assert_eq!(spec["root"]["path"], "rootfs");
@@ -583,6 +588,25 @@ mod tests {
         assert_eq!(shared["mounts"].as_array().unwrap().len(), mounts.len() + 1);
         // And a workspace that shares none carries no mount of its own.
         assert!(mounts.iter().all(|m| m["destination"] != "/root/.codex/auth.json"));
+        // A folder of the computer's own, at the path the workspace reads it inside: one more mount after the
+        // profile's, read-write, so what the workspace writes in the project's memory is what the computer holds
+        // for every other workspace of that project.
+        let memory = "/root/.claude-cfg/projects/-root-wsp/memory";
+        let binds = [Bind { source: "/var/lib/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: false }];
+        let bound = config_json(&Config { binds: &binds, ..c });
+        let folder = bound["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap();
+        assert_eq!(folder["source"], "/var/lib/wsp/projects/pr_1/memory");
+        assert_eq!(folder["type"], "bind");
+        assert_eq!(folder["options"], json!(["rbind", "rprivate", "rw"]));
+        assert_eq!(bound["mounts"].as_array().unwrap().len(), mounts.len() + 1);
+        // A bind the host asked to be read-only is mounted that way, and a workspace with no bind carries none.
+        let read_only = [Bind { source: "/var/lib/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: true }];
+        let fenced = config_json(&Config { binds: &read_only, ..c });
+        assert_eq!(
+            fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap()["options"],
+            json!(["rbind", "rprivate", "ro"])
+        );
+        assert!(mounts.iter().all(|m| m["destination"] != memory));
     }
 
     #[test]
@@ -627,13 +651,19 @@ mod tests {
             engine: false,
             copy: None,
             shares: Vec::new(),
+            binds: Vec::new(),
         };
         write_json(&path, &record).unwrap();
         assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
-        // A record written before the engine, the copy and the shares fields existed reads as a workspace with none.
+        // A record written before the engine, the copy, the shares and the binds fields existed reads as a
+        // workspace with none of them.
         let written = fs::read_to_string(&path).unwrap();
-        assert!(!written.contains("engine") && !written.contains("copy") && !written.contains("shares"), "{written}");
+        assert!(
+            !written.contains("engine") && !written.contains("copy") && !written.contains("shares") && !written.contains("binds"),
+            "{written}"
+        );
         assert!(read_record(&path).unwrap().unwrap().shares.is_empty());
+        assert!(read_record(&path).unwrap().unwrap().binds.is_empty());
         assert_eq!(read_record(&path).unwrap().unwrap().copy, None);
         write_json(&path, &Workspace { engine: true, ..record.clone() }).unwrap();
         assert!(read_record(&path).unwrap().unwrap().engine);
@@ -648,8 +678,16 @@ mod tests {
         assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
         // The logins the workspace was made with are the record's too: every boot binds whatever the file says now.
         let shares = vec![Share { source: "/var/lib/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
-        write_json(&path, &Workspace { shares: shares.clone(), ..record }).unwrap();
+        write_json(&path, &Workspace { shares: shares.clone(), ..record.clone() }).unwrap();
         assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
+        // And the folders it was made with, which every boot mounts again: the project's memory on the computer.
+        let binds = vec![Bind {
+            source: "/var/lib/wsp/projects/pr_1/memory".to_owned(),
+            target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
+            read_only: false,
+        }];
+        write_json(&path, &Workspace { binds: binds.clone(), ..record }).unwrap();
+        assert_eq!(read_record(&path).unwrap().unwrap().binds, binds);
     }
 
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself

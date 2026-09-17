@@ -184,7 +184,9 @@ describe("a workspace of a project", () => {
     const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing", base: "main" });
     const ws = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "pricing page" });
     expect(ws.project).toEqual({ id: project.id, name: "spoo-landing", path: "/root/spoo-landing", computer: "default" });
-    expect(backend.machines[0]!.execLog).toContain(`git clone --branch main ${REPO} /root/spoo-landing`);
+    // The clone is a script now: the folder above the checkout is made first, and a source cloned through a host's
+    // own command line checks that command is there. The line itself is still git's.
+    expect(backend.machines[0]!.execLog.join("\n")).toContain(`git clone --branch main ${REPO} /root/spoo-landing`);
     expect(stages).toContain("project-cloned");
     expect(stages.indexOf("project-cloned")).toBeLessThan(stages.indexOf("ready"));
   });
@@ -193,13 +195,13 @@ describe("a workspace of a project", () => {
     const { rt, backend } = withLocal();
     const project = await rt.projects.add({ source: REPO, on: "default", name: "spoo-landing" });
     await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" });
-    expect(backend.machines[0]!.execLog).toContain(`git clone ${REPO} /root/spoo-landing`);
+    expect(backend.machines[0]!.execLog.join("\n")).toContain(`git clone ${REPO} /root/spoo-landing`);
   });
 
   it("a clone that fails ends the create with git's own last line and the machine goes with it", async () => {
     const backend = stubBackend();
     const plain = backend.execImpl;
-    backend.execImpl = (m, cmd) => (cmd.startsWith("git clone") ? { exitCode: 128, stdout: "", stderr: "Cloning into '/root/x'...\nfatal: could not read Username for 'https://github.com'" } : plain(m, cmd));
+    backend.execImpl = (m, cmd) => (cmd.includes("git clone") ? { exitCode: 128, stdout: "", stderr: "Cloning into '/root/x'...\nfatal: could not read Username for 'https://github.com'" } : plain(m, cmd));
     const { rt } = withLocal(backend);
     const project = await rt.projects.add({ source: REPO, on: "default", name: "x" });
     await expect(rt.workspaces.create({ project: project.id, golden: "snap_g", name: "work" })).rejects.toThrow("fatal: could not read Username for 'https://github.com'");

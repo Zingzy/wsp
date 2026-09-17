@@ -730,12 +730,79 @@ mod tests {
     }
 
     #[test]
+    fn a_spec_carries_the_folders_the_computer_binds_and_reads_both_paths_as_paths() {
+        let bare = MachineSpec {
+            kind: MachineKind::Sandbox,
+            template: None,
+            from_snapshot: None,
+            cpu: None,
+            mem_mb: None,
+            disk_gb: None,
+            envs: None,
+            labels: None,
+            on_idle: None,
+            idle_timeout_ms: None,
+            idempotency_key: None,
+            engine: None,
+            copy: None,
+            shares: None,
+            binds: None,
+        };
+        let bound = MachineSpec {
+            binds: Some(vec![Bind {
+                source: "/var/lib/wsp/projects/pr_1/memory".to_owned(),
+                target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
+                read_only: false,
+            }]),
+            ..bare.clone()
+        };
+        let written = serde_json::to_string(&bound).unwrap();
+        // A bind that is read-write carries no key for it, so a spec written before there were binds and one
+        // written now read the same on the far side.
+        assert_eq!(
+            written,
+            r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/projects/pr_1/memory","target":"/root/.claude-cfg/projects/-root-wsp/memory"}]}"#
+        );
+        assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), bound);
+        let read_only = MachineSpec {
+            binds: Some(vec![Bind {
+                source: "/var/lib/wsp/projects/pr_1/memory".to_owned(),
+                target: "/root/memory".to_owned(),
+                read_only: true,
+            }]),
+            ..bare.clone()
+        };
+        let written = serde_json::to_string(&read_only).unwrap();
+        assert!(written.contains(r#""readOnly":true"#), "{written}");
+        assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), read_only);
+        // Both paths are read by the wire's own rule, as a share's are: a bind mount is the one thing a slip
+        // cannot be taken back.
+        for bad in [
+            r#"{"kind":"sandbox","binds":[{"source":"projects/pr_1/memory","target":"/root/memory"}]}"#,
+            r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/../../root/.ssh","target":"/root/memory"}]}"#,
+            r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/projects/pr_1/memory","target":"/root/../etc"}]}"#,
+        ] {
+            assert!(serde_json::from_str::<MachineSpec>(bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
     fn a_backend_says_where_the_logins_it_shares_live_and_only_as_a_path() {
         let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
         assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().logins, None);
         let shared = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"/var/lib/wsp/logins","offer":"runtime""#);
         assert_eq!(serde_json::from_str::<BackendFacts>(&shared).unwrap().logins.as_deref(), Some("/var/lib/wsp/logins"));
         let relative = facts.replace(r#"{"offer":"runtime""#, r#"{"logins":"logins","offer":"runtime""#);
+        assert!(serde_json::from_str::<BackendFacts>(&relative).is_err());
+    }
+
+    #[test]
+    fn a_backend_says_where_the_projects_it_holds_live_and_only_as_a_path() {
+        let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
+        assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().projects, None);
+        let holding = facts.replace(r#"{"offer":"runtime""#, r#"{"projects":"/var/lib/wsp/projects","offer":"runtime""#);
+        assert_eq!(serde_json::from_str::<BackendFacts>(&holding).unwrap().projects.as_deref(), Some("/var/lib/wsp/projects"));
+        let relative = facts.replace(r#"{"offer":"runtime""#, r#"{"projects":"projects","offer":"runtime""#);
         assert!(serde_json::from_str::<BackendFacts>(&relative).is_err());
     }
 }

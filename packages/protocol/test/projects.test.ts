@@ -57,9 +57,14 @@ describe("what one word to wsp add names", () => {
   });
 
   it("which sources a computer takes is its kind's own row, so no road decides it for itself", () => {
+    // A computer that clones takes a repo any of the three ways it can be named, and a folder on this computer,
+    // which it clones from that folder's own remote and seeds what git ignores onto.
     expect(kindWords("local").projectSources).toEqual(["folder"]);
-    expect(kindWords("cloud").projectSources).toEqual(["git"]);
+    expect(kindWords("cloud").projectSources).toEqual(["git", "github", "gitlab", "folder"]);
     expect(kindWords("ssh").projectSources).toEqual([]);
+    // Working the folder where it sits is its own word: a computer that clones takes a folder as a source and
+    // still holds a copy of it, so the two cannot be read off one list.
+    expect([kindWords("local").worksInPlace, kindWords("cloud").worksInPlace, kindWords("ssh").worksInPlace]).toEqual([true, false, false]);
   });
 
   it("the refusals name the project, the folder and the computer", () => {

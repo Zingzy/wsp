@@ -203,7 +203,7 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
+import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
 import { projectSource } from "./project-sources.js";
 import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
@@ -1902,8 +1902,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The command that puts a project's repo inside a copy of an image, word for word, so the test that reads the
    * machine's log and the machine that runs it read one line. No --branch where the record names no base: the
    * remote's own default branch is what the clone then takes. */
-  const cloneOnMachine = (project: ProjectView): string =>
-    projectSource(project.source.kind).cloneCommand({ remote: project.remote, dest: project.path, ...(project.base !== undefined ? { branch: project.base } : {}) });
+  const cloneOnMachine = (project: ProjectView, computer: string): string =>
+    cloneLines({
+      source: projectSource(project.source.kind),
+      remote: project.remote,
+      checkout: project.path,
+      computer,
+      ...(project.base !== undefined ? { branch: project.base } : {}),
+    }).join("\n");
   /** The clone inside a copy: git's own last line is the failure, so a person reads what git said and not that a
    * stage failed. */
   const cloneProject = async (entry: LiveWorkspace, project: ProjectView, report: StageReport): Promise<void> => {
@@ -1911,7 +1917,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // to clone into it and nothing to install.
     if (project.image !== undefined) return;
     report("project-cloned", `Cloning ${project.remote} into ${project.path}.`);
-    const cloned = await entry.machine.exec(cloneOnMachine(project), { timeoutMs: CLONE_MS });
+    const cloned = await entry.machine.exec(cloneOnMachine(project, placeName(entry.record.place ?? places.wired)), { timeoutMs: CLONE_MS });
     if (cloned.exitCode !== 0) throw new Error(lastLineOf(cloned.stderr) || lastLineOf(cloned.stdout) || `git clone exited ${cloned.exitCode}`);
     // Fresh dependencies on the machine holding the checkout: the catalog's row for whichever lockfile the repo's
     // own root carries, run once, its output in wsp's own folder and never inside the project. A repo no row names
@@ -7412,7 +7418,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         const recorded: ProjectView = { ...project, ...landed };
         projectsHeld.set(recorded.id, recorded);
         await store.put(PROJECTS, recorded.id, recorded);
-        if (o.seed?.remember === true && resolved.seed !== undefined) await store.put(SEED_CHOICES, resolved.seed.source, o.seed);
+        // Kept under the folder as this host resolved it, which is the word the next menu is looked up by.
+        if (o.seed?.remember === true && source.kind === "folder") await store.put(SEED_CHOICES, source.path, o.seed);
         bus.emit({ type: "project.added", project: recorded });
         return recorded;
       };

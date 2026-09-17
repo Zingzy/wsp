@@ -75,14 +75,13 @@ const CLONE_MS = 600_000;
 /** How long the small steps get: the seed unpacked, the patch applied, the root listed. */
 const STEP_MS = 120_000;
 
-/** The one script both roads that clone run, in order: the login git uses where the source needs one, the clone,
- * the seed unpacked on top of it, the person's unpushed commits applied on their own branch, and the seed's own
- * folder removed so nothing of wsp's is left inside the checkout. Written once here, so the two roads cannot
- * differ about what a seeded checkout is. */
-function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; seed?: { plan: SeedPlan; choice: SeedChoice }; memoryDir: string }): string {
-  const at = shellQuote(o.checkout);
+/** The lines every clone on a computer runs, in order: the check that the command the source clones through is
+ * there at all, the line pointing git at that command's login, the folder above the checkout, and the clone. The
+ * add reads them with a seed on top; a workspace whose own create clones reads them alone, so the two roads
+ * cannot differ about what cloning a project means. */
+export function cloneLines(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string }): string[] {
   const cli = o.source.cli;
-  const lines = [
+  return [
     "set -e",
     // The command the clone goes through, before anything is made: a computer whose image does not carry it is
     // refused in one sentence naming the command, rather than a clone that sits waiting for a password.
@@ -90,6 +89,12 @@ function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout:
     `mkdir -p ${shellQuote(o.checkout.replace(/\/[^/]+$/, ""))}`,
     o.source.cloneCommand({ remote: o.remote, dest: o.checkout, ...(o.branch !== undefined ? { branch: o.branch } : {}) }),
   ];
+}
+
+/** The clone with the seed on top of it, which is the add's own road. */
+function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; seed?: { plan: SeedPlan; choice: SeedChoice }; memoryDir: string }): string {
+  const at = shellQuote(o.checkout);
+  const lines = cloneLines(o);
   if (o.seedTar !== undefined) lines.push(`tar -xzf ${shellQuote(o.seedTar)} -C ${at}`);
   const unpushed = o.seed?.plan.unpushed;
   if (o.seed?.choice.commits === true && unpushed != null) {
@@ -166,9 +171,10 @@ const boxLanding: ProjectLanding = {
   async land(o, deps) {
     const dir = projectDir(deps, o.project.id);
     const checkout = `${dir}/checkout`;
-    // The folder wsp keeps this project in, bound at its own path: what the machine writes under it is on the
-    // computer once the machine is gone, which is the whole point of the road.
-    const machine = await deps.worker({ binds: [{ source: projectsDir(deps), target: projectsDir(deps) }], image: false, from: o.image });
+    // The folder wsp keeps this one project in, bound at its own path: what the machine writes under it is on the
+    // computer once the machine is gone, which is the whole point of the road, and no other project's folder is
+    // inside the machine at all.
+    const machine = await deps.worker({ binds: [{ source: dir, target: dir }], image: false, from: o.image });
     try {
       return await cloneSeedInstall(o, deps, machine, { checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` });
     } finally {

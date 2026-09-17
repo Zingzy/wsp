@@ -151,6 +151,8 @@ describe("runtime", () => {
     // A turn's own launch carries one thing over that login, the token naming its thread; no other road carries it.
     expect(contexts.length).toBeGreaterThan(0);
     const project = (await rt.projects.list())[0]!;
+    // The key the record was written with, which is the key every launch on this workspace carries.
+    expect(project.memoryKey).toMatch(/^-root-/);
     for (const ctx of contexts) {
       const { [TURN_TOKEN_ENV]: token, ...login } = ctx.env;
       expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg", CLAUDE_CODE_PROJECT_DIR_NAME: project.memoryKey });
