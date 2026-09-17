@@ -389,7 +389,11 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
 
     // A process that traps the signal and writes what it holds where the saved layer keeps it: /var is one of the
     // workspace's own overlays, and the box's /root, which every workspace on it shares, is not.
-    let trapping = "nohup sh -c 'trap \"echo trapped > /var/tmp/stopped; exit 0\" TERM; while :; do sleep 1; done' > /dev/null 2>&1 & sleep 0.5; echo started";
+    //
+    // What it writes is the state of the workspace's own first process, read at the moment its trap runs, so the
+    // line says the order and not only that a line was written: a trap running after the init had gone could not
+    // have run at all, since the kernel kills every process in a pid namespace whose first process is gone.
+    let trapping = "nohup sh -c 'trap \"grep -m1 ^State /proc/1/status > /var/tmp/stopped 2>/dev/null || echo the-init-was-gone > /var/tmp/stopped; exit 0\" TERM; while :; do sleep 1; done' > /dev/null 2>&1 & sleep 0.5; echo started";
     let (code, out, err) = w.exec(&id, trapping).await;
     assert_eq!((code, out.as_str(), err.as_str()), (0, "started\n", ""));
     let saved = root().join("run").join(&id).join("upper/var/tmp/stopped");
@@ -404,8 +408,11 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     // else here is the kernel's.
     assert!(took < prompt, "the stop took {} ms of a {} s patience", took.as_millis(), patience.as_secs());
     // The line is in the saved layer, so the process was asked to end and had the time to write: an init
-    // signalled first would have taken it down with the namespace before it could.
-    assert_eq!(fs::read_to_string(&saved).unwrap().trim(), "trapped");
+    // signalled first, or a boot command whose end takes the init with it, would have had the kernel kill this
+    // process before its trap could run.
+    let said = fs::read_to_string(&saved).unwrap();
+    let state = said.split_whitespace().nth(1).unwrap_or_default().to_owned();
+    assert!(matches!(state.as_str(), "S" | "R"), "the workspace's first process was {state} when the trap ran: {said}");
     assert!(!Path::new(CGROUPS).join(&id).exists(), "the cgroup of a stopped workspace stays");
     assert!(!fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!("/run/{id}/rootfs")), "the rootfs stays mounted");
 
@@ -1447,29 +1454,47 @@ fn container_id(stdout: &str) -> Option<String> {
 /// The images a case is about to pull onto the box's engine through the fence, removed when the case ends however
 /// it ends. An image the box already holds is left alone: it is the box's, not the case's, and a box serving
 /// something is not a box whose images a test may take away.
+///
+/// The removal goes by the id each pull turned out to be, read off the engine once the pull has happened and
+/// never by the name it was asked for: a name is a label the box's own work may move to another image between
+/// this case's start and its end, and what this case may take away is the bytes it brought.
 struct PulledImages {
-    /// The ones the box did not hold when the case started, in the order they were named.
-    ours: Vec<String>,
+    /// The names the box did not hold when the case started, in the order they were named.
+    wanted: Vec<String>,
+    /// The id each of those turned out to be, once `pulled` has read them.
+    ids: Vec<String>,
 }
 
 impl PulledImages {
     fn of(refs: &[&str]) -> PulledImages {
-        let held = |image: &&str| on_box(&["image", "inspect", "--format", "{{.Id}}", image]).0 == 0;
-        let ours: Vec<String> = refs.iter().filter(|image| !held(image)).map(|image| (*image).to_owned()).collect();
-        eprintln!("== images this case will pull and remove: {ours:?}");
-        PulledImages { ours }
+        let wanted: Vec<String> = refs.iter().filter(|image| image_id(image).is_none()).map(|image| (*image).to_owned()).collect();
+        eprintln!("== images this case will pull and remove: {wanted:?}");
+        PulledImages { wanted, ids: Vec::new() }
+    }
+
+    /// The id every name this case pulled now has, read after the pull: called once the stack is up, so a case
+    /// that died before its pull removes nothing rather than removing by a name.
+    fn pulled(&mut self) {
+        self.ids = self.wanted.iter().filter_map(|image| image_id(image)).collect();
+        eprintln!("== the ids this case pulled: {:?}", self.ids);
     }
 }
 
 impl Drop for PulledImages {
     fn drop(&mut self) {
-        for image in std::mem::take(&mut self.ours) {
-            let (code, _, said) = on_box(&["image", "rm", &image]);
+        for id in std::mem::take(&mut self.ids) {
+            let (code, _, said) = on_box(&["image", "rm", &id]);
             if code != 0 {
-                eprintln!("== the image {image} stayed on the box: {}", said.trim());
+                eprintln!("== the image {id} stayed on the box: {}", said.trim());
             }
         }
     }
+}
+
+/// What the box's engine holds an image name as, or nothing where it holds none.
+fn image_id(image: &str) -> Option<String> {
+    let (code, id, _) = on_box(&["image", "inspect", "--format", "{{.Id}}", image]);
+    (code == 0).then(|| id.trim().to_owned()).filter(|id| !id.is_empty())
 }
 
 /// A container of the box's own, outside any workspace, removed when the case ends however it ends.
@@ -1514,7 +1539,7 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     };
     // Declared before the world, so it is dropped after it: the workspace's own containers go with the kill, and
     // an image cannot be removed while a container of it is still there.
-    let _images = PulledImages::of(&["postgres:16-alpine", "nginx:alpine", "alpine"]);
+    let mut images = PulledImages::of(&["postgres:16-alpine", "nginx:alpine", "alpine"]);
     let mut w = World::open().await;
     let key = checkout_key();
     // A container of the box's own, outside any workspace: the one the workspace must not see. Removed when the case
@@ -1551,6 +1576,8 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     let started = Instant::now();
     let (code, out, err) = w.exec(&id, "cd /var/tmp/demo && docker compose -p wspdemo up -d 2>&1").await;
     show("docker compose up -d, from inside", code, &out, &err);
+    // The pull has happened, so the ids this case brought are the ids it removes at its end.
+    images.pulled();
     eprintln!("compose up took {} ms", started.elapsed().as_millis());
     assert_eq!(code, 0);
     let (code, out, err) =
@@ -1643,7 +1670,7 @@ async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
     };
     // Declared before the world, so it is dropped after it: the workspace's own containers go with the kill, and
     // an image cannot be removed while a container of it is still there.
-    let _images = PulledImages::of(&["alpine"]);
+    let mut images = PulledImages::of(&["alpine"]);
     let mut w = World::open().await;
     let key = checkout_key();
     let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-compose-{key}") }))).await;
@@ -1673,6 +1700,8 @@ async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
     // would be the directory's, which every workspace of one project shares.
     let (code, out, err) = w.exec(&id, "cd /var/tmp/stack && docker compose up -d 2>&1").await;
     show("docker compose up -d with no project named, from inside", code, &out, &err);
+    // The pull has happened, so the ids this case brought are the ids it removes at its end.
+    images.pulled();
     assert_eq!(code, 0);
     let (code, named, err) = w.exec(&id, "docker ps --format '{{.Names}}'").await;
     show("what the stack's container is called", code, &named, &err);
