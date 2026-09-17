@@ -12,10 +12,14 @@ export interface HostLock {
   /** The address the host bound, absent on a lock a host of an earlier build wrote, which bound this computer alone. */
   address?: string;
   startedAt: string;
-  /** Set when a verb started this host for itself rather than a person typing wsp up: wsp down stops such a host,
-   * and a second wsp up is told so. Absent means somebody is holding it open. */
-  startedBy?: "verb";
+  /** What brought this host up, where wsp brought it up itself: a verb that needed one, or the wsp up a person
+   * typed. wsp down stops either, and a second wsp up is told so. Absent is a host wsp did not start from the
+   * command line, which is the app's own, and nothing here may stop that one. */
+  startedBy?: HostStarted;
 }
+
+/** The two roads the command line starts a host by, as the lock records them. */
+export type HostStarted = "verb" | "up";
 
 function isHostLock(v: unknown): v is HostLock {
   return (
@@ -59,7 +63,7 @@ function readLock(path: string): HostLock | undefined {
 function heldBy(lock: HostLock, statePath: string): Error {
   return new Error(
     `another wsp host (pid ${lock.pid}) is already serving ${statePath} on port ${lock.port} (ws ${lock.wsPort}). ` +
-      (lock.startedBy === "verb" ? "wsp down stops it, or point --state at a different file." : "Stop it first, or point --state at a different file."),
+      (lock.startedBy !== undefined ? "wsp down stops it, or point --state at a different file." : "Stop it first, or point --state at a different file."),
   );
 }
 
@@ -145,7 +149,7 @@ function refuseIfServed(lockPath: string, statePath: string): void {
 
 /** Seeded with the requested ports so a refusal during startup can name them;
  * rewritten with the bound ports once the host is up. */
-export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string; startedBy?: "verb" }): HostLock {
+export function takeLock(lockPath: string, statePath: string, ports: { port: number; wsPort: number; address?: string; startedBy?: HostStarted }): HostLock {
   refuseIfServed(lockPath, statePath);
   const lock: HostLock = { pid: process.pid, ...ports, startedAt: new Date().toISOString() };
   mkdirSync(dirname(lockPath), { recursive: true });

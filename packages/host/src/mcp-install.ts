@@ -157,6 +157,10 @@ export function refreshSkills(home: string): string[] {
   return written;
 }
 
+/** The one line a refresh says, and only where it rewrote something: the files, so a person reading it knows
+ * exactly what changed under their home, said once rather than once per agent. */
+export const skillsRefreshedLine = (files: readonly string[]): string => `The wsp skill now matches this wsp in ${files.join(", ")}`;
+
 /** The catalog's agent under this id; an id it does not know is refused with the ids that do have an MCP config. */
 function agentEntry(agentId: string): AgentEntry {
   const entry = CATALOG_AGENTS.find(a => a.id === agentId);

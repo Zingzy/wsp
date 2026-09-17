@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@wsp/protocol";
 import { agentPage, cli, COMMAND_LINES, devPage, HELP, hostPage, MCP_OPTIONS, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { WSP_SKILL, INSTRUCTIONS } from "../src/skill.js";
-import { CLI_VERBS, hasTool, VERBS } from "../src/verbs.js";
+import { CLI_VERBS, hasTool, THREAD_PREFIX_WORD, VERBS } from "../src/verbs.js";
 
 const noPrompt = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
 const captured = (): CliIO & { lines: string[]; errors: string[] } => {
@@ -46,6 +46,41 @@ describe("the pages wsp prints", () => {
     expect(HELP).toContain("Sleeping is automatic.");
     expect(HELP).toContain("wsp --help agent");
     expect(HELP).toContain("wsp host --help");
+  });
+
+  it("the front page names the two lines that serve a host, and the agent page's own line no longer stands in for them", () => {
+    // Both testers learned the word up from a launchd line in wsp status, after hunting through a page titled for
+    // their agents. It is on the page they read first now.
+    const block = HELP.split("\n\n").at(-1)!;
+    expect(block).toContain("wsp up ");
+    expect(block).toContain("wsp down ");
+    expect(HELP).toContain("any verb starts one when none does");
+    expect(HELP).not.toContain("and up and down");
+    // The page for agents still carries their flags, under a title that says who the lines on it are for.
+    expect(agentPage()).toContain("wsp up [--port");
+    expect(agentPage()).toContain("the lines you type yourself");
+  });
+
+  it("the agent page says a reply is printed once, not that stdout carries a second copy of it", () => {
+    // The page taught the double print as the design, and a tester read his reply twice and called it noise.
+    const page = agentPage().replace(/\s+/g, " ");
+    expect(page).toContain("print it once");
+    expect(page).not.toContain("prints the last message on stdout when the reply is complete");
+  });
+
+  it("the front page names the line that reads a thread back, and the line that hands over a thread id names it too", () => {
+    // Marco could start a thread and wait for it and had no way to read what it said; the verb existed, one page in.
+    expect(HELP).toContain("wsp thread read <thread> prints what a thread said");
+    expect(THREAD_PREFIX_WORD).toBe("wsp thread read, wsp send and wsp stop take its first characters");
+  });
+
+  it("the front page's init line says what init does in the person's words, with no sealing and no image in it", () => {
+    // Priya skipped wsp init outright: she did not know what sealing was, whether it was reversible, or what it
+    // would take from her machine, and "once" read as permanent.
+    const init = frontLines().find(line => line.trim().startsWith("wsp init"))!;
+    const row = HELP.split("\n").slice(HELP.split("\n").indexOf(init), HELP.split("\n").indexOf(init) + 2).join(" ");
+    expect(row).toContain("set this computer up");
+    for (const word of ["seal", "image", "once"]) expect(row, word).not.toContain(word);
   });
 
   it("the rules under the front page hold against the lines above them, and the page fits one screen", () => {

@@ -2,7 +2,9 @@
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { LOOPBACK } from "@wsp/runtime";
+import { PORT_TAKEN_REFUSAL, portInsteadLine, portTakenLine, portsPickedLine } from "@wsp/protocol";
 import { choosePorts, listenerOf, portHolder, portInUse } from "../src/ports.js";
+import { pickUpPorts, type CliIO } from "../src/cli.js";
 import type { HostLock } from "../src/host-lock.js";
 
 const servers: Server[] = [];
@@ -114,3 +116,58 @@ async function freed(): Promise<number> {
   await new Promise<void>(resolve => server.close(() => resolve()));
   return port;
 }
+
+describe("the pair wsp up binds", () => {
+  const busy = (...ports: number[]) => async (port: number) => ports.includes(port);
+  const node = async () => ({ command: "node", pid: 62569 });
+  const nobody = (q: string): Promise<string> => Promise.reject(new Error(`unexpected prompt: ${q}`));
+  /** What the two lines a pick prints land in, kept apart: the step is the run saying where it is, the refusal is
+   * a failure. */
+  const io = (): CliIO & { lines: string[]; errors: string[] } => {
+    const lines: string[] = [];
+    const errors: string[] = [];
+    return { lines, errors, log: l => lines.push(l), error: l => errors.push(l), ask: nobody, askSecret: nobody };
+  };
+
+  it("takes the pair as asked and says nothing when both ports are free", async () => {
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(), listener: node })).toEqual({
+      port: 4401,
+      wsPort: 4411,
+    });
+    expect([out.lines, out.errors]).toEqual([[], []]);
+  });
+
+  it("steps over a taken pair nobody named and says which pair it serves and who held the one it left", async () => {
+    // Priya typed wsp up with no flags on a Mac whose default pair was held, and read the bind's own error.
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4400, wsPort: 4410, named: false, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4410), listener: node })).toEqual({
+      port: 4401,
+      wsPort: 4411,
+    });
+    expect(out.lines).toEqual([portsPickedLine({ port: 4401, wsPort: 4411 }, 4410, { command: "node", pid: 62569 })]);
+    expect(out.errors).toEqual([]);
+  });
+
+  it("refuses a port a person named with who holds it and the free pair to type, and hands back no pair to bind", async () => {
+    // Marco lost seventy seconds and three guesses here: every refusal carried the port and nothing to type next.
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4411), listener: node })).toBeUndefined();
+    expect(out.errors).toEqual([portTakenLine(4411, { command: "node", pid: 62569 }), portInsteadLine({ port: 4402, wsPort: 4412 })]);
+    expect(portInsteadLine({ port: 4402, wsPort: 4412 })).toContain("wsp up --port 4402");
+    expect(out.lines).toEqual([]);
+  });
+
+  it("names both ports where the pair a person asked for is not the offset apart, since --port alone would not have it", async () => {
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 9000, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: busy(4401), listener: node })).toBeUndefined();
+    expect(out.errors[1]).toBe(portInsteadLine({ port: 4402, wsPort: 9001 }));
+    expect(out.errors[1]).toContain("wsp up --port 4402 --ws-port 9001");
+  });
+
+  it("falls back to the two ways on where no pair in the window is free", async () => {
+    const out = io();
+    expect(await pickUpPorts(out, { port: 4401, wsPort: 4411, named: true, address: LOOPBACK, statePath: "/Users/z/.wsp/state.json" }, { probe: async () => true, listener: node })).toBeUndefined();
+    expect(out.errors[1]).toBe(PORT_TAKEN_REFUSAL);
+  });
+});

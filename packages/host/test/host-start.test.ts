@@ -133,6 +133,18 @@ describe("a verb starts the host when none serves", () => {
     await expect(dialHost(join(dir, "other", "state.json"), { aim: { kind: "here" } })).rejects.toThrow(noHostServingLine(join(dir, "other", "state.json")));
   });
 
+  it("a line that starts nothing reads the refusal with the line that serves that file, and exits non-zero", async () => {
+    // Priya's and Marco's first stall, at their second command: a fact with no next step in it, where every other
+    // refusal in wsp ends with the command that fixes it. The flag is spelled out, since a person who named a
+    // state file has to name it again to serve that one.
+    const elsewhere = join(dir, "other", "state.json");
+    expect(noHostServingLine(elsewhere)).toBe(`no wsp host is serving ${elsewhere}; start one with wsp up --state ${elsewhere}`);
+    const errors: string[] = [];
+    // No starter handed in, which is what wsp add does on a state file nothing serves.
+    expect(await cli(["add", dir, "--state", elsewhere], quietIO([], errors), undefined, {})).toBe(EXIT_CODES.provider);
+    expect(errors).toEqual([noHostServingLine(elsewhere)]);
+  });
+
   it("wsp threads with no host starts one, says so on stderr, and prints the answer on stdout", async () => {
     const here = servingStarter();
     const lines: string[] = [];

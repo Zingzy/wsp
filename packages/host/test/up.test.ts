@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { createRuntime, jsonFileStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PERSON_HOME_ENV, type ExecStream } from "@wsp/protocol";
+import { EXIT_CODES, PERSON_HOME_ENV, type ExecStream } from "@wsp/protocol";
 import { NO_PROJECT_YET } from "../src/verbs.js";
 import { cli, localWiring, localWorkFolder, noClaudeKeyNote, optsFor, statesHere, up, type CliIO } from "../src/cli.js";
+import { currentHomePointer } from "../src/serving-home.js";
+import { skillsRefreshedLine } from "../src/mcp-install.js";
+import { WSP_SKILL } from "../src/skill.js";
+import type { HostLock } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
@@ -72,6 +77,13 @@ describe("wsp up", () => {
   function stateFile(data: object): void {
     mkdirSync(join(home, "state"), { recursive: true });
     writeFileSync(statePath, JSON.stringify(data));
+  }
+
+  /** A host that has answered once, which is how every case here settles one before its teardown closes it: a
+   * close that lands inside the first milliseconds of a start races the runtime's own listener. */
+  async function answered(handle: HostHandle): Promise<HostHandle> {
+    expect((await fetch(`http://127.0.0.1:${handle.port}/`)).status).toBe(200);
+    return handle;
   }
 
   async function started(lines: string[]): Promise<HostHandle> {
@@ -244,6 +256,75 @@ describe("wsp up", () => {
     await expect(fetch(road.url)).rejects.toThrow();
     // The teardown closes every runtime a case built, so a second close must be quiet rather than a second wss.close.
     await expect(rt.close()).resolves.toBeUndefined();
+  });
+
+  it("wsp up on a port another program holds says who holds it and the line to type, and binds nothing", async () => {
+    // Marco's first minute: three guesses at a port, every one answered with the bind's own EADDRINUSE. The port
+    // here is one this case holds itself, so nothing another process on this computer does decides the answer.
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    const holder = createServer();
+    await new Promise<void>(resolve => holder.listen(0, "127.0.0.1", resolve));
+    const at = holder.address();
+    if (typeof at !== "object" || at === null) throw new Error("no address");
+    const errors: string[] = [];
+    try {
+      expect(await cli(["up", "--port", String(at.port), "--state", statePath], quietIO([], errors))).toBe(EXIT_CODES.provider);
+    } finally {
+      await new Promise<void>(resolve => holder.close(() => resolve()));
+    }
+    expect(errors[0]).toContain(`Port ${at.port} is in use on this computer by `);
+    expect(errors[1]).toMatch(/^Nothing was booted\./);
+    // Nothing bound, so nothing to stop: the lock is the proof the host never started.
+    expect(existsSync(join(home, "state", "host.lock"))).toBe(false);
+  });
+
+  it("a host serving a state file somewhere else writes nothing under the person's home, and one on their own wsp says in one line what it brought up to date", async () => {
+    // Priya kept her whole session inside /tmp and read six lines about files rewritten under her home folder.
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    const user = join(dir, "user");
+    const stale = join(user, ".claude", "skills", "wsp", "SKILL.md");
+    mkdirSync(dirname(stale), { recursive: true });
+    writeFileSync(stale, "an older wsp's skill\n");
+    const lines: string[] = [];
+    await answered(await started(lines));
+    // The state file here is not this wsp home's own, so nothing of the person's is touched: not the skill copy
+    // their agent holds, and not a line about it.
+    expect(readFileSync(stale, "utf8")).toBe("an older wsp's skill\n");
+    expect(lines.filter(l => l.includes("skill"))).toEqual([]);
+
+    // The same start on this home's own state file: the copy is brought up to date, in one line naming it.
+    for (const h of handles.splice(0)) await h.close();
+    const own = join(home, "state.json");
+    writeFileSync(own, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
+    const mine: string[] = [];
+    handles.push(await answered(await up(quietIO(mine), { port: 0, wsPort: 0, statePath: own, webDir, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(own), adapters: {} }) })));
+    expect(readFileSync(stale, "utf8")).toBe(WSP_SKILL);
+    expect(mine).toContain(skillsRefreshedLine(["~/.claude/skills/wsp/SKILL.md"]));
+    expect(mine.filter(l => l.includes("skill"))).toHaveLength(1);
+  });
+
+  it("a host on a home nobody moved writes no pointer under it, and one on a moved home writes the pointer that finds it", async () => {
+    // The pointer is read only where a line names no home of its own; a host on the home such a line already picks
+    // changes nothing about where wsp looks, and a file under the person's home for that is a file nobody asked for.
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    const user = join(dir, "user");
+    vi.stubEnv("WSP_HOME", join(user, ".wsp"));
+    const here = join(user, ".wsp", "state.json");
+    mkdirSync(dirname(here), { recursive: true });
+    writeFileSync(here, JSON.stringify({ goldens: { default: SEALED_GOLDEN } }));
+    handles.push(await answered(await up(quietIO(), { port: 0, wsPort: 0, statePath: here, webDir, runtime: createRuntime({ backend: stubBackend(), store: jsonFileStore(here), adapters: {} }) })));
+    expect(existsSync(currentHomePointer(user))).toBe(false);
+
+    for (const h of handles.splice(0)) await h.close();
+    vi.stubEnv("WSP_HOME", home);
+    await answered(await started([]));
+    expect(readFileSync(currentHomePointer(user), "utf8").trim()).toBe(home);
+  });
+
+  it("wsp up records that it brought the host up, so wsp down has a road to stop it", async () => {
+    stateFile({ goldens: { default: SEALED_GOLDEN } });
+    await answered(await started([]));
+    expect((JSON.parse(readFileSync(join(home, "state", "host.lock"), "utf8")) as HostLock).startedBy).toBe("up");
   });
 
   it("wsp up refuses a flag it does not answer in and starts nothing", async () => {

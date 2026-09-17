@@ -48,13 +48,17 @@ describe("the wsp skill", () => {
     const agentRows = WSP_SKILL.slice(WSP_SKILL.indexOf(VERBS_HEADING), WSP_SKILL.indexOf(SHELL_HEADING));
     expect(agentRows).not.toContain("`wsp threads wait");
     const shell = WSP_SKILL.slice(WSP_SKILL.indexOf(SHELL_HEADING), WSP_SKILL.indexOf(RULES_HEADING));
-    expect(shell).toContain("| `wsp threads wait <thread>... [--timeout <s>]` | `threads_wait` (threads, timeout) |");
+    expect(shell).toContain("| `wsp threads wait <thread>... [--timeout <s>] [--tail]` | `threads_wait` (threads, timeout) |");
     const section = WSP_SKILL.slice(WSP_SKILL.indexOf("### threads wait"), WSP_SKILL.indexOf("### stop"));
     expect(section).toContain("wsp run dev --detach --notify me");
     expect(section).toContain("wsp threads wait 1a2b3c4d 5e6f7a8b --timeout 600");
     expect(section).toContain("One thread per call");
     expect(section).toContain("`thread 1a2b3c4d still running after 10m`");
     expect(section).toContain("This is a shell script's verb");
+    // The wait prints the agent's reply whole, and the tail is the flag: a reply's last line is as often a code
+    // fence as an answer, which is what a tester waiting on two threads read off both.
+    expect(section).toContain("with the agent's reply whole under it");
+    expect(section).toContain("`--tail` prints the last line alone");
     expect(section).toContain("Do not call it in your own conversation");
     expect(section).toContain("Never poll `threads`");
     const loop = WSP_SKILL.slice(WSP_SKILL.indexOf("## The loop for building with wsp"), WSP_SKILL.indexOf("## Where the person steps in"));
