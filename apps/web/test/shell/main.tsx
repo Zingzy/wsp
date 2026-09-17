@@ -48,11 +48,8 @@
 // every picker; ?panel=preview opens the right panel inline with nothing in
 // it, the narrowest the centre column gets at a width; ?panel=browser&at=<address>
 // opens it on a browser tab framing that address, so the bar can be measured
-// with a path and a query in it; ?drop=1 holds the page
-// mid-drag of a folder from the desktop, with the desktop bridge that reads a
-// dropped path, so every workspace row's drop tile can be measured; ?import=1
-// opens the import dialog on ws_a already reading a folder, as a drop on its
-// tile leaves it; ?panel=machine opens the right panel on the Machine tab of
+// with a path and a query in it; ?export=1 opens the dialog that brings a
+// folder home on ws_a; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
 // ?places=1 fills the Where agents run table with four computers, one of them
@@ -93,9 +90,8 @@ document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") =
 if (params.get("shell") === "desktop") {
   window.wsp = { capturePreview: async () => undefined, workspacePreview: async () => undefined };
 }
-// ?drop=1 and ?import=1 are the desktop's roads: the bridge that reads a dropped folder's path is what lets the rows
-// become tiles at all, and the picker is what the dialog draws for the folder there.
-if (params.get("drop") === "1" || params.get("import") === "1") window.wsp = { ...window.wsp, droppedPath: file => `/Users/dev/${file.name}`, pickFolder: async () => undefined };
+// The desktop's road: the folder picker is what a dialog draws for a folder on this computer.
+if (params.get("export") === "1") window.wsp = { ...window.wsp, pickFolder: async () => undefined };
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
@@ -684,11 +680,11 @@ createRoot(document.getElementById("root")!).render(
     <AppShell>{settings ? <SettingsPage /> : shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );
-// ?import=1: the dialog as a drop on the first workspace's tile leaves it, asked for once the sidebar is listening.
-if (params.get("import") === "1") {
+// ?export=1: the dialog that brings a folder home, asked for once the sidebar is listening.
+if (params.get("export") === "1") {
   const ask = (): void => {
     if (document.querySelector("[data-sidebar-row]") === null) setTimeout(ask, 20);
-    else requestProjectTrip({ workspaceId: "ws_a", trip: "import", source: "/Users/dev/spoo" });
+    else requestProjectTrip({ workspaceId: "ws_a", trip: "export" });
   };
   ask();
 }

@@ -91,12 +91,10 @@ const PROJECT_TRIP_EVENT = "wsp:project-trip";
 
 export interface ProjectTripRequest {
   readonly workspaceId: string;
-  readonly trip: "import" | "export";
-  /** The folder an import opens on and reads at once, as a drop on the workspace's row names it. */
-  readonly source?: string;
+  readonly trip: "export";
 }
 
-/** Asks for a project trip's dialog, the import or the export; the sidebar answers with the one it owns. */
+/** Asks for the export dialog, which brings a folder and its agent sessions home; the sidebar answers with it. */
 export function requestProjectTrip(detail: ProjectTripRequest): void {
   window.dispatchEvent(new CustomEvent(PROJECT_TRIP_EVENT, { detail }));
 }

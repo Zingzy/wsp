@@ -41,7 +41,6 @@ import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
-import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
 import { ForwardsList } from "./ForwardsList.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
@@ -59,7 +58,7 @@ import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
 import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
 import { ThreadLaunchRow, ThreadRow } from "./ThreadRow.js";
-import { WorkspaceDropTile, WorkspaceRow, type DropTile } from "./WorkspaceRow.js";
+import { WorkspaceRow } from "./WorkspaceRow.js";
 import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName, onQuietComputer, whereWord } from "./workspaceRows.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
@@ -262,10 +261,6 @@ export function WorkspaceSidebar() {
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
 
-  /** A row takes no drop: a project is recorded with wsp add and a workspace is made of it, so there is nothing for
-   * a folder dropped on a workspace to become. */
-  const tileFor = (): DropTile | null => null;
-
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
       const next = new Set(prev);
@@ -390,16 +385,12 @@ export function WorkspaceSidebar() {
     const isCollapsed = collapsed.has(project.id);
     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
     const naming = renaming?.rowId === workspaceRowId(project.id);
-    const tile = tileFor();
     return (
       <SidebarMenuItem
         key={project.id}
         // A row holding the box takes no menu over it, as a thread row being named does not.
         {...(naming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") }) })}
       >
-        {tile !== null ? (
-          <WorkspaceDropTile rowId={workspaceRowId(project.id)} tile={tile} />
-        ) : (
         <WorkspaceRow
           project={project}
           cost={costs[project.id] ?? null}
@@ -418,7 +409,6 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
-        )}
         {threadsOf(visibleProject, newThreadAction, isCollapsed)}
       </SidebarMenuItem>
     );
@@ -668,11 +658,7 @@ export function WorkspaceSidebar() {
           }}
         />
       ) : null}
-      {trip !== null && tripTarget !== undefined ? (
-        trip.trip === "import" ? null : (
-          <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} />
-        )
-      ) : null}
+      {trip !== null && tripTarget !== undefined ? <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} /> : null}
       {looking !== null && lookTarget !== undefined ? (
         <WorkspaceLookPopover key={looking.key} workspace={lookTarget} part={looking.part} anchor={looking.anchor} onClose={() => setLooking(null)} />
       ) : null}

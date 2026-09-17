@@ -118,7 +118,6 @@ describe("the workspace menu the smoke expects", () => {
       WORKSPACE_WORDS.openBrowser,
       WORKSPACE_WORDS.openMachine,
       SEPARATOR,
-      WORKSPACE_WORDS.importProject,
       WORKSPACE_WORDS.exportProject,
       SEPARATOR,
       WORKSPACE_WORDS.rename,

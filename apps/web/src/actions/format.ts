@@ -16,7 +16,6 @@ export const WORKSPACE_WORDS = {
   openTerminal: "Open terminal",
   openBrowser: "Open browser",
   openMachine: "Open the workspace pane",
-  importProject: "Import project",
   exportProject: "Export project",
   rename: "Rename workspace",
   theme: "Edit theme colour",
@@ -120,7 +119,6 @@ export const CLIENT_CANNOT_FORGET = "This client cannot forget workspaces";
 export const CLIENT_CANNOT_START_DAEMON = "This client cannot start a daemon";
 export const NEW_THREAD_WAITS = "New threads wait for the rebuild";
 export const PROJECTS_WAIT = "Projects wait for the rebuild";
-export const CLIENT_CANNOT_IMPORT = "This client cannot import projects";
 export const CLIENT_CANNOT_EXPORT = "This client cannot export projects";
 export const CLIENT_CANNOT_RENAME_WORKSPACE = "This client cannot rename workspaces";
 export const CLIENT_CANNOT_LOOK = "This client cannot set a workspace's theme or icon";

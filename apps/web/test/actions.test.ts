@@ -46,7 +46,6 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     forget: vi.fn(),
     rename: vi.fn(),
     pickLook: vi.fn(),
-    importProject: vi.fn(),
     exportProject: vi.fn(),
     ...over,
   };
@@ -67,7 +66,6 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
       WORKSPACE_WORDS.openMachine,
-      WORKSPACE_WORDS.importProject,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.icon,
@@ -76,7 +74,7 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "import-project", "export-project", "rename", "icon", "theme", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "export-project", "rename", "icon", "theme", "copy-id"]);
     expect(actionById(actions, "rename").refusal).toBeNull();
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
@@ -136,12 +134,11 @@ describe("workspace actions", () => {
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
     expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild workspaces");
     expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
-    // The project trips: the machine must answer, and the client must have the folder ops; a browser tab without them says so.
-    expect(actionById(gone, "import-project").refusal).toBe("Projects wait for the rebuild");
+    // Bringing a folder home: the machine must answer, and the client must have the folder ops; a browser tab
+    // without them says so. Nothing imports any more: a project is recorded with wsp add and a workspace is one's copy.
     expect(actionById(zombie, "export-project").refusal).toBe("Projects wait for the rebuild");
-    expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "import-project").refusal).toBeNull();
-    const noTrips = resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ importProject: undefined, exportProject: undefined }));
-    expect(actionById(noTrips, "import-project").refusal).toBe("This client cannot import projects");
+    expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "export-project").refusal).toBeNull();
+    const noTrips = resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ exportProject: undefined }));
     expect(actionById(noTrips, "export-project").refusal).toBe("This client cannot export projects");
     expect(actionById(resolveActions(workspaceActions, workspace("paused"), verbs), "open-browser").refusal).toBe("Workspace is paused; wake it to preview");
     expect(actionById(resolveActions(workspaceActions, workspace("waking"), verbs), "open-browser").refusal).toBe("Workspace is waking; previews open when it is running");
@@ -156,9 +153,7 @@ describe("workspace actions", () => {
     await actionById(actions, "open-browser").run();
     await actionById(actions, "open-machine").run();
     await actionById(actions, "copy-id").run();
-    await actionById(actions, "import-project").run();
     await actionById(actions, "export-project").run();
-    expect(verbs.importProject).toHaveBeenCalledWith("ws_a");
     expect(verbs.exportProject).toHaveBeenCalledWith("ws_a");
     expect(verbs.togglePhase).toHaveBeenCalledWith("ws_a");
     expect(verbs.newThread).toHaveBeenCalledWith("ws_a");
@@ -453,7 +448,6 @@ describe("menu items from actions", () => {
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],
       ["open-machine", WORKSPACE_WORDS.openMachine, "open", true],
-      ["import-project", WORKSPACE_WORDS.importProject, "project", true],
       ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", true],
       ["icon", WORKSPACE_WORDS.icon, "edit", true],

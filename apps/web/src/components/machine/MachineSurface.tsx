@@ -76,7 +76,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} kind={kind} />
-        <Projects workspace={workspace} status={status} kind={kind} onTaken={() => setTakes(n => n + 1)} />
+        <Projects workspace={workspace} kind={kind} onTaken={() => setTakes(n => n + 1)} />
         <Live workspace={workspace} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} takes={takes} />}
         {kind.driven && <GoldenLineage workspace={workspace} projects={goldens} />}
@@ -325,13 +325,12 @@ function useProjectGoldens(wanted: boolean, takes: number): ProjectGolden[] {
  * where the import measured one and the day it landed. Under them the two roads that change the list: the import
  * the row's menu offers, through the registry so it is refused where that is, and the snapshot that images the disk
  * with every project on it, offered only where the Versions section draws: a machine with an image behind it. */
-function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: () => void }) {
+function Projects({ workspace, kind, onTaken }: { workspace: WorkspaceView; kind: WorkspaceKindWords; onTaken: () => void }) {
   const api = useStore(s => s.api);
   const project = workspace.project;
   const images = kind.driven && api?.snapshotWorkspace !== undefined;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  void status;
   const snapshot = async (): Promise<void> => {
     if (!api?.snapshotWorkspace) return;
     setBusy(true);
