@@ -6,8 +6,10 @@
 //! blocks gets a reflink copy, and everywhere else every byte is written and the time it took is said out loud.
 //! The walk from one tree to another is written once here and handed the per-file operation each variant brings.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use wsp_frames::CopyWord;
@@ -15,7 +17,7 @@ use wsp_frames::CopyWord;
 #[cfg(target_os = "linux")]
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::FileTypeExt;
 #[cfg(target_os = "linux")]
 use std::path::PathBuf;
 
@@ -216,7 +218,7 @@ fn walk(from: &Path, to: &Path, file: CopyFile, linked: &mut HashMap<(u64, u64),
             same_as(&source, &target)?;
             continue;
         }
-        if let Some(key) = crate::store::shared_inode(&meta) {
+        if let Some(key) = shared_inode(&meta) {
             if let Some(first) = linked.get(&key) {
                 fs::hard_link(first, &target)?;
                 continue;
@@ -272,6 +274,48 @@ fn timed_as(meta: &fs::Metadata, target: &Path) -> io::Result<()> {
 fn own_as(meta: &fs::Metadata, target: &Path) -> io::Result<()> {
     let _ = std::os::unix::fs::lchown(target, Some(meta.uid()), Some(meta.gid()));
     Ok(())
+}
+
+/// How many bytes the files under a directory hold, each inode once: a workspace's upper directories, which is
+/// what it has written since it booted, and the bytes of a checkout, which is what a plain copy of it will cost.
+/// Read off the box, never off a df inside the workspace, which reads the box's whole disk. A workspace may be
+/// running while its upper is read, so an entry gone between the listing and its stat is skipped, never a failure
+/// of the whole count; only a directory that is not there fails.
+pub fn tree_bytes(dir: &Path) -> io::Result<u64> {
+    let mut seen = HashSet::new();
+    let mut total = 0;
+    for entry in fs::read_dir(dir)? {
+        count_entry(entry?, &mut seen, &mut total)?;
+    }
+    Ok(total)
+}
+
+/// One entry's bytes into the total, its directory walked under it; a vanished entry or directory counts nothing.
+fn count_entry(entry: fs::DirEntry, seen: &mut HashSet<(u64, u64)>, total: &mut u64) -> io::Result<()> {
+    let meta = match entry.metadata() {
+        Ok(meta) => meta,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if meta.is_dir() {
+        let entries = match fs::read_dir(entry.path()) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        };
+        for child in entries {
+            count_entry(child?, seen, total)?;
+        }
+    } else if meta.is_file() && shared_inode(&meta).is_none_or(|key| seen.insert(key)) {
+        *total += meta.len();
+    }
+    Ok(())
+}
+
+/// The key of a file a tree hard linked under more than one name, by device and inode: the copy carries its bytes
+/// once under the first name and a link under every other, and a count of those bytes reads it once the same way.
+pub(crate) fn shared_inode(meta: &fs::Metadata) -> Option<(u64, u64)> {
+    (meta.is_file() && meta.nlink() > 1).then(|| (meta.dev(), meta.ino()))
 }
 
 /// What a computer that runs no workspaces answers the picker with, so the crate builds where the kernel work

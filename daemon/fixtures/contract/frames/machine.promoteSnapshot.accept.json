@@ -1,8 +1,0 @@
-[
-  {
-    "id": 1,
-    "op": "machine.promoteSnapshot",
-    "snapshotId": "s1",
-    "name": "golden"
-  }
-]

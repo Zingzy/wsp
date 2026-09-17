@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! A workspace's bundle under `<root>/run/<id>`: an overlay rootfs over the chain's unpacked layers with an upper
-//! and a work directory of its own, the files the container binds over /etc, the record the ops keep, and the
+//! A workspace's bundle under `<root>/run/<id>`: a rootfs made of the computer's own system directories, one
+//! read-only overlay each with an upper and a work directory of its own, the box's /root bound in with the
+//! daemon's own folder blanked over it, the files the container binds over /etc, the record the ops keep, and the
 //! config.json youki reads, built from the embedded profile plus what the spec asks for. Every path the runtime
 //! writes under its root is spelled in `Layout` and nowhere else.
 
@@ -17,7 +18,6 @@ use serde_json::{json, Value};
 use wsp_frames::CopyWord;
 
 use crate::profile;
-use crate::store::Chain;
 
 /// Every path the runtime writes under its root.
 pub struct Layout {
@@ -41,11 +41,27 @@ impl Layout {
     pub fn rootfs(&self, id: &str) -> PathBuf {
         self.workspace(id).join("rootfs")
     }
+    /// Every overlay's upper under one directory: what the workspace has written since it booted, which is what
+    /// a stop keeps and a describe counts.
     pub fn upper(&self, id: &str) -> PathBuf {
         self.workspace(id).join("upper")
     }
+    /// The upper of the overlay over one of the computer's system directories.
+    pub fn upper_of(&self, id: &str, dir: &str) -> PathBuf {
+        self.upper(id).join(dir.trim_start_matches('/'))
+    }
     pub fn work(&self, id: &str) -> PathBuf {
         self.workspace(id).join("work")
+    }
+    /// The work directory overlayfs needs beside that upper, on the same filesystem as it.
+    pub fn work_of(&self, id: &str, dir: &str) -> PathBuf {
+        self.work(id).join(dir.trim_start_matches('/'))
+    }
+    /// An empty directory of the workspace's own, bound over a path inside it that the computer's own directory
+    /// holds something at: the daemon's folder under /root, and the engine's data under /var/lib. One directory
+    /// per path, since what the workspace writes at one of them is not what it writes at another.
+    pub fn blank_at(&self, id: &str, at: &str) -> PathBuf {
+        self.workspace(id).join("blank").join(at.trim_start_matches('/'))
     }
     /// The three files bound over the container's /etc.
     pub fn etc(&self, id: &str) -> PathBuf {
@@ -80,7 +96,9 @@ impl Layout {
     pub fn put(&self, upload_id: &str) -> PathBuf {
         self.root.join("put").join(upload_id)
     }
-    /// Scratch for the self check's overlay mount and the clone probe the copies word is read from.
+    /// Scratch for the self check's overlay mount and the clone probe the copies word is read from. Its upper
+    /// sits under the root, which is the whole point: a root under one of the directories a workspace overlays
+    /// makes an overlay the kernel refuses, and the check is where that is found.
     pub fn check(&self) -> PathBuf {
         self.root.join("check")
     }
@@ -95,10 +113,16 @@ impl Layout {
     /// written `copy_of`, and the open sweeps every one of them. The copy is renamed into place, which is one
     /// directory entry, only once every byte of it is there.
     pub fn copy_being_made(&self, id: &str) -> PathBuf {
-        self.copies().join(format!(".{id}.partial"))
+        self.copies().join(format!(".{id}{}", Layout::PARTIAL))
     }
-    /// The mark a name being made carries, read by the sweep.
-    pub const PARTIAL: &'static str = ".partial";
+    /// The mark a name being made carries, written by `copy_being_made` and read by `copy_belongs_to`, which are
+    /// the only two that know it.
+    const PARTIAL: &'static str = ".partial";
+    /// The workspace a name under the copies directory belongs to: the name itself, or what the mark above wraps.
+    /// The sweep asks it of every name it finds there, since a copy belongs to one workspace and to nothing else.
+    pub fn copy_belongs_to(name: &str) -> String {
+        name.strip_suffix(Layout::PARTIAL).and_then(|rest| rest.strip_prefix('.')).unwrap_or(name).to_owned()
+    }
     /// Where the project checkouts a box holds live; the copies directory sits beside it under the same root,
     /// which is what lets a copy share blocks with the checkout it was made from.
     pub fn projects(&self) -> PathBuf {
@@ -127,16 +151,14 @@ pub struct Init {
     pub boot_id: String,
 }
 
-/// What the ops keep about one workspace: the spec as it was built, the chain it boots from, when, and the init
-/// that runs it. The chain is the record's own copy: a wake mounts it whatever became of the name it was resolved
-/// from, and the sweep keeps its layers while the record stands.
+/// What the ops keep about one workspace: the spec as it was built, when, and the init that runs it. It names no
+/// image, since every workspace here is made of this computer's own directories: a wake mounts them again as they
+/// are now, which is the box's own upgrades and nothing else.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub id: String,
     pub hostname: String,
-    pub image: String,
-    pub chain: Chain,
     pub labels: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub envs: BTreeMap<String, String>,
@@ -309,12 +331,122 @@ pub fn resolv_text(box_file: &str, upstream: &str) -> String {
     text
 }
 
-/// The overlay: the chain's layers as lowers, newest first as overlayfs reads them, the workspace's own upper
-/// and work directories, mounted nodev so no device node in an image reaches a device.
-pub fn mount_rootfs(lowers: &[PathBuf], upper: &Path, work: &Path, target: &Path) -> Result<(), Error> {
-    let lower: Vec<String> = lowers.iter().rev().map(|p| p.to_string_lossy().into_owned()).collect();
-    let data = format!("lowerdir={},upperdir={},workdir={}", lower.join(":"), upper.display(), work.display());
+/// One overlay: the lower directory read only under the workspace's own upper and work directories, mounted
+/// nodev so no device node under the lower reaches a device from inside.
+pub fn mount_overlay(lower: &Path, upper: &Path, work: &Path, target: &Path) -> Result<(), Error> {
+    let data = format!("lowerdir={},upperdir={},workdir={}", lower.display(), upper.display(), work.display());
     mount(Some("overlay"), target, Some("overlay"), MsFlags::MS_NODEV, Some(data.as_str())).map_err(nix_at(target))
+}
+
+/// The computer's own system directories, one overlay each: what a workspace here is made of. Each is the box's
+/// directory as it is now, read through an upper of the workspace's own, so a workspace installs a package and
+/// the box does not have it, and the box upgrades its tools and a workspace that boots next reads them.
+pub const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
+
+/// The paths a workspace's own empty directory is bound over, after the box's /root came in with it: the
+/// daemon's own folder, where its key and its token live and no workspace may read them, and the two folders a
+/// container engine keeps its images and its containers in, which are the box's and not a workspace's to see.
+/// The engine reaches a workspace through the fenced socket alone.
+pub const BLANKED: [&str; 3] = ["/root/.wsp", "/var/lib/docker", "/var/lib/containerd"];
+
+/// The directories a rootfs carries whatever the box holds: the mount points of the overlays and the binds
+/// above, the ones youki mounts the kernel's own filesystems at, and the ones a login expects to be there.
+const SKELETON: [&str; 15] =
+    ["usr", "etc", "opt", "var", "srv", "root", "home", "tmp", "run", "proc", "sys", "dev", "mnt", "media", "boot"];
+
+/// The rootfs of a workspace on a computer somebody owns, made fresh at every boot: the box's own top-level
+/// symlinks as the box writes them, an empty directory for everything else, an overlay over each of the
+/// computer's system directories, the box's /root bound in read-write so the agents' sign-ins and caches are the
+/// person's own, and an empty directory of the workspace's own over each path under it nothing inside may read.
+/// The copy of a project and youki's own mounts come after, in the boot.
+///
+/// A mount here may fail on a box whose root sits under one of the overlaid directories: the kernel refuses an
+/// overlay whose upper is inside its lower. `crate::doctor::root_under_a_lower` is read before any of this and
+/// says so by name, and DEFAULT_ROOT is `/wsp` for that reason.
+pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
+    let rootfs = layout.rootfs(id);
+    // Before anything: a computer whose /bin is a directory of its own rather than a link into /usr would give a
+    // workspace no shell, since /usr is the only place a tool comes from here.
+    if let Some(reason) = unmerged_root()? {
+        return Err(Error { path: PathBuf::from("/"), source: io::Error::new(io::ErrorKind::Unsupported, reason) });
+    }
+    fs::create_dir_all(&rootfs).map_err(at(&rootfs))?;
+    for name in SKELETON {
+        let dir = rootfs.join(name);
+        fs::create_dir_all(&dir).map_err(at(&dir))?;
+    }
+    // Read off the box, never written down here: on a merged-usr box bin, sbin, lib and lib64 are links into usr,
+    // and a box may hold links of its own beside them. A wake finds the links its own first boot wrote, and one
+    // the box has since pointed somewhere else is written again: the link itself is read, never what it points
+    // at, since what it points at is under an overlay this has not mounted yet.
+    for (name, target) in top_level_links()? {
+        let link = rootfs.join(&name);
+        match fs::read_link(&link) {
+            Ok(held) if held == target => continue,
+            Ok(_) => fs::remove_file(&link).map_err(at(&link))?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(at(&link)(e)),
+        }
+        std::os::unix::fs::symlink(&target, &link).map_err(at(&link))?;
+    }
+    for dir in OVERLAID {
+        let (upper, work) = (layout.upper_of(id, dir), layout.work_of(id, dir));
+        for made in [&upper, &work] {
+            fs::create_dir_all(made).map_err(at(made))?;
+        }
+        mount_overlay(Path::new(dir), &upper, &work, &rootfs.join(dir.trim_start_matches('/')))?;
+    }
+    // The person's own home on the box, shared by every workspace on it: the agents' sign-ins, their memory and
+    // their caches are the computer's and last past any one workspace, last writer wins.
+    bind_into(Path::new(BOX_ROOT), &rootfs.join("root"))?;
+    for at_path in BLANKED {
+        let blank = layout.blank_at(id, at_path);
+        fs::create_dir_all(&blank).map_err(at(&blank))?;
+        // The mount point is under a bind of the box's own directory, so the daemon makes it where the box has
+        // none: /root/.wsp is this daemon's own folder and the two engine folders are made by an engine that
+        // may not be installed here at all.
+        let target = inside(&rootfs, at_path)?;
+        fs::create_dir_all(&target).map_err(at(&target))?;
+        bind_into(&blank, &target)?;
+    }
+    Ok(())
+}
+
+/// The box's own /root, bound into every workspace at the same path.
+const BOX_ROOT: &str = "/root";
+
+/// Whether this computer keeps any of the four merged names as a directory of its own, in the doctor's own
+/// sentence: read off `/` here, where the rootfs is made, and asked again by the self check so a box that cannot
+/// hold a workspace says so at the dial rather than at the first create.
+pub fn unmerged_root() -> Result<Option<String>, Error> {
+    let root = Path::new("/");
+    let mut its_own = Vec::new();
+    for entry in fs::read_dir(root).map_err(at(root))? {
+        let entry = entry.map_err(at(root))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if crate::doctor::MERGED_INTO_USR.contains(&name.as_str()) && entry.file_type().map_err(at(&entry.path()))?.is_dir() {
+            its_own.push(name);
+        }
+    }
+    let names: Vec<&str> = its_own.iter().map(String::as_str).collect();
+    Ok(crate::doctor::root_not_merged(&names))
+}
+
+/// Every top-level name on this computer that is a symlink, with what it points at: on a box with merged usr,
+/// bin, sbin, lib and lib64 point into usr, and a rootfs that lacked them would have no shell at all.
+fn top_level_links() -> Result<Vec<(String, PathBuf)>, Error> {
+    let root = Path::new("/");
+    let mut links = Vec::new();
+    for entry in fs::read_dir(root).map_err(at(root))? {
+        let entry = entry.map_err(at(root))?;
+        if !entry.file_type().map_err(at(&entry.path())).map(|kind| kind.is_symlink())? {
+            continue;
+        }
+        let target = fs::read_link(entry.path()).map_err(at(&entry.path()))?;
+        links.push((entry.file_name().to_string_lossy().into_owned(), target));
+    }
+    links.sort();
+    Ok(links)
 }
 
 /// Detaches the mount; a target that is not mounted is already what was asked for.
@@ -435,17 +567,32 @@ mod tests {
 
     #[test]
     fn every_path_sits_under_the_root() {
-        let l = Layout::new(Path::new("/var/lib/wsp"));
-        assert_eq!(l.workspace("wsp-a"), PathBuf::from("/var/lib/wsp/run/wsp-a"));
-        assert_eq!(l.rootfs("wsp-a"), PathBuf::from("/var/lib/wsp/run/wsp-a/rootfs"));
-        assert_eq!(l.state_of("wsp-a"), PathBuf::from("/var/lib/wsp/state/wsp-a"));
-        assert_eq!(l.put("u1"), PathBuf::from("/var/lib/wsp/put/u1"));
+        let l = Layout::new(Path::new(crate::DEFAULT_ROOT));
+        assert_eq!(l.workspace("wsp-a"), PathBuf::from("/wsp/run/wsp-a"));
+        assert_eq!(l.rootfs("wsp-a"), PathBuf::from("/wsp/run/wsp-a/rootfs"));
+        assert_eq!(l.state_of("wsp-a"), PathBuf::from("/wsp/state/wsp-a"));
+        assert_eq!(l.put("u1"), PathBuf::from("/wsp/put/u1"));
         assert_eq!(l.cgroup_name("wsp-a"), "/wsp/wsp-a");
-        assert_eq!(l.copies(), PathBuf::from("/var/lib/wsp/copies"));
-        assert_eq!(l.copy_of("wsp-a"), PathBuf::from("/var/lib/wsp/copies/wsp-a"));
-        assert_eq!(l.projects(), PathBuf::from("/var/lib/wsp/projects"));
+        assert_eq!(l.copies(), PathBuf::from("/wsp/copies"));
+        assert_eq!(l.copy_of("wsp-a"), PathBuf::from("/wsp/copies/wsp-a"));
+        assert_eq!(l.projects(), PathBuf::from("/wsp/projects"));
         // The copies sit beside the checkouts under one root, which is what lets a copy share their blocks.
         assert_eq!(l.copies().parent(), l.projects().parent());
+        // One upper and one work directory per overlaid directory, both under the workspace's own two, so what a
+        // workspace has written is one tree to count and one tree to keep.
+        assert_eq!(l.upper_of("wsp-a", "/usr"), PathBuf::from("/wsp/run/wsp-a/upper/usr"));
+        assert_eq!(l.work_of("wsp-a", "/var"), PathBuf::from("/wsp/run/wsp-a/work/var"));
+        assert!(OVERLAID.iter().all(|dir| l.upper_of("wsp-a", dir).starts_with(l.upper("wsp-a"))));
+        assert_eq!(l.blank_at("wsp-a", "/root/.wsp"), PathBuf::from("/wsp/run/wsp-a/blank/root/.wsp"));
+        // A blank directory per path and no two of them one directory: what a workspace writes at one of them is
+        // not what it writes at another.
+        let blanks: std::collections::BTreeSet<PathBuf> = BLANKED.iter().map(|at| l.blank_at("wsp-a", at)).collect();
+        assert_eq!(blanks.len(), BLANKED.len());
+        // The mark a copy being made carries is written and read in one place.
+        assert_eq!(l.copy_being_made("wsp-a"), PathBuf::from("/wsp/copies/.wsp-a.partial"));
+        assert_eq!(Layout::copy_belongs_to(".wsp-a.partial"), "wsp-a");
+        assert_eq!(Layout::copy_belongs_to("wsp-a"), "wsp-a");
+        assert_eq!(Layout::copy_belongs_to(".clone-probe-42-0"), ".clone-probe-42-0");
     }
 
     #[test]
@@ -495,7 +642,7 @@ mod tests {
             mem_mb: Some(1024),
             cgroup: "/wsp/wsp-a",
             init: Path::new("/usr/local/bin/wsp-daemon"),
-            etc: Path::new("/var/lib/wsp/run/wsp-a/etc"),
+            etc: Path::new("/wsp/run/wsp-a/etc"),
             engine: None,
         };
         let spec = config_json(&c);
@@ -511,14 +658,14 @@ mod tests {
         assert_eq!(init["source"], "/usr/local/bin/wsp-daemon");
         assert_eq!(init["options"], json!(["bind", "ro"]));
         let hosts = mounts.iter().find(|m| m["destination"] == "/etc/hosts").unwrap();
-        assert_eq!(hosts["source"], "/var/lib/wsp/run/wsp-a/etc/hosts");
+        assert_eq!(hosts["source"], "/wsp/run/wsp-a/etc/hosts");
         assert_eq!(spec["process"]["capabilities"]["bounding"].as_array().unwrap().len(), 13);
         assert!(mounts.iter().all(|m| m["destination"] != crate::engine::INSIDE_DIR));
         let bare = config_json(&Config { cpu: None, mem_mb: None, ..c });
         assert!(bare["linux"].get("resources").is_none());
-        let with_engine = config_json(&Config { engine: Some(Path::new("/var/lib/wsp/run/wsp-a/engine")), ..c });
+        let with_engine = config_json(&Config { engine: Some(Path::new("/wsp/run/wsp-a/engine")), ..c });
         let socket_dir = with_engine["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == crate::engine::INSIDE_DIR).unwrap();
-        assert_eq!(socket_dir["source"], "/var/lib/wsp/run/wsp-a/engine");
+        assert_eq!(socket_dir["source"], "/wsp/run/wsp-a/engine");
     }
 
     #[test]
@@ -552,8 +699,6 @@ mod tests {
         let record = Workspace {
             id: "wsp-a".into(),
             hostname: "wsp-a".into(),
-            image: "ubuntu:24.04".into(),
-            chain: Chain { config: crate::fetch::Digest::of(b"c"), layers: vec![crate::fetch::Digest::of(b"l")] },
             labels: BTreeMap::from([("wsp".to_owned(), "1".to_owned())]),
             envs: BTreeMap::from([("WSP_TOKEN".to_owned(), "t".to_owned())]),
             cpu: Some(2.0),
@@ -582,11 +727,101 @@ mod tests {
         assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
     }
 
+    /// Whether a live mount case may run here: the flag the live suite sets and root, since every mount below
+    /// needs both. A run as anyone else is a return at the first line, as every live case in this crate is.
+    fn live_and_root() -> bool {
+        std::env::var("WSP_RUNTIME_LIVE").as_deref() == Ok("1") && nix::unistd::geteuid().is_root()
+    }
+
+    /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and
+    /// taken down again: the box's own top-level symlinks, the skeleton, an overlay over each of the computer's
+    /// system directories with the workspace's own upper under it, the box's /root, and an empty directory over
+    /// every path nothing inside may read. Root and the live flag, as every mount case here is.
+    #[test]
+    fn a_workspace_is_the_computers_own_directories_over_the_workspaces_own_uppers() {
+        if !live_and_root() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(&dir.path().join("root"));
+        let (id, rootfs) = ("wsp-computer", layout.rootfs("wsp-computer"));
+        mount_computer(&layout, id).unwrap();
+        let table = || fs::read_to_string(MOUNTINFO).unwrap();
+        let mounted = |at: &Path| mount_points(&table()).contains(&at.to_path_buf());
+
+        // The box's own links, read off / rather than written down: on a merged-usr box bin, sbin, lib and lib64
+        // point into usr, and a rootfs without them has no shell at all.
+        for (name, target) in top_level_links().unwrap() {
+            assert_eq!(fs::read_link(rootfs.join(&name)).unwrap(), target, "{name}");
+        }
+        // And a second mount of the same rootfs, which is what a wake is, writes them again rather than
+        // tripping on the links its first boot left.
+        unmount_under(&rootfs).unwrap();
+        mount_computer(&layout, id).unwrap();
+        for (name, target) in top_level_links().unwrap() {
+            assert_eq!(fs::read_link(rootfs.join(&name)).unwrap(), target, "{name} after a second mount");
+        }
+        for name in SKELETON {
+            assert!(rootfs.join(name).is_dir(), "{name}");
+        }
+        // Each of the five is its own overlay, and each carries the box's own files.
+        for lower in OVERLAID {
+            let at = rootfs.join(lower.trim_start_matches('/'));
+            assert!(mounted(&at), "{lower} is not mounted");
+            assert!(layout.upper_of(id, lower).is_dir() && layout.work_of(id, lower).is_dir(), "{lower}");
+        }
+        assert!(rootfs.join("etc/os-release").is_file(), "the box's /etc did not come in");
+
+        // A write through the merged view lands in the workspace's own upper, and the box's directory does not
+        // have it: a workspace installs a package and the computer does not.
+        let written = rootfs.join("usr/lib/wsp-computer-probe");
+        fs::write(&written, b"the workspace wrote this\n").unwrap();
+        assert_eq!(fs::read(layout.upper_of(id, "/usr").join("lib/wsp-computer-probe")).unwrap(), b"the workspace wrote this\n");
+        assert!(!Path::new("/usr/lib/wsp-computer-probe").exists(), "a workspace's write reached the box");
+
+        // The person's own /root is the box's, shared and writable; the daemon's own folder under it and the
+        // engine's two folders are empty directories of the workspace's own.
+        assert!(mounted(&rootfs.join("root")));
+        for at in BLANKED {
+            let at_path = inside(&rootfs, at).unwrap();
+            assert!(mounted(&at_path), "{at} is not blanked");
+            assert_eq!(fs::read_dir(&at_path).unwrap().count(), 0, "{at} is not empty");
+            fs::write(at_path.join("probe"), b"w").unwrap();
+            assert!(layout.blank_at(id, at).join("probe").is_file(), "{at} wrote somewhere else");
+        }
+        // And nothing a workspace writes in one blanked path shows up in another.
+        assert_eq!(fs::read_dir(inside(&rootfs, BLANKED[1]).unwrap()).unwrap().count(), 1);
+
+        unmount_under(&rootfs).unwrap();
+        assert!(!table().contains(&rootfs.display().to_string()), "a mount of the workspace outlived the stop");
+        // What the workspace wrote is still on disk, which is what a wake boots over.
+        assert!(layout.upper_of(id, "/usr").join("lib/wsp-computer-probe").is_file());
+    }
+
+    /// A root placed under one of the directories every workspace overlays: the kernel refuses an overlay whose
+    /// upper sits inside its lower, so the doctor's reading is what a person is told and it is read before
+    /// anything is mounted. The mount is tried here too, so the refusal is not a guess about the kernel.
+    #[test]
+    fn a_root_under_one_of_the_lowers_is_a_mount_the_kernel_refuses() {
+        if !live_and_root() {
+            return;
+        }
+        let under = Path::new("/var/lib/wsp-904-under-a-lower");
+        let said = crate::doctor::root_under_a_lower(under).expect("a root under /var read as clear of it");
+        assert!(said.contains("/var/lib/wsp-904-under-a-lower") && said.contains("/var"), "{said}");
+        let layout = Layout::new(under);
+        let refused = mount_computer(&layout, "wsp-under").unwrap_err().to_string();
+        let _ = unmount_under(&layout.rootfs("wsp-under"));
+        fs::remove_dir_all(under).unwrap();
+        // EINVAL is all the kernel says about it, which is why the sentence above is the one a person reads.
+        assert!(refused.contains("/var/lib/wsp-904-under-a-lower"), "{refused}");
+    }
+
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself
     /// holds under the same root stays. Root and a mount namespace of its own, so it runs where the live cases do.
     #[test]
     fn unmount_under_takes_a_bind_under_a_bind_and_leaves_the_boxs_own_mounts() {
-        if std::env::var("WSP_RUNTIME_LIVE").as_deref() != Ok("1") || !nix::unistd::geteuid().is_root() {
+        if !live_and_root() {
             return;
         }
         let dir = tempfile::tempdir().unwrap();

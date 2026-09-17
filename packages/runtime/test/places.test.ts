@@ -36,6 +36,7 @@ import {
   placeDialBackLine,
   workFolderIn,
   copyStoppedLine,
+  NO_IMAGES_HERE,
   type GoldenStageEvent,
   type PlaceStageEvent,
   type PlaceReport,
@@ -236,7 +237,7 @@ describe("a computer joining", () => {
 
   it("refuses a computer whose kernel cannot boot the image, in the doctor's own sentence, and writes no record for it", async () => {
     const { hostKey, store } = await serving();
-    const blocked = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const blocked = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
     const { client, reply } = await join(hostKey, { code: await code(), report: report("laptop", { runsWorkspaces: false, workspacesBlocked: blocked }) });
     sockets.push(client.ws);
     expect(String(reply["error"])).toBe(placeCannotBootLine("laptop", blocked));
@@ -317,7 +318,7 @@ describe("a computer joining", () => {
     const joined = await join(hostKey, { code: await code(), answers: c => forks(c) });
     sockets.push(joined.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
-    const BLOCKED = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const BLOCKED = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
     const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
     // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
     expect(again.proved).toMatchObject({ ok: false });
@@ -1458,7 +1459,6 @@ interface ForkingPlace {
   killed: string[];
   paused: number;
   resumed: number;
-  snapshots: string[];
   tunnels: { tunnelId: string; port: number }[];
   /** What the next create answers with instead of a machine; cleared after one use. */
   refuseCreate?: { error: string; kind: string; status: number };
@@ -1468,8 +1468,6 @@ interface ForkingPlace {
   asked: Record<string, number>;
   /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
   daemonAnswersAfter: number;
-  /** How long a snapshot job there reads running before it reads done; the layer takes time to write. */
-  snapshotTakesMs: number;
   /** Ops this computer takes and never answers, so a test can close the socket with a frame in flight on it. */
   swallow: Set<string>;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
@@ -1486,6 +1484,7 @@ const PLACE_FACTS = {
     signedUrls: false,
     callbackRelay: true,
     diskSnapshots: true,
+    images: true,
     snapshotsAnyLife: false,
     snapshotListing: true,
     templates: true,
@@ -1527,12 +1526,10 @@ function forks(
     killed: [],
     paused: 0,
     resumed: 0,
-    snapshots: [],
     tunnels: [],
     ops: [],
     asked: {},
     daemonAnswersAfter: 1,
-    snapshotTakesMs: 0,
     swallow: new Set<string>(),
     holdResumes: () => {
       held = [];
@@ -1543,7 +1540,6 @@ function forks(
     },
   };
   let made = 0;
-  const jobs = new Map<string, { name: string; started: number }>();
   // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
   let state: "running" | "paused" = "running";
   client.ws.on("message", raw => {
@@ -1590,18 +1586,6 @@ function forks(
         return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
       case "machine.previewUrl":
         return say({ reach: { url: "http://127.0.0.1:49155", token: "", expiresAt: 1 } });
-      // A snapshot is a job there: named at once, asked after until the layer is written.
-      case "machine.snapshot":
-        seen.snapshots.push(String(frame["name"]));
-        jobs.set(`job-${seen.snapshots.length}`, { name: String(frame["name"]), started: Date.now() });
-        return say({ job: `job-${seen.snapshots.length}` });
-      case "machine.snapshotJob": {
-        const job = jobs.get(String(frame["job"]));
-        if (job === undefined) return void client.ws.send(JSON.stringify({ id, ok: false, error: `no such snapshot job: ${String(frame["job"])}`, kind: "missing", status: 404 }));
-        const elapsed = Date.now() - job.started;
-        if (elapsed < seen.snapshotTakesMs) return say({ state: "running", bytes: Math.floor((elapsed / seen.snapshotTakesMs) * 5_000_000), total: 5_000_000 });
-        return say({ state: "done", bytes: 5_000_000, total: 5_000_000, snapshotId: `sha256:${job.name}` });
-      }
       case "machine.pause":
         seen.paused++;
         state = "paused";
@@ -1864,7 +1848,7 @@ describe("a fork on a computer you joined", () => {
     expect(backend.machines).toHaveLength(0);
   });
 
-  it("takes a snapshot of a fork on that computer there, and asks this host's provider for none", async () => {
+  it("refuses a snapshot of a fork on that computer in one sentence, and asks that computer and this host's provider for none", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
@@ -1873,8 +1857,8 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    // A fork of a project golden carries that project from birth, which is what the verb names the image after;
-    // nothing is imported here, since what this test reads is which computer the snapshot is taken on.
+    // A fork of a project golden carries that project from birth, so the verb gets past its own project wall and
+    // what it meets is the computer's.
     await store.put("project-goldens", "snap_p", {
       snapshotId: "snap_p",
       golden: "snap_g",
@@ -1884,39 +1868,11 @@ describe("a fork on a computer you joined", () => {
       createdAt: "2026-09-12T00:00:00.000Z",
     });
     const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
-    const golden = await runtime.workspaces.snapshot(made.id);
-    expect(place.snapshots).toHaveLength(1);
-    expect(place.snapshots[0]).toContain("proj");
-    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
+    // A computer somebody joined keeps no image, so there is nothing for a copy of this fork's disk to become:
+    // the sentence is the far side's own and no frame is sent for it.
+    await expect(runtime.workspaces.snapshot(made.id)).rejects.toThrow(NO_IMAGES_HERE);
+    expect(place.ops.filter(op => op.startsWith("machine.snapshot"))).toEqual([]);
     expect(backend.snapshots).toEqual([]);
-  });
-
-  it("a snapshot there that outlasts the link's frame bound completes: the job is asked after a frame at a time, and every frame answers inside the bound", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const hostKey = newPlaceKeyPair();
-    // A frame bound far under the job: the old road, one frame waiting on the whole layer, failed here.
-    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey), placeFrameWaitMs: 300 });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    let place!: ForkingPlace;
-    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
-    sockets.push(client.ws);
-    place.snapshotTakesMs = 1_500;
-    await store.put("project-goldens", "snap_p", {
-      snapshotId: "snap_p",
-      golden: "snap_g",
-      projects: [{ name: "proj", dest: "/root/proj", importedAt: "2026-09-12T00:00:00.000Z", size: 20 }],
-      workspaceId: "ws_older",
-      workspaceName: "older",
-      createdAt: "2026-09-12T00:00:00.000Z",
-    });
-    const made = await runtime.workspaces.create({ golden: "snap_p", name: "x", on: "srv" });
-    const started = Date.now();
-    const golden = await runtime.workspaces.snapshot(made.id);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
-    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
-    expect(place.asked["machine.snapshot"]).toBe(1);
-    expect(place.asked["machine.snapshotJob"]).toBeGreaterThanOrEqual(2);
   });
 
   it("says the computer is not connected rather than asking the provider anything, and reads it again when it is back", async () => {

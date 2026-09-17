@@ -89,7 +89,8 @@ pub(crate) struct Flags {
     pub(crate) link_refused_retry_ms: Option<u64>,
     #[arg(long, value_name = "n")]
     pub(crate) link_backoff_ms: Option<u64>,
-    /// Where a place's daemon keeps the layers and the workspaces it runs; /var/lib/wsp when absent.
+    /// Where a place's daemon keeps the workspaces it runs, their copies of a project and the checkouts those
+    /// are made from; /wsp when absent.
     #[arg(long, value_name = "dir")]
     pub(crate) runtime_root: Option<PathBuf>,
 }

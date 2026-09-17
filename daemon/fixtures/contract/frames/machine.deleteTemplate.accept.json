@@ -1,7 +1,0 @@
-[
-  {
-    "id": 1,
-    "op": "machine.deleteTemplate",
-    "templateId": "t1"
-  }
-]

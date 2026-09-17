@@ -401,15 +401,6 @@ fn open_runtime(options: &Options, log: &Log) -> Option<Arc<wsp_runtime::ops::Op
     };
     match wsp_runtime::ops::Ops::open(&root, exe) {
         Ok(ops) => {
-            let swept = ops.swept_at_open();
-            if swept.bytes > 0 {
-                log(&format!(
-                    "layer store swept: {} blobs, {} unpacked layers, {} bytes",
-                    swept.blobs.len(),
-                    swept.unpacked.len(),
-                    swept.bytes
-                ));
-            }
             for id in ops.stopped_at_open() {
                 log(&format!("workspace {id} found stopped at start: its init is gone"));
             }

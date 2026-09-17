@@ -68,7 +68,8 @@ pub struct Doctor {
 const WANTED_CONTROLLERS: [&str; 2] = ["memory", "cpu"];
 
 /// The doctor's reading of a box, from its facts alone: workspaces run here when the kernel offers cgroup v2 with
-/// the controllers a cap needs and an overlay to stack the layers on, and the daemon is root; else the first thing
+/// the controllers a cap needs and an overlay to read its own directories through, and the daemon is root; else
+/// the first thing
 /// missing is the reason, in the self check's own words so the two never disagree.
 pub fn assess(facts: &Facts) -> Doctor {
     let blocked = blocking_reason(facts);
@@ -90,7 +91,10 @@ fn blocking_reason(facts: &Facts) -> Option<String> {
         }
     }
     if !facts.overlay {
-        return Some("this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on".to_owned());
+        return Some(
+            "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through"
+                .to_owned(),
+        );
     }
     if !facts.root {
         return Some("wsp runs workspaces on this computer as root, and this daemon is not root".to_owned());
@@ -136,6 +140,48 @@ fn kernel_knows_overlay() -> bool {
 #[cfg(target_os = "linux")]
 fn euid_is_root() -> bool {
     nix::unistd::geteuid().is_root()
+}
+
+/// The directories a workspace's rootfs takes as overlay lowers, as the bundle mounts them. Read here too, since
+/// the one thing that can make every one of those mounts fail is where the daemon's own root was put, and that is
+/// a thing the doctor answers before anything is mounted.
+#[cfg(target_os = "linux")]
+const OVERLAID: [&str; 5] = crate::bundle::OVERLAID;
+#[cfg(not(target_os = "linux"))]
+const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
+
+/// The four names a computer with merged usr keeps as symlinks into /usr. A workspace's rootfs recreates them as
+/// the links they are and reads everything under them through the overlay over /usr; a computer that keeps them
+/// as directories of their own would hand a workspace no shell and no library at all, since nothing here overlays
+/// them.
+pub const MERGED_INTO_USR: [&str; 4] = ["bin", "sbin", "lib", "lib64"];
+
+/// Why a workspace cannot be made of this computer's directories: it keeps one of the four names above as a
+/// directory of its own rather than as a link into /usr. One sentence naming them, since the person can neither
+/// merge their root nor guess why a workspace came up with no shell. Nothing where every one of them is a link or
+/// absent, which every merged-usr distribution is.
+pub fn root_not_merged(directories: &[&str]) -> Option<String> {
+    let its_own: Vec<&str> = MERGED_INTO_USR.iter().copied().filter(|name| directories.contains(name)).collect();
+    if its_own.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "this computer keeps /{} of its own rather than as a link into /usr, and a workspace here is made of /usr alone: wsp runs workspaces on a computer with a merged /usr",
+        its_own.join(", /")
+    ))
+}
+
+/// Why this computer runs no workspace under the root it was given: the root sits inside one of the directories
+/// every workspace overlays, and the kernel refuses an overlay whose upper directory is inside its lower. One
+/// sentence naming both paths, since the fix is to move the root and the person has to know what to move it out
+/// of. Nothing where the root is clear of all five, which `/wsp` is.
+pub fn root_under_a_lower(root: &Path) -> Option<String> {
+    let lower = OVERLAID.iter().find(|lower| root.starts_with(lower))?;
+    Some(format!(
+        "{} sits under {lower}, which every workspace here reads through an overlay: the kernel refuses an overlay whose upper directory is inside its lower, so this daemon's root belongs somewhere else, {} by default",
+        root.display(),
+        crate::DEFAULT_ROOT
+    ))
 }
 
 /// The engine a project's containers would run on: Docker where its cli is on the PATH, else podman, else none.
@@ -223,6 +269,38 @@ mod tests {
         let d = assess(&Facts { kvm: false, engine: Engine::Docker, ..box_that_runs() });
         assert!(d.runs_workspaces && !d.kvm && d.engine == Engine::Docker);
         assert_eq!(Engine::Podman.word(), "podman");
+    }
+
+    /// The one reading that decides whether a workspace can be built under a root at all, in the words the self
+    /// check refuses with: a root under any of the five directories a workspace overlays, named with the lower it
+    /// sits under, and nothing for the default root.
+    #[test]
+    fn a_root_under_a_directory_every_workspace_overlays_is_named_with_that_directory() {
+        for (root, lower) in
+            [("/var/lib/wsp", "/var"), ("/usr/local/wsp", "/usr"), ("/etc/wsp", "/etc"), ("/opt/wsp", "/opt"), ("/srv/wsp", "/srv")]
+        {
+            let said = root_under_a_lower(Path::new(root)).unwrap_or_else(|| panic!("{root} read as clear of {lower}"));
+            assert!(said.contains(root) && said.contains(lower), "{said}");
+            assert!(said.contains(crate::DEFAULT_ROOT), "{said}");
+        }
+        for clear in [crate::DEFAULT_ROOT, "/wsp/one", "/root/wsp-904/plain-root", "/tmp/x", "/home/z/wsp"] {
+            assert_eq!(root_under_a_lower(Path::new(clear)), None, "{clear}");
+        }
+        // A name that only starts with a lower's letters is not under it.
+        assert_eq!(root_under_a_lower(Path::new("/vary/wsp")), None);
+    }
+
+    /// A computer that keeps /bin or /lib of its own: every tool a workspace runs would be missing from it, so
+    /// the reading names what it found and the create says so rather than booting a rootfs with no shell.
+    #[test]
+    fn a_root_that_is_not_merged_into_usr_is_named_with_the_directories_it_keeps() {
+        assert_eq!(root_not_merged(&[]), None);
+        assert_eq!(root_not_merged(&["etc", "var", "opt", "home"]), None);
+        let said = root_not_merged(&["bin", "etc", "lib"]).expect("a root with its own /bin read as merged");
+        assert!(said.contains("/bin, /lib") && said.contains("merged /usr"), "{said}");
+        assert!(root_not_merged(&["lib64"]).unwrap().contains("/lib64"));
+        // The order is the one written down, not the one the directory handed back.
+        assert!(root_not_merged(&["lib", "bin"]).unwrap().contains("/bin, /lib"));
     }
 
     #[test]

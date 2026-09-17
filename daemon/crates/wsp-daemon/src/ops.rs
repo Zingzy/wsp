@@ -714,6 +714,32 @@ mod tests {
         }
     }
 
+    /// The eight ops a layer store answered: they are on no road now, on the link least of all, so the daemon
+    /// names them the way it names any op it does not serve. A workspace on a computer somebody joined is a copy
+    /// of that computer, so there is no snapshot to save, no template to name and nothing to list.
+    #[tokio::test]
+    async fn the_snapshot_and_template_ops_are_no_longer_ops_this_daemon_serves() {
+        let b = bench();
+        let (link, _rx) = conn_on(None, Road::Link);
+        for op in [
+            "machine.snapshot",
+            "machine.snapshotJob",
+            "machine.deleteSnapshot",
+            "machine.listSnapshots",
+            "machine.promoteSnapshot",
+            "machine.getTemplate",
+            "machine.listTemplates",
+            "machine.deleteTemplate",
+        ] {
+            assert!(!MACHINE_OPS.contains(&op), "{op} is still a machine op");
+            assert_eq!(
+                reply(&b, &link, json!({"id": 9, "op": op, "machineId": "wsp-x", "name": "v1", "snapshotId": "sha256:aa", "templateId": "wsp/dev:template", "job": "j"})).await,
+                json!({"id": 9, "ok": false, "error": words::unknown_op(op)}),
+                "{op}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn on_the_link_every_machine_op_is_answered_by_the_runtime_stub_and_the_leave_sweeps_then_stops() {
         let b = bench();
@@ -809,7 +835,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(lost, json!({"id": 2, "ok": false, "error": "no such workspace: wsp-x", "kind": "missing", "status": 404}));
-        assert!(runtime_root.path().join("layers").is_dir(), "the store is opened under the runtime root");
+        // What the open makes under the root it was given, and nothing of a layer store: the workspaces, the
+        // runtime's own state and the copies a workspace's project is made as.
+        for dir in ["run", "state", "copies"] {
+            assert!(runtime_root.path().join(dir).is_dir(), "the open made no {dir} under the runtime root");
+        }
+        assert!(!runtime_root.path().join("layers").exists(), "the open made a layer store under the runtime root");
         // The same op inbound is answered by the same runtime, and the reading of a workspace it has not got is
         // that workspace missing rather than the road refusal; an op that drives something is still refused.
         let (inbound, _rx2) = conn(None);

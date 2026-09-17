@@ -90,12 +90,6 @@ impl CopyWord {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MachineLife {
-    pub first_life: bool,
-}
-
 /// The engine's own error kinds, carried on a refused frame; absent is the link's own: the place is not connected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,18 +130,6 @@ pub enum MachineOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         labels: Option<BTreeMap<String, String>>,
     },
-    #[serde(rename = "machine.deleteSnapshot", rename_all = "camelCase")]
-    DeleteSnapshot { snapshot_id: String },
-    #[serde(rename = "machine.listSnapshots")]
-    ListSnapshots,
-    #[serde(rename = "machine.promoteSnapshot", rename_all = "camelCase")]
-    PromoteSnapshot { snapshot_id: String, name: String },
-    #[serde(rename = "machine.getTemplate", rename_all = "camelCase")]
-    GetTemplate { template_id: String },
-    #[serde(rename = "machine.listTemplates")]
-    ListTemplates,
-    #[serde(rename = "machine.deleteTemplate", rename_all = "camelCase")]
-    DeleteTemplate { template_id: String },
     #[serde(rename = "machine.exec", rename_all = "camelCase")]
     Exec {
         machine_id: String,
@@ -156,11 +138,6 @@ pub enum MachineOp {
         #[serde(default, deserialize_with = "positive", skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u32>,
     },
-    #[serde(rename = "machine.snapshot", rename_all = "camelCase")]
-    Snapshot { machine_id: String, name: String, life: MachineLife },
-    /// How far the snapshot job a `machine.snapshot` answered with has got: the host asks again until it reads done.
-    #[serde(rename = "machine.snapshotJob")]
-    SnapshotJob { job: String },
     #[serde(rename = "machine.pause", rename_all = "camelCase")]
     Pause { machine_id: String },
     #[serde(rename = "machine.resume", rename_all = "camelCase")]
@@ -202,22 +179,14 @@ pub enum MachineOp {
 }
 
 /// The op names above, which the daemon refuses on every socket but the link.
-pub const MACHINE_OPS: [&str; 27] = [
+pub const MACHINE_OPS: [&str; 19] = [
     "machine.backend",
     "machine.capacity",
     "machine.checkKey",
     "machine.create",
     "machine.get",
     "machine.list",
-    "machine.deleteSnapshot",
-    "machine.listSnapshots",
-    "machine.promoteSnapshot",
-    "machine.getTemplate",
-    "machine.listTemplates",
-    "machine.deleteTemplate",
     "machine.exec",
-    "machine.snapshot",
-    "machine.snapshotJob",
     "machine.pause",
     "machine.resume",
     "machine.kill",
@@ -282,6 +251,9 @@ pub struct Capabilities {
     pub signed_urls: bool,
     pub callback_relay: bool,
     pub disk_snapshots: bool,
+    /// The backend keeps images at all: a template or a snapshot a fork can boot from. False on a computer
+    /// somebody joined, where a workspace is a copy of that computer itself and nothing is pulled or built.
+    pub images: bool,
     /// A copy may be taken from any life of the machine, not only its first; false where the provider refuses a
     /// machine that was resumed.
     pub snapshots_any_life: bool,
@@ -547,92 +519,4 @@ impl PreviewReach {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MachineReachReply {
     pub reach: PreviewReach,
-}
-
-/// One snapshot as the store lists it: sizeBytes is the snapshot's own layer, never the chain under it, so storage
-/// sums honestly; parent is the snapshot the workspace was made from, null at a root.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SnapshotRow {
-    pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub size_bytes: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<String>,
-    #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
-    pub parent: Option<Option<String>>,
-}
-
-/// A field that is absent, null or a value, kept apart: serde reads null as absent unless told otherwise.
-fn nullable<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
-    Option::<String>::deserialize(d).map(Some)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum TemplateStatus {
-    Building,
-    Ready,
-    Failed,
-}
-
-/// One template as the provider reports it; a promoted snapshot reads ready at once.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TemplateRow {
-    pub id: String,
-    pub name: String,
-    pub status: TemplateStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<String>,
-}
-
-/// A snapshot is a job: the reply names it, and `machine.snapshotJob` under that name says how far it has got.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MachineSnapshotReply {
-    pub job: String,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum SnapshotJobState {
-    Running,
-    Done,
-}
-
-/// One reading of a snapshot job: the layer's bytes written so far, the upper directory's bytes once they have
-/// been counted, and the snapshot's id once the job is done. A job that failed is a refusal with its reason.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MachineSnapshotJobReply {
-    pub state: SnapshotJobState,
-    pub bytes: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub total: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub snapshot_id: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MachineSnapshotsReply {
-    pub snapshots: Vec<SnapshotRow>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MachinePromoteReply {
-    pub template_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MachineTemplateReply {
-    pub template: TemplateRow,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MachineTemplatesReply {
-    pub templates: Vec<TemplateRow>,
 }
