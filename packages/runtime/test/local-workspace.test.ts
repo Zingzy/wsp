@@ -229,6 +229,16 @@ describe("local workspace", () => {
     expect((await rt.workspaces.create({ project: second.id, name: "mac2" })).kind).toBe("local");
   });
 
+  it("a create on this computer that its own refusal stops asks nothing of the workspace it names as a parent", async () => {
+    const rt = runtime();
+    const project = await projectOn(rt, HERE_PLACE_ID, repoIn(root));
+    const parent = await rt.workspaces.create({ project: project.id, name: "mac" });
+    // The folder the parent works in is gone, so a read of the branch it is on answers with git's own failure. A
+    // create that reads it before its own refusals would answer about that read instead of about itself.
+    rmSync(join(root, "work"), { recursive: true, force: true });
+    await expect(rt.workspaces.create({ project: project.id, name: "mac2", parent: parent.id }, "relayed")).rejects.toThrow(relayedRecordRefusal("mac2"));
+  });
+
   it("a turn on this computer runs under the person's own login and no sandbox flag: this computer is not a machine", async () => {
     const seen: HarnessAdapterContext[] = [];
     const seeing: HarnessAdapterFactory = ctx => {

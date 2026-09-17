@@ -1630,3 +1630,63 @@ describe("the person's terminal config", () => {
     expect(wire.TerminalConfig.safeParse({ ...none, cursorStyle: "beam" }).success).toBe(false);
   });
 });
+
+describe("bringing work back", () => {
+  const view = {
+    id: "ws_child",
+    name: "pricing-page-fork",
+    machineId: "m2",
+    phase: "running",
+    golden: "snap_g",
+    createdAt: "2026-09-17T00:00:00.000Z",
+    project: { id: "pr_1a2b3c4d", name: "landing", path: "/root/landing", computer: "box" },
+    parentWorkspaceId: "ws_parent",
+  } as const;
+
+  it("a workspace says which workspace it was forked out of, and every door hands that over", () => {
+    expect(wire.WorkspaceView.parse(view)).toEqual(view);
+    expect(wire.WorkspaceOut.parse(view).parentWorkspaceId).toBe("ws_parent");
+    // A workspace a person made is nobody's child and carries none.
+    const { parentWorkspaceId: _child, ...own } = view;
+    expect(wire.WorkspaceOut.parse(own).parentWorkspaceId).toBeUndefined();
+    expect(() => wire.WorkspaceView.parse({ ...view, parentWorkspaceId: 7 })).toThrow();
+  });
+
+  it("the three git frames parse, the base is the caller's to leave out, and the workspace op carries the two words a pull request takes", () => {
+    for (const frame of [
+      { id: 1, op: "git.push", cwd: "/root/landing", base: "main" },
+      { id: 2, op: "git.push", cwd: "/root/landing" },
+      { id: 3, op: "git.pr", cwd: "/root/landing", base: "main", title: "the pricing page", body: "what it does" },
+      { id: 4, op: "git.prState", cwd: "/root/landing" },
+    ]) {
+      expect(wire.DaemonRequest.parse(frame)).toEqual(frame);
+    }
+    expect(() => wire.DaemonRequest.parse({ id: 5, op: "git.push", base: "main" })).toThrow();
+    expect(() => wire.DaemonRequest.parse({ id: 6, op: "git.prState" })).toThrow();
+    const asked = { id: 7, op: "workspaces.bringBack", workspaceId: "ws_child", title: "the pricing page" };
+    expect(wire.RuntimeRequest.parse(asked)).toEqual(asked);
+    // A thread may get its own work out, which is why the op is on the list a thread's token opens.
+    expect(wire.THREAD_OPS).toContain("workspaces.bringBack");
+  });
+
+  it("the result carries the push, and the pull request or the reason there is none", () => {
+    const pushed = { branch: "pricing-page", base: "main", ahead: 2, uncommitted: 0, stat: [" 1 file changed"] };
+    const withPr = { ...pushed, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" } };
+    expect(wire.BringBackResult.parse(withPr)).toEqual(withPr);
+    const noted = { ...pushed, note: wire.noHostCliLine("github.com") };
+    expect(wire.BringBackResult.parse(noted)).toEqual(noted);
+    expect(noted.note).toBe("no signed-in command line for github.com is on this computer; the branch is pushed and the pull request waits for one");
+    expect(() => wire.BringBackResult.parse({ ...withPr, pr: { ...withPr.pr, state: "draft" } })).toThrow();
+    expect(wire.DaemonErrorCode.options).toContain("no-host-cli");
+  });
+
+  it("a thread works on its own project alone, and the refusal names both", () => {
+    expect(wire.spawnProjectRefusal("thread_a1b2c3d4", "landing", "docs")).toBe(
+      `this request came out of thread ${wire.threadWord("thread_a1b2c3d4")} on landing; a thread works on its own project alone, and docs is another`,
+    );
+    // Bringing work back is one of the acts a thread may ask for, and it is named in the table like the rest.
+    expect(wire.SPAWN_ACTS_ALLOWED).toContain("bring_back");
+    expect(wire.SPAWN_ACTS["bring_back"]).toBe("bring its work back");
+    expect(wire.spawnActRefusal("thread_a1b2c3d4", "delete")).toContain("bring its work back");
+  });
+});

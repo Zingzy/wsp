@@ -139,3 +139,26 @@ pub fn update_landed(at: &str) -> String {
 pub fn update_swept(parts: usize) -> String {
     format!("swept {parts} leftover update part(s) from a link that dropped mid-upload")
 }
+
+/// What a bring back on the branch the work started from is refused with: wsp makes no branch and pushes no base,
+/// so the commits move to a branch of their own first.
+pub fn on_base_refusal(base: &str) -> String {
+    format!("this workspace is on {base}, the branch it started from; move the commits onto a branch of their own and bring back again")
+}
+
+/// What a bring back in a checkout that is on no branch at all is refused with.
+pub const NOT_ON_A_BRANCH: &str = "this workspace is not on a branch, so there is nothing to bring back yet";
+
+/// What a bring back of a branch the base already holds every commit of is refused with.
+pub fn nothing_ahead(branch: &str, base: &str) -> String {
+    format!("{branch} has no commits that {base} lacks, so there is nothing to bring back")
+}
+
+/// What a bring back in a checkout with nowhere to push is refused with.
+pub const NO_REMOTE: &str = "this project has no remote to push to";
+
+/// What a pull request is answered with where the git host's own command line is not on this computer: the push
+/// stands, so a client reads this beside it as a note rather than as the bring back having failed.
+pub fn no_host_cli(host: &str) -> String {
+    format!("no signed-in command line for {host} is on this computer; the branch is pushed and the pull request waits for one")
+}

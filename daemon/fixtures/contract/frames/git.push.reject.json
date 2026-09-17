@@ -1,0 +1,12 @@
+[
+  {
+    "id": 1,
+    "op": "git.push"
+  },
+  {
+    "id": 1,
+    "op": "git.push",
+    "cwd": "repo",
+    "base": 3
+  }
+]

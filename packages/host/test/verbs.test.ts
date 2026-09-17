@@ -10,8 +10,8 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
-import { copyKey, createRuntime, harnessCatalog, memoryStore, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
+import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type RuntimeDaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, localWorkFolder, serve } from "../src/cli.js";
@@ -30,6 +30,25 @@ import { createOn, projectOn, CUT_LINE, EXPORT_SESSION, EXPORT_SOURCE, PAGE, UNR
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
 runsFromItsOwnFolder();
+
+/** A daemon inside a workspace that answers the two frames a bring back sends, so the verb's own line is read here
+ * without a machine: the push, then the pull request or the sentence that says none was opened. */
+function fakeGitDaemon(): { open: (o: { url: string; token: string }) => Promise<RuntimeDaemonChannel>; pr: { refuse?: { error: string; code?: DaemonErrorCode } } } {
+  const state: { refuse?: { error: string; code?: DaemonErrorCode } } = {};
+  return {
+    pr: state,
+    open: async () => ({
+      send: async (frame: { op: string }) => {
+        if (frame.op === "git.push") {
+          return { id: 1, ok: true, branch: "pricing-page", base: "main", remote: "origin", ahead: 2, uncommitted: 1, stat: [" src/page.tsx | 4 ++--", " 1 file changed, 2 insertions(+), 2 deletions(-)"] };
+        }
+        if (state.refuse !== undefined) return { id: 1, ok: false as const, ...state.refuse };
+        return { id: 1, ok: true, pr: { number: 12, url: "https://github.com/o/r/pull/12", state: "open", host: "github.com" }, created: true };
+      },
+      close: () => {},
+    }),
+  };
+}
 
 // A path the process may not read is refused here and not by chmod: these tests run as root, which reads anything.
 vi.mock("node:fs", async importOriginal => (await import("../../runtime/test/fs-refusal.js")).refusingFs(await importOriginal<typeof import("node:fs")>()));
@@ -63,6 +82,7 @@ describe("wsp verbs over the host", () => {
   /** The environment every verb here runs with: this file's, never the shell that started the run, so a builder with
    * WSP_TURN exported does not have every start refused. A case that means a turn writes that turn's token into it. */
   let env: Record<string, string | undefined>;
+  let daemon: ReturnType<typeof fakeGitDaemon>;
 
   beforeEach(async () => {
     asked.length = 0;
@@ -82,7 +102,8 @@ describe("wsp verbs over the host", () => {
     await store.put("goldens", copyKey("default", "default"), SEALED_GOLDEN);
     claude = scriptedAgent(prompt => (prompt === "die" ? "" : `re: ${prompt}`));
     codex = scriptedAgent(prompt => `codex: ${prompt}`);
-    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, undefined, undefined, copier), placeLinks: placeWiring(statePath, {}) });
+    daemon = fakeGitDaemon();
+    rt = createRuntime({ backend, store, adapters: { claude: claude.adapter, codex: probing(codex.adapter) }, local: localWiring(join(dir, "user"), process.env, undefined, undefined, copier), placeLinks: placeWiring(statePath, {}), daemonChannel: daemon.open });
     handle = await serve(captured(), { port: 0, wsPort: 0, statePath, webDir, runtime: rt });
     // A workspace is one project's copy, so every line that makes one needs a project first; one project here, so
     // wsp new takes the work alone.
@@ -504,6 +525,9 @@ describe("wsp verbs over the host", () => {
     expect(plain.code).toBe(0);
     const forks = (await rt.workspaces.list()).filter(w => w.id !== alpha!.id);
     expect(forks.map(w => [w.name, w.golden])).toEqual([["alpha-fork", alpha!.golden]]);
+    // A fork is a child of the workspace it was forked from: the record says so, and a bring back from it reads
+    // that parent's own branch as the base its work lands in.
+    expect(forks[0]!.parentWorkspaceId).toBe(alpha!.id);
     expect(plain.io.lines).toEqual([`created alpha-fork ${forks[0]!.id} with ${forks[0]!.project.name} at ${forks[0]!.project.path}`]);
 
     const sent = await run("fork", alpha!.id, "--name", "worker", "--send", "build it");
@@ -513,6 +537,31 @@ describe("wsp verbs over the host", () => {
     expect(thread).toMatchObject({ harness: "claude", startedBy: "cli", prompt: "build it", status: "completed" });
     expect(sent.io.lines).toEqual([`created worker ${worker.id} with ${worker.project.name} at ${worker.project.path}`, `thread ${thread!.threadId} · ${THREAD_PREFIX_WORD}`, "re: build it"]);
     expect(sent.io.streamed.endsWith("ready\nre: \n$ ls\nbuild it\ncompleted\n")).toBe(true);
+  });
+
+  it("bring back prints where the branch went, the diffstat under it and the pull request, and the note when a machine has no command line for the host", async () => {
+    await run("new", "alpha");
+    const [alpha] = await rt.workspaces.list();
+    backend.machines.at(-1)!.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+    // The guest carries this host's daemon token, which is what the channel the bring back opens is authed with.
+    backend.execImpl = (_m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestAnswer(cmd));
+    const brought = await run("bring", "back", "alpha");
+    expect(brought.io.errors.join("|")).toBe("");
+    expect(brought.code).toBe(0);
+    expect(brought.io.lines.join("\n").split("\n")).toEqual([
+      `${alpha!.name}: pricing-page pushed, 2 commits over main`,
+      " src/page.tsx | 4 ++--",
+      " 1 file changed, 2 insertions(+), 2 deletions(-)",
+      "https://github.com/o/r/pull/12 (open)",
+      "1 change left in the workspace; nothing uncommitted travels",
+    ]);
+    // The push landed either way, so a machine with no gh on it reads as a branch and a sentence, not a failure.
+    daemon.pr.refuse = { error: noHostCliLine("github.com"), code: "no-host-cli" };
+    const noCli = await run("bring", "back", "alpha");
+    expect(noCli.code).toBe(0);
+    expect(noCli.io.lines.join("\n").split("\n").at(-2)).toBe(noHostCliLine("github.com"));
+    // And a refusal of the push itself is the verb's refusal, in the daemon's own words.
+    daemon.pr.refuse = undefined;
   });
 
   it("run --title names the thread from the first second, in the agent's own launch and in the table", async () => {

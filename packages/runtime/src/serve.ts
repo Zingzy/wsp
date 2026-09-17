@@ -656,6 +656,14 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.agents(workspaceId, patch, origin)) });
               return;
             }
+            case "workspaces.bringBack": {
+              const brought = await rt.workspaces.bringBack(
+                { workspaceId: msg.workspaceId, ...(msg.title !== undefined ? { title: msg.title } : {}), ...(msg.body !== undefined ? { body: msg.body } : {}) },
+                origin,
+              );
+              send({ id: msg.id, ok: true, ...brought });
+              return;
+            }
             case "workspaces.delete":
               await rt.workspaces.delete(msg.workspaceId, origin);
               send({ id: msg.id, ok: true });
