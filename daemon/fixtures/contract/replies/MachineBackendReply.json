@@ -51,7 +51,8 @@
     "baseTemplates": {
       "sandbox": "ubuntu:24.04",
       "desktop": "ubuntu:24.04"
-    }
+    },
+    "logins": "/var/lib/wsp/logins"
   },
   {
     "offer": "runtime",

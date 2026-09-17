@@ -62,7 +62,7 @@ import { addedProjectLine, sourceKind, type ProjectView,
 } from "@wsp/protocol";
 import { SshBackend, SSH_DIAL_MS, checkProviderKey, keyCheckLine, keyFingerprint, landBytes, parseSshAddress, sshClient, sshDial, sshDialsThisComputer, sshLoginWord, sshMachineName, sshRefusalLine, type KeyCheck, type MachineBackend, type SshTransport } from "@wsp/engine";
 import { PlaceLoginRefusedError, newPlaceKeyPair, signPlaceBytes, verifyPlaceBytes, type HerePlace, type PlaceDialler, type PlaceInstaller, type PlaceKeyPair, type PlaceLeaver, type PlaceLogReader, type PlaceUpdateLanded, type PlaceUpdater, type PlaceWiring } from "@wsp/runtime";
-import { CATALOG_AGENTS } from "@wsp/catalog";
+import { CATALOG_AGENTS, NO_SIGN_IN, agentName, keyEnvOf, loginSignIn } from "@wsp/catalog";
 import { PLACE_JOINED_LINE, WSP_READY_LINE, daemonFlags, deployDaemon, joinedPlace, sshDaemonPlace } from "./doctor.js";
 import { assetDir, assetName, daemonBinaryHere } from "./assets.js";
 import { DAEMON_BIN, daemonBinaryIn, daemonTargetFor, guestDaemonTarget, noGuestDaemonLine, type DaemonTarget } from "./daemon-binary.js";
@@ -74,7 +74,10 @@ import { servingHost } from "./host-lock.js";
 import { aimName, aimedHost, wspHome, type HostAim, type HostPick } from "./hosts.js";
 import { joinedAlready, placeFilePath, placeKeyPath, placeLogPath, placeLogin, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile, wspArgvOf } from "./place-report.js";
 import { PROVIDER_ENV, addedProviders, isPlace, placeIdOf, providerBackendFor, providerModule, type ProviderEnv } from "./providers.js";
+import { placeLink, sharedAgentsOn, sharedOn, signInOnBox, type BoxSignIn, type BoxSignedIn, type PlaceLink } from "./place-signin.js";
 import { publicHostname } from "./relay-link.js";
+import { systemOpener } from "./relay.js";
+import type { RelayTerminal } from "./signin-relay.js";
 import { advertiseWord, pairOnLoopbackLine, reachAddresses } from "./pairing.js";
 import {
   installService,
@@ -280,6 +283,40 @@ export const NOTHING_TO_LEAVE_LINE = "this computer is not a place in any wsp, s
 
 /** What a person may name beside the address on wsp add: the name the computer is known by here, and the port and
  * key their own ssh would have been told. */
+/** The refusal for --sign-in beside a flag about joining a computer: the computer is already in, so none of them
+ * has anything to say about it. */
+export const SIGN_IN_FLAGS_REFUSAL =
+  "wsp add --sign-in names a computer already in this wsp, so it takes none of the flags a join takes. Drop them, or drop --sign-in to join a computer.";
+
+/** The refusal for an agent that signs in in the image rather than on the computer: those are answered by the
+ * recipe at init, not here. The list is the catalog's own, so a tool that starts sharing a login says so on its row. */
+export const signInAgentRefusal = (agent: string): string =>
+  `wsp add --sign-in takes an agent whose login lives on the computer that runs the workspaces, which ${agent} is not: ${sharedAgentsOn(CATALOG_AGENTS.map(a => a.id)).join(", ")}.`;
+
+/** A computer that has not told this host where it keeps the logins its workspaces share. It says so on every
+ * link, so the two causes left are a computer that is not connected and one whose agent is older than the one
+ * this host deploys, which shared no login at all; the second names its own way out. */
+export const placeNoLoginsLine = (name: string): string =>
+  `${name} has not said where it keeps the logins its workspaces share, so there is nowhere to sign one in: it is not connected, or the agent on it is older than the one this host deploys. wsp add ${name} --update puts this one on it.`;
+
+/** The question the join puts while the person is still at this terminal. */
+export const boxSignInAsk = (name: string, agent: string): string =>
+  `Sign ${agentName(agent)} in on ${name} now? The login stays on that computer, outside every workspace, and each of them shares it.`;
+
+export const boxSignedInLine = (name: string, agent: string, detail?: string): string =>
+  `${agentName(agent)} is signed in on ${name}${detail === undefined ? "" : ` (${detail})`}; every workspace there shares that login.`;
+
+export const boxNotSignedInLine = (name: string, agent: string, said?: string): string =>
+  `${agentName(agent)} is not signed in on ${name}${said === undefined ? "" : `: ${said}`}. wsp add ${name} --sign-in ${agent} runs it again.`;
+
+/** What a person is told when they say not now, or when nobody is at this keyboard: what threads there read in the
+ * meantime, which is the key the vault holds on this computer, and the line that signs it in later. */
+export const boxSignInLaterLine = (name: string, agent: string): string => {
+  const key = keyEnvOf(loginSignIn(agent) ?? NO_SIGN_IN);
+  const until = key === undefined ? "" : ` Threads there read ${key} from this computer's vault until it is.`;
+  return `${agentName(agent)} is not signed in on ${name}.${until} wsp add ${name} --sign-in ${agent} signs it in.`;
+};
+
 export interface AddFlags {
   name?: string;
   sshPort?: number;
@@ -292,11 +329,14 @@ export interface AddFlags {
   on?: string;
   /** The branch a workspace of the project starts on; absent takes the remote's own default at the clone. */
   base?: string;
+  /** The agent to sign in on a computer already in this wsp, once, outside every workspace on it. The join offers
+   * this itself while the person is at the terminal; this is the same road for a computer that is already in. */
+  signIn?: string;
 }
 
 /** The words a person gave beside the address, read by the one rule every ssh road on this command line reads
  * them by: a port that is a number and a key that is a path on this computer. */
-export function addFlags(name?: string, port?: string, keyPath?: string, update?: boolean, on?: string, base?: string): AddFlags {
+export function addFlags(name?: string, port?: string, keyPath?: string, update?: boolean, on?: string, base?: string, signIn?: string): AddFlags {
   const asked = sshAsked(name, port, keyPath);
   return {
     ...(asked.name !== undefined ? { name: asked.name } : {}),
@@ -305,6 +345,7 @@ export function addFlags(name?: string, port?: string, keyPath?: string, update?
     ...(update === true ? { update: true } : {}),
     ...(on !== undefined ? { on } : {}),
     ...(base !== undefined ? { base } : {}),
+    ...(signIn !== undefined ? { signIn } : {}),
   };
 }
 
@@ -594,9 +635,27 @@ interface PlaceDeps {
   /** How a provider is put the key this computer holds; the one check every other road takes, unless a test hands
    * its own, since a real provider is nobody's to call from a unit test. */
   checkKey(backend: MachineBackend): Promise<KeyCheck>;
+  /** This terminal, for the one thing here that shows another computer's: the sign-in that runs on it. */
+  terminal: RelayTerminal;
+  /** Opens the tool's page on this computer when the person presses o, as a builder's sign-in does. */
+  open(url: string): Promise<boolean>;
+  /** The pty road to one computer's own daemon, through the host that holds its link. */
+  placeLink(client: HostClient, placeId: string): Promise<PlaceLink>;
+  /** Runs the tool's own sign-in on that computer; a test hands its own rather than a pty on a real box. */
+  signIn(o: BoxSignIn): Promise<BoxSignedIn>;
 }
 
-const systemDeps: PlaceDeps = { dial: dialHost, now: Date.now, run: systemRunner, platform: platform(), checkKey: checkProviderKey };
+const systemDeps: PlaceDeps = {
+  dial: dialHost,
+  now: Date.now,
+  run: systemRunner,
+  platform: platform(),
+  checkKey: checkProviderKey,
+  terminal: { input: process.stdin, output: process.stdout },
+  open: systemOpener(platform()),
+  placeLink,
+  signIn: signInOnBox,
+};
 
 /** What the two host-side words work on: the state file the host on this computer serves, and where this run would
  * aim a line, which is read to refuse anywhere but here. */
@@ -624,6 +683,14 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   const [word] = args;
   if (args.length > 1) throw usageRefusal("wsp add takes one provider or one address, or nothing at all.", ADD_USAGE);
   const aim = aimHere("add", opts);
+  if (flags.signIn !== undefined) {
+    if (word === undefined) throw usageRefusal("wsp add --sign-in names the computer to sign the agent in on.", ADD_USAGE);
+    if (flags.update === true || flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined) {
+      io.error(SIGN_IN_FLAGS_REFUSAL);
+      return 1;
+    }
+    return signInOnPlace(io, opts, aim, word, flags.signIn, deps);
+  }
   if (flags.update === true) {
     if (word === undefined) throw usageRefusal("wsp add --update takes the place to move onto this wsp's daemon.", ADD_USAGE);
     if (flags.name !== undefined || flags.sshPort !== undefined || flags.keyPath !== undefined) {
@@ -680,6 +747,7 @@ const ADD_USAGE = [
   "       wsp add <provider>",
   "       wsp add user@host [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
   "       wsp add <place> --update",
+  "       wsp add <place> --sign-in <agent>",
 ].join("\n");
 
 /** The refusal for the update flag beside a flag about joining a computer that is not in yet. */
@@ -776,6 +844,7 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
         ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
       });
       for (const line of addedLines(added.place, added.hostKey)) io.log(line);
+      await offerBoxSignIn(io, client, added.place, deps);
       return 0;
     } finally {
       off();
@@ -825,6 +894,56 @@ async function addProvider(io: CliIO, opts: PlaceOpts, id: string, deps: PlaceDe
   io.log(providerPlaceLine(id, pricing.rateUsdPerHour(pricing.defaultSize)));
   if (servingHost(opts.statePath) !== undefined) io.log(`the host serving ${opts.statePath} reads that at its next start; wsp down and wsp up pick it up now.`);
   return 0;
+}
+
+/** One agent signed in on one computer already in this wsp. The work runs at this terminal: the tool's own flow is
+ * shown here while it runs on that computer, over the link that computer is holding. */
+async function signInOnPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, agent: string, deps: PlaceDeps): Promise<number> {
+  if (sharedOn(agent) === undefined) {
+    io.error(signInAgentRefusal(agent));
+    return 1;
+  }
+  const client = await deps.dial(opts.statePath, { aim });
+  try {
+    const picked = await onePlace(client, `wsp add ${ref} --sign-in ${agent}`, ref);
+    if ("refusal" in picked) {
+      io.error(picked.refusal);
+      return 1;
+    }
+    return (await runBoxSignIn(io, client, picked.place, agent, deps)) ? 0 : 1;
+  } finally {
+    client.close();
+  }
+}
+
+/** The join's own offer, put to the person while they are still at this terminal: a computer that reported an agent
+ * whose login lives there is offered that sign-in. Nothing is asked where nobody is at the keyboard; the line then
+ * says what threads there read until it is signed in. */
+async function offerBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, deps: PlaceDeps): Promise<void> {
+  for (const agent of sharedAgentsOn(place.agents ?? [])) {
+    const asked = place.logins !== undefined && io.isTTY === true && (await io.ask(boxSignInAsk(place.name, agent))) === "yes";
+    if (!asked) {
+      io.log(boxSignInLaterLine(place.name, agent));
+      continue;
+    }
+    await runBoxSignIn(io, client, place, agent, deps);
+  }
+}
+
+/** The sign-in itself and the one line it comes to. Whether it landed is what the caller answers with. */
+async function runBoxSignIn(io: CliIO, client: HostClient, place: PlaceView, agent: string, deps: PlaceDeps): Promise<boolean> {
+  if (place.logins === undefined) {
+    io.error(placeNoLoginsLine(place.name));
+    return false;
+  }
+  const road = await deps.placeLink(client, place.id);
+  try {
+    const answer = await deps.signIn({ link: road.link, agent, logins: place.logins, terminal: deps.terminal, open: deps.open });
+    io.log(answer.signedIn ? boxSignedInLine(place.name, agent, answer.detail) : boxNotSignedInLine(place.name, agent, answer.said));
+    return answer.signedIn;
+  } finally {
+    await road.close();
+  }
 }
 
 export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly string[], deps: PlaceDeps = systemDeps): Promise<number> {

@@ -6,6 +6,7 @@
 import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,6 +62,10 @@ import {
   placeLeaver,
   placeLeaveFailedLine,
   updatedLines,
+  SIGN_IN_FLAGS_REFUSAL,
+  placeNoLoginsLine,
+  boxSignInLaterLine,
+  boxSignedInLine,
 } from "../src/places.js";
 import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, readPlaceFile, sweepPlace, sweptLine, sweptSaid, writePlaceFile } from "../src/place-report.js";
 import { captured } from "./verbs-fixture.js";
@@ -226,12 +231,22 @@ describe("what wsp add prints with no argument", () => {
 
 /** Every dependency the two host-side words take, with the provider check answered here: a unit test calls no
  * provider. The dial is the one road that reaches a host, and the tests that take it hand their own. */
+/** The sign-in on a computer you own, answered here: a unit test opens no pty on a box. A test that means to
+ * exercise it hands its own signIn and reads what it was given. */
+const noBoxSignIn = {
+  terminal: { input: new PassThrough() as never, output: new PassThrough() as never },
+  open: async () => false,
+  placeLink: async () => ({ link: { op: async () => ({ ok: true }), onEvent: () => () => {} }, close: async () => undefined }),
+  signIn: async () => ({ signedIn: false, said: "nothing signs in on this road" }),
+};
+
 const systemPlaceDeps: Parameters<typeof addCommand>[4] = {
   dial: () => Promise.reject(new Error("no host is dialled on this road")),
   now: () => 0,
   run: fakeRunner().run,
   platform: "linux",
   checkKey: async () => ({ state: "taken" }),
+  ...noBoxSignIn,
 };
 
 const opts = (home: string, env: Record<string, string | undefined> = {}): Parameters<typeof addCommand>[1] => ({
@@ -770,6 +785,52 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(said).not.toContain("somebody else");
   });
 
+  it("offers the sign-in on that computer while the person is at this terminal, and says what threads read there when they are not", async () => {
+    const place: PlaceView = {
+      id: "p_1",
+      kind: "computer",
+      name: "box",
+      default: true,
+      present: true,
+      takesForks: true,
+      agents: ["claude", "codex"],
+      logins: "/var/lib/wsp/logins",
+    };
+    const client = {
+      request: async () => ({ place, hostKey: "ssh-ed25519 SHA256:abc" }) as Record<string, unknown>,
+      events: async () => {},
+      onFrame: () => () => {},
+      closeWords: () => "",
+      closed: Promise.resolve(),
+      close: () => {},
+      terminate: () => {},
+    };
+    const asked: string[] = [];
+    const signedIn: { agent: string; logins: string }[] = [];
+    const deps = {
+      ...systemPlaceDeps,
+      dial: async () => client as never,
+      signIn: async (o: { agent: string; logins: string }) => {
+        signedIn.push({ agent: o.agent, logins: o.logins });
+        return { signedIn: true };
+      },
+    } as Parameters<typeof addCommand>[4];
+    const io = { ...captured(), isTTY: true, ask: async (q: string) => (asked.push(q), "yes") };
+    expect(await addCommand(io, opts(tmp("add-offer")), ["root@10.0.0.9"], {}, deps)).toBe(0);
+    // Only the agent whose login lives on that computer is offered; Claude Code's token is this computer's.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("Sign Codex in on box now?");
+    expect(signedIn).toEqual([{ agent: "codex", logins: "/var/lib/wsp/logins" }]);
+    expect(io.lines.join("\n")).toContain(boxSignedInLine("box", "codex"));
+    // Nobody at the keyboard: nothing is asked and nothing runs, and the line says what threads there read
+    // until it is signed in and how to sign it in later.
+    const quiet = captured();
+    expect(await addCommand(quiet, opts(tmp("add-quiet")), ["root@10.0.0.9"], {}, deps)).toBe(0);
+    expect(signedIn).toHaveLength(1);
+    expect(quiet.lines.join("\n")).toContain(boxSignInLaterLine("box", "codex"));
+    expect(quiet.lines.join("\n")).toContain("OPENAI_API_KEY");
+  });
+
   it("reads the port and the key by the rule every ssh road on this command line reads them by", () => {
     expect(addFlags("box", "2222", "/tmp/id_ed25519")).toEqual({ name: "box", sshPort: 2222, keyPath: "/tmp/id_ed25519" });
     expect(addFlags(undefined, undefined, undefined)).toEqual({});
@@ -1256,6 +1317,7 @@ describe("what wsp add asks the host for", () => {
     run: fakeRunner().run,
     platform: "linux",
     checkKey: async () => ({ state: "taken" }),
+    ...noBoxSignIn,
   });
 
   it("opens the door by asking for it and prints its address, so a host on loopback alone is still one a computer can join", async () => {
@@ -1295,6 +1357,84 @@ describe("what wsp add asks the host for", () => {
   });
 });
 
+describe("wsp add <place> --sign-in <agent>", () => {
+  const spoo: PlaceView = {
+    id: "p_1",
+    kind: "computer",
+    name: "spoo",
+    default: true,
+    joinedAt: new Date(0).toISOString(),
+    agents: ["claude", "codex"],
+    logins: "/var/lib/wsp/logins",
+  };
+
+  /** A host holding one joined computer, answering the listing alone: the sign-in itself is handed in. */
+  const listing = (places: PlaceView[] = [spoo]): NonNullable<Parameters<typeof addCommand>[4]>["dial"] => () =>
+    Promise.resolve({
+      request: (op: string) => (op === "places.list" ? Promise.resolve({ places } as never) : Promise.reject(new Error(`unexpected op ${op}`))),
+      events: () => Promise.resolve(),
+      onFrame: () => () => {},
+      closed: Promise.resolve(),
+      closeWords: () => "",
+      close: () => {},
+    } as never);
+
+  const signingIn = (answer: Awaited<ReturnType<NonNullable<Parameters<typeof addCommand>[4]>["signIn"]>>, places?: PlaceView[]) => {
+    const asked: { agent: string; logins: string }[] = [];
+    return {
+      asked,
+      deps: {
+        ...systemPlaceDeps,
+        dial: listing(places),
+        signIn: async (o: { agent: string; logins: string }) => {
+          asked.push({ agent: o.agent, logins: o.logins });
+          return answer;
+        },
+      } as Parameters<typeof addCommand>[4],
+    };
+  };
+
+  it("signs the agent in on the computer named, at the logins directory that computer said it keeps", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true, detail: "ChatGPT" });
+    expect(await addCommand(io, opts(tmp("signin-place")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(0);
+    expect(run.asked).toEqual([{ agent: "codex", logins: "/var/lib/wsp/logins" }]);
+    expect(io.lines.join("\n")).toContain("Codex is signed in on spoo (ChatGPT); every workspace there shares that login.");
+    // A row that says where that computer keeps its logins is never turned away: the host asks its backend again
+    // whenever a computer dials back on another daemon, so a box that has just taken this one is ready here.
+    expect(io.errors.join("\n")).not.toContain(placeNoLoginsLine("spoo"));
+  });
+
+  it("answers a sign-in that did not land with what the tool said and the line that runs it again", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: false, said: "Not logged in" });
+    expect(await addCommand(io, opts(tmp("signin-not")), ["spoo"], { signIn: "codex" }, run.deps)).toBe(1);
+    expect(io.lines.join("\n")).toContain("Not logged in");
+    expect(io.lines.join("\n")).toContain("wsp add spoo --sign-in codex");
+  });
+
+  it("refuses an agent whose login sits in the image, a computer no place answers to, and the flags of a join", async () => {
+    const io = captured();
+    const run = signingIn({ signedIn: true });
+    // Claude Code's login is a token on this computer, so there is nothing to sign in on a box.
+    expect(await addCommand(io, opts(tmp("signin-claude")), ["spoo"], { signIn: "claude" }, run.deps)).toBe(1);
+    expect(io.errors.join("\n")).toContain("codex");
+    expect(run.asked).toEqual([]);
+    const gone = captured();
+    expect(await addCommand(gone, opts(tmp("signin-none")), ["laptop"], { signIn: "codex" }, run.deps)).toBe(1);
+    expect(gone.errors[0]).toContain("It holds spoo.");
+    const named = captured();
+    expect(await addCommand(named, opts(tmp("signin-flags")), ["spoo"], { signIn: "codex", name: "box" }, run.deps)).toBe(1);
+    expect(named.errors[0]).toBe(SIGN_IN_FLAGS_REFUSAL);
+    // And a computer that has not said where it keeps them has nowhere to put one.
+    const quiet = signingIn({ signedIn: true }, [{ ...spoo, logins: undefined }]);
+    const unsaid = captured();
+    expect(await addCommand(unsaid, opts(tmp("signin-unsaid")), ["spoo"], { signIn: "codex" }, quiet.deps)).toBe(1);
+    expect(unsaid.errors[0]).toBe(placeNoLoginsLine("spoo"));
+    expect(quiet.asked).toEqual([]);
+  });
+});
+
 describe("wsp add <place> --update", () => {
   /** A host holding one joined computer, answering the two ops the flag sends and keeping what it was asked. */
   const updateClient = (
@@ -1328,6 +1468,7 @@ describe("wsp add <place> --update", () => {
     run: fakeRunner().run,
     platform: "linux",
     checkKey: async () => ({ state: "taken" }),
+    ...noBoxSignIn,
   });
 
   it("names the place by the word wsp places prints and asks the host to move it, then says both versions and the road", async () => {
@@ -1675,6 +1816,7 @@ describe("what a remove says about the device the join bought", () => {
     run: fakeRunner().run,
     platform: "linux",
     checkKey: async () => ({ state: "taken" }),
+    ...noBoxSignIn,
   });
 
   it("names the token that computer's window still holds and how to take it back", async () => {

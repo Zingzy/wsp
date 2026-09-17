@@ -16,6 +16,12 @@ export class WsClient {
   private constructor(readonly ws: WebSocket) {
     ws.on("message", raw => {
       const m = JSON.parse(String(raw)) as WireMsg;
+      // A frame carrying an op is one the host sent this socket, and its id is the host's own numbering: it is
+      // never the answer to a request made here, however that number lines up with one still waiting.
+      if (typeof m.op === "string") {
+        this.events.push(m);
+        return;
+      }
       if (typeof m.id === "number" && this.pending.has(m.id)) {
         this.pending.get(m.id)!(m);
         this.pending.delete(m.id);

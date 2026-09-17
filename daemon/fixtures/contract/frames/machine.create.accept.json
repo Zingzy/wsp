@@ -21,7 +21,13 @@
       "copy": {
         "from": "/wsp/projects/wsp/checkout",
         "at": "/Users/zingzy/wsp"
-      }
+      },
+      "shares": [
+        {
+          "source": "/var/lib/wsp/logins/codex/auth.json",
+          "target": "/root/.codex/auth.json"
+        }
+      ]
     }
   },
   {
