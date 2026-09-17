@@ -32,7 +32,7 @@ import { webDirFor } from "./assets.js";
 import { DAEMON_DEPLOYED_LINE, claudeEnvs, deployDaemon, doctor, localDoctor, missingBundleFile, removeDaemon, sshDaemonPlace } from "./doctor.js";
 import { agentsHere } from "./agents-here.js";
 import { InitJobs } from "./init-job.js";
-import { ANTHROPIC_KEY, agentKeyEnvs, KEY_LAYER_WORDS, keyIn, parseEnvFile, savedEnv, writeEnvFile, type Keys } from "./env-keys.js";
+import { ANTHROPIC_KEY, KEY_LAYER_WORDS, keyIn, parseEnvFile, savedEnv, vaultOf, writeEnvFile, type Keys } from "./env-keys.js";
 // The writer of the wsp home's .env now sits beside its reader; the name stays exported here for every caller
 // that already had it from this module.
 export { writeEnvFile } from "./env-keys.js";
@@ -42,6 +42,7 @@ import { CACHE_RULE } from "./project-bundle.js";
 import { readBrewTable } from "./init-brew.js";
 import { copyGoldenRecipe } from "./image-recipe.js";
 import { exitCodeOf, runInit, type InitIO, type InitPricing, type InitResult } from "./init.js";
+import { runMintHere } from "./init-vault.js";
 import { recipePath } from "./init-recipe.js";
 import { historyCache } from "./recipe-file.js";
 import { scanTools } from "./scan.js";
@@ -368,22 +369,28 @@ export function keysFound(sources: KeySources = keySources(), layers: Array<Reco
   return anthropic !== undefined ? { anthropic } : {};
 }
 
+/** What the vault hands every turn, read at each launch off the wsp home's .env and nothing else. Not this shell:
+ * a host serving under launchd, and the app, start without it, so a key only in a shell would reach the turns one
+ * road launched and none of the others. Not a folder's .env either: the folder a host happened to start in is
+ * nobody's vault. The one file is what wsp init writes and what the person can read, and a token saved there while
+ * the host runs is in the next turn, since nothing of this is cached. */
+export function vaultNow(env: ProviderEnv = process.env): Record<string, string> {
+  return vaultOf(savedEnv(wspHome(env)));
+}
+
 /** Names the file only when WSP_HOME moved it off the default. */
 export function saveQuestion(home: string, keys: number): string {
   const what = keys > 1 ? "keys" : "key";
   return home === DEFAULT_HOME ? `Save the ${what} so wsp stops asking?` : `Save the ${what} to ${join(home, ".env")} so wsp stops asking?`;
 }
 
-/** What every golden wsp init seals is made of: the harness install and its
- * smoke from the doctor, the daemon bundle deploy, and the loaded keys as envs. */
-export function goldenRecipe(
-  keys: Pick<Keys, "anthropic">,
-  hooks: { deployDaemon?: (machine: Machine) => Promise<void | string> } = {},
-): GoldenRecipe {
+/** What every golden wsp init seals is made of: the harness install and its smoke from the doctor, the daemon
+ * bundle deploy, and the guest's own variables. No sign-in is among them. */
+export function goldenRecipe(hooks: { deployDaemon?: (machine: Machine) => Promise<void | string> } = {}): GoldenRecipe {
   return {
     setup: GOLDEN_SETUP,
     smoke: GOLDEN_SMOKE,
-    envs: claudeEnvs(keys.anthropic),
+    envs: claudeEnvs(),
     deployDaemon: hooks.deployDaemon ?? (async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE)),
   };
 }
@@ -681,7 +688,7 @@ const agentsReachOf = (opts: { address?: string; port: number; advertise?: strin
 export function makeRuntime(
   keys: Keys,
   statePath: string,
-  recipe: GoldenRecipe = goldenRecipe(keys),
+  recipe: GoldenRecipe = goldenRecipe(),
   env: ProviderEnv = process.env,
   agents?: { at?: { address: string; port: number }; advertise?: string; run?: RunningWsp },
 ): Runtime {
@@ -709,6 +716,9 @@ export function makeRuntime(
     store: jsonFileStore(statePath),
     statePath,
     adapters: HARNESS_ADAPTERS,
+    // Read at every launch, never copied: a token minted after this host started is in the next turn, and nothing
+    // of it is written to a machine.
+    vault: () => vaultNow(env),
     goldenRecipe: recipe,
     copyRecipe: hostCopyRecipe(),
     hostId: hostIdentity(),
@@ -728,7 +738,6 @@ function hostCopyRecipe(): (image: SealedImage) => Promise<GoldenRecipe> {
       brew: () => readBrewTable(nodeHost()),
       home: homedir(),
       platform: hostPlatform(),
-      agentKeys: agentKeyEnvs(keysFound()),
       deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE),
     });
 }
@@ -781,7 +790,7 @@ function hostInitDoor(rt: Runtime, statePath: string, run: RunningWsp, openUrl: 
           openLine: hooks.openLine,
           builder,
         }),
-      roads: () => workspaceRoads(rt, agentHomes(home), workspaceEnvsFor(keysFound())),
+      roads: () => workspaceRoads(rt, agentHomes(home), workspaceEnvsFor()),
       recipe: recipe => ({ ...recipe, deployDaemon: async machine => deployDaemon(machine).then(() => DAEMON_DEPLOYED_LINE) }),
       bundleFile: () => missingBundleFile(),
     },
@@ -937,11 +946,9 @@ export function forkCommandFor(opts: { statePath: string }, values: Pick<SharedF
   return ["wsp new", FIRST_WORKSPACE, ...stateFlag(opts, values)].join(" ");
 }
 
-/** The envs a new workspace forks with: the Claude key's, when there is one. */
-function workspaceEnvsFor(keys: Keys): { workspaceEnvs?: (golden: GoldenVersion) => Record<string, string> } {
-  const anthropic = keys.anthropic;
-  return anthropic !== undefined ? { workspaceEnvs: golden => claudeEnvs(anthropic, golden) } : {};
-}
+/** The envs a new workspace forks with: Claude Code's config dir and the browser shim of the golden it forks from.
+ * No sign-in among them; the vault sets the token and the key on each turn instead. */
+const workspaceEnvsFor = (): { workspaceEnvs: (golden: GoldenVersion) => Record<string, string> } => ({ workspaceEnvs: golden => claudeEnvs(golden) });
 
 /** wsp init's flags that only mean something on the golden road, each with how it was given: the local road refuses
  * them rather than take them and do nothing. One row per flag, beside the table that parses them. */
@@ -1028,8 +1035,8 @@ async function init(
         ports: { port: opts.port, wsPort: opts.wsPort, named: opts.named, states: statesHere(opts.statePath) },
         address: opts.address,
         upCommand: flags.upCommand,
-        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, agentsReachOf(opts)),
-        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
+        runtime: () => makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, agentsReachOf(opts)),
+        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv }, say),
       },
       screen,
@@ -1058,7 +1065,9 @@ async function init(
           const { path, exists } = projectFolder(folder);
           return exists ? scanProject(nodeHost(), path) : undefined;
         },
-        agentKeys: agentKeyEnvs(keys),
+        vault: () => vaultNow(providerEnv),
+        mintHere: runMintHere,
+        saveKeys: set => writeEnvFile(join(wspHome(providerEnv), ".env"), set),
         pricing: beside?.pricing ?? providerBackendFor(providerEnv).pricing,
         statePath: opts.statePath,
         home: homedir(),
@@ -1083,7 +1092,7 @@ async function init(
             openLine: hooks.openLine,
             builder,
           }),
-        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor(keys)),
+        roads: rt => workspaceRoads(rt, agentHomes(homedir()), workspaceEnvsFor()),
         host: (rt, ports) => hostFor(rt, keys, { ...opts, port: ports.port, wsPort: ports.wsPort, providerEnv }, say),
         ...(beside !== undefined ? { handOff: (o: { interactive: boolean }) => handOffTo(beside, screen, o.interactive, flags) } : {}),
       },
@@ -1124,7 +1133,7 @@ export interface ServeOptions {
 export async function serve(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   await adoptLoginPath(line => io.log(line));
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   return hostFor(rt, keys, { ...opts, providerEnv }, io, opts.running);
 }
 
@@ -1141,7 +1150,7 @@ export async function up(io: CliIO, opts: ServeOptions): Promise<HostHandle> {
   // A state file with nothing but this computer in it is served with no provider key: wsp init's local road is
   // what wrote it, and asking for a key to serve it would take that road away the next morning.
   const { keys, env: providerEnv } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
-  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(keys), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
+  const rt = opts.runtime ?? makeRuntime(keys, opts.statePath, goldenRecipe(), providerEnv, { ...agentsReachOf(opts), ...(opts.running !== undefined ? { run: opts.running } : {}) });
   // A state with nothing in it serves as it is: a workspace is one project's copy, so a host with no project has
   // no workspace to record, and wsp add is the road. The host listens for pairing either way.
   if (await servesNothing(rt)) io.log(NO_PROJECT_YET);
@@ -1198,7 +1207,7 @@ async function hostFor(
       doorLine: line => io.log(line),
       webDir: opts.webDir ?? webDirFor(),
       // Read at each fork, not once at start: the init job saves a key while this host serves.
-      workspaceEnvs: golden => workspaceEnvsFor(keysFound()).workspaceEnvs?.(golden) ?? {},
+      workspaceEnvs: golden => workspaceEnvsFor().workspaceEnvs(golden),
       ...(opts.openUrl !== undefined ? { openUrl: opts.openUrl } : {}),
       log: line => io.log(line),
       recipePath: recipePath(opts.statePath),
@@ -1779,7 +1788,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // person whose wsp init took the local road.
       if (values.local === true) {
         const { keys, env } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
-        const rt = makeRuntime(keys, opts.statePath, goldenRecipe(keys), env);
+        const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env);
         try {
           return await localDoctor(rt, io);
         } finally {
@@ -1787,9 +1796,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
         }
       }
       const { keys, env } = await loadKeys(io, keySources(opts.providerEnv));
-      const rt = makeRuntime(keys, opts.statePath, goldenRecipe(keys), env);
+      const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env);
       return doctor(rt, io, {
-        ...(keys.anthropic !== undefined ? { envs: claudeEnvs(keys.anthropic) } : {}),
+        envs: claudeEnvs(),
         ...(values.yes === true ? { yes: true } : {}),
         statePath: opts.statePath,
       });

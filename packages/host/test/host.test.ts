@@ -211,7 +211,7 @@ describe("wsp cli", () => {
     expect(scan.tools.filter(r => r.on).map(r => r.id).sort()).toEqual(["build-essential", "curl", "fd", "git", "jq", "node", "pnpm", "python", "ripgrep", "rsync", "sqlite3", "uv", "wget", "xz", "zip"]);
     expect(scan.agents.filter(r => r.on).map(r => r.id)).toEqual(["claude"]);
     expect(scan.commands).toEqual([{ name: "pulumi", calls: 2, sessions: 2 }]);
-    expect(scan.signIns.map(r => [r.id, r.recommended.value])).toEqual([["claude", "machine"]]);
+    expect(scan.signIns.map(r => [r.id, r.recommended.value])).toEqual([["claude", "token"]]);
     expect(existsSync(out)).toBe(false);
 
     errs.length = 0;
@@ -284,7 +284,7 @@ describe("host serves the app", () => {
 
   it("the handle's createWorkspace forks the golden's head the way the app's own create does, and refuses without a golden", async () => {
     const { rt, backend } = testRuntime();
-    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
+    handle = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs(g) });
     await handle.addProject("https://github.com/dev/first.git", "default");
     const first = await handle.createWorkspace("first");
     expect(first.name).toBe("first");
@@ -461,7 +461,7 @@ describe("host serves the app", () => {
       const head = { ...GOLDEN.versions[0]!, ...(browserShim ? { browserShim } : {}) };
       void store.put("goldens", copyKey("default", "default"), { head: 1, versions: [head] });
       const rt = createRuntime({ backend, store, adapters: {} });
-      const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs("sk-ant-x", g) });
+      const h = await startHost({ runtime: rt, port: 0, wsPort: 0, webDir: webDir(), workspaceEnvs: g => claudeEnvs(g) });
       try {
         await h.addProject("https://github.com/dev/beta.git", "default");
         const res = await fetch(`http://127.0.0.1:${h.port}/api/workspaces`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "beta" }) });

@@ -11,7 +11,12 @@ import {
   InitJobEvent,
   InitNeedsYouEvent,
   InitSetup,
+  LOGIN_CHOICES,
   LOGIN_STATE_WORDS,
+  SIGN_IN_ANSWERS,
+  credentialOnBuilderLine,
+  signInChoice,
+  signInChoices,
   LoginState,
   NEEDS_YOU,
   RuntimeRequest,
@@ -321,6 +326,20 @@ describe("the words the clients print for the job", () => {
     // leaves cannot come to say two different things.
     expect(SIGN_IN_LATER).toBe("sign in when you first need it");
     expect(SIGN_IN_DEFERRED_WORD).toBe(`not signed in, ${SIGN_IN_LATER}`);
+  });
+
+  it("the sign-in answers offer six words, each with the words its row and its counts print", () => {
+    expect(LOGIN_CHOICES).toEqual(["copy", "machine", "later", "key", "skip", "token"]);
+    for (const value of LOGIN_CHOICES) expect(SIGN_IN_ANSWERS[value], value).toBeDefined();
+    expect(signInChoices("darwin").map(c => c.value)).toEqual([...LOGIN_CHOICES]);
+    expect(signInChoice("token", "darwin").label).toBe("token from this computer");
+    expect(SIGN_IN_ANSWERS.token.short).toBe("token");
+  });
+
+  it("a builder holding a sign-in file is refused in one sentence that names the paths", () => {
+    expect(credentialOnBuilderLine(["/root/.claude-cfg/.credentials.json", "/root/.codex/auth.json"])).toBe(
+      "the builder holds a sign-in file at /root/.claude-cfg/.credentials.json, /root/.codex/auth.json; sign-ins never sit in an image, so nothing was sealed",
+    );
   });
 
   it("a row's state words have one table, and one predicate says which of them end the row", () => {

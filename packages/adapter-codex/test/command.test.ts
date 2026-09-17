@@ -8,6 +8,11 @@ describe("buildEnv", () => {
     expect(env).toEqual({ PATH: "/usr/bin", HOME: "/Users/z", CODEX_HOME: "/root/.codex" });
   });
 
+  it("sets the API key the vault handed it, and nothing when it handed none", () => {
+    expect(buildEnv({ home: "/root/.codex", apiKey: "sk-x-fake-openai" }).OPENAI_API_KEY).toBe("sk-x-fake-openai");
+    expect(buildEnv({ home: "/root/.codex" }).OPENAI_API_KEY).toBeUndefined();
+  });
+
   it("refuses a relative home", () => {
     expect(() => buildEnv({ home: ".codex" })).toThrow("home must be an absolute path");
   });

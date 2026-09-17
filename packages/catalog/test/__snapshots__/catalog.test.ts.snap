@@ -14,7 +14,7 @@ exports[`catalog > is the seeded catalog 1`] = `
       "prompt history",
     ],
     "road": "script",
-    "signIn": "oauth",
+    "signIn": "token",
     "size": {
       "bytes": 218103808,
       "method": "df",

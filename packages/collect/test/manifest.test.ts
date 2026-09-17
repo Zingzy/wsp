@@ -20,9 +20,9 @@ describe("manifest schema", () => {
     expect(() => parseManifest({ entries: [{ ...token, consent: undefined }] })).toThrow(/entries\.0\.choice: only a logins row or a consent row carries a choice/);
   });
 
-  it("lists the six rungs in ladder order and the five login choices, which the protocol owns", () => {
+  it("lists the six rungs in ladder order and the six login choices, which the protocol owns", () => {
     expect(RUNGS).toEqual(["identity", "shell", "toolchains", "tools", "agents", "logins"]);
-    expect(LOGIN_CHOICES).toEqual(["copy", "machine", "later", "key", "skip"]);
+    expect(LOGIN_CHOICES).toEqual(["copy", "machine", "later", "key", "skip", "token"]);
     expect(LOGIN_CHOICES).toBe(PROTOCOL_LOGIN_CHOICES);
   });
 

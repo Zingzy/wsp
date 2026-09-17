@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
 import { pinMismatchLine } from "@wsp/protocol";
-import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -195,7 +195,7 @@ describe("catalog", () => {
     // Every entry with a login or a note about having none has a row under its login id; a plain tool has none.
     for (const e of CATALOG) {
       const own = loginRow(loginIdOf(e.id));
-      if (hasLogin(e.signIn) || e.signIn.note !== undefined) expect(own?.signIn, e.id).toBe(e.signIn);
+      if (hasLogin(e.signIn) || mintsToken(e.signIn) || e.signIn.note !== undefined) expect(own?.signIn, e.id).toBe(e.signIn);
       else expect(own, e.id).toBeUndefined();
     }
     expect(loginRow("kube")?.entry.id).toBe("kubectl");
@@ -220,7 +220,7 @@ describe("catalog", () => {
       expect(a.projectState.length, a.id).toBeGreaterThan(0);
       expect(a.stateHome, a.id).toMatch(/^\.[\w./-]*[\w-]$/);
       if (a.guestStateHome !== undefined) expect(a.guestStateHome, a.id).toMatch(/^\/root\//);
-      expect(hasLogin(a.signIn), a.id).toBe(true);
+      expect(hasLogin(a.signIn) || mintsToken(a.signIn), a.id).toBe(true);
       expect(smokeOf(a)).toBe(`${a.id} --version`);
       expect(sizeBytes(a.size), a.id).toBeGreaterThan(0);
     }

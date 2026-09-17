@@ -13,7 +13,7 @@ import { CODEX_TOML, MCP_SERVERS_JSON, OPENCODE_JSON, type McpConfig } from "./m
 import { APT_INDEX, roadModule } from "./road-modules.js";
 import type { RoadName } from "./roads.js";
 import { CLAUDE_CONFIG_DIR, DOCKER_INSTALL, FD_INSTALL, GOLDEN_SETUP, HERMES, HERMES_INSTALL, MIB, NODE_RELEASES, OP_INSTALL, PLAYWRIGHT, PLAYWRIGHT_INSTALL, PYTHON_INSTALL, RUSTUP_INSTALL, SWIFT, SWIFT_INSTALL, UV_INSTALL, YARN_INSTALL, nodeInstallScript, type InstallRoad } from "./roads.js";
-import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, type KeyFiles, type SignIn } from "./signin.js";
+import { NO_SIGN_IN, SIGN_IN_ROWS, hasLogin, keysIdOf, keysRowOf, loginIdOf, mintsToken, type KeyFiles, type SignIn } from "./signin.js";
 
 export type EntryKind = "agent" | "tool";
 
@@ -475,7 +475,7 @@ export interface LoginRow {
 
 export const LOGIN_ROWS: readonly LoginRow[] = CATALOG.flatMap((e): LoginRow[] => {
   const s = e.signIn;
-  if (!hasLogin(s)) return s.note !== undefined ? [{ id: loginIdOf(e.id), entry: e, signIn: s }] : [];
+  if (!hasLogin(s)) return mintsToken(s) || s.note !== undefined ? [{ id: loginIdOf(e.id), entry: e, signIn: s }] : [];
   return [{ id: loginIdOf(e.id), entry: e, signIn: s }, ...(s.keys === undefined ? [] : [{ id: keysIdOf(e.id), entry: e, signIn: keysRowOf(s.keys, s.status), keys: s.keys }])];
 });
 
@@ -484,6 +484,17 @@ const LOGIN_ROW_BY_ID: ReadonlyMap<string, LoginRow> = new Map(LOGIN_ROWS.map(r 
 /** The sign-in row filed under a login id, or nothing for a tool the catalog does not know. */
 export function loginRow(id: string): LoginRow | undefined {
   return LOGIN_ROW_BY_ID.get(id);
+}
+
+/** The rung a manifest files a login row under. */
+const LOGINS_RUNG = "logins/";
+
+/** The sign-in a manifest's login row stands for, by the row's id or by the bare name at its end, which is the
+ * login id the collector files it under and never an entry id. The one reader of that rule, so a row read in the
+ * pack, in the vault step and in the job cannot come to mean three things. */
+export function loginSignIn(row: string): SignIn | undefined {
+  const name = row.startsWith(LOGINS_RUNG) ? row.slice(LOGINS_RUNG.length) : row;
+  return name.includes("/") ? undefined : loginRow(name)?.signIn;
 }
 
 /** Exits 0 once an entry is on the machine. */

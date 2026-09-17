@@ -206,7 +206,11 @@ describe("building the image at a second place", () => {
 
   it("a copy build never runs a sign-in stage and takes no second vault off its own builder", async () => {
     const { other, store, rt } = await sealedAtWired();
-    expect(other.machines.flatMap(m => m.execLog).some(c => c.startsWith("for p in "))).toBe(false);
+    // The one probe a copy's builder answers is the seal's guard, over the paths no image may hold; nothing reads
+    // a vault off it, since the vault it lands is the record's own.
+    const probes = other.machines.flatMap(m => m.execLog).filter(c => c.startsWith("for p in "));
+    expect(probes.every(c => c.includes("/root/.claude-cfg/.credentials.json"))).toBe(true);
+    expect(probes.some(c => c.includes("/etc/profile.d/wsp-secrets.sh"))).toBe(false);
     const image = (await store.get("images", "default")) as { version: number };
     expect(image.version).toBe(1);
     expect(await store.getBlob("image-vaults", "default@v1")).toBeDefined();

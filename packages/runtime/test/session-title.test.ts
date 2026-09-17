@@ -627,7 +627,7 @@ describe("the agents whose store keeps a name", () => {
     expect(rows.map(c => c.harness).sort()).toEqual([...THREAD_AGENTS].sort());
     const machine = { id: "m_1" } as unknown as Machine;
     for (const row of rows) {
-      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }) });
+      const adapter = HARNESS_ADAPTERS[row.harness as ThreadAgent]({ machine, workspaceId: ws.id, execStream: machineExecStream(machine), home: () => "/root/.state", env: {}, signInRefusal: signInRefusalLine({ kind: "cloud" }), vault: {} });
       expect(row.renames, row.harness).toBe(adapter.renameSession !== undefined);
       expect(keepsRename(row), row.harness).toBe(true);
     }

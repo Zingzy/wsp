@@ -62,11 +62,12 @@ describe("login choices", () => {
     expect(initialChoice(byId("logins/gh"))).toBe("later");
     expect(initialChoice(byId("logins/codex"))).toBe("later");
     expect(initialChoice({ ...byId("logins/gh"), default: "bring" })).toBe("copy");
-    expect(initialChoice(byId("logins/claude"))).toBe("later");
+    // Claude Code mints its token on this computer, so its unanswered row opens there rather than on a machine.
+    expect(initialChoice(byId("logins/claude"))).toBe("token");
     expect(initialChoice({ ...byId("logins/gh"), default: "skip", reason: "expires in hours" })).toBe("later");
     expect(initialChoice({ ...byId("logins/gh"), choice: "skip" })).toBe("skip");
     expect(initialChoice({ ...byId("logins/gh"), bring: false })).toBe("later");
-    expect(initialChoice({ ...byId("logins/claude"), choice: "copy" })).toBe("copy");
+    expect(initialChoice({ ...byId("logins/claude"), choice: "skip" })).toBe("skip");
     // Signing in while the build runs is the opt-in, and a recipe that saved it is read back as that and not as the default.
     expect(initialChoice({ ...byId("logins/gh"), choice: "machine" })).toBe("machine");
     expect(initialChoice({ ...byId("logins/gh"), choice: "later" })).toBe("later");
@@ -251,7 +252,7 @@ describe("goldenRecipeFor", () => {
   const imp: GoldenImport = { recipeHash: "h", tools: [], agents: [] };
 
   it("runs a bare harness and smoke; the import carries files, tools and agents; envs name no agent when none is ticked", () => {
-    const none = goldenRecipeFor(bring("identity/git-user", "shell/zshrc"), {}, { import: imp });
+    const none = goldenRecipeFor(bring("identity/git-user", "shell/zshrc"), { import: imp });
     expect(none.setup).toBe("true");
     expect(none.smoke).toBe("true");
     expect(none.import).toBe(imp);
@@ -262,33 +263,28 @@ describe("goldenRecipeFor", () => {
     expect(JSON.stringify(none)).not.toMatch(/claude/i);
   });
 
-  it("a ticked Claude Code sets its config dir and the key only when loaded", () => {
-    const withKey = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { ANTHROPIC_API_KEY: ANTHROPIC });
-    expect(withKey.envs).toMatchObject({ ANTHROPIC_API_KEY: ANTHROPIC, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
-
-    const noKey = goldenRecipeFor(bring("agents/claude"), {});
-    expect(noKey.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
-    expect(noKey.envs).toHaveProperty("CLAUDE_CONFIG_DIR");
+  it("a ticked Claude Code sets its config dir and no sign-in of any kind", () => {
+    const claude = goldenRecipeFor(bring("agents/claude", "shell/zshrc"));
+    expect(claude.envs).toMatchObject({ CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
+    expect(claude.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(claude.envs).not.toHaveProperty("CLAUDE_CODE_OAUTH_TOKEN");
   });
 
-  it("a ticked agent takes the key under the variable its own sign-in declares and no other agent's, even with that one loaded", () => {
-    const codex = goldenRecipeFor(bring("agents/codex", "shell/zshrc"), { ANTHROPIC_API_KEY: ANTHROPIC });
+  it("no agent's key rides onto the image: the vault sets each in the environment of every turn instead", () => {
+    const codex = goldenRecipeFor(bring("agents/codex", "shell/zshrc"));
     expect(codex.envs).not.toHaveProperty("CLAUDE_CONFIG_DIR");
-    expect(codex.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
-    expect(codex.envs).toEqual(goldenRecipeFor(bring("shell/zshrc"), {}).envs);
-    const withOwn = goldenRecipeFor(bring("agents/codex"), { ANTHROPIC_API_KEY: ANTHROPIC, OPENAI_API_KEY: "sk-x-fake-openai" });
-    expect(withOwn.envs).toMatchObject({ OPENAI_API_KEY: "sk-x-fake-openai" });
-    expect(withOwn.envs).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(codex.envs).not.toHaveProperty("OPENAI_API_KEY");
+    expect(codex.envs).toEqual(goldenRecipeFor(bring("shell/zshrc")).envs);
   });
 
   it("names no size, so the wizard's builder is minted at the size the backend calls default", () => {
-    const recipe = goldenRecipeFor(bring("agents/claude", "shell/zshrc"), { ANTHROPIC_API_KEY: ANTHROPIC });
+    const recipe = goldenRecipeFor(bring("agents/claude", "shell/zshrc"));
     expect([recipe.cpu, recipe.memMb]).toEqual([undefined, undefined]);
   });
 
   it("threads the daemon deploy hook through", () => {
     const hook = async () => "node v22";
-    expect(goldenRecipeFor([], {}, { deployDaemon: hook }).deployDaemon).toBe(hook);
+    expect(goldenRecipeFor([], { deployDaemon: hook }).deployDaemon).toBe(hook);
   });
 });
 

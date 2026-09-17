@@ -518,10 +518,10 @@ describe("browser shim in the guest", () => {
     const script = deployScript(CLOUD_PLACE, "aabbcc");
     // Not in every machine's envs: an old golden without the shim would otherwise point tools at a missing file.
     expect(GUEST_ENVS["BROWSER"]).toBeUndefined();
-    expect(claudeEnvs("sk-ant-x", { browserShim: true })["BROWSER"]).toBe("/usr/local/bin/wsp-open");
-    expect(claudeEnvs("sk-ant-x", { browserShim: false })["BROWSER"]).toBeUndefined();
-    expect(claudeEnvs("sk-ant-x", {})["BROWSER"]).toBeUndefined();
-    expect(claudeEnvs(undefined, { browserShim: true })).toEqual({ CLAUDE_CONFIG_DIR: "/root/.claude-cfg", ...GUEST_ENVS, BROWSER: "/usr/local/bin/wsp-open" });
+    expect(claudeEnvs({ browserShim: true })["BROWSER"]).toBe("/usr/local/bin/wsp-open");
+    expect(claudeEnvs({ browserShim: false })["BROWSER"]).toBeUndefined();
+    expect(claudeEnvs({})["BROWSER"]).toBeUndefined();
+    expect(claudeEnvs({ browserShim: true })).toEqual({ CLAUDE_CONFIG_DIR: "/root/.claude-cfg", ...GUEST_ENVS, BROWSER: "/usr/local/bin/wsp-open" });
     expect(script).toContain("install -m 0755 /root/wsp-daemon/wsp-open /usr/local/bin/wsp-open");
     expect(script).toContain("ln -sfn /usr/local/bin/wsp-open /usr/local/bin/xdg-open");
     expect(script).toContain("mkdir -p /etc/profile.d && printf 'export BROWSER=%s\\nunset DISPLAY\\n' /usr/local/bin/wsp-open > /etc/profile.d/wsp-open.sh");

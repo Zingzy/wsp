@@ -10,7 +10,7 @@
 // row is one number, a sign-in row a mark, a file and a picker) they are set
 // here, once.
 import { basename } from "node:path";
-import { CATALOG_AGENTS, CATALOG_TOOLS, agentName as catalogName, catalogEntry, hasLogin } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, agentName as catalogName, catalogEntry, hasLogin, keyEnvOf } from "@wsp/catalog";
 import { floorApplies, type LoginChoice, type Manifest, type Platform } from "@wsp/collect";
 import { isMcpRow } from "@wsp/engine";
 import { CLOUD_SETUP_WORDS, fmtCalls, initShownScreens, type InitScreen, type InitScreenId, type InitScreenItem, type Recipe } from "@wsp/protocol";
@@ -96,8 +96,7 @@ function toolItems(tools: readonly TableRow[], recipe: Recipe, manifest: Manifes
 export function keyNameFor(manifest: Pick<Manifest, "entries">, rowId: string): string | undefined {
   const e = manifest.entries.find(x => x.id === rowId);
   if (e === undefined || e.rung !== "logins") return undefined;
-  const s = signInFor(agentName(e));
-  return hasLogin(s) ? s.keyEnv : undefined;
+  return keyEnvOf(signInFor(agentName(e)));
 }
 
 /** A path on this computer as the sign-ins screen names it: the file's own name, or the Keychain item's label. */

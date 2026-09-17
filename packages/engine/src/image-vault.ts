@@ -22,7 +22,7 @@ export interface ImageVault {
  * on an exit of its own, since a missing last path would otherwise leave `[ -e ]`'s 1 as the whole command's and
  * read as a machine that would not answer. Any other exit is exactly that, and the seal stops on it rather than
  * sealing an image whose sign-ins nobody could read. */
-async function presentPaths(machine: Machine, paths: readonly string[]): Promise<string[]> {
+export async function presentPaths(machine: Machine, paths: readonly string[]): Promise<string[]> {
   if (paths.length === 0) return [];
   const probe = `for p in ${paths.map(shellQuote).join(" ")}; do [ -e "$p" ] && echo "$p"; done; exit 0`;
   const read = await machine.exec(probe, { timeoutMs: INLINE_EXEC_MS });

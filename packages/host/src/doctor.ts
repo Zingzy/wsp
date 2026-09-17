@@ -1127,15 +1127,15 @@ export const GUEST_ENVS: Record<string, string> = {
   PATH: TOOLS_PATH,
 };
 
-/** Without a key the guest still needs the config dir and PATH; a subscription
- * user signs in with /login on the machine, so wsp never sees that credential.
+/** What a machine is created with for Claude Code: the config dir and the guest's own variables, and nothing of a
+ * sign-in. No key and no token is among them, since anything of that kind in a machine's environment outranks the
+ * token the vault sets on each turn inside the CLI, and a sign-in never sits on a machine.
  * BROWSER rides along only for a golden sealed with the shim: Claude Code in an
  * agent session (no TTY, no BROWSER) opens nothing at all, so a remote MCP
  * sign-in from an agent run needs it; a golden without the shim would point
  * every tool at a missing file. */
-export function claudeEnvs(anthropicKey?: string, golden?: Pick<GoldenVersion, "browserShim">): Record<string, string> {
+export function claudeEnvs(golden?: Pick<GoldenVersion, "browserShim">): Record<string, string> {
   return {
-    ...(anthropicKey !== undefined ? { ANTHROPIC_API_KEY: anthropicKey } : {}),
     CLAUDE_CONFIG_DIR,
     ...GUEST_ENVS,
     ...(golden?.browserShim === true ? { BROWSER: OPEN_SHIM_PATH } : {}),
@@ -1208,7 +1208,7 @@ export async function verifyNoneLeft(backend: MachineBackend, owner: string, log
 }
 
 export interface DoctorOptions {
-  /** Envs baked into golden builds and forks (claude credentials). */
+  /** Envs a golden build and its forks are created with: config dirs and the guest's own, never a sign-in. */
   envs?: Record<string, string>;
   daemonDir?: string;
   /** Deletes this host's orphan snapshots and templates instead of only naming them. */

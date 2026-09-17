@@ -12,6 +12,7 @@ import { LocalBackend } from "@wsp/engine";
 import { HERE_PLACE_ID, alreadyRecorded, inFolder, machineWord, undrivenRefusal, NO_SUCH_TURN, NOTIFY_ME, registeredLine, REGISTERING_LINE, RELAY_TICKET_REFUSAL, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, THIS_COMPUTER, TICKET_ORIGIN, TURN_TOKEN_ENV, type AdapterAttachOptions, type AdapterEvent, type EventUnion, type ExecStream, type PortForward, type ProjectImportEvent, type TurnResult, type WorkspaceStatus } from "@wsp/protocol";
 import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, oneWorkspacePerProject, type HarnessAdapterContext, type HarnessAdapterFactory, type HarnessSession, type LocalWiring, type ProjectExportOptions, type ProjectImportOptions, type Runtime } from "../src/runtime.js";
+import { HARNESS_ADAPTERS } from "../src/adapters.js";
 import { localExecStream } from "../src/local-exec.js";
 import { serveRuntime, type ForwardsSource } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
@@ -288,6 +289,41 @@ describe("local workspace", () => {
     expect(held.steered[0]).toContain(`thread ${kid.view().threadId!.slice(0, 8)} finished (completed)`);
     held.end(0);
     await turn.finished;
+    await rt.close();
+  });
+
+  it("a turn on this computer runs its real child with the vault's token in its environment, through the agent's own adapter", async () => {
+    const said: string[] = [];
+    // The shipped Claude adapter, built by the registry off the context this runtime hands it: what a real turn on
+    // this computer is launched with, environment and all.
+    const throughClaude: HarnessAdapterFactory = ctx => {
+      const claude = HARNESS_ADAPTERS.claude(ctx);
+      return {
+        steers: false,
+        start: ({ onEvent }) => {
+          const sessionId = randomUUID();
+          const result: TurnResult = { status: "completed", text: "read" };
+          const finished = (async (): Promise<TurnResult> => {
+            const stream = ctx.execStream('printf %s "$CLAUDE_CODE_OAUTH_TOKEN"', { env: { ...claude.env } });
+            let out = "";
+            for await (const line of stream.lines) out += line;
+            await stream.exited;
+            said.push(out);
+            onEvent({ type: "session.start", sessionId });
+            onEvent({ type: "turn.done", sessionId, result });
+            onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+            return result;
+          })();
+          return { localId: sessionId, finished, interrupt: async () => {} };
+        },
+      };
+    };
+    const token = "sk-ant-oat01-TESTONLY";
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: { claude: throughClaude }, local: localWiring, vault: () => ({ CLAUDE_CODE_OAUTH_TOKEN: token }) });
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac", project: (await projectOn(rt, HERE_PLACE_ID, repoIn(root, "vault"))).id });
+    await (await rt.sessions.start(ws.id, { prompt: "read your environment" })).finished;
+    // What the real child process printed out of its own environment, not what the test handed the adapter.
+    expect(said).toEqual([token]);
     await rt.close();
   });
 

@@ -26,6 +26,10 @@ export interface ClaudeEnvOptions {
   /** The machine's login environment: a guest's carries its config dir and IS_SANDBOX, a person's own carries theirs. */
   base?: Readonly<Record<string, string | undefined>>;
   apiKey?: string;
+  /** The long-lived token from claude setup-token. Set after the strip: the strip removes an inherited CLAUDE_CODE_*
+   * as a nesting mark, and this one is ours. An API key beside it wins inside the CLI, so the caller hands one or
+   * the other and never both, decided by what the vault holds: its token where there is one, else its key. */
+  oauthToken?: string;
 }
 
 export function stripLandmineEnv(
@@ -53,6 +57,7 @@ export function buildEnv(options: ClaudeEnvOptions = {}): Record<string, string>
     ...stripLandmineEnv(options.base ?? {}),
     ...HEADLESS_OVERRIDES,
     ...(options.apiKey === undefined ? {} : { ANTHROPIC_API_KEY: options.apiKey }),
+    ...(options.oauthToken === undefined ? {} : { CLAUDE_CODE_OAUTH_TOKEN: options.oauthToken }),
   };
 }
 

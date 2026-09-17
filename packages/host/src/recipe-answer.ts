@@ -5,7 +5,7 @@
 // rule all come from init-table, so the verbs and the wizard's screens can
 // never say different things about the same recipe; nothing here draws a
 // second table of catalog rows.
-import { CATALOG_AGENTS, CATALOG_TOOLS, keysIdOf, loginIdOf, loginRow, signsInByDefault, hasLogin } from "@wsp/catalog";
+import { CATALOG_AGENTS, CATALOG_TOOLS, keysIdOf, livesOnComputer, loginIdOf, loginRow, mintsToken, signsInByDefault, hasLogin } from "@wsp/catalog";
 import { type CommandCount, type Platform, floorApplies } from "@wsp/collect";
 import { RecipeCustomRow, RecipeTick, ToolPin, alsoTitle, customRows, fmtBytes, type Recipe } from "@wsp/protocol";
 import { z } from "zod";
@@ -216,6 +216,8 @@ export function tickAdvice(row: RecipeAnswerRow): RecipeAdvice {
  * or device login runs on the machine, anything else that exists only here travels by copy, and the rest is skipped. */
 export function signInAdvice(id: string): RecipeAdvice {
   const s = signInFor(loginIdOf(id));
+  if (mintsToken(s)) return { value: "token", why: `${s.mint} runs here and the token is set on every turn; nothing of it is on any machine` };
+  if (livesOnComputer(s)) return { value: "later", why: "it signs in once on the computer that runs the workspaces, never on a machine of its own" };
   if (loginRow(keysIdOf(id)) !== undefined) return { value: "key", why: "no sign-in there produces its keys, so they travel and it still signs in on the machine" };
   if (signsInByDefault(s)) return { value: "machine", why: "a browser sign-in the machine finishes; nothing of it is copied" };
   if (hasLogin(s) || (s.kind !== "shell" && s.sources.length > 0)) return { value: "copy", why: "nothing there produces it, so what is here travels" };

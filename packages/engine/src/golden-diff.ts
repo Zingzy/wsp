@@ -150,8 +150,8 @@ export function retiredBy(d: RecipeDiff, previous: readonly GoldenRetired[] = []
 }
 
 /** What an update does with one login answer. `needsFreshMachine` is true for an answer that only takes on a
- * machine built for it: a sign-in wants a pty on a builder before the seal, and a key is set in the environment at
- * create time, so neither reaches a machine that is already running. */
+ * machine built for it: a sign-in wants a pty on a builder before the seal, so it never reaches a machine that is
+ * already running. A key and a token are read out of the vault at every launch, so they reach one. */
 interface LoginAnswer {
   line: (label: string) => string;
   needsFreshMachine: boolean;
@@ -164,8 +164,9 @@ const LOGIN_ANSWERS: Record<LoginChoice, LoginAnswer> = {
   copy: { line: label => `copy the ${label}`, needsFreshMachine: false },
   machine: { line: label => `${label}: a sign-in during the build is not done by an update, so it would not be in the golden; pick the rebuild for it`, needsFreshMachine: true },
   later: { line: label => `${label}: nothing runs for it here; ${SIGN_IN_LATER} on the workspace`, needsFreshMachine: false },
-  key: { line: label => `${label}: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it`, needsFreshMachine: true },
+  key: { line: label => `${label}: the API key is held on this computer and set on every turn, so nothing of it lands on the machine`, needsFreshMachine: false },
   skip: { line: label => `retire the ${label}, left signed in on the image`, needsFreshMachine: false },
+  token: { line: label => `${label}: the token is held on this computer and set on every turn, so nothing of it lands on the machine`, needsFreshMachine: false },
 };
 
 /** A login row the new recipe carries no answer for reads as a skip: the row left the recipe, so the update stops
