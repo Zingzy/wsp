@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { KNOWN_HOSTS, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
+import { KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -2426,7 +2426,7 @@ export type ForwardEvent = z.infer<typeof ForwardOpenEvent> | z.infer<typeof For
 /** What a computer joining this host passes through when the host installs the agent on it over ssh, in order.
  * One list for the line a terminal prints and the rows the app draws, so neither invents a step the other has not
  * got. */
-export const PlaceAddStep = z.enum(["connect", "host-key", "wsp", "service", "join"]);
+export const PlaceAddStep = z.enum(["connect", "host-key", "wsp", "service", "join", "provision"]);
 export type PlaceAddStep = z.infer<typeof PlaceAddStep>;
 
 /** What each step reads as while it runs. The note beside it carries what the computer answered (its system, the
@@ -2437,6 +2437,7 @@ export const PLACE_ADD_WORDS: Record<PlaceAddStep, string> = {
   wsp: "installing wsp",
   service: "starting the agent",
   join: "waiting for it to connect to this computer",
+  provision: "installing the recipe's agents and tools",
 };
 
 /** Where the app's sheet says a step differently from the line a terminal prints. The sheet's road is a Linux box
@@ -2535,6 +2536,35 @@ export const MachineBind = z.object({
 });
 export type MachineBind = z.infer<typeof MachineBind>;
 
+/** What one row of the recipe came to on a computer you own. `present` is a row the computer already had at the
+ * version asked, so nothing ran for it; `skipped` waited on a row that did not land, or was set aside by the plan. */
+export const PlaceProvisionRow = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  outcome: z.enum(["installed", "present", "failed", "skipped"]),
+  note: z.string().optional(),
+  ms: z.number().int().nonnegative().optional(),
+});
+export type PlaceProvisionRow = z.infer<typeof PlaceProvisionRow>;
+
+/** The recipe on a computer you own, as the job that puts its rows there stands: `running` while rows are going on,
+ * `done` once every row has an outcome (failed rows included), `stopped` when the job itself ended before its rows
+ * did, with why in `said`. */
+export const PlaceProvision = z.object({
+  state: z.enum(["running", "done", "stopped"]),
+  /** The stream its steps ride as place.stage events: the add's own id at a join, a fresh one at an update. */
+  addId: z.string().min(1),
+  /** The recipe's own `at` stamp, so the row can say which recipe it was made from. */
+  recipeAt: z.string().min(1),
+  startedAt: z.string().min(1),
+  finishedAt: z.string().optional(),
+  rows: z.array(PlaceProvisionRow),
+  /** While running: the row under way and its place in the run. */
+  at: z.object({ label: z.string(), index: z.number().int().positive(), of: z.number().int().positive() }).optional(),
+  said: z.string().optional(),
+});
+export type PlaceProvision = z.infer<typeof PlaceProvision>;
+
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */
 export const PlaceView = z.object({
   id: z.string(),
@@ -2589,6 +2619,9 @@ export const PlaceView = z.object({
   /** The copy of the image at this place while it is not standing: the stage sentence while a build runs there, the
    * reason after one stopped there. Absent once the copy stands, and on a place nothing was ever built at. */
   build: z.string().optional(),
+  /** The recipe on this computer: what is being put on it, then what stands and what failed. Absent on a provider,
+   * on this computer itself, and on a computer nothing has provisioned yet. */
+  provision: PlaceProvision.optional(),
 });
 export type PlaceView = z.infer<typeof PlaceView>;
 
@@ -2601,6 +2634,26 @@ export const PlaceDial = z.object({
   place: PlaceView,
 });
 export type PlaceDial = z.infer<typeof PlaceDial>;
+
+/** What places.update answers: the daemon half where the computer was behind and absent where it already ran this
+ * wsp's daemon; the recipe job started after it, as it stands when the reply goes out; and, where no job started,
+ * why. */
+export const PlaceUpdateReply = z.object({
+  name: z.string().min(1),
+  daemon: z
+    .object({
+      from: z.number().int(),
+      to: z.number().int(),
+      road: z.enum(["link", "ssh"]),
+      at: z.string(),
+      kept: z.string().optional(),
+      note: z.string().optional(),
+    })
+    .optional(),
+  provision: PlaceProvision.optional(),
+  said: z.string().optional(),
+});
+export type PlaceUpdateReply = z.infer<typeof PlaceUpdateReply>;
 
 /** The id the computer the host runs on carries in that list. It is a place like every other, and the one nothing
  * was installed on, so both sides of the wire read the same word for it. */
@@ -2864,6 +2917,10 @@ export const EXEC_OUTPUT_MAX = 2 * 1024 * 1024;
  * is what bounds a frame that did not, so nothing runs without end on a computer somebody owns. */
 export const EXEC_TIMEOUT_DEFAULT_MS = 20_000;
 
+/** The longest an exec frame may ask for, which is the cap the daemon holds its own timer to. A caller with a
+ * command that can run longer launches it detached and polls it instead. */
+export const EXEC_TIMEOUT_MAX_MS = 600_000;
+
 /** The exit code a command killed at its deadline answers with, on every road wsp runs one: the shell's own word
  * for it, so a caller reads one number whether the command was launched detached on a guest or run by an exec op
  * on a place. One home, since the two roads' guards are compared against each other in tests. */
@@ -2876,7 +2933,7 @@ export const DaemonExecRequest = z.object({
   id: reqId,
   op: z.literal("exec"),
   cmd: z.string().max(EXEC_BODY_MAX),
-  timeoutMs: z.number().int().positive().max(600_000).optional(),
+  timeoutMs: z.number().int().positive().max(EXEC_TIMEOUT_MAX_MS).optional(),
   /** Bytes for the command's stdin, base64; absent closes stdin at once. */
   stdin: z.string().optional(),
 });
@@ -3702,6 +3759,51 @@ export const placeBehindLine = (name: string, word: string): string => `${name} 
 /** The refusal an update gets on a place already running the daemon this wsp deploys. */
 export const placeCurrentLine = (name: string, version: number): string => `${name} already runs daemon ${version}, which is the one this wsp deploys`;
 
+/** What a computer whose recipe is still being put on says to whoever asked for a workspace there, or for a second
+ * run of the job: the row under way where the job has reached one, and the two roads to the rest of the answer. */
+export const placeProvisioningLine = (name: string, at?: { label: string; index: number; of: number }): string =>
+  `${name} is still being set up${at === undefined ? "" : ` (${at.label}, ${at.index} of ${at.of})`}; wsp computers shows it, and a workspace there can be made once it is done`;
+
+/** What a join or an update says when this computer holds no recipe to put on anything: nothing was installed, and
+ * the two lines that write one and then put it on. */
+export const placeNoRecipeLine = (name: string, path: string): string =>
+  `${name} got no agents or tools: this computer has no recipe at ${path}. wsp recipe writes one; wsp add ${name} --update then puts it on ${name}`;
+
+/** What a computer that reported no home folder for its login gets instead of the recipe: every path the job would
+ * build comes off that home, so there is nothing to build one from. Said where the no-recipe line is said. */
+export const placeNoHomeLine = (name: string): string =>
+  `${name} got no agents or tools: it reported no home folder for its login, so nothing on it could be reached`;
+
+/** The row's word for the recipe on a computer: what is under way, or what stands. Empty for a computer nothing
+ * has provisioned, which is every provider and this computer itself. Read by wsp computers and by the app's row,
+ * so the two cannot word it two ways. */
+export function provisionWord(p: PlaceProvision | undefined): string {
+  if (p === undefined) return "";
+  if (p.state === "stopped") return `stopped: ${p.said ?? "no reason recorded"}`;
+  if (p.state === "running") return p.at === undefined ? "setting up" : `setting up ${p.at.index}/${p.at.of}: ${p.at.label}`;
+  const failed = p.rows.filter(r => r.outcome === "failed");
+  // Tools, not rows: a row is the recipe's own word and nobody reading this screen has seen a recipe.
+  return failed.length === 0 ? `${plural(p.rows.length, "tool")} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
+}
+
+/** The lines a terminal prints once a job is over: what installed by name, how many rows were already there, then
+ * every row that failed or was set aside with its reason, and what stopped the job where one did. */
+export function provisionLines(name: string, p: PlaceProvision): string[] {
+  const of = (outcome: PlaceProvisionRow["outcome"]): PlaceProvisionRow[] => p.rows.filter(r => r.outcome === outcome);
+  const installed = of("installed");
+  const present = of("present");
+  const tally = [
+    installed.length === 0 ? "nothing installed" : `${installed.length} installed: ${nameList(installed.map(r => r.label))}`,
+    ...(present.length > 0 ? [`${present.length} already there`] : []),
+  ];
+  return [
+    `${name}: ${tally.join(", ")}`,
+    ...of("failed").map(r => `  x ${r.label}: ${r.note ?? "no reason recorded"}`),
+    ...of("skipped").map(r => `  - ${r.label}: ${r.note ?? "set aside"}`),
+    ...(p.said === undefined ? [] : [`${name}: ${p.said}`]),
+  ];
+}
+
 /** The refusal an update gets where this wsp holds no daemon built for the chip that computer said it is. */
 export const placeNoChipLine = (name: string, platform: string, arch: string): string =>
   `${name} says it is ${platform} ${arch}, and this wsp carries no daemon built for it`;
@@ -4200,10 +4302,11 @@ const RuntimeOp = z.discriminatedUnion("op", [
   /** Every place this host holds: this computer, the computers joined to it, and the provider it forks on.
    * Answers `{ places: PlaceView[] }`. */
   z.object({ id: reqId, op: z.literal("places.list") }),
-  /** Puts the daemon this host deploys on one place, over the link it holds or over the ssh road the install used,
-   * and waits for that computer to dial back running it. The workspaces on it are kept. Answers
-   * `{ name, from, to, road, at, note? }`. */
-  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string() }),
+  /** Puts the daemon this host deploys on one place where it is behind, over the link it holds or over the ssh road
+   * the install used, waits for that computer to dial back running it, and then runs the recipe on it. The
+   * workspaces on it are kept. `addId` is the stream the recipe's own steps ride, so a caller that minted one reads
+   * them from the first row. Answers a PlaceUpdateReply. */
+  z.object({ id: reqId, op: z.literal("places.update"), placeId: z.string(), addId: z.string().optional() }),
   /** Takes a place back out: sweeps wsp off that computer over its link, drops the workspaces standing on it and
    * the place record. Answers `{ removed, swept, note? }`. */
   z.object({ id: reqId, op: z.literal("places.remove"), placeId: z.string() }),
@@ -4901,7 +5004,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, placeProvisionPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";

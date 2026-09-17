@@ -10,6 +10,7 @@ export * from "./local-backend.js";
 export * from "./ssh-backend.js";
 export * from "./key-fingerprint.js";
 export * from "./link-backend.js";
+export * from "./place-machine.js";
 // What a machine that already existed answers about itself, for the two kinds that ask it: read over a connection
 // on one, in a shell of its own on the other.
 export { ARCH_READ, HOME_READ, OS_READ, UPTIME_READ, archOf, osNameOf, readValues, uptimeMsOf } from "./machine-facts.js";
@@ -31,6 +32,7 @@ export * from "./recipe-owned.js";
 export * from "./labels.js";
 export * from "./orphans.js";
 export * from "./golden-import.js";
+export * from "./provision.js";
 export * from "./golden-diff.js";
 export * from "./golden-mcp.js";
 export * from "./machine-context.js";

@@ -467,7 +467,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 send({ id: msg.id, ok: false, error: PLACES_TICKET_REFUSAL });
                 return;
               }
-              send({ id: msg.id, ok: true, ...(await places().update(msg.placeId)) });
+              send({ id: msg.id, ok: true, ...(await places().update(msg.placeId, msg.addId)) });
               return;
             }
             case "places.remove": {
