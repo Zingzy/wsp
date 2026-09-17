@@ -72,5 +72,56 @@
         "at": "/Users/zingzy/wsp"
       }
     }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "shares": [
+        {
+          "source": "logins/codex/auth.json",
+          "target": "/root/.codex/auth.json"
+        }
+      ]
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "shares": [
+        {
+          "source": "/var/lib/wsp/logins/../../root/.ssh/id_ed25519",
+          "target": "/root/.codex/auth.json"
+        }
+      ]
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "shares": [
+        {
+          "source": "/var/lib/wsp/logins/codex/auth.json",
+          "target": "/root/../etc/passwd"
+        }
+      ]
+    }
+  },
+  {
+    "id": 1,
+    "op": "machine.create",
+    "spec": {
+      "kind": "sandbox",
+      "shares": [
+        {
+          "source": "/var/lib/wsp/logins/codex/auth.json"
+        }
+      ]
+    }
   }
 ]

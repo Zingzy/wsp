@@ -54,6 +54,17 @@ export interface KeyFiles {
   note: string;
 }
 
+/** A login the computer running the workspaces signs in once, outside every one of them, and mounts into each:
+ * `dir` is its own directory under that computer's logins directory, `file` the one file every workspace shares,
+ * `target` where the tool reads it inside, and `homeEnv` the variable the tool reads its store's directory from,
+ * which is what the sign-in on that computer runs with. One declaration per tool and nothing else names these. */
+export interface SharedLogin {
+  dir: string;
+  file: string;
+  target: string;
+  homeEnv: string;
+}
+
 /** A long-lived token minted on this computer by the tool's own command, held in the wsp home's .env under
  * `tokenEnv` and set in the environment of every turn. Nothing of it is on any machine. */
 export type TokenSignIn = {
@@ -95,10 +106,10 @@ export type SignIn =
       status?: StatusCheck;
       note?: string;
       keys?: KeyFiles;
-      /** Where this login lives once signed in: in the image (today's rows) or on the computer that runs the
-       * workspaces, signed in there once and shared into each of them. A login that lives on the computer is never
-       * copied onto a builder and never signed in on one. */
-      livesOn?: "computer";
+      /** Set where this login lives on the computer that runs the workspaces rather than in the image: signed in
+       * there once and shared into each of them. A login that lives on the computer is never copied onto a
+       * builder and never signed in on one; what it shares is the file this names. */
+      shared?: SharedLogin;
       /** Where this tool's login lives on the machine once signed in there or copied onto it, `~`-relative guest
        * paths: what the image vault archives for the row. Claude Code's is under CLAUDE_CONFIG_DIR, never HOME. */
       stateOnMachine: readonly string[];
@@ -119,9 +130,22 @@ export function mintsToken(s: SignIn | { kind: "shell" }): s is TokenSignIn {
   return s.kind === "token";
 }
 
+/** What this login shares from the computer that runs the workspaces into each of them, or nothing: the one
+ * reader of that field, so where the file lives, what the sign-in runs with and what may not be sealed all read
+ * the same declaration. */
+export function sharedLoginOf(s: SignIn | { kind: "shell" }): SharedLogin | undefined {
+  return hasLogin(s) ? s.shared : undefined;
+}
+
 /** A login signed in once on the computer that runs the workspaces and shared into each of them. */
 export function livesOnComputer(s: SignIn | { kind: "shell" }): boolean {
-  return hasLogin(s) && s.livesOn === "computer";
+  return sharedLoginOf(s) !== undefined;
+}
+
+/** Where a computer keeps one shared login's own store, under the logins directory its daemon names: the
+ * directory the sign-in there points the tool's home at, and where the file it shares lands. */
+export function loginHomeIn(logins: string, shared: SharedLogin): string {
+  return `${logins}/${shared.dir}`;
 }
 
 /** The variable this tool reads an API key from, or nothing: the one reader of that field, so every place that
@@ -189,11 +213,6 @@ export function loginStatePaths(entry: { signIn: SignIn }): string[] {
 
 /** No sign-in and nothing to say about it. */
 export const NO_SIGN_IN: SignIn = { kind: "none", sources: [] };
-
-/** The paths a builder may never hold when the seal reads it: the login files the pack used to copy, plus the key
- * file the apiKeyHelper road wrote. A sign-in never sits in an image, and a file that outranks the vault's token
- * inside the tool would bill an API key on every fork. */
-export const NEVER_IN_IMAGE: readonly string[] = [`${GUEST_HOME}/${CLAUDE_CONFIG_REL}/.credentials.json`, `${GUEST_HOME}/${CLAUDE_CONFIG_REL}/${CLAUDE_KEY_FILE}`, `${GUEST_HOME}/.codex/auth.json`];
 
 /** In a subshell so its exits never cut the quiet run's own exit marker. */
 export const AWS_STATUS = `sh -c 'for p in $(aws configure list-profiles 2>/dev/null); do aws sts get-caller-identity --profile "$p" 2>/dev/null && exit 0; done; exit 1'`;
@@ -366,7 +385,17 @@ export const SIGN_IN_ROWS = {
     sources: [],
     stateOnMachine: [],
   },
-  codex: { kind: "oauth", sources: [], finish: "callback", keyEnv: "OPENAI_API_KEY", login: "codex login", fallback: "codex login --device-auth", livesOn: "computer", status: { command: "codex login status", signedIn: ok(/Logged in using/) }, stateOnMachine: [] },
+  codex: {
+    kind: "oauth",
+    sources: [],
+    finish: "callback",
+    keyEnv: "OPENAI_API_KEY",
+    login: "codex login",
+    fallback: "codex login --device-auth",
+    shared: { dir: "codex", file: "auth.json", target: `${GUEST_HOME}/.codex/auth.json`, homeEnv: "CODEX_HOME" },
+    status: { command: "codex login status", signedIn: ok(/Logged in using/) },
+    stateOnMachine: [],
+  },
   // Gemini CLI 0.59.0 asks about the folder before anything else, and then which sign-in to take, with Google's
   // preselected: --skip-trust answers the first and the relay's Enter takes the second.
   gemini: {
@@ -428,8 +457,31 @@ export const SIGN_IN_ROWS = {
   },
 } satisfies Record<string, SignIn>;
 
+/** Every login a computer signs in once and shares into each of its workspaces, off the rows themselves. */
+export const SHARED_LOGINS: readonly SharedLogin[] = Object.values(SIGN_IN_ROWS as Record<string, SignIn>)
+  .map(sharedLoginOf)
+  .filter((s): s is SharedLogin => s !== undefined);
+
+/** What a create on a computer that keeps its logins at `logins` shares into the workspace: one mount per login
+ * signed in there, from that computer's own file to the path the tool reads it at inside. */
+export function sharesIn(logins: string): { source: string; target: string }[] {
+  return SHARED_LOGINS.map(s => ({ source: `${loginHomeIn(logins, s)}/${s.file}`, target: s.target }));
+}
+
+/** The paths a builder may never hold when the seal reads it: the login files the pack used to copy, the key
+ * file the apiKeyHelper road wrote, and every login a computer shares into its workspaces. A sign-in never sits
+ * in an image, and a file that outranks the vault's token inside the tool would bill an API key on every fork. */
+export const NEVER_IN_IMAGE: readonly string[] = [
+  `${GUEST_HOME}/${CLAUDE_CONFIG_REL}/.credentials.json`,
+  `${GUEST_HOME}/${CLAUDE_CONFIG_REL}/${CLAUDE_KEY_FILE}`,
+  ...SHARED_LOGINS.map(s => s.target),
+];
+
 /** Every variable the vault hands a turn: each row's token variable and each row's key variable, derived from the
  * rows and nowhere else, so a tool that reads a new one declares it on its own row and the vault carries it. */
 export const VAULT_VARIABLES: ReadonlySet<string> = new Set(
-  Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(s => [...(mintsToken(s) ? [s.tokenEnv] : []), ...(keyEnvOf(s) !== undefined ? [keyEnvOf(s)!] : [])]),
+  Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(s => {
+    const key = keyEnvOf(s);
+    return [...(mintsToken(s) ? [s.tokenEnv] : []), ...(key !== undefined ? [key] : [])];
+  }),
 );

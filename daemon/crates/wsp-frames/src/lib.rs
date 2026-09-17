@@ -28,7 +28,8 @@ pub use machine::{
     MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind,
     MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply, MachineRoads,
     MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, OnIdle, PauseMode,
-    PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks, SnapshotStoragePricing, WorkspaceCopy, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
+    PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks, Share, SnapshotStoragePricing, WorkspaceCopy, MACHINE_OPS,
+    MACHINE_OPS_ON_ANY_ROAD,
 };
 pub use place::{
     place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,

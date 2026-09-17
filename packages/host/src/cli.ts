@@ -1550,6 +1550,7 @@ interface SharedFlags {
   "ssh-key"?: string;
   watch?: boolean;
   update?: boolean;
+  "sign-in"?: string;
   name?: string;
   relay?: string;
   host?: string;
@@ -1739,13 +1740,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   },
   add: {
     page: "front",
-    usage: "wsp add [<provider>|user@host|<place> --update] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
+    usage: "wsp add [<provider>|user@host|<place> --update|<place> --sign-in <agent>] [--name <name>] [--ssh-port <port>] [--ssh-key <path>]",
     about: "a place: user@host for a computer over ssh, <provider> for a provider, nothing for the join line another computer types, a place with --update to put this wsp's daemon on one already in",
     json: false,
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update)),
+      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values["sign-in"])),
   },
   remove: {
     page: "front",
@@ -1955,6 +1956,7 @@ export const SHARED_OPTIONS: Options = {
   "ssh-key": { type: "string" },
   watch: { type: "boolean" },
   update: { type: "boolean" },
+  "sign-in": { type: "string" },
   name: { type: "string" },
   relay: { type: "string" },
   host: { type: "string" },
@@ -2077,6 +2079,7 @@ export const SHARED_FLAGS: readonly SharedFlag[] = [
   { name: "ssh-port", on: ["add"], says: "the port ssh dials that computer on (default 22)" },
   { name: "ssh-key", on: ["add"], says: "the key file ssh logs in with; whatever your own ssh config and agent already use without it" },
   { name: "update", on: ["add"], says: "the place named is already in this wsp: put the daemon this wsp deploys on it, over the link it is holding or over the ssh road it was added on, restart its agent and keep the workspaces standing on it" },
+  { name: "sign-in", on: ["add"], says: "the agent to sign in on the place named, once, outside every workspace on it: the sign-in runs on that computer and every workspace there shares the one login. Offered by the join itself; this is the same road for a computer already in" },
   { name: "yes", on: ["init"], says: "take every default and ask nothing, which a run off a terminal needs; a login with a browser or device sign-in, or one held in the Keychain, is left to the first time you need it on the workspace unless a saved recipe answered copy, so macOS has nothing to ask either and the build waits on nobody" },
   { name: "yes", on: ["doctor"], says: "also delete the snapshots and templates this host left behind, which is not reversible" },
   { name: "recipe", on: ["init"], says: "tick the agents and tools from this recipe (wsp recipe writes it) and go straight to the sign-ins" },

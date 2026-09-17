@@ -40,6 +40,7 @@ import {
   placeNoDialLine,
   BackendFacts,
   type DaemonEvent,
+  type DaemonResponse,
   type MachineSizeOffer,
   type PlaceAddStep,
   type PlaceStageEvent,
@@ -60,6 +61,7 @@ import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
 import type { PlaceBackends } from "./runtime.js";
+import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import type { Store } from "./store.js";
 
@@ -311,6 +313,11 @@ export interface PlaceDoor {
   /** Takes the proved socket as this place's link, with the report `prove` answered; the previous link is cut. */
   attach(placeId: string, socket: WebSocket, report: PlaceReport, from: string, now: number): Promise<void>;
   link(placeId: string): DaemonReach | undefined;
+  /** A channel to the daemon on one computer this host holds, over the link that computer is holding: frames go
+   * up that link and the events it pushes come back to `onEvent`, so a road on this host drives that computer's
+   * own terminal. Nothing is dialled and no token is spent: only that computer can open a socket to this host,
+   * and this is the one it opened. Undefined on a place that is not connected. */
+  channel(placeId: string, onEvent: (event: Record<string, unknown>) => void): DaemonChannel | undefined;
   /** Reads what this host holds about its places into memory, so the backend a fork on one stands on is answered
    * without a read of the store; the hydration calls it once before it reads any workspace record. */
   load(): Promise<void>;
@@ -553,6 +560,9 @@ const RELINK_WAIT_MS = 120_000;
 /** How long a place gets to say what its backend is, and how long the table asking what room it has left waits;
  * a person is watching both, and a place that does not answer in time shows what this host already knows. */
 const BACKEND_FACTS_MS = 10_000;
+/** How long an install waits for that answer before it answers the person: one round trip on a socket the
+ * computer has just opened, and no more, since the row it prints is a line at a terminal. */
+const ADD_FACTS_MS = 2_000;
 const CAPACITY_MS = 5_000;
 /** How long one dial of a computer gets before it is an answer of its own: a person is watching the button they
  * pressed, and a road that is going to answer answers in well under this. */
@@ -719,6 +729,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     await keep({ ...held, lastSeenAt: new Date(at).toISOString() });
   };
 
+  /** Who is reading one computer's daemon events, by place id: the channels a road on this host opened over that
+   * computer's link. A channel is the one road the events it asked for come back on, so a pty on one computer is
+   * never pushed at a reader of another. */
+  const channels = new Map<string, Set<(event: Record<string, unknown>) => void>>();
   /** What is waiting for one computer to open a socket again, by its place id: every ask that may be made a second
    * time parks here for the gap, and the attach that takes the next socket wakes them. */
   const waiting = new Map<string, Set<(back: boolean) => void>>();
@@ -755,6 +769,24 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       timer.unref?.();
       held.add(wake);
     });
+
+  /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
+   * that is up: the read behind this writes the record whenever the answer lands, so a computer slower than
+   * that is joined, or updated, all the same and its row fills in at the read after. Where the facts are already
+   * on the record this answers at once, since the read is dropped for a computer that has said. */
+  const factsOn = async (placeId: string, held: PlaceRecord): Promise<PlaceRecord> => {
+    const read = door
+      .forkingBackend(placeId)
+      .then(async () => (await recordOf(placeId)) ?? held)
+      .catch(() => held);
+    return Promise.race([
+      read,
+      new Promise<PlaceRecord>(resolve => {
+        const timer = setTimeout(() => resolve(held), ADD_FACTS_MS);
+        timer.unref?.();
+      }),
+    ]);
+  };
 
   /** The road the engine drives one place's machines over: one frame and its answer, and the loopback forward a
    * route into a machine there is taken by. A place that is not connected is PlaceAbsentError on every call, which
@@ -879,6 +911,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
+    ...(record.backendFacts?.logins !== undefined ? { logins: record.backendFacts.logins } : {}),
     // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
     // every computer on this list forks.
     takesForks: true,
@@ -983,6 +1016,15 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // so it is kept rather than only announced on the event. What the last dial of this computer said goes with
       // the link that arrived: the computer is here now, and a refusal from before it came back is not news.
       const moved: PlaceRecord = { ...held, name: report.name, report, lastSeenAt: new Date(at).toISOString(), reportedAt: new Date(at).toISOString(), road: { ...held.road, from }, dialled: undefined };
+      // What a computer forks with belongs to the daemon that said it: one that dialled back on another version
+      // is asked again rather than read off an answer the version before it gave, since a newer daemon can carry
+      // a field the older one never did and an older one can have lost it. The read is the attach's own, below.
+      const newDaemon = held.report.daemonVersion !== report.daemonVersion;
+      if (newDaemon) {
+        delete moved.backendFacts;
+        backends.delete(placeId);
+        asking.delete(placeId);
+      }
       await keep(moved);
       const reach = connectDaemon({
         socket,
@@ -992,6 +1034,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           // rest, and neither is pushed at every watcher of the place.
           if (tunnelled(placeId, e)) return;
           void live.get(placeId)?.forward?.then(f => f.event(e)).catch(() => undefined);
+          for (const read of channels.get(placeId) ?? []) read(e as unknown as Record<string, unknown>);
           opts.onDaemonEvent?.(placeId, e);
         },
       });
@@ -1027,6 +1070,42 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     link: placeId => live.get(placeId)?.reach,
+
+    channel(placeId, onEvent) {
+      const held = live.get(placeId);
+      if (held === undefined) return undefined;
+      const reading = channels.get(placeId) ?? new Set<(event: Record<string, unknown>) => void>();
+      channels.set(placeId, reading);
+      reading.add(onEvent);
+      let end: (gone: { code: number; reason: string }) => void = () => {};
+      const closed = new Promise<{ code: number; reason: string }>(r => (end = r));
+      // The link going away ends the channel, as a daemon socket closing ends the host's own: whatever was
+      // running behind it on that computer is no longer something this host can read or stop. The listener comes
+      // off with the channel, so a road that opens and closes many never piles them on one socket.
+      const gone = (code: number, reason: Buffer): void => {
+        forget();
+        end({ code, reason: reason.toString("utf8") });
+      };
+      const forget = (): void => {
+        reading.delete(onEvent);
+        if (reading.size === 0) channels.delete(placeId);
+        held.socket.off("close", gone);
+      };
+      held.socket.once("close", gone);
+      return {
+        send: frame => {
+          const { op, ...params } = frame;
+          const on = live.get(placeId);
+          if (on?.reach !== held.reach) return Promise.reject(new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence));
+          return on.reach.request(op, params) as Promise<DaemonResponse>;
+        },
+        closed,
+        close: () => {
+          forget();
+          end({ code: 1000, reason: "closed here" });
+        },
+      };
+    },
 
     async load() {
       for (const record of await records()) {
@@ -1071,7 +1150,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const read = (async () => {
         const answer = await bounded(linkTo(placeId).request("machine.backend"), BACKEND_FACTS_MS, `machine.backend on ${name}`);
         const facts = BackendFacts.parse(answer);
-        await keep({ ...record, backendFacts: facts });
+        // Onto the record as it stands rather than as it was when the frame went out, and only while the daemon
+        // that answered is still the one running there: a computer that dialled back on another version while
+        // this was out has a read of its own behind that attach, and this answer is not its facts any more.
+        const now = (await recordOf(placeId)) ?? record;
+        if (now.report.daemonVersion !== record.report.daemonVersion) return LinkBackend.of(linkTo(placeId), facts);
+        await keep({ ...now, backendFacts: facts });
         return backendFrom(placeId, facts);
       })().finally(() => asking.delete(placeId));
       asking.set(placeId, read);
@@ -1193,7 +1277,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // The size the box reported is not here: every road that draws this line draws the box's row beside it, and
         // a fact already in the row costs the line the room it needs to read whole.
         stage("join", "done", `engine ${held.report.engine}`);
-        return { addId, place: viewOf(held, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
+        // What that computer forks with, read over the link it has just opened and before this answers: the row a
+        // join prints carries where that computer keeps the logins its workspaces share, which is what the
+        // sign-in offered right after it reads. Waited for no longer than one frame on a fresh link takes: a
+        // computer slower than that is joined all the same, its answer lands on the record behind this add, and
+        // its row carries nothing about its forks until then, as every row did before any of this was asked.
+        const said = await factsOn(placeId, held);
+        return { addId, place: viewOf(said, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
         // against the line it belongs to rather than under the list. One line of it: a note is printed after the
@@ -1343,6 +1433,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
       // about itself then is the only reading that proves the new daemon is the one running there.
       const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
+      // The attach on the new daemon dropped what the old one said it forks with and asked again; this waits for
+      // that answer, so the row after an update carries the new daemon's facts rather than nothing while they are
+      // still in flight. It joins the read behind the attach instead of sending a second frame.
+      if (to !== from) await factsOn(placeId, held);
       return {
         ...landed,
         name: held.name,

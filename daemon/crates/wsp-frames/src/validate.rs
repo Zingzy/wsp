@@ -145,6 +145,18 @@ where
     Ok(s)
 }
 
+/// The same rule for a path that may be absent, which is how a reply carries one.
+pub(crate) fn plain_path_opt<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<String>::deserialize(d)? {
+        None => Ok(None),
+        Some(s) if is_plain_path(&s) => Ok(Some(s)),
+        Some(_) => Err(de::Error::custom("an absolute path made of what a path is made of")),
+    }
+}
+
 pub(crate) fn positive<'de, D>(d: D) -> Result<Option<u32>, D::Error>
 where
     D: Deserializer<'de>,

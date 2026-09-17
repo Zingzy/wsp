@@ -293,6 +293,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
         pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" }, builderDiskGb: 40 },
         lifecycle: { budgets: { wakeAttempts: 1, daemonAnswersMs: 30000, resumeAsks: { everyMs: 5000, forMs: 60000 } } },
         baseTemplates: { sandbox: "ubuntu:24.04", desktop: "ubuntu:24.04" },
+        logins: "/var/lib/wsp/logins",
       },
       {
         offer: "runtime",

@@ -7,6 +7,7 @@
 // answered, kind and status included, so a container it lost reads missing
 // here exactly as it reads there.
 
+import { sharesIn } from "@wsp/catalog";
 import {
   MACHINE_PUT_PART_BYTES,
   MachineAnswersReply,
@@ -25,10 +26,12 @@ import {
   type Capabilities,
   type MachineFacts,
   type MachineHandle,
+  type MachineShare,
   type PlaceCapacity,
 } from "@wsp/protocol";
 import { randomBytes } from "node:crypto";
 import { INLINE_EXEC_MS, execDetached } from "./exec-detached.js";
+import { BUILDER_LABEL } from "./labels.js";
 import type {
   BackendPricing,
   ExecResult,
@@ -263,6 +266,8 @@ export class LinkBackend implements MachineBackend {
   readonly pricing: BackendPricing;
   readonly lifecycle?: Lifecycle;
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
+  /** Where the computer on the far side keeps the logins it shares into every workspace on it, as it said. */
+  readonly logins?: string;
 
   /** Asks the place what its backend is and builds it from the answer. */
   static async open(link: MachineLink): Promise<LinkBackend> {
@@ -281,6 +286,7 @@ export class LinkBackend implements MachineBackend {
     facts: BackendFacts,
   ) {
     this.capabilities = facts.capabilities;
+    if (facts.logins !== undefined) this.logins = facts.logins;
     this.pricing = {
       // The rate the place's own sizes say, and nothing for a size it does not offer, which on a computer somebody
       // owns is every size: the function is not a thing a wire carries, so it is rebuilt from the offers.
@@ -298,10 +304,22 @@ export class LinkBackend implements MachineBackend {
   }
 
   /** The spec's own key is the ask's: the far side answers the machine it already made under that key instead of
-   * booting a second one, so a create the link dropped under is asked again by it and no computer is billed twice. */
+   * booting a second one, so a create the link dropped under is asked again by it and no computer is billed twice.
+   *
+   * The logins that computer signs in once are filled in here and nowhere else, off the catalog's own rows: every
+   * workspace on it reads the same file, so a refresh in one is the computer's refresh. A builder is left out,
+   * since a builder becomes an image and a sign-in never sits in one. */
   async create(spec: MachineSpec): Promise<Machine> {
     const opts: LinkAsk = { timeoutMs: CREATE_MS, ...(spec.idempotencyKey !== undefined ? { idempotencyKey: spec.idempotencyKey } : {}) };
-    return new LinkMachine(this.link, (await this.ask(MachineHandleReply, "machine.create", { spec }, opts)).machine);
+    const asked = { ...spec, ...(this.shares(spec) ?? {}) };
+    return new LinkMachine(this.link, (await this.ask(MachineHandleReply, "machine.create", { spec: asked }, opts)).machine);
+  }
+
+  /** The shares one create carries, or nothing at all: nothing on a computer that keeps no logins for its
+   * workspaces, which is every provider, and nothing on a builder. */
+  private shares(spec: MachineSpec): { shares: MachineShare[] } | undefined {
+    if (this.logins === undefined || spec.labels?.[BUILDER_LABEL] !== undefined) return undefined;
+    return { shares: sharesIn(this.logins) };
   }
 
   async get(id: string): Promise<Machine> {

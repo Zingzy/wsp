@@ -570,6 +570,7 @@ mod tests {
             init: Path::new("/usr/local/bin/wsp-daemon"),
             etc: &layout.etc(id),
             engine: None,
+            shares: &[],
         });
         crate::bundle::write_json(&layout.config(id), &spec).unwrap();
         spec

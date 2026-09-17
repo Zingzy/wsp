@@ -162,6 +162,9 @@ export interface MachineBackend {
   /** Optional: what a machine of each kind boots from on this provider when nothing names a template. Absent leaves
    * the built-in names the engine knows. */
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
+  /** Optional: where the computer holding this backend keeps the logins every workspace on it shares, absolute.
+   * Only a computer the person owns answers one; a provider holds no file of theirs. */
+  readonly logins?: string;
   create(spec: MachineSpec): Promise<Machine>;
   /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
    * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with
