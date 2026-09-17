@@ -54,6 +54,11 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+t", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+alt+arrowleft", command: "workspace.previous", when: "!terminalFocus" },
   { key: "mod+alt+arrowright", command: "workspace.next", when: "!terminalFocus" },
+  // The arrows read as the list does: left and right walk the workspaces, up and down the threads inside the one
+  // on screen. The walk holds its overlay while the chord is held, as the workspace walk does, and lands on the
+  // key coming up.
+  { key: "mod+alt+arrowup", command: "thread.previous", when: "!terminalFocus" },
+  { key: "mod+alt+arrowdown", command: "thread.next", when: "!terminalFocus" },
   { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus" },
   { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus" },
   ...WORKSPACE_SELECT_SLOTS.map(slot => ({ key: `mod+${slot}`, command: workspaceSelectCommand(slot), when: "!terminalOwnsMod" })),

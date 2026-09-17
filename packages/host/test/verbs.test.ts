@@ -406,7 +406,7 @@ describe("wsp verbs over the host", () => {
     expect(io.errors.map(l => (JSON.parse(l) as { error: string }).error)).toEqual(["wsp threads --watch redraws a table and --json answers with objects. Take one of the two: wsp threads --watch at a terminal, or wsp threads --json for the objects."]);
   });
 
-  it("the STATE cell reads the machine and the daemon beside the phase: a machine the provider stopped says Stopped and one whose daemon has gone dark says Unreachable, both while the record still reads running", async () => {
+  it("the STATE cell reads the machine and the daemon beside the phase: a machine the provider paused says Paused and one whose daemon has gone dark says Unreachable, both while the record still reads running", async () => {
     await run("new", "napped");
     await run("new", "dark");
     // Every cloud machine has an edge route, and a prompt 502 on it is the edge dialling the guest and finding
@@ -432,7 +432,9 @@ describe("wsp verbs over the host", () => {
       ]);
       const [, ...rows] = listed.io.lines[0]!.split("\n");
       expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[5]!))).toEqual([
-        ["napped", expect.stringMatching(/^ws_/), "Stopped"],
+        // The provider this host forks on keeps a paused machine's memory, so its nap reads paused here as it
+        // does on the app's row, off the pause mode the landing carries for that project.
+        ["napped", expect.stringMatching(/^ws_/), "Paused"],
         ["dark", expect.stringMatching(/^ws_/), "Unreachable"],
       ]);
 
@@ -860,7 +862,7 @@ describe("wsp verbs over the host", () => {
     await run("new", "alpha");
     const { code, io } = await run("pause", "alpha");
     expect(code).toBe(0);
-    expect(io.lines).toEqual(["alpha stopped"]);
+    expect(io.lines).toEqual(["alpha paused"]);
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
     const missing = await run("pause", "nope");
     expect(missing.code).toBe(EXIT_CODES.usage);
@@ -965,7 +967,7 @@ describe("wsp verbs over the host", () => {
     runningAtProvider();
     const paused = await run("pause", "alpha");
     expect(paused.code).toBe(0);
-    expect(paused.io.lines).toEqual(["alpha stopped"]);
+    expect(paused.io.lines).toEqual(["alpha paused"]);
     expect(m.paused).toBe(true);
     expect((await rt.workspaces.list())[0]!.phase).toBe("napping");
   });
@@ -996,7 +998,7 @@ describe("wsp verbs over the host", () => {
     expect(named.io.lines).toEqual([`alpha is now the name he typed ${alpha.id}`]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["beta", "the name he typed"]);
     // The name is how a workspace is addressed, so every later verb takes the one it now carries.
-    expect((await run("pause", "the name he typed")).io.lines).toEqual(["the name he typed stopped"]);
+    expect((await run("pause", "the name he typed")).io.lines).toEqual(["the name he typed paused"]);
 
     const taken = await run("rename", "beta", "the name he typed");
     expect(taken.code).toBe(1);

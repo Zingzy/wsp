@@ -15,8 +15,15 @@ export const ROW_META_CLASS = `${ROW_META_GRAMMAR} text-[var(--top-row-meta)]`;
  * read at a glance and sits under AA on purpose, prose has to be read and takes the ink that clears it. */
 export const ROW_PROSE_CLASS = `${ROW_META_GRAMMAR} text-[var(--sidebar-prose)]`;
 export const TWO_LINE_ROW_CLASS = "h-11 items-start py-1.5 text-left";
-/** A workspace row: name, the machine, what it cost, one fixed slot each, so every row has one shape and height. */
-export const THREE_LINE_ROW_CLASS = "h-15 items-start py-1.5 text-left";
+/** A workspace row: the name, what it is made of, and the branch or the one sentence it is waiting on. Four lines
+ * of room for three slots, since the made-of line takes two of them at the sidebar's width: the words that say
+ * what a copy is and whose ports it has are the row's own, and cut to one line the ports half was the first thing
+ * a 256 px sidebar dropped. Fixed, so every row has one shape and one height whatever its words. */
+export const THREE_LINE_ROW_CLASS = "h-20 items-start py-1.5 text-left";
+/** The made-of line's own slot: two lines of the meta grammar, held at that height whether the words take one or
+ * two, and cut at the second with the whole on the row's hover text. The row's column is a truncating one for the
+ * name's sake, so the wrap is turned back on here or the line would be cut at the first space past the edge. */
+export const ROW_MADE_OF_SLOT = "min-h-8 whitespace-normal line-clamp-2";
 export const ROW_LEAD_CLASS = "mt-0.5 flex size-3.5 shrink-0 items-center justify-center";
 
 /** The sidebar footer's own row: 28 px, muted mono, the whole width. Every row in the foot wears it, so the foot

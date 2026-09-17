@@ -161,6 +161,7 @@ import {
   workspaceKind,
   workspaceState,
   workspaceStateLine,
+  type PauseMode,
   workspaceStateOf,
   workspaceStaysAwakeLine,
   workspaceWord,
@@ -796,10 +797,23 @@ export async function threadRows(client: HostClient, within?: string): Promise<T
   });
 }
 
+/** How the computer a workspace's project lands on pauses a machine, for every line that prints a state word: the
+ * landing's own flags, which is the reading the app's rows take it from too, so the table and the sidebar cannot
+ * say two things about one nap. Nothing where the landing is refused, which reads the stopping words as every
+ * caller holding no mode does. */
+export async function pauseModeOf(client: HostClient, project: string): Promise<PauseMode | undefined> {
+  try {
+    return (await client.request<{ capabilities: Capabilities }>("workspaces.landing", { project })).capabilities.pauseMode;
+  } catch {
+    return undefined;
+  }
+}
+
 /** The workspace's name and its state word, the line a pause prints once the runtime has answered: the phase is the
- * whole of what a pause changed, and the machine's own state follows it. */
-export function stateLine(workspace: WorkspaceView): string {
-  return workspaceStateLine(workspace.name, workspaceState({ phase: workspace.phase }));
+ * whole of what a pause changed, and the machine's own state follows it. The computer's pause mode rides, so a nap
+ * at a provider that keeps the machine's memory reads paused and a stop reads stopped. */
+export function stateLine(workspace: WorkspaceView, pauseMode?: PauseMode): string {
+  return workspaceStateLine(workspace.name, workspaceState({ phase: workspace.phase }), pauseMode);
 }
 
 /** The line a wake prints: the word the next `wsp workspaces` will print for this workspace, read back off the
@@ -807,7 +821,8 @@ export function stateLine(workspace: WorkspaceView): string {
  * table says unreachable is two answers about one machine, and the phase alone cannot tell them apart. */
 export async function wokeLine(client: HostClient, workspace: WorkspaceOut): Promise<string> {
   const listed = (await workspaceStatuses(client)).find(w => w.id === workspace.id);
-  return workspaceStateLine(workspace.name, listed === undefined ? workspaceState({ phase: workspace.phase }) : workspaceStateOf(listed, listed));
+  const mode = await pauseModeOf(client, workspace.project.id);
+  return workspaceStateLine(workspace.name, listed === undefined ? workspaceState({ phase: workspace.phase }) : workspaceStateOf(listed, listed), mode);
 }
 
 /** Naps the workspace a person names; the view after, as every director shows it. */
@@ -830,8 +845,8 @@ export async function rebuild(client: HostClient, ref: string): Promise<Workspac
 
 /** The state line every director prints after a rebuild, with the machine now under the workspace: the id changed,
  * so a caller that held the old one is told. */
-export function rebuiltLine(workspace: WorkspaceView): string {
-  return `${stateLine(workspace)} on ${workspace.machineId}`;
+export function rebuiltLine(workspace: WorkspaceView, pauseMode?: PauseMode): string {
+  return `${stateLine(workspace, pauseMode)} on ${workspace.machineId}`;
 }
 
 /** The image and its copies as this host serves them, parsed and not trusted, for every director that draws them. */
@@ -1164,7 +1179,7 @@ export function threadTree(rows: readonly ThreadRow[]): { row: ThreadRow; depth:
  * word for every row, this computer's included, read off the status through the one predicate the sidebar reads,
  * so a machine the provider has paused and one whose daemon is dark say here what they say there. The projects
  * themselves are wsp projects' table. */
-export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, string> = new Map(), capabilities?: Pick<Capabilities, "copies" | "ownNetwork">): string[] {
+export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, string> = new Map(), capabilities?: Pick<Capabilities, "copies" | "ownNetwork" | "pauseMode">): string[] {
   const kind = kindWords(workspaceKind(w));
   const named = w.place === undefined ? undefined : places.get(w.place) ?? w.place;
   return [
@@ -1177,7 +1192,7 @@ export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, s
     w.copy === undefined ? "" : madeOfWord(w.copy.road),
     w.copy === undefined || capabilities === undefined ? "" : portsWord(capabilities, w.portBase, hostPlatform()),
     kind.rowReadsMachine ? fmtSize(w.size, kind.cpu) : "",
-    workspaceWord(workspaceStateOf(w, w)),
+    workspaceWord(workspaceStateOf(w, w), capabilities?.pauseMode),
     agentsWord(w.agents),
   ];
 }
@@ -1224,8 +1239,23 @@ export const NO_PROJECT_YET = "no projects yet; wsp add <folder> records one her
 /** The two flags a computer declares about copies, read through the landing of a project standing on it: a row
  * that carries a copy is a row on the computer the host runs on, so its own project is what answers. Asked once
  * per table and only where a row holds a copy, since every other row's cells are empty either way. */
-export async function hereCapabilities(client: HostClient, project: string): Promise<Pick<Capabilities, "copies" | "ownNetwork">> {
+export async function hereCapabilities(client: HostClient, project: string): Promise<Pick<Capabilities, "copies" | "ownNetwork" | "pauseMode">> {
   return (await client.request<{ capabilities: Capabilities }>("workspaces.landing", { project })).capabilities;
+}
+
+/** What every row of a listing needs about the computer its project lands on, by the project's id: the two copy
+ * flags its COPY and PORTS cells read and the pause mode its STATE word reads. One ask per project a row names,
+ * and a project whose landing is refused holds none, so its row says what its record carries. */
+export async function landingsFor(client: HostClient, projects: ReadonlyArray<string>): Promise<Map<string, Pick<Capabilities, "copies" | "ownNetwork" | "pauseMode">>> {
+  const held = new Map<string, Pick<Capabilities, "copies" | "ownNetwork" | "pauseMode">>();
+  for (const project of new Set(projects)) {
+    try {
+      held.set(project, await hereCapabilities(client, project));
+    } catch {
+      // A computer that forks nothing has no landing to give; the row reads its record alone.
+    }
+  }
+  return held;
 }
 
 export async function createFor(
@@ -2447,13 +2477,12 @@ export const VERBS: readonly Verb[] = [
       return drawRows(ctx, "wsp workspaces", async client => {
         const rows = await workspaceStatuses(client);
         const places = rows.some(w => w.place !== undefined) ? await placeNames(client) : new Map<string, string>();
-        // Asked once and only where a row carries a copy: the two flags are this computer's, and every row that
-        // holds a copy of a folder is a row on it.
-        const held = rows.find(w => w.copy !== undefined);
-        const here = held === undefined ? undefined : await hereCapabilities(client, held.project.id);
+        // One landing per project a row names: the copy cells read its two flags and the state word reads its
+        // pause mode, so a nap at a provider that keeps the machine's memory says paused here as it does in the app.
+        const landings = await landingsFor(client, rows.map(w => w.project.id));
         return {
           value: { workspaces: rows },
-          rows: table([["WORKSPACE", "ID", "PROJECT", "COMPUTER", "COPY", "PORTS", "SIZE", "STATE", "AGENTS"], ...rows.map(w => workspaceLine(w, places, here))]),
+          rows: table([["WORKSPACE", "ID", "PROJECT", "COMPUTER", "COPY", "PORTS", "SIZE", "STATE", "AGENTS"], ...rows.map(w => workspaceLine(w, places, landings.get(w.project.id)))]),
         };
       });
     },
@@ -2873,8 +2902,9 @@ export const VERBS: readonly Verb[] = [
     run: async ctx => {
       const [ref] = ctx.args;
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp pause takes one workspace.", usageIs(ctx));
-      const workspace = await nap(await ctx.client(), ref);
-      ctx.out.emit({ workspace }, stateLine(workspace));
+      const client = await ctx.client();
+      const workspace = await nap(client, ref);
+      ctx.out.emit({ workspace }, stateLine(workspace, await pauseModeOf(client, workspace.project.id)));
       return 0;
     },
     tool: tool({

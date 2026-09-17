@@ -18,7 +18,6 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { ROW_META_CLASS } from "../src/sidebar/rowGrammar.js";
 import { AppShell } from "../src/shell/AppShell.js";
-import { runShellCommand } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest } from "../src/shell/shellRequests.js";
 import { loadPagePreviews, useWorkspacePreviews } from "../src/shell/workspacePreviews.js";
 import { recentThreads, useThreadHistory } from "../src/shell/threadHistory.js";
@@ -498,11 +497,14 @@ describe("the thread switcher", () => {
   const thread = (id: string, title: string, minutesAgo: number): SessionView => ({ ...session(`s_${id}`, "ws_a", title, Date.now() - minutesAgo * 60_000), threadId: id });
   const SIX = [1, 2, 3, 4, 5, 6].map(n => thread(`thr_${n}`, `thread ${n}`, n));
 
-  /** The walk as every road runs it: the command with the keys a chord would be holding, which is what the
-   * dispatcher passes it and what the palette's own row runs with none. No chord carries it now that the sidebar
-   * draws one body and the Tab pair walks the workspaces. */
+  /** The walk as a person makes it: the mod arrows under the pair that walks the workspaces, held while the overlay
+   * stands and landed on the hold coming up. Shift is no part of it here, since down and up are the two ways. */
+  /** The hold of that chord let go, which is what commits the walk: Alt, as the workspace arrows commit on. */
+  const releaseThread = (): void => {
+    fireEvent.keyUp(window, { key: "Alt" });
+  };
   const threadStep = (mods: { shiftKey?: boolean } = {}): void => {
-    act(() => runShellCommand(mods.shiftKey === true ? "thread.previous" : "thread.next", { workspaceId: useStore.getState().selectedId, toggleSidebar: () => {} }, ["Control"]));
+    fireEvent.keyDown(window, { key: mods.shiftKey === true ? "ArrowUp" : "ArrowDown", code: mods.shiftKey === true ? "ArrowUp" : "ArrowDown", metaKey: true, altKey: true });
   };
 
   async function mountThreads(threads: SessionView[]): Promise<() => void> {
@@ -545,7 +547,7 @@ describe("the thread switcher", () => {
       threadStep();
       threadStep();
       await waitFor(() => expect(highlightedThread()).toBe("thr_4"));
-      release();
+      releaseThread();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
       expect(useStore.getState().selectedId).toBe("ws_a");
       expect(overlay()).toBeNull();
@@ -564,7 +566,7 @@ describe("the thread switcher", () => {
         threadStep();
       });
       act(() => {
-        release();
+        releaseThread();
       });
       expect(useStore.getState().selectedThreadId).toBe("thr_3");
       act(() => {
@@ -575,7 +577,7 @@ describe("the thread switcher", () => {
         threadStep();
       });
       act(() => {
-        release();
+        releaseThread();
       });
       expect(useStore.getState().selectedThreadId).toBe("thr_5");
       // Shift and a tap is the far end of the five.
@@ -583,7 +585,7 @@ describe("the thread switcher", () => {
         threadStep({ shiftKey: true });
       });
       act(() => {
-        release();
+        releaseThread();
       });
       expect(useStore.getState().selectedThreadId).not.toBe("thr_5");
       expect(useStore.getState().selectedThreadId).not.toBe("thr_3");
@@ -605,11 +607,11 @@ describe("the thread switcher", () => {
       await waitFor(() => expect(overlay()).not.toBeNull());
       expect(threadCards()).toEqual(["thr_5", "thr_3", "thr_1", "thr_2", "thr_4"]);
       expect(highlightedThread()).toBe("thr_5");
-      release();
+      releaseThread();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_5"));
       act(() => useStore.getState().select("ws_a"));
       threadStep({ shiftKey: true });
-      release();
+      releaseThread();
       await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_4"));
     } finally {
       restore();

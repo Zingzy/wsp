@@ -585,7 +585,8 @@ describe("rows from the fixture wire", () => {
     );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
     const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|min-h-|py-)/.test(c)).sort();
-    expect(heightOf(rowOf("api"))).toEqual(["h-15", "py-1.5"]);
+    // Four lines of room for the row's three slots: the made-of line takes two of them at the sidebar's width.
+    expect(heightOf(rowOf("api"))).toEqual(["h-20", "py-1.5"]);
     expect(heightOf(rowOf("fix the port list"))).toEqual(["h-11", "py-1.5"]);
     expect(heightOf(rowOf("upgrade node"))).toEqual(["h-11", "py-1.5"]);
     // A button centres its text unless told otherwise; a short title starts where a long one does.

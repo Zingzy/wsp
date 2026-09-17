@@ -720,14 +720,14 @@ describe("default shortcuts", () => {
       mod("k");
       await waitFor(() => expect(palette()).not.toBeNull());
       expect(inPalette().queryByText(/Nothing to step to/)).toBeNull();
-      // The thread walk carries no chord: the Tab pair walks the workspaces, and this row is how a hand reaches it.
-      expect(chordOn("Next thread")).toBeNull();
+      // The mod arrows walk the threads of the workspace on screen, as left and right walk the workspaces.
+      expect(chordOn("Next thread")).toBe("⌥⌘Down");
     } finally {
       restore();
     }
   });
 
-  it("lists the workspace walk with the Tab pair and the thread walk with no chord: the sidebar draws one body", async () => {
+  it("lists the workspace walk with the Tab pair and the thread walk with the arrows under it", async () => {
     const sessions = [session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })];
     await mountShell(sessions);
     const restore = asDesktopShell();
@@ -735,8 +735,8 @@ describe("default shortcuts", () => {
       useStore.getState().select("ws_a");
       mod("k");
       await waitFor(() => expect(palette()).not.toBeNull());
-      expect(chordOn("Next thread")).toBeNull();
-      expect(chordOn("Previous thread")).toBeNull();
+      expect(chordOn("Next thread")).toBe("⌥⌘Down");
+      expect(chordOn("Previous thread")).toBe("⌥⌘Up");
       expect(chordOn("Next workspace")).toBe("⌃Tab");
       expect(chordOn("Previous workspace")).toBe("⌃⇧Tab");
     } finally {

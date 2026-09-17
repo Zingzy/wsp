@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../adapt/index.js";
-import { forkedWorkspaces, projectGroups, threadTree } from "./threadTree";
+import { forkedWorkspaces, nestedWorkspaces, projectGroups, threadTree } from "./threadTree";
 
 const project = (id: string, name: string, computer = "here"): ProjectView => ({
   id,
@@ -42,11 +42,62 @@ describe("the projects the sidebar draws", () => {
     expect(groups.map(g => [g.project.id, g.workspaces.map(w => w.id)])).toEqual([["pr_1", ["ws_a"]]]);
   });
 
-  it("leaves a workspace an agent forked out of the project's own list: it is drawn under the thread that forked it", () => {
-    const groups = projectGroups([project("pr_1", "spoo")], [row("ws_a", "pr_1", [thread("lead", "ws_a")]), row("ws_fork", "pr_1", [], "lead")]);
-    expect(groups.map(g => g.workspaces.map(w => w.id))).toEqual([["ws_a"]]);
-    expect(forkedWorkspaces([row("ws_a", "pr_1"), row("ws_fork", "pr_1", [], "lead")], "lead").map(w => w.id)).toEqual(["ws_fork"]);
-    expect(forkedWorkspaces([row("ws_a", "pr_1")], "lead")).toEqual([]);
+  it("leaves a workspace an agent forked out of the project's own list while the thread that forked it has a row", () => {
+    const rows = [row("ws_a", "pr_1", [thread("lead", "ws_a")]), row("ws_fork", "pr_1", [], "lead")];
+    const nested = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: ["lead"] }, { workspace: "ws_fork", threads: [] }]);
+    expect([...nested]).toEqual(["ws_fork"]);
+    expect(projectGroups([project("pr_1", "spoo")], rows, nested).map(g => g.workspaces.map(w => w.id))).toEqual([["ws_a"]]);
+    expect(forkedWorkspaces(rows, "lead", nested).map(w => w.id)).toEqual(["ws_fork"]);
+    expect(forkedWorkspaces([row("ws_a", "pr_1")], "lead", nested)).toEqual([]);
+  });
+});
+
+describe("a workspace an agent forked has one row whatever is shut", () => {
+  const lead = () => row("ws_a", "pr_1", [thread("lead", "ws_a")]);
+  const fork = () => row("ws_fork", "pr_1", [thread("builder", "ws_fork", "lead")], "lead");
+  /** Where the rows stand: the project's own list, and the forks that nest under a thread. */
+  const stands = (shown: { workspace: string; threads: string[] }[]) => {
+    const rows = [lead(), fork()];
+    const nested = nestedWorkspaces(rows, shown);
+    return {
+      list: projectGroups([project("pr_1", "spoo")], rows, nested).flatMap(g => g.workspaces.map(w => w.id)),
+      under: forkedWorkspaces(rows, "lead", nested).map(w => w.id),
+    };
+  };
+
+  it("nests under its opener while that thread's row is drawn", () => {
+    expect(stands([{ workspace: "ws_a", threads: ["lead"] }, { workspace: "ws_fork", threads: ["builder"] }])).toEqual({ list: ["ws_a"], under: ["ws_fork"] });
+  });
+
+  it("stands in its project's list while the opener's shelf is shut over it", () => {
+    // The opener settled and the shelf holding it is shut: the body draws no row for it.
+    expect(stands([{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: ["builder"] }])).toEqual({ list: ["ws_a", "ws_fork"], under: [] });
+  });
+
+  it("stands in the list while the opener sits in a shut archive", () => {
+    expect(stands([{ workspace: "ws_a", threads: [] }])).toEqual({ list: ["ws_a", "ws_fork"], under: [] });
+  });
+
+  it("stands in the list once the opener is forgotten, which leaves no thread to nest under", () => {
+    const rows = [row("ws_a", "pr_1", []), fork()];
+    const nested = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: ["builder"] }]);
+    expect(nested.size).toBe(0);
+    expect(projectGroups([project("pr_1", "spoo")], rows, nested).flatMap(g => g.workspaces.map(w => w.id))).toEqual(["ws_a", "ws_fork"]);
+  });
+
+  it("stands in the list while the opener's own workspace is collapsed", () => {
+    expect(stands([{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: [] }])).toEqual({ list: ["ws_a", "ws_fork"], under: [] });
+  });
+
+  it("falls back with its own fork behind it: a fork of a fork whose chain is broken stands in the list too", () => {
+    const rows = [lead(), fork(), row("ws_deep", "pr_1", [], "builder")];
+    // Nothing of the lead's threads is drawn, so neither the fork nor the fork's own fork can nest.
+    const shut = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: [] }, { workspace: "ws_fork", threads: ["builder"] }, { workspace: "ws_deep", threads: [] }]);
+    expect(projectGroups([project("pr_1", "spoo")], rows, shut).flatMap(g => g.workspaces.map(w => w.id))).toEqual(["ws_a", "ws_fork", "ws_deep"]);
+    // With the chain drawn, both nest: the fork under the lead's thread and the deep one under the fork's.
+    const open = nestedWorkspaces(rows, [{ workspace: "ws_a", threads: ["lead"] }, { workspace: "ws_fork", threads: ["builder"] }, { workspace: "ws_deep", threads: [] }]);
+    expect([...open].sort()).toEqual(["ws_deep", "ws_fork"]);
+    expect(projectGroups([project("pr_1", "spoo")], rows, open).flatMap(g => g.workspaces.map(w => w.id))).toEqual(["ws_a"]);
   });
 });
 

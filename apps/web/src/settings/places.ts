@@ -76,11 +76,17 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, imageByt
 /** The dialog's own title. */
 export const removeTitle = (place: PlaceView): string => `Remove ${placeName(place)}?`;
 
-/** What this computer is called inside a sentence. One home for the word, so the day the app is told which
+/** Which platform every word the app writes about this computer is worded for, and the one home of that answer:
+ * the day the app is told which platform it runs on, this line reads it and every word follows. The row's copy
+ * words, the dialog's landing line and the sentences about this computer all take it from here rather than
+ * spelling it again.
+ *
+ * What this computer is called inside a sentence. One home for the word, so the day the app is told which
  * platform it runs on, the Mac's word becomes the platform's in one edit rather than in every sentence that says
  * it. The places table's first column says it capitalised, as a name in a column (hereWord); everything that says
  * it mid-sentence reads this. */
-export const THIS_COMPUTER_WORD = thisComputer("darwin");
+export const APP_PLATFORM = "darwin" as const;
+export const THIS_COMPUTER_WORD = thisComputer(APP_PLATFORM);
 
 /** What one row of the places list is, in the words the pane's Where row says after its name. One entry per kind
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own

@@ -10,7 +10,7 @@
 // Start and its width while a create runs, held and dimmed. Nothing on this
 // screen moves as it fills.
 import { useEffect, useState, type DragEvent, type KeyboardEvent } from "react";
-import { madeOfWord, type InitAgent, type PlaceView } from "@wsp/protocol";
+import { FIRST_WORKSPACE_ROAD, madeOfWord, type CopyRoad, type InitAgent, type PlaceView } from "@wsp/protocol";
 import { Button } from "../components/ui/button.js";
 import { Input } from "../components/ui/input.js";
 import { FOLDER_GHOST } from "../files/FolderPathField.js";
@@ -143,12 +143,12 @@ export function FirstRun() {
         {/* The slot stands from the first paint and is empty until a folder is named: what this piece of work will
             be, in the words the row it becomes will carry. */}
         <span className={cn(FACT, "mt-4 min-h-4 truncate")} data-k="lands">
-          {folder.trim() === "" ? "" : landsLine(places)}
+          {folder.trim() === "" ? "" : landsLine(places, FIRST_WORKSPACE_ROAD)}
         </span>
-        {/* The agents line says what was found here, and its absence is the one thing that holds Start. Cut to its
-            one line, with the whole of it on the line's own hover text: six agents wrapped to two lines at a
-            phone's width and pushed the button down as they arrived. */}
-        <span className={cn(FACT, "mt-1 min-h-4 truncate")} title={agents === null || noAgent ? undefined : agents.map(agent => agent.name).join(" · ")} data-k="agents">
+        {/* The agents line says what was found here, and its absence is the one thing that holds Start. Two lines
+            of height from the first paint, filled to as many as the list takes and cut at the second: six agents
+            wrapped and pushed the button down as they arrived, and one line cut the list in half at 1280. */}
+        <span className={cn(FACT, "mt-1 min-h-8 line-clamp-2")} title={agents === null || noAgent ? undefined : agents.map(agent => agent.name).join(" · ")} data-k="agents">
           {agents === null ? "" : noAgent ? FIRST_RUN_WORDS.noAgent : agents.map(agent => agent.name).join(" · ")}
         </span>
         <div className="mt-6 flex items-center gap-3">
@@ -165,11 +165,11 @@ export function FirstRun() {
   );
 }
 
-/** What the first piece of work on a folder here will be, off the computer this wsp runs on and the protocol's own
- * word for the road it takes: the folder itself, which is what the runtime does with the first workspace of a
- * project on this computer today. The word comes off the landing's own road once the ruling on that default lands
- * it; nothing here spells the road out. */
-export function landsLine(places: readonly PlaceView[]): string {
+/** What the first piece of work on a folder here will be: the computer this wsp runs on, and the word for the road
+ * the create will take, read off the one home of that default (FIRST_WORKSPACE_ROAD, which the runtime reads where
+ * it records that first workspace) through the protocol's own word table. This screen writes no road: the day the
+ * default becomes a copy, one line in the protocol moves and this line follows. */
+export function landsLine(places: readonly PlaceView[], road: CopyRoad): string {
   const here = places[0];
-  return [here === undefined ? undefined : placeName(here, true), madeOfWord("in-place")].filter((part): part is string => part !== undefined).join(" · ");
+  return [here === undefined ? undefined : placeName(here, true), madeOfWord(road)].filter((part): part is string => part !== undefined).join(" · ");
 }

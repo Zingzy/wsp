@@ -45,7 +45,7 @@ import { ROW_LEAD_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, proj
 import { SearchRow } from "./SearchRow.js";
 import { SectionRow } from "./SectionRow.js";
 import { foldArchivedThreads, resolveAdjacentThreadId, resolveSettledTimestamp, splitSidebarThreads } from "./Sidebar.logic.js";
-import { forkedWorkspaces, projectGroups, threadTree, workspaceOf, type ProjectRef } from "./threadTree.js";
+import { forkedWorkspaces, nestedWorkspaces, projectGroups, threadTree, workspaceOf, type ProjectRef } from "./threadTree.js";
 import { SettingsRow } from "./SettingsRow.js";
 import { HostFoot } from "../hosts/HostFoot.js";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./SidebarChrome.js";
@@ -176,7 +176,24 @@ export function WorkspaceSidebar() {
   const projects = useSidebarProjects();
   const launches = useLaunches();
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
-  const groups = useMemo(() => projectGroups(recorded, projects), [recorded, projects]);
+  /** The thread rows this body draws for each workspace, by the rules that hide one: its project's section shut,
+   * its own threads collapsed, the settled shelf shut over it, the archive shut inside that shelf. What it leaves
+   * out is what a fork cannot nest under, so the rule below gives that fork a row in its project's list instead. */
+  const shown = useMemo(
+    () =>
+      visible.map(({ project, active, settled, archived }) => {
+        const settledOpen = !settledCollapsed.includes(project.id);
+        const archivedOpen = archivedOpenIds.includes(project.id);
+        const hidden = shutProjects.has(project.workspace.project.id) || collapsed.has(project.id);
+        return {
+          workspace: project.id,
+          threads: hidden ? [] : [...active, ...(settledOpen ? settled : []), ...(settledOpen && archivedOpen ? archived : [])].map(thread => thread.id),
+        };
+      }),
+    [visible, settledCollapsed, archivedOpenIds, shutProjects, collapsed],
+  );
+  const nested = useMemo(() => nestedWorkspaces(projects, shown), [projects, shown]);
+  const groups = useMemo(() => projectGroups(recorded, projects, nested), [recorded, projects, nested]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   // One landing per project, for the network half of every row's second line and the pause mode its state word
   // takes. Asked here, where the projects are drawn, so no row asks for itself.
@@ -272,7 +289,7 @@ export function WorkspaceSidebar() {
     const rowId = threadRowId(thread.id);
     // A workspace this thread's own agent forked is a copy of the computer with its own branch, so it stands as a
     // workspace row one step in under this row, with its own threads under it.
-    const forked = forkedWorkspaces(projects, thread.id);
+    const forked = forkedWorkspaces(projects, thread.id, nested);
     return (
       <Fragment key={thread.id}>
         <ThreadRow

@@ -274,11 +274,13 @@ export function whereWord(record: Pick<WorkspaceView, "machineId"> & { kind?: Wo
 
 /** The line a verb that moved a workspace prints once the runtime has answered: the workspace and the word the next
  * listing will show for it, in the lowercase a line of work reads. The one place that word is lowered, so a pause
- * and a wake cannot spell one state two ways. A machine the provider has started and nothing on it answers gets a
+ * and a wake cannot spell one state two ways. The computer's pause mode rides where the caller holds it, as the
+ * state word itself takes it: a nap on a provider that keeps the machine's memory is a pause, and a stop anywhere
+ * else. A machine the provider has started and nothing on it answers gets a
  * sentence of its own, since one word there would say the wake failed when what happened is that the machine is up
  * and its daemon is not talking yet; a caller holding only a phase never reaches it. */
-export function workspaceStateLine(name: string, state: WorkspaceState): string {
-  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state).toLowerCase()}`;
+export function workspaceStateLine(name: string, state: WorkspaceState, pauseMode?: PauseMode): string {
+  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state, pauseMode).toLowerCase()}`;
 }
 
 /** Every word a slot beside facts can hold for a computer that is not answering, which is what lets a reader of

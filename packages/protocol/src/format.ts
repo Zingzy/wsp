@@ -2301,6 +2301,12 @@ export const computerWord = (os: string | null | undefined): string => thisCompu
  * workspace. */
 export const madeOfWord = (road: CopyRoad): string => (road === "in-place" ? "in this folder" : "a copy");
 
+/** The road the first piece of work on a project on the computer the host runs on takes: the folder itself, worked
+ * where it sits. One home for that default, read by the runtime where it records that first workspace and by the
+ * first-run screen to say what the work will be, so the day the ruling on it makes the first workspace a copy the
+ * word follows on every screen without one of them writing a road of its own. */
+export const FIRST_WORKSPACE_ROAD: CopyRoad = "in-place";
+
 /** What a workspace's copy has for a network, in the same words: its own where the computer gives a copy one, else
  * the computer's own ports, with the port an app that reads PORT binds where the record carries a base, since two
  * copies on one computer's network cannot both have 3000. Nothing at all on a computer that copies nothing, which

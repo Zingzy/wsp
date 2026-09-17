@@ -8,7 +8,7 @@
 import { agentName } from "@wsp/catalog";
 import { isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
-import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
+import { APP_PLATFORM, PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
 import { shortcutLabelForCommand } from "../keybindings.js";
 import { formatRelativeTimeLabel } from "../lib/timestampFormat.js";
@@ -71,7 +71,7 @@ export function madeOfLine({ project, landing, computer }: { project: Pick<Sideb
   return [
     copy === undefined ? undefined : madeOfWord(copy.road),
     computer ?? undefined,
-    landing === null ? undefined : portsWord(landing, project.workspace.portBase, "darwin") || undefined,
+    landing === null ? undefined : portsWord(landing, project.workspace.portBase, APP_PLATFORM) || undefined,
   ]
     .filter((part): part is string => part !== undefined)
     .join(" · ");

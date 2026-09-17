@@ -225,7 +225,7 @@ describe("the switch chords over the sidebar's one body", () => {
   const DESKTOP = { desktopShell: true };
   const tab = (mods: Partial<ShortcutEventLike> = {}) => key("Tab", { ctrlKey: true, code: "Tab", ...mods });
   /** The switch between workspaces as each platform's mod spells it: Command with Option on macOS, Control with Alt elsewhere. */
-  const arrow = (name: "ArrowLeft" | "ArrowRight", platform: string, mods: Partial<ShortcutEventLike> = {}) =>
+  const arrow = (name: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown", platform: string, mods: Partial<ShortcutEventLike> = {}) =>
     key(name, { altKey: true, code: name, ...(platform === MAC ? { metaKey: true } : { ctrlKey: true }), ...mods });
 
   it("gives the Tab pair the workspaces, whatever the sidebar is drawing: it draws one body", () => {
@@ -234,9 +234,14 @@ describe("the switch chords over the sidebar's one body", () => {
     expect(resolve(tab(), LINUX, DESKTOP)).toBe("workspace.next");
   });
 
-  it("binds the thread walk to no chord: it is a row in the palette and a command, and the Tab pair is the workspaces'", () => {
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBeNull();
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.previous", { platform: MAC, context: DESKTOP })).toBeNull();
+  it("walks the threads of the workspace on screen on the mod arrows up and down, as left and right walk the workspaces", () => {
+    expect(resolve(arrow("ArrowDown", MAC), MAC, DESKTOP)).toBe("thread.next");
+    expect(resolve(arrow("ArrowUp", MAC), MAC, DESKTOP)).toBe("thread.previous");
+    expect(resolve(arrow("ArrowDown", LINUX), LINUX, DESKTOP)).toBe("thread.next");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBe("⌥⌘Down");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.previous", { platform: MAC, context: DESKTOP })).toBe("⌥⌘Up");
+    // A focused terminal keeps them, as it keeps every arrow of the pair.
+    expect(resolve(arrow("ArrowDown", MAC), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
   });
 
   it("moves between workspaces on the mod arrows of the desktop shell", () => {

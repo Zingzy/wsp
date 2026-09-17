@@ -2,14 +2,16 @@
 // Where the person is: the settings page by its name while it is open; else
 // the thread that opened this one where an agent did, a folder glyph, the
 // workspace's name, a slash and the open thread's title; a creation in
-// progress by its name; the words for no selection otherwise. The thread is
+// progress by its name; the words for no selection otherwise, and nothing at
+// all while the first run is the centre, since that screen's own title says
+// the same emptiness and two sentences about it read as a fault. The thread is
 // the one the centre shows. The header carries no state word for a thread that
 // is simply working or settled, since the pane under it already shows that; it
 // carries the one state a person has to act on, so a prompt is never hidden by
 // the header the pane is scrolled under.
 import { FolderIcon } from "lucide-react";
 import { threadState, threadWordOf, waitingLine } from "@wsp/protocol";
-import { useCreation, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useWorkspace } from "../protocol/store.js";
+import { useCreation, useFirstRun, useOpenThread, useSelectedId, useSelectedWorkspaceId, useSettingsOpen, useSidebarProjects, useWorkspace } from "../protocol/store.js";
 import { ThreadLink } from "../components/ThreadLink.js";
 import { cn } from "../lib/utils.js";
 import { SETTINGS_WORDS } from "../settings/format.js";
@@ -21,6 +23,8 @@ export function ThreadBreadcrumb() {
   const workspace = useWorkspace(workspaceId);
   const thread = useOpenThread(workspaceId);
   const settingsOpen = useSettingsOpen();
+  // The first run is the whole centre, and it is titled: the bar says nothing over it.
+  const firstRun = useFirstRun();
   // An opener may run on any workspace, so the whole fleet is read rather than this one's threads.
   const opener = openedBy(useSidebarProjects(), { parentThreadId: thread?.parentThreadId ?? null });
   const name = workspace?.name ?? creation?.name;
@@ -29,7 +33,7 @@ export function ThreadBreadcrumb() {
       {settingsOpen ? (
         <span className="truncate font-medium text-foreground">{SETTINGS_WORDS.title}</span>
       ) : name === undefined ? (
-        <span className="truncate text-muted-foreground">No workspace selected</span>
+        firstRun ? null : <span className="truncate text-muted-foreground">No workspace selected</span>
       ) : (
         <>
           {thread !== null && opener !== undefined ? (

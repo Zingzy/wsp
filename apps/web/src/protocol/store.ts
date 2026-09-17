@@ -122,6 +122,9 @@ interface State {
   /** Whether the host has answered about that list yet. An empty list is an answer and a list not asked for yet is
    * not: what draws only while this computer is the only row would otherwise draw on every load and go again. */
   placesRead: boolean;
+  /** The same for the projects: the first run is the whole centre while this wsp holds none, and the workspaces
+   * list answers first, so a host with projects and no workspace painted that screen for one round trip. */
+  projectsRead: boolean;
   /** Whether the Add a computer sheet stands open over the Settings page. */
   addComputerOpen: boolean;
   /** Whether the Connect a provider sheet stands open over the Settings page. */
@@ -400,7 +403,10 @@ export const useStore = create<State>((set, get) => {
     else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
     // The landings go with it: a host that has gained a computer or an image since answers differently now.
     set({ landings: {} });
-    void api.projectsList?.().then(projects => set({ projects })).catch(() => {});
+    // An answer either way settles it, and a host whose wire carries no projects list settles it at once.
+    const projectsAsked = api.projectsList?.();
+    if (projectsAsked === undefined) set({ projectsRead: true });
+    else void projectsAsked.then(projects => set({ projects, projectsRead: true })).catch(() => set({ projectsRead: true }));
     void api
       .preferences?.()
       .then(preferences => {
@@ -432,6 +438,7 @@ export const useStore = create<State>((set, get) => {
     places: [],
     projects: [],
     landings: {},
+    projectsRead: false,
     placesRead: false,
     addComputerOpen: false,
     connectProviderOpen: false,
@@ -1095,5 +1102,12 @@ export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
 export function usePlaces(): PlaceView[] { return useStore(s => s.places); }
 export function useProjects(): ProjectView[] { return useStore(s => s.projects); }
 export function usePlacesRead(): boolean { return useStore(s => s.placesRead); }
+export function useProjectsRead(): boolean { return useStore(s => s.projectsRead); }
+/** Whether the first run is the whole centre: this wsp holds no project and no workspace, and the host has
+ * answered about both. The centre and the header read it here, so the bar cannot title an emptiness the centre is
+ * already titling, and neither paints that screen over a host whose lists are still on their way. */
+export function useFirstRun(): boolean {
+  return useStore(s => s.ready && s.projectsRead && s.projects.length === 0 && s.workspaces.length === 0);
+}
 export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }
 export function useConnectProviderOpen(): boolean { return useStore(s => s.connectProviderOpen); }

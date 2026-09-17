@@ -19,7 +19,7 @@
 // a double-click on the name, so the row keeps its height and its grammar. The
 // words come from workspaceRows.ts and the actions from the workspace registry.
 import { ChevronDownIcon, PlayIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { needsRebuild, workspaceKind, type Capabilities, type MemoryReading } from "@wsp/protocol";
+import { kindWords, needsRebuild, workspaceKind, type Capabilities, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
 import { actionById, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
@@ -30,7 +30,7 @@ import { cn } from "../lib/utils.js";
 import { useAbsentComputer } from "../protocol/store.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
-import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
+import { ROW_LEAD_CLASS, ROW_MADE_OF_SLOT, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
 import { NEW_THREAD_TITLE, glyphStateClass, madeOfLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
@@ -41,7 +41,14 @@ const ROW_CLASS = "group-has-data-[sidebar=menu-action]/menu-item:pe-2";
 /** The slot holds the longest state word there is, so a word arriving or leaving never moves the name beside it:
  * Unreachable measures 72.9 px in the row's mono at 11 px, and at 44 px the slot took the 16 px it needed off the
  * name, which moved under a person reading it. */
-const STATE_SLOT_CLASS = "min-w-[74px] shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
+const STATE_SLOT_CLASS = "shrink-0 text-right transition-opacity group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0";
+/** That width on a row whose kind has a state to show. */
+const STATE_SLOT_WIDTH = "min-w-[74px]";
+/** The room a row that shows no state word keeps anyway: the two glyphs the hover puts in the slot, so nothing a
+ * person is reading ever runs under them and the name is one width at rest and on hover. A workspace of this
+ * computer is such a row: wsp neither pauses nor wakes it, so its slot held 74 px of nothing and took them off an
+ * 18 character name. */
+const GLYPH_ROOM = "min-w-[52px]";
 /** The kind's glyph reads at the weight of the muted meta beside it until the state's own class takes the ink over. */
 const LEAD_GLYPH_CLASS = "text-muted-foreground/60";
 
@@ -95,6 +102,9 @@ export function WorkspaceRow({
   const gone = project.state === "gone";
   const madeOf = madeOfLine({ project, landing, computer });
   const absent = useAbsentComputer(project.id, nowMs);
+  /** Whether this row's kind has a state word to show at all: a machine wsp drives has one, and so has a row whose
+   * computer is not answering, whatever its kind. Every other row keeps the glyphs' room and nothing more. */
+  const holdsState = kindWords(workspaceKind(project.workspace)).driven || absent !== null;
   const meta = workspaceMetaLine({ project, absent, outOfMemory });
   // The same slot carries the branch most of the time and a sentence when something needs reading.
   const metaIsProse = meta !== "" && metaSentences({ project, absent, outOfMemory }).includes(meta);
@@ -137,11 +147,11 @@ export function WorkspaceRow({
                 {project.displayName}
               </span>
             )}
-            <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS)}>
+            <span data-workspace-state className={cn(ROW_META_CLASS, STATE_SLOT_CLASS, holdsState ? STATE_SLOT_WIDTH : GLYPH_ROOM)}>
               {stateSlotWord(project, absent)}
             </span>
           </span>
-          <span data-workspace-made-of className={cn(ROW_META_CLASS, "truncate")} title={madeOf}>
+          <span data-workspace-made-of className={cn(ROW_META_CLASS, ROW_MADE_OF_SLOT)} title={madeOf}>
             {madeOf}
           </span>
           <span data-workspace-meta className={cn(metaIsProse ? ROW_PROSE_CLASS : ROW_META_CLASS, "truncate")} title={absent?.sentence ?? meta}>

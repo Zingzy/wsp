@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useSyncExternalStore } from "react";
 import { makeApi, ProtocolClient } from "./protocol/client.js";
-import { useCreation, useProjects, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
+import { useCreation, useFirstRun, useProjectsRead, useReady, useSelectedId, useSelectedThreadId, useSettingsOpen, useStore } from "./protocol/store.js";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./components/ui/empty.js";
 import { WorkspaceTerminalDrawer } from "./components/WorkspaceTerminalDrawer.js";
 import { SettingsPage } from "./settings/SettingsPage.js";
@@ -66,14 +66,17 @@ function WorkspaceCenter() {
   const threadId = useSelectedThreadId();
   const creation = useCreation(workspaceId);
   const settingsOpen = useSettingsOpen();
-  const projects = useProjects();
-  const workspaces = useStore(s => s.workspaces);
+  const firstRun = useFirstRun();
+  const projectsRead = useProjectsRead();
   if (settingsOpen) return <SettingsPage />;
   if (creation) return <WorkspaceCreation creation={creation} />;
-  // Nothing recorded and nothing standing: the first run is the whole centre, and it is the one screen that
-  // records a project. A host that holds either says the rest, since a workspace with no project record of its own
-  // is still work a person can open.
-  if (projects.length === 0 && workspaces.length === 0) return <FirstRun />;
+  // Nothing recorded and nothing standing, both answered for: the first run is the whole centre, and it is the one
+  // screen that records a project. A host that holds either says the rest, since a workspace with no project record
+  // of its own is still work a person can open; one that has answered about neither yet says nothing at all.
+  if (firstRun) return <FirstRun />;
+  // A host that has not yet said what projects it holds says nothing here: the first run may still be the centre,
+  // and either sentence painted now is replaced a round trip later.
+  if (!workspaceId && !projectsRead) return null;
   if (!workspaceId) {
     return (
       <Empty className="flex-1">

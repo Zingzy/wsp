@@ -161,4 +161,63 @@ describe("the sidebar under the four nouns", () => {
     const row = screen.getByText("pricing table").closest<HTMLElement>("[data-sidebar-row]")!;
     expect(row.querySelector("[data-workspace-made-of]")!.textContent).toBe("a copy · shares this Mac's ports, PORT 3100");
   });
+
+  it("keeps that forked workspace's row in its project's list whenever the thread that forked it is not drawn", async () => {
+    const lead = workspace("ws_a", "pricing page", "pr_1");
+    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
+    /** The opener settled long enough ago to sit in the archive, which is shut; the fork's own thread still runs. */
+    const settledLongAgo = new Date(Date.now() - 48 * 60 * 60_000).toISOString();
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
+    await act(async () => {
+      useStore.setState({
+        sessions: {
+          ws_a: [{ id: "s_lead", workspaceId: "ws_a", threadId: "th_lead", harness: "claude", status: "completed", prompt: "move the pricing table", startedBy: "person", startedAt: settledLongAgo, endedAt: settledLongAgo }],
+          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
+        },
+      } as never);
+    });
+    // The opener is in the shut archive, so no thread row carries it; the fork stands in the project's own list
+    // with its own thread under it, where the plain rule puts it.
+    await waitFor(() => expect(rowIds()).toContain("ws:ws_fork"));
+    // The shelf's own header and the archive's under it, both shut over the opener, then the fork's row.
+    expect(rowIds()).toEqual(["ws:ws_a", "settled:ws_a", "archived:ws_a", "ws:ws_fork", "thread:th_child"]);
+    expect(screen.queryByText("move the pricing table")).toBeNull();
+    expect(screen.getByText("pricing table")).toBeDefined();
+  });
+
+  it("keeps it in the list while the opener's own workspace is collapsed, and nests it again when that opens", async () => {
+    const lead = workspace("ws_a", "pricing page", "pr_1");
+    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
+    await act(async () => {
+      useStore.setState({
+        sessions: {
+          ws_a: [{ id: "s_lead", workspaceId: "ws_a", threadId: "th_lead", harness: "claude", status: "running", prompt: "move the pricing table", startedBy: "person" }],
+          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
+        },
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("move the pricing table")).toBeDefined());
+    fireEvent.click(screen.getByLabelText("Collapse pricing page"));
+    await waitFor(() => expect(screen.queryByText("move the pricing table")).toBeNull());
+    expect(rowIds()).toEqual(["ws:ws_a", "ws:ws_fork", "thread:th_child"]);
+    fireEvent.click(screen.getByLabelText("Expand pricing page"));
+    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a", "thread:th_lead", "ws:ws_fork", "thread:th_child"]));
+  });
+
+  it("keeps it in the list once the opener thread is forgotten, so no workspace the host holds loses its row", async () => {
+    const lead = workspace("ws_a", "pricing page", "pr_1");
+    const forked = { ...workspace("ws_fork", "pricing table", "pr_1"), parentThreadId: "th_lead" };
+    mount({ projects: [project("pr_1", "spoo")], workspaces: [lead, forked] });
+    await act(async () => {
+      useStore.setState({
+        sessions: {
+          ws_a: [],
+          ws_fork: [{ id: "s_child", workspaceId: "ws_fork", threadId: "th_child", harness: "claude", status: "running", prompt: "write the migration", startedBy: "agent", parentThreadId: "th_lead" }],
+        },
+      } as never);
+    });
+    await waitFor(() => expect(screen.getByText("write the migration")).toBeDefined());
+    expect(rowIds()).toEqual(["ws:ws_a", "ws:ws_fork", "thread:th_child"]);
+  });
 });

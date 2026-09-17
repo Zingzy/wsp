@@ -19,10 +19,11 @@ const workspace: WorkspaceView = {
   createdAt: "t",
 };
 
-function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
+function mount({ projects, workspaces, projectsRead = true }: { projects: ProjectView[]; workspaces: WorkspaceView[]; projectsRead?: boolean }) {
   useStore.setState({
     api: { subscribe: () => () => {}, initGet: async () => ({ keys: { solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null }) } as unknown as Api,
     ready: true,
+    projectsRead,
     projects,
     workspaces,
     statuses: {},
@@ -39,13 +40,19 @@ function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: 
 
 afterEach(() => {
   cleanup();
-  useStore.setState({ api: null, projects: [], workspaces: [] } as never);
+  useStore.setState({ api: null, projects: [], workspaces: [], projectsRead: false } as never);
 });
 
 describe("what the centre of the window shows", () => {
   it("is the first run while this wsp holds no project and no workspace", () => {
     mount({ projects: [], workspaces: [] });
     expect(screen.getByText(FIRST_RUN_WORDS.title)).toBeDefined();
+  });
+
+  it("is nothing at all until the host has answered about the projects, so that screen never paints over work", () => {
+    mount({ projects: [], workspaces: [], projectsRead: false });
+    expect(screen.queryByText(FIRST_RUN_WORDS.title)).toBeNull();
+    expect(screen.queryByText("Pick a workspace to continue")).toBeNull();
   });
 
   it("is not the first run while a workspace stands, whose project record has not arrived yet", () => {

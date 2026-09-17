@@ -11,6 +11,7 @@ import {
   ProjectCopy,
   WorkspaceView,
   copyPathFor,
+  FIRST_WORKSPACE_ROAD,
   folderSlug,
   madeOfWord,
   portsWord,
@@ -81,6 +82,11 @@ describe("what a row says a workspace is made of", () => {
     expect(madeOfWord("in-place")).toBe("in this folder");
     expect(madeOfWord("clonefile")).toBe("a copy");
     expect(madeOfWord("worktree")).toBe("a copy");
+  });
+
+  it("has one home for the road a first piece of work here takes, which the runtime and the first-run screen both read", () => {
+    expect(FIRST_WORKSPACE_ROAD).toBe("in-place");
+    expect(madeOfWord(FIRST_WORKSPACE_ROAD)).toBe("in this folder");
   });
 });
 
