@@ -1,0 +1,11 @@
+#!/bin/sh
+# Only the coordinator pushes main. Builders push ticket branches.
+[ "$WSP_COORDINATOR" = "1" ] && exit 0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "refused: pushing main is the coordinator's job (set WSP_COORDINATOR=1 in the coordinator session only)" >&2
+      exit 1 ;;
+  esac
+done
+exit 0

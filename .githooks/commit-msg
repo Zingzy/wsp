@@ -1,0 +1,38 @@
+#!/bin/sh
+# What the reviews keep finding in a message, refused before the commit exists.
+# The body is read without git's own comment lines and without the diff a
+# verbose commit appends below the scissors, so neither can trip a rule.
+msg=""
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    "#"*">8"*) break ;;
+    "#"*) continue ;;
+  esac
+  msg="$msg$line
+"
+done < "$1"
+
+dash=$(printf '%s' "$msg" | grep -n -e '—' -e '–' | head -1)
+if [ -n "$dash" ]; then
+  echo "refused: line ${dash%%:*} of the commit message has an em dash or an en dash; write it with a comma, a colon or two sentences" >&2
+  exit 1
+fi
+
+if printf '%s' "$msg" | grep -qi '^[[:space:]]*Co-Authored-By:'; then
+  echo "refused: the commit message carries a Co-Authored-By trailer; delete that line" >&2
+  exit 1
+fi
+
+ticket=$(printf '%s' "$msg" | grep -nE '(^|[^[:alnum:]_])#[0-9]+' | head -1)
+if [ -n "$ticket" ]; then
+  echo "refused: line ${ticket%%:*} of the commit message names a ticket number; say what the commit does and leave the number on the tracker" >&2
+  exit 1
+fi
+
+named=$(printf '%s' "$msg" | grep -nEi '(^|[^[:alnum:]])(claude|anthropic|opus|fable|sonnet|ai)([^[:alnum:]]|$)' | head -1)
+if [ -n "$named" ]; then
+  echo "refused: line ${named%%:*} of the commit message names a tool or a model; say what changed instead" >&2
+  exit 1
+fi
+
+exit 0

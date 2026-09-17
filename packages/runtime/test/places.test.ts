@@ -2492,7 +2492,9 @@ describe("a computer joining a host that holds a sealed image", () => {
     // The wait is a wait, not a second answer: past its bound the stage fails with the frame's own words, which is
     // what a person read on this stage before anything waited at all.
     await expect(preparing).rejects.toThrow("connection lost");
-    expect(Date.now() - at).toBeGreaterThanOrEqual(300);
+    // Node wakes a timer against its own clock, which can read a millisecond short of the wall clock the elapsed
+    // here is measured on (a runner read 299 ms of this 300 ms wait), so the bound allows for that and no more.
+    expect(Date.now() - at).toBeGreaterThanOrEqual(300 - 10);
   });
 
   it("builds nothing for a computer whose doctor said no, since its join never stood, and nothing at all on a host that holds no image", async () => {

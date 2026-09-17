@@ -158,3 +158,21 @@ if (typeof globalThis.PointerEvent === "undefined") {
 beforeEach(() => {
   if (typeof window !== "undefined") window.location.hash = "";
 });
+
+// jsdom's CSS parser does not know @layer, and the file tree writes a stylesheet that opens with one on every
+// render, so a run printed a parse error per render that reads as a fault in the app. Only that kind of error is
+// dropped here; every other thing jsdom reports still reaches the run.
+type JsdomErrorReporters = {
+  listeners(event: "jsdomError"): ((error: unknown) => void)[];
+  removeAllListeners(event: "jsdomError"): void;
+  on(event: "jsdomError", listener: (error: unknown) => void): void;
+};
+const jsdomErrors = (window as unknown as { _virtualConsole?: JsdomErrorReporters })._virtualConsole;
+if (jsdomErrors) {
+  const reporters = jsdomErrors.listeners("jsdomError");
+  jsdomErrors.removeAllListeners("jsdomError");
+  jsdomErrors.on("jsdomError", error => {
+    if ((error as { type?: string }).type === "css parsing") return;
+    for (const report of reporters) report(error);
+  });
+}
