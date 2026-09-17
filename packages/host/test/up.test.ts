@@ -163,7 +163,11 @@ describe("wsp up", () => {
     // And the folder the turn road resolves is that same one, read off the backend the wiring published it on, which
     // is also the folder that backend's own machine runs in: one fact, so the two roads cannot split.
     expect(wiring.backend.folder).toBe(work);
-    expect((await rt.workspaces.execStream("ws_l", ["pwd"])).ranIn).toBe(work);
+    // Read off the stream and then waited on: a child still writing its run files under the wsp home while this
+    // test's folder is swept is a teardown that fails on the files it is racing.
+    const ran = await rt.workspaces.execStream("ws_l", ["pwd"]);
+    expect(ran.ranIn).toBe(work);
+    await printed(ran);
     // The harness's own store stays the person's, wherever their store variable puts it: a sign-in they made is the
     // one a turn uses, so nothing of it moved under the work folder.
     expect(wiring.home("claude").startsWith(work)).toBe(false);
