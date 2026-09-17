@@ -21,6 +21,7 @@ pub mod doctor;
 pub mod engine;
 #[cfg(target_os = "linux")]
 pub mod freeze;
+pub mod hardening;
 #[cfg(target_os = "linux")]
 pub mod init;
 #[cfg(target_os = "linux")]
@@ -29,7 +30,6 @@ pub mod net;
 pub mod nft;
 #[cfg(target_os = "linux")]
 pub mod ops;
-#[cfg(target_os = "linux")]
 pub mod profile;
 #[cfg(target_os = "linux")]
 pub mod runtime;

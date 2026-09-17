@@ -17,9 +17,10 @@ use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use wsp_frames::numbers::GUEST_WSP_HOME;
-use wsp_frames::{CopyWord, Share};
+use wsp_frames::{Bind, CopyWord, Share};
 
 use crate::doctor::OVERLAID;
+use crate::hardening;
 use crate::profile;
 
 /// Every path the runtime writes under its root.
@@ -195,6 +196,11 @@ pub struct Workspace {
     /// takes whatever the file says now, which is what makes one sign-in on the computer the workspaces' own.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shares: Vec<Share>,
+    /// The folders of this computer's own this workspace was made with, mounted into it by every boot: a
+    /// project's memory folder is one, so every workspace of that project works the same memory. A record
+    /// written before any workspace took one reads as a workspace with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub binds: Vec<Bind>,
 }
 
 /// The copy one workspace was made with, as the create made it: where it came from, where it is mounted inside,
@@ -227,6 +233,11 @@ pub struct Config<'a> {
     pub engine: Option<&'a Path>,
     /// The computer's own logins, each bound at the path its tool reads inside; empty where none is shared.
     pub shares: &'a [Share],
+    /// The computer's own folders, each bound at the path the workspace reads inside; empty where there are none.
+    pub binds: &'a [Bind],
+    /// The compose project every container engine call inside the workspace belongs to, where the workspace asked
+    /// for an engine; nothing where it did not, since a workspace with no engine runs no compose.
+    pub compose_project: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -261,6 +272,13 @@ pub fn config_json(c: &Config) -> Value {
     spec["process"]["cwd"] = json!("/");
     let mut env = vec![format!("PATH={}", profile::DEFAULT_PATH), format!("HOSTNAME={}", c.hostname)];
     env.extend(c.envs.iter().map(|(k, v)| format!("{k}={v}")));
+    // Last of the environment, so it stands whatever else was asked for: two workspaces of one project whose
+    // compose names are both the project's own directory name fail at compose's network step, the second one
+    // finding the first one's network under the name it wants (measured on a box). One name per workspace is
+    // what makes the two of them two stacks.
+    if let Some(project) = c.compose_project {
+        env.push(format!("COMPOSE_PROJECT_NAME={project}"));
+    }
     spec["process"]["env"] = json!(env);
     let bind = |destination: &str, source: PathBuf, options: &[&str]| json!({ "destination": destination, "type": "bind", "source": source, "options": options });
     let mounts = spec["mounts"].as_array_mut().expect("the profile lists mounts");
@@ -275,6 +293,13 @@ pub fn config_json(c: &Config) -> Value {
     // place, and what it writes is what the computer holds for every other workspace on it.
     for share in c.shares {
         mounts.push(bind(&share.target, PathBuf::from(&share.source), &["rbind", "rw"]));
+    }
+    // A whole folder of the computer's, read-write unless the bind says otherwise: what the workspace writes in
+    // it is what the computer holds for every other workspace of the same project. The same words a shared login
+    // takes, and no propagation word here either: the boot makes every one of these binds itself through
+    // `bind_into`, which is where the one propagation rule for everything under a rootfs lives.
+    for b in c.binds {
+        mounts.push(bind(&b.target, PathBuf::from(&b.source), if b.read_only { &["rbind", "ro"] } else { &["rbind", "rw"] }));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -367,11 +392,6 @@ pub fn mount_overlay(lower: &Path, upper: &Path, work: &Path, target: &Path) -> 
     mount(Some("overlay"), target, Some("overlay"), MsFlags::MS_NODEV, Some(data.as_str())).map_err(nix_at(target))
 }
 
-/// The paths a workspace's own empty directory is bound over, after the box's /root came in with it: the two
-/// folders a container engine keeps its images and its containers in, which are the box's and not a workspace's
-/// to see. The engine reaches a workspace through the fenced socket alone.
-pub const EMPTY_BINDS: [&str; 2] = ["/var/lib/docker", "/var/lib/containerd"];
-
 /// The directories a rootfs carries whatever the box holds: the mount points of the overlays and the binds
 /// above, the ones youki mounts the kernel's own filesystems at, and the ones a login expects to be there.
 const SKELETON: [&str; 15] =
@@ -387,8 +407,8 @@ const EMPTIED_AT_BOOT: [&str; 2] = ["run", "tmp"];
 /// symlinks as the box writes them, an empty directory for everything else, /run and /tmp emptied, the rootfs
 /// made a mount of its own that propagates nothing, an overlay over each of the computer's system directories,
 /// the box's /root bound in read-write so the agents' sign-ins and caches are the person's own, the workspace's
-/// own wsp folder over the box's, and an empty directory of the workspace's own over each path under it nothing
-/// inside may read. The copy of a project and youki's own mounts come after, in the boot.
+/// own wsp folder over the box's, and an empty file or directory of the workspace's own over every path
+/// `hardening::covered` names. The copy of a project and youki's own mounts come after, in the boot.
 ///
 /// Every mount here is the workspace's alone: `bind_into` says why that takes two calls rather than one.
 ///
@@ -459,10 +479,18 @@ pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
     let home = layout.wsp_home(id);
     fs::create_dir_all(&home).map_err(at(&home))?;
     bind_over(&home, &rootfs, GUEST_WSP_HOME)?;
-    for at_path in EMPTY_BINDS {
-        let empty = layout.empty_at(id, at_path);
-        fs::create_dir_all(&empty).map_err(at(&empty))?;
-        bind_over(&empty, &rootfs, at_path)?;
+    // And over every path of the box's own that nothing inside may read, the workspace's own empty file or
+    // directory: one per path, so what a workspace writes at one of them is not what it writes at another. Read
+    // off the rootfs here rather than listed here, and read last: the person's home and the box's /etc are both
+    // among the trees being covered, and both are only there to read once the mounts above are up.
+    for cover in hardening::covered(&rootfs) {
+        let empty = layout.empty_at(id, &cover.at);
+        if cover.file {
+            bind_file_over(&empty, &rootfs, &cover.at)?;
+        } else {
+            fs::create_dir_all(&empty).map_err(at(&empty))?;
+            bind_over(&empty, &rootfs, &cover.at)?;
+        }
     }
     Ok(())
 }
@@ -475,6 +503,18 @@ fn bind_over(source: &Path, rootfs: &Path, at_path: &str) -> Result<(), Error> {
     let target = inside(rootfs, at_path)?;
     fs::create_dir_all(&target).map_err(at(&target))?;
     bind_into(source, &target)
+}
+
+/// The same for a path the box keeps a file at: a file bind wants a file at both ends, so the workspace's own
+/// empty one is made here and the one inside is already there, since the cover was read off the rootfs.
+fn bind_file_over(source: &Path, rootfs: &Path, at_path: &str) -> Result<(), Error> {
+    let target = inside(rootfs, at_path)?;
+    if let Some(dir) = source.parent() {
+        fs::create_dir_all(dir).map_err(at(dir))?;
+    }
+    empty_file(source)?;
+    empty_file(&target)?;
+    mount_bind(source, &target)
 }
 
 /// The box's own /root, bound into every workspace at the same path.
@@ -563,6 +603,12 @@ pub fn unmount(target: &Path) -> Result<(), Error> {
 /// expects, and nothing a workspace mounts reaches the computer.
 pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     fs::create_dir_all(target).map_err(at(target))?;
+    mount_bind(source, target)
+}
+
+/// The two calls of one bind, made in the one order: every bind under a rootfs goes through here, so neither road
+/// can make one and forget the propagation that makes it receive only.
+fn mount_bind(source: &Path, target: &Path) -> Result<(), Error> {
     for (from, at_path, flags) in bind_steps(source, target) {
         mount(from, at_path, None::<&str>, flags, None::<&str>).map_err(nix_at(at_path))?;
     }
@@ -713,10 +759,10 @@ mod tests {
         assert_eq!(l.empty_at("wsp-a", "/var/lib/docker"), PathBuf::from("/wsp/run/wsp-a/empty/var/lib/docker"));
         // An empty directory per path and no two of them one directory: what a workspace writes at one of them
         // is not what it writes at another.
-        let empties: std::collections::BTreeSet<PathBuf> = EMPTY_BINDS.iter().map(|at| l.empty_at("wsp-a", at)).collect();
-        assert_eq!(empties.len(), EMPTY_BINDS.len());
+        let empties: std::collections::BTreeSet<PathBuf> = hardening::EMPTY_BINDS.iter().map(|at| l.empty_at("wsp-a", at)).collect();
+        assert_eq!(empties.len(), hardening::EMPTY_BINDS.len());
         // Every one of them under the workspace's own folder, so a stop keeps them and a remove takes them all.
-        for made in [l.wsp_home("wsp-a"), l.empty_at("wsp-a", EMPTY_BINDS[0]), l.upper("wsp-a")] {
+        for made in [l.wsp_home("wsp-a"), l.empty_at("wsp-a", hardening::EMPTY_BINDS[0]), l.upper("wsp-a")] {
             assert!(made.starts_with(l.workspace("wsp-a")), "{}", made.display());
         }
         // The mark a copy being made carries is written and read in one place.
@@ -776,6 +822,8 @@ mod tests {
             etc: Path::new("/wsp/run/wsp-a/etc"),
             engine: None,
             shares: &[],
+            binds: &[],
+            compose_project: None,
         };
         let spec = config_json(&c);
         assert_eq!(spec["root"]["path"], "rootfs");
@@ -798,6 +846,20 @@ mod tests {
         let with_engine = config_json(&Config { engine: Some(Path::new("/wsp/run/wsp-a/engine")), ..c });
         let socket_dir = with_engine["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == crate::engine::INSIDE_DIR).unwrap();
         assert_eq!(socket_dir["source"], "/wsp/run/wsp-a/engine");
+        // The compose project is the workspace's own, and it is the last word in the environment: a workspace
+        // with an engine runs compose against the box's engine through the fence, and two workspaces of one
+        // project share no network there only because their project names differ.
+        let composing = config_json(&Config { engine: Some(Path::new("/wsp/run/wsp-a/engine")), compose_project: Some("wsp-a"), ..c });
+        let env = composing["process"]["env"].as_array().unwrap();
+        assert_eq!(env.last().unwrap(), "COMPOSE_PROJECT_NAME=wsp-a");
+        assert_eq!(env.iter().filter(|word| word.as_str().is_some_and(|w| w.starts_with("COMPOSE_PROJECT_NAME="))).count(), 1);
+        // And a workspace that asked for no engine carries none, since it runs no compose at all.
+        assert!(!spec["process"]["env"].as_array().unwrap().iter().any(|w| w.as_str().is_some_and(|w| w.contains("COMPOSE_PROJECT"))));
+        assert!(!with_engine["process"]["env"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().is_some_and(|w| w.contains("COMPOSE_PROJECT"))));
         // A login the computer signs in once: the one file, at the path the tool reads it inside, read-write, so
         // the tool refreshing it there is the computer's own refresh. Nothing else about the mounts moves.
         let shares = [Share { source: "/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
@@ -809,6 +871,27 @@ mod tests {
         assert_eq!(shared["mounts"].as_array().unwrap().len(), mounts.len() + 1);
         // And a workspace that shares none carries no mount of its own.
         assert!(mounts.iter().all(|m| m["destination"] != "/root/.codex/auth.json"));
+        // A folder of the computer's own, at the path the workspace reads it inside: one more mount after the
+        // profile's, read-write, so what the workspace writes in the project's memory is what the computer holds
+        // for every other workspace of that project.
+        let memory = "/root/.claude-cfg/projects/-root-wsp/memory";
+        let binds = [Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: false }];
+        let bound = config_json(&Config { binds: &binds, ..c });
+        let folder = bound["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap();
+        assert_eq!(folder["source"], "/wsp/projects/pr_1/memory");
+        assert_eq!(folder["type"], "bind");
+        // The same words a shared login takes: the boot makes the bind itself, and `bind_steps` is the one place
+        // the propagation of everything under a rootfs is decided.
+        assert_eq!(folder["options"], json!(["rbind", "rw"]));
+        assert_eq!(bound["mounts"].as_array().unwrap().len(), mounts.len() + 1);
+        // A bind the host asked to be read-only is mounted that way, and a workspace with no bind carries none.
+        let read_only = [Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: true }];
+        let fenced = config_json(&Config { binds: &read_only, ..c });
+        assert_eq!(
+            fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap()["options"],
+            json!(["rbind", "ro"])
+        );
+        assert!(mounts.iter().all(|m| m["destination"] != memory));
     }
 
     #[test]
@@ -856,13 +939,19 @@ mod tests {
             engine: false,
             copy: None,
             shares: Vec::new(),
+            binds: Vec::new(),
         };
         write_json(&path, &record).unwrap();
         assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
-        // A record written before the engine, the copy and the shares fields existed reads as a workspace with none.
+        // A record written before the engine, the copy, the shares and the binds fields existed reads as a
+        // workspace with none of them.
         let written = fs::read_to_string(&path).unwrap();
-        assert!(!written.contains("engine") && !written.contains("copy") && !written.contains("shares"), "{written}");
+        assert!(
+            !written.contains("engine") && !written.contains("copy") && !written.contains("shares") && !written.contains("binds"),
+            "{written}"
+        );
         assert!(read_record(&path).unwrap().unwrap().shares.is_empty());
+        assert!(read_record(&path).unwrap().unwrap().binds.is_empty());
         assert_eq!(read_record(&path).unwrap().unwrap().copy, None);
         write_json(&path, &Workspace { engine: true, ..record.clone() }).unwrap();
         assert!(read_record(&path).unwrap().unwrap().engine);
@@ -877,8 +966,16 @@ mod tests {
         assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
         // The logins the workspace was made with are the record's too: every boot binds whatever the file says now.
         let shares = vec![Share { source: "/var/lib/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
-        write_json(&path, &Workspace { shares: shares.clone(), ..record }).unwrap();
+        write_json(&path, &Workspace { shares: shares.clone(), ..record.clone() }).unwrap();
         assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
+        // And the folders it was made with, which every boot mounts again: the project's memory on the computer.
+        let binds = vec![Bind {
+            source: "/wsp/projects/pr_1/memory".to_owned(),
+            target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
+            read_only: false,
+        }];
+        write_json(&path, &Workspace { binds: binds.clone(), ..record }).unwrap();
+        assert_eq!(read_record(&path).unwrap().unwrap().binds, binds);
     }
 
     /// Every bind the boot makes is two calls in one order: the bind, then the propagation that makes it
@@ -953,6 +1050,11 @@ mod tests {
         // What the computer keeps at its own resolv.conf, read before anything is mounted: a link on every
         // computer that runs systemd-resolved, and whatever it is, this leaves it alone.
         let box_resolv = (fs::symlink_metadata(BOX_RESOLV).map(|m| m.file_type().is_symlink()).ok(), fs::read_link(BOX_RESOLV).ok());
+        // And what the box keeps at two of the paths the covers go over, so the case can say afterwards that the
+        // computer's own are as they were: how many entries its /root/.ssh holds and how long its shadow file is,
+        // neither of which is a thing this reads the content of.
+        let box_ssh = fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0);
+        let box_shadow = fs::metadata("/etc/shadow").map(|m| m.len()).ok();
         mount_computer(&layout, id).unwrap();
         let table = || fs::read_to_string(MOUNTINFO).unwrap();
         let mounted = |at: &Path| mount_points(&table()).contains(&at.to_path_buf());
@@ -1000,18 +1102,33 @@ mod tests {
         assert_eq!(fs::read(layout.upper_of(id, "/usr").join("lib/wsp-computer-probe")).unwrap(), b"the workspace wrote this\n");
         assert!(!Path::new("/usr/lib/wsp-computer-probe").exists(), "a workspace's write reached the box");
 
-        // The person's own /root is the box's, shared and writable; the engine's two folders are empty
-        // directories of the workspace's own.
+        // The person's own /root is the box's, shared and writable; every path the hardening list names is the
+        // workspace's own empty file or directory over the box's, so the box's logins, its sudo rules, its ssh
+        // host keys, the keys that open it and every other home on it show nothing inside.
         assert!(mounted(&rootfs.join("root")));
-        for at in EMPTY_BINDS {
-            let at_path = inside(&rootfs, at).unwrap();
-            assert!(mounted(&at_path), "{at} is not an empty directory of the workspace's own");
-            assert_eq!(fs::read_dir(&at_path).unwrap().count(), 0, "{at} is not empty");
-            fs::write(at_path.join("probe"), b"w").unwrap();
-            assert!(layout.empty_at(id, at).join("probe").is_file(), "{at} wrote somewhere else");
+        let covers = hardening::covered(&rootfs);
+        for named in ["/etc/shadow", "/etc/gshadow", "/root/.ssh", "/home", "/var/lib/docker"] {
+            assert!(covers.iter().any(|c| c.at == named), "{named} is not covered: {covers:?}");
         }
-        // And nothing a workspace writes in one of them shows up in another.
-        assert_eq!(fs::read_dir(inside(&rootfs, EMPTY_BINDS[1]).unwrap()).unwrap().count(), 1);
+        assert!(covers.iter().any(|c| c.at.starts_with("/etc/ssh/ssh_host_")), "no host key is covered: {covers:?}");
+        for cover in &covers {
+            let at_path = inside(&rootfs, &cover.at).unwrap();
+            assert!(mounted(&at_path), "{} is not covered", cover.at);
+            if cover.file {
+                assert_eq!(fs::metadata(&at_path).unwrap().len(), 0, "{} reads bytes inside", cover.at);
+                continue;
+            }
+            assert_eq!(fs::read_dir(&at_path).unwrap().count(), 0, "{} is not empty", cover.at);
+            fs::write(at_path.join("probe"), b"w").unwrap();
+            assert!(layout.empty_at(id, &cover.at).join("probe").is_file(), "{} wrote somewhere else", cover.at);
+        }
+        // Nothing a workspace writes in one of them shows up in another, and nothing it writes reaches the
+        // box's own: the empty directories are one per path, under the workspace's own folder.
+        for cover in covers.iter().filter(|c| !c.file) {
+            assert_eq!(fs::read_dir(inside(&rootfs, &cover.at).unwrap()).unwrap().count(), 1, "{}", cover.at);
+        }
+        assert_eq!(fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0), box_ssh, "the computer's own keys changed");
+        assert_eq!(fs::metadata("/etc/shadow").map(|m| m.len()).ok(), box_shadow, "the computer's own logins changed");
 
         // The wsp folder under that home is the workspace's own: what the daemon inside writes at its token's
         // default path lands under run/<id> and nothing of it reaches the box's own folder.

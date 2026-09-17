@@ -48,7 +48,7 @@ Asked to set a person up, read this section before running a single verb: a verb
 
    Expect: `created dev <id>`, printed when the machine is booted and reachable, or with `--json` the creating stages and then the workspace, one JSON line each. `wsp new: no image yet; run wsp init` instead means the host is serving without a sealed image, because an init is still running or ended without sealing: wait for it, or go back to step 5. A refusal that names the account's machine cap means two are already up; the builder stays up ten minutes after a seal and counts as one, so right after a seal that is `first` and the builder, and the person chooses which workspace to pause.
 
-7. Record the project: `wsp add <url> --on <computer>` for a repo the computer clones, or `wsp add <folder>` for a folder on this computer, worked in place. `wsp new "<what you are working on>"` then makes the workspace with the project inside. Take `wsp snapshot <workspace>` once it stands, so the next workspace of that project starts from a project image with the checkout in place and no second clone.
+7. Record the project: `wsp add <url> --on <computer>` for a repo the computer clones, `wsp add <owner/repo> --on <computer>` for one its signed-in `gh` or `glab` clones, or `wsp add <folder>` for a folder on this computer, worked in place. `wsp add <folder> --on <computer>` is the third road: that computer clones the folder's own remote and the folder seeds what git ignores on top, so the line prints a menu of those paths with their sizes and sends nothing until `--yes`; the person picks with `--keep <path>`, `--cut <path>`, `--no-memory` and `--no-commits`, and `--remember` keeps their ticks for the next add of that folder. `wsp new "<what you are working on>"` then makes the workspace with the project inside. Take `wsp snapshot <workspace>` once it stands, so the next workspace of that project starts from a project image with the checkout in place and no second clone.
 
    Expect: `wsp exec first -- ls <folder>` lists the repo on the machine with the command's own exit code, 0, and `wsp snapshot first` prints a `project image <id>` line naming the project.
 
@@ -234,6 +234,9 @@ wsp new gate --size 2x8               # a machine at a size the provider offers;
 wsp folders /Users/zingzy                         # what is inside, for naming a folder to record
 wsp add /Users/zingzy/wsp                         # a project on this computer, worked where it sits
 wsp add https://github.com/spoo-me/frontend --on spoo --name spoo-landing   # a project a computer clones
+wsp add spoo-me/frontend --on spoo                # the same repo through the signed-in gh on that computer
+wsp add /Users/zingzy/spoo/spoo-landing --on spoo # a folder here seeding a project there: prints the menu, sends nothing
+wsp add /Users/zingzy/spoo/spoo-landing --on spoo --yes   # sends the ticked rows; --keep, --cut, --no-memory, --no-commits move them
 wsp projects                                      # every project, each on its computer
 wsp new "pricing page"                            # one project: the work is the whole line
 wsp new spoo-landing "pricing page"               # more than one: name which project the work is on

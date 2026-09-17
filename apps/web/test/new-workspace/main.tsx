@@ -31,6 +31,10 @@ const project = (id: string, name: string, computer: string): ProjectView => ({
   computer,
   source: { kind: "git", url: `https://github.com/dev/${name}.git` },
   path: `/root/${name}`,
+  remote: `https://github.com/dev/${name}.git`,
+  defaultBranch: "main",
+  memoryKey: `-root-${name}`,
+  memoryDir: `/root/.claude-cfg/projects/-root-${name}/memory`,
   createdAt: "2026-09-12T09:31:00.000Z",
 });
 const places = [HERE, HETZNER, ASCII];
