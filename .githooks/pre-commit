@@ -1,0 +1,65 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# What a review keeps finding in a diff, refused before the commit exists.
+# Every check reads the staged content and never the working tree, so what is
+# refused is what the commit would carry. A staged path can carry a space, so
+# every list of them here is read a line at a time, the way git writes it.
+# The two content rules below do not run while a merge is in progress: the
+# lines a merge stages are the other side's, and they were judged when that
+# side took them. The .base-sha rule runs on a merge as well, since a merge is
+# how that file reaches a branch.
+nl='
+'
+IFS="$nl"
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -n "$staged" ] || exit 0
+
+for f in $staged; do
+  case "$f" in
+    .base-sha|*/.base-sha)
+      echo "refused: $f is a working file of the landing gate and never lands; run git rm --cached $f" >&2
+      exit 1 ;;
+  esac
+done
+
+git rev-parse -q --verify MERGE_HEAD >/dev/null && exit 0
+
+# A fixture is content under test: it says what it says, and no rule here reads it.
+prose=""
+labelled=""
+for f in $staged; do
+  case "$f" in */fixtures/*|fixtures/*) continue ;; esac
+  case "$f" in
+    *.ts|*.tsx|*.js|*.mjs|*.cjs|*.rs|*.md|*.mdx|*.yml|*.yaml|*.toml|*.sh|*.css|*.html|*.txt|*.json) prose="$prose$nl$f" ;;
+  esac
+  case "$f" in
+    *.rs|*.ts|*.tsx) labelled="$labelled$nl$f" ;;
+  esac
+done
+
+# The lines this commit adds, for one file or for a list of them. A diff's own file header carries a space after
+# its three plus signs; an added line that begins with two of its own does not, and is read like any other.
+added() { git diff --cached -U0 -- "$@" | grep '^+' | grep -v '^+++ '; }
+
+if [ -n "$prose" ] && added $prose | grep -q '—'; then
+  for f in $prose; do
+    if added "$f" | grep -q '—'; then
+      echo "refused: a line staged in $f has an em dash; write it with a comma, a colon or two sentences" >&2
+      exit 1
+    fi
+  done
+fi
+
+# wsp-904 and live-904, whole tokens: a longer number is not a ticket, so sk-live-000fake is a key and not a
+# label. A bare 904-a-slug is not read at all, since the form has no hit on main and number words do (256-colour).
+label='(^|[^[:alnum:]])(wsp|live)-[0-9]{3}([^[:alnum:]]|$)'
+if [ -n "$labelled" ] && added $labelled | grep -qE "$label"; then
+  for f in $labelled; do
+    if added "$f" | grep -qE "$label"; then
+      echo "refused: a line staged in $f carries a ticket label; name what the code does and leave the number on the tracker" >&2
+      exit 1
+    fi
+  done
+fi
+
+exit 0

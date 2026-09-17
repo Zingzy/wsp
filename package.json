@@ -7,6 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
+    "prepare": "node scripts/hooks-path.mjs",
     "test": "vitest run",
     "build": "pnpm -r build",
     "wsp": "node packages/host/dist/bin.js",

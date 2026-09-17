@@ -1,0 +1,9 @@
+#!/bin/sh
+# Only the coordinator merges into main. Builders report; the coordinator gates and merges.
+[ "$WSP_COORDINATOR" = "1" ] && exit 0
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+  echo "refused: merging into main is the coordinator's job (set WSP_COORDINATOR=1 in the coordinator session only)" >&2
+  exit 1
+fi
+exit 0
