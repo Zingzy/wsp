@@ -727,7 +727,9 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   // clones, or a folder this computer holds. A provider's own word is neither and is read first.
   const kind = word === undefined || addableProviders().includes(word) ? undefined : sourceKindOf(word);
   if (kind === "computer") return addOverSsh(io, opts, aim, word!, flags, deps);
-  if (kind === "git" || kind === "folder") return addProject(io, opts, aim, word!, flags, deps);
+  // Every other kind a word can name is a project's source, whichever of them it is: the host reads the word again
+  // and records it, so a source added to the protocol's own reading needs no second list here.
+  if (kind !== undefined) return addProject(io, opts, aim, word!, flags, deps);
   if (named) {
     io.error(ADD_FLAGS_REFUSAL);
     return 1;
@@ -834,12 +836,15 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
     let seed: SeedChoice | undefined;
     if (sourceKindOf(source) === "folder" && onComputer !== undefined) {
       const { plan } = await client.request<{ plan: SeedPlan }>("project.seed.plan", { source });
-      for (const line of table(seedMenuRows(plan, flags.yes === true ? choiceFrom(plan, flags) : defaultSeedChoice(plan)))) io.log(line);
+      // What would travel: their own words where they gave any, else what the catalogue ticks itself. Read before
+      // the menu is drawn, so a word naming a path that never travels is refused rather than shown as ticked.
+      const choice = flags.yes === true ? choiceFrom(plan, flags) : defaultSeedChoice(plan);
+      for (const line of table(seedMenuRows(plan, choice))) io.log(line);
       if (flags.yes !== true) {
         for (const line of seedConsentLines(plan, onComputer, more => `wsp add ${shellQuote(source)} --on ${shellQuote(onComputer)} ${more}`)) io.log(line);
         return 0;
       }
-      seed = choiceFrom(plan, flags);
+      seed = choice;
     }
     const { project } = await client.request<{ project: ProjectView }>("projects.add", {
       source,

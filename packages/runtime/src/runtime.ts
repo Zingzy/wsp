@@ -161,6 +161,7 @@ import type {
   MachineBind,
   SeedChoice,
   SeedPlan,
+  WorkspaceCopy,
   PermissionAsk,
   PermissionOption,
   PermissionOutcome,
@@ -422,6 +423,9 @@ export interface WorkspaceSpec {
   /** The folders of the computer's own this workspace mounts: its project's memory folder, where that computer
    * holds one. Written by the create off the project's landing road and read again by every wake. */
   binds?: MachineBind[];
+  /** The checkout on that computer this workspace holds its own copy of, and where that copy is mounted inside.
+   * Written by the create off the project's record, so a wake mounts the copy the create was made with. */
+  copy?: WorkspaceCopy;
 }
 
 /** What a create answers: the view, and a notice when a builder kept after a save was stopped to make room. */
@@ -594,7 +598,7 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   /** The project this workspace was made for, by its id. The view joins the record's name, path and computer off
    * the projects map, so one fact has one stored home. */
   project: string;
-  spec: Pick<WorkspaceSpec, "envs" | "labels" | "engine" | "binds">;
+  spec: Pick<WorkspaceSpec, "envs" | "labels" | "engine" | "binds" | "copy">;
   idleWindowMs?: number | null;
   /** What the provider built, read back after every create (it may clamp the
    * request); the rail and the rate use this, never what was asked for. */
@@ -1913,9 +1917,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** The clone inside a copy: git's own last line is the failure, so a person reads what git said and not that a
    * stage failed. */
   const cloneProject = async (entry: LiveWorkspace, project: ProjectView, report: StageReport): Promise<void> => {
-    // A copy forked from the project's own image already holds the checkout and its dependencies; there is nothing
-    // to clone into it and nothing to install.
-    if (project.image !== undefined) return;
+    // A copy forked from the project's own image already holds the checkout and its dependencies, and so does one
+    // the computer copied the checkout into; there is nothing to clone and nothing to install in either.
+    if (project.image !== undefined || project.checkout !== undefined) return;
     report("project-cloned", `Cloning ${project.remote} into ${project.path}.`);
     const cloned = await entry.machine.exec(cloneOnMachine(project, placeName(entry.record.place ?? places.wired)), { timeoutMs: CLONE_MS });
     if (cloned.exitCode !== 0) throw new Error(lastLineOf(cloned.stderr) || lastLineOf(cloned.stdout) || `git clone exited ${cloned.exitCode}`);
@@ -1935,9 +1939,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * here is allowed: nothing clones it. */
   const remoteHere = async (path: string): Promise<{ remote: string; defaultBranch: string }> => {
     const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
-    const read = await machine.exec(`${shellLine(["git", "-C", path, "remote", "get-url", "origin"])} || true; ${shellLine(["git", "-C", path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])} || true`, {
-      timeoutMs: INLINE_EXEC_MS,
-    });
+    // Each command prints exactly one line, its answer or an empty one, so the two are read apart whichever of
+    // them the folder can answer: a folder with no origin has no remote and no default branch, not one of each.
+    const read = await machine.exec(
+      `${shellLine(["git", "-C", path, "remote", "get-url", "origin"])} || echo; ${shellLine(["git", "-C", path, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"])} || echo`,
+      { timeoutMs: INLINE_EXEC_MS },
+    );
     const [remote = "", head = ""] = read.stdout.split("\n").map(line => line.trim());
     return { remote, defaultBranch: head.replace(/^origin\//, "") };
   };
@@ -3287,8 +3294,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...image,
     kind,
     ...(engine ? { engine: true } : {}),
-    // The project's own folders on its computer, as the create recorded them: a wake mounts what the create did.
+    // The project's own folders on its computer, as the create recorded them: a wake mounts what the create did,
+    // and the copy of the checkout it was made with is made again from the same folder.
     ...(r.spec.binds !== undefined && r.spec.binds.length > 0 ? { binds: r.spec.binds } : {}),
+    ...(r.spec.copy !== undefined ? { copy: r.spec.copy } : {}),
     cpu: override?.cpu ?? r.size.cpu,
     memMb: override?.memMb ?? r.size.memMb,
     envs: { ...GUEST_LOGIN_ENV, ...r.spec.envs, ...override?.envs },
@@ -4102,6 +4111,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const at = await landingBackend(placeId);
     // What this project's computer mounts into every workspace of it, off the road that landed the project there.
     const binds = projectLanding(landingKind(project.computer, at)).workspaceBinds(project);
+    // A project whose checkout the add left on that computer: this workspace takes its own copy of it, mounted at
+    // the path the project has inside, so the seed and the install the add paid for are there and nothing is
+    // cloned again. A project the computer keeps in an image carries it in the image instead, and one with
+    // neither is cloned by the stage below.
+    const copy = project.checkout === undefined ? undefined : { from: project.checkout, at: project.path };
     // A computer that keeps no image is forked from none: the workspace is a copy of that computer itself, so no
     // image is read, no copy of one is built there ahead of the fork, and the record names none the way a
     // workspace worked in place does.
@@ -4128,6 +4142,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         // holds one, nothing where the project's memory rides the image. Kept on the record, so a wake mounts what
         // the create mounted.
         ...(binds.length > 0 ? { binds } : {}),
+        ...(copy !== undefined ? { copy } : {}),
       },
       ...(o.idleWindowMs !== undefined ? { idleWindowMs: o.idleWindowMs } : {}),
       ...(placeId !== undefined ? { place: placeId } : {}),
@@ -7306,10 +7321,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const deps: LandingDeps = {
       async worker(o) {
         const forking = await landingBackend(placeId);
-        const golden = await copyForFork(o.from, placeId);
+        // A computer that keeps no image is worked in a copy of its own directories, the same machine a workspace
+        // there is; only a provider names an image to fork, and the add read which one once.
+        const golden = o.from === "" ? undefined : await copyForFork(o.from, placeId);
         const spec: MachineSpec = {
           kind: "sandbox",
-          fromSnapshot: golden,
+          ...(golden !== undefined ? { fromSnapshot: golden } : {}),
           envs: { ...GUEST_LOGIN_ENV },
           // A machine whose disk becomes an image is a builder, which is what keeps the computer's own logins out
           // of it; one that only clones onto the computer is not, since the clone reads those logins.
@@ -7431,8 +7448,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         return recorded;
       };
       if (!seeding || resolved.seed === undefined || o.seed === undefined) return keep({});
-      // The seed lands inside a fork of that computer's image, so a host that has sealed none has nowhere to put it.
-      const image = await imageHeadOrNone();
+      // Where the seed lands: inside a copy of this host's image on a computer that keeps one, so a host that has
+      // sealed none has nowhere to put it; on a computer that keeps none the work runs in a copy of that
+      // computer's own directories and no image is read at all.
+      const image = at !== undefined && keepsImages(at) ? await imageHeadOrNone() : "";
       if (image === undefined) throw Object.assign(new Error(NO_IMAGE_FOR_SEED), { kind: "invalid" });
       const choice = o.seed;
       const plan = resolved.seed;

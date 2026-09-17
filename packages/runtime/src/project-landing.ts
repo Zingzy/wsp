@@ -25,7 +25,8 @@ export interface ProjectPlaces {
  * archive where the source was a folder on this computer, and where to say how far it has got. */
 export interface LandRequest {
   project: ProjectView;
-  /** The image the computer forks to do this work in: the head of this host's own, read once by the add. */
+  /** The image the computer forks to do this work in: the head of this host's own, read once by the add, and
+   * empty on a computer that keeps no image and works in a copy of its own directories instead. */
   image: string;
   source: ProjectSourceModule;
   /** What the computer is called, for the one sentence a computer whose image lacks the clone's command gets. */
@@ -36,6 +37,8 @@ export interface LandRequest {
 
 /** What one landing left behind, which the record keeps. */
 export interface Landed {
+  /** Where the checkout it cloned sits on the computer, for a road that keeps one outside its workspaces. */
+  checkout?: string;
   seeded?: ProjectView["seeded"];
   installed?: ProjectView["installed"];
   image?: ProjectView["image"];
@@ -44,7 +47,8 @@ export interface Landed {
 /** What a landing road may ask of the runtime: a short-lived machine of the computer's own image to work in, the
  * road that puts a file's bytes on it, the snapshot a road that keeps an image takes, and the clock. */
 export interface LandingDeps {
-  /** A machine of the computer's image. `from` is the image it forks, which the add read once; `image` says
+  /** A machine to work in on that computer. `from` is the image it forks, which the add read once, and is empty on
+   * a computer that keeps no image, where the machine is a copy of that computer's own directories; `image` says
    * whether this machine's disk becomes one, which keeps the computer's own logins out of it. Killed by the caller
    * whatever happens. */
   worker(o: { binds: readonly MachineBind[]; image: boolean; from: string }): Promise<Machine>;
@@ -159,9 +163,9 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
 
 /** A computer the person owns: its daemon holds the disk, so the checkout and the memory folder sit on that disk
  * beside each other under wsp's own folder for the project, and every workspace of the project binds the memory
- * folder read-write. The clone, the seed and the install run inside one short-lived workspace of the computer's
- * own image with that folder bound in, so the toolchain and the logins are the image's and nothing is installed on
- * the computer itself. */
+ * folder read-write. The clone, the seed and the install run inside one short-lived workspace of that computer,
+ * with that folder bound in, so the toolchain and the logins are the ones its workspaces run with and nothing of
+ * wsp's is installed on the computer itself. */
 const boxLanding: ProjectLanding = {
   kind: "box",
   places({ project, deps }) {
@@ -176,7 +180,9 @@ const boxLanding: ProjectLanding = {
     // inside the machine at all.
     const machine = await deps.worker({ binds: [{ source: dir, target: dir }], image: false, from: o.image });
     try {
-      return await cloneSeedInstall(o, deps, machine, { checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` });
+      // The checkout stays on the computer once the machine is gone: every workspace of this project takes its own
+      // copy of it, so the seed and the install are paid for once.
+      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
     } finally {
       await machine.kill().catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
     }

@@ -268,6 +268,7 @@ export class LinkBackend implements MachineBackend {
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
   /** Where the computer on the far side keeps the logins it shares into every workspace on it, as it said. */
   readonly logins?: string;
+  /** Where it keeps the project checkouts it holds and each project's own memory, as it said. */
   readonly projects?: string;
 
   /** Asks the place what its backend is and builds it from the answer. */

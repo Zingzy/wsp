@@ -79,10 +79,12 @@ const TICKED: SeedChoice = { files: [".env.local"], memory: true, commits: false
 
 /** A host with an image sealed on the computer named, the stub provider as its backend and a folder reader that
  * answers the plan handed in: what an add of a folder on this computer onto a computer that clones needs. */
-async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
+async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer; keepsImages?: boolean } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
   const backend = stubBackend();
-  // What the computer says about itself: a box keeps project checkouts on a disk of its own, a provider keeps none.
+  // What the computer says about itself: a box keeps project checkouts on a disk of its own and no image at all,
+  // a provider keeps images and no checkout.
   if (o.projects !== undefined) (backend as { projects?: string }).projects = o.projects;
+  if (o.keepsImages === false) backend.capabilities.images = false;
   const store = memoryStore();
   await store.put("goldens", copyKey(o.at ?? "default", "default"), { head: 1, versions: [version] });
   const packs: { plan: SeedPlan; choice: SeedChoice }[] = [];
@@ -159,6 +161,20 @@ describe("a folder seeding a project on a computer that clones", () => {
     expect(specs(backend)[before]?.binds).toEqual([{ source: project.memoryDir, target: `/root/.claude-cfg/projects/${project.memoryKey}/memory` }]);
   });
 
+  it("leaves the checkout on the computer, and every workspace of the project takes its own copy of it", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/var/lib/wsp/projects", keepsImages: false });
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    expect(project.checkout).toBe(`/var/lib/wsp/projects/${project.id}/checkout`);
+    const before = backend.machines.length;
+    await rt.workspaces.create({ project: project.id, name: "work" });
+    // The copy is mounted at the path the project has inside, which for a folder seeded from this computer is the
+    // folder's own path, and nothing clones over it.
+    expect(specs(backend)[before]?.copy).toEqual({ from: project.checkout, at: project.path });
+    expect(backend.machines[before]?.execLog.join("\n")).not.toContain("git clone");
+  });
+
   it("the machine that did the work is stopped whatever happened, and a failed install is the add's own failure", async () => {
     const folder = repo();
     const { rt, backend } = await withImage({ plan: plan(folder), projects: "/var/lib/wsp/projects" });
@@ -174,6 +190,21 @@ describe("a folder seeding a project on a computer that clones", () => {
     // Nothing is left running at the provider, and no project was recorded.
     expect(stopped(backend)).toBe(1);
     expect(await rt.projects.list()).toEqual([]);
+  });
+});
+
+describe("a computer that keeps no image of its own", () => {
+  it("is worked in a copy of its own directories: nothing is forked from an image and the clone still lands", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/var/lib/wsp/projects", keepsImages: false });
+    answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package-lock.json\n", stderr: "" } : undefined));
+    const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    expect(specs(backend)[0]?.fromSnapshot).toBeUndefined();
+    expect(commands(backend)).toContain(`git clone ${REMOTE}`);
+    expect(project.installed).toMatchObject({ command: "npm ci" });
+    // The machine the work ran in is stopped, and the project keeps its memory on that computer.
+    expect(stopped(backend)).toBe(1);
+    expect(project.memoryDir).toBe(`/var/lib/wsp/projects/${project.id}/memory`);
   });
 });
 

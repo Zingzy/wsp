@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The project sources as modules, one per kind: what a source resolves to on
 // this computer (the remote the other computer clones and the project's own
-// name), the line that clones it there, and the lines that point git on that
-// computer's own command line where the source needs one. The add
-// asks a module through PROJECT_SOURCES; nothing outside this file decides by
-// a source's kind. Adding a source is a module and its row.
+// name), the line that clones it there, and the command that clone goes
+// through where it goes through one rather than through git. The add asks a
+// module through PROJECT_SOURCES; nothing outside this file decides by a
+// source's kind. Adding a source is a module and its row.
 import { GIT_HOSTS, gitHostOf, noGitCliLine, ownerRepoOf, type GitHost } from "@wsp/catalog";
 import { noRemoteLine, projectNameOf, shellLine, type ProjectSource, type SeedPlan } from "@wsp/protocol";
 
@@ -49,6 +49,8 @@ const gitClone = (o: { remote: string; dest: string; branch?: string }): string 
 /** The default branch a remote's HEAD names, as the clone will take it: `main` where nothing could be read, which
  * is what git itself falls back to and what the record then carries. */
 const DEFAULT_BRANCH = "main";
+/** A branch read off a folder or a remote, or that fallback where the read came back empty. */
+const branchOr = (read: string | undefined): string => (read === undefined || read === "" ? DEFAULT_BRANCH : read);
 
 const folderModule: ProjectSourceModule<Extract<ProjectSource, { kind: "folder" }>> = {
   kind: "folder",
@@ -60,7 +62,7 @@ const folderModule: ProjectSourceModule<Extract<ProjectSource, { kind: "folder" 
     // menu is for the road that carries what git ignores onto another computer.
     if (!deps.seeding) {
       const { remote, defaultBranch } = await deps.folderRemote(source.path);
-      return { remote, defaultBranch, name: projectNameOf(source) };
+      return { remote, defaultBranch: branchOr(defaultBranch), name: projectNameOf(source) };
     }
     const seed = await deps.seedPlan(source.path);
     if (seed.remote === null) throw Object.assign(new Error(noRemoteLine(source.path)), { kind: "invalid" });
@@ -68,13 +70,8 @@ const folderModule: ProjectSourceModule<Extract<ProjectSource, { kind: "folder" 
     // as it stands would ask for one, and over https the host's own signed-in command line answers for it.
     const host = gitHostOf(seed.remote);
     const ownerRepo = host === undefined ? undefined : ownerRepoOf(seed.remote);
-    const overHttps = host !== undefined && ownerRepo !== undefined && !seed.remote.startsWith("https://");
-    return {
-      remote: overHttps && host !== undefined && ownerRepo !== undefined ? host.httpsUrl(ownerRepo) : seed.remote,
-      defaultBranch: seed.defaultBranch ?? seed.branch ?? DEFAULT_BRANCH,
-      name: projectNameOf(source),
-      seed,
-    };
+    const remote = host !== undefined && ownerRepo !== undefined && !seed.remote.startsWith("https://") ? host.httpsUrl(ownerRepo) : seed.remote;
+    return { remote, defaultBranch: branchOr(seed.defaultBranch ?? seed.branch), name: projectNameOf(source), seed };
   },
   cloneCommand: gitClone,
 };

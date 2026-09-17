@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn a_backend_says_where_the_projects_it_holds_live_and_only_as_a_path() {
-        let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
+        let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"images":false,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
         assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().projects, None);
         let holding = facts.replace(r#"{"offer":"runtime""#, r#"{"projects":"/var/lib/wsp/projects","offer":"runtime""#);
         assert_eq!(serde_json::from_str::<BackendFacts>(&holding).unwrap().projects.as_deref(), Some("/var/lib/wsp/projects"));

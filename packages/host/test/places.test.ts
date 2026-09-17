@@ -2097,3 +2097,43 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     expect(asked.map(a => a.op)).toEqual(["projects.add", "places.list"]);
   });
 });
+
+describe("wsp add <owner/repo>: a repo the computer's own command line clones", () => {
+  it("is a project's source like any other word that names one, and never a provider or an address", async () => {
+    const home = tmp("add-owner-repo");
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const project = {
+      id: "pr_2",
+      name: "frontend",
+      computer: "p_1",
+      source: { kind: "github", repo: "spoo-me/frontend" },
+      path: "/root/frontend",
+      remote: "https://github.com/spoo-me/frontend.git",
+      defaultBranch: "main",
+      memoryKey: "-root-frontend",
+      memoryDir: "/root/.claude-cfg/projects/-root-frontend/memory",
+      createdAt: new Date(0).toISOString(),
+    };
+    const dial = (): Promise<never> =>
+      Promise.resolve({
+        request: (op: string, params?: Record<string, unknown>) => {
+          asked.push({ op, ...(params === undefined ? {} : { params }) });
+          if (op === "projects.add") return Promise.resolve({ project } as never);
+          if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "spoo", default: true }] } as never);
+          return Promise.reject(new Error(`unexpected op ${op}`));
+        },
+        events: () => Promise.resolve(),
+        onFrame: () => () => {},
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+    const io = captured();
+    expect(await addCommand(io, opts(home), ["spoo-me/frontend"], { on: "spoo" }, { ...systemPlaceDeps, dial })).toBe(0);
+    // It reaches the host as the word that was typed, and no menu is read: only a folder here has one.
+    expect(asked.map(a => a.op)).toEqual(["projects.add", "places.list"]);
+    expect(asked[0]?.params).toMatchObject({ source: "spoo-me/frontend", on: "spoo" });
+    expect(io.lines.join("\n")).toContain("frontend pr_2");
+  });
+});

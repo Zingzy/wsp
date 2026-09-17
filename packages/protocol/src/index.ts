@@ -426,6 +426,10 @@ export const ProjectView = z.object({
   /** Where the project's memory lives on the computer holding it, which every workspace of it reads: the folder
    * itself on this Mac, a folder of wsp's own on a computer that clones. */
   memoryDir: z.string(),
+  /** Where the checkout sits on the computer holding it, outside every workspace of it: a folder of wsp's own on
+   * a computer that cloned it there, which every workspace of the project takes its own copy of. Absent where the
+   * computer keeps the project inside an image instead, and where the project is worked where it already sits. */
+  checkout: z.string().optional(),
   /** What the seed carried, once, where the source was a folder on this computer. */
   seeded: z.object({ files: z.number().int(), bytes: z.number().int(), memory: z.boolean(), commits: z.number().int(), at: z.string() }).optional(),
   /** What the install ran and how long it took, once; absent where no catalog row named an install for this repo. */
