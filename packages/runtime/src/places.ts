@@ -35,6 +35,7 @@ import {
   placeStillInstalledLine,
   placeDialLine,
   placeDialRoad,
+  placeNoHomeLine,
   placeNoRecipeLine,
   placeProvisionPaths,
   placeProvisioningLine,
@@ -796,9 +797,16 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       held.add(wake);
     });
 
-  /** The recipe job under way on each computer, by place id: one per computer, so a second run is refused rather
-   * than two runs installing over each other. */
-  const provisioning = new Map<string, Promise<void>>();
+  /** The computers a recipe job is going on, by place id: one per computer, so a second run is refused rather than
+   * two runs installing over each other. A computer is in here from before the recipe is read, which is a read of
+   * this whole computer, until its rows are done. */
+  const provisioning = new Set<string>();
+
+  /** The sentence another run of the recipe on this computer is refused with, naming the row under way where the
+   * job has reached one; nothing when none is going on. The one reading, so the start, the update and the gate a
+   * create passes cannot disagree about whether a computer is busy. */
+  const provisioningNow = (record: PlaceRecord): string | undefined =>
+    provisioning.has(record.id) || record.provision?.state === "running" ? placeProvisioningLine(record.name, record.provision?.at) : undefined;
 
   /** The one write of a place's provision: onto the record as it stands rather than as it was when the row landed,
    * since an attach's write of lastSeenAt is going on beside it. */
@@ -851,7 +859,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
   const runProvision = async (placeId: string, addId: string, planned: ProvisionPlan, machine: Machine, home: string, started: PlaceProvision): Promise<void> => {
     const provisioner = wiring.provision;
     if (provisioner === undefined) return;
-    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} put the recipe of ${planned.recipeAt} on this computer at ${started.startedAt}: ${plural(planned.steps.length, "row")}`);
+    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} put the recipe of ${planned.recipeAt} on this computer at ${started.startedAt}: ${plural(planned.steps.length, "tool")}`);
     let held = started;
     let writing: Promise<void> = Promise.resolve();
     const push = (next: PlaceProvision): void => {
@@ -893,21 +901,32 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     const provisioner = wiring.provision;
     if (provisioner === undefined) return {};
     const record = await recordOf(placeId);
-    const home = record?.report.login["HOME"];
-    if (record === undefined || home === undefined) return {};
-    if (provisioning.has(placeId) || record.provision?.state === "running") {
-      return { said: placeProvisioningLine(record.name, record.provision?.at) };
+    if (record === undefined) return {};
+    const busy = provisioningNow(record);
+    if (busy !== undefined) return { said: busy };
+    const home = record.report.login["HOME"];
+    // Every path the job builds comes off that home, so a computer that reported none gets no recipe and says so.
+    if (home === undefined) return { said: placeNoHomeLine(record.name) };
+    // The slot is taken before the recipe is read, and that read is a read of this whole computer: two starts
+    // inside it would both have passed the check above and installed over each other on that box.
+    provisioning.add(placeId);
+    try {
+      const planned = await provisioner.plan();
+      if ("noRecipe" in planned) {
+        provisioning.delete(placeId);
+        return { said: placeNoRecipeLine(record.name, planned.noRecipe) };
+      }
+      const provision: PlaceProvision = { state: "running", addId, recipeAt: planned.recipeAt, startedAt: new Date(clockNow()).toISOString(), rows: [] };
+      await writeProvision(placeId, provision);
+      provisionStage(addId, "running", `${plural(planned.steps.length, "tool")} from the recipe of ${planned.recipeAt}`);
+      // The computer itself, not a workspace on it: the link it is holding to this host, driven as a machine.
+      const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
+      void runProvision(placeId, addId, planned, machine, home, provision).finally(() => provisioning.delete(placeId));
+      return { provision };
+    } catch (e) {
+      provisioning.delete(placeId);
+      throw e;
     }
-    const planned = await provisioner.plan();
-    if ("noRecipe" in planned) return { said: placeNoRecipeLine(record.name, planned.noRecipe) };
-    const provision: PlaceProvision = { state: "running", addId, recipeAt: planned.recipeAt, startedAt: new Date(clockNow()).toISOString(), rows: [] };
-    await writeProvision(placeId, provision);
-    provisionStage(addId, "running", `${plural(planned.steps.length, "row")} from the recipe of ${planned.recipeAt}`);
-    // The computer itself, not a workspace on it: the link it is holding to this host, driven as a machine.
-    const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
-    const job = runProvision(placeId, addId, planned, machine, home, provision).finally(() => provisioning.delete(placeId));
-    provisioning.set(placeId, job);
-    return { provision };
   };
 
   /** The start above with its own refusal as a sentence: a recipe this host cannot read is a computer that got no
@@ -1296,9 +1315,8 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // A computer whose recipe is still going on is not forked into while it runs: the workspace would come up
       // without the agent the job is putting there. The running workspaces on it are untouched, since they read
       // backendOf and not this.
-      if (record.provision?.state === "running") {
-        throw Object.assign(new Error(placeProvisioningLine(name, record.provision.at)), { kind: "conflict" });
-      }
+      const busy = provisioningNow(record);
+      if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
       // The first fork on this computer is where the host learns what it forks with; every road after it reads the
@@ -1579,6 +1597,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     async update(placeId, addId) {
       const held = await recordOf(placeId);
       if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
+      // Read before anything: another run of the recipe on that computer is refused as the op's own refusal, so
+      // whoever asked reads one sentence and the line returns rather than following a job it did not start.
+      const busy = provisioningNow(held);
+      if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
       const from = held.report.daemonVersion;
       // The daemon half runs only where that computer is behind: a computer already running this wsp's daemon is
       // the common case for a recipe that changed, and the recipe half below is what the person asked for.

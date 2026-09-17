@@ -8,7 +8,7 @@ import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { PATH_LINE, PROFILE_PATH_FILE, PROFILE_PATH_LINE, TOOLS_PATH, aptIndexStep, viaRoad, type ToolInstall } from "./golden-import.js";
-import { installTools, type InstallToolsOptions, type ToolResult } from "./golden-tools.js";
+import { ALREADY_ON_MACHINE, installTools, type InstallToolsOptions, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
 const BASE_STAGE: GoldenStage = "deploying-daemon";
@@ -19,9 +19,8 @@ const APT_STEP = stepId(APT_INDEX);
 /** Every base step runs under the dotfiles prelude, ahead of the tools PATH the road helper puts on. */
 const withEnv = (cmd: string): string => `${PRELUDE}\n${cmd}`;
 
-/** What a row the base stage has nothing to do for reads as: the tool answers already, whether the provider's image
- * shipped it or an earlier run of this stage installed it, and either way no bytes move for it now. */
-export const ALREADY_ON_MACHINE = "already on the machine";
+/** The note above, re-exported where the floor's own readers have always found it. */
+export { ALREADY_ON_MACHINE };
 
 /** The floor as the tools loop runs it: one guarded step per row in catalog order through the row's road, each after
  * the row the catalog says it runs on top of; the apt index is read once, before the first row that waits on it. A

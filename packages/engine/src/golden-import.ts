@@ -1025,6 +1025,14 @@ export function aptIndexStep(id: string, cmd: string): ToolInstall {
   return { id, label: "apt index", manager: "apt", cmd, shown: "apt-get update" };
 }
 
+/** Whether Homebrew already holds every formula named, as its own list answers it: the check a brew step reads as
+ * already done. `brew list --versions a b` exits non-zero as soon as one of them is not installed, and on a
+ * computer with no Homebrew at all the su itself fails, which reads the same way. */
+export const brewHasCheck = (...formulae: readonly string[]): string => asLinuxbrew(`list --versions ${formulae.join(" ")}`);
+
+/** Whether a tap is already tapped, off the list Homebrew prints of them. */
+export const brewTapCheck = (tap: string): string => `${asLinuxbrew("tap")} 2>/dev/null | grep -qx ${shellQuote(tap)}`;
+
 /** A formula's step, for the plan's own brew lines: the toolchain, a manager's formula. */
 function viaBrew(formula: string): { cmd: string; shown: string } {
   const step = viaRoad({ road: "brew", formula }, formula);
@@ -1056,7 +1064,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   const toolchain = BREW_TOOLCHAIN.reduce<{ steps: ToolInstall[]; last: string }>(
     (acc, f) => {
       const id = `tools/brew-toolchain/${f}`;
-      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", ...viaBrew(f), after: acc.last });
+      acc.steps.push({ id, label: `Homebrew's ${f}`, manager: "brew", ...viaBrew(f), after: acc.last, check: brewHasCheck(f) });
       return { steps: acc.steps, last: id };
     },
     { steps: [], last: "tools/homebrew" },
@@ -1111,10 +1119,12 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
   if (brew.taps.length + brew.formulae.length > 0 || managerFormulae.length + catalogFormulae.length + customOf("brew").length > 0) {
     installs.push({ id: "tools/homebrew", label: "Homebrew", manager: "brew", cmd: withPath(homebrewBootstrap()), shown: `git clone github.com/Homebrew/brew at ${HOMEBREW.tag}`, bin: "brew" });
     installs.push(...toolchain.steps);
-    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last });
+    for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last, check: brewTapCheck(t) });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
-    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last });
-    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f) });
+    // The shared step's work is done once every formula it was built for is installed, since brew installs each
+    // one's dependencies with it: that is the check it reads as already done.
+    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewHasCheck(...formulae) });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, check: brewHasCheck(f), pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on
   // it, the manager's step otherwise; a floor row is there already.
@@ -1443,6 +1453,12 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readon
 /** Where the Node install is filed when the agents ride the one tools loop, so an agent step waits on it by name. */
 export const AGENT_NODE_STEP = "agents/node";
 
+/** Whether the node on the machine already meets an agents plan's floor, read the way the install script reads it
+ * so the two cannot disagree: the step keeps such a node and installs nothing, so this is also what says the step
+ * has nothing to do on a computer that has been provisioned before. */
+export const nodeFloorCheck = (floor: number): string =>
+  `major="$(node --version 2>/dev/null | sed 's/^v//; s/\\..*//')"; [ "\${major:-0}" -ge ${floor} ]`;
+
 /** An agents plan as steps of the one tools loop: the node step first, then each agent, waiting on that step
  * where its road runs on node. The install line runs on the tools PATH with the Node the step installed ahead of
  * it, the agent's own version check is the step's check, the catalog's command is its bin and the version the
@@ -1454,7 +1470,7 @@ export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CAT
   const out: ToolInstall[] = [];
   const node = plan.node;
   if (node !== undefined) {
-    out.push({ id: AGENT_NODE_STEP, label: `Node ${node.version}`, manager: "script", cmd: node.cmd, shown: `Node ${node.version} for ${node.agents.join(", ")}` });
+    out.push({ id: AGENT_NODE_STEP, label: `Node ${node.version}`, manager: "script", cmd: node.cmd, shown: `Node ${node.version} for ${node.agents.join(", ")}`, check: nodeFloorCheck(node.floor) });
   }
   for (const a of plan.installs) {
     const entry = agents.find(e => e.id === name(a));

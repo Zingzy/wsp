@@ -59,8 +59,13 @@ function presenceTests(step: ToolInstall): string[] {
   return tests;
 }
 
-/** The steps the computer already satisfies, by the rule above, read on the tools PATH. One exec where the reads
- * fit one exec body and as few as fit otherwise, since a big recipe's reads are longer than a frame may carry. */
+/** How many steps one read asks about. The reads are `brew list`, `npm root -g` and a command's own version line,
+ * about a second each on a box, and one exec has the inline bound to answer inside; the byte cap below pages a
+ * long read too. */
+const PRESENT_BATCH = 8;
+
+/** The steps the computer already satisfies, by the rule above, read on the tools PATH. As few execs as the reads
+ * fit in: a batch at a time, and a batch that would not fit one exec body is split again. */
 export async function presentSteps(machine: Machine, steps: readonly ToolInstall[]): Promise<Set<string>> {
   const asked = steps.flatMap(step => {
     const tests = presenceTests(step);
@@ -83,7 +88,7 @@ export async function presentSteps(machine: Machine, steps: readonly ToolInstall
   };
   for (const { step, tests } of asked) {
     const line = lineFor(batch.length, tests);
-    if (batch.length > 0 && !execFits([path, ...batch.map(b => b.line), line].join("\n"))) {
+    if (batch.length > 0 && (batch.length >= PRESENT_BATCH || !execFits([path, ...batch.map(b => b.line), line].join("\n")))) {
       await readBatch();
       batch.push({ line: lineFor(0, tests), id: step.id });
     } else batch.push({ line, id: step.id });
@@ -126,8 +131,11 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     return step === undefined ? undefined : { label: step.label, index: done + 1, of: plan.steps.length };
   };
   // The floor keeps this computer's caches: npm's and apt's under a person's own home are theirs, and a builder
-  // sweeping them is a builder that becomes an image.
-  const base = await installBase(machine, (which, detail) => stage(detail === undefined ? which : `${which}: ${detail}`), { caches: "keep" });
+  // sweeping them is a builder that becomes an image. Its own lines are what a person reads, not the stage id the
+  // image build files them under.
+  const base = await installBase(machine, (_which, detail) => {
+    if (detail !== undefined) stage(detail);
+  }, { caches: "keep" });
   stage(base.line);
   const present = await presentSteps(machine, plan.steps);
   const tools = await installTools(

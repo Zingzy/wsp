@@ -8,9 +8,8 @@
 import { existsSync } from "node:fs";
 import type { Manifest, Platform } from "@wsp/collect";
 import { provisionBox, provisionPlanOf, type BrewTable } from "@wsp/engine";
-import { BREW_ID_PREFIX } from "@wsp/protocol";
 import type { PlaceProvisioner } from "@wsp/runtime";
-import { copyRows, planImport } from "./image-recipe.js";
+import { brewTableFor, copyRows, planImport } from "./image-recipe.js";
 import { loadRecipe, smallRecipePath } from "./recipe-file.js";
 
 /** What the planner reads beside the recipe: this computer's rungs and its Homebrew table, the same two readers
@@ -33,10 +32,7 @@ export function placeProvisioner(o: ProvisionReaders): PlaceProvisioner {
       if (!existsSync(path)) return { noRecipe: path };
       const recipe = loadRecipe(path);
       const manifest = await o.collect();
-      // Homebrew is read only where a row of its own is here, as wsp init and a copy's build read it, and a brew
-      // that will not answer leaves an empty table: a formula's size decides no tick on a recipe already settled.
-      const wanted = manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX));
-      const brew = (wanted ? await o.brew().catch(() => undefined) : undefined) ?? new Map();
+      const brew = await brewTableFor(manifest, o.brew);
       // No record and so no pins: a computer somebody owns keeps no sealed version, and the catalog's own
       // versions are what its rows install at.
       const rows = copyRows(manifest, { recipe, pins: [] }, { home: o.home, brew });

@@ -13,6 +13,7 @@ import {
   PlaceProvision,
   PlaceUpdateReply,
   PlaceView,
+  placeNoHomeLine,
   placeNoRecipeLine,
   placeProvisionPaths,
   placeProvisioningLine,
@@ -397,8 +398,9 @@ describe("the recipe on a computer you own", () => {
     expect(provisionWord(undefined)).toBe("");
     expect(provisionWord(running)).toBe("setting up 3/7: Codex");
     expect(provisionWord({ ...running, at: undefined })).toBe("setting up");
-    expect(provisionWord(done([row(), row({ id: "tools/uv/ruff", label: "ruff", outcome: "present" })]))).toBe("2 rows ready");
-    expect(provisionWord(done([row()]))).toBe("1 row ready");
+    // Tools, never rows: a row is the recipe's own word and nobody reading a computer's row has seen a recipe.
+    expect(provisionWord(done([row(), row({ id: "tools/uv/ruff", label: "ruff", outcome: "present" })]))).toBe("2 tools ready");
+    expect(provisionWord(done([row()]))).toBe("1 tool ready");
     expect(provisionWord(done([row(), row({ id: "tools/release/gh", label: "GitHub CLI", outcome: "failed" }), row({ id: "tools/uv/uv", label: "uv", outcome: "failed" })]))).toBe(
       "2 of 3 failed: GitHub CLI, uv",
     );
@@ -433,6 +435,12 @@ describe("the recipe on a computer you own", () => {
     expect(placeNoRecipeLine("spoo", "/Users/lena/.wsp/recipe.json")).toBe(
       "spoo got no agents or tools: this computer has no recipe at /Users/lena/.wsp/recipe.json. wsp recipe writes one; wsp add spoo --update then puts it on spoo",
     );
+  });
+
+  it("says a computer that reported no home folder got none either, in the same words", () => {
+    expect(placeNoHomeLine("spoo")).toBe("spoo got no agents or tools: it reported no home folder for its login, so nothing on it could be reached");
+    // The two read as one kind of answer: the computer is joined, the recipe went nowhere, and why.
+    for (const line of [placeNoHomeLine("spoo"), placeNoRecipeLine("spoo", "/x/recipe.json")]) expect(line.startsWith("spoo got no agents or tools: ")).toBe(true);
   });
 
   it("keeps its log and its outcome in the folder wsp already owns on that computer, never inside a workspace", () => {

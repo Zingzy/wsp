@@ -17,6 +17,7 @@ import {
   AGENT_INSTALLERS,
   AGENT_NODE_STEP,
   agentSteps,
+  nodeFloorCheck,
   NODE_PATH_LINE,
   CURRENT_LTS,
   NODE_RELEASES,
@@ -1453,15 +1454,25 @@ describe("the agents as steps of the one tools loop", () => {
     expect(codex.cmd).toContain(AGENT_INSTALLERS["codex"]!.install);
   });
 
-  it("names the node step after the release it installs, for the row a person reads", () => {
+  it("names the node step after the release it installs, and reads the floor its script reads", () => {
     const plan = agentInstallsFor(ticked("agents/codex"));
     const node = agentSteps(plan).find(t => t.id === AGENT_NODE_STEP)!;
     expect(node.label).toBe(`Node ${plan.node!.version}`);
     expect(node.cmd).toBe(plan.node!.cmd);
-    // Neither a check nor a command of its own: the script itself keeps a node that meets the floor, so the step
-    // is never read as already there.
-    expect(node.check).toBeUndefined();
+    // The check is the floor the script itself keeps a node for, so a computer that already meets it runs nothing
+    // and the row reads present on every run after the first.
+    expect(node.check).toBe(nodeFloorCheck(plan.node!.floor));
+    expect(node.check).toContain(`-ge ${plan.node!.floor}`);
     expect(node.bin).toBeUndefined();
+  });
+
+  it("reads that floor the way the install script reads it, under a real shell", () => {
+    const here = Number(process.versions.node.split(".")[0]);
+    const run = (line: string): number => spawnSync("bash", ["-c", `( ${line} )`], { encoding: "utf8" }).status ?? -1;
+    expect(run(nodeFloorCheck(here))).toBe(0);
+    expect(run(nodeFloorCheck(here + 1))).not.toBe(0);
+    // A computer with no node at all reads as under every floor rather than as an error.
+    expect(spawnSync("bash", ["-c", `( PATH=/nonexistent; ${nodeFloorCheck(18)} )`], { encoding: "utf8" }).status).not.toBe(0);
   });
 
   it("carries no node step when nothing ticked runs on node, and nothing at all for no agent", () => {

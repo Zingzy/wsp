@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -360,7 +360,7 @@ describe("the table wsp places prints", () => {
     expect(column(printed[3]!)).toBe("");
     // Once it is over the same column says what stands.
     const over = computerLines([{ ...rows[1]!, provision: { ...job, state: "done", at: undefined, rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } }], "darwin");
-    expect(over[1]!.slice(over[0]!.indexOf("TOOLS")).trim()).toBe("1 row ready");
+    expect(over[1]!.slice(over[0]!.indexOf("TOOLS")).trim()).toBe("1 tool ready");
   });
 
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
@@ -831,7 +831,7 @@ describe("wsp add on a computer reached over ssh", () => {
           // The join's own steps and the recipe's rows ride the one stream: the step's words are said once and
           // each row stands on its own line under it.
           fn({ type: "place.stage", addId, step: "join", state: "done", note: "engine none" });
-          fn({ type: "place.stage", addId, step: "provision", state: "running", note: "2 rows from the recipe of 2026-09-17T10:00:00.000Z" });
+          fn({ type: "place.stage", addId, step: "provision", state: "running", note: "2 tools from the recipe of 2026-09-17T10:00:00.000Z" });
           fn({ type: "place.stage", addId, step: "provision", state: "running", note: "Codex: installed" });
           fn({ type: "place.stage", addId, step: "provision", state: "done", note: "the rows are in" });
         }
@@ -1575,7 +1575,7 @@ describe("wsp add <place> --update", () => {
 
   /** A host whose update answers `reply` and, while it does, pushes the recipe's own rows back on the stream the
    * line minted. The listing it answers with carries the job as it stands once the rows have landed. */
-  const recipeClient = (reply: Record<string, unknown>, listed: PlaceProvision) => {
+  const recipeClient = (reply: Record<string, unknown> | Error, listed: PlaceProvision) => {
     const asked: { op: string; params?: Record<string, unknown> }[] = [];
     const frames: ((frame: Record<string, unknown>) => void)[] = [];
     const rows: PlaceView[] = [{ id: "p_1", kind: "computer", name: "spoo", default: true, joinedAt: new Date(0).toISOString(), daemonVersion: DAEMON_VERSION }];
@@ -1585,8 +1585,10 @@ describe("wsp add <place> --update", () => {
         Promise.resolve({
           request: (op: string, params?: Record<string, unknown>) => {
             asked.push({ op, ...(params === undefined ? {} : { params }) });
-            if (op === "places.list") return Promise.resolve({ places: rows.map(r => (asked.some(a => a.op === "places.update") ? { ...r, provision: listed } : r)) } as never);
+            // The row carries the job from the moment the first line started it, which is before this line asks.
+            if (op === "places.list") return Promise.resolve({ places: rows.map(r => (reply instanceof Error || asked.some(a => a.op === "places.update") ? { ...r, provision: listed } : r)) } as never);
             if (op !== "places.update") return Promise.reject(new Error(`unexpected op ${op}`));
+            if (reply instanceof Error) return Promise.reject(reply);
             const addId = String(params!["addId"]);
             for (const fn of frames) {
               for (const row of listed.rows) fn({ type: "place.stage", addId, step: "provision", state: "running", note: `${row.label}: ${row.outcome}` });
@@ -1649,6 +1651,24 @@ describe("wsp add <place> --update", () => {
     const quiet = captured();
     expect(await addCommand(quiet, opts(tmp("update-stopped")), ["spoo"], { update: true }, updateDeps(gone.dial))).toBe(1);
     expect(quiet.lines.join("\n")).toContain("spoo: spoo is not connected");
+  });
+
+  it("returns on a computer whose recipe is already going on, in the one sentence, rather than waiting on a job it did not start", async () => {
+    const io = captured();
+    // What the host answers a second update: the op's own refusal, while the listing's row still carries the job
+    // the first line started. A line that followed that row would wait on a stream nothing of its own ends.
+    const job = jobOf([{ id: "agents/codex", label: "Codex", outcome: "installed" }], "running");
+    const busy = placeProvisioningLine("spoo", { label: "Codex", index: 1, of: 2 });
+    const fake = recipeClient(Object.assign(new Error(busy), { kind: "conflict" }), job);
+    const code = await Promise.race([
+      addCommand(io, opts(tmp("update-busy")), ["spoo"], { update: true }, updateDeps(fake.dial)),
+      new Promise<string>(resolve => setTimeout(() => resolve("still waiting"), 1000)),
+    ]);
+    expect(code).toBe(1);
+    expect(io.errors.join("\n")).toContain(busy);
+    // Nothing of the running job's tally is printed: those rows are not this line's to say.
+    expect(io.lines.join("\n")).not.toContain("Codex: installed");
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 
   it("says what a computer that got no recipe at all got, and exits 0: nothing failed", async () => {

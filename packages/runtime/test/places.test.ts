@@ -31,6 +31,7 @@ import {
   readJoinToken,
   placeNoDaemonPortLine,
   placeNoLinkLine,
+  placeNoHomeLine,
   placeNoRecipeLine,
   placeProvisionPaths,
   placeProvisioningLine,
@@ -49,7 +50,7 @@ import {
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, type PlaceRecord, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -2618,7 +2619,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
   ];
 
   /** A provisioner as the host wires one, with what it plans and what its run comes to under this test's hand. */
-  function provisioner(o: { rows?: PlaceProvisionRow[]; throws?: string; noRecipe?: string; hold?: boolean; planThrows?: string } = {}) {
+  function provisioner(o: { rows?: PlaceProvisionRow[]; throws?: string; noRecipe?: string; hold?: boolean; planThrows?: string; planMs?: number } = {}) {
     let release = (): void => {};
     const held = new Promise<void>(resolve => (release = resolve));
     const calls = { plan: 0, run: 0 };
@@ -2631,6 +2632,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
       wired: {
         plan: async () => {
           calls.plan++;
+          if (o.planMs !== undefined) await new Promise(resolve => setTimeout(resolve, o.planMs));
           if (o.planThrows !== undefined) throw new Error(o.planThrows);
           return o.noRecipe === undefined ? PLAN : { noRecipe: o.noRecipe };
         },
@@ -2755,7 +2757,7 @@ describe("the recipe this host holds, put on a computer you own", () => {
     await until(async () => (await provisionOf(added.place.id))?.state === "done");
     const provision = stages.filter(s => s.step === "provision");
     expect(provision.every(s => s.addId === "a_mine")).toBe(true);
-    expect(provision[0]?.note).toContain(`2 rows from the recipe of ${RECIPE_AT}`);
+    expect(provision[0]?.note).toContain(`2 tools from the recipe of ${RECIPE_AT}`);
     expect(provision.map(s => s.note)).toContain("Codex: installed");
     expect(provision.filter(s => s.state === "done")).toHaveLength(1);
     expect(provision.at(-1)?.note).toContain("1 installed: Codex");
@@ -2774,15 +2776,51 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(await runtime!.places!.forkingBackend(placeId)).toBeDefined();
   });
 
-  it("is refused a second time while the first is still going on, in that same sentence", async () => {
+  it("is refused a second time while the first is still going on, as the op's own refusal so nothing waits on it", async () => {
     const p = provisioner({ hold: true });
     const { placeId } = await joined({ provision: p.wired, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
-    await until(async () => (await provisionOf(placeId))?.state === "running");
-    const again = await runtime!.places!.update(placeId);
-    expect(again.said).toContain("is still being set up");
+    await until(async () => (await provisionOf(placeId))?.at !== undefined);
+    const at = (await provisionOf(placeId))!.at;
+    // A refusal of the op, not a reply carrying somebody else's job: whoever asked reads one sentence and returns.
+    await expect(runtime!.places!.update(placeId)).rejects.toThrow(placeProvisioningLine("spoo", at));
+    expect(p.calls.plan).toBe(1);
     expect(p.calls.run).toBe(1);
     p.release();
     await until(async () => (await provisionOf(placeId))?.state === "done");
+    // And once it is done the same ask starts a job of its own.
+    const again = await runtime!.places!.update(placeId);
+    expect(again.provision?.state).toBe("running");
+    await until(async () => p.calls.run === 2);
+  });
+
+  it("starts one job per computer even when two asks land inside the recipe read, which reads this whole computer", async () => {
+    // The read takes a while, as reading this Mac does: the slot is taken before it, or both asks pass the check
+    // and two runs install over each other on that box.
+    const p = provisioner({ planMs: 40 });
+    const { placeId } = await joined({ provision: p.wired, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const both = await Promise.allSettled([runtime!.places!.update(placeId), new Promise(r => setTimeout(r, 5)).then(() => runtime!.places!.update(placeId))]);
+    const said = both.map(o => (o.status === "fulfilled" ? "ok" : String((o.reason as Error).message)));
+    expect(said.filter(w => w === "ok")).toHaveLength(1);
+    expect(said.filter(w => w.includes("is still being set up"))).toHaveLength(1);
+    // The recipe was read once more and run once more, not twice.
+    expect(p.calls.plan).toBe(2);
+    expect(p.calls.run).toBe(2);
+  });
+
+  it("says a computer that reported no home folder got no recipe, as the one with no recipe says it", async () => {
+    const p = provisioner();
+    const store = memoryStore();
+    const { placeId } = await joined({ provision: p.wired, store, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    // A report with no home is refused at the join, so this is a record from a wsp that took one: the paths every
+    // step is built from come off that home and there are none.
+    const held = (await store.get("places", placeId)) as PlaceRecord;
+    await store.put("places", placeId, { ...held, provision: undefined, report: { ...held.report, login: { USER: "root", PATH: "/usr/bin" } } });
+    const answer = await runtime!.places!.update(placeId);
+    expect(answer.said).toBe(placeNoHomeLine("spoo"));
+    expect(answer.provision).toBeUndefined();
+    expect(p.calls.run).toBe(1);
   });
 
   it("stops with the computer's own sentence when the link goes under it, and the gate opens again", async () => {

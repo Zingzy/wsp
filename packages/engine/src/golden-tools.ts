@@ -9,9 +9,6 @@
 import { BREW_PREFIX, HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
 import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
-// The note a row nothing had to be done for reads as lives with the floor, which is where it was first said; the
-// loop reads it for a row the caller already found on the machine.
-import { ALREADY_ON_MACHINE } from "./golden-base.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
@@ -79,6 +76,11 @@ export function reasonOf(res: ExecResult, timeoutS: number): string {
   const err = lines(res.stderr);
   return (err.filter(l => l.startsWith("Error:")).at(-1) ?? err.at(-1) ?? lines(res.stdout).at(-1) ?? `exit ${res.exitCode}`).slice(0, 160);
 }
+
+/** What a row nothing had to be done for reads as: the tool answers already, whether the provider's image shipped
+ * it, an earlier run installed it or the caller found it on a computer somebody owns, and either way no bytes move
+ * for it now. It sits with the loop that writes it; the floor re-exports it, since that is where it was first said. */
+export const ALREADY_ON_MACHINE = "already on the machine";
 
 /** A result that read its pin back: what a tools or a harness stage says about one row once it is on the machine. */
 export interface Pinned {

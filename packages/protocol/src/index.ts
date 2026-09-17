@@ -3619,6 +3619,11 @@ export const placeProvisioningLine = (name: string, at?: { label: string; index:
 export const placeNoRecipeLine = (name: string, path: string): string =>
   `${name} got no agents or tools: this computer has no recipe at ${path}. wsp recipe writes one; wsp add ${name} --update then puts it on ${name}`;
 
+/** What a computer that reported no home folder for its login gets instead of the recipe: every path the job would
+ * build comes off that home, so there is nothing to build one from. Said where the no-recipe line is said. */
+export const placeNoHomeLine = (name: string): string =>
+  `${name} got no agents or tools: it reported no home folder for its login, so nothing on it could be reached`;
+
 /** The row's word for the recipe on a computer: what is under way, or what stands. Empty for a computer nothing
  * has provisioned, which is every provider and this computer itself. Read by wsp computers and by the app's row,
  * so the two cannot word it two ways. */
@@ -3627,7 +3632,8 @@ export function provisionWord(p: PlaceProvision | undefined): string {
   if (p.state === "stopped") return `stopped: ${p.said ?? "no reason recorded"}`;
   if (p.state === "running") return p.at === undefined ? "setting up" : `setting up ${p.at.index}/${p.at.of}: ${p.at.label}`;
   const failed = p.rows.filter(r => r.outcome === "failed");
-  return failed.length === 0 ? `${plural(p.rows.length, "row")} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
+  // Tools, not rows: a row is the recipe's own word and nobody reading this screen has seen a recipe.
+  return failed.length === 0 ? `${plural(p.rows.length, "tool")} ready` : `${failed.length} of ${p.rows.length} failed: ${nameList(failed.map(r => r.label))}`;
 }
 
 /** The lines a terminal prints once a job is over: what installed by name, how many rows were already there, then

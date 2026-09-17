@@ -9,11 +9,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR } from "@wsp/catalog";
-import type { PlaceProvisionRow } from "@wsp/protocol";
+import { provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
 import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
-import { TOOLS_PATH, type ToolInstall } from "../src/golden-import.js";
+import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
-import { presentSteps, provisionBox, type ProvisionPlan } from "../src/provision.js";
+import { presentSteps, provisionBox, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
@@ -57,10 +57,13 @@ function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => unde
     kind: "sandbox",
     exec: async (cmd: string) => {
       calls.push(cmd);
+      // What the test says first, then what every box answers: the disk, the floor's versions and the context probe.
+      const said = answer(cmd);
+      if (said !== undefined) return said;
       if (cmd === FREE_KB_CMD) return { exitCode: 0, stdout: `${9_000_000}\n`, stderr: "" };
       if (cmd === BASE_VERSIONS_CMD) return { exitCode: 0, stdout: `${FLOOR_READ}\n`, stderr: "" };
       if (cmd.includes("echo WSP_CTX")) return { exitCode: 0, stdout: "WSP_CTX\nAGENT claude\nWSP_CTX_END\n", stderr: "" };
-      return answer(cmd) ?? ok;
+      return ok;
     },
     run: async (script: string) => {
       calls.push(script);
@@ -78,6 +81,19 @@ const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"]
 /** The rows a run answered, as the assertions read them. */
 const outcomes = (rows: readonly PlaceProvisionRow[]): [string, string][] => rows.map(r => [r.id, r.outcome]);
 
+/** A recipe row as the planner reads one: ticked, with the id the collector writes. */
+const row = (id: string, rung = "agents"): RecipeEntry => ({ rung, id, label: id, paths: [], bytes: 0, default: "bring", bring: true });
+
+/** Every marker a presence read asks for, as a computer that answers every one of them prints them. */
+const everyMark = (cmd: string): string =>
+  cmd
+    .split("\n")
+    .flatMap(line => {
+      const at = /wsp-present[^0-9]*([0-9]+)/.exec(line);
+      return at === null ? [] : [`wsp-present ${at[1]!}`];
+    })
+    .join("\n");
+
 describe("what a computer already satisfies", () => {
   it("is the step whose check passes, the step whose command answers with no version asked, and the step reading the version it asks for", async () => {
     const dir = scratch({ ace: "exit 0", bee: "exit 0", cee: "echo 1.2.3", dee: "echo 9.9.9" });
@@ -93,6 +109,30 @@ describe("what a computer already satisfies", () => {
     // Dee answers, but at another version than the recipe asks for, which is the drift the recipe is there to fix;
     // Eff is not on the computer at all; the node step names neither a command nor a check and is never present.
     expect([...present].sort()).toEqual(["agents/cee", "tools/apt/bee", "tools/custom/ace"]);
+  });
+
+  it("is every step of a plan the computer already answers, so a second run of that recipe installs nothing", async () => {
+    // The recipe spoo gets: the node step, Claude Code by its own installer, Codex by npm at the version the
+    // catalog pins, Homebrew and its toolchain, the shared step and two formulae. Every one of them carries a
+    // check or a command, and a box that has been provisioned once answers all of them.
+    const plan = provisionPlanOf(
+      {
+        recipeHash: "h1",
+        agents: agentInstallsFor([row("agents/claude"), row("agents/codex")]).installs,
+        node: agentInstallsFor([row("agents/codex")]).node!,
+        tools: toolInstallsFor([row("tools/brew/gh", "tools"), row("tools/brew/yq", "tools")]).installs,
+      },
+      "2026-09-17T10:00:00.000Z",
+    );
+    expect(plan.steps.length).toBeGreaterThan(6);
+    // No step of the plan is unreadable: each says either a command it puts on PATH or a check of its own.
+    for (const s of plan.steps) expect(s.check ?? s.bin, s.id).toBeDefined();
+    const { machine } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: everyMark(cmd), stderr: "" } : undefined));
+    const rows = await provisionBox(machine, plan, () => {});
+    expect(rows.map(r => r.id)).toEqual(plan.steps.map(s => s.id));
+    expect(rows.every(r => r.outcome === "present")).toBe(true);
+    expect(provisionWord({ state: "done", addId: "a_1", recipeAt: plan.recipeAt, startedAt: "x", rows })).toBe(`${rows.length} tools ready`);
+    expect(provisionLines("spoo", { state: "done", addId: "a_1", recipeAt: plan.recipeAt, startedAt: "x", rows })[0]).toBe(`spoo: nothing installed, ${rows.length} already there`);
   });
 
   it("is nothing at all when the computer answers nothing, and asks for nothing when no step carries a check or a command", async () => {
@@ -120,6 +160,17 @@ describe("the run on the computer itself", () => {
     expect(seen.at(-1)).toContain("machine context:");
     // The floor's caches are the person's own on a computer they keep: nothing sweeps them.
     expect(calls.some(c => c.includes("rm -rf /root/.npm") || c.includes("apt-get clean"))).toBe(false);
+  });
+
+  it("says the floor's own lines as a person reads them, with no stage id of the image build's in front", async () => {
+    // A computer with none of the floor on it: every floor row runs, and what the terminal and the log on that
+    // computer read is the row and the tally, not the stage the image build files them under.
+    const { machine } = boxMachine(cmd => (cmd === BASE_VERSIONS_CMD ? { exitCode: 0, stdout: "", stderr: "" } : undefined));
+    const seen: string[] = [];
+    await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), detail => void seen.push(detail));
+    expect(seen.some(l => l.startsWith("deploying-daemon"))).toBe(false);
+    expect(seen.some(l => /^jq \(\d+\/\d+\)$/.test(l))).toBe(true);
+    expect(seen.some(l => /^\d+ installed.*free$/.test(l))).toBe(true);
   });
 
   it("answers one row per step and per row the plan set aside, with the outcome the computer gave each", async () => {

@@ -56,6 +56,17 @@ export function planGoldenRecipe(
   };
 }
 
+/** Whether this computer's rows need Homebrew read at all: a row of its own is here. The one reading, so the Tools
+ * screen, a copy's build and a computer's provisioning ask it the same way. */
+export const wantsBrew = (manifest: Manifest): boolean => manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX));
+
+/** The Homebrew table a plan off this computer runs against: read only where a brew row of its own is here, and an
+ * empty one where brew will not answer, since a formula's size decides no tick on a plan already settled. The one
+ * road, so a copy's build and a computer's provisioning cannot read this Mac two ways. */
+export async function brewTableFor(manifest: Manifest, brew: (() => Promise<BrewTable>) | undefined): Promise<BrewTable> {
+  return (wantsBrew(manifest) ? await brew?.().catch(() => undefined) : undefined) ?? new Map();
+}
+
 /** What a copy's build reads off this computer: the collector and the Homebrew table where there is one. The same
  * readers wsp init takes, minus the ones that only a person's screens use. */
 export interface CopyReaders extends Pick<BuildContext, "home" | "platform"> {
@@ -111,10 +122,7 @@ export function withRecordPins(manifest: Manifest, pins: readonly SealedPin[]): 
 export async function copyGoldenRecipe(image: SealedImage, o: CopyReaders): Promise<GoldenRecipe> {
   if (image.recipe === undefined) throw new Error(`${image.name} v${image.version} was sealed without the recipe it was built from, so no other place can build it`);
   const manifest = await o.collect();
-  // Homebrew is read only where a row of its own is here, as wsp init reads it, and a brew that will not answer
-  // leaves the measured table standing: a formula's size decides no tick on a plan the record already settled.
-  const wanted = manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX));
-  const brew = (wanted ? await o.brew?.().catch(() => undefined) : undefined) ?? new Map();
+  const brew = await brewTableFor(manifest, o.brew);
   const rows = copyRows(manifest, { ...image, recipe: image.recipe }, { home: o.home, brew });
   return planGoldenRecipe({
     rows,

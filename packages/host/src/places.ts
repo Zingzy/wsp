@@ -28,6 +28,7 @@ import { addedProjectLine, sourceKind, type ProjectView,
   PLACES_WORDS,
   PlaceUpdateReply,
   placeCurrentLine,
+  type PlaceProvision,
   provisionLines,
   DAEMON_VERSION,
   JOIN_NO_KEY_REFUSAL,
@@ -807,14 +808,19 @@ function watchProvision(io: CliIO, client: HostClient, addId: string): { ended: 
   return { ended, off };
 }
 
-/** Waits out the recipe job on one computer and prints what it came to, off the row the host keeps rather than off
- * the last event: the rows are what a failed row is named from, and they outlive the run. Answers what the line
- * exits with: 1 where a row failed or the job stopped. */
-async function followProvision(io: CliIO, client: HostClient, place: PlaceView, watch: { ended: Promise<void> }): Promise<number> {
-  if (place.provision === undefined) return 0;
-  if (place.provision.state === "running") await watch.ended;
+/** Waits out the recipe job this line started and prints what it came to, off the row the host keeps rather than
+ * off the last event: the rows are what a failed row is named from, and they outlive the run. `job` is the one the
+ * answer said it started and never the row's own, since a row may carry a job another line is running, whose
+ * events ride a stream this one is not reading and whose end would never come. Answers what the line exits with:
+ * 1 where a row failed or the job stopped. */
+async function followProvision(io: CliIO, client: HostClient, place: Pick<PlaceView, "id" | "name">, job: PlaceProvision | undefined, watch: { ended: Promise<void> }): Promise<number> {
+  if (job === undefined) return 0;
+  if (job.state === "running") await watch.ended;
   const rows = await client.request<{ places: PlaceView[] }>("places.list");
-  const provision = rows.places.find(p => p.id === place.id)?.provision ?? place.provision;
+  const now = rows.places.find(p => p.id === place.id)?.provision;
+  // The row's job, but only while it is the one this line started: a fresh one on that computer is somebody
+  // else's run and its rows are not this line's to tally.
+  const provision = now?.addId === job.addId ? now : job;
   for (const line of provisionLines(place.name, provision)) io.log(line);
   return provision.state === "done" && provision.rows.every(r => r.outcome !== "failed") ? 0 : 1;
 }
@@ -839,8 +845,15 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
     try {
       const answer = PlaceUpdateReply.parse(await client.request<Record<string, unknown>>("places.update", { placeId: picked.place.id, addId }));
       for (const line of updatedLines(answer)) io.log(line);
+      // A computer that got no recipe says so and the line is over: there is no job of this line's to follow.
       if (answer.said !== undefined) io.log(answer.said);
-      return await followProvision(io, client, { ...picked.place, ...(answer.provision === undefined ? {} : { provision: answer.provision }) }, watch);
+      return await followProvision(io, client, picked.place, answer.provision, watch);
+    } catch (e) {
+      // The host's own refusal: a recipe already going on that computer is one sentence, and this line is over
+      // rather than waiting on a run somebody else started.
+      if ((e as { kind?: unknown }).kind !== "conflict") throw e;
+      io.error(e instanceof Error ? e.message : String(e));
+      return 1;
     } finally {
       watch.off();
     }
@@ -912,8 +925,9 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
       for (const line of addedLines(added.place, added.hostKey)) io.log(line);
       if (added.said !== undefined) io.log(added.said);
       // The recipe before the sign-in: signing an agent in on that computer needs the agent on that computer,
-      // which is what the job just put there.
-      await followProvision(io, client, added.place, watch);
+      // which is what the job just put there. The job this add started is the row's, since the add is what wrote
+      // it; a reply that says why none started carries no job and nothing is followed.
+      await followProvision(io, client, added.place, added.said === undefined ? added.place.provision : undefined, watch);
       await offerBoxSignIn(io, client, added.place, deps);
       return 0;
     } finally {
