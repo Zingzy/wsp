@@ -18,7 +18,7 @@ import { HELP, agentPage, cli, commandPage, COMMANDS_FOR_HELP, localWiring, loca
 import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
-import { awake, CLI_VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
+import { awake, CLI_VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noHostServingLine, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
 import { HOST_SIDE_VAULT, hostPlatform, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
@@ -1385,6 +1385,35 @@ describe("wsp verbs over the host", () => {
     expect(io.lines).toEqual([`thread ${row!.threadId} · ${THREAD_PREFIX_WORD}`, "the kernel is 25.4.0"]);
   });
 
+  it("wsp send at a terminal prints the reply once, the copy that streamed, and down a pipe prints it whole at the end", async () => {
+    // Marco read each send's reply twice and called it noise. A terminal has the streamed prose in front of the
+    // same eyes, so stdout adds no copy of it; a pipe is somebody else's reader and carries the reply whole.
+    const held = heldAgent(false);
+    await restartHost({ claude: held.adapter });
+    await run("new", "alpha");
+    await run("run", "alpha", "--detach", "build it");
+    const [row] = await rt.sessions.list();
+    held.release(0, "first turn done");
+
+    const io = captured();
+    io.isTTY = true;
+    io.sameScreen = true;
+    const ended = cli(["send", row!.threadId!, "and now the second", "--state", statePath], io, undefined, env);
+    await vi.waitFor(() => expect(held.starts).toHaveLength(2));
+    held.release(1, "the answer is 42");
+    expect(await ended).toBe(0);
+    expect(io.screen).toBe("the answer is 42\ncompleted\n");
+    expect(io.screen.split("the answer is 42")).toHaveLength(2);
+    expect(io.lines).toEqual([]);
+
+    const piped = starting("send", row!.threadId!, "and a third");
+    await vi.waitFor(() => expect(held.starts).toHaveLength(3));
+    held.release(2, "the answer is still 42");
+    expect(await piped.ended).toBe(0);
+    expect(piped.io.lines).toEqual(["the answer is still 42"]);
+    expect(piped.io.streamed).toBe("the answer is still 42\ncompleted\n");
+  });
+
   it("a turn whose stdout is a pipe prints the reply once, at the end, with the stream beside it the person's own view of the work", async () => {
     const held = heldAgent(false);
     await restartHost({ claude: held.adapter });
@@ -2524,8 +2553,15 @@ describe("wsp verbs over the host", () => {
     held.release(1, "b is green\nall done for b");
     const first = await waiting;
     expect(first.code).toBe(0);
-    expect(first.io.lines).toEqual([`thread ${b!.threadId!.slice(0, 8)} finished (completed): all done for b`]);
+    // The whole reply under the finished line, not its last line: Marco waited on two threads and read a closing
+    // remark off one and a code fence off the other, with the answers he was waiting for nowhere on his screen.
+    expect(first.io.lines).toEqual([`thread ${b!.threadId!.slice(0, 8)} finished (completed): b is green\nall done for b`]);
+    expect(first.io.lines[0]).toBe(notifyLine(b!.threadId!, { status: "completed", text: "b is green\nall done for b" }, "whole"));
     expect(first.io.errors).toEqual([]);
+    // --tail is the last line alone, the line a notify sends; b is over, so it comes back at once.
+    const tail = await run("threads", "wait", b!.threadId!, "--tail");
+    expect(tail.code).toBe(0);
+    expect(tail.io.lines).toEqual([`thread ${b!.threadId!.slice(0, 8)} finished (completed): all done for b`]);
     // b is over, so a wait naming both comes back with b at once, read off the transcript; the JSON is the tool's object.
     const again = await run("threads", "wait", a!.threadId!, b!.threadId!, "--json");
     expect(again.code).toBe(0);
@@ -2555,6 +2591,9 @@ describe("wsp verbs over the host", () => {
     const stray = await run("threads", "nope", "also");
     expect(stray.code).toBe(3);
     expect(stray.io.errors[0]).toContain("wsp threads takes at most one workspace; wsp threads wait is its one subcommand");
+    // Marco typed wsp threads read <thread> and this refusal was where he learned there was no such line; it names
+    // the one there is.
+    expect(stray.io.errors[0]).toContain("wsp thread read <thread> prints what one said");
   });
 
   it("threads wait on a thread whose first turn has not reached the machine blocks for that turn; the same thread once its turn is over comes back at once with its finished line", async () => {
@@ -2695,7 +2734,8 @@ describe("wsp verbs over the host", () => {
     expect(listed.map(t => [t.id, t.status, t.turns])).toEqual([[thread, "completed", 1]]);
     expect((await run("thread", "read", thread, "--last")).io.lines[0]).toContain("the build is green\nall green");
     expect((await run("thread", "read", thread)).io.lines[0]).toContain("the build is green\nall green");
-    expect((await run("threads", "wait", thread)).io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): all green`]);
+    expect((await run("threads", "wait", thread)).io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): the build is green\nall green`]);
+    expect((await run("threads", "wait", thread, "--tail")).io.lines).toEqual([`thread ${thread.slice(0, 8)} finished (completed): all green`]);
   });
 
   it("threads wait on a turn the runtime ended says failed with the runtime's reason, as the notify line would; a turn the transport cut says the cut line", async () => {
@@ -3335,7 +3375,7 @@ describe("wsp verbs over the host", () => {
     handle = undefined;
     const io = captured();
     expect(await cli(["threads", "--state", statePath], io, undefined, env, false)).toBe(1);
-    expect(io.errors).toEqual([`wsp threads: no wsp host is serving ${statePath}`]);
+    expect(io.errors).toEqual([`wsp threads: ${noHostServingLine(statePath)}`]);
   });
 
   it("a wrong token is refused by the host, under the auth class", async () => {
