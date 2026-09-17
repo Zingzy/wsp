@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { agentInstallsFor, brewfileFor, estimateDisk, isMcpRow, PACK_BUDGET_BYTES, plural, shownOf, toolInstallsFor, TOOLS_DISK_FLOOR, type BrewTable, type ImportResult } from "@wsp/engine";
 import { ALREADY_APPLIED, BREW_ID_PREFIX, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, builderStaysLine, customRows, fmtBytes, fmtDuration, fmtElapsed, fmtMemGb, initStageWhile, initStoppedAt, INIT_ROW_STATES, MACHINE_GONE_LINE, notHereLine, packageOf, SAVED_KEY_STOPPED_LINE, SEAL_FAILED_BUILDER_GONE_LINE, SEAL_FAILED_LINE, SIGN_IN_ANSWERS, sealFailedBuilderStaysLine, sealFailedBuilderUnreadLine, shellQuote, type AppPorts, type PortsAsked, GOLDEN_STAGE_WORDS } from "@wsp/protocol";
 import { importResultPath, keychainLogins, readSecrets, refusedIsDir, type SecretReader } from "./init-import.js";
-import { planGoldenRecipe, planImport, type BuildContext } from "./image-recipe.js";
+import { planGoldenRecipe, planImport, wantsBrew, type BuildContext } from "./image-recipe.js";
 import {
   RUNG_TITLE,
   agentName,
@@ -876,7 +876,7 @@ export async function readThisComputer(opts: ReadOptions, io: Pick<InitIO, "outp
   // Homebrew here sizes the formulae on the Tools screen and says which tap formula has a release to take; a
   // brew that fails leaves the measured table.
   let brew: BrewTable = new Map();
-  if (opts.brew !== undefined && manifest.entries.some(e => e.id.startsWith(BREW_ID_PREFIX))) {
+  if (opts.brew !== undefined && wantsBrew(manifest)) {
     const sizes = spin(io.output, "Reading Homebrew for sizes", io.isTTY);
     try {
       brew = await opts.brew();

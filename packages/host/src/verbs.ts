@@ -212,6 +212,7 @@ import {
   isLocalWorkspace,
   turnSpendWord,
   placeDaemonBehind,
+  provisionWord,
   namesPlace,
   noSuchPlaceRefusal,
   placeForksNowhereLine,
@@ -505,8 +506,11 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
+    // The recipe on that computer: what is being put on it, then what stands and what failed. Empty on a cloud
+    // and on this computer, which wsp installs nothing on.
+    provisionWord(p.provision),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE"], ...rows]);
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
