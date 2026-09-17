@@ -204,8 +204,8 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
-import { projectSource } from "./project-sources.js";
+import { cloneLines, guestMemoryDir, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding } from "./project-landing.js";
+import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
@@ -959,11 +959,6 @@ export const oneWorkspacePerProject = (project: string, standing: string): strin
 
 /** Why a host will not serve a state file written before a workspace named its project: nothing reads the old
  * shape, so the file is moved aside by hand and this host starts empty. */
-/** Why a host will not serve a state file whose projects were recorded before one carried the key its agent's
- * memory sits under: the key is the add's to write and nothing may guess it, so the file is moved aside by hand. */
-export const wipeTheProjects = (projectId: string, statePath: string | undefined): string =>
-  `project ${projectId} was recorded before a project carried its memory key, and nothing reads that shape: move ${statePath ?? "this host's state file"} aside and start again, and wsp add records your projects on the new one`;
-
 export const wipeTheState = (workspaceId: string, statePath: string | undefined): string =>
   `workspace ${workspaceId} was recorded before a workspace held a project, and nothing reads that shape: move ${statePath ?? "this host's state file"} aside and start again, and wsp add records your projects on the new one`;
 
@@ -1934,6 +1929,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const ran = await entry.machine.exec(installScript(install, { dir: project.path, log }), { timeoutMs: INSTALL_MS });
     if (ran.exitCode !== 0) throw new Error(`${install.command} in ${project.path}: ${lastLineOf(ran.stderr) || lastLineOf(ran.stdout) || `exit ${ran.exitCode}`}; its whole output is ${log} on the machine`);
   };
+  /** A project record with the fields a later build added filled in, or the record itself where it carries them
+   * all. Each is the rule the add would have written, read off what the record already holds: the remote a repo
+   * source names, the default branch every clone falls back to, the key its agent's memory sits under (the path
+   * on the computer holding it) and the folder that memory is in there. A record that has them is untouched, and
+   * nothing here recomputes a field a record carries. */
+  const filledProject = (held: ProjectView): ProjectView => {
+    const has = (word: unknown): boolean => typeof word === "string" && word !== "";
+    if (has(held.remote) && has(held.defaultBranch) && has(held.memoryKey) && has(held.memoryDir)) return held;
+    const key = has(held.memoryKey) ? held.memoryKey : claudeProjectKey(held.source.kind === "folder" ? held.source.path : held.path);
+    const here = held.computer === HERE_PLACE_ID;
+    return {
+      ...held,
+      remote: has(held.remote) ? held.remote : projectRemote(held.source),
+      defaultBranch: has(held.defaultBranch) ? held.defaultBranch : DEFAULT_BRANCH,
+      memoryKey: key,
+      // Where that agent reads it: its store on this computer for a project worked here, its own on the guest for
+      // a project on a computer that holds a copy.
+      memoryDir: has(held.memoryDir) ? held.memoryDir : here ? claudeMemoryDir(local?.home("claude") ?? "", key) : guestMemoryDir(key),
+    };
+  };
+
   /** One folder on this computer's own remote and the branch that remote's HEAD names, in one command: what a
    * project worked in place here keeps on its record. Both empty where the folder has no origin, which a project
    * here is allowed: nothing clones it. */
@@ -3984,12 +4000,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The projects are read before the workspaces: every workspace record names one, and its view joins that
       // project's name, path and computer off this map.
       for (const raw of await store.list(PROJECTS)) {
-        const project = raw as ProjectView;
-        // Nothing reads a project recorded before it carried the key its agent's memory sits under: the key is
-        // written once at the add and never recomputed, so a record without one is refused in the same sentence a
-        // workspace from the old shape is, rather than guessed at here.
-        if (typeof project.memoryKey !== "string" || typeof project.memoryDir !== "string") throw new Error(wipeTheProjects(project.id, opts.statePath));
+        // A project recorded before it carried the remote it was cloned from and the key its agent's memory sits
+        // under: every one of those is the add's own rule over what the record already holds, so they are filled
+        // in here and written back rather than costing the person the whole state file.
+        const project = filledProject(raw as ProjectView);
         projectsHeld.set(project.id, project);
+        if (project !== raw) await store.put(PROJECTS, project.id, project);
       }
       for (const raw of await store.list(WORKSPACES)) await hydrateWorkspace(raw);
       for (const raw of await store.list(TRANSCRIPTS)) {
@@ -7425,9 +7441,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         defaultBranch: resolved.defaultBranch,
         memoryKey,
         memoryDir: places.memoryDir,
-        // The branch a workspace of this project starts on: the one they named, else the branch whose unpushed
-        // commits the seed carries, since the point of carrying them is to go on working on that branch.
-        ...(o.base !== undefined ? { base: o.base } : resolved.seed?.unpushed != null ? { base: resolved.seed.branch } : {}),
+        // The branch a workspace of this project starts on: the one they named, and otherwise none, which the
+        // clone reads as the remote's own default. The branch a seed's unpushed commits were on is never this: a
+        // branch the remote has never seen is nothing a clone can ask for, so those commits land on a branch of
+        // their own after the clone and the record stays on the branch the remote has.
+        ...(o.base !== undefined ? { base: o.base } : {}),
         createdAt: new Date(clock.now()).toISOString(),
       };
       const began = clock.now();

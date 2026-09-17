@@ -47,6 +47,22 @@ describe("what a seed ticks before anybody touches the menu", () => {
     expect(defaultSeedChoice(PLAN)).toEqual({ files: [".env.local", ".claude/settings.local.json"], memory: true, commits: true });
   });
 
+  it("takes the ticks the plan carries, so an untick remembered for that folder holds", () => {
+    // The menu a remembered choice was applied to carries their ticks, not the catalogue's: a config row they
+    // unticked last time stays unticked, and a row they kept that no row names travels.
+    const remembered: SeedPlan = {
+      ...PLAN,
+      remembered: true,
+      files: PLAN.files.map(f => ({ ...f, ticked: f.path === ".next-mock" })),
+    };
+    expect(defaultSeedChoice(remembered)).toEqual({ files: [".next-mock"], memory: true, commits: true });
+  });
+
+  it("never ticks a login, whatever a remembered choice says about it", () => {
+    const remembered: SeedPlan = { ...PLAN, remembered: true, files: PLAN.files.map(f => ({ ...f, ticked: true })) };
+    expect(defaultSeedChoice(remembered).files).not.toContain(".git-credentials");
+  });
+
   it("ticks no memory and no commits where the folder has neither", () => {
     expect(defaultSeedChoice({ ...PLAN, memory: null, unpushed: null })).toEqual({ files: [".env.local", ".claude/settings.local.json"], memory: false, commits: false });
   });

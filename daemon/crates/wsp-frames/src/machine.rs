@@ -634,7 +634,7 @@ mod tests {
         };
         let bound = MachineSpec {
             binds: Some(vec![Bind {
-                source: "/var/lib/wsp/projects/pr_1/memory".to_owned(),
+                source: "/wsp/projects/pr_1/memory".to_owned(),
                 target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
                 read_only: false,
             }]),
@@ -645,15 +645,11 @@ mod tests {
         // written now read the same on the far side.
         assert_eq!(
             written,
-            r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/projects/pr_1/memory","target":"/root/.claude-cfg/projects/-root-wsp/memory"}]}"#
+            r#"{"kind":"sandbox","binds":[{"source":"/wsp/projects/pr_1/memory","target":"/root/.claude-cfg/projects/-root-wsp/memory"}]}"#
         );
         assert_eq!(serde_json::from_str::<MachineSpec>(&written).unwrap(), bound);
         let read_only = MachineSpec {
-            binds: Some(vec![Bind {
-                source: "/var/lib/wsp/projects/pr_1/memory".to_owned(),
-                target: "/root/memory".to_owned(),
-                read_only: true,
-            }]),
+            binds: Some(vec![Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: "/root/memory".to_owned(), read_only: true }]),
             ..bare.clone()
         };
         let written = serde_json::to_string(&read_only).unwrap();
@@ -664,7 +660,7 @@ mod tests {
         for bad in [
             r#"{"kind":"sandbox","binds":[{"source":"projects/pr_1/memory","target":"/root/memory"}]}"#,
             r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/../../root/.ssh","target":"/root/memory"}]}"#,
-            r#"{"kind":"sandbox","binds":[{"source":"/var/lib/wsp/projects/pr_1/memory","target":"/root/../etc"}]}"#,
+            r#"{"kind":"sandbox","binds":[{"source":"/wsp/projects/pr_1/memory","target":"/root/../etc"}]}"#,
         ] {
             assert!(serde_json::from_str::<MachineSpec>(bad).is_err(), "{bad}");
         }
@@ -684,8 +680,8 @@ mod tests {
     fn a_backend_says_where_the_projects_it_holds_live_and_only_as_a_path() {
         let facts = r#"{"offer":"runtime","capabilities":{"liveCloneForks":false,"replacesMachine":true,"previewUrls":false,"signedUrls":false,"callbackRelay":false,"diskSnapshots":true,"images":false,"snapshotsAnyLife":false,"snapshotListing":true,"templates":true,"sizes":[],"kept":false},"pricing":{"defaultSize":{"cpu":2,"memMb":4096},"snapshotStorage":{"freeGb":0,"usdPerGbMonth":0,"billedFrom":""}}}"#;
         assert_eq!(serde_json::from_str::<BackendFacts>(facts).unwrap().projects, None);
-        let holding = facts.replace(r#"{"offer":"runtime""#, r#"{"projects":"/var/lib/wsp/projects","offer":"runtime""#);
-        assert_eq!(serde_json::from_str::<BackendFacts>(&holding).unwrap().projects.as_deref(), Some("/var/lib/wsp/projects"));
+        let holding = facts.replace(r#"{"offer":"runtime""#, r#"{"projects":"/wsp/projects","offer":"runtime""#);
+        assert_eq!(serde_json::from_str::<BackendFacts>(&holding).unwrap().projects.as_deref(), Some("/wsp/projects"));
         let relative = facts.replace(r#"{"offer":"runtime""#, r#"{"projects":"projects","offer":"runtime""#);
         assert!(serde_json::from_str::<BackendFacts>(&relative).is_err());
     }

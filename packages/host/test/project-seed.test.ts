@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeMemoryDir, claudeProjectKey, defaultSeedChoice, type SeedFile, type SeedPlan } from "@wsp/protocol";
@@ -22,6 +22,18 @@ writeFileSync(join(folder, ".claude", "other.json"), "{}\n");
 writeFileSync(join(folder, ".git", "config"), "[core]\n");
 writeFileSync(join(folder, "node_modules", "left", "index.js"), "module.exports = 1\n");
 writeFileSync(join(folder, ".git-credentials"), "https://x:y@github.com\n");
+mkdirSync(join(folder, "config"), { recursive: true });
+writeFileSync(join(folder, "config", "app.json"), "{}\n");
+// A login inside a folder the person ticks, which the catalogue's logins row names wherever it sits.
+writeFileSync(join(folder, "config", ".netrc"), "machine github.com password x\n");
+mkdirSync(join(folder, "linked"), { recursive: true });
+writeFileSync(join(folder, "linked", "own.txt"), "mine\n");
+// What a link would reach if one were followed: a file and a folder outside the project.
+writeFileSync(join(root, "outside.txt"), "not theirs to send\n");
+mkdirSync(join(root, "outside-dir"), { recursive: true });
+writeFileSync(join(root, "outside-dir", "secret.txt"), "not theirs either\n");
+symlinkSync(join(root, "outside.txt"), join(folder, "linked", "link-to-outside"));
+symlinkSync(join(root, "outside-dir"), join(folder, "linked", "link-to-folder"));
 mkdirSync(claudeMemoryDir(claude, key), { recursive: true });
 writeFileSync(join(claudeMemoryDir(claude, key), "MEMORY.md"), "- one thing\n");
 writeFileSync(join(claudeMemoryDir(claude, key), "one.md"), "the thing\n");
@@ -64,6 +76,22 @@ describe("the archive a folder seeds a project with", () => {
     const packed = await packSeed({ plan: PLAN, choice: { files: [".env.local", ".claude"], memory: false, commits: false }, claudeStateHome: claude, run: fakeGit });
     expect(inside(packed.tar).sort()).toEqual([".claude/other.json", ".claude/settings.local.json", ".env.local"]);
     expect(inside(packed.tar).some(path => path.startsWith(".git/"))).toBe(false);
+  });
+
+  it("leaves a login found inside a ticked folder behind, and names it", async () => {
+    // The menu shows a folder, not what is in it: a login inside one somebody ticked is still a login.
+    const plan = { ...PLAN, files: [...PLAN.files, file("config", "unknown", true)] };
+    const packed = await packSeed({ plan, choice: { files: ["config"], memory: false, commits: false }, claudeStateHome: claude, run: fakeGit });
+    expect(inside(packed.tar).sort()).toEqual(["config/app.json"]);
+    expect(packed.left).toEqual(["config/.netrc"]);
+    expect(packed.files).toBe(1);
+  });
+
+  it("follows no link out of the folder: a link is left behind, whatever it points at", async () => {
+    const plan = { ...PLAN, files: [...PLAN.files, file("linked", "unknown", true)] };
+    const packed = await packSeed({ plan, choice: { files: ["linked"], memory: false, commits: false }, claudeStateHome: claude, run: fakeGit });
+    // The folder holds one real file and two links, one to a file outside the project and one to a folder outside it.
+    expect(inside(packed.tar).sort()).toEqual(["linked/own.txt"]);
   });
 
   it("refuses a login the choice named, even though the menu showed it", async () => {

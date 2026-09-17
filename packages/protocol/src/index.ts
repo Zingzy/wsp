@@ -2455,7 +2455,11 @@ export type MachineShare = z.infer<typeof MachineShare>;
  * inside, and whether the workspace may write through it. Unlike a share, which is one file of a login, this is a
  * folder both sides keep working in, which is what makes one project's memory the same memory in every workspace
  * of it on that computer. */
-export const MachineBind = z.object({ source: z.string(), target: z.string(), readOnly: z.boolean().optional() });
+export const MachineBind = z.object({
+  source: z.string().min(1).refine(isPlainPath, "an absolute path on the computer"),
+  target: z.string().min(1).refine(isPlainPath, "an absolute path inside the workspace"),
+  readOnly: z.boolean().optional(),
+});
 export type MachineBind = z.infer<typeof MachineBind>;
 
 /** One row of wsp places: a computer of the person's own, this computer itself, or the provider this host forks on. */

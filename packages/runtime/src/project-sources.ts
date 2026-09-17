@@ -31,6 +31,9 @@ export interface SourceDeps {
 
 export interface ProjectSourceModule<S extends ProjectSource = ProjectSource> {
   kind: S["kind"];
+  /** The remote this source names on its own, without asking this computer anything: a repo's own url, the https
+   * url a host's owner/repo is, and nothing for a folder, whose remote only its own git can say. */
+  remote(source: S): string;
   resolve(source: S, deps: SourceDeps): Promise<ResolvedSource>;
   /** The line that clones the project onto the computer that holds it, in that computer's own shell. */
   cloneCommand(o: { remote: string; dest: string; branch?: string }): string;
@@ -48,12 +51,13 @@ const gitClone = (o: { remote: string; dest: string; branch?: string }): string 
 
 /** The default branch a remote's HEAD names, as the clone will take it: `main` where nothing could be read, which
  * is what git itself falls back to and what the record then carries. */
-const DEFAULT_BRANCH = "main";
+export const DEFAULT_BRANCH = "main";
 /** A branch read off a folder or a remote, or that fallback where the read came back empty. */
 const branchOr = (read: string | undefined): string => (read === undefined || read === "" ? DEFAULT_BRANCH : read);
 
 const folderModule: ProjectSourceModule<Extract<ProjectSource, { kind: "folder" }>> = {
   kind: "folder",
+  remote: () => "",
   // A folder on this computer is not carried anywhere: the computer clones the folder's own origin and the folder
   // seeds what git ignores on top of that clone. A folder git has no remote for is refused here, before anything
   // is created, since there would be nothing for the other computer to clone.
@@ -78,8 +82,9 @@ const folderModule: ProjectSourceModule<Extract<ProjectSource, { kind: "folder" 
 
 const gitModule: ProjectSourceModule<Extract<ProjectSource, { kind: "git" }>> = {
   kind: "git",
+  remote: source => source.url,
   async resolve(source) {
-    return { remote: source.url, defaultBranch: DEFAULT_BRANCH, name: projectNameOf(source) };
+    return { remote: gitModule.remote(source), defaultBranch: DEFAULT_BRANCH, name: projectNameOf(source) };
   },
   cloneCommand: gitClone,
 };
@@ -90,6 +95,7 @@ const gitModule: ProjectSourceModule<Extract<ProjectSource, { kind: "git" }>> = 
 function hostModule(host: GitHost): ProjectSourceModule<Extract<ProjectSource, { kind: "github" | "gitlab" }>> {
   return {
     kind: host.id,
+    remote: source => host.httpsUrl(source.repo),
     async resolve(source) {
       return { remote: host.httpsUrl(source.repo), defaultBranch: DEFAULT_BRANCH, name: projectNameOf(source) };
     },
@@ -105,6 +111,10 @@ export const PROJECT_SOURCES: ReadonlyMap<ProjectSource["kind"], ProjectSourceMo
   [gitModule.kind, gitModule as ProjectSourceModule],
   ...GIT_HOSTS.map(host => [host.id, hostModule(host) as ProjectSourceModule] as const),
 ]);
+
+/** The remote one source names, read through its own module: what a record written before it carried one is
+ * filled in with, and what the add records. */
+export const projectRemote = (source: ProjectSource): string => projectSource(source.kind).remote(source);
 
 /** The module for one source, or the wiring fault of a kind nothing registered. */
 export function projectSource(kind: ProjectSource["kind"]): ProjectSourceModule {

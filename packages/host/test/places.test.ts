@@ -1996,6 +1996,11 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     ],
     remembered: false,
   };
+  /** The computers a host lists: this one, which works a folder where it sits, and a box that clones. */
+  const PLACES: PlaceView[] = [
+    { id: "here", kind: "computer", name: "studio.local", default: false, present: true },
+    { id: "p_1", kind: "computer", name: "spoo", default: true },
+  ];
   const project = {
     id: "pr_1",
     name: "spoo-landing",
@@ -2020,7 +2025,7 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
             asked.push({ op, ...(params === undefined ? {} : { params }) });
             if (op === "project.seed.plan") return Promise.resolve({ plan: PLAN } as never);
             if (op === "projects.add") return Promise.resolve({ project } as never);
-            if (op === "places.list") return Promise.resolve({ places: [{ id: "p_1", kind: "computer", name: "spoo", default: true }] } as never);
+            if (op === "places.list") return Promise.resolve({ places: PLACES } as never);
             return Promise.reject(new Error(`unexpected op ${op}`));
           },
           events: () => Promise.resolve(),
@@ -2058,8 +2063,8 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     expect(printed).toContain("nothing was sent");
     expect(printed).toContain("4 uncommitted changes stay on this computer");
     expect(printed).toContain("--yes");
-    // The menu was read and nothing was recorded.
-    expect(asked.map(a => a.op)).toEqual(["project.seed.plan"]);
+    // The computer's own kind is read first, then the menu, and nothing was recorded.
+    expect(asked.map(a => a.op)).toEqual(["places.list", "project.seed.plan"]);
   });
 
   it("with --yes it sends the ticks the catalogue decided, and the keeps and cuts move them", async () => {
@@ -2087,7 +2092,48 @@ describe("wsp add <folder> --on <computer>: the menu before anything travels", (
     const { dial, asked } = menuClient();
     const io = captured();
     await expect(addCommand(io, opts(home), [FOLDER], { on: "spoo", yes: true, keep: [".git-credentials"] }, menuDeps(dial))).rejects.toThrow(/never travels in a seed/);
-    expect(asked.map(a => a.op)).toEqual(["project.seed.plan"]);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "project.seed.plan"]);
+  });
+
+  it("draws and sends the ticks a remembered choice put on the plan, not the catalogue's own", async () => {
+    const home = tmp("add-seed-remembered");
+    // What the host answers once a choice was remembered for this folder: their ticks on the same rows.
+    const remembered = { ...PLAN, remembered: true, files: PLAN.files.map(f => ({ ...f, ticked: f.path === "docs" })) };
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const dial = (): Promise<never> =>
+      Promise.resolve({
+        request: (op: string, params?: Record<string, unknown>) => {
+          asked.push({ op, ...(params === undefined ? {} : { params }) });
+          if (op === "project.seed.plan") return Promise.resolve({ plan: remembered } as never);
+          if (op === "projects.add") return Promise.resolve({ project } as never);
+          if (op === "places.list") return Promise.resolve({ places: PLACES } as never);
+          return Promise.reject(new Error(`unexpected op ${op}`));
+        },
+        events: () => Promise.resolve(),
+        onFrame: () => () => {},
+        closed: Promise.resolve(),
+        closeWords: () => "",
+        close: () => {},
+        drop: () => {},
+      } as never);
+    const io = captured();
+    expect(await addCommand(io, opts(home), [FOLDER], { on: "spoo" }, menuDeps(dial))).toBe(0);
+    // The menu reads their ticks: the config row they unticked is unticked and the folder they kept is ticked.
+    expect(io.lines.join("\n")).toContain("[ ]  .env.local");
+    expect(io.lines.join("\n")).toContain("[x]  docs/");
+    // And --yes sends those, not the catalogue's.
+    const sent = menuClient();
+    expect(await addCommand(captured(), opts(home), [FOLDER], { on: "spoo", yes: true }, menuDeps(dial))).toBe(0);
+    expect(asked.filter(a => a.op === "projects.add").at(-1)?.params).toMatchObject({ seed: { files: ["docs"] } });
+    void sent;
+  });
+
+  it("a folder onto this computer is worked where it sits, so no menu is read and nothing is asked about it", async () => {
+    const home = tmp("add-seed-here");
+    const { dial, asked } = menuClient();
+    // The computer the app runs on, named by the word its own row carries.
+    expect(await addCommand(captured(), opts(home), [FOLDER], { on: "here" }, menuDeps(dial))).toBe(0);
+    expect(asked.map(a => a.op)).toEqual(["places.list", "projects.add", "places.list"]);
   });
 
   it("a folder with no computer named is a project here and reads no menu at all", async () => {

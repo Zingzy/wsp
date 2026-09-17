@@ -4,17 +4,21 @@
 // the commits the remote does not have as a patch, both under one folder of
 // wsp's own the landing unpacks and removes. Nothing else of theirs travels:
 // no .git, no login, no path the plan marked as one that never leaves.
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { seedRowFor } from "@wsp/catalog";
 import { runChild, tarOf, type TarEntry } from "@wsp/engine";
 import { claudeMemoryDir, neverTravelsLine, notInTheMenuLine, SEED_MEMORY_DIR, SEED_PATCH, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 
-/** What a pack of one seed carries and how much of it, for the record's own seeded row. */
+/** What a pack of one seed carries and how much of it, for the record's own seeded row, and the paths it left
+ * behind inside a folder somebody ticked. */
 export interface PackedSeed {
   tar: Buffer;
   files: number;
   bytes: number;
   commits: number;
+  /** Logins found inside a ticked folder, which never travel: the add says them, so nothing is quietly dropped. */
+  left: string[];
 }
 
 /** How long git gets to write the patch of one branch's unpushed commits. */
@@ -33,6 +37,7 @@ export async function packSeed(o: {
   const { plan, choice } = o;
   const known = new Map(plan.files.map(f => [f.path, f]));
   const entries: TarEntry[] = [];
+  const left: string[] = [];
   let files = 0;
   let bytes = 0;
   for (const path of choice.files) {
@@ -43,7 +48,14 @@ export async function packSeed(o: {
     // from somewhere else, since the one thing a seed must never carry is the history the computer clones itself.
     if (path === ".git" || path.startsWith(".git/")) throw new Error(neverGitLine(path));
     for (const found of filesAt(join(plan.source, path))) {
-      entries.push(fileEntry(relative(plan.source, found), found));
+      const rel = relative(plan.source, found);
+      // Every file a ticked folder holds is judged by the catalogue as a menu row is: a login inside a folder
+      // somebody ticked is still a login, and it stays here and is named rather than travelling unseen.
+      if (seedRowFor(rel, false)?.kind === "never") {
+        left.push(rel);
+        continue;
+      }
+      entries.push(fileEntry(rel, found));
       files += 1;
       bytes += statSync(found).size;
     }
@@ -66,17 +78,18 @@ export async function packSeed(o: {
     bytes += Buffer.byteLength(patch.stdout);
     files += 1;
   }
-  return { tar: tarOf(entries), files, bytes, commits };
+  return { tar: tarOf(entries), files, bytes, commits, left };
 }
 
 /** Why the repository's own folder is refused: the computer clones the repo itself, so its history never rides a
  * seed, and a choice naming it is a choice built from something other than the menu. */
 export const neverGitLine = (path: string): string => `${path} is the repository's own folder, which a seed never carries: the computer clones the repo itself`;
 
-/** Every regular file at a path: the file itself, or every one under it where it is a directory. Links are left
- * behind rather than followed, so nothing outside the folder is read through one. */
+/** Every regular file at a path: the file itself, or every one under it where it is a directory. Read with lstat
+ * and not stat, so a link is seen as the link it is and left behind: a link inside a ticked folder is how a file
+ * outside the folder would otherwise be read and carried. */
 function filesAt(at: string): string[] {
-  const stat = statSync(at, { throwIfNoEntry: false });
+  const stat = lstatSync(at, { throwIfNoEntry: false });
   if (stat === undefined || stat.isSymbolicLink()) return [];
   if (stat.isFile()) return [at];
   if (!stat.isDirectory()) return [];

@@ -96,16 +96,19 @@ export function cloneLines(o: { source: ProjectSourceModule; remote: string; che
 }
 
 /** The clone with the seed on top of it, which is the add's own road. */
-function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; seed?: { plan: SeedPlan; choice: SeedChoice }; memoryDir: string }): string {
+export function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; seed?: { plan: SeedPlan; choice: SeedChoice }; memoryDir: string }): string {
   const at = shellQuote(o.checkout);
   const lines = cloneLines(o);
   if (o.seedTar !== undefined) lines.push(`tar -xzf ${shellQuote(o.seedTar)} -C ${at}`);
   const unpushed = o.seed?.plan.unpushed;
   if (o.seed?.choice.commits === true && unpushed != null) {
-    // The person's own branch, from the commit their work started at, with their commits on top: a workspace of
-    // this project then opens on the work they had not pushed rather than on the remote's own tip.
+    // The person's own branch, made where their work started and with their commits on top, then the branch the
+    // clone came up on again. `-B` and not `-b`: the branch they were working on may be one the remote has, in
+    // which case the clone already made it and creating it a second time would end the script.
+    const branch = shellQuote(o.seed.plan.branch);
+    const back = shellQuote(o.branch ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch);
     lines.push(
-      `cd ${at} && git checkout -b ${shellQuote(o.seed.plan.branch)} ${shellQuote(unpushed.base)} && git am --3way ${shellQuote(`${o.checkout}/${SEED_PATCH}`)}`,
+      `cd ${at} && git checkout -B ${branch} ${shellQuote(unpushed.base)} && git am --3way ${shellQuote(`${o.checkout}/${SEED_PATCH}`)} && git checkout ${back}`,
     );
   }
   if (o.seed?.choice.memory === true && o.seed.plan.memory !== null) {
@@ -149,16 +152,28 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
         }),
   };
   const root = await machine.exec(`ls -A ${shellQuote(places.checkout)}`, { timeoutMs: STEP_MS });
-  const install = projectInstalls(root.stdout.split("\n").map(name => name.trim()), places.checkout)[0];
-  if (install === undefined) return landed;
-  report("installing", `${install.command} in ${places.checkout}.`);
+  // Every ecosystem the checkout's own root names a lockfile for, in catalogue order: a repo that is a Node app
+  // with a Rust crate in it gets both, and a repo no row names an install for gets none.
+  const installs = projectInstalls(root.stdout.split("\n").map(name => name.trim()), places.checkout);
+  if (installs.length === 0) return landed;
   const began = deps.now();
-  const ok = await machine.exec(installScript(install, { dir: places.checkout, log: places.log }), { timeoutMs: INSTALL_MS });
-  if (ok.exitCode !== 0) {
-    const said = lastLine(ok.stderr) ?? lastLine(ok.stdout) ?? `exit ${ok.exitCode}`;
-    throw new Error(`${install.command} in ${places.checkout}: ${said}; its whole output is ${places.log} on ${project.computer}`);
+  for (const install of installs) {
+    report("installing", `${install.command} in ${places.checkout}.`);
+    const ok = await machine.exec(installScript(install, { dir: places.checkout, log: places.log }), { timeoutMs: INSTALL_MS });
+    if (ok.exitCode !== 0) {
+      const said = lastLine(ok.stderr) ?? lastLine(ok.stdout) ?? `exit ${ok.exitCode}`;
+      throw new Error(`${install.command} in ${places.checkout}: ${said}; its whole output is ${places.log} on ${project.computer}`);
+    }
   }
-  return { ...landed, installed: { row: install.row, command: install.command, at: new Date(deps.now()).toISOString(), seconds: Math.round((deps.now() - began) / 1000) } };
+  return {
+    ...landed,
+    installed: {
+      row: installs.map(i => i.row).join(", "),
+      command: installs.map(i => i.command).join("; "),
+      at: new Date(deps.now()).toISOString(),
+      seconds: Math.round((deps.now() - began) / 1000),
+    },
+  };
 }
 
 /** A computer the person owns: its daemon holds the disk, so the checkout and the memory folder sit on that disk
@@ -175,14 +190,21 @@ const boxLanding: ProjectLanding = {
   async land(o, deps) {
     const dir = projectDir(deps, o.project.id);
     const checkout = `${dir}/checkout`;
-    // The folder wsp keeps this one project in, bound at its own path: what the machine writes under it is on the
-    // computer once the machine is gone, which is the whole point of the road, and no other project's folder is
-    // inside the machine at all.
-    const machine = await deps.worker({ binds: [{ source: dir, target: dir }], image: false, from: o.image });
+    // Two folders of the computer's own, bound into the machine that does the work: the project's own folder at
+    // its own path, so the memory the seed carries and the install's log land on the computer and stay there once
+    // the machine is gone; and the checkout at the path the project has inside every workspace of it, so the
+    // clone and the install run where the workspaces will read them. An install that writes an absolute path (a
+    // virtualenv's own shebangs, its pyvenv.cfg) then names the path the workspaces have rather than the folder
+    // the computer keeps the checkout in.
+    const binds = [
+      { source: dir, target: dir },
+      { source: checkout, target: o.project.path },
+    ];
+    const machine = await deps.worker({ binds, image: false, from: o.image });
     try {
       // The checkout stays on the computer once the machine is gone: every workspace of this project takes its own
       // copy of it, so the seed and the install are paid for once.
-      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
+      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
     } finally {
       await machine.kill().catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
     }

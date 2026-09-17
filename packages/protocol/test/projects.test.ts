@@ -4,7 +4,7 @@
 // this computer belongs to: the command line, the runtime and the app all
 // read these here.
 import { describe, expect, it } from "vitest";
-import { addedProjectLine, ADD_FORMS_LINE, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
+import { addedProjectLine, ADD_FORMS_LINE, projectSourceOf, computerNamed, folderName, HERE_PLACE_ID, hiddenFolder, isMacMachine, goldenForkName, homeShortened, kindWords, noWorkspaceForFolderLine, NOT_A_REPO_LINE, ProjectGolden, projectNameOf, projectPathOn, projectsInPlace, type ProjectSource, type ProjectView, REGISTERING_LINE, registeredLine, registerTakesNoConsentLine, sameSourceRefusal, sourceKind, threadOpenedLine, workspaceForFolder, type WorkspaceProject, WorkspaceView } from "../src/index.js";
 
 const spoo: WorkspaceProject = { name: "spoo", dest: "/root/spoo", importedAt: "2026-09-01T00:00:00Z", size: 1024 };
 const wsp: WorkspaceProject = { name: "wsp", dest: "/root/wsp", importedAt: "2026-09-02T00:00:00Z" };
@@ -41,6 +41,12 @@ describe("what one word to wsp add names", () => {
     // A path is a path first: a folder somebody called repo.git is theirs on this computer, not a url.
     expect(sourceKind("/Users/me/repo.git")).toBe("folder");
     expect(() => sourceKind("spoo")).toThrow(ADD_FORMS_LINE);
+    // owner/repo is the word the host's own command line takes; the host in front of it names the other host.
+    expect(sourceKind("spoo-me/frontend")).toBe("github");
+    expect(sourceKind("gitlab.com/dev/thing")).toBe("gitlab");
+    // The record keeps the word that command reads: no host in front of it and no .git after it.
+    expect(projectSourceOf("gitlab.com/dev/thing.git", "gitlab")).toEqual({ kind: "gitlab", repo: "dev/thing" });
+    expect(projectSourceOf("spoo-me/frontend", "github")).toEqual({ kind: "github", repo: "spoo-me/frontend" });
   });
 
   it("a project is named by its repo's last word without .git, or by the folder's own name", () => {

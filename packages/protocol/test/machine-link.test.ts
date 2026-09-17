@@ -65,6 +65,14 @@ describe("the machine ops on a place link", () => {
     expect(WorkspaceCopy.safeParse(copy).success).toBe(true);
     // Both sides are absolute and plain: a relative path, a path that is not one, and an empty one are refused
     // at the wire rather than quoted in a mount command on the far side.
+    // A folder of the computer's bound into the workspace is read by the same rule the copy and the shares are.
+    const bind = { source: "/wsp/projects/pr_1/memory", target: "/root/.claude-cfg/projects/-root-wsp/memory" };
+    expect(create({ kind: "sandbox", binds: [bind] })).toBe(true);
+    expect(create({ kind: "sandbox", binds: [{ ...bind, readOnly: true }] })).toBe(true);
+    expect(create({ kind: "sandbox", binds: [{ ...bind, source: "projects/pr_1/memory" }] })).toBe(false);
+    expect(create({ kind: "sandbox", binds: [{ ...bind, source: "/wsp/projects/../../root/.ssh" }] })).toBe(false);
+    expect(create({ kind: "sandbox", binds: [{ ...bind, target: "/root/../etc" }] })).toBe(false);
+    expect(create({ kind: "sandbox", binds: [{ source: bind.source }] })).toBe(false);
     expect(create({ kind: "sandbox", copy: { ...copy, from: "projects/wsp/checkout" } })).toBe(false);
     expect(create({ kind: "sandbox", copy: { ...copy, at: "wsp" } })).toBe(false);
     expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/zingzy/wsp; rm -rf /" } })).toBe(false);

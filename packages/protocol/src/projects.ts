@@ -69,7 +69,9 @@ export function projectPathOn(source: ProjectSource, name: string): string {
 export function projectSourceOf(word: string, kind: Exclude<ReturnType<typeof sourceKind>, "computer">, folderPath?: string): ProjectSource {
   if (kind === "folder") return { kind, path: folderPath ?? word };
   if (kind === "git") return { kind, url: word };
-  return { kind, repo: word.replace(/^(github|gitlab)\.com\//, "") };
+  // owner/repo as the host's own command line takes it: the host in front of it and a trailing .git are the
+  // person's way of writing the same repo, and neither is part of the word that command reads.
+  return { kind, repo: word.replace(/^(github|gitlab)\.com\//, "").replace(/\.git$/, "") };
 }
 
 /** The folder a copy's projects are cloned under: the home a fork's own login lands in. */

@@ -236,6 +236,44 @@ describe("a workspace of a project", () => {
   });
 });
 
+describe("a project recorded before a later build's fields", () => {
+  /** A record as yesterday's host wrote it: the four fields this build added are not on it. */
+  const old = { id: "pr_old", name: "spoo-landing", computer: "default", source: { kind: "git" as const, url: REPO }, path: "/root/spoo-landing", createdAt: "2026-09-16T00:00:00.000Z" };
+
+  it("is filled in at load with the add's own rules and written back, not refused", async () => {
+    const store = memoryStore();
+    await store.put("projects", old.id, old);
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: fakeLocal(here()) });
+    const [project] = await rt.projects.list();
+    expect(project).toMatchObject({
+      id: "pr_old",
+      remote: REPO,
+      defaultBranch: "main",
+      memoryKey: "-root-spoo-landing",
+      memoryDir: "/root/.claude-cfg/projects/-root-spoo-landing/memory",
+    });
+    // Written back, so the next boot reads a record that carries them.
+    expect(await store.get("projects", "pr_old")).toEqual(project);
+    // And the workspaces standing on it still stand: nothing asked anybody to move a state file aside.
+    expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("keeps every field a record already carries, and reads a folder here against this computer's own store", async () => {
+    const store = memoryStore();
+    const folder = tempRepo();
+    await store.put("projects", "pr_here", { ...old, id: "pr_here", computer: HERE_PLACE_ID, source: { kind: "folder", path: folder }, path: folder, remote: "git@github.com:dev/x.git" });
+    const root = here();
+    const rt = createRuntime({ backend: stubBackend(), store, adapters: {}, local: fakeLocal(root) });
+    const [project] = await rt.projects.list();
+    // The remote it was recorded with stands; the key and the folder are this computer's own reading.
+    expect(project?.remote).toBe("git@github.com:dev/x.git");
+    expect(project?.memoryKey).toBe(folder.replace(/[^A-Za-z0-9]/g, "-"));
+    expect(project?.memoryDir).toContain("/projects/");
+    expect(project?.memoryDir.endsWith("/memory")).toBe(true);
+    rmSync(folder, { recursive: true, force: true });
+  });
+});
+
 describe("naming a workspace", () => {
   /** Two workspaces whose ids share their first six characters, written into the store by hand: the runtime mints
    * random ids, and an ambiguous prefix is only ambiguous where two ids are known to share one. */

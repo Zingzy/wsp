@@ -751,10 +751,11 @@ impl Ops {
             bundle::empty_file(&bundle::inside(&self.layout.rootfs(&id), &share.target)?)?;
             shares.push(share.clone());
         }
-        // The directory the bind lands on inside, made where the image carries none: a folder bind needs the
-        // folder to be there inside, and the runtime makes it rather than trusting the container runtime to.
+        // The folders of the computer's own this workspace was made with, bound where it reads them: made here
+        // rather than left to the container runtime, and made the way every bind under a rootfs is, so what the
+        // workspace mounts under one of them never reaches the computer.
         for bind in &record.binds {
-            bundle::empty_dir(&bundle::inside(&self.layout.rootfs(&id), &bind.target)?)?;
+            bundle::bind_into(Path::new(&bind.source), &bundle::inside(&self.layout.rootfs(&id), &bind.target)?)?;
         }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {

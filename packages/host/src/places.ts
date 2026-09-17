@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { addedProjectLine, defaultSeedChoice, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, type ProjectView, type SeedChoice, type SeedPlan,
+import { addedProjectLine, defaultSeedChoice, kindForComputer, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, worksInPlace, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
@@ -831,10 +831,13 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   const client = await deps.dial(opts.statePath, { aim });
   try {
     // A folder of the person's seeding a project on a computer that clones: the menu first, and nothing is sent
-    // until they have said what travels. A folder worked in place here seeds nothing, so it never reads the menu.
+    // until they have said what travels. A folder worked where it sits seeds nothing and reads no menu, which the
+    // computer's own kind says rather than this line: naming this computer with --on is the same road as naming
+    // none, and both work the folder where it already is.
     const onComputer = flags.on;
+    const seeding = sourceKindOf(source) === "folder" && onComputer !== undefined && !(await worksInPlaceOn(client, onComputer));
     let seed: SeedChoice | undefined;
-    if (sourceKindOf(source) === "folder" && onComputer !== undefined) {
+    if (seeding && onComputer !== undefined) {
       const { plan } = await client.request<{ plan: SeedPlan }>("project.seed.plan", { source });
       // What would travel: their own words where they gave any, else what the catalogue ticks itself. Read before
       // the menu is drawn, so a word naming a path that never travels is refused rather than shown as ticked.
@@ -860,6 +863,15 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   } finally {
     client.close();
   }
+}
+
+/** Whether the computer a word names works a folder where it sits rather than holding a copy of it: the kind
+ * table's own answer for the computer that word is, off the same places listing every other row reads. A word
+ * naming no computer is left to the host, which refuses it naming the computers there are. */
+async function worksInPlaceOn(client: HostClient, word: string): Promise<boolean> {
+  const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
+  const found = places.find(p => p.id === word || p.name === word);
+  return found !== undefined && worksInPlace(kindForComputer(found.id));
 }
 
 /** What the person's own words make of the menu: the ticks the catalog decided, then their keeps and cuts and the

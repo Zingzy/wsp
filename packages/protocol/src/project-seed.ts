@@ -15,12 +15,14 @@ export const SEED_DIR = ".wsp-seed";
 export const SEED_MEMORY_DIR = `${SEED_DIR}/memory`;
 export const SEED_PATCH = `${SEED_DIR}/commits.patch`;
 
-/** What the menu starts with where nothing was remembered: every configuration row, the memory folder and the
- * unpushed commits. Nothing the computer rebuilds, no database and no login, since the first two are made again
- * there and the last never travels at all. */
+/** What the menu starts with: whatever each row is ticked as. A plan nobody has answered for carries the
+ * catalogue's own judgment, every configuration row and nothing else; one built from a choice remembered for that
+ * folder carries theirs, so an untick they asked to be kept is still unticked here. A login is never ticked
+ * whatever a remembered choice says, since it never travels at all. The memory folder and the unpushed commits
+ * ride on there being any. */
 export function defaultSeedChoice(plan: SeedPlan): SeedChoice {
   return {
-    files: plan.files.filter(f => f.kind === "config").map(f => f.path),
+    files: plan.files.filter(f => f.ticked && f.kind !== "never").map(f => f.path),
     memory: plan.memory !== null,
     commits: plan.unpushed !== null,
   };

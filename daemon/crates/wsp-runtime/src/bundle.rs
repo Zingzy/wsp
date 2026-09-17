@@ -10,7 +10,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
@@ -284,13 +284,11 @@ pub fn config_json(c: &Config) -> Value {
         mounts.push(bind(&share.target, PathBuf::from(&share.source), &["rbind", "rw"]));
     }
     // A whole folder of the computer's, read-write unless the bind says otherwise: what the workspace writes in
-    // it is what the computer holds for every other workspace of the same project.
+    // it is what the computer holds for every other workspace of the same project. The same words a shared login
+    // takes, and no propagation word here either: the boot makes every one of these binds itself through
+    // `bind_into`, which is where the one propagation rule for everything under a rootfs lives.
     for b in c.binds {
-        mounts.push(bind(
-            &b.target,
-            PathBuf::from(&b.source),
-            if b.read_only { &["rbind", "rprivate", "ro"] } else { &["rbind", "rprivate", "rw"] },
-        ));
+        mounts.push(bind(&b.target, PathBuf::from(&b.source), if b.read_only { &["rbind", "ro"] } else { &["rbind", "rw"] }));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -605,16 +603,6 @@ pub fn empty_file(path: &Path) -> Result<(), Error> {
     fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path).map(|_| ()).map_err(at(path))
 }
 
-/// The directory a folder bind is to land on, made where the image carries none: a bind needs the directory to be
-/// there inside, and the runtime makes it rather than trusting the container runtime to. Mode 0700, since what
-/// lands on it is the person's own work; a directory already there is left as it is.
-pub fn empty_dir(path: &Path) -> Result<(), Error> {
-    if path.is_dir() {
-        return Ok(());
-    }
-    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path).map_err(at(path))
-}
-
 /// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own, held
 /// to the wire's own rule rather than to a copy of it: a path that walks up out of the rootfs resolves to a
 /// path on the box, and a bind mount is the one place a slip cannot be undone afterwards.
@@ -840,15 +828,17 @@ mod tests {
         // profile's, read-write, so what the workspace writes in the project's memory is what the computer holds
         // for every other workspace of that project.
         let memory = "/root/.claude-cfg/projects/-root-wsp/memory";
-        let binds = [Bind { source: "/var/lib/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: false }];
+        let binds = [Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: false }];
         let bound = config_json(&Config { binds: &binds, ..c });
         let folder = bound["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap();
-        assert_eq!(folder["source"], "/var/lib/wsp/projects/pr_1/memory");
+        assert_eq!(folder["source"], "/wsp/projects/pr_1/memory");
         assert_eq!(folder["type"], "bind");
-        assert_eq!(folder["options"], json!(["rbind", "rprivate", "rw"]));
+        // The same words a shared login takes: the boot makes the bind itself, and `bind_steps` is the one place
+        // the propagation of everything under a rootfs is decided.
+        assert_eq!(folder["options"], json!(["rbind", "rw"]));
         assert_eq!(bound["mounts"].as_array().unwrap().len(), mounts.len() + 1);
         // A bind the host asked to be read-only is mounted that way, and a workspace with no bind carries none.
-        let read_only = [Bind { source: "/var/lib/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: true }];
+        let read_only = [Bind { source: "/wsp/projects/pr_1/memory".to_owned(), target: memory.to_owned(), read_only: true }];
         let fenced = config_json(&Config { binds: &read_only, ..c });
         assert_eq!(
             fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap()["options"],
@@ -933,7 +923,7 @@ mod tests {
         assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
         // And the folders it was made with, which every boot mounts again: the project's memory on the computer.
         let binds = vec![Bind {
-            source: "/var/lib/wsp/projects/pr_1/memory".to_owned(),
+            source: "/wsp/projects/pr_1/memory".to_owned(),
             target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
             read_only: false,
         }];
