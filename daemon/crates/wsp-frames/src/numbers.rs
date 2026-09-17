@@ -2,12 +2,19 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 45;
+pub const DAEMON_VERSION: u32 = 46;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
-pub const DEFAULT_TOKEN_PATH: &str = "/root/.wsp-daemon-token";
-pub const DEFAULT_INBOX_DIR: &str = "/root/inbox";
+/// Where the daemon inside a machine keeps everything of its own: its token, its inbox, its manifest, its open
+/// socket, its run and log folders and its roots file, every one of them under this folder by default. A
+/// workspace on a computer somebody joined has this folder of its own bound over the computer's, so two
+/// workspaces there never read or write each other's token and the computer's own daemon folder is not readable
+/// from inside at all. The shape is `place_daemon_paths("/root")`'s, which the test below holds it to: one
+/// daemon, one rule for where it puts its own files under the home it was given.
+pub const GUEST_WSP_HOME: &str = "/root/.wsp";
+pub const DEFAULT_TOKEN_PATH: &str = "/root/.wsp/daemon-token";
+pub const DEFAULT_INBOX_DIR: &str = "/root/.wsp/inbox";
 pub const DEFAULT_MANIFEST_PATH: &str = "/root/.wsp/manifest.json";
 pub const DEFAULT_RUN_DIR: &str = "/root/.wsp/run";
 pub const DEFAULT_LOG_DIR: &str = "/root/.wsp/logs";
@@ -83,4 +90,40 @@ pub const WORK_OOM_SCORE_ADJ: i32 = 500;
 /// The sh line that puts a shell, and everything it starts, at the work scores.
 pub fn work_score_line() -> String {
     format!("{{ echo {WORK_OOM_SCORE_ADJ} > /proc/self/oom_score_adj; }} 2>/dev/null; renice 0 $$ >/dev/null 2>&1")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every file the daemon inside a machine writes for itself sits under one folder, and that folder is the
+    /// workspace's own on a computer somebody joined. A path that slipped out of it would be written into a
+    /// `/root` every workspace on that computer shares, where the second workspace's deploy would rewrite the
+    /// first one's token.
+    #[test]
+    fn every_path_the_daemon_writes_for_itself_is_under_the_one_folder() {
+        for path in [
+            DEFAULT_TOKEN_PATH,
+            DEFAULT_INBOX_DIR,
+            DEFAULT_MANIFEST_PATH,
+            DEFAULT_RUN_DIR,
+            DEFAULT_LOG_DIR,
+            DAEMON_ROOTS_PATH,
+            OPEN_SOCKET_PATH,
+        ] {
+            assert!(path.starts_with(&format!("{GUEST_WSP_HOME}/")), "{path} is not under {GUEST_WSP_HOME}");
+        }
+        // And they are the names a daemon on a computer somebody joined uses under that computer's home: one
+        // daemon, one rule, whether the machine is a fork or a computer of the person's own.
+        let at = crate::place_daemon_paths(std::path::Path::new("/root"));
+        assert_eq!(at.wsp, std::path::PathBuf::from(GUEST_WSP_HOME));
+        assert_eq!(at.token_path, std::path::PathBuf::from(DEFAULT_TOKEN_PATH));
+        assert_eq!(at.inbox, std::path::PathBuf::from(DEFAULT_INBOX_DIR));
+        assert_eq!(at.manifest_path, std::path::PathBuf::from(DEFAULT_MANIFEST_PATH));
+        assert_eq!(at.open_socket, std::path::PathBuf::from(OPEN_SOCKET_PATH));
+        assert_eq!(at.run_dir, std::path::PathBuf::from(DEFAULT_RUN_DIR));
+        assert_eq!(at.roots_path, std::path::PathBuf::from(DAEMON_ROOTS_PATH));
+        // The binary the host deploys is not one of them: it is the host's to land and lives beside the folder.
+        assert!(!GUEST_DAEMON_DIR.starts_with(GUEST_WSP_HOME));
+    }
 }

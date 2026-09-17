@@ -118,6 +118,7 @@ export class LocalBackend implements MachineBackend {
     signedUrls: false,
     callbackRelay: false,
     diskSnapshots: false,
+    images: false, // this computer is itself: nothing is forked here and no image is kept
     snapshotsAnyLife: false,
     snapshotListing: false,
     templates: false,

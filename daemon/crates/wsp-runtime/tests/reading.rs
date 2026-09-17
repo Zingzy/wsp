@@ -12,12 +12,10 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 use wsp_frames::RequestId;
 use wsp_runtime::bundle::{self, Init, Layout, Workspace};
-use wsp_runtime::fetch::Digest;
 use wsp_runtime::freeze;
 use wsp_runtime::net::Network;
-use wsp_runtime::ops::{Ops, BASE_IMAGE, WSP_LABEL};
+use wsp_runtime::ops::{Ops, WSP_LABEL};
 use wsp_runtime::runtime;
-use wsp_runtime::store::Chain;
 
 /// A record on disk under the layout, with the init a caller names: the ops read what is written there, so a
 /// reading can be driven without a container.
@@ -25,8 +23,6 @@ fn recorded(layout: &Layout, id: &str, init: Init) {
     let record = Workspace {
         id: id.to_owned(),
         hostname: id.to_owned(),
-        image: BASE_IMAGE.to_owned(),
-        chain: Chain { config: Digest::of(b"config"), layers: Vec::new() },
         labels: BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]),
         envs: BTreeMap::new(),
         cpu: Some(1.0),

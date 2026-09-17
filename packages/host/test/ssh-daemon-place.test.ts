@@ -65,7 +65,7 @@ const script = (): string => deployScript(sshDaemonPlace(LOGIN), "aabbcc");
 describe("the place a fork keeps its daemon", () => {
   it("spells the guest's own layout: /root, a system unit, and the edge-reachable bind", () => {
     const cloud = deployScript(CLOUD_PLACE, "aabbcc");
-    expect(cloud).toContain("mkdir -p /root/wsp-daemon /root/inbox");
+    expect(cloud).toContain("mkdir -p /root/wsp-daemon /root/.wsp/inbox");
     expect(cloud).toContain("tar -xzf /root/wsp-daemon.tgz -C /root/wsp-daemon");
     expect(cloud).toContain(`cat > /etc/systemd/system/${DAEMON_UNIT} <<'WSP_UNIT'`);
     expect(cloud).toContain(`systemctl restart ${DAEMON_UNIT}`);

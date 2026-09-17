@@ -218,6 +218,10 @@ export const Capabilities = z.object({
    * Whether a fork of that image comes up with the processes still running is liveCloneForks and says nothing about
    * whether one can be taken. */
   diskSnapshots: z.boolean(),
+  /** The backend keeps images at all: a template or a snapshot a fork can boot from, whether it built them or
+   * pulled them. False on a computer somebody joined, where a workspace is a copy of that computer's own
+   * directories and of one checkout on it, so a fork names no image, nothing is pulled and nothing is built. */
+  images: z.boolean(),
   /** The copy may be taken from a machine that was paused and woken, not only from one that never was. False where
    * the provider refuses a resumed machine (Solari answers 502 and consumes the builder), which is the one reason a
    * builder that woke can no longer be sealed. Read wherever the golden road asks whether a builder still has a
@@ -3034,16 +3038,7 @@ export const MachineLinkRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("machine.create"), spec: MachineSpec }),
   z.object({ id: reqId, op: z.literal("machine.get"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.list"), labels: z.record(z.string()).optional() }),
-  z.object({ id: reqId, op: z.literal("machine.deleteSnapshot"), snapshotId: z.string() }),
-  z.object({ id: reqId, op: z.literal("machine.listSnapshots") }),
-  z.object({ id: reqId, op: z.literal("machine.promoteSnapshot"), snapshotId: z.string(), name: z.string() }),
-  z.object({ id: reqId, op: z.literal("machine.getTemplate"), templateId: z.string() }),
-  z.object({ id: reqId, op: z.literal("machine.listTemplates") }),
-  z.object({ id: reqId, op: z.literal("machine.deleteTemplate"), templateId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.exec"), machineId: z.string(), cmd: z.string().max(EXEC_BODY_MAX), timeoutMs: z.number().int().positive().optional() }),
-  z.object({ id: reqId, op: z.literal("machine.snapshot"), machineId: z.string(), name: z.string(), life: MachineLife }),
-  /** How far the snapshot job a machine.snapshot answered with has got; asked again until it reads done. */
-  z.object({ id: reqId, op: z.literal("machine.snapshotJob"), job: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.pause"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.resume"), machineId: z.string() }),
   z.object({ id: reqId, op: z.literal("machine.kill"), machineId: z.string() }),
@@ -3083,13 +3078,6 @@ export const MachineCapacityReply = PlaceCapacity;
 export const MachineHandleReply = z.object({ machine: MachineHandle });
 export const MachineListReply = z.object({ machines: z.array(MachineListRow) });
 export const MachineExecReply = z.object({ result: ExecResult });
-/** A snapshot is a job on the far side: the reply names it, and machine.snapshotJob under that name says how far it
- * has got, so no one frame waits on a layer that takes minutes to write. */
-export const MachineSnapshotReply = z.object({ job: z.string() });
-/** One reading of a snapshot job: the layer's bytes written so far, the bytes the machine had written since it booted
- * once counted, and the snapshot's id once done. A job that failed is a refused frame carrying its reason. */
-export const MachineSnapshotJobReply = z.object({ state: z.enum(["running", "done"]), bytes: z.number().int().nonnegative(), total: z.number().int().nonnegative().optional(), snapshotId: z.string().optional() });
-export type MachineSnapshotJobReply = z.infer<typeof MachineSnapshotJobReply>;
 export const MachineStateReply = z.object({ state: MachineState });
 export const MachineShapeReply = z.object({ shape: MachineShape });
 /** One workspace as the computer running it reads it, in one frame: the sizes its cgroup was written with, what it
@@ -3116,16 +3104,17 @@ export const MachineAnswersReply = z.object({ answers: z.boolean() });
 /** The route on the place's own loopback; the host turns it into a route of its own with a forward. */
 export const MachineReachReply = z.object({ reach: PreviewReach });
 export const MachineUrlReply = z.object({ url: z.string() });
-export const MachineSnapshotsReply = z.object({ snapshots: z.array(SnapshotRow) });
-export const MachinePromoteReply = z.object({ templateId: z.string() });
-export const MachineTemplateReply = z.object({ template: TemplateRow });
-export const MachineTemplatesReply = z.object({ templates: z.array(TemplateRow) });
 
 /** What an op meant for the link a computer opened to its host answers on any other socket: the leave op, which
  * takes this computer out of a wsp, and every machine op, which drives the Docker daemon behind it. One sentence,
  * since it is one rule: a client holding this daemon's token is a client on this machine, and a client on this
  * machine neither un-joins it nor forks on it. */
 export const NOT_ON_THIS_ROAD = "not on this road";
+
+/** What a create naming a template or a snapshot is refused with on a computer somebody joined, and what a road
+ * above answers for a saved image there without asking: a workspace on such a computer is made from that
+ * computer's own directories and a copy of a checkout on it, so there is nothing to pull and nothing to build. */
+export const NO_IMAGES_HERE = "this computer keeps no images: a workspace here is a copy of the computer itself";
 
 /** What a place that holds no copy of the image a fork names is refused with. A place builds its copy on first use;
  * until it does, the forks land where the image already is. */
@@ -3174,7 +3163,7 @@ export function workspacesBlockedBy(at: { platform: string; read: (path: string)
   for (const wanted of ["memory", "cpu"]) if (!has.has(wanted)) return `this computer's cgroup root offers no ${wanted} controller, which wsp needs to run workspaces here`;
   const filesystems = at.read(PROC_FILESYSTEMS_PATH);
   if (filesystems === undefined || !filesystems.split(/\s+/).includes("overlay")) {
-    return "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    return "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
   }
   if (at.euid !== 0) return "wsp runs workspaces on this computer as root, and this daemon is not root";
   return undefined;
@@ -3318,6 +3307,7 @@ const DAEMON_CONTENTS = [
   "c2f00944a79a850450b11b4610b93ac4894b7da39282755a9bfef55776a11dff",
   "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
+  "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3439,7 +3429,11 @@ const DAEMON_CONTENTS = [
  * Version 45 lets a machine specification name shares: files the computer keeps outside every workspace under the
  * daemon's logins directory and binds into each workspace at a target path, so a login signed in once on the computer
  * is the same file in every workspace there and a refresh in one is the computer's refresh; a share whose source sits
- * outside that directory is refused at create. */
+ * outside that directory is refused at create.
+ * Version 46 makes a workspace on a computer you own out of the computer itself: its system directories under overlays
+ * with an upper per workspace, its home shared read-write with the daemon's own files hidden, the engine's data
+ * hidden, the project bound at its path; a box pulls no image and keeps no layer store, and the snapshot and template
+ * operations leave its wire. The root moves to /wsp so no upper sits under a lower the kernel would refuse. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

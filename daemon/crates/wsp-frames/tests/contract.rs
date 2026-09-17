@@ -12,10 +12,8 @@ use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
     numbers, words, BackendFacts, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GuestCliMessage, GuestOpenReply,
-    MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachinePromoteReply,
-    MachineReachReply, MachineReadingReply, MachineShapeReply, MachineSnapshotJobReply, MachineSnapshotReply, MachineSnapshotsReply,
-    MachineStateReply, MachineTemplateReply, MachineTemplatesReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS,
-    MACHINE_OPS,
+    MachineAnswersReply, MachineExecReply, MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply,
+    MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -197,24 +195,6 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
                 "MachineReachReply" => {
                     round_trip::<MachineReachReply>(&sample, &at);
                 }
-                "MachineSnapshotReply" => {
-                    round_trip::<MachineSnapshotReply>(&sample, &at);
-                }
-                "MachineSnapshotJobReply" => {
-                    round_trip::<MachineSnapshotJobReply>(&sample, &at);
-                }
-                "MachineSnapshotsReply" => {
-                    round_trip::<MachineSnapshotsReply>(&sample, &at);
-                }
-                "MachinePromoteReply" => {
-                    round_trip::<MachinePromoteReply>(&sample, &at);
-                }
-                "MachineTemplateReply" => {
-                    round_trip::<MachineTemplateReply>(&sample, &at);
-                }
-                "MachineTemplatesReply" => {
-                    round_trip::<MachineTemplatesReply>(&sample, &at);
-                }
                 "DaemonErrorResponse" => {
                     round_trip::<DaemonErrorResponse>(&sample, &at);
                 }
@@ -240,16 +220,10 @@ fn every_reply_fixture_round_trips_through_the_reply_types() {
         "MachineExecReply",
         "MachineHandleReply",
         "MachineListReply",
-        "MachinePromoteReply",
         "MachineReachReply",
         "MachineReadingReply",
         "MachineShapeReply",
-        "MachineSnapshotJobReply",
-        "MachineSnapshotReply",
-        "MachineSnapshotsReply",
         "MachineStateReply",
-        "MachineTemplateReply",
-        "MachineTemplatesReply",
     ];
     expected.sort_unstable();
     assert_eq!(seen, expected, "every reply this daemon answers has its fixture");
@@ -272,6 +246,7 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("portScopeRefusal", words::port_scope_refusal("{port}"));
     m.insert("notOnThisRoad", words::NOT_ON_THIS_ROAD.to_owned());
     m.insert("notOnThisKind", words::NOT_ON_THIS_KIND.to_owned());
+    m.insert("noImagesHere", words::NO_IMAGES_HERE.to_owned());
     m.insert("guestNotWatcher", words::GUEST_NOT_WATCHER.to_owned());
     m.insert("guestQueueFull", words::GUEST_QUEUE_FULL.to_owned());
     m.insert("guestUnwatched", words::GUEST_UNWATCHED.to_owned());
@@ -325,6 +300,7 @@ fn rendered_numbers() -> BTreeMap<&'static str, Value> {
     m.insert("daemonDefaultHost", Value::from(numbers::DEFAULT_HOST));
     m.insert("daemonDefaultPort", Value::from(numbers::DEFAULT_PORT));
     m.insert("daemonSamplerIntervalMs", Value::from(numbers::SAMPLER_INTERVAL_MS));
+    m.insert("guestWspHome", Value::from(numbers::GUEST_WSP_HOME));
     m.insert("daemonTokenPath", Value::from(numbers::DEFAULT_TOKEN_PATH));
     m.insert("daemonRootsPath", Value::from(numbers::DAEMON_ROOTS_PATH));
     m.insert("guestInboxDir", Value::from(numbers::DEFAULT_INBOX_DIR));

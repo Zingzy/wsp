@@ -147,6 +147,7 @@ export class SolariBackend implements MachineBackend {
     signedUrls: true,
     callbackRelay: true, // the daemon link rides previewUrls
     diskSnapshots: true,
+    images: true, // the provider keeps the snapshots and templates a fork boots from
     snapshotsAnyLife: false, // the provider answers 502 on a machine that was resumed, and the builder is consumed with it
     snapshotListing: true,
     templates: true,

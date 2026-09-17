@@ -25,15 +25,7 @@ describe("the machine ops on a place link", () => {
       { id: 4, op: "machine.create", spec: { kind: "sandbox", template: "wsp/dev:template", cpu: 2, memMb: 4096 } },
       { id: 5, op: "machine.get", machineId: "c1" },
       { id: 6, op: "machine.list", labels: { wsp: "1" } },
-      { id: 7, op: "machine.deleteSnapshot", snapshotId: "sha256:aa" },
-      { id: 8, op: "machine.listSnapshots" },
-      { id: 9, op: "machine.promoteSnapshot", snapshotId: "sha256:aa", name: "v1" },
-      { id: 10, op: "machine.getTemplate", templateId: "wsp/dev:template" },
-      { id: 11, op: "machine.listTemplates" },
-      { id: 12, op: "machine.deleteTemplate", templateId: "wsp/dev:template" },
       { id: 13, op: "machine.exec", machineId: "c1", cmd: "echo hi", timeoutMs: 1000 },
-      { id: 14, op: "machine.snapshot", machineId: "c1", name: "v1", life: { firstLife: true } },
-      { id: 27, op: "machine.snapshotJob", job: "3f9a1c2b4d5e6f70" },
       { id: 15, op: "machine.pause", machineId: "c1" },
       { id: 16, op: "machine.resume", machineId: "c1" },
       { id: 17, op: "machine.kill", machineId: "c1" },
@@ -48,6 +40,20 @@ describe("the machine ops on a place link", () => {
       { id: 26, op: "machine.putBytes", machineId: "c1", path: "/root/a", uploadId: "u1", seq: 0, last: true, data: "AAAA" },
     ];
     for (const frame of frames) expect(MachineLinkRequest.safeParse(frame).success, JSON.stringify(frame)).toBe(true);
+  });
+
+  it("refuses the eight frames a layer store answered: a place keeps no image to save, name or list", () => {
+    const gone: unknown[] = [
+      { id: 1, op: "machine.snapshot", machineId: "c1", name: "v1", life: { firstLife: true } },
+      { id: 2, op: "machine.snapshotJob", job: "3f9a1c2b4d5e6f70" },
+      { id: 3, op: "machine.deleteSnapshot", snapshotId: "sha256:aa" },
+      { id: 4, op: "machine.listSnapshots" },
+      { id: 5, op: "machine.promoteSnapshot", snapshotId: "sha256:aa", name: "v1" },
+      { id: 6, op: "machine.getTemplate", templateId: "wsp/dev:template" },
+      { id: 7, op: "machine.listTemplates" },
+      { id: 8, op: "machine.deleteTemplate", templateId: "wsp/dev:template" },
+    ];
+    for (const frame of gone) expect(MachineLinkRequest.safeParse(frame).success, JSON.stringify(frame)).toBe(false);
   });
 
   it("takes a create that brings a project of the computer's own, and refuses one whose paths are not paths", () => {
@@ -100,6 +106,7 @@ describe("the machine ops on a place link", () => {
         signedUrls: false,
         callbackRelay: false,
         diskSnapshots: true,
+        images: true,
         snapshotsAnyLife: false,
         snapshotListing: true,
         templates: true,

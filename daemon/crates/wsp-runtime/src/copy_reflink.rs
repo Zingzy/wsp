@@ -52,7 +52,8 @@ pub fn clone_file(source: &Path, target: &Path) -> io::Result<()> {
 /// volume can do and nothing about a clone from the checkout, which is the copy about to be made. FICLONE
 /// across two filesystems answers EXDEV, a filesystem that shares no blocks answers EOPNOTSUPP, and a checkout
 /// holding no file with bytes in it answers nothing at all, which reads as the plain copy that tree costs
-/// anyway.
+/// anyway. A probe whose own removal fails stays under the copies directory as a hidden file; nothing names it, so
+/// the open's sweep of every copy no record names takes it away.
 pub fn clones_into(from: &Path, copies: &Path) -> bool {
     let Some(file) = first_file(from, &mut 0) else { return false };
     let probe = crate::copy::probe_path(copies, "clone-of-checkout");

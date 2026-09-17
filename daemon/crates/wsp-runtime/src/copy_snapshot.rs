@@ -75,7 +75,8 @@ impl Copier for BtrfsSnapshot {
 /// rather than by comparing any id: btrfs gives every subvolume a device and a filesystem id of its own, so the
 /// only honest question is the one the kernel answers. A subvolume on another filesystem answers EXDEV and
 /// anything that is not btrfs answers ENOTTY; every refusal falls through to the next road, since a copy that
-/// writes every byte is always there.
+/// writes every byte is always there. A probe whose own removal fails stays under the copies directory as a
+/// hidden subvolume; nothing names it, so the open's sweep of every copy no record names takes it away.
 pub fn snapshots_into(from: &Path, copies: &Path) -> bool {
     let probe = crate::copy::probe_path(copies, "snapshot-probe");
     if BtrfsSnapshot.copy(from, &probe).is_err() {

@@ -1,29 +1,27 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The machine ops against the kernel, through this binary as the helper and the init: root, cgroup v2 and a
-//! registry, so gated WSP_RUNTIME_LIVE=1. The root is one directory under /tmp per checkout, so the base image is
-//! pulled once per checkout; every workspace a case makes is killed at its end, and its mount and its cgroup are
-//! checked gone. Nothing here touches a workspace it did not make. The cases are the Docker backend's, the fake
-//! engine replaced by the kernel, then the network's: the box reaches a workspace at a published port, a
-//! workspace reaches its box, a registry and nothing of its neighbours; then the store's: snapshots, forks from
-//! them, templates, and the pause that stops a workspace and the wake that boots its saved layer.
+//! The machine ops against the kernel, through this binary as the helper and the init: root and cgroup v2, so
+//! gated WSP_RUNTIME_LIVE=1. The root is one directory under /tmp per checkout; every workspace a case makes is
+//! killed at its end, and its mount and its cgroup are checked gone. Nothing here touches a workspace it did not
+//! make. The cases are the Docker backend's, the fake engine replaced by the kernel, then the network's: the box
+//! reaches a workspace at a published port, a workspace reaches its box, a registry and nothing of its
+//! neighbours; then this computer's own: a workspace made of the box's directories, the project it was given as
+//! a copy, and the pause that stops it and the wake that boots it over what it wrote.
 #![cfg(target_os = "linux")]
 
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use tokio::sync::{Mutex, MutexGuard};
 use wsp_frames::RequestId;
-use wsp_runtime::fetch::Digest;
 use wsp_runtime::net::{self, Network, Route};
 use wsp_runtime::nft;
 use wsp_runtime::ops::Ops;
-use wsp_runtime::store::Store;
 
 const CGROUPS: &str = "/sys/fs/cgroup/wsp";
 
@@ -68,8 +66,8 @@ fn bin() -> PathBuf {
 const ANSWER_ON_7070: &str = "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"0.0.0.0\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) { print $c \"hello from inside\\n\"; close $c }' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err";
 
 impl World {
-    /// Opens the ops on the fixed root and kills whatever an earlier case left under the live label: its
-    /// workspaces, its snapshots and its templates, all named after this checkout.
+    /// Opens the ops on the fixed root and kills whatever an earlier case left under the live label, every one
+    /// of them named after this checkout.
     async fn open() -> World {
         let turn = ONE_AT_A_TIME.lock().await;
         let ops = Ops::open(&root(), bin()).unwrap();
@@ -79,51 +77,7 @@ impl World {
         for row in rows["machines"].as_array().unwrap() {
             world.ask("machine.kill", json!({ "machineId": row["id"] })).await;
         }
-        let templates = world.ok("machine.listTemplates", json!({})).await;
-        for row in templates["templates"].as_array().unwrap() {
-            if row["name"].as_str().unwrap().starts_with(&live_owner()) {
-                world.ok("machine.deleteTemplate", json!({ "templateId": row["id"] })).await;
-            }
-        }
-        let snapshots = world.ok("machine.listSnapshots", json!({})).await;
-        for row in snapshots["snapshots"].as_array().unwrap() {
-            if row["name"].as_str().unwrap().starts_with(&live_owner()) {
-                world.ok("machine.deleteSnapshot", json!({ "snapshotId": row["id"] })).await;
-            }
-        }
         world
-    }
-
-    /// A snapshot of the workspace under a name of this checkout's, asked after until its job reads done; answers
-    /// its id.
-    async fn snapshot(&self, id: &str, name: &str, first_life: bool) -> String {
-        let reply = self
-            .ok(
-                "machine.snapshot",
-                json!({ "machineId": id, "name": format!("{}-{name}", live_owner()), "life": { "firstLife": first_life } }),
-            )
-            .await;
-        let job = reply["job"].as_str().unwrap().to_owned();
-        loop {
-            let read = self.ok("machine.snapshotJob", json!({ "job": job })).await;
-            if read["state"] == "done" {
-                assert!(read["total"].as_u64().is_some(), "{read}");
-                return read["snapshotId"].as_str().unwrap().to_owned();
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-    }
-
-    /// The listing's row for one snapshot.
-    async fn snapshot_row(&self, snapshot_id: &str) -> Value {
-        let rows = self.ok("machine.listSnapshots", json!({})).await;
-        rows["snapshots"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|r| r["id"] == snapshot_id)
-            .cloned()
-            .unwrap_or_else(|| panic!("{snapshot_id} is not listed: {rows}"))
     }
 
     /// The same root opened again, as a daemon that restarted opens it: nothing killed, the forwards restored.
@@ -229,8 +183,10 @@ impl Drop for World {
     }
 }
 
+/// The spec every case here creates from: no image name at all, since this computer keeps none and a workspace
+/// is made of the computer's own directories.
 fn spec(extra: Value) -> Value {
-    let mut spec = json!({ "kind": "sandbox", "template": "ubuntu:24.04", "labels": { "wsp-owner": live_owner() } });
+    let mut spec = json!({ "kind": "sandbox", "labels": { "wsp-owner": live_owner() } });
     for (k, v) in extra.as_object().unwrap() {
         spec[k] = v.clone();
     }
@@ -238,7 +194,7 @@ fn spec(extra: Value) -> Value {
 }
 
 #[tokio::test]
-async fn builds_the_container_from_the_spec_image_limits_labels_envs_and_the_boot_command() {
+async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_command() {
     if !live() {
         return;
     }
@@ -652,11 +608,15 @@ async fn the_backend_and_the_self_check_answer_on_this_box() {
     let facts = w.ok("machine.backend", json!({})).await;
     assert_eq!(facts["offer"], "runtime");
     assert_eq!(facts["capabilities"]["pauseMode"], "disk");
-    assert_eq!(facts["baseTemplates"]["sandbox"], "ubuntu:24.04");
+    // This computer keeps no image: no flag promises one and no kind names one to boot from.
+    assert_eq!(facts["capabilities"]["images"], false);
+    assert_eq!(facts["capabilities"]["diskSnapshots"], false);
+    assert_eq!(facts["capabilities"]["templates"], false);
+    assert!(facts.get("baseTemplates").is_none(), "{facts}");
     let capacity = w.ok("machine.capacity", json!({})).await;
     assert!(capacity["cores"].as_u64().unwrap() >= 1);
     assert!(capacity["diskFreeBytes"].as_u64().unwrap() > 0);
-    assert!(capacity["images"].as_array().unwrap().iter().any(|i| i["name"] == "ubuntu:24.04"));
+    assert_eq!(capacity["images"].as_array().unwrap().len(), 0);
     w.close().await;
 }
 
@@ -1003,245 +963,6 @@ async fn a_link_alias_longer_than_the_kernel_takes_is_refused_by_name() {
     assert!(refused.to_string().ends_with("is 300 bytes, and a link alias holds 255"), "{refused}");
 }
 
-/// What a workspace does to its disk before it is committed: a file of its own, a file of the image's deleted, a
-/// directory of the image's emptied and refilled, which overlayfs marks opaque, and a hard link whose first name is
-/// as long as a package tree's.
-const CHANGE_THE_DISK: &str = "echo taken > /root/marker && rm /usr/bin/passwd && rm -rf /home && mkdir /home && touch /home/only && d=/opt/.pnpm/$(printf 'a%.0s' $(seq 60))/node_modules/$(printf 'b%.0s' $(seq 60)) && mkdir -p $d && echo linked > $d/index.js && ln $d/index.js /opt/linked.js";
-/// What a fork of that reads back: the marker, no passwd, and /home holding only what the upper put there.
-const READ_THE_DISK: &str = "cat /root/marker; test -e /usr/bin/passwd && echo passwd-stays || echo passwd-gone; ls /home";
-
-#[tokio::test]
-async fn commits_a_snapshot_under_the_name_and_answers_the_id() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({}))).await;
-    let (code, _, err) = w.exec(&id, CHANGE_THE_DISK).await;
-    assert_eq!((code, err.as_str()), (0, ""));
-    let started = Instant::now();
-    let snapshot_id = w.snapshot(&id, "v1", true).await;
-    eprintln!("snapshot: {} ms", started.elapsed().as_millis());
-    let digest = Digest::parse(&snapshot_id).unwrap_or_else(|e| panic!("{snapshot_id}: {e}"));
-    assert_eq!(w.state(&id).await, "running", "the workspace runs on after the commit");
-    let store = Store::open(&root()).unwrap();
-    let record = store.snapshot(&digest).unwrap().expect("the store holds the snapshot");
-    assert_eq!(record.name, format!("{}-v1", live_owner()));
-    assert_eq!(record.workspace, id);
-    assert_eq!(record.chain.layers.last(), Some(&record.layer), "the saved layer tops the chain");
-    assert!(!store.has_blob(&record.layer), "the blob went with the unpack: the tree is the layer's one form");
-    let unpacked = store.unpacked(&record.layer).expect("the layer is unpacked");
-    // The whiteouts as the store reads them: a character device for the deleted file, the opaque mark on /home.
-    let passwd = fs::symlink_metadata(unpacked.join("usr/bin/passwd")).unwrap();
-    assert!(passwd.file_type().is_char_device() && passwd.rdev() == 0, "the deleted file is a whiteout in the layer");
-    assert_eq!(xattr::get(unpacked.join("home"), "trusted.overlay.opaque").unwrap().as_deref(), Some(&b"y"[..]));
-    assert_eq!(fs::read_to_string(unpacked.join("root/marker")).unwrap(), "taken\n");
-    // The hard link's long first name and its second name are one inode in the layer, as they were in the upper.
-    let first = unpacked.join("opt/.pnpm").join("a".repeat(60)).join("node_modules").join("b".repeat(60)).join("index.js");
-    assert_eq!(fs::metadata(&first).unwrap().ino(), fs::metadata(unpacked.join("opt/linked.js")).unwrap().ino(), "{}", first.display());
-    let row = w.snapshot_row(&snapshot_id).await;
-    assert_eq!(row["name"], format!("{}-v1", live_owner()));
-    assert_eq!(row["sizeBytes"].as_u64(), Some(record.layer_bytes));
-    assert_eq!(row["parent"], Value::Null, "a snapshot off an image is a root");
-    assert!(row["createdAt"].as_str().unwrap().ends_with('Z'));
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    w.close().await;
-}
-
-#[tokio::test]
-async fn boots_a_fork_from_a_snapshot_and_the_whiteout_of_a_deleted_file_holds() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({}))).await;
-    let (code, _, _) = w.exec(&id, CHANGE_THE_DISK).await;
-    assert_eq!(code, 0);
-    let snapshot_id = w.snapshot(&id, "v1", true).await;
-    let started = Instant::now();
-    let fork = w.create(spec(json!({ "fromSnapshot": snapshot_id, "template": Value::Null }))).await;
-    eprintln!("fork from a snapshot to ready: {} ms", started.elapsed().as_millis());
-    assert_ne!(fork, id);
-    let (code, out, err) = w.exec(&fork, READ_THE_DISK).await;
-    assert_eq!((code, err.as_str()), (0, ""), "{out}");
-    assert_eq!(out, "taken\npasswd-gone\nonly\n", "the marker is there, the deleted file stays deleted, /home holds the upper's alone");
-    // The original is untouched by the fork's life.
-    let (_, out, _) = w.exec(&fork, "echo fork > /root/marker").await;
-    assert_eq!(out, "");
-    let (_, out, _) = w.exec(&id, "cat /root/marker").await;
-    assert_eq!(out, "taken\n");
-    // A snapshot of the fork is chained under the first, and its bytes are its own.
-    let second = w.snapshot(&fork, "v2", true).await;
-    let row = w.snapshot_row(&second).await;
-    assert_eq!(row["parent"], snapshot_id, "the fork's snapshot names the one it booted from");
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": second })).await;
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    w.close().await;
-}
-
-#[tokio::test]
-async fn a_commit_after_a_thaw_takes_the_life_it_is_handed() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({ "labels": { "wsp-owner": live_owner(), "wsp.idle": "freeze" } }))).await;
-    w.ok("machine.pause", json!({ "machineId": id })).await;
-    assert!(fs::read_to_string(Path::new(CGROUPS).join(&id).join("cgroup.events")).unwrap().contains("frozen 1"));
-    w.ok("machine.resume", json!({ "machineId": id })).await;
-    assert!(fs::read_to_string(Path::new(CGROUPS).join(&id).join("cgroup.events")).unwrap().contains("frozen 0"));
-    let (code, _, _) = w.exec(&id, "echo second life > /root/after-thaw").await;
-    assert_eq!(code, 0);
-    // The runtime hands a thawed workspace firstLife false; the disk is the same copy, so the commit takes it.
-    let snapshot_id = w.snapshot(&id, "thawed", false).await;
-    assert!(Digest::parse(&snapshot_id).is_ok(), "{snapshot_id}");
-    assert_eq!(w.state(&id).await, "running");
-    let fork = w.create(spec(json!({ "fromSnapshot": snapshot_id, "template": Value::Null }))).await;
-    let (_, out, _) = w.exec(&fork, "cat /root/after-thaw").await;
-    assert_eq!(out, "second life\n");
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    w.close().await;
-}
-
-#[tokio::test]
-async fn promotes_by_naming_the_chain() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({}))).await;
-    let (code, _, _) = w.exec(&id, CHANGE_THE_DISK).await;
-    assert_eq!(code, 0);
-    let snapshot_id = w.snapshot(&id, "v1", true).await;
-    let name = format!("{}-dev", live_owner());
-    let promoted = w.ok("machine.promoteSnapshot", json!({ "snapshotId": snapshot_id, "name": name })).await;
-    let template_id = promoted["templateId"].as_str().unwrap().to_owned();
-    assert_eq!(template_id, format!("wsp/{name}:template"));
-    let got = w.ok("machine.getTemplate", json!({ "templateId": template_id })).await;
-    assert_eq!(got["template"]["id"], template_id);
-    assert_eq!(got["template"]["name"], name);
-    assert_eq!(got["template"]["status"], "ready");
-    assert!(got["template"]["createdAt"].as_str().unwrap().ends_with('Z'));
-    let listed = w.ok("machine.listTemplates", json!({})).await;
-    assert!(listed["templates"].as_array().unwrap().iter().any(|t| t["id"] == template_id), "{listed}");
-    let store = Store::open(&root()).unwrap();
-    let template = store.template(&template_id).unwrap().expect("the store holds the template");
-    let snapshot = store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().unwrap();
-    assert_eq!(template.chain, snapshot.chain, "a template is the snapshot's chain under a name");
-    // A fork boots from the template as from an image, and outlives the snapshot and the template it came from.
-    let fork = w.create(spec(json!({ "template": template_id }))).await;
-    let (_, out, _) = w.exec(&fork, READ_THE_DISK).await;
-    assert_eq!(out, "taken\npasswd-gone\nonly\n");
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    assert!(store.unpacked(&snapshot.layer).is_some(), "the template still names the layer");
-    w.ok("machine.deleteTemplate", json!({ "templateId": template_id })).await;
-    let lost = w.ask("machine.getTemplate", json!({ "templateId": template_id })).await;
-    assert_eq!((lost["kind"].as_str(), lost["status"].as_u64()), (Some("missing"), Some(404)), "{lost}");
-    assert!(store.unpacked(&snapshot.layer).is_some(), "the fork still holds the layer");
-    let (_, out, _) = w.exec(&fork, "cat /root/marker").await;
-    assert_eq!(out, "taken\n");
-    w.close().await;
-}
-
-#[tokio::test]
-async fn lists_snapshots_with_their_own_bytes() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({}))).await;
-    let (code, _, _) = w.exec(&id, "head -c 1048576 /dev/urandom > /root/big").await;
-    assert_eq!(code, 0);
-    let big = w.snapshot(&id, "big", true).await;
-    let fork = w.create(spec(json!({ "fromSnapshot": big, "template": Value::Null }))).await;
-    let (code, _, _) = w.exec(&fork, "echo small > /root/small").await;
-    assert_eq!(code, 0);
-    let small = w.snapshot(&fork, "small", true).await;
-    let big_row = w.snapshot_row(&big).await;
-    let small_row = w.snapshot_row(&small).await;
-    let (big_bytes, small_bytes) = (big_row["sizeBytes"].as_u64().unwrap(), small_row["sizeBytes"].as_u64().unwrap());
-    eprintln!("snapshot bytes: big {big_bytes}, small {small_bytes}");
-    assert!(big_bytes > 1_000_000, "a megabyte of noise does not fold: {big_bytes}");
-    assert!(small_bytes < 10_000, "the fork's snapshot carries its own change alone: {small_bytes}");
-    assert_eq!(small_row["parent"], big);
-    let rows = w.ok("machine.listSnapshots", json!({})).await;
-    let names: Vec<&str> = rows["snapshots"].as_array().unwrap().iter().filter_map(|r| r["name"].as_str()).collect();
-    let mine: Vec<&&str> = names.iter().filter(|n| n.starts_with(&live_owner())).collect();
-    assert_eq!(mine.len(), 2, "{names:?}");
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": small })).await;
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": big })).await;
-    w.close().await;
-}
-
-#[tokio::test]
-async fn delete_drops_the_reference_and_the_sweep_removes_the_layer() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({}))).await;
-    let (code, _, _) = w.exec(&id, "echo taken > /root/marker").await;
-    assert_eq!(code, 0);
-    let snapshot_id = w.snapshot(&id, "v1", true).await;
-    let store = Store::open(&root()).unwrap();
-    let snapshot = store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().unwrap();
-    let (layer, layer_bytes) = (snapshot.layer, snapshot.layer_bytes);
-    assert_eq!(store.references(&layer).unwrap(), 1);
-    let fork = w.create(spec(json!({ "fromSnapshot": snapshot_id, "template": Value::Null }))).await;
-    assert!(!store.has_blob(&layer), "one form: the tree alone, {layer_bytes} bytes");
-    // The delete drops the snapshot's reference; the fork's record still holds the chain, so the layer stays.
-    w.ok("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    assert_eq!(store.references(&layer).unwrap(), 0, "no record names the layer");
-    assert!(store.unpacked(&layer).is_some(), "a fork still mounts the layer");
-    let (_, out, _) = w.exec(&fork, "cat /root/marker").await;
-    assert_eq!(out, "taken\n");
-    let again = w.ask("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    assert_eq!((again["kind"].as_str(), again["status"].as_u64()), (Some("missing"), Some(404)), "{again}");
-    // With the fork gone nothing holds the layer, and the next sweep, at the daemon's start, takes it.
-    w.ok("machine.kill", json!({ "machineId": fork })).await;
-    w.made.retain(|m| m != &fork);
-    assert!(store.unpacked(&layer).is_some(), "the kill itself sweeps nothing");
-    w.reopen().await;
-    let swept = w.ops.swept_at_open();
-    assert!(!swept.blobs.contains(&layer), "no blob of the layer was there to sweep: {swept:?}");
-    assert!(swept.unpacked.contains(&layer), "{swept:?}");
-    assert!(swept.bytes >= layer_bytes, "{} bytes swept, the layer's tree held {layer_bytes}", swept.bytes);
-    assert!(store.unpacked(&layer).is_none());
-    w.close().await;
-}
-
-/// A fork's create resolves its snapshot, then mounts the chain and writes the record that makes the sweep keep
-/// it; a delete of that snapshot in flight at the same time must not take the layer between the two. The two
-/// frames run on this one runtime together, the create polled first: the delete gets the store the moment the
-/// create lets go of it, which is after the record is on disk, so its sweep finds the layer held.
-#[tokio::test]
-async fn a_sweep_in_flight_beside_a_fork_takes_nothing_the_fork_mounts() {
-    if !live() {
-        return;
-    }
-    let mut w = World::open().await;
-    let id = w.create(spec(json!({}))).await;
-    let (code, _, _) = w.exec(&id, "echo taken > /root/marker").await;
-    assert_eq!(code, 0);
-    let snapshot_id = w.snapshot(&id, "raced", true).await;
-    let store = Store::open(&root()).unwrap();
-    let layer = store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().unwrap().layer;
-    let fork_spec = spec(json!({ "fromSnapshot": snapshot_id, "template": Value::Null }));
-    let (created, deleted) = tokio::join!(
-        w.ask("machine.create", json!({ "spec": fork_spec })),
-        w.ask("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })),
-    );
-    assert_eq!(created["ok"], true, "{created}");
-    let fork = created["machine"]["id"].as_str().unwrap().to_owned();
-    w.made.push(fork.clone());
-    assert_eq!(deleted["ok"], true, "{deleted}");
-    assert!(store.snapshot(&Digest::parse(&snapshot_id).unwrap()).unwrap().is_none(), "the snapshot's record went");
-    assert!(store.unpacked(&layer).is_some(), "the fork's record holds the layer through the sweep");
-    let (code, out, err) = w.exec(&fork, "cat /root/marker").await;
-    assert_eq!((code, out.as_str()), (0, "taken\n"), "the fork mounts the layer whole: {err}");
-    w.close().await;
-}
-
 /// youki reads any process on the init's pid as the container, and a state file that does not read is a workspace
 /// this daemon can neither nap nor wake: it reads gone, not a nap the resume would refuse, and the kill still takes
 /// it whole, since a workspace that cannot be killed would stay on the box for good.
@@ -1341,56 +1062,6 @@ async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forwa
     w.close().await;
 }
 
-/// The image build's own road over the seam, which is the road `wsp image build <place>` drives on a joined
-/// computer: a workspace forked from the base runs the recipe as execs, the vault's sign-ins land on it, a
-/// snapshot commits the result as a layer under a name, a template names its chain, and a fork from that image
-/// runs the recipe's tool and reads the vault. The vault is inside the built layer and nowhere in the store's
-/// metadata: the records name digests and times, never a secret's bytes.
-#[tokio::test]
-async fn an_image_built_by_running_a_recipe_holds_the_vault_in_its_layer_and_not_in_the_stores_metadata() {
-    if !live() {
-        return;
-    }
-    const TOKEN: &str = "SIGN-IN-TOKEN-665e-secret";
-    let mut w = World::open().await;
-    // The builder from the base chain, as prepareBuilder forks one.
-    let builder = w.create(spec(json!({}))).await;
-    // The recipe as execs: a tool the image carries, and the vault handed in the way the image build hands it
-    // today, a file written inside the workspace, not an env on the record.
-    let (code, _, err) = w
-        .exec(
-            &builder,
-            "install -D -m 0755 /dev/stdin /usr/local/bin/recipe-tool <<'TOOL'\n#!/bin/sh\necho recipe-tool-ran\nTOOL\nmkdir -p /root/.wsp && printf %s 'SIGN-IN-TOKEN-665e-secret' > /root/.wsp/vault",
-        )
-        .await;
-    assert_eq!((code, err.as_str()), (0, ""), "the recipe steps run");
-    // The seal: commit the upper directory as a layer under a name, then name its chain a template a fork boots
-    // from, as sealGolden snapshots and promoteSnapshot names.
-    let snapshot_id = w.snapshot(&builder, "built", true).await;
-    let promoted = w.ok("machine.promoteSnapshot", json!({ "snapshotId": snapshot_id, "name": format!("{}-image", live_owner()) })).await;
-    let template_id = promoted["templateId"].as_str().unwrap().to_owned();
-    // A fork from the built image runs the recipe's tool and reads the vault, as a workspace made from a copy does.
-    let fork = w.create(spec(json!({ "template": template_id }))).await;
-    let (code, out, _) = w.exec(&fork, "recipe-tool; cat /root/.wsp/vault").await;
-    assert_eq!((code, out.as_str()), (0, &format!("recipe-tool-ran\n{TOKEN}")[..]), "the fork runs the tool and holds the vault");
-    // The vault's bytes are in the layer, which the fork just read, and in none of the store's metadata records.
-    for dir in ["snapshots", "templates", "images"] {
-        let at = root().join("layers").join(dir);
-        if let Ok(entries) = fs::read_dir(&at) {
-            for entry in entries {
-                let path = entry.unwrap().path();
-                if path.extension().is_some_and(|e| e == "json") {
-                    let text = fs::read_to_string(&path).unwrap();
-                    assert!(!text.contains(TOKEN), "the store's {dir} record {} holds the vault: {text}", path.display());
-                }
-            }
-        }
-    }
-    w.ok("machine.deleteTemplate", json!({ "templateId": template_id })).await;
-    w.ask("machine.deleteSnapshot", json!({ "snapshotId": snapshot_id })).await;
-    w.close().await;
-}
-
 /// One line read off a fresh connection to the address, inside two seconds, off the runtime thread: the forwards
 /// under test are tasks of this very runtime and need it free to answer.
 async fn read_line(addr: SocketAddrV4) -> std::io::Result<String> {
@@ -1471,9 +1142,12 @@ fn base64_of(bytes: &[u8]) -> String {
     out
 }
 
+/// The sha256 of what the byte road was handed, to read against what the file inside holds.
 fn sha256_hex(bytes: &[u8]) -> String {
-    let digest = wsp_runtime::fetch::Digest::of(bytes);
-    digest.hex().to_owned()
+    use sha2::Digest as _;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A file of the box's landed in the workspace through the byte road, in parts, and made executable.
@@ -1672,6 +1346,128 @@ fn checkout(at: &Path) {
     fs::set_permissions(at.join("README.md"), std::os::unix::fs::PermissionsExt::from_mode(0o600)).unwrap();
 }
 
+/// A workspace of this computer and nothing else: no image named, no project handed in. What it holds is what
+/// the box holds, read through an overlay of its own; what the box keeps to itself is an empty directory inside.
+#[tokio::test]
+async fn a_workspace_is_the_computer_it_runs_on_with_a_wsp_folder_of_its_own() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The box's own tools and the box's own /etc, through the overlays; the box's /root, through the bind. The
+    // wsp folder under that home is the workspace's own, bound over the box's, so what the computer's own daemon
+    // keeps there is not a name a workspace can read.
+    let (code, out, err) = w
+        .exec(
+            &id,
+            "command -v sh; command -v git || echo no-git-on-this-box; head -1 /etc/os-release; ls -A /root/.wsp; find /var/lib/docker /var/lib/containerd -mindepth 1 | wc -l",
+        )
+        .await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    eprintln!("== what a workspace of this computer reads: {out}");
+    let inside: Vec<&str> = out.lines().collect();
+    let on_the_box = fs::read_to_string("/etc/os-release").unwrap().lines().next().unwrap().to_owned();
+    assert!(inside.contains(&on_the_box.as_str()), "the box's /etc/os-release did not come in: {out}");
+    for name in fs::read_dir("/root/.wsp").into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()) {
+        assert!(!inside.contains(&name.as_str()), "the daemon's own {name} is readable inside: {out}");
+    }
+    assert_eq!(inside.last(), Some(&"0"), "the engine's own folders are not empty inside: {out}");
+    // The resolvers a workspace reads: a regular file the boot wrote, never the box's link into a /run the
+    // workspace does not share, and never the box's own stub address, which inside this network namespace is
+    // the workspace's own loopback. A name resolved from inside is the proof the file is usable.
+    let (code, out, err) = w.exec(&id, "test -L /etc/resolv.conf && echo a-link || echo a-file; grep '^nameserver' /etc/resolv.conf").await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    assert!(out.starts_with("a-file\n") && out.contains("nameserver ") && !out.contains("127.0.0.53"), "{out}");
+    eprintln!("== the resolvers a workspace of this computer reads: {out}");
+    // What the box keeps out of a workspace: the daemon's own root, where every other workspace's copy lives,
+    // and the box's own engine socket, since /run is the workspace's own directory and not the box's.
+    let (code, out, _) = w.exec(&id, &format!("ls -A / | tr '\n' ' '; echo; test -e {} && echo root-inside || echo root-outside; test -e /run/docker.sock && echo socket-inside || echo socket-outside", root().display())).await;
+    assert_eq!(code, 0);
+    assert!(out.contains("root-outside") && out.contains("socket-outside"), "{out}");
+    eprintln!("== what a workspace of this computer holds at its top level: {}", out.lines().next().unwrap_or(""));
+    // /root is the person's own home on this computer, shared by every workspace on it: what the box holds there
+    // is what a workspace reads, and what a workspace writes there the box has.
+    let mark = format!("/root/.wsp-live-{}", checkout_key());
+    let (code, _, err) = w.exec(&id, &format!("echo from-inside > {mark}")).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(fs::read_to_string(&mark).unwrap(), "from-inside\n", "the box's /root is not the workspace's own");
+    fs::remove_file(&mark).unwrap();
+    // The daemon's own folder inside is the workspace's own, not the computer's: two workspaces each write a
+    // token at the path the daemon reads by default, each reads its own back, and the computer's own token file
+    // is the same bytes after as before. The box's names were read as invisible inside above, which is what
+    // makes this write safe to make.
+    let token = wsp_frames::numbers::DEFAULT_TOKEN_PATH;
+    let box_token = fs::read(token).ok();
+    let second = w.create(spec(json!({}))).await;
+    for (workspace, word) in [(&id, "first"), (&second, "second")] {
+        let (code, _, err) = w.exec(workspace, &format!("printf '%s' token-of-the-{word} > {token}")).await;
+        assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    }
+    for (workspace, word) in [(&id, "first"), (&second, "second")] {
+        let (code, out, _) = w.exec(workspace, &format!("cat {token}")).await;
+        assert_eq!((code, out.as_str()), (0, format!("token-of-the-{word}").as_str()), "a workspace read another's token");
+        assert_eq!(
+            fs::read(root().join("run").join(workspace).join("wsp-home/daemon-token")).unwrap(),
+            format!("token-of-the-{word}").into_bytes()
+        );
+    }
+    assert_eq!(fs::read(token).ok(), box_token, "a workspace's write reached the computer's own daemon token");
+    // And no workspace's folder is mounted at the computer's own path while both are up: a bind left in the
+    // computer's peer group would put one there, where every process on the box reads it instead of its own.
+    let table = fs::read_to_string("/proc/self/mountinfo").unwrap();
+    let at_the_computers_own = table.lines().filter(|line| line.contains(&format!(" {} ", wsp_frames::numbers::GUEST_WSP_HOME))).count();
+    assert_eq!(at_the_computers_own, 0, "a workspace's wsp folder is mounted at {}", wsp_frames::numbers::GUEST_WSP_HOME);
+    // A package installed inside is the workspace's alone: the overlay's upper takes it and the box has nothing.
+    let (code, out, err) =
+        w.exec(&id, "mkdir -p /usr/local/lib/wsp-probe && echo mine > /usr/local/lib/wsp-probe/x && cat /usr/local/lib/wsp-probe/x").await;
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "mine\n", ""));
+    assert!(!Path::new("/usr/local/lib/wsp-probe").exists(), "a workspace's write reached the box's /usr");
+    assert!(root().join("run").join(&id).join("upper/usr/local/lib/wsp-probe/x").is_file(), "the write is not in the workspace's upper");
+    // The mounts a workspace holds are under its rootfs and nowhere else, and the nap takes every one of them.
+    let rootfs = format!("{}/run/{id}/rootfs", root().display());
+    let under = |table: &str| table.lines().filter(|line| line.contains(&rootfs)).count();
+    assert!(under(&fs::read_to_string("/proc/self/mountinfo").unwrap()) >= 9, "the overlays and the binds are not all there");
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    assert_eq!(under(&fs::read_to_string("/proc/self/mountinfo").unwrap()), 0, "the nap left a mount of the box's directories");
+    // And the wake mounts the computer again over what the workspace wrote, its own wsp folder included.
+    w.ok("machine.resume", json!({ "machineId": &id })).await;
+    let (code, out, _) = w.exec(&id, &format!("cat /usr/local/lib/wsp-probe/x; cat {token}; head -1 /etc/os-release")).await;
+    assert_eq!(code, 0);
+    assert!(out.starts_with("mine\ntoken-of-the-first"), "{out}");
+    w.close().await;
+}
+
+/// A create meant for a provider, sent here: one sentence, and nothing of a workspace left behind. The eight ops
+/// a layer store answered are not ops at all any more, so the frame itself is refused and names itself.
+#[tokio::test]
+async fn a_create_that_names_an_image_is_refused_and_the_snapshot_ops_are_gone() {
+    if !live() {
+        return;
+    }
+    let w = World::open().await;
+    let key = checkout_key();
+    let refused = w
+        .ask(
+            "machine.create",
+            json!({ "spec": spec(json!({ "template": "ubuntu:24.04", "idempotencyKey": format!("live-image-{key}") })) }),
+        )
+        .await;
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert_eq!(refused["error"], wsp_frames::words::NO_IMAGES_HERE, "{refused}");
+    assert!(!root().join("run").join(format!("wsp-live-image-{key}")).exists(), "the refused create claimed a folder");
+    for (op, fields) in [
+        ("machine.snapshot", json!({ "machineId": "wsp-x", "name": "v1", "life": { "firstLife": true } })),
+        ("machine.listSnapshots", json!({})),
+        ("machine.listTemplates", json!({})),
+        ("machine.promoteSnapshot", json!({ "snapshotId": "sha256:aa", "name": "v1" })),
+    ] {
+        let reply = w.ask(op, fields).await;
+        assert_eq!(reply["ok"], false, "{op}: {reply}");
+        assert!(reply["error"].as_str().unwrap().contains(op), "{op}: {reply}");
+    }
+}
+
 #[tokio::test]
 async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own_path() {
     if !live() {
@@ -1718,6 +1514,10 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
     assert!(["reflink", "snapshot", "plain"].contains(&copy["made"].as_str().unwrap()), "{copy}");
     assert!(copy["ms"].as_u64().is_some(), "{copy}");
     assert!(root().join("copies").join(&id).is_dir());
+    // What a boot leaves at /run and /tmp is not what a nap keeps: the project's copy comes back with the line
+    // the workspace wrote in it, and the pid file a process inside left at /run is gone, as it is on any boot.
+    let (code, _, err) = w.exec(&id, "echo 4242 > /run/inside.pid; echo scratch > /tmp/inside.tmp").await;
+    assert_eq!((code, err.as_str()), (0, ""));
     // A nap keeps the copy and the file the workspace wrote in it, and the wake binds it back at the same path.
     w.ok("machine.pause", json!({ "machineId": &id })).await;
     assert!(root().join("copies").join(&id).is_dir(), "the nap took the copy");
@@ -1725,6 +1525,8 @@ async fn a_workspace_made_with_a_project_holds_a_copy_of_the_checkout_at_its_own
     w.ok("machine.resume", json!({ "machineId": &id })).await;
     let (code, out, _) = w.exec(&id, &format!("cat {at}/README.md")).await;
     assert_eq!((code, out.as_str()), (0, "the checkout\nwritten-inside\n"));
+    let (code, out, _) = w.exec(&id, "find /run /tmp -mindepth 1 | wc -l").await;
+    assert_eq!((code, out.trim()), (0, "0"), "the wake carried the last boot's /run or /tmp");
     // The kill takes the copy with the workspace, and leaves the checkout on the box where it was.
     w.ok("machine.kill", json!({ "machineId": &id })).await;
     assert!(!root().join("copies").join(&id).exists(), "the copy stayed after the kill");

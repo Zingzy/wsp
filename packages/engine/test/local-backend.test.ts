@@ -23,6 +23,7 @@ describe("local backend", () => {
       signedUrls: false,
       callbackRelay: false,
       diskSnapshots: false,
+      images: false,
       snapshotsAnyLife: false,
       snapshotListing: false,
       templates: false,
