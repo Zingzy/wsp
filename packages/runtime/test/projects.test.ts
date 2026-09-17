@@ -215,6 +215,17 @@ describe("naming a workspace", () => {
     // Three characters is under the floor, so it is read as a name and nothing else, however many ids open with it.
     await expect(rt.workspaces.resolve("ws_")).rejects.toThrow(noWorkspaceRefusal("ws_"));
   });
+
+  it("a workspace whose name is the start of two ids is its name, since a whole word wins over a prefix", async () => {
+    const rt = twoSharing();
+    const project = (await rt.projects.list())[0]!;
+    // The name is exactly the word that starts both ids: a person who named a workspace that cannot be locked out
+    // of it by two ids that happen to share those characters.
+    const named = await rt.workspaces.create({ project: project.id, golden: "snap_g", name: "ws_1a2b" });
+    expect((await rt.workspaces.resolve("ws_1a2b")).id).toBe(named.id);
+    // The two ids are still ambiguous under any other word that starts both and names no workspace.
+    await expect(rt.workspaces.resolve("ws_1a2b3c4d5")).rejects.toThrow(noWorkspaceRefusal("ws_1a2b3c4d5"));
+  });
 });
 
 describe("the folder a thread starts in", () => {
