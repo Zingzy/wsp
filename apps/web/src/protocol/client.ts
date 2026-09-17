@@ -474,12 +474,6 @@ export interface Api {
   preferences?(): Promise<Preferences>;
   /** The patch over the host's record; resolves with the record as it now stands, and every client hears preferences.changed. */
   setPreferences?(patch: PreferencesPatch): Promise<Preferences>;
-  /** What importing a folder on this computer would carry; nothing is read into memory or uploaded. Optional so
-   * fixtures that never import need not fake it; the sidebar offers no import without it. */
-  planProject?(source: string): Promise<ProjectPlan>;
-  /** Packs the folder and lands it on the workspace's machine; progress rides project.import events, this resolves
-   * with what landed. carry and rewrite name paths from the plan's secrets; an existing dest is refused unless replace. */
-  importProject?(opts: ImportProjectOptions): Promise<ProjectImportResult>;
   /** Brings a folder and the agent sessions keyed to it home from the workspace's machine; progress rides project.export
    * events, this resolves with what landed. An existing dest is refused (kind "exists") unless replace. Optional so
    * fixtures that never export need not fake it; the sidebar offers no export without it. */
@@ -578,19 +572,6 @@ export interface StartSessionOptions {
   /** The images the message carries. The host refuses over the caps and refuses naming the agent when that agent
    * reads no image, both before its machine is asked for anything. */
   attachments?: readonly ImageAttachment[];
-}
-
-export interface ImportProjectOptions {
-  workspaceId: string;
-  /** The folder on this computer as the person picked it; events echo this spelling. */
-  source: string;
-  /** Where it lands on the machine, absolute. */
-  dest: string;
-  replace?: boolean;
-  carry?: string[];
-  rewrite?: string[];
-  /** The plan's agents whose sessions travel, by catalog id; absent, none do. */
-  agents?: string[];
 }
 
 export interface ExportProjectOptions {
@@ -696,9 +677,7 @@ export function makeApi(c: ProtocolClient): Api {
     // Parsed, not trusted: the page paints its theme and sizes only from values the wire type vouches for.
     preferences: async () => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.get")).preferences),
     setPreferences: async patch => Preferences.parse((await c.request<{ preferences?: unknown }>("preferences.set", { patch })).preferences),
-    // Parsed, not trusted: the consent step renders only what the wire type vouches for.
-    planProject: async source => ProjectPlan.parse((await c.request<{ plan?: unknown }>("project.plan", { source })).plan),
-    importProject: async opts => ProjectImportResult.parse((await c.request<{ imported?: unknown }>("project.import", { ...opts })).imported),
+    // Parsed, not trusted: the dialog renders only what the wire type vouches for.
     exportProject: async opts => ProjectExportResult.parse((await c.request<{ exported?: unknown }>("project.export", { ...opts })).exported),
     // Parsed, not trusted: the modal draws screens and rows only as the wire type vouches for them.
     initGet: async () => InitSetup.parse((await c.request<{ setup?: unknown }>("init.get")).setup),

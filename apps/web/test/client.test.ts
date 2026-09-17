@@ -118,26 +118,6 @@ describe("makeApi wrappers", () => {
     await expect(browse()).rejects.toThrow();
   });
 
-  it("planProject and importProject send the project ops and unwrap only what the wire type vouches for", async () => {
-    const { api, lastSent } = await connect();
-    const plan = { source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [{ path: ".env", bytes: 10, signals: ["name"] }], excluded: ["node_modules"], skipped: [], agents: [] };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, plan });
-    expect(await api.planProject!("/var/proj")).toEqual(plan);
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.plan", source: "/var/proj" });
-    // Every import answers with the project the record gained, which is what a client lists the folder from.
-    const imported = { dest: "/private/var/proj", files: 2, bytes: 800, parts: 1, cut: [".env"], rewritten: [], agents: [], project: { name: "proj", dest: "/private/var/proj", importedAt: "2026-09-12T10:00:00.000Z", size: 800 } };
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, imported });
-    expect(await api.importProject!({ workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude"], replace: true })).toEqual(imported);
-    expect(lastSent()).toEqual({ id: expect.any(Number), op: "project.import", workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj", carry: [], rewrite: [".git/config"], agents: ["claude"], replace: true });
-    // An import that says nothing about the project is not an import this client can list: it is not unwrapped.
-    const { project: _project, ...noProject } = imported;
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true, imported: noProject });
-    await expect(api.importProject!({ workspaceId: "ws_1", source: "/var/proj", dest: "/private/var/proj" })).rejects.toThrow();
-    // A reply without the plan must not become a plan.
-    ScriptedSocket.reply = f => ({ id: f["id"], ok: true });
-    await expect(api.planProject!("/var/proj")).rejects.toThrow();
-  });
-
   it("createWorkspace sends the project and the name, a picked size as cpu and memMb and a picked image, and the runtime parses every one of them", async () => {
     const { api, lastSent } = await connect();
     const workspace = { id: "ws_1", name: "beta", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_1", createdAt: "t" };

@@ -71,7 +71,7 @@ function fakeApi(workspaces: WorkspaceView[], sessions: SessionView[]) {
 const flush = () => new Promise(r => setTimeout(r, 0));
 
 beforeEach(() => {
-  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
+  useStore.setState({ api: null, conn: "connecting", capabilities: null, workspaces: [], projects: [], statuses: {}, costs: {}, spending: {}, toast: null, toastAction: null, setupOpen: false, selectedId: null, selectedThreadId: null, freshThread: false, creations: [], sessions: {}, launches: {}, ready: false, gaps: 0 });
 });
 
 // The address is a global the store reads: a #w/<id> left behind would pick the workspace for every test after it.
@@ -806,6 +806,41 @@ describe("store connection", () => {
     await toggling;
     expect(useStore.getState().workspaces[0]!.phase).toBe("running");
     expect(useStore.getState().toast).toBeNull();
+  });
+});
+
+describe("the projects a workspace is made of", () => {
+  const SPOO: ProjectView = { id: "pr_1", name: "spoo-landing", computer: "p_1", source: { kind: "git", url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
+  const WSP: ProjectView = { id: "pr_2", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: "t" };
+
+  it("are read at bind and kept by the two project events: one added shows, one removed goes, and an id nothing holds leaves the list as it was", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    api.projectsList = async () => [SPOO];
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_1"]);
+
+    // A project recorded anywhere, by this app or by the command line, lands here off the host's own event.
+    useStore.getState().applyEvent({ type: "project.added", project: WSP });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_1", "pr_2"]);
+    expect(useStore.getState().projects.find(p => p.id === "pr_2")).toEqual(WSP);
+    // The same project again is the record as it now stands, never a second row of it.
+    useStore.getState().applyEvent({ type: "project.added", project: { ...WSP, name: "wsp-renamed" } });
+    expect(useStore.getState().projects.map(p => p.name)).toEqual(["spoo-landing", "wsp-renamed"]);
+
+    useStore.getState().applyEvent({ type: "project.removed", projectId: "pr_1" });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_2"]);
+    // An id this app holds no record for changes nothing: the list is what the host said, not what an event guessed.
+    useStore.getState().applyEvent({ type: "project.removed", projectId: "pr_nobody" });
+    expect(useStore.getState().projects.map(p => p.id)).toEqual(["pr_2"]);
+  });
+
+  it("a host whose wire carries no project list leaves the list empty rather than waiting on a reply that is never coming", async () => {
+    const { api } = fakeApi([view("ws_a")], []);
+    delete api.projectsList;
+    useStore.getState().bind(api);
+    await flush();
+    expect(useStore.getState().projects).toEqual([]);
   });
 });
 

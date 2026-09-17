@@ -57,7 +57,7 @@
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -393,28 +393,6 @@ const chatHistory: SessionEvent[] = [
   { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
 ];
 
-// The import ops ride the api only where a case reads them (the tiles, the dialog, the Machine tab), so the rows'
-// menu the shell case counts keeps the import refused as a client without the ops has it.
-const importOps: Pick<Api, "planProject" | "importProject"> = {
-  // The import dialog's plan for the folder a drop hands it: a repository of some files, two caches left behind, one
-  // secret-shaped file cut and one offered rewritten, so every row of the plan draws.
-  planProject: async source => ({
-    source,
-    repo: true,
-    files: 412,
-    bytes: 48_200_000,
-    secrets: [
-      { path: ".env", bytes: 120, signals: ["name", "keys"] },
-      { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/zingzy/spoo"], drop: [] } },
-    ],
-    excluded: ["node_modules", ".next"],
-    skipped: [],
-    agents: [],
-  }),
-  importProject: async o => ({ dest: o.dest, files: 412, bytes: 48_200_000, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [], project: { name: folderName(o.dest), dest: o.dest, importedAt: new Date().toISOString(), size: 48_200_000 } }),
-};
-const withImport = params.get("drop") === "1" || params.get("import") === "1" || params.get("panel") === "machine";
-
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
@@ -496,7 +474,6 @@ const api: Api = {
   },
   getGolden: async () => undefined,
   hostTerminalConfig: async () => TRANSLUCENT,
-  ...(withImport ? importOps : {}),
   listProjectGoldens: async () => [],
   snapshotWorkspace: async id => ({ snapshotId: "snap_taken", projects: PROJECTS, golden: "snap_g", workspaceId: id, workspaceName: "api", createdAt: new Date().toISOString() }),
 };

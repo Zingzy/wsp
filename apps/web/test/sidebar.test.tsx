@@ -828,10 +828,8 @@ describe("new thread", () => {
     expect(item(rowOf("api")).querySelector("[data-thread-launch]")).toBeNull();
   });
 
-  it("no row carries an import or export glyph, with or without the project ops; a live row's glyphs are its chevron and its plus", async () => {
+  it("no row carries a project glyph, with or without the export op; a live row's glyphs are its chevron and its plus", async () => {
     const api = fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]);
-    api.planProject = vi.fn(async () => ({ source: "/private/var/proj", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] }));
-    api.importProject = vi.fn();
     api.exportProject = vi.fn();
     await mount(api, "api");
     expect(screen.queryByRole("button", { name: /Import a project/ })).toBeNull();
@@ -858,45 +856,6 @@ describe("new thread", () => {
   });
 });
 
-describe("a folder dragged from the desktop", () => {
-  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
-  const PLAN = { source: "/Users/dev/spoo", repo: true, files: 3, bytes: 900, secrets: [], excluded: [], skipped: [], agents: [] };
-  /** A drag event as the window sees one: jsdom builds no DragEvent, so the transfer rides the event as a property. */
-  const drag = (type: string, dataTransfer: Record<string, unknown>): Event => Object.assign(new Event(type, { bubbles: true, cancelable: true }), { dataTransfer });
-  const carrying = { types: ["Files"], items: [{ kind: "file", type: "" }] };
-  const folder = (name: string) => ({ types: ["Files"], files: [new File([], name)], items: [{ kind: "file", type: "", webkitGetAsEntry: () => ({ isDirectory: true }) }] });
-  const tiles = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-drop-tile]")).map(t => t.textContent ?? "");
-  const tileOf = (id: string): HTMLElement => document.querySelector<HTMLElement>(`[data-drop-tile][data-row-id="ws:${id}"]`)!;
-
-  async function mountWithBridge() {
-    window.wsp = { droppedPath: file => `/Users/dev/${file.name}` };
-    const api = fakeApi([API, WEB, MAC], [status(API), status(WEB), { ...status(MAC), kind: "local", rateUsdPerHour: 0 }]);
-    api.planProject = vi.fn(async () => PLAN);
-    api.importProject = vi.fn(async (o: { dest: string }) => ({ dest: o.dest, files: 3, bytes: 900, parts: 0, cut: [], rewritten: [], agents: [], project: { name: "dev", dest: o.dest, importedAt: "2026-09-12T10:00:00.000Z", size: 900 } }));
-    await mount(api, "api");
-    return api;
-  }
-  afterEach(() => {
-    delete window.wsp;
-  });
-
-
-  it("a drag that carries no files, text say, moves nothing", async () => {
-    await mountWithBridge();
-    act(() => void window.dispatchEvent(drag("dragenter", { types: ["text/plain"], items: [{ kind: "string", type: "text/plain" }] })));
-    expect(tiles()).toEqual([]);
-  });
-
-  it("a browser tab cannot read a dropped folder's path, so its rows stay rows", async () => {
-    const api = fakeApi([API, WEB], [status(API), status(WEB)]);
-    api.planProject = vi.fn(async () => PLAN);
-    api.importProject = vi.fn();
-    await mount(api, "api");
-    act(() => void window.dispatchEvent(drag("dragenter", carrying)));
-    expect(tiles()).toEqual([]);
-    expect(screen.getByText("api")).toBeDefined();
-  });
-});
 
 describe("search", () => {
   it("the row is the palette's door: a glyph and the word Search, no chord on its face, and the compose glyph alone at the right edge; a click opens the palette, focus alone does not, and no field ever appears", async () => {
