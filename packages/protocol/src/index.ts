@@ -3093,6 +3093,10 @@ export const MachineReading = z.object({
   cpuUsageUsec: z.number().int().nonnegative().optional(),
   uptimeMs: z.number().int().nonnegative().optional(),
   procs: z.number().int().nonnegative().optional(),
+  /** How long the computer running it has seen it do nothing on its own: no byte through a published port and no
+   * command run in it. Counted from its boot, so one nothing has asked anything of reads its whole life. Absent
+   * from a workspace that is not running, and from a computer that cannot say. */
+  quietForMs: z.number().int().nonnegative().optional(),
   address: z.string().optional(),
   cgroup: z.string(),
   upper: z.string(),

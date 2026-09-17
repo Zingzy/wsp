@@ -289,6 +289,53 @@ describe("idle policy in the runtime", () => {
     expect(napped).toHaveLength(1); // napping is not idle
   });
 
+  it("starts the window over instead of stopping a workspace its own computer says is busy", async () => {
+    const { rt, backend, fc } = testRuntime();
+    const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+    // The computer running it saw a byte through a published port a minute ago, which is inside the window: the
+    // window starts over and nothing is stopped under the person clicking through it.
+    backend.lifecycle.quietForMs = async () => 60_000;
+    const [before] = await rt.status.list();
+    expect(before!.idleAt).toBe(fc.clock.now() + WINDOW);
+    fc.advance(WINDOW);
+    await until(async () => (await rt.status.list())[0]!.idleAt === fc.clock.now() + WINDOW);
+    expect(await phaseOf(rt, ws.id)).toBe("running");
+    expect(backend.machines[0]!.paused).toBe(false);
+    // And once that computer says it has been quiet for the whole window, the stop goes ahead.
+    backend.lifecycle.quietForMs = async () => WINDOW;
+    fc.advance(WINDOW);
+    await napping(rt, ws.id);
+    expect(backend.machines[0]!.paused).toBe(true);
+  });
+
+  it("stops a workspace whose computer cannot say how quiet it is, and one whose reading fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      // Every provider: nothing above the daemon on a computer somebody owns counts a byte on a port, so the
+      // host's own clock is the whole policy there, as it was before the figure existed.
+      const { rt, backend, fc } = testRuntime();
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
+      backend.lifecycle.quietForMs = async () => undefined;
+      fc.advance(WINDOW);
+      await napping(rt, ws.id);
+      expect(backend.machines[0]!.paused).toBe(true);
+
+      // A reading that fails says nothing about the workspace, so the stop goes ahead rather than a workspace
+      // living for ever behind a computer that will not answer.
+      const second = testRuntime();
+      const other = await createOn(second.rt, { golden: "snap_g", name: "b" });
+      second.backend.lifecycle.quietForMs = async () => {
+        throw new Error("the computer did not answer");
+      };
+      second.fc.advance(WINDOW);
+      await napping(second.rt, other.id);
+      expect(second.backend.machines[0]!.paused).toBe(true);
+      expect(warn.mock.calls.flat().join(" ")).toContain("quiet figure of");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("names the window in minutes the way the rail will show it", async () => {
     const { rt, fc } = testRuntime({ idle: { defaultWindowMs: 20 * 60_000 } });
     const statuses: WorkspaceStatus[] = [];

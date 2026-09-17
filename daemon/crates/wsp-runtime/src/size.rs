@@ -10,12 +10,14 @@ use std::fs;
 /// The least every workspace leaves the box it runs on, whatever size it was asked for: a core and a gigabyte.
 pub const BOX_CORE_HEADROOM: f64 = 1.0;
 pub const BOX_MEMORY_HEADROOM_MB: u64 = 1024;
-/// The most of a box's memory one workspace's cap may name, beside the headroom: the box is not the fork's alone,
-/// since a computer somebody keeps is serving their own work while a workspace runs on it.
-pub const BOX_MEMORY_SHARE: f64 = 0.5;
-/// The least a workspace's memory cap is ever held down to, since below it the guest's own daemon does not run:
-/// a box too small to leave the headroom gives this much rather than nothing.
-pub const LEAST_MEM_MB: u64 = 512;
+/// The most of a box's memory one workspace's cap may name, beside the headroom: a third, since a computer
+/// somebody keeps is serving their own work while a workspace runs on it and two more pieces of work may be named
+/// on it before this one is done.
+pub const BOX_MEMORY_SHARE: f64 = 1.0 / 3.0;
+/// The least a workspace's memory cap is ever held down to, named here and nowhere else: an agent and the dev
+/// server it starts live above this together, and below it the guest's own daemon does not run at all. A box too
+/// small to leave the headroom gives this much rather than nothing.
+pub const LEAST_MEM_MB: u64 = 1024;
 /// Where the kernel says how much memory the box has.
 const MEMINFO: &str = "/proc/meminfo";
 
@@ -29,13 +31,8 @@ pub struct BoxFacts {
 impl BoxFacts {
     pub fn read() -> BoxFacts {
         let cores = std::thread::available_parallelism().map_or(1, |n| n.get() as u64);
-        let meminfo = fs::read_to_string(MEMINFO).unwrap_or_default();
-        let mem_kb: u64 = meminfo
-            .lines()
-            .find_map(|line| line.strip_prefix("MemTotal:"))
-            .and_then(|rest| rest.trim().trim_end_matches("kB").trim().parse().ok())
-            .unwrap_or(0);
-        BoxFacts { cores, mem_mb: mem_kb / 1024 }
+        let mem_mb = mem_mb_of(&fs::read_to_string(MEMINFO).unwrap_or_default(), "MemTotal:").unwrap_or(0);
+        BoxFacts { cores, mem_mb }
     }
 
     /// The most one workspace's cpu quota may name here.
@@ -44,11 +41,28 @@ impl BoxFacts {
     }
 
     /// The most one workspace's memory cap may name here: the smaller of the box's share and the box less its
-    /// headroom, so a big box keeps half and a small one keeps its gigabyte.
+    /// headroom, held up to the floor. At a third the share is what binds on every box big enough to leave the
+    /// floor, and the headroom stands as the guard it always was: whatever the share is, a workspace never names
+    /// the box's last gigabyte.
     pub fn machine_mem_mb(&self) -> u64 {
         let share = (self.mem_mb as f64 * BOX_MEMORY_SHARE).floor() as u64;
         share.min(self.mem_mb.saturating_sub(BOX_MEMORY_HEADROOM_MB)).max(LEAST_MEM_MB)
     }
+}
+
+/// What the box has free this moment, off the kernel's own figure for what may be handed out without pushing it
+/// into reclaim. Read at the ask and never kept, since it moves with every process on the box: this is what the
+/// room check holds a create to, rather than the sum of the caps the workspaces here were given, so five awake
+/// workspaces whose processes are all small still fit. Nothing on a computer whose kernel keeps no such file,
+/// where a create is held to nothing.
+pub fn free_mem_mb() -> Option<u64> {
+    mem_mb_of(&fs::read_to_string(MEMINFO).ok()?, "MemAvailable:")
+}
+
+/// One figure off /proc/meminfo, in megabytes: the kernel writes them in kilobytes, one to a line.
+fn mem_mb_of(meminfo: &str, key: &str) -> Option<u64> {
+    let kb: u64 = meminfo.lines().find_map(|line| line.strip_prefix(key))?.trim().trim_end_matches("kB").trim().parse().ok()?;
+    Some(kb / 1024)
 }
 
 /// A size as this box gives it: never absent, since a workspace with no cap of its own is a workspace that can
@@ -136,16 +150,16 @@ mod tests {
     }
 
     #[test]
-    fn a_fork_of_the_whole_box_gets_a_core_and_half_the_memory_and_the_answer_says_so() {
+    fn a_fork_of_the_whole_box_gets_a_core_and_a_third_of_the_memory_and_the_answer_says_so() {
         let given = size_on_box(&small_box(), Some(2.0), Some(4096));
-        assert_eq!((given.cpu, given.mem_mb), (1.0, 2048));
-        assert_eq!(given.clamped.as_deref(), Some("size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 2 GB"));
+        assert_eq!((given.cpu, given.mem_mb), (1.0, 1365));
+        assert_eq!(given.clamped.as_deref(), Some("size 2x4 on 2 cores: cpu clamped to 1 and memory clamped to 1.3 GB"));
     }
 
     #[test]
     fn a_fork_that_leaves_the_box_room_is_given_what_it_asked_for_and_the_answer_says_nothing() {
-        let given = size_on_box(&small_box(), Some(1.0), Some(2048));
-        assert_eq!((given.cpu, given.mem_mb, given.clamped), (1.0, 2048, None));
+        let given = size_on_box(&small_box(), Some(1.0), Some(1024));
+        assert_eq!((given.cpu, given.mem_mb, given.clamped), (1.0, 1024, None));
     }
 
     #[test]
@@ -155,8 +169,8 @@ mod tests {
         assert_eq!(cpu_only.clamped.as_deref(), Some("size 4x1 on 2 cores: cpu clamped to 1"));
         // The side the spec leaves out takes the ceiling, so it is named beside the one that was cut.
         let mem_only = size_on_box(&small_box(), None, Some(8192));
-        assert_eq!((mem_only.cpu, mem_only.mem_mb), (1.0, 2048));
-        assert_eq!(mem_only.clamped.as_deref(), Some("size 8 GB on 2 cores: cpu clamped to 1 and memory clamped to 2 GB"));
+        assert_eq!((mem_only.cpu, mem_only.mem_mb), (1.0, 1365));
+        assert_eq!(mem_only.clamped.as_deref(), Some("size 8 GB on 2 cores: cpu clamped to 1 and memory clamped to 1.3 GB"));
     }
 
     #[test]
@@ -164,25 +178,46 @@ mod tests {
         // Nothing above the daemon fills this in for a client on the link, and a workspace with no cap of its own
         // can hold the whole box however small its size was meant to be.
         let given = size_on_box(&small_box(), None, None);
-        assert_eq!((given.cpu, given.mem_mb), (1.0, 2048));
-        assert_eq!(given.clamped.as_deref(), Some("no size on 2 cores: cpu clamped to 1 and memory clamped to 2 GB"));
+        assert_eq!((given.cpu, given.mem_mb), (1.0, 1365));
+        assert_eq!(given.clamped.as_deref(), Some("no size on 2 cores: cpu clamped to 1 and memory clamped to 1.3 GB"));
     }
 
     #[test]
-    fn the_memory_ceiling_is_whichever_of_the_share_and_the_headroom_leaves_the_box_more() {
-        // A big box keeps half of itself, which is more than a gigabyte.
-        let big = size_on_box(&BoxFacts { cores: 8, mem_mb: 8192 }, Some(4.0), Some(8192));
-        assert_eq!((big.cpu, big.mem_mb), (4.0, 4096));
-        assert_eq!(big.clamped.as_deref(), Some("size 4x8 on 8 cores: memory clamped to 4 GB"));
-        // A box under two gigabytes keeps its gigabyte, which is more than half of it.
-        let small = size_on_box(&BoxFacts { cores: 4, mem_mb: 1800 }, Some(1.0), Some(1800));
-        assert_eq!(small.mem_mb, 776);
+    fn the_memory_ceiling_is_a_third_of_the_box_and_the_floor_under_a_box_too_small_for_one() {
+        // The box the workspaces on a computer somebody keeps are measured on, which is the one the proof runs on.
+        let spoo = size_on_box(&BoxFacts { cores: 2, mem_mb: 7747 }, Some(2.0), Some(7747));
+        assert_eq!(spoo.mem_mb, 2582);
+        assert_eq!(spoo.clamped.as_deref(), Some("size 2x7.6 on 2 cores: cpu clamped to 1 and memory clamped to 2.5 GB"));
+        // A box whose third is under the floor gives the floor, since below it nothing inside runs at all.
+        assert_eq!(size_on_box(&BoxFacts { cores: 4, mem_mb: 2048 }, Some(1.0), Some(2048)).mem_mb, LEAST_MEM_MB);
+        assert_eq!(size_on_box(&BoxFacts { cores: 8, mem_mb: 8192 }, Some(4.0), Some(8192)).mem_mb, 2730);
+        // And whatever the share is, the headroom stands: a box big enough to leave the floor keeps its gigabyte.
+        for mem_mb in [2048, 4096, 7747, 8192, 16_384, 65_536] {
+            let facts = BoxFacts { cores: 4, mem_mb };
+            assert!(facts.machine_mem_mb() <= mem_mb - BOX_MEMORY_HEADROOM_MB, "{mem_mb}");
+        }
     }
 
     #[test]
     fn a_one_core_box_still_gives_a_core_and_a_tiny_box_still_gives_memory() {
         let given = size_on_box(&BoxFacts { cores: 1, mem_mb: 1024 }, Some(2.0), Some(2048));
         assert_eq!((given.cpu, given.mem_mb), (1.0, LEAST_MEM_MB));
-        assert_eq!(given.clamped.as_deref(), Some("size 2x2 on 1 core: cpu clamped to 1 and memory clamped to 0.5 GB"));
+        assert_eq!(given.clamped.as_deref(), Some("size 2x2 on 1 core: cpu clamped to 1 and memory clamped to 1 GB"));
+    }
+
+    #[test]
+    fn the_two_figures_are_read_off_the_kernels_own_file_in_megabytes() {
+        let meminfo = "MemTotal:        7932016 kB\nMemFree:          312244 kB\nMemAvailable:    4093852 kB\n";
+        assert_eq!(mem_mb_of(meminfo, "MemTotal:"), Some(7746));
+        assert_eq!(mem_mb_of(meminfo, "MemAvailable:"), Some(3997));
+        assert_eq!(mem_mb_of(meminfo, "SwapTotal:"), None);
+        assert_eq!(mem_mb_of("", "MemTotal:"), None);
+        assert_eq!(mem_mb_of("MemAvailable:    not a number\n", "MemAvailable:"), None);
+        // On a box the free figure answers and sits inside what the box holds; on any other computer there is no
+        // such file and a create is held to nothing.
+        match free_mem_mb() {
+            Some(free) => assert!(free > 0 && free <= BoxFacts::read().mem_mb, "{free}"),
+            None => assert!(!std::path::Path::new(MEMINFO).exists()),
+        }
     }
 }

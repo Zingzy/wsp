@@ -6,8 +6,8 @@
 // lifecycle instead of the Docker file's per-case sweep. Root, cgroup v2 and a
 // registry are what it needs, so it runs under WSP_RUNTIME_LIVE=1 alone. The deploy case puts the daemon onto a
 // workspace and reads its hello back through the forward, which takes apt, nodejs.org and npm from inside. The
-// pause cases are this computer's own: the nap that stops a workspace and the wake that boots it again over what
-// it wrote.
+// pause cases are this computer's own: the nap that stops a workspace, the wake that boots it again over what it
+// wrote, and the quiet figure this host reads off the far side before it stops one.
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -142,17 +142,21 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     expect((await machine.exec("sleep 30; echo late", { timeoutMs: 300 })).exitCode).toBe(124);
   }, 60_000);
 
-  it("pauses and resumes with the freezer, where the workspace is labelled to keep what it holds", async () => {
-    const machine = await create({ kind: "sandbox", memMb: 512, labels: { "wsp.idle": "freeze" } });
+  it("answers how long the workspace has been quiet, which is what this host reads before it stops one", async () => {
+    const machine = await create({ kind: "sandbox", memMb: 512 });
+    // A command run in it is the workspace doing something, so the figure starts over at it and grows from there.
+    expect((await exec(machine, "echo working")).stdout).toBe("working\n");
+    const quiet = () => backend.lifecycle!.quietForMs!(machine);
+    expect(await quiet()).toBeLessThan(1_000);
+    await new Promise(r => setTimeout(r, 2_500));
+    const grown = await quiet();
+    times["quiet figure after 2.5 s of nothing"] = grown!;
+    expect(grown).toBeGreaterThan(2_000);
+    // And nothing at all once it is stopped: a workspace that is not running has nothing to be quiet about.
     await machine.pause();
-    expect(await machine.state()).toBe("paused");
-    expect(readFileSync(join(cgroupOf(machine.id), "cgroup.events"), "utf8")).toContain("frozen 1");
-    times["frozen memory.current bytes"] = Number(readFileSync(join(cgroupOf(machine.id), "memory.current"), "utf8").trim());
-    expect((await backend.capacity()).machines.paused).toBe(1);
+    expect(await quiet()).toBeUndefined();
     await machine.resume();
-    expect(await machine.state()).toBe("running");
-    expect(readFileSync(join(cgroupOf(machine.id), "cgroup.events"), "utf8")).toContain("frozen 0");
-    expect((await exec(machine, "echo awake")).stdout).toBe("awake\n");
+    expect(await quiet()).toBeLessThan(1_000);
   }, 60_000);
 
   it("takes a project of the computer's own in as a copy, at the path that project has outside", async () => {
@@ -341,7 +345,7 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     const reach = await machine.previewUrl!(7070);
     const port = Number(new URL(reach.url).port);
     expect(await readLine(port)).toBe("hello from inside");
-    expect(await exec(machine, "echo kept > /root/saved; hostname -I")).toMatchObject({ exitCode: 0 });
+    expect(await exec(machine, "echo kept > /var/tmp/saved; hostname -I")).toMatchObject({ exitCode: 0 });
     const address = (await exec(machine, "hostname -I")).stdout.trim();
     const roomBefore = (await backend.capacity()).memRoomMb;
     await machine.pause();
@@ -360,7 +364,8 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     times["wake from the saved layer"] = Date.now() - started;
     expect(await machine.state()).toBe("running");
     expect(times["wake from the saved layer"]).toBeLessThan(200);
-    expect(await exec(machine, "cat /root/saved; hostname -I")).toMatchObject({ exitCode: 0, stdout: `kept\n${address} \n` });
+    expect(await exec(machine, "cat /var/tmp/saved; hostname -I")).toMatchObject({ exitCode: 0, stdout: `kept\n${address} \n` });
+    expect(existsSync(join(root, "run", machine.id, "upper/var/tmp/saved"))).toBe(true);
     expect((await machine.previewUrl!(7070)).url).toBe(reach.url);
     expect(await exec(machine, ANSWER_ON_7070)).toMatchObject({ exitCode: 0, stderr: "" });
     expect(await readLine(port)).toBe("hello from inside");

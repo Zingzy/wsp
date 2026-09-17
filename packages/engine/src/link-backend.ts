@@ -18,6 +18,7 @@ import {
   MachineHandleReply,
   MachineListReply,
   MachineReachReply,
+  MachineReadingReply,
   MachineShapeReply,
   MachineStateReply,
   MachineUrlReply,
@@ -295,12 +296,24 @@ export class LinkBackend implements MachineBackend {
       snapshotStorage: facts.pricing.snapshotStorage,
       ...(facts.pricing.builderDiskGb !== undefined ? { builderDiskGb: facts.pricing.builderDiskGb } : {}),
     };
-    if (facts.lifecycle !== undefined) this.lifecycle = { budgets: facts.lifecycle.budgets };
+    // The quiet figure is the reading's, asked of the computer running the machine: it is the only backend that
+    // can see a byte on a published port or a command run inside, so it is the only one that answers one.
+    if (facts.lifecycle !== undefined) {
+      this.lifecycle = { budgets: facts.lifecycle.budgets, quietForMs: machine => this.quietForMs(machine) };
+    }
     if (facts.baseTemplates !== undefined) this.baseTemplates = facts.baseTemplates;
   }
 
   private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: LinkAsk): Promise<T> {
     return askLink(this.link, reply, op, params, opts);
+  }
+
+  /** How long the computer running this machine has seen it do nothing on its own, off one reading. Undefined
+   * where that computer's own backend does not count it, which is what a daemon too old to carry the figure
+   * answers: the stop is then the host's own clock's to decide, as it was before. */
+  private async quietForMs(machine: Machine): Promise<number | undefined> {
+    const { reading } = await this.ask(MachineReadingReply, "machine.metrics", { machineId: machine.id });
+    return reading.quietForMs;
   }
 
   /** The spec's own key is the ask's: the far side answers the machine it already made under that key instead of

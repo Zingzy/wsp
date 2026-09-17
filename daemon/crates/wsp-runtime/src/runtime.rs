@@ -14,7 +14,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use libcontainer::container::builder::ContainerBuilder;
 use libcontainer::container::{Container, ContainerStatus, State};
@@ -44,6 +44,10 @@ const STALE_NOTIFY: Duration = Duration::from_secs(30);
 const TENANT_NOTIFY: &str = "tenant-notify-";
 /// How long killed processes get to leave their cgroup before the kill is called failed.
 const KILL_PATIENCE: Duration = Duration::from_secs(10);
+/// How long the processes of a workspace get to end themselves after SIGTERM before the kill road takes whatever
+/// stayed. A turn writing its files out and a dev server closing its sockets are both done well inside it, and a
+/// person who asked for a stop does not wait longer than this on a process that ignores the signal.
+pub const STOP_PATIENCE: Duration = Duration::from_secs(15);
 /// The one sentence an exec is refused with when the workspace's filter has a rule whose action is notify: loading
 /// such a filter hands back a notify fd, and nothing on the exec road serves it.
 const NOTIFY_REFUSAL: &str =
@@ -300,11 +304,43 @@ impl Runtime {
         Ok(Container::load(dir).map_err(container)?.pid().map(|pid| pid.as_raw()))
     }
 
-    /// youki's status word written to its state file, so its own reads agree with the freezer.
-    pub fn set_status(&self, id: &str, paused: bool) -> Result<(), Error> {
-        let mut c = Container::load(self.layout.state_of(id)).map_err(container)?;
-        c.set_status(if paused { ContainerStatus::Paused } else { ContainerStatus::Running }).save().map_err(container)
+    /// The stop a nap is, which always stops: SIGTERM to every process in the workspace's cgroup and in the
+    /// cgroups under it, its init last of all, a wait for them to leave, then the kill road for whatever stayed.
+    ///
+    /// The init is signalled last because it is the first process of a pid namespace: the kernel kills every
+    /// other process in one the moment that process is gone, so an init signalled first would take the turn and
+    /// the dev server down with it before either could write out what it held. `init` is the record's, so a
+    /// workspace whose init is some other process by now signals nothing and goes straight to the kill road.
+    pub async fn stop(&self, id: &str, init: Option<&Init>) -> Result<(), Error> {
+        let cgroup = self.layout.cgroup_dir(id);
+        let init_pid = init.filter(|init| alive(init)).map(|init| init.pid);
+        tokio::task::spawn_blocking(move || term_under(&cgroup, init_pid, STOP_PATIENCE)).await.map_err(joined)??;
+        self.kill(id, init).await
     }
+}
+
+/// SIGTERM to the workspace's own processes and then to its init, waiting for each to leave inside the patience
+/// they share. Whatever is still there when it runs out is the kill road's; nothing here fails for that, since a
+/// stop that refused would leave a workspace neither awake nor stopped.
+fn term_under(cgroup: &Path, init: Option<i32>, patience: Duration) -> Result<(), Error> {
+    if !cgroup.exists() {
+        return Ok(());
+    }
+    let deadline = Instant::now() + patience;
+    let others = |pids: &[i32]| -> bool { pids.iter().any(|pid| Some(*pid) != init) };
+    let pids = crate::freeze::pids_under(cgroup).map_err(io_at(cgroup))?;
+    for pid in pids.iter().copied().filter(|pid| Some(*pid) != init) {
+        let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
+    }
+    while others(&crate::freeze::pids_under(cgroup).unwrap_or_default()) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let Some(init) = init else { return Ok(()) };
+    let _ = kill(Pid::from_raw(init), Signal::SIGTERM);
+    while !crate::freeze::pids_under(cgroup).unwrap_or_default().is_empty() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
 }
 
 /// The identity of a live process: its pid with its start time and the box's boot id, which is what tells the
@@ -571,6 +607,7 @@ mod tests {
             etc: &layout.etc(id),
             engine: None,
             shares: &[],
+            compose_project: None,
         });
         crate::bundle::write_json(&layout.config(id), &spec).unwrap();
         spec

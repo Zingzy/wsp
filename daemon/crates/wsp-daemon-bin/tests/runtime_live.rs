@@ -63,6 +63,11 @@ fn bin() -> PathBuf {
 
 /// What every workspace here runs to answer a line on its port 7070, from every address it has: the base image
 /// carries perl and nothing else that listens.
+/// The same bound to the loopback inside and nowhere else: what a dev server started with no address of its own
+/// binds. From the box the workspace's own address answers nothing there, and the published port answers all the
+/// same, since the listener on the box dials from inside the workspace's namespace.
+const ANSWER_ON_LOOPBACK_7070: &str = "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"127.0.0.1\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) { print $c \"hello from inside\\n\"; close $c }' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err";
+
 const ANSWER_ON_7070: &str = "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"0.0.0.0\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; while ($c = $s->accept) { print $c \"hello from inside\\n\"; close $c }' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err";
 
 impl World {
@@ -142,6 +147,12 @@ impl World {
         let reply = self.ok("machine.exec", json!({ "machineId": id, "cmd": cmd, "timeoutMs": 60_000 })).await;
         let r = &reply["result"];
         (r["exitCode"].as_i64().unwrap(), r["stdout"].as_str().unwrap().to_owned(), r["stderr"].as_str().unwrap().to_owned())
+    }
+
+    /// The quiet figure off the workspace's reading: how long this computer has seen it do nothing on its own.
+    async fn quiet_ms(&self, id: &str) -> u64 {
+        let reading = self.ok("machine.metrics", json!({ "machineId": id })).await["reading"].clone();
+        reading["quietForMs"].as_u64().unwrap_or_else(|| panic!("no quiet figure in {reading}"))
     }
 
     async fn state(&self, id: &str) -> String {
@@ -330,31 +341,175 @@ async fn an_exec_against_a_filter_with_a_notify_action_is_refused_and_the_worksp
 }
 
 #[tokio::test]
-async fn pauses_and_resumes_with_the_freezer() {
+async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     if !live() {
         return;
     }
     let mut w = World::open().await;
-    // The label that says the workspace must keep what its processes hold: a pause freezes it instead of stopping it.
-    let id = w.create(spec(json!({ "memMb": 512, "labels": { "wsp-owner": live_owner(), "wsp.idle": "freeze" } }))).await;
+    let id = w.create(spec(json!({ "memMb": 1024 }))).await;
+    // A process that traps the signal and writes what it holds where the saved layer keeps it: /var is one of the
+    // workspace's own overlays, and the box's /root, which every workspace on it shares, is not.
+    let trapping = "nohup sh -c 'trap \"echo trapped > /var/tmp/stopped; exit 0\" TERM; while :; do sleep 1; done' > /dev/null 2>&1 & sleep 0.5; echo started";
+    let (code, out, err) = w.exec(&id, trapping).await;
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "started\n", ""));
+    let saved = root().join("run").join(&id).join("upper/var/tmp/stopped");
+    assert!(!saved.exists(), "the trap wrote before the stop");
+
+    let started = Instant::now();
     w.ok("machine.pause", json!({ "machineId": id })).await;
-    let events = fs::read_to_string(Path::new(CGROUPS).join(&id).join("cgroup.events")).unwrap();
-    let state_file = fs::read_to_string(root().join("state").join(&id).join("state.json")).unwrap();
-    assert_eq!(w.state(&id).await, "paused", "events: {events} state.json: {state_file}");
-    assert!(events.contains("frozen 1"), "{events}");
-    let held = fs::read_to_string(Path::new(CGROUPS).join(&id).join("memory.current")).unwrap();
-    eprintln!("frozen workspace memory.current: {} bytes", held.trim());
-    let capacity = w.ok("machine.capacity", json!({})).await;
-    assert_eq!(capacity["machines"]["paused"], 1);
-    let listed = w.ok("machine.list", json!({ "labels": { "wsp-owner": live_owner() } })).await;
-    let row = listed["machines"].as_array().unwrap().iter().find(|m| m["id"] == id).unwrap();
-    assert_eq!(row["state"], "paused");
+    let took = started.elapsed();
+    eprintln!(
+        "stop with a process that traps SIGTERM: {} ms, patience {} s",
+        took.as_millis(),
+        wsp_runtime::runtime::STOP_PATIENCE.as_secs()
+    );
+    assert_eq!(w.state(&id).await, "paused");
+    assert!(took < wsp_runtime::runtime::STOP_PATIENCE, "the stop took its whole patience: {} ms", took.as_millis());
+    // The line is in the saved layer, so the process was asked to end and had the time to write: an init
+    // signalled first would have taken it down with the namespace before it could.
+    assert_eq!(fs::read_to_string(&saved).unwrap().trim(), "trapped");
+    assert!(!Path::new(CGROUPS).join(&id).exists(), "the cgroup of a stopped workspace stays");
+    assert!(!fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!("/run/{id}/rootfs")), "the rootfs stays mounted");
+
+    // And a stop always stops: a process that ignores the signal holds its cgroup for the patience and the kill
+    // road takes it from there.
     w.ok("machine.resume", json!({ "machineId": id })).await;
-    assert_eq!(w.state(&id).await, "running");
-    let events = fs::read_to_string(Path::new(CGROUPS).join(&id).join("cgroup.events")).unwrap();
-    assert!(events.contains("frozen 0"), "{events}");
-    let (code, out, _) = w.exec(&id, "echo awake").await;
-    assert_eq!((code, out.as_str()), (0, "awake\n"));
+    let deaf = "nohup sh -c 'trap \"\" TERM; while :; do sleep 1; done' > /dev/null 2>&1 & sleep 0.5; echo started";
+    let (code, _, _) = w.exec(&id, deaf).await;
+    assert_eq!(code, 0);
+    let started = Instant::now();
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    eprintln!("stop with a process that ignores SIGTERM: {} ms", started.elapsed().as_millis());
+    assert_eq!(w.state(&id).await, "paused");
+    assert!(!Path::new(CGROUPS).join(&id).exists(), "a workspace that ignored the signal kept its cgroup");
+    // Nothing here is ever frozen: a pause on a stopped workspace is what a second pause meets.
+    let twice = w.ask("machine.pause", json!({ "machineId": id })).await;
+    assert!(twice["error"].as_str().unwrap().contains("is already paused"), "{twice}");
+    w.close().await;
+}
+
+/// What this computer can see of a workspace working, which is the figure the host's idle firing reads before it
+/// stops one: a byte through a published port and a command run in it start it over, and nothing else does.
+#[tokio::test]
+async fn the_quiet_figure_is_what_this_computer_can_see_of_a_workspace_working() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    w.listen_inside(&id).await;
+    let port = w.publish(&id, 7070).await;
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    let before = w.quiet_ms(&id).await;
+    assert!(before > 2_000, "the figure did not grow while nothing happened: {before} ms");
+
+    // Somebody asking the workspace for something, through the port the box published for it.
+    assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap(), "hello from inside");
+    let after_get = w.quiet_ms(&id).await;
+    assert!(after_get < 1_000, "a GET through the published port left the figure at {after_get} ms");
+
+    // The host's own probe of the daemon inside is not the workspace working: it is asked of every running
+    // workspace every few seconds for as long as the host is up, and a figure it started over would never reach
+    // the end of a window.
+    tokio::time::sleep(Duration::from_millis(2_500)).await;
+    w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 20_000 })).await;
+    let after_probe = w.quiet_ms(&id).await;
+    assert!(after_probe > 2_000, "the daemon probe started the figure over: {after_probe} ms");
+
+    // A command run in it is.
+    w.exec(&id, "echo working").await;
+    let after_exec = w.quiet_ms(&id).await;
+    assert!(after_exec < 1_000, "a command left the figure at {after_exec} ms");
+    eprintln!("quiet_for_ms: {before} quiet, {after_get} after a GET, {after_probe} after the daemon probe, {after_exec} after a command");
+
+    // A stopped workspace has no figure at all, and the wake starts one over: a workspace idle across a stop
+    // lives one more window.
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    let napping = w.ok("machine.metrics", json!({ "machineId": id })).await["reading"].clone();
+    assert!(napping.get("quietForMs").is_none(), "{napping}");
+    w.ok("machine.resume", json!({ "machineId": id })).await;
+    let woken = w.quiet_ms(&id).await;
+    assert!(woken < 1_000, "the wake left the figure at {woken} ms");
+    w.close().await;
+}
+
+/// A service bound to the loopback inside and nowhere else, which is what a dev server started with no address
+/// binds, answers at the box's published port: the listener out here dials from inside the workspace's own
+/// network namespace, where that loopback is the workspace's.
+#[tokio::test]
+async fn a_service_bound_to_the_loopback_inside_answers_at_the_published_port() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let (code, _, err) = w.exec(&id, ANSWER_ON_LOOPBACK_7070).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    // Not at the workspace's own address: nothing is listening there, which is the whole difference.
+    let address = w.network(&id).address;
+    let refused = read_line(SocketAddrV4::new(address, 7070)).await;
+    assert!(refused.is_err(), "the loopback bind answered at the workspace's own address: {refused:?}");
+    let port = w.publish(&id, 7070).await;
+    assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap(), "hello from inside");
+    // And the same port after a stop and a wake, where the listener is bound again on the new namespace.
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    w.ok("machine.resume", json!({ "machineId": id })).await;
+    let (code, _, err) = w.exec(&id, ANSWER_ON_LOOPBACK_7070).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(w.publish(&id, 7070).await, port);
+    assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap(), "hello from inside");
+    w.close().await;
+}
+
+/// What the box keeps of its own that a turn inside a workspace may not read: the password hashes, the sudo
+/// rules, the keys it answers ssh on, the keys that open other computers, and every other home on it. Each of
+/// them is the workspace's own empty file or directory, and what the box holds is untouched.
+#[tokio::test]
+async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
+    if !live() {
+        return;
+    }
+    // What the box holds, read before any workspace is made: the length of one file and the count of one
+    // directory, neither of which is a thing this reads the content of.
+    let box_shadow = fs::metadata("/etc/shadow").map(|m| m.len()).unwrap_or(0);
+    let box_keys = fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0);
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    let (code, out, err) = w
+        .exec(&id, "wc -c < /etc/shadow; wc -c < /etc/gshadow; ls -A /home | wc -l; ls -A /root/.ssh | wc -l; cat /etc/ssh/ssh_host_* 2>/dev/null | wc -c")
+        .await;
+    show("what the box keeps of its own, from inside a workspace", code, &out, &err);
+    assert_eq!(code, 0);
+    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["0", "0", "0", "0", "0"], "{out}");
+    // And what is not covered: the box's sudo rules are read as they are, so a script inside that types sudo
+    // gets what root gets rather than a refusal from a file granting nobody anything.
+    let (code, sudo, err) = w.exec(&id, "sudo -n true && echo sudo works").await;
+    show("sudo inside the workspace", code, &sudo, &err);
+    if code == 0 {
+        assert_eq!(sudo.trim(), "sudo works");
+    } else {
+        eprintln!("this image carries no sudo; the rules case is the read below");
+        assert!(w.exec(&id, "grep -c ALL /etc/sudoers").await.1.trim() != "0", "the box's sudo rules were covered");
+    }
+    // A write where the box's own keys live is the workspace's own and reaches nothing of the box's: a workspace
+    // that could write here would let itself back into the box as root.
+    let (code, _, err) = w.exec(&id, "echo 'a key of this workspace alone' > /root/.ssh/authorized_keys").await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(fs::metadata("/etc/shadow").map(|m| m.len()).unwrap_or(0), box_shadow, "the box's own logins changed");
+    assert_eq!(fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0), box_keys, "the box's own keys changed");
+    // And the capabilities no workspace holds are in no set a turn inside carries.
+    let (code, caps, err) = w.exec(&id, "grep -E 'CapBnd|CapEff|CapPrm' /proc/self/status").await;
+    show("the capabilities of a turn inside", code, &caps, &err);
+    assert_eq!(code, 0);
+    let bits = [("CAP_SYS_ADMIN", 21u32), ("CAP_SYS_MODULE", 16), ("CAP_SYS_BOOT", 22), ("CAP_MKNOD", 27)];
+    for line in caps.lines() {
+        let Some((set, mask)) = line.split_once(':') else { continue };
+        let mask = u64::from_str_radix(mask.trim(), 16).unwrap_or_else(|e| panic!("{line}: {e}"));
+        for dropped in wsp_runtime::hardening::DROPPED_CAPS {
+            let (_, bit) = bits.iter().find(|(name, _)| *name == dropped).unwrap_or_else(|| panic!("{dropped} has no bit here"));
+            assert_eq!(mask & (1 << bit), 0, "{set} carries {dropped}");
+        }
+    }
     w.close().await;
 }
 
@@ -1002,7 +1157,9 @@ async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forwa
     assert_ne!(other_address, address);
     let port = w.publish(&id, 7070).await;
     let network = w.network(&id);
-    let (code, _, _) = w.exec(&id, "echo kept > /root/saved").await;
+    // Written where the saved layer keeps it: /var is one of the workspace's own overlays, and the box's /root,
+    // which every workspace on it shares, is the box's own file if a workspace writes there.
+    let (code, _, _) = w.exec(&id, "echo kept > /var/tmp/saved").await;
     assert_eq!(code, 0);
     let record: Value = serde_json::from_str(&fs::read_to_string(root().join("run").join(&id).join("workspace.json")).unwrap()).unwrap();
     let init = record["init"]["pid"].as_i64().unwrap();
@@ -1016,7 +1173,7 @@ async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forwa
     assert!(!Path::new("/sys/class/net").join(&network.link).exists(), "the link is gone");
     assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap_err().kind(), std::io::ErrorKind::ConnectionRefused);
     assert!(!fs::read_to_string("/proc/self/mountinfo").unwrap().contains(&format!("/run/{id}/rootfs")), "the overlay is detached");
-    assert!(root().join("run").join(&id).join("upper/root/saved").is_file(), "the upper directory is the saved layer");
+    assert!(root().join("run").join(&id).join("upper/var/tmp/saved").is_file(), "the upper directory is the saved layer");
     assert_eq!(w.network(&id).forwards, network.forwards, "the network record keeps the forwards");
     let capacity = w.ok("machine.capacity", json!({})).await;
     assert_eq!(capacity["machines"]["paused"], 1);
@@ -1043,14 +1200,16 @@ async fn pause_then_resume_boots_the_saved_layer_with_the_same_address_and_forwa
     let woken = w.network(&id);
     assert_eq!((woken.address, woken.link, woken.gateway), (address, network.link.clone(), network.gateway), "the same address");
     assert_eq!(woken.forwards, network.forwards, "the same forward");
-    let (code, out, _) = w.exec(&id, "cat /root/saved; hostname").await;
+    let (code, out, _) = w.exec(&id, "cat /var/tmp/saved; hostname").await;
     assert_eq!((code, out.as_str()), (0, format!("kept\n{id}\n").as_str()));
     // The processes are gone with the stop, so the listener inside is started again; the box port is the same one.
     assert_eq!(w.listen_inside(&id).await, address);
     assert_eq!(read_line(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).await.unwrap(), "hello from inside");
     assert_eq!(w.publish(&id, 7070).await, port);
-    let (_, out, _) = w.exec(&id, "cat /sys/fs/cgroup/memory.max").await;
-    assert_eq!(out.trim(), "536870912", "the cap comes back with the boot");
+    let (_, out, _) = w.exec(&id, "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.high").await;
+    // The cap as a kill and as a throttle, both back with the boot: the kernel reclaims what it can from the
+    // workspace at the figure before it ends anything at it.
+    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["536870912", "536870912"], "{out}");
     // A second nap and wake, since the first is not special.
     w.ok("machine.pause", json!({ "machineId": id })).await;
     assert_eq!(w.state(&id).await, "paused");
@@ -1333,6 +1492,66 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
     assert!(!socket.exists(), "the socket stays after the kill");
     let (_, outside_still, _) = on_box(&["inspect", "--format", "{{.State.Status}}", &outside]);
     assert_eq!(outside_still.trim(), "running", "the box's own container went with the workspace");
+}
+
+/// Two pieces of work on one project are two compose projects: the workspace's own id is the name compose reads
+/// out of the environment, so the second one's stack does not find the first one's network under the name it
+/// wants and fail at the network step. The name rides on the boot and on every exec, since a tenant inherits
+/// neither the init's environment nor the daemon's.
+#[tokio::test]
+async fn a_workspace_with_an_engine_runs_compose_under_a_project_of_its_own() {
+    if !live() {
+        return;
+    }
+    let Ok(_engine) = wsp_runtime::engine::socket_of(&wsp_runtime::doctor::read_facts()) else {
+        eprintln!("this box has no container engine with a socket; the compose project case is skipped");
+        return;
+    };
+    let Some((docker, compose)) = box_docker() else {
+        eprintln!("this box has no docker client with a compose plugin to land inside; the compose project case is skipped");
+        return;
+    };
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let id = w.create(spec(json!({ "engine": true, "idempotencyKey": format!("live-compose-{key}") }))).await;
+    let project = wsp_runtime::ops::compose_project(&id);
+    // The environment of a command run in it, which is where compose reads the project name.
+    let (code, out, err) = w.exec(&id, "echo $COMPOSE_PROJECT_NAME").await;
+    show("the compose project of a command run inside", code, &out, &err);
+    assert_eq!((code, out.trim()), (0, project.as_str()));
+    // And of the workspace's first process, which every thread under it inherits.
+    let (code, boot_env, err) = w.exec(&id, "tr '\\0' '\\n' < /proc/1/environ | grep COMPOSE_PROJECT_NAME").await;
+    show("the compose project of the workspace's own init", code, &boot_env, &err);
+    assert_eq!((code, boot_env.trim()), (0, format!("COMPOSE_PROJECT_NAME={project}").as_str()));
+
+    put_file(&w, &id, &docker, "/usr/local/bin/docker").await;
+    put_file(&w, &id, &compose, "/root/.docker/cli-plugins/docker-compose").await;
+    let stack = "services:\n  quiet:\n    image: alpine\n    command: sleep 600\n";
+    let (code, _, err) = w
+        .exec(
+            &id,
+            &format!("mkdir -p /root/stack /root/.wsp && printf '%s' '{stack}' > /root/stack/compose.yaml && echo /root/stack > /root/.wsp/roots"),
+        )
+        .await;
+    assert_eq!((code, err.as_str()), (0, ""), "{err}");
+    // No project named on the command line: what compose uses is the name in the environment, and without one it
+    // would be the directory's, which every workspace of one project shares.
+    let (code, out, err) = w.exec(&id, "cd /root/stack && docker compose up -d 2>&1").await;
+    show("docker compose up -d with no project named, from inside", code, &out, &err);
+    assert_eq!(code, 0);
+    let (code, named, err) = w.exec(&id, "docker ps --format '{{.Names}}'").await;
+    show("what the stack's container is called", code, &named, &err);
+    assert_eq!(code, 0);
+    assert!(named.lines().any(|line| line.trim() == format!("{project}-quiet-1")), "{named}");
+    // The box sees it under the same name, which is what makes two workspaces two stacks on one engine.
+    let (_, on_the_box, _) = on_box(&["ps", "--format", "{{.Names}}"]);
+    assert!(on_the_box.lines().any(|line| line.trim() == format!("{project}-quiet-1")), "{on_the_box}");
+    let (code, out, err) = w.exec(&id, "cd /root/stack && docker compose down -v 2>&1").await;
+    show("docker compose down -v, from inside", code, &out, &err);
+    assert_eq!(code, 0);
+    w.close().await;
+    let (_, left, _) = on_box(&["ps", "-a", "--filter", &format!("label={}={id}", wsp_runtime::engine::LABEL), "--format", "{{.Names}}"]);
+    assert_eq!(left.trim(), "", "the killed workspace left containers on the engine");
 }
 
 /// A checkout on the box, as a project a person keeps there: a file, a folder, a symlink, a mode and a pair of

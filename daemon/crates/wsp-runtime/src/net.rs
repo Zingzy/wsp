@@ -3,7 +3,10 @@
 //! the namespace youki made, one /30 out of one private range per box, NAT for what leaves the box, the box's own
 //! resolvers handed in, and `host.wsp.internal` naming the veth gateway. Published ports are this daemon's own
 //! listeners on the box's loopback, each dialing the workspace's address. Everything is the kernel's rtnetlink and
-//! nf_tables spoken from here; no ip, iptables or nft binary runs.
+//! nf_tables spoken from here; no ip, iptables or nft binary runs. Each published port's listener dials the
+//! workspace from inside its own network namespace, so a service bound to 127.0.0.1 in there is reached as well
+//! as one bound to the workspace's address, and every byte through one of them is what this computer can see of
+//! the workspace doing something.
 //!
 //! What a workspace reaches: its box at `host.wsp.internal`, and the world through the interface of the box's
 //! default route and the NAT. Not the box's cloud metadata, not the box's other interfaces or what lies behind
@@ -44,6 +47,11 @@ use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::os::fd::AsRawFd;
 use std::path::Path;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use netlink_packet_core::{NetlinkMessage, NetlinkPayload, NLM_F_ACK, NLM_F_CREATE, NLM_F_DUMP, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::address::{AddressAttribute, AddressMessage};
@@ -54,6 +62,7 @@ use netlink_sys::protocols::NETLINK_ROUTE;
 use netlink_sys::{Socket, SocketAddr};
 use nix::sched::{setns, CloneFlags};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -619,6 +628,110 @@ pub fn check() -> Result<(), String> {
     pair.map_err(|e| format!("this computer's kernel makes no veth pair, which wsp needs to give a workspace a network: {e}"))
 }
 
+/// How long a workspace has been quiet by what the computer running it can see: the last byte through one of its
+/// published ports, or the last command run in it. Nothing else is in it, since nothing else of a workspace is
+/// this computer's to see: a turn's own work reaches the host as the turn's own events.
+///
+/// Counted off a monotonic clock, so the box's own wall clock being set while a workspace runs never moves the
+/// figure, and counted from the moment the clock was made, which is the workspace's boot: one nothing has asked
+/// anything of since it came up reads its whole life as quiet, which is what makes a workspace booted and left
+/// alone stop at its first window.
+pub struct Quiet {
+    since: Instant,
+    /// Milliseconds after `since` of the last thing this computer saw.
+    seen_ms: AtomicU64,
+}
+
+impl Quiet {
+    fn new() -> Quiet {
+        Quiet { since: Instant::now(), seen_ms: AtomicU64::new(0) }
+    }
+
+    /// The workspace did something: the clock starts over. Taken as the later of what two readers write, since
+    /// two bytes on two connections are read in whatever order the runtime gets to them.
+    pub fn touch(&self) {
+        self.seen_ms.fetch_max(self.since.elapsed().as_millis() as u64, Ordering::Relaxed);
+    }
+
+    pub fn quiet_for(&self) -> Duration {
+        let now = self.since.elapsed().as_millis() as u64;
+        Duration::from_millis(now.saturating_sub(self.seen_ms.load(Ordering::Relaxed)))
+    }
+}
+
+/// A stream every byte of which is a byte through a published port: each read and each write starts the
+/// workspace's quiet clock over. Wrapped around the connection on the box's side of the copy, so both directions
+/// go through it.
+struct Counted<S> {
+    inner: S,
+    quiet: Arc<Quiet>,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for Counted<S> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let me = self.get_mut();
+        let held = buf.filled().len();
+        let polled = Pin::new(&mut me.inner).poll_read(cx, buf);
+        if buf.filled().len() > held {
+            me.quiet.touch();
+        }
+        polled
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for Counted<S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        let me = self.get_mut();
+        let polled = Pin::new(&mut me.inner).poll_write(cx, buf);
+        if matches!(polled, Poll::Ready(Ok(written)) if written > 0) {
+            me.quiet.touch();
+        }
+        polled
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
+/// Where a listener sends what it accepts.
+enum Dial {
+    /// A port inside the workspace, dialled from inside its own network namespace: a service bound to 127.0.0.1
+    /// in there is reached, which is what a dev server started with no address of its own binds, and so is one
+    /// bound to the workspace's own address. The namespace is the init's, and a stop takes every listener with
+    /// it, so the pid here is the live one for as long as the listener holding it is bound.
+    Inside { pid: i32, port: u16 },
+    /// A port on the box's own loopback, dialled from here: how a workspace reaches a port its own containers
+    /// published, which the engine bound out here.
+    Box(SocketAddrV4),
+}
+
+impl Dial {
+    async fn connect(&self) -> io::Result<TcpStream> {
+        match *self {
+            Dial::Box(addr) => TcpStream::connect(addr).await,
+            Dial::Inside { pid, port } => {
+                let ns_path = format!("/proc/{pid}/ns/net");
+                let dialled = tokio::task::spawn_blocking(move || -> io::Result<std::net::TcpStream> {
+                    let ns = fs::File::open(&ns_path)?;
+                    inside_with(ns, move || {
+                        std::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).map_err(at(format!("dialling 127.0.0.1:{port} inside")))
+                    })
+                    .map_err(|e| io::Error::other(e.to_string()))
+                })
+                .await
+                .map_err(io::Error::other)??;
+                dialled.set_nonblocking(true)?;
+                TcpStream::from_std(dialled)
+            }
+        }
+    }
+}
+
 struct Listener {
     box_port: u16,
     task: JoinHandle<()>,
@@ -636,10 +749,13 @@ pub struct Net {
     /// One turn at a time on the kernel's tables and links, since a block is picked by reading what is there.
     turn: Mutex<()>,
     listeners: Mutex<BTreeMap<String, BTreeMap<u16, Listener>>>,
-    /// Listeners on a workspace's own loopback, inside its namespace, each dialing a port on the box's loopback: how
-    /// its containers' published ports are reached at the port it asked for. Keyed by the port inside; not recorded,
-    /// since a wake and a daemon restart read them off the engine again.
+    /// Listeners on every address a workspace has, inside its namespace, each dialing a port on the box's loopback:
+    /// how its containers' published ports are reached at the port it asked for. Keyed by the port inside; not
+    /// recorded, since a wake and a daemon restart read them off the engine again.
     inward: Mutex<BTreeMap<String, BTreeMap<u16, Listener>>>,
+    /// The quiet clock of every workspace this daemon booted or found running, one each. A plain lock: every turn
+    /// on it is a lookup, and the reading a client asks for is answered off the runtime thread.
+    quiet: std::sync::Mutex<BTreeMap<String, Arc<Quiet>>>,
 }
 
 impl Net {
@@ -647,7 +763,13 @@ impl Net {
     /// alias names a workspace dir under this root that is not running goes, and once no workspace link is left on
     /// the box the rules go too. Not root: nothing here was made, so nothing is touched.
     pub fn open(layout: Layout, running: &[String]) -> Result<(Net, Swept), Error> {
-        let net = Net { layout, turn: Mutex::new(()), listeners: Mutex::new(BTreeMap::new()), inward: Mutex::new(BTreeMap::new()) };
+        let net = Net {
+            layout,
+            turn: Mutex::new(()),
+            listeners: Mutex::new(BTreeMap::new()),
+            inward: Mutex::new(BTreeMap::new()),
+            quiet: std::sync::Mutex::new(BTreeMap::new()),
+        };
         let mut swept = Swept::default();
         if !is_root() {
             return Ok((net, swept));
@@ -687,6 +809,27 @@ impl Net {
         self.layout.workspace(id).display().to_string()
     }
 
+    /// The workspace's quiet clock, started at this moment where this daemon has none for it: a boot starts one,
+    /// and so does the open of a daemon that found the workspace already running, since a figure counted from a
+    /// moment nothing remembers is not a figure. A workspace idle across a daemon restart therefore lives one
+    /// more window.
+    pub fn quiet_of(&self, id: &str) -> Arc<Quiet> {
+        let mut clocks = self.quiet.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(clocks.entry(id.to_owned()).or_insert_with(|| Arc::new(Quiet::new())))
+    }
+
+    /// The workspace did something this computer can see, which is a command run in it: the clock starts over.
+    /// A workspace this daemon has no clock for gets one, so the first thing seen is the figure's own start.
+    pub fn touched(&self, id: &str) {
+        self.quiet_of(id).touch();
+    }
+
+    /// How long it has been quiet, in milliseconds, where this daemon has a clock for it.
+    pub fn quiet_for_ms(&self, id: &str) -> Option<u64> {
+        let clocks = self.quiet.lock().unwrap_or_else(|e| e.into_inner());
+        clocks.get(id).map(|quiet| quiet.quiet_for().as_millis() as u64)
+    }
+
     pub fn record(&self, id: &str) -> Result<Option<Network>, Error> {
         let path = self.layout.net(id);
         match fs::read(&path) {
@@ -703,6 +846,8 @@ impl Net {
     pub async fn restore(&self, running: &[String]) -> Result<(), Error> {
         for id in running {
             let Some(mut network) = self.record(id)? else { continue };
+            // A workspace this daemon has just found running gets a clock counted from now, as a boot does.
+            let quiet = self.quiet_of(id);
             let mut moved = false;
             for (port, box_port) in network.forwards.clone() {
                 if self.listeners.lock().await.get(id).is_some_and(|m| m.contains_key(&port)) {
@@ -718,7 +863,8 @@ impl Net {
                     network.forwards.insert(port, got);
                     moved = true;
                 }
-                self.hold(id, port, bound, SocketAddrV4::new(network.address, port)).await;
+                let Some(pid) = self.init_pid(id)? else { continue };
+                self.hold(id, port, bound, Dial::Inside { pid, port }, Some(Arc::clone(&quiet))).await;
             }
             if moved {
                 bundle::write_json(&self.layout.net(id), &network)?;
@@ -732,6 +878,9 @@ impl Net {
     /// is still free; the forwards themselves come back with `restore`.
     pub async fn up(&self, id: &str, pid: i32) -> Result<Network, Error> {
         let _turn = self.turn.lock().await;
+        // The quiet clock starts with the boot, so a workspace nobody asks anything of is quiet from the moment
+        // it came up.
+        self.quiet_of(id).touch();
         let layout = Layout::new(self.layout.root());
         let alias = self.alias_of(id);
         let before = self.record(id)?;
@@ -794,6 +943,9 @@ impl Net {
         let _turn = self.turn.lock().await;
         self.listeners.lock().await.remove(id);
         self.inward.lock().await.remove(id);
+        // A stopped workspace has nothing to be quiet about, and its pid is not its pid any more: the wake starts
+        // a clock of its own.
+        self.quiet.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
         // The listeners' tasks end at the next turn of the runtime; taking it here means none is bound when this
         // returns.
         tokio::task::yield_now().await;
@@ -825,6 +977,8 @@ impl Net {
     }
 
     /// The port on the box's loopback that dials the workspace's port: the one already open for it, else a new one.
+    /// The record is written whatever the workspace is doing, so a port published while it is stopped is one the
+    /// wake binds; nothing is dialled for it until then.
     pub async fn publish(&self, id: &str, port: u16) -> Result<u16, Error> {
         if let Some(held) = self.listeners.lock().await.get(id).and_then(|m| m.get(&port)) {
             return Ok(held.box_port);
@@ -835,13 +989,31 @@ impl Net {
         let box_port = bound.local_addr().map_err(at("reading a forward's port"))?.port();
         network.forwards.insert(port, box_port);
         bundle::write_json(&self.layout.net(id), &network)?;
-        self.hold(id, port, bound, SocketAddrV4::new(network.address, port)).await;
+        // A port published while the workspace is stopped is bound here all the same, which keeps the port from
+        // being taken by something else before the wake: with no live init there is no namespace to dial, the
+        // dial's own read of /proc answers nothing, and the connection closes with no byte, as one to a port
+        // nothing listens on inside does.
+        let pid = self.init_pid(id)?.unwrap_or(0);
+        let quiet = self.quiet_of(id);
+        self.hold(id, port, bound, Dial::Inside { pid, port }, Some(quiet)).await;
         Ok(box_port)
     }
 
-    /// A listener on the workspace's loopback at `inside`, in the namespace of the init `pid`, dialing the box's
-    /// loopback at `box_port`: the workspace reaches a container's published port at the port it asked for. One
-    /// already held on that port inside is replaced.
+    /// The pid of the workspace's init as its record names it, where that pid is still that process: what a
+    /// listener dials the workspace's own namespace through.
+    fn init_pid(&self, id: &str) -> Result<Option<i32>, Error> {
+        let record = bundle::read_record(&self.layout.record(id))?;
+        Ok(record.filter(|record| crate::runtime::alive(&record.init)).map(|record| record.init.pid))
+    }
+
+    /// A listener on every address the workspace has at `inside`, in the namespace of the init `pid`, dialing the
+    /// box's loopback at `box_port`: the workspace reaches a container's published port at the port it asked for.
+    /// One already held on that port inside is replaced.
+    ///
+    /// Every address and not the loopback alone: a container of the workspace's own dials a sibling at the
+    /// workspace's own address as often as at localhost, and on a loopback-only listener that dial was refused
+    /// (measured through the fence on a box). These bytes are the workspace talking to its own containers, so
+    /// none of them is on the quiet clock: what keeps a workspace awake is somebody asking it for something.
     pub async fn forward_inward(&self, id: &str, pid: i32, inside_port: u16, box_port: u16) -> Result<(), Error> {
         if let Some(held) = self.inward.lock().await.get_mut(id) {
             held.remove(&inside_port);
@@ -852,8 +1024,8 @@ impl Net {
         let bound = tokio::task::spawn_blocking(move || -> Result<std::net::TcpListener, Error> {
             let ns = fs::File::open(&ns_path).map_err(at(ns_path.clone()))?;
             inside_with(ns, move || {
-                let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, inside_port))
-                    .map_err(at(format!("binding 127.0.0.1:{inside_port} inside the workspace")))?;
+                let listener = std::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, inside_port))
+                    .map_err(at(format!("binding 0.0.0.0:{inside_port} inside the workspace")))?;
                 listener.set_nonblocking(true).map_err(at("a listener inside the workspace"))?;
                 Ok(listener)
             })
@@ -861,14 +1033,14 @@ impl Net {
         .await
         .map_err(|e| Error { what: "the namespace task".into(), source: io::Error::other(e.to_string()) })??;
         let listener = TcpListener::from_std(bound).map_err(at("a listener inside the workspace"))?;
-        let task = tokio::spawn(serve(listener, SocketAddrV4::new(Ipv4Addr::LOCALHOST, box_port)));
+        let task = tokio::spawn(serve(listener, Arc::new(Dial::Box(SocketAddrV4::new(Ipv4Addr::LOCALHOST, box_port))), None));
         self.inward.lock().await.entry(id.to_owned()).or_default().insert(inside_port, Listener { box_port, task });
         Ok(())
     }
 
-    async fn hold(&self, id: &str, port: u16, bound: TcpListener, target: SocketAddrV4) {
+    async fn hold(&self, id: &str, port: u16, bound: TcpListener, dial: Dial, quiet: Option<Arc<Quiet>>) {
         let box_port = bound.local_addr().map(|a| a.port()).unwrap_or(0);
-        let task = tokio::spawn(serve(bound, target));
+        let task = tokio::spawn(serve(bound, Arc::new(dial), quiet));
         self.listeners.lock().await.entry(id.to_owned()).or_default().insert(port, Listener { box_port, task });
     }
 }
@@ -877,20 +1049,30 @@ async fn bind(port: u16) -> io::Result<TcpListener> {
     TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await
 }
 
-/// Every connection accepted on the box's loopback is one connection to the workspace's port, bytes both ways
-/// until either side closes.
-async fn serve(listener: TcpListener, target: SocketAddrV4) {
+/// Every connection accepted is one connection to where the dial leads, bytes both ways until either side
+/// closes. Where a quiet clock came with it, every byte of every one of them starts that clock over: the
+/// connection on this side is the one wrapped, so both directions count.
+async fn serve(listener: TcpListener, dial: Arc<Dial>, quiet: Option<Arc<Quiet>>) {
     loop {
         let (mut inbound, _) = match listener.accept().await {
             Ok(accepted) => accepted,
             Err(_) => {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
             }
         };
+        let dial = Arc::clone(&dial);
+        let quiet = quiet.clone();
         tokio::spawn(async move {
-            if let Ok(mut outbound) = TcpStream::connect(target).await {
-                let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+            let Ok(mut outbound) = dial.connect().await else { return };
+            match quiet {
+                Some(quiet) => {
+                    let mut counted = Counted { inner: inbound, quiet };
+                    let _ = tokio::io::copy_bidirectional(&mut counted, &mut outbound).await;
+                }
+                None => {
+                    let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound).await;
+                }
             }
         });
     }
@@ -973,6 +1155,58 @@ mod tests {
         assert_eq!(forwarding_file("wsp-3"), "/proc/sys/net/ipv4/conf/wsp-3/forwarding");
     }
 
+    /// The clock the host's idle firing reads: nothing since the last byte or the last command, growing while
+    /// nothing happens. Every figure here is held against fifty milliseconds, which is a runtime turn and not a
+    /// wall clock: the window this feeds is twenty minutes long.
+    #[tokio::test]
+    async fn the_quiet_clock_starts_over_on_every_byte_and_grows_while_nothing_happens() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let quiet = Arc::new(Quiet::new());
+        quiet.touch();
+        assert!(quiet.quiet_for() < Duration::from_millis(50), "{:?}", quiet.quiet_for());
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(quiet.quiet_for() >= Duration::from_millis(50), "{:?}", quiet.quiet_for());
+
+        // A byte read off the connection on the box's side is somebody asking the workspace for something.
+        let (mut asking, answering) = tokio::io::duplex(64);
+        let mut counted = Counted { inner: answering, quiet: Arc::clone(&quiet) };
+        asking.write_all(b"GET / HTTP/1.1\r\n").await.unwrap();
+        let mut held = [0u8; 16];
+        counted.read_exact(&mut held).await.unwrap();
+        assert!(quiet.quiet_for() < Duration::from_millis(50), "a byte in did not start the clock over");
+
+        // And a byte written back to them is the workspace answering.
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        counted.write_all(b"HTTP/1.1 200 OK\r\n").await.unwrap();
+        assert!(quiet.quiet_for() < Duration::from_millis(50), "a byte out did not start the clock over");
+
+        // A connection closing is not a byte: the clock goes on growing, so a browser tab going away does not
+        // read as the workspace doing something.
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        drop(asking);
+        assert_eq!(counted.read(&mut held).await.unwrap(), 0);
+        assert!(quiet.quiet_for() >= Duration::from_millis(50), "the end of a stream started the clock over");
+    }
+
+    #[test]
+    fn a_workspace_this_daemon_has_no_clock_for_answers_no_figure() {
+        let net = Net {
+            layout: Layout::new(Path::new("/var/lib/wsp")),
+            turn: Mutex::new(()),
+            listeners: Mutex::new(BTreeMap::new()),
+            inward: Mutex::new(BTreeMap::new()),
+            quiet: std::sync::Mutex::new(BTreeMap::new()),
+        };
+        // Nothing of this workspace has been seen by this daemon at all, which is what a restart leaves.
+        assert_eq!(net.quiet_for_ms("wsp-a"), None);
+        net.touched("wsp-a");
+        assert!(net.quiet_for_ms("wsp-a").is_some_and(|ms| ms < 50), "{:?}", net.quiet_for_ms("wsp-a"));
+        // One clock per workspace, so reading a figure is not what resets it and two roads into one workspace
+        // write the same clock.
+        assert!(Arc::ptr_eq(&net.quiet_of("wsp-a"), &net.quiet_of("wsp-a")));
+        assert!(!Arc::ptr_eq(&net.quiet_of("wsp-a"), &net.quiet_of("wsp-b")));
+    }
+
     #[test]
     fn an_alias_names_a_workspace_under_this_root_alone() {
         let net = Net {
@@ -980,6 +1214,7 @@ mod tests {
             turn: Mutex::new(()),
             listeners: Mutex::new(BTreeMap::new()),
             inward: Mutex::new(BTreeMap::new()),
+            quiet: std::sync::Mutex::new(BTreeMap::new()),
         };
         assert_eq!(net.workspace_of("/var/lib/wsp/run/wsp-a"), Some("wsp-a".to_owned()));
         assert_eq!(net.workspace_of("/tmp/other/run/wsp-a"), None);

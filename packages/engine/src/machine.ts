@@ -152,6 +152,10 @@ export interface Lifecycle {
    * forgotten. Called from the policy's own arming and not awaited: a rejection is logged, and the backend decides
    * whether a given instant is worth a call, since the window is armed on every streamed chunk. */
   backstop?(machine: Machine, until: number): Promise<void>;
+  /** Optional: how long the machine has been quiet by what the computer running it can see, bytes on its
+   * published ports and commands run in it. Read once before an idle stop, so a dev server somebody is clicking
+   * through stays up. Undefined where the backend cannot say, which leaves the stop to the host's own clock. */
+  quietForMs?(machine: Machine): Promise<number | undefined>;
 }
 
 export interface MachineBackend {
