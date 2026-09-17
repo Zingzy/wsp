@@ -121,7 +121,7 @@ describe("recording a project", () => {
   it("a folder seeding a computer that clones is refused until the person has said what travels", async () => {
     const folder = tempRepo();
     const plan = seedPlanFor(folder);
-    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0 }) });
+    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0, left: [] }) });
     await expect(rt.projects.add({ source: folder, on: "default" })).rejects.toThrow(seedChoiceNeeded(folder));
     expect(await rt.projects.list()).toEqual([]);
     rmSync(folder, { recursive: true, force: true });
@@ -130,7 +130,7 @@ describe("recording a project", () => {
   it("a folder seeding a computer this host has sealed no image for is refused: the seed has nowhere to land", async () => {
     const folder = tempRepo();
     const plan = seedPlanFor(folder);
-    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0 }) });
+    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0, left: [] }) });
     await expect(rt.projects.add({ source: folder, on: "default", seed: { files: [], memory: false, commits: false } })).rejects.toThrow(NO_IMAGE_FOR_SEED);
     rmSync(folder, { recursive: true, force: true });
   });
@@ -138,7 +138,7 @@ describe("recording a project", () => {
   it("a folder with no remote cannot seed a computer that clones: there is nothing for it to clone", async () => {
     const folder = tempRepo();
     const plan = { ...seedPlanFor(folder), remote: null };
-    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0 }) });
+    const { rt } = withLocal(stubBackend(), { plan: async () => plan, pack: async () => ({ tar: Buffer.from("x"), files: 1, bytes: 1, commits: 0, left: [] }) });
     await expect(rt.projects.add({ source: folder, on: "default", seed: { files: [], memory: false, commits: false } })).rejects.toThrow(noRemoteLine(folder));
     rmSync(folder, { recursive: true, force: true });
   });
@@ -261,6 +261,23 @@ describe("a project recorded before a later build's fields", () => {
     expect(await store.get("projects", "pr_old")).toEqual(project);
     // And the workspaces standing on it still stand: nothing asked anybody to move a state file aside.
     expect(await rt.workspaces.list()).toEqual([]);
+  });
+
+  it("on a computer that holds the checkout, carries the memory folder that computer's own road names", async () => {
+    const store = memoryStore();
+    await store.put("projects", old.id, old);
+    const backend = stubBackend();
+    // What the computer says about itself: it keeps the project checkouts and their memory on a disk of its own.
+    (backend as { projects?: string }).projects = "/wsp/projects";
+    backend.capabilities.images = false;
+    const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(here()) });
+    const [project] = await rt.projects.list();
+    // The road's own rule, not a guest path: the folder under that computer's projects directory.
+    expect(project?.memoryDir).toBe(`/wsp/projects/${old.id}/memory`);
+    // And it is exactly what a workspace of the project mounts, which is the whole point of filling it.
+    const ws = await rt.workspaces.create({ project: old.id, name: "work" });
+    const spec = backend.machines.find(m => m.id === ws.machineId)?.spec;
+    expect(spec?.binds).toEqual([{ source: project?.memoryDir, target: `/root/.claude-cfg/projects/${project?.memoryKey}/memory` }]);
   });
 
   it("keeps every field a record already carries, and reads a folder here against this computer's own store", async () => {

@@ -15,7 +15,6 @@ export const ENV_STRIP_PATTERNS: readonly RegExp[] = [
   /^FORCE_CODE_TERMINAL$/,
 ];
 
-
 // From t3code's probe options: headless runs must not probe for IDEs, or the
 // CLI spawns discovery process trees on every invocation.
 const HEADLESS_OVERRIDES = {

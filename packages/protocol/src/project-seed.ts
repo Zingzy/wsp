@@ -110,6 +110,12 @@ export function seedConsentLines(plan: SeedPlan, computer: string, addLine: (fla
   ];
 }
 
+/** What the add says about the paths a ticked folder held that never travel: a login inside a folder somebody
+ * ticked stays on this computer, and the line names each one, so nothing they asked to carry is dropped in
+ * silence. */
+export const leftBehindLine = (paths: readonly string[]): string =>
+  `${plural(paths.length, "login")} inside the folders you ticked stayed on this computer: ${paths.join(", ")}`;
+
 /** Why a folder with no remote records nothing: the computer clones the repo, and a folder git has no remote for
  * gives it nothing to clone. */
 export const noRemoteLine = (folder: string): string =>

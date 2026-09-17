@@ -80,7 +80,7 @@ const TICKED: SeedChoice = { files: [".env.local"], memory: true, commits: false
 
 /** A host with an image sealed on the computer named, the stub provider as its backend and a folder reader that
  * answers the plan handed in: what an add of a folder on this computer onto a computer that clones needs. */
-async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer; keepsImages?: boolean } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
+async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; packed?: Buffer; keepsImages?: boolean; left?: string[] } = { plan: plan("/x") }): Promise<{ rt: Runtime; backend: StubBackend; store: Store; seed: SeedWiring; packs: { plan: SeedPlan; choice: SeedChoice }[] }> {
   const backend = stubBackend();
   // What the computer says about itself: a box keeps project checkouts on a disk of its own and no image at all,
   // a provider keeps images and no checkout.
@@ -93,7 +93,7 @@ async function withImage(o: { at?: string; plan: SeedPlan; projects?: string; pa
     plan: async () => o.plan,
     pack: async ({ plan: p, choice }) => {
       packs.push({ plan: p, choice });
-      return { tar: o.packed ?? Buffer.from("seed archive"), files: choice.files.length, bytes: 12, commits: 0 };
+      return { tar: o.packed ?? Buffer.from("seed archive"), files: choice.files.length, bytes: 12, commits: 0, left: o.left ?? [] };
     },
   };
   const root = mkdtempSync(join(tmpdir(), "wsp-add-local-"));
@@ -166,6 +166,21 @@ describe("a folder seeding a project on a computer that clones", () => {
     expect(packs).toEqual([{ plan: plan(folder), choice: TICKED }]);
     expect(project.installed).toBeUndefined();
     expect(commands(backend)).not.toContain("npm ci");
+  });
+
+  it("names the logins a ticked folder held that never travel, so nothing they ticked is dropped in silence", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects", left: ["config/.netrc"] });
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const project = await rt.projects.add({ source: folder, on: "default", seed: { files: ["config"], memory: false, commits: false } });
+    expect(project.notice).toBe("1 login inside the folders you ticked stayed on this computer: config/.netrc");
+  });
+
+  it("says nothing of the kind where every ticked path travelled", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    expect((await rt.projects.add({ source: folder, on: "default", seed: TICKED })).notice).toBeUndefined();
   });
 
   it("keeps the project's memory on the computer, and every workspace of it binds that folder read-write", async () => {

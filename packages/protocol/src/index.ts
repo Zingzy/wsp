@@ -4862,7 +4862,7 @@ export {
 export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
-export { defaultSeedChoice, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
+export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";
