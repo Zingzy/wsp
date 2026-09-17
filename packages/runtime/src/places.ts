@@ -20,7 +20,6 @@ import {
   PLACE_LEAVE_LINE,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
-  placeCurrentLine,
   forkRoom,
   placeLinkTranscript,
   isPlainPath,
@@ -36,6 +35,11 @@ import {
   placeStillInstalledLine,
   placeDialLine,
   placeDialRoad,
+  placeNoRecipeLine,
+  placeProvisionPaths,
+  placeProvisioningLine,
+  provisionLines,
+  plural,
   sshRoadOf,
   placeNoDialLine,
   BackendFacts,
@@ -51,12 +55,15 @@ import {
   type PlaceEvent,
   type PlaceDial,
   type PlaceDialled,
+  type PlaceProvision,
+  type PlaceProvisionRow,
   type PlaceReport,
   type PlaceRoad,
+  type PlaceUpdateReply,
   type PlaceView,
   type WorkspaceSize,
 } from "@wsp/protocol";
-import { LinkBackend, PlaceAbsentError, SSH_STORE_VARS, keyFingerprint, plainPath, type ExecResult, type MachineBackend, type MachineLink } from "@wsp/engine";
+import { LinkBackend, PlaceAbsentError, PlaceMachine, SSH_STORE_VARS, keyFingerprint, plainPath, putFiles, type ExecResult, type Machine, type MachineBackend, type MachineLink, type ProvisionPlan, type ProvisionStage } from "@wsp/engine";
 import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
@@ -97,6 +104,8 @@ export interface PlaceRecord {
   road?: PlaceRecordRoad;
   /** What the last dial of it came to. Kept so the answer outlives the window that asked for it. */
   dialled?: PlaceDialled;
+  /** The recipe job on this computer as it last stood; written per row while it runs. */
+  provision?: PlaceProvision;
   /** When the report on this record was taken. Not lastSeenAt: that moves every minute while the link is held,
    * and the uptime in the report grows with the computer, so a row dating one by the other reads an hours-old
    * figure as a minutes-old one. */
@@ -156,6 +165,18 @@ export interface PlaceWiring {
    * Absent on a runtime served without the ssh road, where a remove of a computer that is not connected says the
    * agent is still installed and leaves it to the person at that computer. */
   leave?: PlaceLeaver;
+  /** How the recipe this computer holds is put on a computer you own. Absent, no computer is provisioned and the
+   * join and the update say nothing about it. */
+  provision?: PlaceProvisioner;
+}
+
+/** How the recipe on this computer is put on a computer you own. `plan` reads the recipe beside the host's state
+ * and this computer and answers the steps, or the recipe path when there is none; `run` puts the plan on `machine`,
+ * which is that computer itself over the link its daemon holds. The host wires it because the recipe and the
+ * reading of this computer are the host's, as the installer and the daemon binary are. */
+export interface PlaceProvisioner {
+  plan(): Promise<ProvisionPlan | { noRecipe: string }>;
+  run(machine: Machine, plan: ProvisionPlan, stage: ProvisionStage): Promise<PlaceProvisionRow[]>;
 }
 
 /** One login over ssh as this host holds it: the address in the spelling a person would type back, and the key file
@@ -210,15 +231,6 @@ export interface PlaceLeaveRequest {
  * over the login the install used. Answers the lines it said it took; throws the road's own sentence where the
  * computer will not answer, which leaves the remove saying the agent is still installed. */
 export type PlaceLeaver = (req: PlaceLeaveRequest) => Promise<readonly string[]>;
-
-/** What the door answers a person who asked for one: the versions either side of the move, the road it took, where
- * it landed, and the sentence for a computer that had not dialled back on the new daemon before the wait ran out. */
-export interface PlaceUpdated extends PlaceUpdateLanded {
-  name: string;
-  from: number;
-  to: number;
-  note?: string;
-}
 
 /** What one install is told: where to log in, what to call the computer, the single-use code it spends on this
  * host, and the addresses that computer is to dial it at, in the order its link tries them. The addresses are the
@@ -367,9 +379,10 @@ export interface PlaceDoor {
   /** The home the place's login lands in, which every path a turn there is built from. */
   homeOf(placeId: string): Promise<string | undefined>;
   list(now: number): Promise<PlaceView[]>;
-  /** Puts the daemon this host deploys on one place and waits for it to dial back running it. Refuses in one
-   * sentence a place this host does not hold, one already on this daemon, and a runtime wired with no updater. */
-  update(placeId: string): Promise<PlaceUpdated>;
+  /** Puts the daemon this host deploys on one place where it is behind, then runs the recipe job on it. Refuses in
+   * one sentence a place this host does not hold, and a computer that is behind on a runtime wired with no
+   * updater; a computer already on this daemon takes the job alone. */
+  update(placeId: string, addId?: string): Promise<PlaceUpdateReply>;
   remove(placeId: string): Promise<PlaceRemoved>;
   /** Every place a word picks, by id or by the name the person gave it: none, one, or the two that share a name,
    * which is a refusal the caller writes with the ids in it. */
@@ -422,11 +435,13 @@ export class PlaceLoginRefusedError extends Error {}
 export class PlaceForksNowhereError extends Error {}
 
 /** What an install answers once the computer has dialled in: which stream of steps it was, the place it became,
- * and the key its ssh answered with. */
+ * the key its ssh answered with, and why the recipe job did not start where it did not. The place's own row
+ * carries that job while it runs, so a caller reads one or the other and never both. */
 export interface PlaceAdded {
   addId: string;
   place: PlaceView;
   hostKey?: string;
+  said?: string;
 }
 
 /** What a remove answers: whether a place of that id was there, what the sweep took off that computer, what the
@@ -582,6 +597,15 @@ async function boxSaid(wiring: PlaceWiring, installed: PlaceInstalled): Promise<
   const login = { ssh: installed.ssh, ...(installed.sshKeyPath !== undefined ? { keyPath: installed.sshKeyPath } : {}) };
   return await wiring.log(login).catch(() => []);
 }
+
+/** What a job the host was driving reads as once that host is gone: nothing outlives the process that drove it,
+ * so the record is not left saying a run is under way that nothing is running. */
+export const PROVISION_HOST_STOPPED = "the host stopped while it ran";
+
+/** How often the job's lines are appended to the log on the computer, and how many lines go without waiting for
+ * that: one exec per line would be one frame per line on a run of hundreds. */
+const PROVISION_LOG_EVERY_MS = 2_000;
+const PROVISION_LOG_LINES = 50;
 
 /** How long a computer that took an update has to come back up running it. The unit restarts the daemon within
  * seconds and its link backs off from two, so a minute is the row reading the new version as the ticket asks
@@ -772,6 +796,120 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       held.add(wake);
     });
 
+  /** The recipe job under way on each computer, by place id: one per computer, so a second run is refused rather
+   * than two runs installing over each other. */
+  const provisioning = new Map<string, Promise<void>>();
+
+  /** The one write of a place's provision: onto the record as it stands rather than as it was when the row landed,
+   * since an attach's write of lastSeenAt is going on beside it. */
+  const writeProvision = async (placeId: string, provision: PlaceProvision): Promise<void> => {
+    const now = await recordOf(placeId);
+    if (now === undefined) return;
+    await keep({ ...now, provision });
+  };
+
+  const provisionStage = (addId: string, state: "running" | "done" | "failed", note?: string): void => {
+    opts.onStage?.({ type: "place.stage", addId, step: "provision", state, ...(note !== undefined ? { note } : {}) });
+  };
+
+  /** The job's own log and outcome on the computer itself, so a person at its shell reads what happened without
+   * this host: the lines appended in batches, the outcome written whole at the end. Nothing here fails the job; a
+   * computer that will not take its own log is still a computer the recipe landed on. */
+  const provisionRecord = (machine: Machine, home: string, header: string) => {
+    const at = placeProvisionPaths(home);
+    let lines: string[] = [header];
+    let timer: NodeJS.Timeout | undefined;
+    let writing: Promise<void> = Promise.resolve();
+    const flush = (): Promise<void> => {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+      const sending = lines;
+      lines = [];
+      if (sending.length === 0) return writing;
+      writing = writing.then(() => putFiles(machine, [{ path: at.log, text: `${sending.join("\n")}\n`, append: true }]).then(() => undefined)).catch(() => undefined);
+      return writing;
+    };
+    return {
+      write: (line: string): void => {
+        lines.push(line);
+        if (lines.length >= PROVISION_LOG_LINES) void flush();
+        else if (timer === undefined) {
+          timer = setTimeout(() => void flush(), PROVISION_LOG_EVERY_MS);
+          timer.unref?.();
+        }
+      },
+      close: async (provision: PlaceProvision): Promise<void> => {
+        await flush();
+        await putFiles(machine, [{ path: at.result, text: `${JSON.stringify(provision, null, 2)}\n` }]).catch(() => undefined);
+      },
+    };
+  };
+
+  /** The run itself, behind whoever asked for it: every row onto the record as its outcome arrives, every line on
+   * the place's own stage stream and in the log on that computer, and the state at the end. A throw is the
+   * computer having stopped answering, which leaves the job stopped with its first line. */
+  const runProvision = async (placeId: string, addId: string, planned: ProvisionPlan, machine: Machine, home: string, started: PlaceProvision): Promise<void> => {
+    const provisioner = wiring.provision;
+    if (provisioner === undefined) return;
+    const log = provisionRecord(machine, home, `wsp ${wiring.hostName()} put the recipe of ${planned.recipeAt} on this computer at ${started.startedAt}: ${plural(planned.steps.length, "row")}`);
+    let held = started;
+    let writing: Promise<void> = Promise.resolve();
+    const push = (next: PlaceProvision): void => {
+      held = next;
+      writing = writing.then(() => writeProvision(placeId, next)).catch(() => undefined);
+    };
+    const stage: ProvisionStage = (detail, at, row) => {
+      log.write(detail);
+      provisionStage(addId, "running", detail);
+      if (row === undefined && at === undefined) return;
+      push({ ...held, rows: row === undefined ? held.rows : [...held.rows, row], ...(at === undefined ? {} : { at }) });
+    };
+    try {
+      const rows = await provisioner.run(machine, planned, stage);
+      const { at: _under, ...rest } = held;
+      push({ ...rest, state: "done", finishedAt: new Date(clockNow()).toISOString(), rows });
+      await writing;
+      provisionStage(addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "));
+    } catch (e) {
+      const said = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
+      const { at: _under, ...rest } = held;
+      push({ ...rest, state: "stopped", said, finishedAt: new Date(clockNow()).toISOString() });
+      await writing;
+      provisionStage(addId, "failed", said);
+    }
+    await log.close(held);
+  };
+
+  /** Starts the recipe job on one computer and answers how it stands the moment it is under way, so a person who
+   * asked for a join or an update reads a row that is already running. The plan is read here, which is this
+   * computer being read; everything after it happens behind the answer. Nothing at all on a host that wired no
+   * provisioner, which is what every runtime outside the app has. */
+  const startProvision = async (placeId: string, addId: string): Promise<{ provision?: PlaceProvision; said?: string }> => {
+    const provisioner = wiring.provision;
+    if (provisioner === undefined) return {};
+    const record = await recordOf(placeId);
+    const home = record?.report.login["HOME"];
+    if (record === undefined || home === undefined) return {};
+    if (provisioning.has(placeId) || record.provision?.state === "running") {
+      return { said: placeProvisioningLine(record.name, record.provision?.at) };
+    }
+    const planned = await provisioner.plan();
+    if ("noRecipe" in planned) return { said: placeNoRecipeLine(record.name, planned.noRecipe) };
+    const provision: PlaceProvision = { state: "running", addId, recipeAt: planned.recipeAt, startedAt: new Date(clockNow()).toISOString(), rows: [] };
+    await writeProvision(placeId, provision);
+    provisionStage(addId, "running", `${plural(planned.steps.length, "row")} from the recipe of ${planned.recipeAt}`);
+    // The computer itself, not a workspace on it: the link it is holding to this host, driven as a machine.
+    const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
+    const job = runProvision(placeId, addId, planned, machine, home, provision).finally(() => provisioning.delete(placeId));
+    provisioning.set(placeId, job);
+    return { provision };
+  };
+
+  /** The start above with its own refusal as a sentence: a recipe this host cannot read is a computer that got no
+   * agents, not a join or an update that failed after the daemon landed. */
+  const startedOrSaid = (placeId: string, addId: string): Promise<{ provision?: PlaceProvision; said?: string }> =>
+    startProvision(placeId, addId).catch((e: unknown) => ({ said: (e instanceof Error ? e.message : String(e)).split("\n")[0]! }));
+
   /** The record with what that computer forks with on it, waited for no longer than one round trip on a link
    * that is up: the read behind this writes the record whenever the answer lands, so a computer slower than
    * that is joined, or updated, all the same and its row fills in at the read after. Where the facts are already
@@ -926,6 +1064,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     ...(record.report.uptimeMs !== undefined ? { uptimeMs: record.report.uptimeMs } : {}),
     ...(record.reportedAt !== undefined ? { reportedAt: record.reportedAt } : {}),
     ...(record.dialled !== undefined ? { dialled: record.dialled } : {}),
+    ...(record.provision !== undefined ? { provision: record.provision } : {}),
   });
 
   /** Whether this computer can be a place at all, by the daemon's own self check, and the one sentence when it
@@ -1113,6 +1252,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       for (const record of await records()) {
         kept.set(record.id, record);
         if (record.backendFacts !== undefined && !backends.has(record.id)) backendFrom(record.id, record.backendFacts);
+        // No job outlives the host that drove it, so a record left running is stopped here rather than holding
+        // the gate on that computer shut for good.
+        if (record.provision?.state === "running") {
+          const { at: _under, ...rest } = record.provision;
+          await writeProvision(record.id, { ...rest, state: "stopped", said: PROVISION_HOST_STOPPED, finishedAt: new Date(clockNow()).toISOString() });
+        }
       }
     },
 
@@ -1142,6 +1287,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       if (record === undefined) {
         backends.delete(placeId);
         throw new PlaceForksNowhereError(placeForksNowhereLine(name));
+      }
+      // A computer whose recipe is still going on is not forked into while it runs: the workspace would come up
+      // without the agent the job is putting there. The running workspaces on it are untouched, since they read
+      // backendOf and not this.
+      if (record.provision?.state === "running") {
+        throw Object.assign(new Error(placeProvisioningLine(name, record.provision.at)), { kind: "conflict" });
       }
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
@@ -1284,8 +1435,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
         // sign-in offered right after it reads. Waited for no longer than one frame on a fresh link takes: a
         // computer slower than that is joined all the same, its answer lands on the record behind this add, and
         // its row carries nothing about its forks until then, as every row did before any of this was asked.
-        const said = await factsOn(placeId, held);
-        return { addId, place: viewOf(said, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}) };
+        const facts = await factsOn(placeId, held);
+        // The recipe starts before this answers and runs on behind it, on the add's own stream: the steps ride
+        // where the join's steps rode. Started rather than fired and forgotten, so the row this answers with says
+        // whether a job is under way and whoever asked knows whether there is one to follow.
+        const started = await startedOrSaid(placeId, addId);
+        const row = { ...facts, ...(started.provision !== undefined ? { provision: started.provision } : {}) };
+        return { addId, place: viewOf(row, await defaultId()), ...(installed.hostKey !== undefined ? { hostKey: installed.hostKey } : {}), ...(started.said !== undefined ? { said: started.said } : {}) };
       } catch (e) {
         // The step the install was on when it stopped is the one that failed, so a person reads the sentence
         // against the line it belongs to rather than under the list. One line of it: a note is printed after the
@@ -1415,37 +1571,41 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       ];
     },
 
-    async update(placeId) {
+    async update(placeId, addId) {
       const held = await recordOf(placeId);
       if (held === undefined) throw new Error(noSuchPlaceRefusal(placeId, (await records()).map(r => r.name)));
       const from = held.report.daemonVersion;
-      // Read before a byte is picked up: a place already on this daemon is told so rather than sent it again, and
-      // the row it is told about is the one the list prints.
-      if (from >= DAEMON_VERSION) throw new Error(placeCurrentLine(held.name, from));
-      if (wiring.update === undefined) throw new Error(NO_PLACE_UPDATER);
-      const link = live.get(placeId)?.reach;
-      const ssh = loginOf(held);
-      const landed = await wiring.update({
-        placeId,
-        name: held.name,
-        report: held.report,
-        ...(link === undefined ? {} : { link }),
-        ...(ssh === undefined ? {} : { ssh }),
-      });
-      // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
-      // about itself then is the only reading that proves the new daemon is the one running there.
-      const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
-      // The attach on the new daemon dropped what the old one said it forks with and asked again; this waits for
-      // that answer, so the row after an update carries the new daemon's facts rather than nothing while they are
-      // still in flight. It joins the read behind the attach instead of sending a second frame.
-      if (to !== from) await factsOn(placeId, held);
-      return {
-        ...landed,
-        name: held.name,
-        from,
-        to,
-        ...(to >= DAEMON_VERSION ? {} : { note: placeUpdateSlowLine(held.name, Math.round((opts.updateWaitMs ?? UPDATE_WAIT_MS) / 1000)) }),
-      };
+      // The daemon half runs only where that computer is behind: a computer already running this wsp's daemon is
+      // the common case for a recipe that changed, and the recipe half below is what the person asked for.
+      let daemon: PlaceUpdateReply["daemon"];
+      if (from < DAEMON_VERSION) {
+        if (wiring.update === undefined) throw new Error(NO_PLACE_UPDATER);
+        const link = live.get(placeId)?.reach;
+        const ssh = loginOf(held);
+        const landed = await wiring.update({
+          placeId,
+          name: held.name,
+          report: held.report,
+          ...(link === undefined ? {} : { link }),
+          ...(ssh === undefined ? {} : { ssh }),
+        });
+        // The row is the answer, not the landing: the computer restarts its agent and dials back, and what it says
+        // about itself then is the only reading that proves the new daemon is the one running there.
+        const to = await untilDaemonVersion(placeId, from, opts.updateWaitMs ?? UPDATE_WAIT_MS);
+        // The attach on the new daemon dropped what the old one said it forks with and asked again; this waits for
+        // that answer, so the row after an update carries the new daemon's facts rather than nothing while they are
+        // still in flight. It joins the read behind the attach instead of sending a second frame.
+        if (to !== from) await factsOn(placeId, held);
+        daemon = {
+          ...landed,
+          from,
+          to,
+          ...(to >= DAEMON_VERSION ? {} : { note: placeUpdateSlowLine(held.name, Math.round((opts.updateWaitMs ?? UPDATE_WAIT_MS) / 1000)) }),
+        };
+      }
+      // A stream of its own: this is not an install, and the rows ride it the way a join's steps ride the add's.
+      const started = await startedOrSaid(placeId, addId ?? `a_${randomBytes(6).toString("hex")}`);
+      return { name: held.name, ...(daemon === undefined ? {} : { daemon }), ...started };
     },
 
     async remove(placeId) {

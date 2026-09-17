@@ -13,7 +13,7 @@
 // the one the person typed.
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { hostname, platform } from "node:os";
+import { homedir, hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { addedProjectLine, sourceKind, type ProjectView,
   ALREADY_JOINED_LINE,
@@ -26,6 +26,10 @@ import { addedProjectLine, sourceKind, type ProjectView,
   PLACE_FILE_MODE,
   PLACE_ADD_WORDS,
   PLACES_WORDS,
+  PlaceUpdateReply,
+  placeCurrentLine,
+  provisionLines,
+  DAEMON_VERSION,
   JOIN_NO_KEY_REFUSAL,
   joinKeyRefusal,
   joinToken,
@@ -91,6 +95,9 @@ import {
 } from "./service.js";
 import { dialHost, hostPlatform, sshAsked, type DialOpts, type HostClient } from "./verbs.js";
 import { writeEnvFile } from "./env-keys.js";
+import { collect, nodeHost } from "@wsp/collect";
+import { readBrewTable } from "./init-brew.js";
+import { placeProvisioner } from "./place-provision.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
  * type for it on a command line. The one reading, so the row for this computer and the name a join writes agree. */
@@ -139,6 +146,15 @@ export const hostKeyHere = (statePath: string): string => keyFingerprint(hostPla
 export function placeWiring(statePath: string, env: ProviderEnv, advertise?: string): PlaceWiring {
   return {
     hostKey: hostPlaceKey(statePath),
+    // The recipe beside that state file, put on every computer this host holds: the same two readers a copy of
+    // the image is planned from, since a box is provisioned from the same rows by the same roads.
+    provision: placeProvisioner({
+      statePath,
+      home: homedir(),
+      platform: hostPlatform(),
+      collect: () => collect(nodeHost()),
+      brew: () => readBrewTable(nodeHost()),
+    }),
     // The word the person gave --advertise travels to the install, which is the one road that knows the computer
     // being joined is somewhere else and so whether that word could ever be dialled from it.
     install: placeInstaller(advertise === undefined ? {} : { advertise }),
@@ -754,17 +770,53 @@ const ADD_USAGE = [
 export const UPDATE_FLAGS_REFUSAL =
   "wsp add --update names a computer already in this wsp, so it takes none of the flags a join takes. Drop them, or drop --update to join a computer.";
 
-/** What the line prints once a place is on the daemon this host deploys, or once it has taken it and not yet come
- * back on it. The versions either side and the road the binary took, so a person reading it can tell the link road
- * from the ssh one without asking. */
-export function updatedLines(answer: { name: string; from: number; to: number; road: string; at: string; kept?: string; note?: string }): string[] {
+/** What the line prints about the daemon half of an update: the versions either side and the road the binary took,
+ * so a person reading it can tell the link road from the ssh one without asking, or the one line for a computer
+ * that already runs this wsp's daemon and took the recipe alone. */
+export function updatedLines(answer: PlaceUpdateReply): string[] {
+  const daemon = answer.daemon;
+  if (daemon === undefined) return [placeCurrentLine(answer.name, DAEMON_VERSION)];
   return [
-    `${answer.name}: daemon ${answer.from} to ${answer.to}, over the ${answer.road === "ssh" ? "ssh road" : "link"}`,
-    `its binary      ${answer.at}`,
+    `${answer.name}: daemon ${daemon.from} to ${daemon.to}, over the ${daemon.road === "ssh" ? "ssh road" : "link"}`,
+    `its binary      ${daemon.at}`,
     // Where the one it replaced was kept: the first thing to look at on a box whose daemon will not come up.
-    ...(answer.kept === undefined ? [] : [`the old one     ${answer.kept}`]),
-    ...(answer.note === undefined ? [] : [answer.note]),
+    ...(daemon.kept === undefined ? [] : [`the old one     ${daemon.kept}`]),
+    ...(daemon.note === undefined ? [] : [daemon.note]),
   ];
+}
+
+/** One line of the recipe job as it runs: what the row under way said, under the step's own mark. The step's words
+ * are not repeated per row; the job says one row at a time and the mark is what a person reads down. */
+export function provisionStageLine(event: PlaceStageEvent): string {
+  const mark = event.state === "done" ? "·" : event.state === "failed" ? "x" : " ";
+  return `  ${mark} ${event.note ?? PLACE_ADD_WORDS.provision}`;
+}
+
+/** What is watched while the recipe goes on a computer: every line the job says, printed as it arrives, and the
+ * event that ends it. Registered before the request that starts the job, so no row is lost between the answer to
+ * that request and the wait for the job. */
+function watchProvision(io: CliIO, client: HostClient, addId: string): { ended: Promise<void>; off: () => void } {
+  let end: () => void = () => {};
+  const ended = new Promise<void>(resolve => (end = resolve));
+  const off = client.onFrame(frame => {
+    const stage = PlaceStageEvent.safeParse(frame);
+    if (!stage.success || stage.data.addId !== addId || stage.data.step !== "provision") return;
+    io.log(provisionStageLine(stage.data));
+    if (stage.data.state !== "running") end();
+  });
+  return { ended, off };
+}
+
+/** Waits out the recipe job on one computer and prints what it came to, off the row the host keeps rather than off
+ * the last event: the rows are what a failed row is named from, and they outlive the run. Answers what the line
+ * exits with: 1 where a row failed or the job stopped. */
+async function followProvision(io: CliIO, client: HostClient, place: PlaceView, watch: { ended: Promise<void> }): Promise<number> {
+  if (place.provision === undefined) return 0;
+  if (place.provision.state === "running") await watch.ended;
+  const rows = await client.request<{ places: PlaceView[] }>("places.list");
+  const provision = rows.places.find(p => p.id === place.id)?.provision ?? place.provision;
+  for (const line of provisionLines(place.name, provision)) io.log(line);
+  return provision.state === "done" && provision.rows.every(r => r.outcome !== "failed") ? 0 : 1;
 }
 
 /** One place moved onto this wsp's daemon. The work is the host's, over the socket this line opens, as the install
@@ -778,9 +830,20 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
       io.error(picked.refusal);
       return 1;
     }
-    const answer = await client.request<{ name: string; from: number; to: number; road: string; at: string; note?: string }>("places.update", { placeId: picked.place.id });
-    for (const line of updatedLines(answer)) io.log(line);
-    return 0;
+    // Minted here rather than read off the reply: the job's rows come back while it runs and the reply lands once
+    // it is under way, so a line printed as it happens has to know which stream is this one's. The host is told
+    // which id to put them on, as the join tells it.
+    const addId = `a_${randomBytes(6).toString("hex")}`;
+    const watch = watchProvision(io, client, addId);
+    await client.events();
+    try {
+      const answer = PlaceUpdateReply.parse(await client.request<Record<string, unknown>>("places.update", { placeId: picked.place.id, addId }));
+      for (const line of updatedLines(answer)) io.log(line);
+      if (answer.said !== undefined) io.log(answer.said);
+      return await followProvision(io, client, { ...picked.place, ...(answer.provision === undefined ? {} : { provision: answer.provision }) }, watch);
+    } finally {
+      watch.off();
+    }
   } finally {
     client.close();
   }
@@ -831,12 +894,15 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
   try {
     const off = client.onFrame(frame => {
       const stage = PlaceStageEvent.safeParse(frame);
-      if (!stage.success || stage.data.addId !== addId) return;
+      if (!stage.success || stage.data.addId !== addId || stage.data.step === "provision") return;
       for (const line of stageLines(stage.data)) io.log(line);
     });
+    // The recipe's own lines ride the same stream and are watched from here too, since the job starts inside the
+    // add and its first rows land before the add answers.
+    const watch = watchProvision(io, client, addId);
     await client.events();
     try {
-      const added = await client.request<{ place: PlaceView; hostKey?: string }>("places.add", {
+      const added = await client.request<{ place: PlaceView; hostKey?: string; said?: string }>("places.add", {
         addId,
         address,
         ...(flags.name !== undefined ? { name: flags.name } : {}),
@@ -844,9 +910,14 @@ async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: str
         ...(flags.keyPath !== undefined ? { keyPath: flags.keyPath } : {}),
       });
       for (const line of addedLines(added.place, added.hostKey)) io.log(line);
+      if (added.said !== undefined) io.log(added.said);
+      // The recipe before the sign-in: signing an agent in on that computer needs the agent on that computer,
+      // which is what the job just put there.
+      await followProvision(io, client, added.place, watch);
       await offerBoxSignIn(io, client, added.place, deps);
       return 0;
     } finally {
+      watch.off();
       off();
     }
   } finally {

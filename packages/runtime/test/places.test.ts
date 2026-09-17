@@ -17,7 +17,6 @@ import {
   PLACE_UNKNOWN_REFUSAL,
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
-  placeCurrentLine,
   THREAD_OPS,
   placeDaemonPaths,
   absentComputer,
@@ -32,20 +31,25 @@ import {
   readJoinToken,
   placeNoDaemonPortLine,
   placeNoLinkLine,
+  placeNoRecipeLine,
+  placeProvisionPaths,
+  placeProvisioningLine,
   placeStillInstalledLine,
   placeDialBackLine,
   workFolderIn,
   copyStoppedLine,
   NO_IMAGES_HERE,
   type GoldenStageEvent,
+  type PlaceProvision,
+  type PlaceProvisionRow,
   type PlaceStageEvent,
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
-import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
-import { NO_PLACE_UPDATER, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NoProviderBackend, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -723,10 +727,8 @@ describe("moving a place onto the daemon this host deploys", () => {
 
     expect(answer.ok, String(answer["error"])).toBe(true);
     expect(answer["name"]).toBe("old-macbook");
-    expect(answer["from"]).toBe(DAEMON_VERSION - 1);
-    expect(answer["to"]).toBe(DAEMON_VERSION);
-    expect(answer["road"]).toBe("link");
-    expect(answer["at"]).toBe("/home/maya/.wsp/daemon/wsp-daemon");
+    // The daemon half of the reply; the recipe half beside it is this host's own and nothing is wired for it here.
+    expect(answer["daemon"]).toMatchObject({ from: DAEMON_VERSION - 1, to: DAEMON_VERSION, road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon" });
     // The row a person reads says it too, and says nothing about being behind any more.
     const row = (await placesOf()).find(p => p.id === placeId)!;
     expect(row.daemonVersion).toBe(DAEMON_VERSION);
@@ -772,7 +774,7 @@ describe("moving a place onto the daemon this host deploys", () => {
     back.unref?.();
     const answer = await update(placeId);
     expect(answer.ok, String(answer["error"])).toBe(true);
-    expect(answer["to"]).toBe(DAEMON_VERSION);
+    expect(answer["daemon"]).toMatchObject({ to: DAEMON_VERSION });
     // The row read straight after the update carries them: the sign-in on that computer is the next thing a
     // person runs, and it reads this field.
     expect((await placesOf()).find(p => p.id === placeId)!.logins).toBe(LOGINS);
@@ -787,19 +789,22 @@ describe("moving a place onto the daemon this host deploys", () => {
     const answer = await update(placeId);
     expect(answer.ok, String(answer["error"])).toBe(true);
     // Nothing failed: the binary landed and the row moves on the computer's next link, which the note says.
-    expect(answer["to"]).toBe(DAEMON_VERSION - 1);
-    expect(String(answer["note"])).toContain("had not dialled back on it within");
+    expect(answer["daemon"]).toMatchObject({ to: DAEMON_VERSION - 1 });
+    expect(String((answer["daemon"] as { note?: unknown }).note)).toContain("had not dialled back on it within");
   });
 
-  it("refuses a place already running this daemon before it picks up a byte, and one this host does not hold", async () => {
+  it("picks up no byte for a place already running this daemon, and refuses one this host does not hold", async () => {
     const asked: { req: PlaceUpdateRequest }[] = [];
     const { hostKey } = await serving({ update: overTheLink(Buffer.from("a daemon"), asked) });
     const level = report("old-macbook", { daemonVersion: DAEMON_VERSION });
     const { client, placeId } = await join(hostKey, { code: await code(), report: level });
     sockets.push(client.ws);
     const answer = await update(placeId);
-    expect(answer.ok).toBe(false);
-    expect(answer["error"]).toBe(placeCurrentLine("old-macbook", DAEMON_VERSION));
+    // The update is the road the recipe is put on again, so a computer that is current is not refused: it takes
+    // the recipe alone, and nothing here is wired to put one on.
+    expect(answer.ok, String(answer["error"])).toBe(true);
+    expect(answer["daemon"]).toBeUndefined();
+    expect(answer["provision"]).toBeUndefined();
     expect(asked).toEqual([]);
     const nowhere = await update("p_nothing");
     expect(nowhere.ok).toBe(false);
@@ -1485,7 +1490,7 @@ describe("putting the agent on a computer over ssh", () => {
     // And the road that puts a daemon on that computer takes it: the one box that needs the update road is the one
     // whose agent could not dial.
     const updated = await runtime.places!.update(joined);
-    expect(updated.road).toBe("ssh");
+    expect(updated.daemon?.road).toBe("ssh");
     expect(asked.map(r => r.ssh)).toEqual([{ ssh: "root@65.21.4.12", keyPath: "/Users/lena/.ssh/hetzner" }]);
   });
 
@@ -2592,5 +2597,290 @@ describe("a computer joining a host that holds a sealed image", () => {
     expect(swept.reaped.map(r => r.id)).toContain("k7");
     expect(await store.get("builders", "k7")).toBeUndefined();
     expect(await store.keys("goldens")).toEqual([]);
+  });
+});
+
+describe("the recipe this host holds, put on a computer you own", () => {
+  const RECIPE_AT = "2026-09-17T10:00:00.000Z";
+  const PLAN: ProvisionPlan = {
+    recipeAt: RECIPE_AT,
+    steps: [
+      { id: "agents/node", label: "Node 22.23.2", manager: "script", cmd: "node-step" },
+      { id: "agents/codex", label: "Codex", manager: "npm", cmd: "codex-step", after: "agents/node" },
+    ],
+    skipped: [],
+  };
+  const ROWS: PlaceProvisionRow[] = [
+    { id: "agents/node", label: "Node 22.23.2", outcome: "present" },
+    { id: "agents/codex", label: "Codex", outcome: "installed" },
+  ];
+
+  /** A provisioner as the host wires one, with what it plans and what its run comes to under this test's hand. */
+  function provisioner(o: { rows?: PlaceProvisionRow[]; throws?: string; noRecipe?: string; hold?: boolean; planThrows?: string } = {}) {
+    let release = (): void => {};
+    const held = new Promise<void>(resolve => (release = resolve));
+    const calls = { plan: 0, run: 0 };
+    const machines: Machine[] = [];
+    const rows = o.rows ?? ROWS;
+    return {
+      calls,
+      machines,
+      release,
+      wired: {
+        plan: async () => {
+          calls.plan++;
+          if (o.planThrows !== undefined) throw new Error(o.planThrows);
+          return o.noRecipe === undefined ? PLAN : { noRecipe: o.noRecipe };
+        },
+        run: async (machine, plan, stage) => {
+          calls.run++;
+          machines.push(machine);
+          expect(plan.recipeAt).toBe(RECIPE_AT);
+          // The row it is on before the first outcome, as a run that is on a step says it.
+          stage(`${rows[0]!.label} (1/${rows.length})`, { label: rows[0]!.label, index: 1, of: rows.length });
+          if (o.hold === true) await held;
+          if (o.throws !== undefined) throw new Error(o.throws);
+          for (const [i, row] of rows.entries()) stage(`${row.label}: ${row.outcome}`, { label: row.label, index: i + 1, of: rows.length }, row);
+          return rows;
+        },
+      } satisfies PlaceProvisioner,
+    };
+  }
+
+  /** What the computer answers on its link: what it forks with, and every command as its daemon's exec would. */
+  function answersFor(cmds: string[]) {
+    return (c: WsClient): void => {
+      c.ws.on("message", raw => {
+        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+        const op = frame["op"];
+        if (op === "machine.backend") return void c.ws.send(JSON.stringify({ id: frame["id"], ok: true, ...KEEPS_NO_IMAGE }));
+        // What room it has left, which every read of the row asks for: a computer that does not answer holds every
+        // listing for the wait the table gives it.
+        if (op === "machine.capacity") {
+          return void c.ws.send(
+            JSON.stringify({
+              id: frame["id"],
+              ok: true,
+              cores: 2,
+              memMb: 7600,
+              memRoomMb: 6000,
+              machineMemMb: 4096,
+              diskFreeBytes: 19 * 1024 ** 3,
+              images: [],
+              machines: { running: 0, paused: 0 },
+            }),
+          );
+        }
+        if (op !== "exec") return;
+        cmds.push(String(frame["cmd"] ?? ""));
+        c.ws.send(JSON.stringify({ id: frame["id"], ok: true, exitCode: 0, stdout: "", stderr: "", truncated: false }));
+      });
+    };
+  }
+
+  /** A host with the recipe wired, and a computer joined to it through the install road, as a join does it. */
+  async function joined(o: { provision: PlaceProvisioner; store?: Store; cmds?: string[]; report?: PlaceReport; update?: PlaceUpdater }): Promise<{ placeId: string; addId: string; store: Store; hostKey: PlaceKeyPair; added: Awaited<ReturnType<NonNullable<Runtime["places"]>["add"]>> }> {
+    const hostKey = newPlaceKeyPair();
+    const store = o.store ?? memoryStore();
+    const answers = answersFor(o.cmds ?? []);
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey, undefined, o.update),
+        provision: o.provision,
+        install: async (req, stage) => {
+          stage("connect", "done", "Ubuntu 24.04");
+          const { client } = await join(hostKey, { code: readJoinToken(req.code).code, name: "spoo", ...(o.report === undefined ? {} : { report: o.report, proveReport: o.report }), answers });
+          sockets.push(client.ws);
+          return { name: "spoo" };
+        },
+      },
+      placeUpdateWaitMs: 50,
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    return { placeId: added.place.id, addId: added.addId, store, hostKey, added };
+  }
+
+  const provisionOf = async (placeId: string): Promise<PlaceView["provision"]> => (await placesOf()).find(p => p.id === placeId)?.provision;
+
+  /** What one exec that lands a file wrote into it: the text goes up as base64 and the shell decodes it there. */
+  const written = (cmd: string): string => Buffer.from(/printf %s '([A-Za-z0-9+/=]*)'/.exec(cmd)![1]!, "base64").toString("utf8");
+
+  it("starts inside the join, on the add's own stream, and leaves the rows the computer answered on the row", async () => {
+    const p = provisioner();
+    const stages: PlaceStageEvent[] = [];
+    const { placeId, added } = await joined({ provision: p.wired });
+    runtime!.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    // The reply already says a job is under way, so whoever asked knows there is one to follow.
+    expect(added.place.provision).toMatchObject({ state: "running", addId: "a_mine", recipeAt: RECIPE_AT, rows: [] });
+    expect(added.said).toBeUndefined();
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const provision = (await provisionOf(placeId))!;
+    expect(provision.rows).toEqual(ROWS);
+    expect(provision.addId).toBe("a_mine");
+    expect(provision.finishedAt).toBeDefined();
+    expect(provision.at).toBeUndefined();
+    expect(p.calls).toEqual({ plan: 1, run: 1 });
+  });
+
+  it("says each row as it lands on the add's own stream, and says the tally once at the end", async () => {
+    const stages: PlaceStageEvent[] = [];
+    const hostKey = newPlaceKeyPair();
+    const p = provisioner();
+    // The events are watched from before the add, the way a terminal watches them: the first rows land inside it.
+    const store = memoryStore();
+    const answers = answersFor([]);
+    runtime = createRuntime({
+      backend: stubBackend(),
+      store,
+      adapters: {},
+      placeLinks: {
+        ...wiring(hostKey),
+        provision: p.wired,
+        install: async req => {
+          const { client } = await join(hostKey, { code: readJoinToken(req.code).code, name: "spoo", answers });
+          sockets.push(client.ws);
+          return { name: "spoo" };
+        },
+      },
+    });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    runtime.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    const added = await runtime.places!.add({ addId: "a_mine", address: "root@10.0.0.9", hostUrls: DOOR }, Date.now());
+    await until(async () => (await provisionOf(added.place.id))?.state === "done");
+    const provision = stages.filter(s => s.step === "provision");
+    expect(provision.every(s => s.addId === "a_mine")).toBe(true);
+    expect(provision[0]?.note).toContain(`2 rows from the recipe of ${RECIPE_AT}`);
+    expect(provision.map(s => s.note)).toContain("Codex: installed");
+    expect(provision.filter(s => s.state === "done")).toHaveLength(1);
+    expect(provision.at(-1)?.note).toContain("1 installed: Codex");
+  });
+
+  it("refuses a workspace there in one sentence while it runs, naming the row it is on, and takes one once it is done", async () => {
+    const p = provisioner({ hold: true });
+    const { placeId } = await joined({ provision: p.wired });
+    await until(async () => (await provisionOf(placeId))?.at !== undefined);
+    const at = (await provisionOf(placeId))!.at;
+    await expect(runtime!.places!.forkingBackend(placeId)).rejects.toThrow(placeProvisioningLine("spoo", at));
+    // The workspaces already standing there are untouched: they read the backend, not the road a fork takes.
+    expect(runtime!.places!.backendOf(placeId)).toBeDefined();
+    p.release();
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    expect(await runtime!.places!.forkingBackend(placeId)).toBeDefined();
+  });
+
+  it("is refused a second time while the first is still going on, in that same sentence", async () => {
+    const p = provisioner({ hold: true });
+    const { placeId } = await joined({ provision: p.wired, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
+    await until(async () => (await provisionOf(placeId))?.state === "running");
+    const again = await runtime!.places!.update(placeId);
+    expect(again.said).toContain("is still being set up");
+    expect(p.calls.run).toBe(1);
+    p.release();
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+  });
+
+  it("stops with the computer's own sentence when the link goes under it, and the gate opens again", async () => {
+    const p = provisioner({ throws: "spoo is not connected" });
+    const { placeId } = await joined({ provision: p.wired });
+    await until(async () => (await provisionOf(placeId))?.state === "stopped");
+    expect((await provisionOf(placeId))!.said).toBe("spoo is not connected");
+    expect(await runtime!.places!.forkingBackend(placeId)).toBeDefined();
+  });
+
+  it("writes nothing on the row when this computer holds no recipe, and says where one would be written", async () => {
+    const p = provisioner({ noRecipe: "/Users/lena/.wsp/recipe.json" });
+    const { placeId, added } = await joined({ provision: p.wired });
+    expect(added.said).toBe(placeNoRecipeLine("spoo", "/Users/lena/.wsp/recipe.json"));
+    expect(added.place.provision).toBeUndefined();
+    expect(await provisionOf(placeId)).toBeUndefined();
+    expect(p.calls.run).toBe(0);
+  });
+
+  it("answers a recipe this host cannot read as a computer that got no agents, not as a join that failed", async () => {
+    const p = provisioner({ planThrows: "/Users/lena/.wsp/recipe.json: invalid recipe: rows: required" });
+    const { added, placeId } = await joined({ provision: p.wired });
+    expect(added.said).toContain("invalid recipe");
+    expect(await provisionOf(placeId)).toBeUndefined();
+  });
+
+  it("runs on an update alone where the computer already runs this wsp's daemon, and after the daemon where it is behind", async () => {
+    const current = provisioner();
+    const { placeId } = await joined({ provision: current.wired, report: report("spoo", { daemonVersion: DAEMON_VERSION }) });
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const answer = await runtime!.places!.update(placeId);
+    // No updater is wired at all, and nothing refused the update: a computer that is current takes the recipe alone.
+    expect(answer.daemon).toBeUndefined();
+    expect(answer.name).toBe("spoo");
+    expect(answer.provision).toMatchObject({ state: "running", recipeAt: RECIPE_AT });
+    await until(async () => current.calls.run === 2);
+
+    const behind = provisioner();
+    const asked: PlaceUpdateRequest[] = [];
+    const later = await joined({
+      provision: behind.wired,
+      report: report("old-macbook", { daemonVersion: DAEMON_VERSION - 1 }),
+      update: async req => {
+        asked.push(req);
+        return { road: "ssh", at: "/root/.wsp/daemon/wsp-daemon" };
+      },
+    });
+    await until(async () => (await provisionOf(later.placeId))?.state === "done");
+    const moved = await runtime!.places!.update(later.placeId);
+    expect(asked).toHaveLength(1);
+    expect(moved.daemon).toMatchObject({ from: DAEMON_VERSION - 1, road: "ssh" });
+    expect(moved.provision?.state).toBe("running");
+    await until(async () => behind.calls.run === 2);
+  });
+
+  it("keeps its own log and its outcome on that computer, under the folder wsp already owns there", async () => {
+    const cmds: string[] = [];
+    const p = provisioner();
+    const { placeId } = await joined({ provision: p.wired, cmds });
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const at = placeProvisionPaths("/home/maya");
+    await until(async () => cmds.some(c => c.includes(at.result)));
+    const log = cmds.filter(c => c.includes(at.log));
+    // Appended, so a second batch does not replace the first, and behind its own marker so a retried exec lands once.
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.some(c => c.includes("base64 -d >>"))).toBe(true);
+    expect(log.map(written).join("\n")).toContain("Codex: installed");
+    // The header names this host, the recipe it read and how many rows it planned, for a person reading the log.
+    expect(log.map(written).join("\n")).toContain(`wsp zingzys-mac put the recipe of ${RECIPE_AT}`);
+    // The outcome itself, written whole at the end, for a person at that computer's own shell.
+    const result = cmds.filter(c => c.includes(`base64 -d > '${at.result}'`));
+    expect(result).toHaveLength(1);
+    expect(JSON.parse(written(result[0]!))).toMatchObject({ state: "done", rows: ROWS });
+  });
+
+  it("turns a job the host that drove it did not outlive into one that stopped, at the next host's first read", async () => {
+    const store = memoryStore();
+    const p = provisioner();
+    const { placeId } = await joined({ provision: p.wired, store });
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const held = (await store.get("places", placeId)) as { provision: PlaceProvision };
+    await store.put("places", placeId, { ...held, provision: { ...held.provision, state: "running", at: { label: "Codex", index: 2, of: 2 } } });
+    await srv!.close();
+    await runtime!.close();
+    // The next host over the same state file: its first read is what ends the job nothing is running.
+    runtime = createRuntime({ backend: stubBackend(), store, adapters: {}, placeLinks: { ...wiring(newPlaceKeyPair()), provision: p.wired } });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    // The one hydration every road waits on, which is what a host does before it serves anything.
+    expect(await runtime.workspaces.list()).toEqual([]);
+    expect(await provisionOf(placeId)).toMatchObject({ state: "stopped", said: PROVISION_HOST_STOPPED });
+    // And the gate is open again: a workspace there is nobody's to wait for.
+    expect((await provisionOf(placeId))!.at).toBeUndefined();
+  });
+
+  it("puts nothing on a computer at all on a host that wired no recipe road, and says nothing about one", async () => {
+    const { hostKey } = await serving();
+    const { client, placeId } = await join(hostKey, { code: await code(), report: report("old-macbook", { daemonVersion: DAEMON_VERSION }) });
+    sockets.push(client.ws);
+    expect(await provisionOf(placeId)).toBeUndefined();
+    await expect(runtime!.places!.update(placeId)).resolves.toMatchObject({ name: "old-macbook" });
+    expect(await provisionOf(placeId)).toBeUndefined();
   });
 });

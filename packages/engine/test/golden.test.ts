@@ -10,7 +10,8 @@ import { credentialOnBuilderLine, shellQuote, type RecipeDigest } from "@wsp/pro
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
-import { MIB, USED_KB_CMD } from "../src/golden-tools.js";
+import { MIB, USED_KB_CMD, installTools } from "../src/golden-tools.js";
+import { ALREADY_ON_MACHINE } from "../src/golden-base.js";
 import { goldenName } from "../src/snapshot-names.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
 
@@ -843,8 +844,8 @@ describe("golden import stages", () => {
         { id: "tools/npm/bun", label: "bun@1.4.0", manager: "npm", cmd: "npm install -g bun@1.4.0" },
       ],
       agents: [
-        { id: "agents/claude", name: "Claude Code", install: "claude-install", smoke: "claude --version" },
-        { id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" },
+        { id: "agents/claude", name: "Claude Code", install: "claude-install", smoke: "claude --version", road: "script" as const },
+        { id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", road: "npm" as const },
       ],
       ...over,
     };
@@ -1556,8 +1557,8 @@ describe("golden import stages", () => {
   it("the Node step runs once before the agents: kept when the guest meets the floor, installed and said so when not, and a failure fails the agents above the guest's major and with them the seal", async () => {
     const node = { floor: 22, version: "22.23.2", agents: ["Pi"], cmd: "node-step" };
     const agents = [
-      { id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", node: 16 },
-      { id: "agents/pi", name: "Pi", install: "pi-install", smoke: "pi --version", node: 22 },
+      { id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", node: 16, road: "npm" as const },
+      { id: "agents/pi", name: "Pi", install: "pi-install", smoke: "pi --version", node: 22, road: "npm" as const },
     ];
     const kept = backendFor([["node-step", { exitCode: 0, stdout: "NODE_HAVE v22.1.0\nNODE_KEPT v22.1.0\n", stderr: "" }]]);
     const k = stageRecorder();
@@ -1591,7 +1592,7 @@ describe("golden import stages", () => {
 
   it("the Node floor and every agent installer run under the road table's network lines, so the bare curl their scripts type gets the function's flags", async () => {
     const node = { floor: 22, version: "22.23.2", agents: ["Pi"], cmd: "node-step" };
-    const agents = [{ id: "agents/pi", name: "Pi", install: "pi-install", smoke: "pi --version", node: 22 }];
+    const agents = [{ id: "agents/pi", name: "Pi", install: "pi-install", smoke: "pi --version", node: 22, road: "npm" as const }];
     const { backend, cmds, fetch } = backendFor([["node-step", { exitCode: 0, stdout: "NODE_HAVE v22.1.0\nNODE_KEPT v22.1.0\n", stderr: "" }]]);
     await prepareBuilder({ backend, setup: "true", fetch, import: importOf({ node, agents }) });
     for (const needle of ["node-step", "pi-install"]) {
@@ -2254,7 +2255,7 @@ describe("golden import stages", () => {
     const SNAPSHOT: RecipeDigest = { ticks: [], files: [] };
     const head: GoldenVersion = { version: 1, snapshotId: "snap_wsp-h1-default-v1", baseTemplate: "base", kind: "desktop", setupSha: "s1", createdAt: "2026-09-01T00:00:00.000Z", smoke: { cmd: "claude --version && gemini --version", exitCode: 0 }, size: { cpu: 2, memMb: 8192 }, base: [{ name: "node", version: "22.23.2" }, { name: "jq", version: "1.7.1" }] };
     const deltaOf = (over: Partial<GoldenDelta> = {}): GoldenDelta => ({
-      import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }], agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version" }] }),
+      import: importOf({ recipeHash: "h2", recipe: SNAPSHOT, tools: [{ id: "tools/brew/jq", label: "jq", manager: "brew", cmd: "brew install jq" }], agents: [{ id: "agents/codex", name: "Codex", install: "codex-install", smoke: "codex --version", road: "npm" as const }] }),
       retired: [
         { id: "shell/zshrc", name: "~/.zshrc" },
         { id: "tools/npm/bun", name: "bun" },
@@ -2448,7 +2449,7 @@ describe("golden import stages", () => {
       expect(nextLeftBehind([hook, codexNote], deltaOf(), [])).toEqual([]);
       const untouched = deltaOf({ retired: [], retiredOnImage: [], import: { ...deltaOf().import, agents: [] } });
       expect(nextLeftBehind([hook], untouched, [])).toEqual([hook]);
-      const replanned = deltaOf({ retired: [], retiredOnImage: [], import: { ...deltaOf().import, agents: [{ id: "agents/claude", name: "Claude Code", install: "claude-install", smoke: "claude --version" }] } });
+      const replanned = deltaOf({ retired: [], retiredOnImage: [], import: { ...deltaOf().import, agents: [{ id: "agents/claude", name: "Claude Code", install: "claude-install", smoke: "claude --version", road: "script" as const }] } });
       const fresh = { ...hook, note: "hook left behind: ~/.claude/hooks/new" };
       expect(nextLeftBehind([hook], replanned, [fresh])).toEqual([fresh]);
     });
@@ -2626,6 +2627,62 @@ describe("golden import stages", () => {
       const sealed = await sealGolden(builder, { backend, hostId: "h1", smoke: "true", manifest: { head: 1, versions: [head] } });
       expect(sealed.version).toMatchObject({ version: 2, parentSnapshotId: head.snapshotId, retired: deltaOf().retired });
     });
+  });
+});
+
+describe("the tools loop on a machine that is not a fresh builder", () => {
+  const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
+  const FREE = "df -Pk /root | awk 'NR==2{print $4}'";
+
+  /** A machine that answers df from plenty and everything else with exit 0, recording what it was sent. */
+  function loopMachine() {
+    const calls: string[] = [];
+    const machine = {
+      id: "spoo",
+      kind: "sandbox",
+      exec: async (cmd: string) => {
+        calls.push(cmd);
+        return cmd === FREE ? { exitCode: 0, stdout: `${9_000_000}\n`, stderr: "" } : ok;
+      },
+      run: async (script: string) => {
+        calls.push(script);
+        return ok;
+      },
+    } as unknown as Machine;
+    return { machine, calls };
+  }
+
+  const steps: ToolInstall[] = [
+    { id: "agents/node", label: "Node 22.23.2", manager: "script", cmd: "install node" },
+    { id: "agents/codex", label: "Codex", manager: "npm", cmd: "install codex", after: "agents/node", bin: "codex" },
+  ];
+
+  it("pushes a step the caller already found on the machine as installed, runs nothing for it, and lets what waits on it run", async () => {
+    const { machine, calls } = loopMachine();
+    const { tools } = await installTools(machine, steps, () => {}, "installing-tools", { present: new Set(["agents/node"]) });
+    expect(tools.map(t => [t.id, t.outcome, t.note])).toEqual([
+      ["agents/node", "installed", ALREADY_ON_MACHINE],
+      ["agents/codex", "installed", undefined],
+    ]);
+    expect(calls.some(c => c.includes("install node"))).toBe(false);
+    expect(calls.some(c => c.includes("install codex"))).toBe(true);
+  });
+
+  it("keeps the caches where the machine is somebody's own computer, and sweeps them where it becomes an image", async () => {
+    const kept = loopMachine();
+    await installTools(kept.machine, steps, () => {}, "installing-tools", { caches: "keep" });
+    for (const needle of ["/root/.npm", "apt-get clean", "go clean -cache"]) expect(kept.calls.some(c => c.includes(needle)), needle).toBe(false);
+    const swept = loopMachine();
+    await installTools(swept.machine, steps, () => {}, "installing-tools");
+    for (const needle of ["/root/.npm", "apt-get clean"]) expect(swept.calls.some(c => c.includes(needle)), needle).toBe(true);
+  });
+
+  it("hands each row to the caller watching the moment its outcome exists, in the order the loop reached them", async () => {
+    const { machine } = loopMachine();
+    const seen: string[] = [];
+    const { tools } = await installTools(machine, steps, () => {}, "installing-tools", { onTool: t => void seen.push(t.id) });
+    expect(seen).toEqual(["agents/node", "agents/codex"]);
+    expect(tools.map(t => t.id)).toEqual(seen);
   });
 });
 

@@ -72,7 +72,7 @@ export interface CopyReaders extends Pick<BuildContext, "home" | "platform"> {
  * The tool each answered sign-in needs is ticked before the answers go, the way wsp init ticks it: the small recipe
  * records the answer and not the tick it caused, so a copy planned off the answers as written would land a login on
  * a machine with nothing to read it. */
-export function copyRows(manifest: Manifest, image: SealedImage & { recipe: Recipe }, o: { home: string; brew: BrewTable }): ManifestEntry[] {
+export function copyRows(manifest: Manifest, image: Pick<SealedImage, "pins"> & { recipe: Recipe }, o: { home: string; brew: BrewTable }): ManifestEntry[] {
   const here = lockRefused({ ...manifest, entries: withoutAgentTools(manifest.entries) }, refusedIsDir(o.home));
   const applied = withRecordPins(manifestFor({ manifest: here }, image.recipe), image.pins ?? []);
   const { ticks, choices } = defaultAnswers(applied, o.brew);

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -140,7 +140,7 @@ export const notTheLogin = (active: string): string => `${active} is the login i
 /** Why a copy leaves every account behind: the file lists more than one and names none in use, so there is nothing
  * to pick between; the sign-in runs on the machine instead. */
 export const NO_ACTIVE_LOGIN = "the file names no login in use here; sign in on the machine";
-const name = (e: RecipeEntry): string => e.id.slice(e.id.indexOf("/") + 1);
+const name = (e: Pick<RecipeEntry, "id">): string => e.id.slice(e.id.indexOf("/") + 1);
 
 /** An MCP server's row: under the agents rung, filed by the MCP id prefix; the one rule every reader of the agents rung asks. */
 export const isMcpRow = (e: Pick<RecipeEntry, "rung" | "id">): boolean => e.rung === "agents" && e.id.startsWith(MCP_ID_PREFIX);
@@ -636,6 +636,9 @@ export interface ToolInstall {
   bin?: string;
   /** A command that exits 0 once the row is on the machine, run after the install for a row that carries its own. */
   check?: string;
+  /** The version the row asks for, off its road, so a presence read can compare; absent where the road installs
+   * what its source serves. */
+  asks?: string;
   /** The one line a person reads while the step runs: the manager's command, or where a download comes from. Absent, cmd is read. */
   shown?: string;
   /** What the result says beside the install once it lands: a road no golden build has proven yet, a version the road could not pin. */
@@ -652,6 +655,18 @@ export interface PinRead {
   fixed: boolean;
   words: string;
 }
+
+/** The version a road's install line asks for, for a presence read to compare against: the road's own where the
+ * road fixes one, nothing where it installs whatever its source serves that day. */
+export function asksVersion(road: InstallRoad): string | undefined {
+  return fixesVersion(road) ? versionOf(road) : undefined;
+}
+
+/** A step's `asks` as a field, so a caller spreads it rather than reading the rule twice. */
+const asksOf = (road: InstallRoad): { asks?: string } => {
+  const asks = asksVersion(road);
+  return asks === undefined ? {} : { asks };
+};
 
 /** The pin read a road gives a step: its module's version line on the command it puts on PATH, whether it fixes one, and its words. */
 export function pinReadOf(road: InstallRoad, bin: string): PinRead {
@@ -1138,7 +1153,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
       return;
     }
     const after = afterDep(depOf(planned), planned.road.road);
-    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
   const asManager = (id: string): boolean => [...managers.values()].some(m => m.row?.e.id === id);
@@ -1289,6 +1304,8 @@ export interface AgentInstaller {
   install: string;
   /** Exits 0 once the agent is on the machine. */
   smoke: string;
+  /** The road the install line walks, which is what bounds a step running it. */
+  road: RoadName;
   /** The lowest Node major its package's engines field accepts; absent when it declares none. */
   node?: number;
   /** How the agent's installed version is read back and whether a copy gets it; absent for an installer outside the catalog. */
@@ -1301,7 +1318,7 @@ export interface AgentInstall extends AgentInstaller {
 
 /** An agent's installer as the catalog gives it: its road's line, its version check, its Node floor and its pin read. */
 function agentInstaller(a: AgentEntry): AgentInstaller {
-  return { name: a.name, install: installLine(a), smoke: smokeOf(a), ...(a.node !== undefined ? { node: a.node } : {}), pin: pinReadOf(a.installRoad, a.bin) };
+  return { name: a.name, install: installLine(a), smoke: smokeOf(a), road: a.installRoad.road, ...(a.node !== undefined ? { node: a.node } : {}), pin: pinReadOf(a.installRoad, a.bin) };
 }
 
 /** The line a guest gets when no supported pinned major meets an agent's floor. */
@@ -1324,7 +1341,7 @@ export function nodeMajorFor(floor: number, now: Date): NodeMajor | undefined {
 export function agentInstallers(agents: readonly AgentEntry[]): Record<string, AgentInstaller> {
   return {
     ...Object.fromEntries(agents.map(a => [a.id, agentInstaller(a)])),
-    aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version" },
+    aider: { name: "Aider", install: `${UV_INSTALL}\nuv tool install --force --python 3.12 --with pip aider-chat==0.86.2`, smoke: "aider --version", road: "uv" },
   };
 }
 
@@ -1419,6 +1436,40 @@ export function agentInstallsFor(entries: readonly RecipeEntry[], agents: readon
   if (needs.length > 0 && major !== undefined) {
     const release = NODE_RELEASES[major];
     out.node = { floor, version: release.version, agents: needs.map(a => a.name), cmd: nodeInstallScript(floor, release) };
+  }
+  return out;
+}
+
+/** Where the Node install is filed when the agents ride the one tools loop, so an agent step waits on it by name. */
+export const AGENT_NODE_STEP = "agents/node";
+
+/** An agents plan as steps of the one tools loop: the node step first, then each agent, waiting on that step
+ * where its road runs on node. The install line runs on the tools PATH with the Node the step installed ahead of
+ * it, the agent's own version check is the step's check, the catalog's command is its bin and the version the
+ * catalog's road pins is what the step asks for, so a computer that already answers at that version installs
+ * nothing. The road is the step's manager, which is what bounds the run.
+ *
+ * The plan's own skipped rows are not here: they never became steps, and whoever runs the plan reports them. */
+export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CATALOG_AGENTS): ToolInstall[] {
+  const out: ToolInstall[] = [];
+  const node = plan.node;
+  if (node !== undefined) {
+    out.push({ id: AGENT_NODE_STEP, label: `Node ${node.version}`, manager: "script", cmd: node.cmd, shown: `Node ${node.version} for ${node.agents.join(", ")}` });
+  }
+  for (const a of plan.installs) {
+    const entry = agents.find(e => e.id === name(a));
+    const waits = node !== undefined && managerBehind(ROAD_MODULES[a.road].after) !== undefined ? { after: AGENT_NODE_STEP } : {};
+    out.push({
+      id: a.id,
+      label: a.name,
+      manager: a.road,
+      cmd: `${PATH_LINE}\n${NODE_PATH_LINE}\n${a.install}`,
+      shown: shownOf(a.install.split("\n")),
+      check: a.smoke,
+      ...waits,
+      ...(entry === undefined ? {} : { bin: entry.bin, ...asksOf(entry.installRoad) }),
+      ...(a.pin === undefined ? {} : { pin: a.pin }),
+    });
   }
   return out;
 }

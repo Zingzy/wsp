@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -20,7 +20,7 @@ import { daemonBinaryHere } from "../src/assets.js";
 import { daemonBinaryIn, GUEST_DAEMON_TARGETS, noGuestDaemonLine } from "../src/daemon-binary.js";
 import { daemonFlags, PLACE_JOINED_LINE, sshDaemonPlace, WSP_READY_LINE } from "../src/doctor.js";
 import { BoxBackend, type KeyCheck, type MachineBackend } from "@wsp/engine";
-import { placeLines } from "../src/verbs.js";
+import { computerLines, placeLines } from "../src/verbs.js";
 import {
   ADD_FLAGS_REFUSAL,
   NOTHING_TO_LEAVE_LINE,
@@ -345,6 +345,22 @@ describe("the table wsp places prints", () => {
     // A computer on this wsp's own daemon says nothing in that column, and neither does one that never reported.
     expect(printed[2]).not.toContain("daemon");
     expect(placeLines([rows[2]!])[1]).not.toContain("daemon");
+  });
+
+  it("says on the computers table what the recipe on that computer is doing, and nothing for a cloud or this Mac", () => {
+    const job: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "Codex", index: 3, of: 7 } };
+    const printed = computerLines([{ ...rows[1]!, provision: job }, rows[0]!, rows[2]!], "darwin");
+    const header = printed[0]!;
+    expect(header).toContain("TOOLS");
+    const column = (line: string): string => line.slice(header.indexOf("TOOLS")).trim();
+    // The word is the protocol's own, so this table and the app's row cannot say it two ways.
+    expect(column(printed[1]!)).toBe(provisionWord(job));
+    expect(column(printed[1]!)).toBe("setting up 3/7: Codex");
+    expect(column(printed[2]!)).toBe("");
+    expect(column(printed[3]!)).toBe("");
+    // Once it is over the same column says what stands.
+    const over = computerLines([{ ...rows[1]!, provision: { ...job, state: "done", at: undefined, rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } }], "darwin");
+    expect(over[1]!.slice(over[0]!.indexOf("TOOLS")).trim()).toBe("1 row ready");
   });
 
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
@@ -783,6 +799,67 @@ describe("wsp add on a computer reached over ssh", () => {
     expect(said).toContain("box has no container engine");
     expect(said).toContain("wsp remove box");
     expect(said).not.toContain("somebody else");
+  });
+
+  it("prints the recipe's own rows as they land, after the join lines and before the sign-in it needs them for", async () => {
+    const io = { ...captured(), isTTY: true, ask: async () => "no" };
+    const frames: ((frame: Record<string, unknown>) => void)[] = [];
+    const job: PlaceProvision = {
+      state: "running",
+      addId: "a_mine",
+      recipeAt: "2026-09-17T10:00:00.000Z",
+      startedAt: "2026-09-17T10:01:00.000Z",
+      rows: [],
+      at: { label: "Codex", index: 1, of: 2 },
+    };
+    const done: PlaceProvision = {
+      ...job,
+      state: "done",
+      at: undefined,
+      rows: [
+        { id: "agents/codex", label: "Codex", outcome: "installed" },
+        { id: "tools/brew/gh", label: "gh", outcome: "present" },
+      ],
+    };
+    const place: PlaceView = { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true, agents: ["codex"], logins: "/var/lib/wsp/logins" };
+    const client = {
+      request: async (op: string, params?: Record<string, unknown>) => {
+        if (op === "places.list") return { places: [{ ...place, provision: done }] } as Record<string, unknown>;
+        expect(op).toBe("places.add");
+        const addId = String(params!["addId"]);
+        for (const fn of frames) {
+          // The join's own steps and the recipe's rows ride the one stream: the step's words are said once and
+          // each row stands on its own line under it.
+          fn({ type: "place.stage", addId, step: "join", state: "done", note: "engine none" });
+          fn({ type: "place.stage", addId, step: "provision", state: "running", note: "2 rows from the recipe of 2026-09-17T10:00:00.000Z" });
+          fn({ type: "place.stage", addId, step: "provision", state: "running", note: "Codex: installed" });
+          fn({ type: "place.stage", addId, step: "provision", state: "done", note: "the rows are in" });
+        }
+        return { addId, place: { ...place, provision: job } } as Record<string, unknown>;
+      },
+      events: async () => {},
+      onFrame: (fn: (frame: Record<string, unknown>) => void) => {
+        frames.push(fn);
+        return () => frames.splice(frames.indexOf(fn), 1);
+      },
+      closeWords: () => "",
+      closed: Promise.resolve(),
+      close: () => {},
+      terminate: () => {},
+    };
+    const deps = { ...systemPlaceDeps, dial: async () => client as never };
+    expect(await addCommand(io, opts(tmp("add-recipe")), ["root@10.0.0.9"], {}, deps)).toBe(0);
+    const said = io.lines;
+    const at = (needle: string): number => said.findIndex(l => l.includes(needle));
+    expect(at("spoo joined this wsp")).toBeGreaterThanOrEqual(0);
+    // Each row on its own line as it lands, and the tally once the job is over, after the join's own lines.
+    expect(at("Codex: installed")).toBeGreaterThanOrEqual(0);
+    expect(at("spoo: 1 installed: Codex, 1 already there")).toBeGreaterThan(at("spoo joined this wsp"));
+    // The step's words are the protocol's and are said once, not once per row.
+    expect(said.filter(l => l.includes(PLACE_ADD_WORDS.provision))).toHaveLength(0);
+    // The sign-in on that computer comes after the rows: Codex cannot be signed in there before it is there.
+    expect(at("Sign Codex in on spoo now?")).toBe(-1);
+    expect(at(boxSignInLaterLine("spoo", "codex"))).toBeGreaterThan(at("spoo: 1 installed: Codex, 1 already there"));
   });
 
   it("offers the sign-in on that computer while the person is at this terminal, and says what threads read there when they are not", async () => {
@@ -1474,25 +1551,113 @@ describe("wsp add <place> --update", () => {
   it("names the place by the word wsp places prints and asks the host to move it, then says both versions and the road", async () => {
     const home = tmp("update-place");
     const io = captured();
-    const fake = updateClient({ name: "spoo", from: 27, to: DAEMON_VERSION, road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" });
+    const fake = updateClient({ name: "spoo", daemon: { from: 27, to: DAEMON_VERSION, road: "link", at: "/home/maya/.wsp/daemon/wsp-daemon", kept: "/home/maya/.wsp/daemon/wsp-daemon.old" } });
     expect(await addCommand(io, opts(home), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
     // The id off the listing, never the word the person typed: two computers may share a name and the host keys by id.
-    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1" });
+    // The stream the recipe's rows ride is minted here, so they are read from the first one.
+    expect(fake.asked[1]!.params).toEqual({ placeId: "p_1", addId: expect.stringMatching(/^a_[0-9a-f]{12}$/) });
     expect(io.lines.join("\n")).toContain(`spoo: daemon 27 to ${DAEMON_VERSION}, over the link`);
     expect(io.lines.join("\n")).toContain("/home/maya/.wsp/daemon/wsp-daemon");
     // Where the one it replaced was kept, which is the first thing to look at on a box that will not come up.
     expect(io.lines.join("\n")).toContain("the old one     /home/maya/.wsp/daemon/wsp-daemon.old");
     // A daemon that answered no kept path simply says nothing of it rather than an empty row.
-    expect(updatedLines({ name: "spoo", from: 27, to: 34, road: "link", at: "/x" }).some(line => line.includes("the old one"))).toBe(false);
+    expect(updatedLines({ name: "spoo", daemon: { from: 27, to: 34, road: "link", at: "/x" } }).some(line => line.includes("the old one"))).toBe(false);
   });
 
   it("says the note when the computer took the daemon and had not dialled back on it yet", async () => {
     const io = captured();
-    const fake = updateClient({ name: "spoo", from: 27, to: 27, road: "ssh", at: "/home/maya/.wsp/daemon/wsp-daemon", note: "spoo took the daemon and had not dialled back on it within 60s; its row reads the new version once it does" });
+    const fake = updateClient({ name: "spoo", daemon: { from: 27, to: 27, road: "ssh", at: "/home/maya/.wsp/daemon/wsp-daemon", note: "spoo took the daemon and had not dialled back on it within 60s; its row reads the new version once it does" } });
     expect(await addCommand(io, opts(tmp("update-slow")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
     expect(io.lines.join("\n")).toContain("over the ssh road");
     expect(io.lines.join("\n")).toContain("had not dialled back on it within 60s");
+  });
+
+  /** A host whose update answers `reply` and, while it does, pushes the recipe's own rows back on the stream the
+   * line minted. The listing it answers with carries the job as it stands once the rows have landed. */
+  const recipeClient = (reply: Record<string, unknown>, listed: PlaceProvision) => {
+    const asked: { op: string; params?: Record<string, unknown> }[] = [];
+    const frames: ((frame: Record<string, unknown>) => void)[] = [];
+    const rows: PlaceView[] = [{ id: "p_1", kind: "computer", name: "spoo", default: true, joinedAt: new Date(0).toISOString(), daemonVersion: DAEMON_VERSION }];
+    return {
+      asked,
+      dial: (): Promise<never> =>
+        Promise.resolve({
+          request: (op: string, params?: Record<string, unknown>) => {
+            asked.push({ op, ...(params === undefined ? {} : { params }) });
+            if (op === "places.list") return Promise.resolve({ places: rows.map(r => (asked.some(a => a.op === "places.update") ? { ...r, provision: listed } : r)) } as never);
+            if (op !== "places.update") return Promise.reject(new Error(`unexpected op ${op}`));
+            const addId = String(params!["addId"]);
+            for (const fn of frames) {
+              for (const row of listed.rows) fn({ type: "place.stage", addId, step: "provision", state: "running", note: `${row.label}: ${row.outcome}` });
+              fn({ type: "place.stage", addId, step: "provision", state: listed.state === "done" ? "done" : "failed", note: "the rows are in" });
+              // Another computer's job on the same host is another stream, and this line prints none of it.
+              fn({ type: "place.stage", addId: "a_other", step: "provision", state: "running", note: "somebody else's row" });
+            }
+            return Promise.resolve(reply as never);
+          },
+          events: () => Promise.resolve(),
+          onFrame: (fn: (frame: Record<string, unknown>) => void) => {
+            frames.push(fn);
+            return () => frames.splice(frames.indexOf(fn), 1);
+          },
+          closed: Promise.resolve(),
+          closeWords: () => "",
+          close: () => {},
+          drop: () => {},
+        } as never),
+    };
+  };
+
+  const jobOf = (rows: PlaceProvision["rows"], state: PlaceProvision["state"] = "done"): PlaceProvision => ({
+    state,
+    addId: "a_1",
+    recipeAt: "2026-09-17T10:00:00.000Z",
+    startedAt: "2026-09-17T10:01:00.000Z",
+    rows,
+  });
+
+  it("puts the recipe on a computer already running this daemon, saying so and then printing every row", async () => {
+    const io = captured();
+    const job = jobOf([
+      { id: "agents/node", label: "Node 22.23.2", outcome: "present" },
+      { id: "agents/codex", label: "Codex", outcome: "installed" },
+    ]);
+    const fake = recipeClient({ name: "spoo", provision: { ...job, state: "running" } }, job);
+    expect(await addCommand(io, opts(tmp("update-recipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
+    const said = io.lines.join("\n");
+    // No daemon half in the reply: the computer is current, and the line says so rather than refusing the update.
+    expect(said).toContain(placeCurrentLine("spoo", DAEMON_VERSION));
+    expect(said).toContain("Codex: installed");
+    expect(said).toContain("spoo: 1 installed: Codex, 1 already there");
+    expect(said).not.toContain("somebody else's row");
+    // The rows are read off the row the host keeps, which is what outlives the run.
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update", "places.list"]);
+  });
+
+  it("exits 1 naming the row that failed, and 0 when every row landed or was already there", async () => {
+    const io = captured();
+    const failed = jobOf([
+      { id: "agents/codex", label: "Codex", outcome: "installed" },
+      { id: "tools/brew/gh", label: "gh", outcome: "failed", note: "brew answered 404" },
+    ]);
+    const fake = recipeClient({ name: "spoo", provision: { ...failed, state: "running" } }, failed);
+    expect(await addCommand(io, opts(tmp("update-failed")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(1);
+    expect(io.lines.join("\n")).toContain("x gh: brew answered 404");
+    const stopped = jobOf([{ id: "agents/codex", label: "Codex", outcome: "installed" }], "stopped");
+    const gone = recipeClient({ name: "spoo", provision: { ...stopped, state: "running" } }, { ...stopped, said: "spoo is not connected" });
+    const quiet = captured();
+    expect(await addCommand(quiet, opts(tmp("update-stopped")), ["spoo"], { update: true }, updateDeps(gone.dial))).toBe(1);
+    expect(quiet.lines.join("\n")).toContain("spoo: spoo is not connected");
+  });
+
+  it("says what a computer that got no recipe at all got, and exits 0: nothing failed", async () => {
+    const io = captured();
+    const fake = updateClient({ name: "spoo", said: placeNoRecipeLine("spoo", "/Users/lena/.wsp/recipe.json") });
+    expect(await addCommand(io, opts(tmp("update-norecipe")), ["spoo"], { update: true }, updateDeps(fake.dial))).toBe(0);
+    expect(io.lines.join("\n")).toContain("this computer has no recipe at /Users/lena/.wsp/recipe.json");
+    // Nothing to follow, so nothing is read again.
+    expect(fake.asked.map(a => a.op)).toEqual(["places.list", "places.update"]);
   });
 
   it("refuses a word no place answers to in the line the person typed, never in the remove's", async () => {

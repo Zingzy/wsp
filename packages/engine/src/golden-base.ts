@@ -8,7 +8,7 @@ import { fmtBytes, type GoldenBaseTool, type GoldenStage } from "@wsp/protocol";
 import { PRELUDE } from "./dotfiles-presets.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
 import { PATH_LINE, PROFILE_PATH_FILE, PROFILE_PATH_LINE, TOOLS_PATH, aptIndexStep, viaRoad, type ToolInstall } from "./golden-import.js";
-import { installTools, type ToolResult } from "./golden-tools.js";
+import { installTools, type InstallToolsOptions, type ToolResult } from "./golden-tools.js";
 import type { Machine } from "./machine.js";
 
 const BASE_STAGE: GoldenStage = "deploying-daemon";
@@ -111,11 +111,12 @@ export interface BaseOutcome {
 
 /** Installs the floor and reads the versions back; the tools loop names each failure alone and skips what waited on
  * it. The same read runs first, against the image as the provider ships it: a row it already satisfies is recorded
- * as on the machine, in catalog order beside the rows that ran, and nothing is installed over it. */
-export async function installBase(machine: Machine, stage: (stage: GoldenStage, detail?: string) => void): Promise<BaseOutcome> {
+ * as on the machine, in catalog order beside the rows that ran, and nothing is installed over it. `caches` is the
+ * loop's own: a builder becomes an image and sweeps, a computer somebody owns keeps the caches that are theirs. */
+export async function installBase(machine: Machine, stage: (stage: GoldenStage, detail?: string) => void, opts: Pick<InstallToolsOptions, "caches"> = {}): Promise<BaseOutcome> {
   const onImage = await machine.exec(BASE_VERSIONS_CMD, { timeoutMs: INLINE_EXEC_MS });
   const carried = carriedByImage(parseVersions(onImage.stdout));
-  const { tools } = await installTools(machine, baseInstalls(carried), stage, BASE_STAGE);
+  const { tools } = await installTools(machine, baseInstalls(carried), stage, BASE_STAGE, opts);
   const ran = new Map(tools.map(t => [t.id, t]));
   const floor = new Set(BASE_FLOOR.map(e => stepId(e.id)));
   // The floor's rows read in catalog order whether they ran or the image already had them; the loop's other steps

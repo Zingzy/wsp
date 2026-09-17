@@ -9,6 +9,9 @@
 import { BREW_PREFIX, HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
 import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
+// The note a row nothing had to be done for reads as lives with the floor, which is where it was first said; the
+// loop reads it for a row the caller already found on the machine.
+import { ALREADY_ON_MACHINE } from "./golden-base.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
@@ -368,15 +371,35 @@ async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], res
   }
 }
 
+/** What a caller that is not a fresh builder tells the loop about the machine under it. */
+export interface InstallToolsOptions {
+  /** Steps the machine already satisfies, by step id: each is pushed as installed with ALREADY_ON_MACHINE, runs
+   * no command, and counts as landed for the steps waiting on it. */
+  present?: ReadonlySet<string>;
+  /** Whether the caches the installs leave are swept. A builder becomes an image, so its are swept; a computer
+   * somebody owns keeps its own, which are theirs and not this run's to throw away. */
+  caches?: "sweep" | "keep";
+  /** Each row the moment its outcome exists, for a caller that reports as it goes rather than at the end. */
+  onTool?: (result: ToolResult) => void;
+}
+
 /** Runs the plan's installs one at a time. Each tool fails alone and is named in the stage detail;
  * one that waits on an install that failed is skipped with that install's name. At the first reading
  * under the floor the cleanup runs once and df is read again, since the bottle cache alone held 2.4 GB
  * at that point on one run; the loop stops only if the disk is still under the floor, and the tools
  * left are skipped with the reading. */
-export async function installTools(machine: Machine, tools: readonly ToolInstall[], onStage: Stage, at: GoldenStage = "installing-tools"): Promise<ToolsOutcome> {
+export async function installTools(machine: Machine, tools: readonly ToolInstall[], onStage: Stage, at: GoldenStage = "installing-tools", opts: InstallToolsOptions = {}): Promise<ToolsOutcome> {
   const stage = (detail: string, step?: GoldenStep): void => onStage(at, detail, step);
+  const present = opts.present ?? new Set<string>();
+  /** Nothing on a machine whose caches are the person's own; the phrase where they are this run's to sweep. */
+  const sweep = async (): Promise<string | undefined> => (opts.caches === "keep" ? undefined : await sweepCaches(machine));
   await machine.exec(SWEEP_TMP_CMD, { timeoutMs: INLINE_EXEC_MS });
   const out: ToolsOutcome = { tools: [] };
+  /** One row's outcome: kept for the answer and handed to the caller watching, in the order the loop reaches them. */
+  const landed = (result: ToolResult): void => {
+    out.tools.push(result);
+    opts.onTool?.(result);
+  };
   const installed = new Set<string>();
   const labelOf = (id: string): string => tools.find(t => t.id === id)?.label ?? id;
   const run: Run = (cmd, label, road, step) => machine.run(guardedRoad(road, cmd), { deadlineMs: guardDeadlineMs(roadLimitS(road)), onLine: line => stage(`${label}: ${line}`, step) });
@@ -391,18 +414,26 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
     cleanedAtFloor = true;
     stage(`${fmtBytes(low)} free, under the ${fmtBytes(TOOLS_DISK_FLOOR)} floor; cleaning up before skipping`);
     const brew = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
-    const swept = await sweepCaches(machine);
+    const swept = await sweep();
     const after = await freeBytes(machine);
     stage(closing(brew, swept, after.kind === "free" ? `${fmtBytes(after.bytes)} free` : after.reason));
     return after;
   };
   for (const [i, tool] of tools.entries()) {
+    // Read before anything else about this step: a step the machine already satisfies at the version asked runs
+    // nothing, so neither the disk nor what it waits on has any bearing on it, and what waits on it waits on
+    // something that is already there.
+    if (present.has(tool.id)) {
+      installed.add(tool.id);
+      landed({ id: tool.id, label: tool.label, outcome: "installed", note: ALREADY_ON_MACHINE });
+      continue;
+    }
     if (tool.after !== undefined && !installed.has(tool.after)) {
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
+      landed({ id: tool.id, label: tool.label, outcome: "skipped", note: `${labelOf(tool.after)} did not install` });
       continue;
     }
     if (floor !== undefined) {
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+      landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
       continue;
     }
     let free = reading ?? (await freeBytes(machine));
@@ -415,7 +446,7 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       if (after === undefined || after.kind === "unknown" || after.bytes < TOOLS_DISK_FLOOR) {
         const words = after === undefined ? `${fmtBytes(free.bytes)} free` : after.kind === "free" ? `${fmtBytes(after.bytes)} free after cleanup` : `${fmtBytes(free.bytes)} free before cleanup, df failed after`;
         floor = floorNote(words);
-        out.tools.push({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
+        landed({ id: tool.id, label: tool.label, outcome: "skipped", note: floor });
         continue;
       }
       free = after;
@@ -444,15 +475,15 @@ export async function installTools(machine: Machine, tools: readonly ToolInstall
       const left = await freeBytes(machine);
       reading = left;
       const bytes = free.kind === "free" && left.kind === "free" ? Math.max(0, free.bytes - left.bytes) : undefined;
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
+      landed({ id: tool.id, label: tool.label, outcome: "installed", ...(tool.note !== undefined ? { note: tool.note } : {}), ms, ...(bytes !== undefined ? { bytes } : {}), ...(road !== undefined ? { road } : {}) });
     } else {
-      out.tools.push({ id: tool.id, label: tool.label, outcome: "failed", note: timeouts === 2 ? timedOutLine(limit, 2) : reasonOf(res, limit), ms });
+      landed({ id: tool.id, label: tool.label, outcome: "failed", note: timeouts === 2 ? timedOutLine(limit, 2) : reasonOf(res, limit), ms });
     }
   }
   await verifyCommands(machine, tools, out.tools, stage);
   await verifyChecks(machine, tools, out.tools, stage);
   await readPins(machine, tools, out.tools, stage);
   const housekeeping = installed.has("tools/homebrew") ? await brewHousekeeping(machine, run) : undefined;
-  stage(closing(summarize(out.tools, housekeeping), await sweepCaches(machine), await freeNote(machine)));
+  stage(closing(summarize(out.tools, housekeeping), await sweep(), await freeNote(machine)));
   return out;
 }

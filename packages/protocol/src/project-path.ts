@@ -112,6 +112,15 @@ export function placeDaemonPaths(home: string): {
   };
 }
 
+/** What the job that puts the recipe on a computer you own keeps there: the scratch its long steps run under, the
+ * log it appends a line to as it goes, and the outcome it writes at the end, which is what a person at that
+ * computer's own shell reads without the host. All of it under the one folder wsp already owns there, so a
+ * workspace on that computer never sees it: every workspace has its own `.wsp` bound over the computer's. */
+export function placeProvisionPaths(home: string): { dir: string; runDir: string; log: string; result: string } {
+  const dir = `${placeDaemonPaths(home).wsp}/provision`;
+  return { dir, runDir: `${dir}/run`, log: `${dir}/log`, result: `${dir}/result.json` };
+}
+
 /** Every path a leave takes off a computer joined as a place, in the order they go: the place file, its key and the
  * agent's log, then everything the daemon and an installer over ssh put under wsp's own folder, then the browser
  * shim and its xdg-open name. The work folder is not here: what the person's threads wrote there is theirs. The
