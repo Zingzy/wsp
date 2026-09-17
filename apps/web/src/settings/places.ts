@@ -87,6 +87,15 @@ export const THIS_COMPUTER_WORD = thisComputer("darwin");
  * phrase for a joined computer, the one both the row and every sentence about it read. */
 export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_COMPUTER, provider: "a provider" };
 
+/** What the computer a landing names is called on a screen: the row this host holds for it, named the one way every
+ * surface names a computer, else the word the landing itself carried. The runtime answers the id of the computer
+ * the host runs on there, and an id is no word for a person to read. */
+export function landingName(places: readonly PlaceView[], landing: { readonly place?: string; readonly name: string }): string {
+  const word = landing.place ?? landing.name;
+  const row = places.find(place => place.id === word || namesPlace(place, word));
+  return row === undefined ? landing.name : placeName(row, row === places[0]);
+}
+
 /** Whether this row is the place a word names, read the one way every reader of a place word reads it: the id the
  * wire keys it by, or the name a person types. The image record's copies and the build's own frames both carry the
  * word rather than the id, so one predicate answers for both. */

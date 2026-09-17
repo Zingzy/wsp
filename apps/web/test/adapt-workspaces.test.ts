@@ -14,11 +14,11 @@ describe("workspaceIndicator", () => {
   it.each<[WorkspacePhase, MachineState | null, ReachState | null, string, string, boolean]>([
     ["running", "running", "reachable", "Running", "running", false],
     ["running", null, null, "Running", "running", false],
-    ["pausing", "running", "napping", "Pausing", "paused", true],
+    ["pausing", "running", "napping", "Stopping", "paused", true],
     ["waking", "starting", "unreachable", "Waking", "neutral", true],
-    ["napping", "paused", "napping", "Paused", "paused", false],
+    ["napping", "paused", "napping", "Stopped", "paused", false],
     ["running", "starting", "unreachable", "Waking", "neutral", true],
-    ["running", "paused", "napping", "Paused", "paused", false],
+    ["running", "paused", "napping", "Stopped", "paused", false],
     ["running", "running", "unreachable", "Unreachable", "neutral", false],
     ["running", "running", "no-daemon", "Unreachable", "neutral", false],
     ["running", "gone", "gone", "Gone", "neutral", false],
@@ -30,6 +30,10 @@ describe("workspaceIndicator", () => {
   ])("phase %s, machine %s, reach %s -> %s", (phase, machineState, reach, label, tone, pulse) => {
     const s = machineState !== null && reach !== null ? status(phase, machineState, reach) : null;
     expect(workspaceIndicator({ phase }, s)).toEqual({ label, tone, pulse });
+    // A computer that keeps a paused machine's memory reads the pause words for the same two states; every other
+    // computer stops, which is what a reading with no mode behind it says.
+    const memory = workspaceIndicator({ phase }, s, "memory");
+    expect(memory).toEqual({ ...{ label, tone, pulse }, label: label === "Stopped" ? "Paused" : label === "Stopping" ? "Pausing" : label });
   });
 });
 
@@ -207,7 +211,7 @@ describe("deriveSidebarProjects", () => {
 
   it("the restart log: a napping status wins over the stale view phase", () => {
     const [p] = deriveSidebarProjects({ workspaces: [LIVE_WORKSPACE_1], statuses: statusesFrom(LIVE_RUN_1_RESTART) });
-    expect(p).toMatchObject({ phase: "napping", indicator: { label: "Paused", tone: "paused" } });
+    expect(p).toMatchObject({ phase: "napping", indicator: { label: "Stopped", tone: "paused" } });
   });
 
   it("without a status the view alone drives the indicator", () => {

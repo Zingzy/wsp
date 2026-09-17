@@ -2294,21 +2294,24 @@ export function isMacMachine(osName: string | null | undefined): boolean {
  * screen that names this computer uses, so a table and the settings list cannot call one computer two things. */
 export const computerWord = (os: string | null | undefined): string => thisComputer(isMacMachine(os) ? "darwin" : "linux");
 
-/** What a row says about the network of a workspace on a computer that copies but cannot give a copy a network of
- * its own: every copy binds the ports of the one computer, so two dev servers on 3000 are one port and the second
- * one fails. The platform rides, as it does in every line naming this computer, so a Linux reader is not told
- * about a Mac. */
-export const sharesPortsLine = (platform: "darwin" | "linux"): string => `shares ports with ${thisComputer(platform)}`;
+/** What a workspace's copy of its project is, in the words a person uses for it: the folder itself worked where it
+ * sits, or a copy of it. A directory clone and a git worktree are two roads to the one thing a person reads, so
+ * both read the same; which road was taken, and why one was passed over, rides the row's hover text. The one home
+ * for the word, so a row in the app and a cell in the command line's table cannot say two things about one
+ * workspace. */
+export const madeOfWord = (road: CopyRoad): string => (road === "in-place" ? "in this folder" : "a copy");
 
-/** The network cell of a workspace's row: the shared-ports line on a computer that copies and has no network for
- * a copy, nothing anywhere else. Reads the two capability flags and nothing about the workspace's kind, so a
- * computer that gains its own network changes one flag and the cell follows. */
-export function networkLine(c: Pick<Capabilities, "copies" | "ownNetwork">, platform: "darwin" | "linux"): string {
-  return c.copies && !c.ownNetwork ? sharesPortsLine(platform) : "";
+/** What a workspace's copy has for a network, in the same words: its own where the computer gives a copy one, else
+ * the computer's own ports, with the port an app that reads PORT binds where the record carries a base, since two
+ * copies on one computer's network cannot both have 3000. Nothing at all on a computer that copies nothing, which
+ * has no copy to say it of. Reads the two capability flags and nothing about the workspace's kind, so a computer
+ * that gains its own network changes one flag and every line follows. */
+export function portsWord(c: Pick<Capabilities, "copies" | "ownNetwork">, portBase: number | undefined, platform: "darwin" | "linux"): string {
+  if (c.ownNetwork) return "own network";
+  if (!c.copies) return "";
+  const shares = `shares ${thisComputer(platform)}'s ports`;
+  return portBase === undefined ? shares : `${shares}, PORT ${portBase}`;
 }
-
-/** The road a copy was made by as a row says it: one word, so the column is narrow. */
-export const copyRoadWord = (road: CopyRoad): string => ({ clonefile: "clone", worktree: "worktree", "in-place": "in place" })[road];
 
 /** The heading over the tools a package manager here has that no catalog row carries: the wizard's own screen and
  * the `wsp recipe scan` section are one section, so they carry one name. */

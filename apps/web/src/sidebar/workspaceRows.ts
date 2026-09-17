@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Row labels and dialog helpers for the workspace sidebar. The adapter names
-// the state; this file turns it into the words and classes a row shows. Pure
-// but for the one hook beside the where word, which reads that word off the
-// store for the surfaces that hold a workspace's id and no snapshot.
+// Row labels for the workspace sidebar. The adapter names the state; this file
+// turns it into the words and classes a row shows. What a workspace is made of
+// and what its ports are is the protocol's word table (madeOfWord, portsWord),
+// read here and never respelled. Pure but for the one hook beside the where
+// word, which reads that word off the store for the surfaces that hold a
+// workspace's id and no snapshot.
 import { agentName } from "@wsp/catalog";
-import { FREE_WORD, fmtCost, fmtSize, isBilling, isLocalWorkspace, kindWords, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, wakeAskingAgainLine, workspaceKind, workspaceStateOf, type AbsentComputer, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords, type WorkspaceState, type WorkspaceStatus } from "@wsp/protocol";
+import { isLocalWorkspace, kindWords, madeOfWord, portsWord, whereWord as whereOf, machineLacksShort, outOfMemoryRowLine, workspaceKind, type AbsentComputer, type Capabilities, type MemoryReading, type ReachState, type SessionOrigin, type PlaceView, type WorkspaceKindWords } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicatorTone } from "../adapt/index.js";
 import { PLACE_KIND_WORDS, THIS_COMPUTER_WORD, placeName, placeOf } from "../settings/places.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -15,29 +17,6 @@ import { formatWorkingDurationLabel, type ThreadStatusPill } from "./Sidebar.log
 
 export const NEW_THREAD_SHORTCUT = shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "chat.new");
 export const NEW_THREAD_TITLE = NEW_THREAD_SHORTCUT ? `New thread (${NEW_THREAD_SHORTCUT})` : "New thread";
-
-/** What the countdown reads while the runtime has no nap scheduled for a billing machine. */
-export const NO_NAP_SCHEDULED = "active";
-
-/** Countdown to the runtime's auto-nap while the machine bills; "active" when nothing is scheduled. */
-export function idleCountdownLabel(status: WorkspaceStatus | null, nowMs: number): string | null {
-  if (!status || !isBilling(workspaceStateOf(status, status))) return null;
-  if (status.idleAt === undefined) return NO_NAP_SCHEDULED;
-  const remaining = status.idleAt - nowMs;
-  if (remaining < 60_000) return "naps soon";
-  return `naps in ${formatWorkingDurationLabel(remaining)}`;
-}
-
-/** Slow is the only reach state the indicator does not already carry as a label. */
-export function reachNote(reach: ReachState | null): string | null {
-  return reach === "slow" ? "edge slow" : null;
-}
-
-/** Which ask the host is on while it asks the provider again for a wake it never took, in the two words this slot
- * has room for beside the spend and the nap countdown; the Machine tab reads the same fact at its full length. */
-export function wakeAskNote(status: WorkspaceStatus | null): string | null {
-  return status?.wakeAsk === undefined ? null : wakeAskingAgainLine(status.wakeAsk.ask, status.wakeAsk.of, "short");
-}
 
 /** The row's line for a daemon that is not there, and which of the two facts it is: no-daemon is a machine that
  * answers with nothing on the daemon's port, unsupported one with no daemon road at all. Nothing for every other
@@ -78,53 +57,39 @@ export interface WorkspaceMetaInput {
   /** The one reading of a computer that is not answering; the row's third line is then its own. Absent on a
    * caller that holds no places list. */
   readonly absent?: AbsentComputer | null | undefined;
-  /** The meter's last tick for this workspace; null before the first. */
-  readonly cost: { readonly rateUsdPerHour: number; readonly accruedUsd: number } | null;
   /** The last memory sample from a machine whose link then dropped. */
   readonly outOfMemory: MemoryReading | undefined;
-  readonly nowMs: number;
 }
 
-/** The workspace row's third line, one string in one order: what it cost today, the edge note, the nap countdown
- * last. The cost leads once the meter has ticked; before that the row says nothing about spend rather than a
- * $0.00 it changes into a real figure a second later. The row cuts it at its own cap; nothing here decides what to
- * leave out. What the runtime is doing to the machine's daemon, a drop with memory near full, or a daemon that is
- * not there at all takes the whole line while it lasts, and a computer that is not answering takes it over all of
- * them: it is the one thing on the row a person may be waiting on, and it reads in the ink prose gets. A
- * machine wsp does not drive spends nothing and naps never, so its line says so in one word. */
-export function workspaceMetaLine({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string {
-  const [sentence] = metaSentences({ project, absent, outOfMemory });
-  if (sentence !== undefined) return sentence;
-  return costLine({ project, cost, nowMs });
-}
-
-/** The row's third line: free for a computer wsp does not pay for, else what it cost today, the ask a wake the
- * provider has not taken is on, the edge note and the nap countdown, in that order. The hourly rate is not on it:
- * the line holds 30 characters and the spend with its countdown fills them, so the rate reads on the pane's own
- * Rate row rather than crowding out what a person is waiting on. */
-function costLine({ project, cost, nowMs }: Omit<WorkspaceMetaInput, "outOfMemory">): string {
-  if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  return [accruedTodayLabel(cost?.accruedUsd ?? null), wakeAskNote(project.status), reachNote(project.reach), idleCountdownLabel(project.status, nowMs)]
-    .filter((part): part is string => part !== null)
+/** What a workspace is made of, the row's second line: the word for its copy, the computer it stands on where
+ * that is not the computer this window runs on, and what the copy has for a network. Every word is the
+ * protocol's table, so this line and the command line's two cells cannot say two things about one workspace. A
+ * workspace with no copy of a folder is a fork, whose line is its network alone; a caller with no landing for the
+ * project has no flags to read the network off and says the copy and the computer.  */
+export function madeOfLine({ project, landing, computer }: { project: Pick<SidebarProjectSnapshot, "workspace">; landing: Pick<Capabilities, "copies" | "ownNetwork"> | null; computer: string | null }): string {
+  const copy = project.workspace.copy;
+  return [
+    copy === undefined ? undefined : madeOfWord(copy.road),
+    computer ?? undefined,
+    landing === null ? undefined : portsWord(landing, project.workspace.portBase, "darwin") || undefined,
+  ]
+    .filter((part): part is string => part !== undefined)
     .join(" · ");
 }
 
-/** What the machine costs, as the row's line and the Spaces header both lead with: free for a machine wsp does not
- * pay for, else what it cost today with the rate while it bills, and nothing at all before the meter has ticked. */
-function spendLine({ project, cost }: Pick<WorkspaceMetaInput, "project" | "cost">): string | null {
-  if (!kindWords(workspaceKind(project.workspace)).driven) return FREE_WORD;
-  const parts = [accruedTodayLabel(cost?.accruedUsd ?? null), isBilling(project.state) ? rateLabel(cost?.rateUsdPerHour ?? project.status?.rateUsdPerHour ?? null) : null].filter((part): part is string => part !== null);
-  return parts.length === 0 ? null : parts.join(" · ");
+/** The branch the agent is working on, off the record the copy was made with; empty where the record carries
+ * none, which is a fork and the folder worked in place, whose branch is whatever the person has it on now. */
+export function branchLine(project: Pick<SidebarProjectSnapshot, "workspace">): string {
+  return project.workspace.copy?.branch ?? "";
 }
 
-/** What the machine is, the row's second line and one of the Spaces header's: the size its status carries in the
- * kind's word for a cpu, a fork's vCPUs or this computer's cores, on a kind whose rows read a size there, else what
- * that kind calls its machine (a machine over ssh). Null before a status carries a size, so a surface leaves the
- * slot empty rather than drawing it half. */
-export function machineLine(project: Pick<SidebarProjectSnapshot, "status" | "workspace">): string | null {
-  const kind = kindWords(workspaceKind(project.workspace));
-  if (!kind.rowReadsMachine) return kind.machine;
-  return project.status === null ? null : fmtSize(project.status.size, kind.cpu);
+/** The workspace row's third line: the one sentence a person is waiting on while there is one, else the branch the
+ * agent is working on, else nothing. The sentence leads because it is the one thing on the row a person can act on
+ * and the branch is there either way: a copy always carries one, so a branch that led would hide every prompt and
+ * every note on this computer's rows. No figure ever stands here: what a machine costs is a fact about the computer
+ * it runs on, and it lives on that computer's row in Settings. */
+export function workspaceMetaLine({ project, absent, outOfMemory }: WorkspaceMetaInput): string {
+  return metaSentences({ project, absent, outOfMemory })[0] ?? branchLine(project);
 }
 
 /** The lead of the prompt a thread of this workspace is stopped on, the one sentence a person is waiting on: the
@@ -140,28 +105,6 @@ export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "wor
   return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
 }
 
-/** What a workspace has cost since the meter's midnight, in the one shape every spend figure reads in; the sidebar
- * row and the switcher card read the one rule. Null before the meter's first tick: a row that paints $0.00 and
- * changes it a second later has told the person something that was never true. */
-export function accruedTodayLabel(accruedUsd: number | null): string | null {
-  return accruedUsd === null ? null : `${fmtCost(accruedUsd)} today`;
-}
-
-/** The awake rate as every sidebar surface prints it, to the tenth of a cent; null before the meter's first tick. */
-export const rateLabel = (rateUsdPerHour: number | null): string | null => (rateUsdPerHour === null ? null : `$${rateUsdPerHour.toFixed(3)}/hr`);
-
-/** The Spaces header's lines under the name. The two the row gives a whole line to lead, since the one workspace on
- * screen is where a person waits on them: what the runtime is doing to the daemon, a drop with memory near full,
- * then a daemon that is not there at all. Then what the machine is, what it costs, and when it naps. A line nothing
- * is known for is left out rather than drawn half: no size yet means no machine line, as no nap scheduled means no
- * nap line. The cost line waits for the meter's first tick as the row's does and carries the rate only while the
- * machine bills; a machine wsp does not drive reads free there, as its row does, and naps never. */
-export function spaceHeaderLines({ project, absent, cost, outOfMemory, nowMs }: WorkspaceMetaInput): string[] {
-  const nap = kindWords(workspaceKind(project.workspace)).driven ? idleCountdownLabel(project.status, nowMs) : null;
-  const lines: (string | null)[] = [...metaSentences({ project, absent, outOfMemory }), machineLine(project), spendLine({ project, cost }), nap === NO_NAP_SCHEDULED ? null : nap];
-  return lines.filter((line): line is string => line !== null);
-}
-
 /** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. A
  * machine wsp does not drive has no state of its own to name, since wsp neither pauses nor wakes it. The one
  * exception is the computer under it not answering, which is a state of that computer rather than of wsp's
@@ -171,11 +114,6 @@ export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "i
   if (!kindWords(workspaceKind(project.workspace)).driven) return "";
   return project.state === "running" ? "" : project.indicator.label;
 }
-
-// The base the sidebar's whispered tiers mix from, not the app's muted ink: the same colour on a
-// dark surface, and on a light one the step an alpha needs there. A row in the command palette
-// draws it from the root's copy of the token.
-const PLAIN = { colorClass: "text-sidebar-whisper/70", dotClass: "bg-sidebar-whisper/60" };
 
 /** The computer or the provider a workspace runs on, as a row names it: the live record once a status has arrived,
  * read through the protocol's one reading of that question, so this row, the command line's table and the pane
@@ -258,17 +196,17 @@ export function provenanceLabel(thread: Pick<SidebarThreadSnapshot, "harness">, 
   return [agentName(thread.harness), ...words].join(" · ");
 }
 
-/** The pill keys on the session's state and wears the adapter's word: a running thread, one waiting on the person
- * and one that did not settle carry one, the resting states none. A thread stopped on a permission prompt carries it
- * whatever its turn's own status says, since that is the one row on the screen a person can act on. */
-export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indicator" | "asking">): ThreadStatusPill | null {
+/** The word a thread row's state slot carries, off the adapter's own reading: a thread waiting on the person, one
+ * that is working and one that did not settle each say so, and the resting states say nothing, since a row nobody
+ * is waiting on is what every other row is. No dot for any state: a state is a word here, and the row beside it
+ * says the rest. */
+export function threadStateWord(thread: Pick<SidebarThreadSnapshot, "status" | "indicator" | "asking">): string | null {
   if (!thread.indicator) return null;
-  if (thread.asking !== null) return { label: thread.indicator.label, ...PLAIN, pulse: false };
+  if (thread.asking !== null) return thread.indicator.label;
   switch (thread.status) {
     case "running":
-      return { label: thread.indicator.label, ...PLAIN, pulse: thread.indicator.pulse };
     case "failed":
-      return { label: thread.indicator.label, ...PLAIN, pulse: false };
+      return thread.indicator.label;
     case "completed":
     case "interrupted":
       return null;
@@ -282,7 +220,7 @@ export function threadPill(thread: Pick<SidebarThreadSnapshot, "status" | "indic
 /** How a workspace's glyph dims while its machine is paused, on the row's lead and the space bar's icon alike: half
  * ink and no hue. The bar's colour is the space's own (the theme's ink on the current one, muted on the others), so
  * this is all the state does there. */
-export function leadDimClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
+function leadDimClass(project: Pick<SidebarProjectSnapshot, "state">): string | undefined {
   return project.state === "paused" ? "opacity-50" : undefined;
 }
 
@@ -328,10 +266,3 @@ export function compactTimeLabel(iso: string | null): string {
   return label.endsWith(" ago") ? label.slice(0, -4) : label;
 }
 
-export function defaultWorkspaceName(existing: ReadonlyArray<string>): string {
-  const taken = new Set(existing);
-  for (let n = 1; ; n++) {
-    const candidate = `workspace-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}

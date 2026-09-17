@@ -32,6 +32,8 @@ export const rowLineCut = (line: string): string => cutLine(line, ROW_LINE_MAX);
 export { ROW_LINE_MAX };
 
 export const workspaceRowId = (workspaceId: string): string => `ws:${workspaceId}`;
+/** A project's header row, which the keyboard does not walk and a test and a screenshot step name it by. */
+export const projectRowK = (projectId: string): string => `project:${projectId}`;
 export const threadRowId = (threadId: string): string => `thread:${threadId}`;
 /** The header over a group of one workspace's thread rows: the idle shelf, and the archive nested inside it. */
 export const groupRowId = (group: "settled" | "archived", workspaceId: string): string => `${group}:${workspaceId}`;

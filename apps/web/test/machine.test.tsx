@@ -727,7 +727,9 @@ describe("a workspace behind the golden's head", () => {
   });
 
   it.each([
-    ["napping" as const, "api is paused; wake it to move it to a newer image"],
+    // The sentence reads the state word with no pause mode behind it, which is the stopping word; the pane's own
+    // state row reads the computer's mode beside it.
+    ["napping" as const, "api is stopped; wake it to move it to a newer image"],
     ["gone" as const, "api's machine is gone; rebuild it to move it to a newer image"],
   ])("a %s workspace is not moved: the button is dead and the row says why, since the move replaces the machine", async (phase, why) => {
     await mount([{ ...onV11(), phase }], CAPS, twoVersions);

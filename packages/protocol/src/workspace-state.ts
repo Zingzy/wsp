@@ -4,7 +4,7 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineFacts, MachineState, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -238,15 +238,22 @@ export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status
 
 const WORDS: Record<WorkspaceState, string> = {
   running: "Running",
-  pausing: "Pausing",
-  paused: "Paused",
+  pausing: "Stopping",
+  paused: "Stopped",
   waking: "Waking",
   unreachable: "Unreachable",
   gone: "Gone",
 };
 
-export function workspaceWord(state: WorkspaceState): string {
-  return WORDS[state];
+/** The two words a computer that keeps the processes and the bytes of a paused machine reads instead: a nap there
+ * is a pause, and everywhere else it is a stop, which is what the machine does to every process it was running. */
+const MEMORY_WORDS: Partial<Record<WorkspaceState, string>> = { pausing: "Pausing", paused: "Paused" };
+
+/** The one word for a workspace's state. The computer's pause mode rides where the caller holds it, since the same
+ * state is a pause on a machine that keeps its memory and a stop on one that does not; a caller holding none reads
+ * the stopping words, which is what every computer but a provider with memory pauses does. */
+export function workspaceWord(state: WorkspaceState, pauseMode?: PauseMode): string {
+  return (pauseMode === "memory" ? MEMORY_WORDS[state] : undefined) ?? WORDS[state];
 }
 
 /** What a row this workspace's machine stands on says under WHERE: the name this host has for the computer it runs

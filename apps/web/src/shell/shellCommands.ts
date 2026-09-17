@@ -20,7 +20,7 @@ import { useStore } from "../protocol/store.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
 import { absenceOf } from "../settings/places.js";
 import { sidebarThreadOrder } from "../sidebar/Sidebar.logic.js";
-import { spaceWorkspaceId } from "../sidebar/sidebarMode.js";
+import { currentWorkspaceId } from "../adapt/workspaces.js";
 import { threadTree } from "../sidebar/threadTree.js";
 import { useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { resetTerminalZoom, stepTerminalZoom } from "../terminal/fontSetting.js";
@@ -117,13 +117,13 @@ function orderedWorkspaceIds(): string[] {
     list, its compare against what is open and its select all read. */
 export type WalkableThread = SidebarThreadSnapshot & { readonly threadId: string };
 
-/** The threads of the workspace Spaces has on screen that a walk can land on, in the order the sidebar draws
+/** The threads of the workspace on screen that a walk can land on, in the order the sidebar draws
     them. The chord and the palette's rows read this one list, so a row that says it is disabled and a chord that
     does nothing agree. A row the runtime stamped no thread id on pins the workspace alone, so a walk that landed
     on it could never step off it. */
 export function threadWalk(projects: ReadonlyArray<SidebarProjectSnapshot>, selectedId: string | null): WalkableThread[] {
-  const spaceId = spaceWorkspaceId(projects.map(project => project.id), selectedId);
-  const group = threadTree(projects).find(candidate => candidate.project.id === spaceId);
+  const current = currentWorkspaceId(projects.map(project => project.id), selectedId);
+  const group = threadTree(projects).find(candidate => candidate.project.id === current);
   if (group === undefined) return [];
   return sidebarThreadOrder(group.threads).filter((thread): thread is WalkableThread => thread.threadId !== null);
 }

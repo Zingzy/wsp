@@ -11,10 +11,9 @@ import {
   ProjectCopy,
   WorkspaceView,
   copyPathFor,
-  copyRoadWord,
   folderSlug,
-  networkLine,
-  sharesPortsLine,
+  madeOfWord,
+  portsWord,
   thisComputer,
 } from "../src/index.js";
 
@@ -63,27 +62,25 @@ describe("the two flags a computer declares about copies", () => {
 });
 
 describe("what a row says about a copy's network", () => {
-  it("is the shared-ports line only where the computer copies and a copy gets no network of its own", () => {
+  it("is its own network, the computer's ports with the copy's port base, or those ports alone, and nothing where the computer copies nothing", () => {
     for (const platform of ["darwin", "linux"] as const) {
-      expect(networkLine(here, platform)).toBe(sharesPortsLine(platform));
-      expect(networkLine({ copies: true, ownNetwork: true }, platform)).toBe("");
-      expect(networkLine({ copies: false, ownNetwork: false }, platform)).toBe("");
-      expect(networkLine({ copies: false, ownNetwork: true }, platform)).toBe("");
+      expect(portsWord({ copies: false, ownNetwork: true }, undefined, platform)).toBe("own network");
+      expect(portsWord(here, 3100, platform)).toBe(`shares ${thisComputer(platform)}'s ports, PORT 3100`);
+      expect(portsWord(here, undefined, platform)).toBe(`shares ${thisComputer(platform)}'s ports`);
+      expect(portsWord({ copies: false, ownNetwork: false }, undefined, platform)).toBe("");
     }
   });
 
-  it("names this computer the way every other line naming it does, off the platform and never a word of its own", () => {
-    for (const platform of ["darwin", "linux"] as const) {
-      expect(sharesPortsLine(platform)).toBe(`shares ports with ${thisComputer(platform)}`);
-    }
+  it("gives a copy with its own network that word whatever road made it, since the ports inside one are its own", () => {
+    expect(portsWord({ copies: true, ownNetwork: true }, 3100, "darwin")).toBe("own network");
   });
 });
 
-describe("the road word on a row", () => {
-  it("is one word per road", () => {
-    expect(copyRoadWord("clonefile")).toBe("clone");
-    expect(copyRoadWord("worktree")).toBe("worktree");
-    expect(copyRoadWord("in-place")).toBe("in place");
+describe("what a row says a workspace is made of", () => {
+  it("is the folder itself for the in-place road and a copy for both roads that make one", () => {
+    expect(madeOfWord("in-place")).toBe("in this folder");
+    expect(madeOfWord("clonefile")).toBe("a copy");
+    expect(madeOfWord("worktree")).toBe("a copy");
   });
 });
 

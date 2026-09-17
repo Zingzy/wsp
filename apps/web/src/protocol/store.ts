@@ -3,12 +3,12 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, cloudCreateRefusal, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, kindForComputer, worksInPlace, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
 import type { Launch, SidebarProjectSnapshot } from "../adapt/view-model.js";
-import { DisconnectedError, RequestError, type Api, type ConnStatus, type ProtocolEvent } from "./client.js";
+import { DisconnectedError, RequestError, type Api, type ConnStatus, type Landing, type ProtocolEvent } from "./client.js";
 import { lastWorkspaceId, rememberWorkspace } from "./lastWorkspace.js";
 import { clearLegacyPreferences, legacyPreferences } from "./legacyPreferences.js";
 import { bootPreferences, rememberFirstPaint } from "./firstPaint.js";
@@ -114,6 +114,11 @@ interface State {
   places: PlaceView[];
   /** Every project this wsp holds, which is what a workspace is made of; the two project events keep it current. */
   projects: ProjectView[];
+  /** Where a workspace of each project would land, by the project's id: asked once per project, and the one home of
+   * the flags a row's words about its copy's ports and its state word are read off. A key with null under it is a
+   * project the runtime refused a landing for, which is what keeps that refusal from being asked again on every
+   * render; its rows say what their records carry and nothing more. */
+  landings: Record<string, Landing | null>;
   /** Whether the host has answered about that list yet. An empty list is an answer and a list not asked for yet is
    * not: what draws only while this computer is the only row would otherwise draw on every load and go again. */
   placesRead: boolean;
@@ -166,6 +171,15 @@ interface State {
    * it through the stage events; resolves with the runtime's id for the new workspace, or null when the create was
    * refused. `picked` carries a project image or a size only where the person chose one. */
   createWorkspace(project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null>;
+  /** Records a project and answers the record the host kept: a folder on this computer, or a repository address on
+   * the computer named. The row arrives by the project.added event too; this is what the first run and the sheet
+   * wait on. Null on a client that cannot record one. */
+  addProject(source: string, on?: string): Promise<ProjectView | null>;
+  /** Forgets a project; the row leaves on project.removed. A refusal (a workspace still stands on it) is a toast. */
+  removeProject(projectId: string): Promise<void>;
+  /** Asks where a workspace of this project would land, once per project. A refusal is remembered as no landing
+   * rather than asked again on every render. */
+  loadLanding(project: string): Promise<void>;
   /** Runs a failed creation again under the same row. */
   retryCreation(key: string): Promise<void>;
   dismissCreation(key: string): void;
@@ -303,17 +317,6 @@ export const useStore = create<State>((set, get) => {
     }));
     if (opened) writeAddress({ workspaceId });
   };
-  /** Whether a fork of the image head is held back, having said so in the toast: the refusal is spoken before a
-   * creation row exists, so a person who asks too early reads where the image is rather than a row that only failed.
-   * A project worked in place forks nothing and a fork of a named project image has its own image, so neither is
-   * held back here. */
-  const holdCreate = (computer: string | undefined, golden: string | undefined): boolean => {
-    if (golden !== undefined || (computer !== undefined && worksInPlace(kindForComputer(computer)))) return false;
-    const refusal = cloudCreateRefusal({ hasGolden: get().hasGolden, job: get().initJob });
-    if (refusal === null) return false;
-    set({ toast: refusal.line, toastAction: { for: refusal.line, word: refusal.word, run: () => get().openSetup() } });
-    return true;
-  };
   const runCreation = async (key: string, project: string, name: string, picked?: { golden?: string; size?: WorkspaceSize }): Promise<string | null> => {
     const api = get().api;
     if (!api) return null;
@@ -395,6 +398,8 @@ export const useStore = create<State>((set, get) => {
     const placesAsked = api.placesList?.();
     if (placesAsked === undefined) set({ placesRead: true });
     else void placesAsked.then(places => set({ places, placesRead: true })).catch(() => set({ placesRead: true }));
+    // The landings go with it: a host that has gained a computer or an image since answers differently now.
+    set({ landings: {} });
     void api.projectsList?.().then(projects => set({ projects })).catch(() => {});
     void api
       .preferences?.()
@@ -426,6 +431,7 @@ export const useStore = create<State>((set, get) => {
     connectOpen: false,
     places: [],
     projects: [],
+    landings: {},
     placesRead: false,
     addComputerOpen: false,
     connectProviderOpen: false,
@@ -498,9 +504,10 @@ export const useStore = create<State>((set, get) => {
     },
     async createWorkspace(project, name, picked) {
       // The computer is the project's own, so the row that waits on an image build is keyed by it and nothing asks
-      // the person where the work goes.
+      // the person where the work goes. Nothing is refused here: a project on this computer forks nothing, and a
+      // project on a computer with no image is refused by the runtime in its own sentence on the creation view.
       const computer = get().projects.find(p => p.id === project)?.computer;
-      if (!get().api || holdCreate(computer, picked?.golden)) return null;
+      if (!get().api) return null;
       const key = `creating:${++creationSeq}`;
       set(s => ({
         creations: [
@@ -512,10 +519,40 @@ export const useStore = create<State>((set, get) => {
       }));
       return runCreation(key, project, name, picked);
     },
+    async addProject(source, on) {
+      const api = get().api;
+      if (api?.projectsAdd === undefined) return null;
+      const project = await api.projectsAdd(source, on);
+      // The event carries the same record; taking it here too means the caller's next read holds it whichever
+      // arrived first, and the create that follows a first run has a project to be made of.
+      set(s => ({ projects: [...s.projects.filter(p => p.id !== project.id), project] }));
+      return project;
+    },
+    async removeProject(projectId) {
+      const api = get().api;
+      if (api?.projectsRemove === undefined) return;
+      try {
+        await api.projectsRemove(projectId);
+      } catch (e) {
+        if (!(e instanceof DisconnectedError)) set({ toast: e instanceof Error ? e.message : String(e) });
+      }
+    },
+    async loadLanding(project) {
+      const api = get().api;
+      if (api?.workspacesLanding === undefined || project in get().landings) return;
+      // The mark goes down before the ask, so a project drawn in three rows is asked about once.
+      set(s => ({ landings: { ...s.landings, [project]: null } }));
+      try {
+        const landing = await api.workspacesLanding(project);
+        set(s => ({ landings: { ...s.landings, [project]: landing } }));
+      } catch {
+        // A computer that forks nothing has no landing to give; the rows say what their records carry.
+      }
+    },
     async retryCreation(key) {
       const creation = get().creations.find(c => c.key === key);
       // A row another client started carries no project, so there is nothing here to ask again.
-      if (!creation || creation.project === undefined || holdCreate(creation.where, creation.golden)) return;
+      if (!creation || creation.project === undefined) return;
       patchCreation(key, c => ({ ...c, workspaceId: null, lines: NO_LINES, failed: null }));
       await runCreation(key, creation.project, creation.name, { ...(creation.golden !== undefined ? { golden: creation.golden } : {}), ...(creation.size !== undefined ? { size: creation.size } : {}) });
     },
@@ -675,7 +712,9 @@ export const useStore = create<State>((set, get) => {
       }
     },
     clearToast() { set({ toast: null, toastAction: null }); },
-    openSetup() { set({ setupOpen: true }); },
+    /** The screens live on the Settings page's image section now, so the road that opens them opens the page under
+     * them: a toast asking for a sign-in is pressed from anywhere in the window. */
+    openSetup() { set({ settingsOpen: true, setupOpen: true }); },
     closeSetup() { set({ setupOpen: false }); },
     openConnect() { set({ connectOpen: true }); },
     closeConnect() { set({ connectOpen: false }); },
@@ -749,7 +788,10 @@ export const useStore = create<State>((set, get) => {
           set(s => ({ projects: [...s.projects.filter(p => p.id !== e.project.id), e.project] }));
           return;
         case "project.removed":
-          set(s => ({ projects: s.projects.filter(p => p.id !== e.projectId) }));
+          set(s => {
+            const { [e.projectId]: _gone, ...landings } = s.landings;
+            return { projects: s.projects.filter(p => p.id !== e.projectId), landings };
+          });
           return;
         case "forward.open":
           set(s => ({ forwards: [...s.forwards.filter(f => !(f.workspaceId === e.forward.workspaceId && f.port === e.forward.port)), e.forward] }));
@@ -921,7 +963,9 @@ export function useSidebarProjects(): SidebarProjectSnapshot[] {
   const workspaces = useStore(s => s.workspaces);
   const statuses = useStore(s => s.statuses);
   const sessions = useStore(s => s.sessions);
-  return useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions }), [workspaces, statuses, sessions]);
+  const landings = useStore(s => s.landings);
+  const pauseModes = useMemo(() => Object.fromEntries(Object.entries(landings).map(([project, landing]) => [project, landing?.capabilities.pauseMode])), [landings]);
+  return useMemo(() => deriveSidebarProjects({ workspaces, statuses, sessions, pauseModes }), [workspaces, statuses, sessions, pauseModes]);
 }
 
 /** Every workspace's send in flight, for the sidebar, which reads them beside the rows the runtime has written. */
@@ -1049,6 +1093,18 @@ export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
   useEffect(() => (api ? api.subscribe(fn) : undefined), [api, fn]);
 }
 export function usePlaces(): PlaceView[] { return useStore(s => s.places); }
+export function useProjects(): ProjectView[] { return useStore(s => s.projects); }
+/** Where a workspace of this project lands, once the host has answered for it; null until then and for a project
+ * whose landing was refused. Every surface that says anything about a copy's ports or a stopped machine's word
+ * reads it here, so the row, the dialog and the first run cannot answer that question three ways. */
+export function useLanding(project: string | null): Landing | null {
+  const landing = useStore(s => (project === null ? undefined : s.landings[project]));
+  const load = useStore(s => s.loadLanding);
+  useEffect(() => {
+    if (project !== null) void load(project);
+  }, [load, project]);
+  return landing ?? null;
+}
 export function usePlacesRead(): boolean { return useStore(s => s.placesRead); }
 export function useAddComputerOpen(): boolean { return useStore(s => s.addComputerOpen); }
 export function useConnectProviderOpen(): boolean { return useStore(s => s.connectProviderOpen); }

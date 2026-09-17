@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from "vitest";
 import { goneRefusal, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
 import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
-import { SIDEBAR_MODE_ACTION, sidebarActions, type SidebarTarget, type SidebarVerbs } from "../src/actions/sidebarActions.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
 import { actionById, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
@@ -45,7 +44,6 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     restartDaemon: vi.fn(async () => {}),
     forget: vi.fn(),
     rename: vi.fn(),
-    pickLook: vi.fn(),
     exportProject: vi.fn(),
     ...over,
   };
@@ -68,27 +66,19 @@ describe("workspace actions", () => {
       WORKSPACE_WORDS.openMachine,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
-      WORKSPACE_WORDS.icon,
-      WORKSPACE_WORDS.theme,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "export-project", "rename", "icon", "theme", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "export-project", "rename", "copy-id"]);
     expect(actionById(actions, "rename").refusal).toBeNull();
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
     // A client with no rename verb says so rather than opening a box nothing would take.
     expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ rename: undefined })), "rename").refusal).toBe("This client cannot rename workspaces");
-    // The theme and the icon are the same record, so they open on a gone machine too; a client without the verb says so.
-    for (const id of ["theme", "icon"]) {
-      expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), id).refusal).toBeNull();
-      expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs({ pickLook: undefined })), id).refusal).toBe("This client cannot set a workspace's theme or icon");
-    }
-    actionById(actions, "icon").run();
-    expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "glyph");
-    actionById(actions, "theme").run();
-    expect(verbs.pickLook).toHaveBeenCalledWith("ws_a", "theme");
+    // The look actions are gone from the registry, so no surface can offer a picker for a colour or a glyph.
+    expect(actions.map(action => action.id)).not.toContain("icon");
+    expect(actions.map(action => action.id)).not.toContain("theme");
     expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it");
     expect(actionById(actions, "rebuild").refusal).toBe("This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
     expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
@@ -122,7 +112,7 @@ describe("workspace actions", () => {
   it("a gone workspace offers rebuild and forget and refuses the machine actions; a zombie offers rebuild alone; a client without the verbs says so", () => {
     const verbs = workspaceVerbs();
     const gone = resolveActions(workspaceActions, workspace("gone"), verbs);
-    expect(enabled(gone)).toEqual(["rebuild", "open-machine", "rename", "icon", "theme", "copy-id", "forget"]);
+    expect(enabled(gone)).toEqual(["rebuild", "open-machine", "rename", "copy-id", "forget"]);
     expect(actionById(gone, "new-thread").refusal).toBe("New threads wait for the rebuild");
     expect(actionById(gone, "open-terminal").refusal).toBe(goneRefusal("open a terminal"));
     expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
@@ -239,7 +229,7 @@ describe("workspace actions", () => {
     expect(actionById(actions, "phase").buttonWord).toBe("Wake");
     // The same machine before its wake ran out is refused the rebuild, in the word its own row shows.
     expect(actionById(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), "rebuild").refusal).toBe(
-      "This one is paused, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
+      "This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
     );
   });
 
@@ -269,10 +259,10 @@ describe("workspace actions", () => {
     // rebuild was the last row in that list still calling it a machine that answers.
     const pausedActions = resolveActions(workspaceActions, workspace("paused"), workspaceVerbs());
     expect(actionById(pausedActions, "rebuild").refusal).toBe(
-      "This one is paused, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
+      "This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
     );
-    expect(actionById(pausedActions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is paused");
-    expect(workspaceWord(workspaceState(workspace("paused")))).toBe("Paused");
+    expect(actionById(pausedActions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is stopped");
+    expect(workspaceWord(workspaceState(workspace("paused")))).toBe("Stopped");
   });
 
   it("the row buttons' labels name the workspace, and the keybindings come from the one table", () => {
@@ -450,8 +440,6 @@ describe("menu items from actions", () => {
       ["open-machine", WORKSPACE_WORDS.openMachine, "open", true],
       ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", true],
-      ["icon", WORKSPACE_WORDS.icon, "edit", true],
-      ["theme", WORKSPACE_WORDS.theme, "edit", true],
       ["fork", WORKSPACE_WORDS.fork, "edit", false],
       ["copy-id", WORKSPACE_WORDS.copyId, "copy", true],
       ["forget", WORKSPACE_WORDS.forget, "remove", false],
@@ -484,23 +472,3 @@ describe("placing the in-app menu", () => {
   });
 });
 
-describe("the Workspaces section registry", () => {
-  const target = (over: Partial<SidebarTarget> = {}): SidebarTarget => ({ mode: "list", ...over });
-  const verbs = (): SidebarVerbs & { calls: string[] } => {
-    const calls: string[] = [];
-    return { calls, setMode: mode => calls.push(`mode:${mode}`) };
-  };
-
-  it("offers the body toggle alone: a workspace is made of a project, which the new workspace dialog picks", () => {
-    const rows = resolveActions(sidebarActions, target(), verbs());
-    expect(rows.map(a => a.id)).toEqual([SIDEBAR_MODE_ACTION]);
-    const menu = toMenuItems(rows, DEFAULT_RESOLVED_KEYBINDINGS);
-    expect(menu.map(item => [item.label, item.group, item.enabled])).toEqual([[SIDEBAR_MODE_WORDS.spaces.title, "view", true]]);
-  });
-
-  it("running the mode row runs the toggle, which is the one verb the registry takes", () => {
-    const v = verbs();
-    actionById(resolveActions(sidebarActions, target(), v), SIDEBAR_MODE_ACTION)!.run();
-    expect(v.calls).toEqual(["mode:spaces"]);
-  });
-});

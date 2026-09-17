@@ -16,7 +16,7 @@ import {
   SessionInterruptOutcome,
   SessionRenameResult,
   SessionSteerOutcome,
-  type Capabilities,
+  Capabilities,
   type DaemonChannelEvent,
   type DaemonFrame,
   type DaemonOpenReply,
@@ -333,6 +333,15 @@ export interface PlaceRemoved {
   note?: string;
 }
 
+/** Where a workspace of one project would land: the computer's name as a person reads it, the row it stands on
+ * where that is a computer of their own, and what that computer offers. Read ahead of a create, and read by every
+ * row of that project for the words about its copy's ports and the pause mode its state word takes. */
+export interface Landing {
+  readonly place?: string;
+  readonly name: string;
+  readonly capabilities: Capabilities;
+}
+
 /** The ssh road of Add a computer: the login as a person's terminal would take it. No key rides here; the host
  * logs in through the ssh agent and config as they stand, which is what the note under the fields promises. */
 export interface SshLogin {
@@ -459,6 +468,18 @@ export interface Api {
   /** Every project this wsp holds, which is what the new-workspace dialog picks one of. Optional so a fixture that
    * makes no workspace need not fake it; without it the dialog says there is no project yet. */
   projectsList?(): Promise<ProjectView[]>;
+  /** Records a project: a folder on the computer running the host, or a repository address on the computer named.
+   * The host answers the record it kept, so the sidebar draws the project before anything is cloned. Optional so a
+   * fixture that records none need not fake it; without it the first run and the sheet are held. */
+  projectsAdd?(source: string, on?: string): Promise<ProjectView>;
+  /** Forgets a project. The host refuses one a workspace still stands on, naming them. Optional so a fixture that
+   * removes none need not fake it; without it the row's Remove project is held. */
+  projectsRemove?(projectId: string): Promise<void>;
+  /** Where a workspace of this project would land and what that computer offers: the computer's name, and the
+   * flags the row's own words about the copy's ports and the state word's pause mode are read off. Refused in the
+   * runtime's own sentence where that computer forks nothing. Optional so a fixture with no landing need not fake
+   * it; without it a row says what its record carries and nothing more. */
+  workspacesLanding?(project: string): Promise<Landing>;
   /** Opens the door a computer you own dials and answers where it is. Refused in the host's own words when this
    * host serves none. */
   placesDoor?(): Promise<PlaceDoorView>;
@@ -670,6 +691,15 @@ export function makeApi(c: ProtocolClient): Api {
     },
     placesList: async () => PlaceView.array().parse((await c.request<{ places?: unknown }>("places.list")).places),
     projectsList: async () => ProjectView.array().parse((await c.request<{ projects?: unknown }>("projects.list")).projects),
+    projectsAdd: async (source, on) => ProjectView.parse((await c.request<{ project?: unknown }>("projects.add", { source, ...(on === undefined ? {} : { on }) })).project),
+    projectsRemove: async projectId => {
+      await c.request("projects.remove", { projectId });
+    },
+    workspacesLanding: async project => {
+      const answer = await c.request<{ place?: string; name?: unknown; capabilities?: unknown }>("workspaces.landing", { project });
+      // Parsed, not trusted: a row's words about a copy's ports and its state word are read off these flags.
+      return { ...(answer.place === undefined ? {} : { place: answer.place }), name: String(answer.name), capabilities: Capabilities.parse(answer.capabilities) };
+    },
     placesDoor: async () => PlaceDoorView.parse((await c.request<{ door?: unknown }>("places.door")).door),
     pairIssue: async () => await c.request<{ code: string; expiresAt: number }>("pair.issue"),
     account: async () => AccountView.parse((await c.request<{ account?: unknown }>("account.get")).account),

@@ -36,7 +36,11 @@ const Fact = ({ k, line }: { k: string; line: string }) => (
 export function ImageSection() {
   const api = useStore(s => s.api);
   const [view, setView] = useState<SealedImageView | null>(null);
-  const [editing, setEditing] = useState(false);
+  // One door on those screens, and the host's own flag is it: a job that stops for a sign-in asks for them from
+  // the toast, and the person lands on the screen that is waiting rather than on a shut section.
+  const editing = useStore(s => s.setupOpen);
+  const openSetup = useStore(s => s.openSetup);
+  const closeSetup = useStore(s => s.closeSetup);
   // Read again when the sheet shuts, since a build that ran behind it changes every fact on this section; while it
   // stands open there is nothing here to repaint.
   useEffect(() => {
@@ -54,7 +58,7 @@ export function ImageSection() {
   }, [api, editing]);
   const image = view?.image ?? null;
   const edit = (
-    <Button data-k="edit-image" variant="outline" size="xs" onClick={() => setEditing(true)}>
+    <Button data-k="edit-image" variant="outline" size="xs" onClick={openSetup}>
       {IMAGE_WORDS.edit}
     </Button>
   );
@@ -101,7 +105,7 @@ export function ImageSection() {
           </Table>
         </div>
       )}
-      {editing ? <CloudSetupDialog onClose={() => setEditing(false)} /> : null}
+      {editing ? <CloudSetupDialog onClose={closeSetup} /> : null}
     </Section>
   );
 }

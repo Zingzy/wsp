@@ -435,7 +435,7 @@ describe("a pause the runtime did not start", () => {
     const second = createRuntime({ backend, store, adapters: {} });
     const hydrated = await second.workspaces.get(ws.id);
     expect(hydrated.phase).toBe("napping");
-    expect(workspaceWord(workspaceState({ phase: hydrated.phase }))).toBe("Paused");
+    expect(workspaceWord(workspaceState({ phase: hydrated.phase }), backend.capabilities.pauseMode)).toBe("Paused");
     expect(sendRefusal(workspaceState({ phase: hydrated.phase }))).toBe("Workspace is paused; wake it to send");
     expect(await store.get("workspaces", ws.id)).toMatchObject({ phase: "napping" });
 
@@ -575,7 +575,7 @@ describe("a provider move the backend gave up on", () => {
     const last = pushes(events).at(-1)!;
     expect(last).toMatchObject({ phase: "napping", machineState: "paused" });
     expect(last.reason).toMatch(/^the provider answered none of 1 resume request over /);
-    expect(workspaceWord(workspaceState({ phase: last.phase }))).toBe("Paused");
+    expect(workspaceWord(workspaceState({ phase: last.phase }), backend.capabilities.pauseMode)).toBe("Paused");
     hung.land();
     expect((await rt.workspaces.wake(ws.id)).phase).toBe("running");
   });

@@ -200,8 +200,8 @@ import {
   computerNamed,
   worksInPlaceTakesNone,
   worksInPlace,
-  copyRoadWord,
-  networkLine,
+  madeOfWord,
+  portsWord,
   kindForComputer,
   computerKindWord,
   nameTheProjectLine,
@@ -1164,11 +1164,10 @@ export function workspaceLine(w: WorkspaceListing, places: ReadonlyMap<string, s
     w.id,
     w.project.name,
     whereWord(w, named),
-    // What this workspace's copy of the project is, and what it costs: the road that made it and, on a computer
-    // whose copies share its network, that they do. Both cells are empty on a fork, whose project arrives by the
-    // runtime's own road and whose machine has a network of its own.
-    w.copy === undefined ? "" : copyRoadWord(w.copy.road),
-    w.copy === undefined || capabilities === undefined ? "" : networkLine(capabilities, hostPlatform()),
+    // What this workspace's copy of the project is and what its ports are, in the words the app's own row says
+    // them in. Both cells are empty on a fork, whose project arrives by the runtime's own road.
+    w.copy === undefined ? "" : madeOfWord(w.copy.road),
+    w.copy === undefined || capabilities === undefined ? "" : portsWord(capabilities, w.portBase, hostPlatform()),
     kind.rowReadsMachine ? fmtSize(w.size, kind.cpu) : "",
     workspaceWord(workspaceStateOf(w, w)),
     agentsWord(w.agents),

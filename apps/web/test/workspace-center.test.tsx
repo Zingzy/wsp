@@ -89,8 +89,10 @@ describe("workspace center", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeDefined();
   });
 
-  it("with no workspace the center asks for one instead of showing a strip", async () => {
+  it("with a project recorded and no workspace the center asks for one instead of showing a strip", async () => {
     await mount([]);
+    // A project stands, so the centre is the line that asks for a pick rather than the first run.
+    act(() => useStore.setState({ projects: [{ id: "pr_1", name: "the-project", computer: "here", source: { kind: "folder", path: "/root" }, path: "/root", createdAt: "t" }] }));
     await screen.findByText("Pick a workspace to continue");
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
     expect(screen.queryByRole("tablist")).toBeNull();

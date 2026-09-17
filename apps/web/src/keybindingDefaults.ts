@@ -54,10 +54,8 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+t", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+alt+arrowleft", command: "workspace.previous", when: "!terminalFocus" },
   { key: "mod+alt+arrowright", command: "workspace.next", when: "!terminalFocus" },
-  { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus && !spacesMode" },
-  { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus && !spacesMode" },
-  { key: "ctrl+tab", command: "thread.next", when: "!terminalFocus && spacesMode" },
-  { key: "ctrl+shift+tab", command: "thread.previous", when: "!terminalFocus && spacesMode" },
+  { key: "ctrl+tab", command: "workspace.next", when: "!terminalFocus" },
+  { key: "ctrl+shift+tab", command: "workspace.previous", when: "!terminalFocus" },
   ...WORKSPACE_SELECT_SLOTS.map(slot => ({ key: `mod+${slot}`, command: workspaceSelectCommand(slot), when: "!terminalOwnsMod" })),
 ];
 

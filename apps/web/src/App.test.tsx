@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import type { ProjectView, WorkspaceView } from "@wsp/protocol";
+import { Shell } from "./App.js";
+import type { Api } from "./protocol/client.js";
+import { useStore } from "./protocol/store.js";
+import { FIRST_RUN_WORDS } from "./sidebar/words.js";
+
+const project: ProjectView = { id: "pr_1", name: "spoo", computer: "here", source: { kind: "folder", path: "/Users/dev/spoo" }, path: "/Users/dev/spoo", createdAt: "t" };
+const workspace: WorkspaceView = {
+  id: "ws_a",
+  name: "pricing page",
+  kind: "local",
+  machineId: "local",
+  project: { id: "pr_1", name: "spoo", path: "/Users/dev/spoo", computer: "here" },
+  phase: "running",
+  golden: "",
+  createdAt: "t",
+};
+
+function mount({ projects, workspaces }: { projects: ProjectView[]; workspaces: WorkspaceView[] }) {
+  useStore.setState({
+    api: { subscribe: () => () => {}, initGet: async () => ({ keys: { solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null }) } as unknown as Api,
+    ready: true,
+    projects,
+    workspaces,
+    statuses: {},
+    sessions: {},
+    places: [],
+    landings: {},
+    selectedId: null,
+    selectedThreadId: null,
+    settingsOpen: false,
+    creations: [],
+  } as never);
+  render(<Shell />);
+}
+
+afterEach(() => {
+  cleanup();
+  useStore.setState({ api: null, projects: [], workspaces: [] } as never);
+});
+
+describe("what the centre of the window shows", () => {
+  it("is the first run while this wsp holds no project and no workspace", () => {
+    mount({ projects: [], workspaces: [] });
+    expect(screen.getByText(FIRST_RUN_WORDS.title)).toBeDefined();
+  });
+
+  it("is not the first run while a workspace stands, whose project record has not arrived yet", () => {
+    mount({ projects: [], workspaces: [workspace] });
+    expect(screen.queryByText(FIRST_RUN_WORDS.title)).toBeNull();
+    expect(screen.getByText("Pick a workspace to continue")).toBeDefined();
+  });
+
+  it("is the line that asks for a pick once there is a project and nothing is picked", () => {
+    mount({ projects: [project], workspaces: [workspace] });
+    expect(screen.getByText("Pick a workspace to continue")).toBeDefined();
+    expect(screen.queryByText(FIRST_RUN_WORDS.title)).toBeNull();
+  });
+});

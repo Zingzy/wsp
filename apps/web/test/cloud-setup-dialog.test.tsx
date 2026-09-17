@@ -15,7 +15,6 @@ import { KEY_REFUSED_LINE, KEY_REFUSED_ROWS, keyStoppedRows } from "./cloud-setu
 import { FOLDER_GHOST } from "../src/files/FolderPathField.js";
 import { useStore } from "../src/protocol/store.js";
 import { CloudSetupDialog } from "../src/sidebar/CloudSetupDialog.js";
-import { CloudSetupRow } from "../src/sidebar/CloudSetupRow.js";
 import { resetAskedToNotify } from "../src/shell/needsYou.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -1232,26 +1231,6 @@ describe("the cloud setup sheet", () => {
     expect(dialog.textContent).not.toContain(PASTED);
   });
 
-  it("opened from the row mid-build, the sheet outlives the seal: the done screen stays, Open workspace selects the fork, and the row goes back to its own words", async () => {
-    const building: InitJob = { ...JOB, phase: "sealing", screens: [], rows: [{ id: "stage/sealed", kind: "stage", label: GOLDEN_STAGE_WORDS.sealed, state: "running" }], progress: { done: 0, total: 1 } };
-    const { api, emit } = fakeApi({ setup: { ...HELD, job: building } });
-    useStore.setState({ initJob: building });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    // While a build runs the keycap is that build: it says where it stands and opens the screens it runs under.
-    const row = await screen.findByRole("button", { name: initButtonLine(building) });
-    fireEvent.click(row);
-    const dialog = await screen.findByRole("dialog");
-    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
-    emit({ ...building, phase: "done", golden: { version: 1 }, workspace: { id: "ws_first", name: "first" }, rows: [{ id: "stage/sealed", kind: "stage", label: GOLDEN_STAGE_WORDS.sealed, state: "done" }], progress: { done: 1, total: 1 } });
-    await waitFor(() => expect(useStore.getState().hasGolden).toBe(true));
-    await waitFor(() => expect(screen.getByRole("dialog").textContent).toContain(CLOUD_SETUP_WORDS.build.done));
-    fireEvent.click(k(screen.getByRole("dialog"), "primary"));
-    expect(useStore.getState().selectedId).toBe("ws_first");
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect((await screen.findByRole("button", { name: PLACES_WORDS.addComputer })).textContent).toBe(PLACES_WORDS.addComputer);
-  });
-
   it("a saved key refused at build time draws the job the host leaves: the first stage failed with the refusal, the rows after it never reached, nothing counted as done, and Change the key back to the keys step", async () => {
     const stopped: InitJob = { ...JOB, phase: "failed", screens: [], rows: KEY_REFUSED_ROWS, progress: { done: 0, total: KEY_REFUSED_ROWS.length }, error: KEY_REFUSED_LINE, keyRefused: true };
     const t = await open({ setup: { ...HELD, job: stopped } });
@@ -1296,164 +1275,5 @@ describe("the cloud setup sheet", () => {
     await waitFor(() => expect(k(t.dialog, "build")).toBeDefined());
     expect(k(t.dialog, "sentence").textContent).toBe(line);
     expect(k(t.dialog, "primary").textContent).toContain(CLOUD_SETUP_WORDS.build.again);
-  });
-
-  it("the sidebar row reads the job's line while it runs and the sheet is shut, and the plain words otherwise", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    expect(row.textContent).toBe(PLACES_WORDS.addComputer);
-    const job: InitJob = { ...JOB, phase: "building", screens: [], rows: [{ id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "running" }, { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "waiting" }], progress: { done: 0, total: 2 } };
-    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
-    expect(row.textContent).toBe("building · 0/2");
-    expect(row.querySelector("[data-badge], .animate-status-pulse")).toBeNull();
-    act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, phase: "done" } }));
-    // The build over, the keycap is the road it is the rest of the time: this Mac is still the only computer here.
-    await waitFor(() => expect(row.textContent).toBe(PLACES_WORDS.addComputer));
-  });
-  it("the row is the kit's keycap button: bordered, bevelled, full width, the cloud glyph and the mono words centred inside it", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    expect(row.getAttribute("data-slot")).toBe("button");
-    expect(row.className).toMatch(/\bborder\b/);
-    expect(row.className).toContain("inset-shadow-");
-    expect(row.className).toContain("w-full");
-    expect(row.className).toContain("font-mono");
-    // Regular weight, like every other mono word in the sidebar; the kit's medium is dropped.
-    expect(row.className).toContain("font-normal");
-    expect(row.className).not.toContain("font-medium");
-    expect(row.className).toContain("transition-[color,background-color,box-shadow]");
-    expect(row.className).toContain("justify-center");
-    expect(row.className).toContain("focus-visible:ring-2");
-    expect(row.querySelector("svg")).not.toBeNull();
-    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(PLACES_WORDS.addComputer);
-  });
-
-  it("no hairline sits over the row: the button's own border and the spacing separate it", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    const { container } = render(<CloudSetupRow />);
-    await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    const foot = container.querySelector<HTMLElement>("[data-cloud-setup]");
-    expect(foot).not.toBeNull();
-    expect(foot!.className).not.toMatch(/border-t/);
-    expect(container.querySelector("hr, [data-slot=separator]")).toBeNull();
-  });
-
-  it("prominence is the keycap and the width, not colour: no accent fill, no glow on the button, one button in the foot", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    const { container } = render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    expect(row.className).not.toMatch(/bg-primary|border-primary/);
-    expect(row.className).not.toContain("drop-shadow");
-    expect(row.querySelector("svg")?.getAttribute("class")).toContain("drop-shadow");
-    expect(container.querySelectorAll("button")).toHaveLength(1);
-  });
-
-  it("while the job runs the same button carries the stage word in place of the label, and takes its own back when it ends", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    const job: InitJob = { ...JOB, phase: "building", screens: [], rows: [{ id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "running" }], progress: { done: 0, total: 1 } };
-    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
-    expect(screen.getByRole("button", { name: initProgressLine(job) })).toBe(row);
-    expect(row.getAttribute("data-slot")).toBe("button");
-    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(initProgressLine(job));
-    act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, phase: "done" } }));
-    await waitFor(() => expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(PLACES_WORDS.addComputer));
-  });
-  it("while the job runs the button is alive: the spinner in the glyph's place, the stage word and count, a line along the bottom at the stages done over the total; a sign-in waiting on the person pauses the spinner and says so", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    expect(row.querySelector(".animate-spin")).toBeNull();
-    expect(row.querySelector("[data-cloud-setup-progress]")).toBeNull();
-    const stages: InitJob["rows"] = [
-      { id: "stage/creating", kind: "stage", label: GOLDEN_STAGE_WORDS.creating, state: "done" },
-      { id: "stage/deploying-daemon", kind: "stage", label: GOLDEN_STAGE_WORDS["deploying-daemon"], state: "running" },
-      { id: "stage/applying-setup", kind: "stage", label: GOLDEN_STAGE_WORDS["applying-setup"], state: "waiting" },
-      { id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "waiting" },
-    ];
-    const job: InitJob = { ...JOB, phase: "building", screens: [], rows: stages, progress: { done: 1, total: 4 } };
-    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
-    expect(row.querySelector(".lucide-cloud")).toBeNull();
-    const spinner = row.querySelector(".animate-spin");
-    expect(spinner).not.toBeNull();
-    expect(spinner!.getAttribute("class")).not.toContain("paused");
-    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("building · 1/4");
-    const line = row.querySelector<HTMLElement>("[data-cloud-setup-progress]");
-    expect(line).not.toBeNull();
-    expect(line!.getAttribute("role")).toBe("progressbar");
-    expect(line!.getAttribute("aria-valuenow")).toBe("25");
-    expect(line!.style.width).toBe("25%");
-    expect(line!.className).toContain("duration-300");
-    act(() => useStore.getState().applyEvent({ type: "init.job", job: { ...job, rows: stages.map((r, i) => (i < 2 ? { ...r, state: "done" } : r)), progress: { done: 2, total: 4 } } }));
-    expect(line!.style.width).toBe("50%");
-    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("building · 2/4");
-    const waiting: InitJob = { ...job, phase: "signing-in", progress: { done: 2, total: 4 }, rows: [...stages, { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device", code: "8F4A-C21B" }], needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } };
-    act(() => useStore.getState().applyEvent({ type: "init.job", job: waiting }));
-    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe(initButtonLine(waiting));
-    expect(row.querySelector("[data-cloud-setup-words]")?.textContent).toBe("waiting for you");
-    expect(row.querySelector(".animate-spin")!.getAttribute("class")).toContain("paused");
-    expect(line!.style.width).toBe("50%");
-    fireEvent.click(row);
-    const dialog = await screen.findByRole("dialog");
-    await waitFor(() => expect(k(dialog, "build")).toBeDefined());
-  });
-
-  it("the press on the keycap is where the browser is asked for leave to notify, since a request off an event is one it quietens", async () => {
-    resetAskedToNotify();
-    const asks: string[] = [];
-    class FakeNotification {
-      static permission = "default";
-      static requestPermission = () => {
-        asks.push("asked");
-        return Promise.resolve("granted");
-      };
-    }
-    vi.stubGlobal("Notification", FakeNotification);
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    expect(asks, "nothing on mount: a prompt out of nowhere is one nobody grants").toEqual([]);
-    fireEvent.click(row);
-    expect(asks).toEqual(["asked"]);
-    expect(useStore.getState().addComputerOpen).toBe(true);
-    vi.unstubAllGlobals();
-  });
-
-  it("a build that needs the person turns the whole keycap to the warning tone, and it goes back to muted zinc when the need does", async () => {
-    const { api } = fakeApi({ setup: HELD });
-    useStore.getState().bind(api);
-    render(<CloudSetupRow />);
-    const row = await screen.findByRole("button", { name: PLACES_WORDS.addComputer });
-    const signIn: InitJob["rows"][number] = { id: "sign-in/gh", kind: "sign-in", tool: "gh", label: "GitHub CLI login", state: SIGN_IN_OPEN_STATE, page: "https://github.com/login/device" };
-    const job: InitJob = { ...JOB, phase: "signing-in", screens: [], rows: [{ id: "stage/ready", kind: "stage", label: GOLDEN_STAGE_WORDS.ready, state: "done" }, signIn], progress: { done: 1, total: 2 } };
-    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
-    // Waiting on the machine: the row is the sidebar's own muted zinc, and no warning token is anywhere on it.
-    expect(row.className).toContain("text-sidebar-muted-foreground");
-    expect(row.className).not.toMatch(/warning/);
-    expect(row.hasAttribute("data-waiting-on-you")).toBe(false);
-    expect(row.querySelector<HTMLElement>("[data-cloud-setup-progress]")!.className).toContain("bg-sidebar-muted-foreground");
-    const needed: InitJob = { ...job, needsYou: { what: "sign in to GitHub CLI login", since: 1_760_000_000_000 } };
-    act(() => useStore.getState().applyEvent({ type: "init.job", job: needed }));
-    expect(row.hasAttribute("data-waiting-on-you")).toBe(true);
-    expect(row.className).toContain("text-warning-foreground");
-    expect(row.className).toContain("border-warning/50");
-    expect(row.className).not.toContain("text-sidebar-muted-foreground");
-    // The tone is the tokens' warning and nothing literal, and the fill stays quiet: it is a wait, not a confirm.
-    expect(row.className).not.toMatch(/amber|orange|#|rgb\(/);
-    expect(row.querySelector<HTMLElement>("[data-cloud-setup-progress]")!.className).toContain("bg-warning");
-    act(() => useStore.getState().applyEvent({ type: "init.job", job }));
-    expect(row.hasAttribute("data-waiting-on-you")).toBe(false);
-    expect(row.className).toContain("text-sidebar-muted-foreground");
-    expect(row.className).not.toMatch(/warning/);
   });
 });
