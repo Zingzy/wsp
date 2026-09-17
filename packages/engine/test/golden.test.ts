@@ -835,6 +835,7 @@ describe("golden import stages", () => {
       files: {
         count: 3,
         rungs: { identity: 1, shell: 2 },
+        lands: [],
         bytes: 4096,
         skipped: [{ id: "shell/bashrc", path: "~/.bashrc", note: "no longer on this computer" }],
         pack: async () => ({ tar: Buffer.from("tgz-bytes"), bytes: 1200, unpacked: 4096, skipped: [], cut: [], silenced: [], macPaths: [] }),
@@ -2029,7 +2030,7 @@ describe("golden import stages", () => {
   });
 
   it("a failure packing or extracting the files is fatal with its reason", async () => {
-    const packFails = importOf({ files: { count: 1, rungs: { shell: 1 }, bytes: 10, skipped: [], pack: async () => { throw new Error("Keychain: user cancelled"); } } });
+    const packFails = importOf({ files: { count: 1, rungs: { shell: 1 }, lands: [], bytes: 10, skipped: [], pack: async () => { throw new Error("Keychain: user cancelled"); } } });
     const a = backendFor();
     await expect(prepareBuilder({ backend: a.backend, setup: "true", fetch: a.fetch, import: packFails })).rejects.toThrow(/Keychain: user cancelled/);
     expect(a.killed).toEqual(["m1"]);
@@ -2064,7 +2065,7 @@ describe("golden import stages", () => {
     expect(builder.import?.smoke).toBe("true");
 
     let result: ImportResult | undefined;
-    const gone = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { count: 0, rungs: {}, bytes: 0, skipped: [{ id: "shell/zshrc", path: "~/.zshrc", note: "no longer on this computer" }], pack: async () => { throw new Error("must not pack"); } }, onResult: r => (result = r) }) });
+    const gone = await prepareBuilder({ backend, setup: "true", fetch, onStage, import: importOf({ files: { count: 0, rungs: {}, lands: [], bytes: 0, skipped: [{ id: "shell/zshrc", path: "~/.zshrc", note: "no longer on this computer" }], pack: async () => { throw new Error("must not pack"); } }, onResult: r => (result = r) }) });
     expect(stages).toContain("applying-setup:nothing left to pack; skipped ~/.zshrc (no longer on this computer)");
     expect(gone.import?.applied).toContain("uploading-files");
     // No pack ran, so nothing was cut: the result says nothing about it rather than claiming an empty cut.

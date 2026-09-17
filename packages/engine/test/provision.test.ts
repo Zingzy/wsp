@@ -9,11 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR } from "@wsp/catalog";
-import { provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
+import { MCP_ID_PREFIX, provisionCountWord, provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
 import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
 import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
-import { presentSteps, provisionBox, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { MCP_SERVERS_JSON } from "@wsp/catalog";
+import { presentSteps, provisionBox, provisionCountsOf, provisionPlanOf, type ProvisionPlan } from "../src/provision.js";
+import { OWN_MARK } from "../src/provision-files.js";
+import { tarOf } from "../src/vault.js";
 import type { ExecResult, Machine } from "../src/machine.js";
 
 const ok: ExecResult = { exitCode: 0, stdout: "", stderr: "" };
@@ -76,7 +79,10 @@ function boxMachine(answer: (cmd: string) => ExecResult | undefined = () => unde
 
 const step = (over: Partial<ToolInstall> & Pick<ToolInstall, "id" | "label">): ToolInstall => ({ manager: "script", cmd: `install ${over.id}`, ...over });
 
-const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"] = []): ProvisionPlan => ({ recipeAt: "2026-09-17T10:00:00.000Z", steps, skipped });
+const planOf = (steps: readonly ToolInstall[], skipped: ProvisionPlan["skipped"] = [], over: Partial<ProvisionPlan> = {}): ProvisionPlan => ({ recipeAt: "2026-09-17T10:00:00.000Z", steps, skipped, ...over });
+
+/** The login the computer's own agent runs as, which is where the agents' folders are there. */
+const ON = { home: "/root" };
 
 /** The rows a run answered, as the assertions read them. */
 const outcomes = (rows: readonly PlaceProvisionRow[]): [string, string][] => rows.map(r => [r.id, r.outcome]);
@@ -128,7 +134,7 @@ describe("what a computer already satisfies", () => {
     // No step of the plan is unreadable: each says either a command it puts on PATH or a check of its own.
     for (const s of plan.steps) expect(s.check ?? s.bin, s.id).toBeDefined();
     const { machine } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: everyMark(cmd), stderr: "" } : undefined));
-    const rows = await provisionBox(machine, plan, () => {});
+    const rows = await provisionBox(machine, plan, () => {}, ON);
     expect(rows.map(r => r.id)).toEqual(plan.steps.map(s => s.id));
     expect(rows.every(r => r.outcome === "present")).toBe(true);
     expect(provisionWord({ state: "done", addId: "a_1", recipeAt: plan.recipeAt, startedAt: "x", rows })).toBe(`${rows.length} tools ready`);
@@ -149,7 +155,7 @@ describe("the run on the computer itself", () => {
     const steps = [step({ id: "agents/codex", label: "Codex", manager: "npm", bin: "codex" }), step({ id: "tools/release/gh", label: "GitHub CLI", manager: "release", bin: "gh" })];
     const { machine, calls } = boxMachine();
     const seen: string[] = [];
-    const rows = await provisionBox(machine, planOf(steps), detail => void seen.push(detail));
+    const rows = await provisionBox(machine, planOf(steps), detail => void seen.push(detail), ON);
     const at = (needle: string): number => calls.findIndex(c => c.includes(needle));
     expect(at(BASE_VERSIONS_CMD)).toBe(0);
     expect(at("wsp-present")).toBeGreaterThan(0);
@@ -167,7 +173,7 @@ describe("the run on the computer itself", () => {
     // computer read is the row and the tally, not the stage the image build files them under.
     const { machine } = boxMachine(cmd => (cmd === BASE_VERSIONS_CMD ? { exitCode: 0, stdout: "", stderr: "" } : undefined));
     const seen: string[] = [];
-    await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), detail => void seen.push(detail));
+    await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), detail => void seen.push(detail), ON);
     expect(seen.some(l => l.startsWith("deploying-daemon"))).toBe(false);
     expect(seen.some(l => /^jq \(\d+\/\d+\)$/.test(l))).toBe(true);
     expect(seen.some(l => /^\d+ installed.*free$/.test(l))).toBe(true);
@@ -191,7 +197,7 @@ describe("the run on the computer itself", () => {
     const rows: PlaceProvisionRow[] = [];
     const answered = await provisionBox(machine, planOf(steps, aside), (_detail, _at, row) => {
       if (row !== undefined) rows.push(row);
-    });
+    }, ON);
     expect(outcomes(answered)).toEqual([
       ["tools/brew-cask/raycast", "skipped"],
       ["agents/node", "failed"],
@@ -212,7 +218,7 @@ describe("the run on the computer itself", () => {
     const steps = [step({ id: "agents/codex", label: "Codex" }), step({ id: "tools/release/gh", label: "GitHub CLI" })];
     const { machine } = boxMachine();
     const at: (string | undefined)[] = [];
-    await provisionBox(machine, planOf(steps), (_detail, under) => void at.push(under === undefined ? undefined : `${under.index}/${under.of}: ${under.label}`));
+    await provisionBox(machine, planOf(steps), (_detail, under) => void at.push(under === undefined ? undefined : `${under.index}/${under.of}: ${under.label}`), ON);
     expect(at.filter(a => a !== undefined)).toContain("1/2: Codex");
     expect(at.filter(a => a !== undefined)).toContain("2/2: GitHub CLI");
     // Nothing is under way while the floor runs and nothing once the last row has landed.
@@ -242,8 +248,83 @@ describe("the run on the computer itself", () => {
     await expect(
       provisionBox(machine, planOf(steps), (_detail, _at, row) => {
         if (row !== undefined) rows.push(row);
-      }),
+      }, ON),
     ).rejects.toThrow("spoo is not connected");
     expect(rows.map(r => r.id)).toEqual(["a/one", "a/two"]);
+  });
+});
+
+describe("the person's own files and their servers, on the same run", () => {
+  /** A plan whose files and servers are named, with a pack this computer answers without reading a disk. */
+  const withFilesAndServers = (steps: readonly ToolInstall[]): ProvisionPlan =>
+    planOf(steps, [], {
+      files: {
+        lands: [{ id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/skills" }],
+        pack: async () => ({ tar: tarOf([{ path: ".claude-cfg/skills/why/SKILL.md", mode: 0o644, content: "why\n" }]), bytes: 1, unpacked: 1, skipped: [], cut: [], silenced: [], macPaths: [] }),
+      },
+      mcp: {
+        agents: [{ id: "claude", label: "Claude Code", scopes: [{ files: ["/root/.claude-cfg/.claude.json"], format: MCP_SERVERS_JSON, keep: ["github"], drop: [] }], aside: [] }],
+        guestHome: "/root",
+        rewrites: [],
+        binDirs: [],
+        tools: [],
+      },
+    });
+
+  it("lands the files after the tools, writes the servers after the files and the machine context after all of it", async () => {
+    const { machine, calls } = boxMachine();
+    const rows = await provisionBox(machine, withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), () => {}, ON);
+    const at = (needle: string): number => calls.findIndex(c => c.includes(needle));
+    expect(at("install agents/codex")).toBeGreaterThan(-1);
+    expect(at("wsp-land")).toBeGreaterThan(at("install agents/codex"));
+    expect(at("wsp_mcp_read")).toBeGreaterThan(at("wsp-land"));
+    expect(at("echo WSP_CTX")).toBeGreaterThan(at("wsp_mcp_read"));
+    // Every row says what it puts there, so the word on the computers row counts them by kind.
+    expect(rows.map(r => [r.id, r.kind])).toEqual([
+      ["agents/codex", undefined],
+      ["files/.claude-cfg/skills", "file"],
+      [`${MCP_ID_PREFIX}claude/github`, "server"],
+    ]);
+    expect(provisionWord({ state: "done", addId: "a_1", recipeAt: "x", startedAt: "y", rows })).toBe("1 tool, 1 file, 1 MCP server ready");
+  });
+
+  it("counts the files and the servers in what the job says it is putting there, and in the rows it is on while it runs", async () => {
+    const plan = withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]);
+    expect(provisionCountWord(provisionCountsOf(plan))).toBe("1 tool, 1 file, 1 MCP server");
+    const { machine } = boxMachine();
+    const at: string[] = [];
+    await provisionBox(machine, plan, (_detail, under) => {
+      if (under !== undefined) at.push(`${under.index}/${under.of}: ${under.label}`);
+    }, ON);
+    expect(at).toContain("1/3: Codex");
+    expect(at).toContain("2/3: your agents' files");
+    expect(at).toContain("3/3: MCP servers");
+  });
+
+  it("says every path the archive carried failed, with the reason, when the files could not be packed or landed, and goes on with the rest", async () => {
+    const plan = withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]);
+    const { machine, calls } = boxMachine();
+    const rows = await provisionBox(
+      machine,
+      { ...plan, files: { lands: plan.files!.lands, pack: () => Promise.reject(new Error("Keychain: user cancelled")) } },
+      () => {},
+      ON,
+    );
+    expect(rows.map(r => [r.id, r.outcome, r.note])).toEqual([
+      ["agents/codex", "installed", undefined],
+      ["files/.claude-cfg/skills", "failed", "Keychain: user cancelled"],
+      [`${MCP_ID_PREFIX}claude/github`, "skipped", "the config edit did not run (exit 0)"],
+    ]);
+    // The machine context still lands: a computer with its tools on and no word of why is worse than the failure.
+    expect(calls.some(c => c.includes("echo WSP_CTX"))).toBe(true);
+    // Whose the files on that computer are is asked of the computer, not answered off this run: the list beside
+    // the job is read even where nothing was packed, so a config wsp wrote there before is still wsp's.
+    expect(calls.some(c => c.includes(OWN_MARK))).toBe(true);
+  });
+
+  it("asks the computer nothing about files or servers when the recipe names none", async () => {
+    const { machine, calls } = boxMachine();
+    await provisionBox(machine, planOf([step({ id: "agents/codex", label: "Codex", bin: "codex" })]), () => {}, ON);
+    expect(calls.some(c => c.includes("wsp-land") || c.includes("wsp_mcp_read"))).toBe(false);
   });
 });

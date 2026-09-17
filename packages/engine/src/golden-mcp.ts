@@ -78,6 +78,10 @@ export interface McpResult {
 /** Rows whose last id segment is the binary they put on PATH; taps, casks and the toolchain install none. */
 const BINARY_ROW = /^tools\/(brew|go|cargo|npm|pnpm|bun|pipx|uv|hand)\//;
 
+/** One server's row id: the agent it belongs to, whether its scope is the person's home folder, and its name. The
+ * one spelling, read by the plan that edits the configs and by every caller that sets a server aside without one. */
+export const mcpRowId = (agent: string, home: boolean, name: string): string => `${MCP_ID_PREFIX}${agent}/${home ? "home/" : ""}${name}`;
+
 /** A row's agent, scope and server name from its id: `agents/mcp/<agent>/<name>`, or `agents/mcp/<agent>/home/<name>`;
  * nothing for a row that is not a server, the mcp-remote row included. */
 export function parseMcpId(id: string): { agent: string; home: boolean; name: string } | undefined {
@@ -368,7 +372,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   for (const agent of agents) {
     for (const scope of agent.scopes) {
       const outcome = report?.[at++];
-      const id = (name: string): string => `${MCP_ID_PREFIX}${agent.id}/${scope.project !== undefined ? "home/" : ""}${name}`;
+      const id = (name: string): string => mcpRowId(agent.id, scope.project !== undefined, name);
       const skippedKeep =
         failure ?? (outcome === undefined || outcome.file === null ? `${agent.label}'s config is not on the machine` : outcome.error !== undefined ? `${agent.label}'s config on the machine did not parse (${outcome.error})` : undefined);
       for (const name of scope.keep) {

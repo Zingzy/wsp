@@ -301,6 +301,9 @@ export interface GoldenImport {
     bytes: number;
     /** Ticked paths the plan set aside (missing on disk, a private key), reported before packing. */
     skipped: SkippedPath[];
+    /** Where each planned path lands under the guest's home, with the row it came from: the image extracts the
+     * archive whole and needs none of it, a computer somebody owns lands them one at a time and answers a row each. */
+    lands: readonly { id: string; label: string; dest: string }[];
     /** Builds the archive. */
     pack: () => Promise<PackedFiles>;
     /** The planned files a tool rewrites while it runs, `~`-relative: they never decide the hash, so an

@@ -147,9 +147,12 @@ export function placeDaemonPaths(home: string): {
  * log it appends a line to as it goes, and the outcome it writes at the end, which is what a person at that
  * computer's own shell reads without the host. All of it under the one folder wsp already owns there, so a
  * workspace on that computer never sees it: every workspace has its own `.wsp` bound over the computer's. */
-export function placeProvisionPaths(home: string): { dir: string; runDir: string; log: string; result: string } {
+export function placeProvisionPaths(home: string): { dir: string; runDir: string; log: string; result: string; staging: string; landed: string; landing: string } {
   const dir = `${placeDaemonPaths(home).wsp}/provision`;
-  return { dir, runDir: `${dir}/run`, log: `${dir}/log`, result: `${dir}/result.json` };
+  // staging: the person's own agent files as they came off their computer, before a single one is landed.
+  // landed: what wsp put in the agents' homes there and what it left there, so a later run knows its own copy
+  // from a file the person has since written; landing is that list while the run is still going on.
+  return { dir, runDir: `${dir}/run`, log: `${dir}/log`, result: `${dir}/result.json`, staging: `${dir}/files`, landed: `${dir}/landed`, landing: `${dir}/landing` };
 }
 
 /** Every path a leave takes off a computer joined as a place, in the order they go: the place file, its key and the
