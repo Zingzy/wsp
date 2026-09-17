@@ -2,6 +2,7 @@
 // protocol client; it never drives the engine directly, proving the runtime
 // embeds cleanly (the hosted control plane wraps the same runtime).
 
+import { HERE_PLACE_ID } from "@wsp/protocol";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -130,21 +131,33 @@ async function createWorkspace(
   golden: string,
   cpu?: number,
 ): Promise<WorkspaceView> {
+  // A workspace is one project's copy, so this road records the repo it proves on before it forks: one source on
+  // one computer is one project, so a second run answers with the one already there.
+  const project = await rt.projects
+    .add({ source: DEMO_REPO, on: (await rt.projects.computers()).find(c => c.id !== HERE_PLACE_ID)!.id })
+    .catch(async e => {
+      if ((e as { kind?: string }).kind !== "conflict") throw e;
+      return (await rt.projects.list()).find(p => p.source.kind === "git" && p.source.url === DEMO_REPO)!;
+    });
   return timings.time(
     `fork ${name}`,
     async () => {
       try {
-        return await rt.workspaces.create({ golden, name, envs, labels: cliLabels(), ...(cpu ? { cpu } : {}) });
+        return await rt.workspaces.create({ project: project.id, golden, name, envs, labels: cliLabels(), ...(cpu ? { cpu } : {}) });
       } catch (e) {
         if ((e as { kind?: string }).kind !== "missing") throw e;
         log(`golden snapshot ${golden} is gone; rebuilding`);
         const rebuilt = await rt.golden.build(goldenBuild(envs));
-        return rt.workspaces.create({ golden: rebuilt.version.snapshotId, name, envs, labels: cliLabels() });
+        return rt.workspaces.create({ project: project.id, golden: rebuilt.version.snapshotId, name, envs, labels: cliLabels() });
       }
     },
     w => `machine ${w.machineId.slice(0, 24)}…`,
   );
 }
+
+/** The repo every workspace this canary forks holds: a public one of a single commit, so the clone inside the copy
+ * is a reach test and not a download. */
+const DEMO_REPO = "https://github.com/octocat/Hello-World.git";
 
 function watchEvents(rt: Runtime): void {
   rt.events.on("*", (e: EventUnion) => {
