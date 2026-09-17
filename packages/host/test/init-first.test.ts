@@ -150,7 +150,18 @@ describe("the tick beside the fork", () => {
 });
 
 describe("the tick taken", () => {
-  const project = { id: "pr_mac", name: "mac", computer: "here", source: { kind: "folder" as const, path: "/Users/dev/mac" }, path: "/Users/dev/mac", createdAt: "2026-09-17T00:00:00.000Z" };
+  const project = {
+    id: "pr_mac",
+    name: "mac",
+    computer: "here",
+    source: { kind: "folder" as const, path: "/Users/dev/mac" },
+    path: "/Users/dev/mac",
+    remote: "https://github.com/dev/mac.git",
+    defaultBranch: "main",
+    memoryKey: "-Users-dev-mac",
+    memoryDir: "/Users/dev/.claude/projects/-Users-dev-mac/memory",
+    createdAt: "2026-09-17T00:00:00.000Z",
+  };
 
   it("records the folder as a project here and makes its workspace, and says which one it is", async () => {
     const output = new PassThrough();

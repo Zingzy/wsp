@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { addedProjectLine, sourceKind, type ProjectView,
+import { addedProjectLine, defaultSeedChoice, kindForComputer, seedChoiceFrom, seedConsentLines, seedMenuRows, sourceKind, worksInPlace, type ProjectView, type SeedChoice, type SeedPlan,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
@@ -94,7 +94,7 @@ import {
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
-import { dialHost, hostPlatform, sshAsked, type DialOpts, type HostClient } from "./verbs.js";
+import { dialHost, hostPlatform, sshAsked, table, type DialOpts, type HostClient } from "./verbs.js";
 import { writeEnvFile } from "./env-keys.js";
 import { collect, nodeHost } from "@wsp/collect";
 import { readBrewTable } from "./init-brew.js";
@@ -349,13 +349,36 @@ export interface AddFlags {
   /** The agent to sign in on a computer already in this wsp, once, outside every workspace on it. The join offers
    * this itself while the person is at the terminal; this is the same road for a computer that is already in. */
   signIn?: string;
+  /** A folder seeding a project on a computer that clones: what the person answered about what travels. Without
+   * `yes` the line prints the menu and sends nothing, since what git ignores in their folder is theirs. */
+  yes?: boolean;
+  keep?: readonly string[];
+  cut?: readonly string[];
+  noMemory?: boolean;
+  noCommits?: boolean;
+  remember?: boolean;
 }
 
 /** The words a person gave beside the address, read by the one rule every ssh road on this command line reads
  * them by: a port that is a number and a key that is a path on this computer. */
-export function addFlags(name?: string, port?: string, keyPath?: string, update?: boolean, on?: string, base?: string, signIn?: string): AddFlags {
+export function addFlags(
+  name?: string,
+  port?: string,
+  keyPath?: string,
+  update?: boolean,
+  on?: string,
+  base?: string,
+  signIn?: string,
+  seed: { yes?: boolean; keep?: string[]; cut?: string[]; noMemory?: boolean; noCommits?: boolean; remember?: boolean } = {},
+): AddFlags {
   const asked = sshAsked(name, port, keyPath);
   return {
+    ...(seed.yes === true ? { yes: true } : {}),
+    ...(seed.keep !== undefined ? { keep: seed.keep } : {}),
+    ...(seed.cut !== undefined ? { cut: seed.cut } : {}),
+    ...(seed.noMemory === true ? { noMemory: true } : {}),
+    ...(seed.noCommits === true ? { noCommits: true } : {}),
+    ...(seed.remember === true ? { remember: true } : {}),
     ...(asked.name !== undefined ? { name: asked.name } : {}),
     ...(asked.port !== undefined ? { sshPort: asked.port } : {}),
     ...(asked.keyPath !== undefined ? { keyPath: asked.keyPath } : {}),
@@ -721,7 +744,9 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   // clones, or a folder this computer holds. A provider's own word is neither and is read first.
   const kind = word === undefined || addableProviders().includes(word) ? undefined : sourceKindOf(word);
   if (kind === "computer") return addOverSsh(io, opts, aim, word!, flags, deps);
-  if (kind === "git" || kind === "folder") return addProject(io, opts, aim, word!, flags, deps);
+  // Every other kind a word can name is a project's source, whichever of them it is: the host reads the word again
+  // and records it, so a source added to the protocol's own reading needs no second list here.
+  if (kind !== undefined) return addProject(io, opts, aim, word!, flags, deps);
   if (named) {
     io.error(ADD_FLAGS_REFUSAL);
     return 1;
@@ -862,8 +887,8 @@ async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string
   }
 }
 
-/** What one word to wsp add names, with the verb's own refusal for a word that names none of the three forms. */
-function sourceKindOf(word: string): "computer" | "git" | "folder" | undefined {
+/** What one word to wsp add names, with the verb's own refusal for a word that names none of the forms. */
+function sourceKindOf(word: string): ReturnType<typeof sourceKind> | undefined {
   try {
     return sourceKind(word);
   } catch {
@@ -881,11 +906,31 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   }
   const client = await deps.dial(opts.statePath, { aim });
   try {
+    // A folder of the person's seeding a project on a computer that clones: the menu first, and nothing is sent
+    // until they have said what travels. A folder worked where it sits seeds nothing and reads no menu, which the
+    // computer's own kind says rather than this line: naming this computer with --on is the same road as naming
+    // none, and both work the folder where it already is.
+    const onComputer = flags.on;
+    const seeding = sourceKindOf(source) === "folder" && onComputer !== undefined && !(await worksInPlaceOn(client, onComputer));
+    let seed: SeedChoice | undefined;
+    if (seeding && onComputer !== undefined) {
+      const { plan } = await client.request<{ plan: SeedPlan }>("project.seed.plan", { source });
+      // What would travel: their own words where they gave any, else what the catalogue ticks itself. Read before
+      // the menu is drawn, so a word naming a path that never travels is refused rather than shown as ticked.
+      const choice = flags.yes === true ? choiceFrom(plan, flags) : defaultSeedChoice(plan);
+      for (const line of table(seedMenuRows(plan, choice))) io.log(line);
+      if (flags.yes !== true) {
+        for (const line of seedConsentLines(plan, onComputer, more => `wsp add ${shellQuote(source)} --on ${shellQuote(onComputer)} ${more}`)) io.log(line);
+        return 0;
+      }
+      seed = choice;
+    }
     const { project } = await client.request<{ project: ProjectView }>("projects.add", {
       source,
       ...(flags.on !== undefined ? { on: flags.on } : {}),
       ...(flags.name !== undefined ? { name: flags.name } : {}),
       ...(flags.base !== undefined ? { base: flags.base } : {}),
+      ...(seed !== undefined ? { seed } : {}),
     });
     // The computer by the name this wsp holds for it, off the same list every table reads.
     const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
@@ -894,6 +939,25 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   } finally {
     client.close();
   }
+}
+
+/** Whether the computer a word names works a folder where it sits rather than holding a copy of it: the kind
+ * table's own answer for the computer that word is, off the same places listing every other row reads. A word
+ * naming no computer is left to the host, which refuses it naming the computers there are. */
+async function worksInPlaceOn(client: HostClient, word: string): Promise<boolean> {
+  const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
+  const found = places.find(p => p.id === word || p.name === word);
+  return found !== undefined && worksInPlace(kindForComputer(found.id));
+}
+
+/** What the person's own words make of the menu: the ticks the catalog decided, then their keeps and cuts and the
+ * two words that drop the memory folder and the patch. The rules are the protocol's, read the same way by the app. */
+function choiceFrom(plan: SeedPlan, flags: AddFlags): SeedChoice {
+  return seedChoiceFrom(plan, flags.keep ?? [], flags.cut ?? [], {
+    ...(flags.noMemory === true ? { memory: false } : {}),
+    ...(flags.noCommits === true ? { commits: false } : {}),
+    ...(flags.remember === true ? { remember: true } : {}),
+  });
 }
 
 /** One typed address: the host logs in over ssh, installs the agent and waits for that computer to dial back. The

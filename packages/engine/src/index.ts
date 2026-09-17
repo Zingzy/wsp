@@ -39,5 +39,6 @@ export * from "./machine-context.js";
 export * from "./snapshot-names.js";
 export * from "./snapshot-storage.js";
 export * from "./tool-sizes.js";
+export * from "./project-install.js";
 export * from "./project-state/index.js";
 export * from "./provider-slot.js";

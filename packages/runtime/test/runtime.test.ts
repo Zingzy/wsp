@@ -150,6 +150,11 @@ describe("runtime", () => {
     // Every context, not the first alone: a turn is not the only road that asks a harness something on the machine.
     // A turn's own launch carries one thing over that login, the token naming its thread; no other road carries it.
     expect(contexts.length).toBeGreaterThan(0);
+    const project = (await rt.projects.list())[0]!;
+    // The key the record was written with is handed to the adapter beside that environment and never in it: the
+    // CLI's own strip drops an inherited one, and the adapter sets the key it was told after it.
+    expect(project.memoryKey).toMatch(/^-root-/);
+    expect(contexts.every(ctx => ctx.projectKey === project.memoryKey)).toBe(true);
     for (const ctx of contexts) {
       const { [TURN_TOKEN_ENV]: token, ...login } = ctx.env;
       expect(login).toEqual({ ...GUEST_LOGIN_ENV, CLAUDE_CONFIG_DIR: "/root/.claude-cfg" });
@@ -3403,7 +3408,8 @@ describe("runtime create stages", () => {
         "hostname set to task-1",
         "Preview route to the daemon minted.",
         "Daemon answered.",
-        expect.stringMatching(/^Cloning stub-\d+ into \/root\/stub-\d+\.$/),
+        // The remote the record keeps, which is what the clone on the machine takes, and where it lands inside.
+        expect.stringMatching(/^Cloning https:\/\/github\.com\/wsp\/stub-\d+\.git into \/root\/stub-\d+\.$/),
         "ready",
       ]);
       for (const e of stages) expect(e.message).not.toContain(backend.machines[0]!.id);

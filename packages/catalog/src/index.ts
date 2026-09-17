@@ -12,3 +12,5 @@ export * from "./codex-hooks.js";
 export * from "./catalog.js";
 export * from "./thread-agents.js";
 export * from "./base-image.js";
+export * from "./seed.js";
+export * from "./git-hosts.js";
