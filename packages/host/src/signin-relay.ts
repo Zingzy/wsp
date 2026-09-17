@@ -34,6 +34,9 @@ export interface RelayOptions {
   callbackUrl?(): string | undefined;
   /** The person pressed o and this URL opened here. */
   onConsent?(url: string): void;
+  /** Rides the pty's environment on the far side, where the daemon's own defaults would otherwise decide: what a
+   * tool whose store lives somewhere other than its default home is run with, without quoting it into the line. */
+  env?: Record<string, string>;
   /** The pty is killed after this long. */
   timeoutMs: number;
   /** A URL that ends a chunk is offered after this much quiet, for a tool that prints it and blocks. Default 300 ms. */
@@ -166,7 +169,7 @@ export async function relayPty(o: RelayOptions): Promise<RelayOutcome> {
   const cols = output.columns ?? 80;
   const rows = output.rows ?? 24;
   // bash by name: the person's login shell may read interactive rc files that would sit under the typed line.
-  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, shell: "bash" }));
+  const ptyId = ptyIdOf(await o.link.op("pty.create", { cols, rows, shell: "bash", ...(o.env !== undefined ? { env: o.env } : {}) }));
   const scanner = new UrlScanner();
   const outcome: RelayOutcome = { exitCode: -1, timedOut: false, dropped: false, urls: 0, opened: 0 };
   let offer: { url: string; at: number; typed: boolean } | undefined;

@@ -480,6 +480,58 @@ describe("the socket a place proved", () => {
   });
 });
 
+describe("a channel to the daemon on a computer you own", () => {
+  it("rides the link that computer opened: the frame goes up it, the answer comes back under the ask, and what it pushes reaches the socket that asked", async () => {
+    const { hostKey } = await serving();
+    const asked: Record<string, unknown>[] = [];
+    // The computer answers the pty frames the host sends it, as its own daemon would, and pushes one chunk back.
+    const answers = (c: WsClient): void => {
+      c.ws.on("message", raw => {
+        const frame = JSON.parse(String(raw)) as Record<string, unknown>;
+        const op = frame["op"];
+        if (typeof op !== "string" || !op.startsWith("pty.")) return;
+        asked.push(frame);
+        c.ws.send(JSON.stringify({ id: frame["id"], ok: true, ptyId: "pty_7" }));
+        c.ws.send(JSON.stringify({ type: "pty.data", ptyId: "pty_7", data: "Open https://auth.openai.com/device" }));
+      });
+    };
+    const { client, placeId } = await join(hostKey, { code: await code(), answers });
+    sockets.push(client.ws);
+    const mine = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(mine.ws);
+    const opened = await mine.request("daemon.open", { placeId });
+    expect(opened.ok, String(opened["error"])).toBe(true);
+    const channel = String(opened["channel"]);
+    const sent = await mine.request("daemon.send", { channel, frame: { op: "pty.create", cols: 80, rows: 24, env: { CODEX_HOME: "/var/lib/wsp/logins/codex" } } });
+    expect(sent["reply"]).toMatchObject({ ok: true, ptyId: "pty_7" });
+    // The frame reached that computer whole, the environment the sign-in runs with included.
+    expect(asked.at(-1)).toMatchObject({ op: "pty.create", cols: 80, env: { CODEX_HOME: "/var/lib/wsp/logins/codex" } });
+    await until(async () => mine.events.some(e => e.type === "daemon.event" && e["channel"] === channel && String((e["event"] as Record<string, unknown>)["data"]).includes("auth.openai.com")));
+    // One daemon per channel: naming both, or neither, is the caller not saying which.
+    expect((await mine.request("daemon.open", { placeId, workspaceId: "w_1" })).ok).toBe(false);
+    expect((await mine.request("daemon.open", {})).ok).toBe(false);
+    // The computer going away ends the channel, since whatever was running behind it is no longer reachable.
+    client.close();
+    await until(async () => mine.events.some(e => e.type === "daemon.closed" && e["channel"] === channel));
+    // And a computer that is not connected has no channel to open at all.
+    expect(String((await mine.request("daemon.open", { placeId }))["error"])).toContain("old-macbook");
+  });
+
+  it("is the host's own road: a socket let in on a ticket is refused, as it is for every other places op", async () => {
+    const { hostKey } = await serving();
+    const { placeId } = await join(hostKey, { code: await code() });
+    const host = await WsClient.connect(srv!.port, { token: "host-token" });
+    sockets.push(host.ws);
+    const issued = await host.request("ticket.issue", { purpose: "connect" });
+    expect(issued.ok, String(issued["error"])).toBe(true);
+    const ticketed = await WsClient.connect(srv!.port, { ticket: String(issued["ticket"]) });
+    sockets.push(ticketed.ws);
+    const refused = await ticketed.request("daemon.open", { placeId });
+    expect(refused.ok).toBe(false);
+    expect(refused["error"]).toBe(PLACES_TICKET_REFUSAL);
+  });
+});
+
 describe("the list of every place", () => {
   it("puts this computer first, the computers joined after it and the provider last, with exactly one default", async () => {
     const { hostKey } = await serving({ provider: { id: "box", rateUsdPerHour: 0.018 } });

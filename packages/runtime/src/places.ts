@@ -40,6 +40,7 @@ import {
   placeNoDialLine,
   BackendFacts,
   type DaemonEvent,
+  type DaemonResponse,
   type MachineSizeOffer,
   type PlaceAddStep,
   type PlaceStageEvent,
@@ -60,6 +61,7 @@ import type { WebSocket } from "ws";
 import type { DeviceDoor } from "./devices.js";
 import { openPlaceForward, type PlaceForward } from "./place-forward.js";
 import type { PlaceBackends } from "./runtime.js";
+import type { DaemonChannel } from "./daemon-channel.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import type { Store } from "./store.js";
 
@@ -311,6 +313,11 @@ export interface PlaceDoor {
   /** Takes the proved socket as this place's link, with the report `prove` answered; the previous link is cut. */
   attach(placeId: string, socket: WebSocket, report: PlaceReport, from: string, now: number): Promise<void>;
   link(placeId: string): DaemonReach | undefined;
+  /** A channel to the daemon on one computer this host holds, over the link that computer is holding: frames go
+   * up that link and the events it pushes come back to `onEvent`, so a road on this host drives that computer's
+   * own terminal. Nothing is dialled and no token is spent: only that computer can open a socket to this host,
+   * and this is the one it opened. Undefined on a place that is not connected. */
+  channel(placeId: string, onEvent: (event: Record<string, unknown>) => void): DaemonChannel | undefined;
   /** Reads what this host holds about its places into memory, so the backend a fork on one stands on is answered
    * without a read of the store; the hydration calls it once before it reads any workspace record. */
   load(): Promise<void>;
@@ -719,6 +726,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     await keep({ ...held, lastSeenAt: new Date(at).toISOString() });
   };
 
+  /** Who is reading one computer's daemon events, by place id: the channels a road on this host opened over that
+   * computer's link. A channel is the one road the events it asked for come back on, so a pty on one computer is
+   * never pushed at a reader of another. */
+  const channels = new Map<string, Set<(event: Record<string, unknown>) => void>>();
   /** What is waiting for one computer to open a socket again, by its place id: every ask that may be made a second
    * time parks here for the gap, and the attach that takes the next socket wakes them. */
   const waiting = new Map<string, Set<(back: boolean) => void>>();
@@ -879,6 +890,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     lastSeenAt: record.lastSeenAt,
     daemonVersion: record.report.daemonVersion,
     agents: record.report.agents,
+    ...(record.backendFacts?.logins !== undefined ? { logins: record.backendFacts.logins } : {}),
     // A joined computer boots the image or it never joined: the daemon's self check is the gate at the join, so
     // every computer on this list forks.
     takesForks: true,
@@ -992,6 +1004,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
           // rest, and neither is pushed at every watcher of the place.
           if (tunnelled(placeId, e)) return;
           void live.get(placeId)?.forward?.then(f => f.event(e)).catch(() => undefined);
+          for (const read of channels.get(placeId) ?? []) read(e as unknown as Record<string, unknown>);
           opts.onDaemonEvent?.(placeId, e);
         },
       });
@@ -1027,6 +1040,42 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     },
 
     link: placeId => live.get(placeId)?.reach,
+
+    channel(placeId, onEvent) {
+      const held = live.get(placeId);
+      if (held === undefined) return undefined;
+      const reading = channels.get(placeId) ?? new Set<(event: Record<string, unknown>) => void>();
+      channels.set(placeId, reading);
+      reading.add(onEvent);
+      let end: (gone: { code: number; reason: string }) => void = () => {};
+      const closed = new Promise<{ code: number; reason: string }>(r => (end = r));
+      // The link going away ends the channel, as a daemon socket closing ends the host's own: whatever was
+      // running behind it on that computer is no longer something this host can read or stop. The listener comes
+      // off with the channel, so a road that opens and closes many never piles them on one socket.
+      const gone = (code: number, reason: Buffer): void => {
+        forget();
+        end({ code, reason: reason.toString("utf8") });
+      };
+      const forget = (): void => {
+        reading.delete(onEvent);
+        if (reading.size === 0) channels.delete(placeId);
+        held.socket.off("close", gone);
+      };
+      held.socket.once("close", gone);
+      return {
+        send: frame => {
+          const { op, ...params } = frame;
+          const on = live.get(placeId);
+          if (on?.reach !== held.reach) return Promise.reject(new PlaceAbsentError(absentComputer(kept.get(placeId)?.name ?? placeId, null).sentence));
+          return on.reach.request(op, params) as Promise<DaemonResponse>;
+        },
+        closed,
+        close: () => {
+          forget();
+          end({ code: 1000, reason: "closed here" });
+        },
+      };
+    },
 
     async load() {
       for (const record of await records()) {

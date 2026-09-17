@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::io;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -27,7 +28,7 @@ use wsp_frames::{
     MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
     MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
     MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
-    PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
+    PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId, Share, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
     TemplateRow, TemplateStatus, WorkspaceCopy, WorkspaceSize,
 };
 
@@ -221,6 +222,14 @@ impl Ops {
         for dir in [layout.run(), layout.state()] {
             fs::create_dir_all(&dir).map_err(|source| store::Error::Io { path: dir.clone(), source })?;
         }
+        // The logins directory is made before any sign-in on this computer asks for it, and only this login may
+        // read it: what lands under it is the person's own sign-in for every workspace here.
+        let logins = layout.logins();
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&logins)
+            .map_err(|source| store::Error::Io { path: logins.clone(), source })?;
         // Before anything reads the run directory as a list of workspaces: what a create that died left is not
         // one, and a copy that was still being made is not a copy.
         let unfinished = sweep_unfinished(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
@@ -517,6 +526,7 @@ impl Ops {
                 budgets: LifecycleBudgets { wake_attempts: WAKE_ATTEMPTS, daemon_answers_ms: DAEMON_ANSWERS_MS, resume_asks: None },
             }),
             base_templates: Some(BaseTemplates { sandbox: BASE_IMAGE.to_owned(), desktop: BASE_IMAGE.to_owned() }),
+            logins: Some(self.layout.logins().to_string_lossy().into_owned()),
         }
     }
 
@@ -596,6 +606,9 @@ impl Ops {
         // Read before the claim below, so the answer to a create the first one already made carries the same
         // sentence about the same size rather than going quiet on the second ask.
         let size = size_on_box(&self.facts, spec.cpu, spec.mem_mb);
+        // Before the claim and before anything is mounted: a source this daemon does not share out is refused,
+        // and a refusal here costs nothing to take back.
+        let shares = self.shares_of(&spec)?;
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
             None => format!("wsp-{}", store::random_word()),
@@ -624,7 +637,7 @@ impl Ops {
             None => None,
         };
         let notice = notices([size.clamped.clone(), copy.as_ref().and_then(|made| self.plain_copy_notice(made))]);
-        match self.build(&id, &image, &spec, &size, copy.clone()).await {
+        match self.build(&id, &image, &spec, &size, copy.clone(), shares).await {
             Ok(record) => Ok(noticed(self.handle(&record, None, None), notice)),
             Err(e) => {
                 // A workspace that would not come up is ours and nobody else's: nothing of it stays behind, the
@@ -636,6 +649,25 @@ impl Ops {
                 Err(e)
             }
         }
+    }
+
+    /// The logins a create asks for, held to the one directory this daemon shares them out of: a source anywhere
+    /// else on the box is refused, since a bind mount lands on the workspace's own files and is the one thing a
+    /// slip cannot be taken back. The wire has already read both paths as paths; this is what reads where they are.
+    fn shares_of(&self, spec: &MachineSpec) -> Result<Vec<Share>, OpError> {
+        let logins = self.layout.logins();
+        let asked = spec.shares.clone().unwrap_or_default();
+        for share in &asked {
+            let under = Path::new(&share.source).strip_prefix(&logins).is_ok_and(|rest| rest.iter().next().is_some());
+            if !under {
+                return Err(OpError::plain(format!(
+                    "a login shared into a workspace is a file under {}, and {} is not one",
+                    logins.display(),
+                    share.source
+                )));
+            }
+        }
+        Ok(asked)
     }
 
     /// The workspace's own copy of a checkout this computer holds, made the way this disk makes one and timed.
@@ -682,6 +714,7 @@ impl Ops {
         spec: &MachineSpec,
         size: &SizeOnBox,
         copy: Option<CopyMade>,
+        shares: Vec<Share>,
     ) -> Result<Workspace, OpError> {
         // Held until the record is on disk, which is what makes the sweep keep the chain: a delete of the snapshot
         // or template the fork boots from waits here instead of taking the layer from under the mount.
@@ -707,6 +740,7 @@ impl Ops {
             init: Init { pid: 0, started: 0, boot_id: String::new() },
             engine,
             copy,
+            shares,
         };
         self.boot(record).await
     }
@@ -728,6 +762,17 @@ impl Ops {
         if let Some(made) = &record.copy {
             bundle::bind_into(&self.layout.copy_of(&id), &bundle::inside(&self.layout.rootfs(&id), &made.at)?)?;
         }
+        // The computer's own logins, each mounted at the path its tool reads inside. A file bind needs the file
+        // to be there inside, so the runtime makes an empty one where the image carries none; a login this
+        // computer does not hold yet is no mount at all, and the wake after the sign-in is what brings it.
+        let mut shares = Vec::new();
+        for share in &record.shares {
+            if !Path::new(&share.source).is_file() {
+                continue;
+            }
+            bundle::empty_file(&bundle::inside(&self.layout.rootfs(&id), &share.target)?)?;
+            shares.push(share.clone());
+        }
         let engine_dir = record.engine.then(|| self.layout.engine(&id));
         if let Some(dir) = &engine_dir {
             fs::create_dir_all(dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
@@ -746,6 +791,7 @@ impl Ops {
             init: self.runtime.exe(),
             etc: &self.layout.etc(&id),
             engine: engine_dir.as_deref(),
+            shares: &shares,
         };
         bundle::write_json(&self.layout.config(&id), &bundle::config_json(&config))?;
         self.runtime.create(&id).await?;
@@ -1057,10 +1103,13 @@ async fn commit_snapshot(
     let upper = layout.upper(&record.id);
     let progress = Arc::clone(job);
     let reading = Arc::clone(&store);
+    // The file each shared login is mounted over is left out of the layer: this runtime made it for the mount to
+    // land on, and a sign-in never sits in an image, not even as the empty file one is read from.
+    let without: Vec<PathBuf> = record.shares.iter().map(|share| PathBuf::from(share.target.trim_start_matches('/'))).collect();
     let committed = tokio::task::spawn_blocking(move || {
         let total = store::tree_bytes(&upper).map_err(|source| store::Error::Io { path: upper.clone(), source })?;
         let _ = progress.total.set(total);
-        reading.commit_blob(|out| snapshot::write_layer(&upper, out, &progress.written))
+        reading.commit_blob(|out| snapshot::write_layer(&upper, out, &progress.written, &without))
     })
     .await
     .map_err(|e| OpError::plain(e.to_string()));
@@ -1325,6 +1374,8 @@ pub fn stub(id: Option<RequestId>, op: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
     use crate::size::LEAST_MEM_MB;
 
@@ -1366,6 +1417,7 @@ mod tests {
             init: Path::new("/bin/true"),
             etc: Path::new("/tmp"),
             engine: None,
+            shares: &[],
         });
         // One core of every period, and half of the box's four gigabytes.
         assert_eq!(spec["linux"]["resources"]["cpu"], serde_json::json!({ "quota": 100_000, "period": 100_000 }));
@@ -1558,6 +1610,7 @@ mod tests {
             init: Init { pid: i32::MAX, started: 0, boot_id: String::new() },
             engine: false,
             copy: None,
+            shares: Vec::new(),
         };
         fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
     }
@@ -1602,6 +1655,49 @@ mod tests {
         for id in ["wsp-one", "wsp-two"] {
             assert!(Layout::new(root).upper(id).is_dir(), "{id} lost its upper directory");
         }
+    }
+
+    /// A spec asking for one shared login, with the source spelled as given.
+    fn asking_for(source: &Path) -> MachineSpec {
+        MachineSpec {
+            kind: MachineKind::Sandbox,
+            template: None,
+            from_snapshot: None,
+            cpu: None,
+            mem_mb: None,
+            disk_gb: None,
+            envs: None,
+            labels: None,
+            on_idle: None,
+            idle_timeout_ms: None,
+            idempotency_key: None,
+            engine: None,
+            copy: None,
+            shares: Some(vec![Share { source: source.display().to_string(), target: "/root/.codex/auth.json".to_owned() }]),
+        }
+    }
+
+    #[test]
+    fn a_login_shared_into_a_workspace_is_a_file_under_this_daemons_logins_directory_and_nowhere_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let logins = ops.layout.logins();
+        // The open made it, and only this login reads what lands under it: the sign-in writes the person's own
+        // login there before any workspace asks for it.
+        assert!(logins.is_dir());
+        assert_eq!(fs::metadata(&logins).unwrap().permissions().mode() & 0o777, 0o700);
+        let asked = ops.shares_of(&asking_for(&logins.join("codex/auth.json"))).unwrap();
+        assert_eq!(asked.iter().map(|s| s.target.as_str()).collect::<Vec<_>>(), ["/root/.codex/auth.json"]);
+        // Anywhere else on the box, and the directory itself, which is not a file of a login: refused in one
+        // sentence naming where a shared login does live.
+        for outside in [dir.path().join("root/.ssh/id_ed25519"), logins.clone(), logins.join("../copies/wsp-a")] {
+            let refused = ops.shares_of(&asking_for(&outside)).unwrap_err().message;
+            assert!(refused.contains(&logins.display().to_string()) && refused.ends_with("is not one"), "{outside:?}: {refused}");
+        }
+        // And a create that asks for none shares none.
+        assert!(ops.shares_of(&MachineSpec { shares: None, ..asking_for(&logins) }).unwrap().is_empty());
+        // What this computer says about itself names the same directory, which is what the host fills a create from.
+        assert_eq!(ops.backend_facts().logins, Some(logins.display().to_string()));
     }
 
     #[test]

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
 import {
+  BackendFacts,
   DaemonErrorResponse,
   EXEC_BODY_MAX,
   MACHINE_PUT_PART_BYTES,
   MachineLinkRequest,
+  MachineShare,
   PlaceView,
   WorkspaceCopy,
   WorkspaceView,
@@ -69,6 +71,48 @@ describe("the machine ops on a place link", () => {
     expect(create({ kind: "sandbox", copy: { ...copy, at: "/Users/./wsp" } })).toBe(false);
     // A folder whose name begins with a dot is a folder, and half a home is made of them.
     expect(create({ kind: "sandbox", copy: { ...copy, at: "/root/.claude/projects" } })).toBe(true);
+  });
+
+  it("takes a create that shares the computer's own logins into the workspace, and refuses a path that is not one", () => {
+    const share = { source: "/var/lib/wsp/logins/codex/auth.json", target: "/root/.codex/auth.json" };
+    const create = (spec: unknown): boolean => MachineLinkRequest.safeParse({ id: 1, op: "machine.create", spec }).success;
+    expect(create({ kind: "sandbox", shares: [share] })).toBe(true);
+    // A workspace that shares none is the same frame without the field, and the empty list is no shares either.
+    expect(create({ kind: "sandbox" })).toBe(true);
+    expect(create({ kind: "sandbox", shares: [] })).toBe(true);
+    expect(MachineShare.safeParse(share).success).toBe(true);
+    // Both sides are absolute and plain, and neither walks up out of itself: where the file on the computer has
+    // to live is the daemon's own wall behind this one, and a bind mount is what cannot be taken back.
+    expect(create({ kind: "sandbox", shares: [{ ...share, source: "logins/codex/auth.json" }] })).toBe(false);
+    expect(create({ kind: "sandbox", shares: [{ ...share, source: "/var/lib/wsp/logins/../../root/.ssh/id" }] })).toBe(false);
+    expect(create({ kind: "sandbox", shares: [{ ...share, target: "/root/../etc/passwd" }] })).toBe(false);
+    expect(create({ kind: "sandbox", shares: [{ ...share, target: "" }] })).toBe(false);
+    expect(create({ kind: "sandbox", shares: [{ source: share.source }] })).toBe(false);
+  });
+
+  it("reads where a computer keeps the logins it shares, and nothing that is not a path", () => {
+    const facts = {
+      offer: "runtime",
+      capabilities: {
+        liveCloneForks: false,
+        replacesMachine: true,
+        previewUrls: false,
+        signedUrls: false,
+        callbackRelay: false,
+        diskSnapshots: true,
+        snapshotsAnyLife: false,
+        snapshotListing: true,
+        templates: true,
+        sizes: [],
+        kept: false,
+      },
+      pricing: { defaultSize: { cpu: 2, memMb: 4096 }, snapshotStorage: { freeGb: 0, usdPerGbMonth: 0, billedFrom: "" } },
+    };
+    // A provider shares none, so the field is absent there and present on a computer the person owns.
+    expect(BackendFacts.parse(facts).logins).toBeUndefined();
+    expect(BackendFacts.parse({ ...facts, logins: "/var/lib/wsp/logins" }).logins).toBe("/var/lib/wsp/logins");
+    expect(BackendFacts.safeParse({ ...facts, logins: "logins" }).success).toBe(false);
+    expect(BackendFacts.safeParse({ ...facts, logins: "" }).success).toBe(false);
   });
 
   it("refuses an op it does not carry, a part out of range and a command over the body cap", () => {

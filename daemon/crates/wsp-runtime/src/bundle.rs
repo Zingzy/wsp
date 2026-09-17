@@ -9,12 +9,13 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use wsp_frames::CopyWord;
+use wsp_frames::{CopyWord, Share};
 
 use crate::profile;
 use crate::store::Chain;
@@ -99,6 +100,11 @@ impl Layout {
     }
     /// The mark a name being made carries, read by the sweep.
     pub const PARTIAL: &'static str = ".partial";
+    /// Where this computer keeps the logins every workspace on it shares, one directory per tool: a login signed
+    /// in once here, outside every workspace, and mounted into each of them. Nothing under it is ever in an image.
+    pub fn logins(&self) -> PathBuf {
+        self.root.join("logins")
+    }
     /// Where the project checkouts a box holds live; the copies directory sits beside it under the same root,
     /// which is what lets a copy share blocks with the checkout it was made from.
     pub fn projects(&self) -> PathBuf {
@@ -154,6 +160,10 @@ pub struct Workspace {
     /// workspace took a project reads as one without.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copy: Option<CopyMade>,
+    /// The logins this computer holds and this workspace was made with, mounted into it by every boot: a wake
+    /// takes whatever the file says now, which is what makes one sign-in on the computer the workspaces' own.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shares: Vec<Share>,
 }
 
 /// The copy one workspace was made with, as the create made it: where it came from, where it is mounted inside,
@@ -184,6 +194,8 @@ pub struct Config<'a> {
     pub etc: &'a Path,
     /// The directory holding the engine socket, bound at `engine::INSIDE_DIR` where the workspace asked for one.
     pub engine: Option<&'a Path>,
+    /// The computer's own logins, each bound at the path its tool reads inside; empty where none is shared.
+    pub shares: &'a [Share],
 }
 
 #[derive(Debug)]
@@ -227,6 +239,11 @@ pub fn config_json(c: &Config) -> Value {
     }
     if let Some(engine) = c.engine {
         mounts.push(bind(crate::engine::INSIDE_DIR, engine.to_path_buf(), &["rbind", "rprivate"]));
+    }
+    // Read-write, and the one file rather than the directory around it: the tool refreshes its own login in
+    // place, and what it writes is what the computer holds for every other workspace on it.
+    for share in c.shares {
+        mounts.push(bind(&share.target, PathBuf::from(&share.source), &["rbind", "rw"]));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -332,6 +349,19 @@ pub fn unmount(target: &Path) -> Result<(), Error> {
 pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     fs::create_dir_all(target).map_err(at(target))?;
     mount(Some(source), target, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).map_err(nix_at(target))
+}
+
+/// The file a bind mount is to land on, made where the image carries none: a file bind needs the file to be
+/// there inside, and the runtime makes it rather than trusting the container runtime to. Mode 0600, since a
+/// login is what lands on it; a file already there is left as it is.
+pub fn empty_file(path: &Path) -> Result<(), Error> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(at(dir))?;
+    }
+    fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path).map(|_| ()).map_err(at(path))
 }
 
 /// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own, held
@@ -497,6 +527,7 @@ mod tests {
             init: Path::new("/usr/local/bin/wsp-daemon"),
             etc: Path::new("/var/lib/wsp/run/wsp-a/etc"),
             engine: None,
+            shares: &[],
         };
         let spec = config_json(&c);
         assert_eq!(spec["root"]["path"], "rootfs");
@@ -519,6 +550,17 @@ mod tests {
         let with_engine = config_json(&Config { engine: Some(Path::new("/var/lib/wsp/run/wsp-a/engine")), ..c });
         let socket_dir = with_engine["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == crate::engine::INSIDE_DIR).unwrap();
         assert_eq!(socket_dir["source"], "/var/lib/wsp/run/wsp-a/engine");
+        // A login the computer signs in once: the one file, at the path the tool reads it inside, read-write, so
+        // the tool refreshing it there is the computer's own refresh. Nothing else about the mounts moves.
+        let shares = [Share { source: "/var/lib/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
+        let shared = config_json(&Config { shares: &shares, ..c });
+        let login = shared["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == "/root/.codex/auth.json").unwrap();
+        assert_eq!(login["source"], "/var/lib/wsp/logins/codex/auth.json");
+        assert_eq!(login["type"], "bind");
+        assert_eq!(login["options"], json!(["rbind", "rw"]));
+        assert_eq!(shared["mounts"].as_array().unwrap().len(), mounts.len() + 1);
+        // And a workspace that shares none carries no mount of its own.
+        assert!(mounts.iter().all(|m| m["destination"] != "/root/.codex/auth.json"));
     }
 
     #[test]
@@ -562,12 +604,14 @@ mod tests {
             init: Init { pid: 4242, started: 123_456, boot_id: "b0".into() },
             engine: false,
             copy: None,
+            shares: Vec::new(),
         };
         write_json(&path, &record).unwrap();
         assert_eq!(read_record(&path).unwrap(), Some(record.clone()));
-        // A record written before the engine and the copy fields existed reads as a workspace without either.
+        // A record written before the engine, the copy and the shares fields existed reads as a workspace with none.
         let written = fs::read_to_string(&path).unwrap();
-        assert!(!written.contains("engine") && !written.contains("copy"), "{written}");
+        assert!(!written.contains("engine") && !written.contains("copy") && !written.contains("shares"), "{written}");
+        assert!(read_record(&path).unwrap().unwrap().shares.is_empty());
         assert_eq!(read_record(&path).unwrap().unwrap().copy, None);
         write_json(&path, &Workspace { engine: true, ..record.clone() }).unwrap();
         assert!(read_record(&path).unwrap().unwrap().engine);
@@ -577,9 +621,13 @@ mod tests {
             made: CopyWord::Reflink,
             ms: 1_903,
         };
-        write_json(&path, &Workspace { copy: Some(made.clone()), ..record }).unwrap();
+        write_json(&path, &Workspace { copy: Some(made.clone()), ..record.clone() }).unwrap();
         assert_eq!(read_record(&path).unwrap().unwrap().copy, Some(made));
         assert!(fs::read_to_string(&path).unwrap().contains("\"made\": \"reflink\""));
+        // The logins the workspace was made with are the record's too: every boot binds whatever the file says now.
+        let shares = vec![Share { source: "/var/lib/wsp/logins/codex/auth.json".to_owned(), target: "/root/.codex/auth.json".to_owned() }];
+        write_json(&path, &Workspace { shares: shares.clone(), ..record }).unwrap();
+        assert_eq!(read_record(&path).unwrap().unwrap().shares, shares);
     }
 
     /// Two binds under a rootfs, as a boot leaves them, taken down by one call while the mount the box itself
