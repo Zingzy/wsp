@@ -612,19 +612,9 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               send({ id, ok: true, workspace: handed(workspace), ...(notice !== undefined ? { notice } : {}) });
               return;
             }
-            case "workspaces.createLocal":
-              send({ id: msg.id, ok: true, workspace: handed(await rt.workspaces.createLocal(msg.name, origin)) });
-              return;
             case "workspaces.landing":
-              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing(msg.on === undefined ? {} : { on: msg.on })) });
+              send({ id: msg.id, ok: true, ...(await rt.workspaces.landing({ project: msg.project })) });
               return;
-            case "workspaces.createSsh": {
-              const { id, op, address, origin: _sent, ...rest } = msg;
-              void op;
-              const { notice, ...workspace } = await rt.workspaces.createSsh(address, rest, origin);
-              send({ id, ok: true, workspace: handed(workspace), ...(notice !== undefined ? { notice } : {}) });
-              return;
-            }
             case "workspaces.list":
               send({ id: msg.id, ok: true, workspaces: (await rt.workspaces.list(origin)).map(handed) });
               return;
@@ -676,6 +666,21 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               return;
             case "workspaces.snapshot":
               send({ id: msg.id, ok: true, projectGolden: await rt.workspaces.snapshot(msg.workspaceId, origin) });
+              return;
+            case "projects.add": {
+              const { notice, ...project } = await rt.projects.add({ source: msg.source, ...(msg.on !== undefined ? { on: msg.on } : {}), ...(msg.name !== undefined ? { name: msg.name } : {}), ...(msg.base !== undefined ? { base: msg.base } : {}) }, origin);
+              send({ id: msg.id, ok: true, project, ...(notice !== undefined ? { notice } : {}) });
+              return;
+            }
+            case "projects.list":
+              send({ id: msg.id, ok: true, projects: await rt.projects.list(origin) });
+              return;
+            case "projects.resolve":
+              send({ id: msg.id, ok: true, project: await rt.projects.resolve(msg.ref, origin) });
+              return;
+            case "projects.remove":
+              await rt.projects.remove(msg.projectId, origin);
+              send({ id: msg.id, ok: true });
               return;
             case "projectGoldens.list":
               send({ id: msg.id, ok: true, projectGoldens: await rt.golden.projects() });
@@ -786,7 +791,6 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
                 ...(msg.resume !== undefined ? { resume: msg.resume } : {}),
                 ...(msg.thread !== undefined ? { thread: msg.thread } : {}),
                 ...(msg.cwd !== undefined ? { cwd: msg.cwd } : {}),
-                ...(msg.project !== undefined ? { project: msg.project } : {}),
                 ...(msg.model !== undefined ? { model: msg.model } : {}),
                 ...(msg.effort !== undefined ? { effort: msg.effort } : {}),
                 ...(msg.permissionMode !== undefined ? { permissionMode: msg.permissionMode } : {}),

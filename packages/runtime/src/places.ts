@@ -28,7 +28,7 @@ import {
   absentComputer,
   namesPlace,
   noSuchPlaceRefusal,
-  placeHoldsForksRefusal,
+  placeHoldsForksRefusal, placeHoldsProjectsRefusal,
   placeForksNowhereLine,
   placeCannotBootLine,
   placeNoDaemonPortLine,
@@ -252,12 +252,14 @@ export interface PlaceInstalled {
 export type PlaceStaging = (step: PlaceAddStep, state: "running" | "done" | "failed", note?: string) => void;
 export type PlaceInstaller = (req: PlaceInstallRequest, stage: PlaceStaging) => Promise<PlaceInstalled>;
 
-/** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks,
- * and a remove refuses to take the place out from under them. */
+/** The one road into the runtime a place needs, handed in because it is the runtime's own: a place holds its forks
+ * and the projects recorded on it, and a remove refuses to take the place out from under either. */
 export interface PlaceRecording {
   /** The names of the forks standing on this place: the machines wsp made there, which are the only workspaces a
    * place carries. */
   forksOn(placeId: string): Promise<string[]>;
+  /** The names of the projects recorded on this place, which every workspace of them is a copy for. */
+  projectsOn(placeId: string): Promise<string[]>;
 }
 
 export interface PlaceDoorOptions {
@@ -1453,6 +1455,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // leave containers on that computer nothing here can name again.
       const forks = await recording.forksOn(placeId);
       if (forks.length > 0) throw new Error(placeHoldsForksRefusal(held.name, forks));
+      // A project is one computer's: taken out from under its projects, the place id on each record would name
+      // nothing. The forks are refused first, since a workspace of a project is a machine standing on this place.
+      const projects = await recording.projectsOn(placeId);
+      if (projects.length > 0) throw new Error(placeHoldsProjectsRefusal(held.name, projects));
       const reach = live.get(placeId)?.reach;
       const leaver = wiring.leave;
       const login = loginOf(held);

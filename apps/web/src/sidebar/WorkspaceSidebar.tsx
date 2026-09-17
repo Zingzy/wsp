@@ -14,7 +14,7 @@
 // sidebar-glass: nothing here paints a background.
 import { ChevronDownIcon, MessageSquarePlusIcon, PlusIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import { DROP_A_FOLDER_LINE, HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, dropRefusedLine, dropTileLine, goldenHead, isLocalWorkspace, kindWords, registerRequest, registeredLine, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
+import { HOST_ASLEEP_LINE, PROVIDER_UNREACHED_LINE, cloudCreateRefusal, computerOffline, creationAwaits, goldenHead, isLocalWorkspace, workspaceKind, workspaceState, type SealedImageCopy, type WorkspaceSize, type WorkspaceState } from "@wsp/protocol";
 import { openContextMenu, runAction } from "../actions/contextMenu.js";
 import { CREATION_ASKED, rebuildRefusedLine } from "../actions/format.js";
 import { actionById, resolveActions, type ResolvedAction } from "../actions/registry.js";
@@ -41,9 +41,7 @@ import { hostAsleep } from "../boot.js";
 import { goToAdjacentWorkspace } from "../shell/shellCommands.js";
 import { onForgetWorkspaceRequest, onNewWorkspaceRequest, onProjectTripRequest, onRenameWorkspaceRequest, onWorkspaceLookRequest, type ProjectTripRequest, type WorkspaceLookRequest } from "../shell/shellRequests.js";
 import { ExportProjectDialog } from "./ExportProjectDialog.js";
-import { droppedFolder, useFolderDrag, useWindowFolderDrag } from "./folderDrag.js";
 import { ForwardsList } from "./ForwardsList.js";
-import { ImportProjectDialog } from "./ImportProjectDialog.js";
 import { NewWorkspaceDialog } from "./NewWorkspaceDialog.js";
 import { ROW_LEAD_CLASS, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, groupRowId, threadRowId, workspaceRowId } from "./rowGrammar.js";
 import { SearchRow } from "./SearchRow.js";
@@ -60,7 +58,7 @@ import { SpaceHeader } from "./SpaceHeader.js";
 import { SPACE_LEAVING_SELECTOR, SpaceSlide } from "./SpaceSlide.js";
 import { NO_SWIPE, readSwipe } from "./spaceSwipe.js";
 import { ThreadLaunchRow, ThreadRow } from "./ThreadRow.js";
-import { WorkspaceDropTile, WorkspaceRow, type DropTile } from "./WorkspaceRow.js";
+import { WorkspaceRow } from "./WorkspaceRow.js";
 import { NEW_THREAD_SHORTCUT, NEW_THREAD_TITLE, compactTimeLabel, defaultWorkspaceName, onQuietComputer, whereWord } from "./workspaceRows.js";
 
 /** Which workspaces have their idle shelf shut, so a shelf is open until this workspace's own chevron shuts it. */
@@ -141,11 +139,10 @@ export function WorkspaceSidebar() {
   // waiting state of its own, so it holds nothing at all.
   const ready = useReady();
   const createWorkspace = useStore(s => s.createWorkspace);
-  const createLocal = useStore(s => s.createLocalWorkspace);
-  // One local workspace per host: the section's road to this computer says whether a pick makes it or goes to it.
-  const hasLocal = useStore(s => s.workspaces.some(w => isLocalWorkspace(w)));
   // Where a workspace can go: the same list Settings draws, so the dialog and that table never offer two answers.
   const places = useStore(s => s.places);
+  // What a workspace is made of. Named apart from the sidebar's own `projects`, which are its workspace rows.
+  const recorded = useStore(s => s.projects);
   const openAddComputer = useStore(s => s.openAddComputer);
   const hasGolden = useStore(s => s.hasGolden);
   const initJob = useStore(s => s.initJob);
@@ -199,8 +196,8 @@ export function WorkspaceSidebar() {
   const visible = useMemo(() => visibleProjects(projects, nowMs), [projects, nowMs]);
   const outOfMemory = useOutOfMemoryReadings(projects);
   const sectionActions = useMemo(
-    () => resolveActions(sidebarActions, { mode, hasLocal, connected: api !== null }, { setMode, newLocal: () => void createLocal() }, labs),
-    [api, createLocal, hasLocal, labs, mode, setMode],
+    () => resolveActions(sidebarActions, { mode }, { setMode }, labs),
+    [labs, mode, setMode],
   );
   const spaceId = useSpaceWorkspaceId();
   const currentSpace = mode !== "spaces" ? null : (visible.find(v => v.project.id === spaceId) ?? null);
@@ -245,9 +242,9 @@ export function WorkspaceSidebar() {
   );
   useEffect(() => onProjectTripRequest(request => setTrip({ ...request, key: Date.now() })), []);
 
-  const create = async (name: string, where?: string, size?: WorkspaceSize): Promise<void> => {
+  const create = async (name: string, project: string, size?: WorkspaceSize): Promise<void> => {
     setDialog(null);
-    await createWorkspace(name, undefined, size, where);
+    await createWorkspace(project, name, size === undefined ? undefined : { size });
   };
 
   // The row's rebuild spins until the status names a new machine, so it stands in for the registry's plain call.
@@ -263,42 +260,6 @@ export function WorkspaceSidebar() {
     }
   };
   const verbs = { ...defaultVerbs, rebuild: api?.rebuild ? rebuild : undefined };
-
-  // A folder dragged from the desktop: only the desktop shell can read where it is, and only a client with the import
-  // ops has anywhere to put it, so a browser tab's rows stay rows.
-  const droppedPath = desktopBridge()?.droppedPath;
-  useWindowFolderDrag(droppedPath !== undefined && verbs.importProject !== undefined);
-  const dragging = useFolderDrag(s => s.dragging);
-  /** Where a dropped folder goes, by the workspace's kind: registered at once on this computer, with the result or
-   * the refusal in the toast; read into the import dialog for a box. A file is neither. */
-  const landDrop = async (project: SidebarProjectSnapshot, transfer: DataTransfer): Promise<void> => {
-    useFolderDrag.getState().end();
-    const file = droppedFolder(transfer);
-    if (file === null || droppedPath === undefined) {
-      useStore.setState({ toast: DROP_A_FOLDER_LINE });
-      return;
-    }
-    const source = droppedPath(file);
-    if (kindWords(workspaceKind(project.workspace)).imports !== "registers") {
-      setTrip({ key: Date.now(), workspaceId: project.id, trip: "import", source });
-      return;
-    }
-    if (api?.importProject === undefined) return;
-    try {
-      const landed = await api.importProject({ workspaceId: project.id, ...registerRequest(source) });
-      useStore.getState().landProject(project.id, landed.project);
-      useStore.setState({ toast: registeredLine(landed.dest) });
-    } catch (e) {
-      useStore.setState({ toast: dropRefusedLine(source) });
-    }
-  };
-  /** The row's tile while a drag lasts, where a drop has somewhere to go: a kind with an import road, on a machine the
-   * import action is not refused for, so a gone or zombie row stays a row. */
-  const tileFor = (project: SidebarProjectSnapshot, actions: ReadonlyArray<ResolvedAction>): DropTile | null => {
-    if (!dragging || actionById(actions, "import-project").refusal !== null) return null;
-    const label = dropTileLine(workspaceKind(project.workspace), project.displayName);
-    return label === null ? null : { label, onDrop: transfer => void landDrop(project, transfer) };
-  };
 
   const toggleCollapsed = (id: string): void => {
     setCollapsed(prev => {
@@ -424,16 +385,12 @@ export function WorkspaceSidebar() {
     const isCollapsed = collapsed.has(project.id);
     const rebuildAsked = rebuilding[project.id] !== undefined && rebuilding[project.id] === (project.status?.machineId ?? project.workspace.machineId);
     const naming = renaming?.rowId === workspaceRowId(project.id);
-    const tile = tileFor(project, actions);
     return (
       <SidebarMenuItem
         key={project.id}
         // A row holding the box takes no menu over it, as a thread row being named does not.
         {...(naming ? {} : { onContextMenu: (event: MouseEvent<HTMLElement>) => void openContextMenu(event, actions, { returnTo: event.currentTarget.querySelector<HTMLElement>("[data-sidebar-row]") }) })}
       >
-        {tile !== null ? (
-          <WorkspaceDropTile rowId={workspaceRowId(project.id)} tile={tile} />
-        ) : (
         <WorkspaceRow
           project={project}
           cost={costs[project.id] ?? null}
@@ -452,7 +409,6 @@ export function WorkspaceSidebar() {
           onRenameCancel={() => setRenaming(null)}
           onRenameOpen={openerOf(actionById(actions, "rename"))}
         />
-        )}
         {threadsOf(visibleProject, newThreadAction, isCollapsed)}
       </SidebarMenuItem>
     );
@@ -690,10 +646,11 @@ export function WorkspaceSidebar() {
           key={dialog.key}
           initialName={dialog.name}
           places={places}
+          projects={recorded}
           copies={dialog.copies}
           goldenSize={dialog.goldenSize}
           refusal={createRefusal?.line ?? null}
-          onCreate={(name, where, size) => void create(name, where, size)}
+          onCreate={(name, project, size) => void create(name, project, size)}
           onCancel={() => setDialog(null)}
           onAddComputer={() => {
             setDialog(null);
@@ -701,13 +658,7 @@ export function WorkspaceSidebar() {
           }}
         />
       ) : null}
-      {trip !== null && tripTarget !== undefined ? (
-        trip.trip === "import" ? (
-          <ImportProjectDialog key={trip.key} workspace={tripTarget} {...(trip.source !== undefined ? { initialSource: trip.source } : {})} onClose={() => setTrip(null)} />
-        ) : (
-          <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} />
-        )
-      ) : null}
+      {trip !== null && tripTarget !== undefined ? <ExportProjectDialog key={trip.key} workspace={tripTarget} onClose={() => setTrip(null)} /> : null}
       {looking !== null && lookTarget !== undefined ? (
         <WorkspaceLookPopover key={looking.key} workspace={lookTarget} part={looking.part} anchor={looking.anchor} onClose={() => setLooking(null)} />
       ) : null}

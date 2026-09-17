@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
-import { hostname, tmpdir } from "node:os";
-import { join, posix } from "node:path";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { homedir, hostname, tmpdir } from "node:os";
+import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
 import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, catalogIdOfRow, guestEnv } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
@@ -148,6 +148,9 @@ import type {
   ProjectExportStage,
   ProjectGolden,
   ProjectImportResult,
+  ProjectRef,
+  ProjectSource,
+  ProjectView,
   ProjectImportStage,
   ProjectPlan,
   PermissionAsk,
@@ -193,7 +196,7 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, alreadyRecorded, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, projectAt, projectFor, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, sshHostKeyNotice, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, withProject, workspaceProjects, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, sameSourceRefusal, sourceKind, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent } from "@wsp/engine";
@@ -414,8 +417,11 @@ export interface CreatedWorkspace extends WorkspaceView {
 }
 
 export interface CreateWorkspaceOptions extends WorkspaceSpec {
-  /** Snapshot id of the golden image to fork. */
-  golden: string;
+  /** The project this workspace is made for, by id or by name. Its computer is where the workspace lands, so
+   * nothing else says where. */
+  project: string;
+  /** Snapshot id of a project image to fork; absent takes the head of this host's own image. */
+  golden?: string;
   name: string;
   /** What the agents on the new workspace may ask of this host; absent is off, and on a fork a thread asked for it
    * is the forking workspace's own switch, so a tree of machines carries one rule rather than needing it set again.
@@ -423,9 +429,6 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   agents?: Partial<WorkspaceAgents>;
   /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
   idleWindowMs?: number | null;
-  /** The place this fork lands on, by the word a person types for it: a joined computer's name or id, or this
-   * computer. Absent takes the place a fork last landed on. */
-  on?: string;
 }
 
 /** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
@@ -572,9 +575,12 @@ export interface ProjectImportOptions {
   bundler: ProjectBundler;
 }
 
-interface WorkspaceRecord extends WorkspaceView {
+interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
   /** cloud or local; a record stored before local existed has none and reads cloud. */
   kind: WorkspaceKind;
+  /** The project this workspace was made for, by its id. The view joins the record's name, path and computer off
+   * the projects map, so one fact has one stored home. */
+  project: string;
   spec: Pick<WorkspaceSpec, "envs" | "labels" | "engine">;
   idleWindowMs?: number | null;
   /** What the provider built, read back after every create (it may clamp the
@@ -755,29 +761,12 @@ export interface LocalWiring {
   close?: () => Promise<void>;
 }
 
-/** What a host wires for the machines it reaches over ssh: the backend that dials them, and the one call that
- * records one. Absent, the runtime serves no ssh workspace and `createSsh` is refused. The one place the ssh
- * variant is registered beside the cloud default. */
+/** What a host wires for the machines it reaches over ssh: the backend that dials them and the road to a daemon
+ * already on one. A machine somebody owns is a computer this host joins, and the projects on it are cloned into
+ * copies of its own image, so nothing here records a workspace: this is the ssh variant's registration beside the
+ * cloud default and nothing more. */
 export interface SshWiring {
   backend: MachineBackend;
-  /** One dial that proves the machine answers and reads what its record stands on: the handle, the name the address
-   * suggests, the machine's own login environment and its size. The address is the person's own word for the
-   * machine (user@host), read here and nowhere else in the runtime. */
-  adopt: (address: string, opts: { port?: number; keyPath?: string }) => Promise<{
-    machine: Machine;
-    name: string;
-    login: Readonly<Record<string, string>>;
-    shape: MachineShape;
-    /** What the machine answered about who it is, so one machine carries one workspace however it was addressed. */
-    identity?: string;
-    /** The key the machine answered the connection with, shown to the person once so they can compare it. */
-    hostKey?: string;
-  }>;
-  /** Puts the daemon on a machine reached over ssh, under the login it answered with: everything it writes sits
-   * under that home and its unit is that login's own, so nothing about the deploy needs root. A returned string
-   * rides the stage line as its detail, the way a fork's does. Absent, an ssh workspace is recorded with no
-   * daemon and its panes say so. */
-  deployDaemon?: (machine: Machine, login: { home: string; path: string }) => Promise<void | string>;
   /** A port on this computer's own loopback carried to a port on the machine's, one connection per machine and
    * reused by every dial after the first. Nothing on the machine listens past its own loopback, so this is the
    * whole road to its daemon. */
@@ -793,6 +782,9 @@ export interface SshWiring {
 
 export interface RuntimeOptions {
   backend: MachineBackend;
+  /** The file this runtime's store is kept in, for the one refusal that asks a person to move it aside: a record
+   * written before projects were records of their own is not read, so the sentence has to name what to move. */
+  statePath?: string;
   /** The local computer as a workspace, when a host wires it; the cloud backend serves every other workspace. */
   local?: LocalWiring;
   /** The machines this host reaches over ssh, when a host wires them. */
@@ -906,6 +898,47 @@ const WAKE_LATE_READ_MS = 3 * 60_000;
 const DAEMON_HELLO_TIMEOUT_MS = 5_000;
 /** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
 const PORT_PROBE_TIMEOUT_MS = 10_000;
+
+/** How long a project's clone inside a fresh copy may take before the create gives up on it. A repo of the size
+ * wsp is dogfooded on lands in seconds; the budget is for a cold cache on a small machine. */
+const CLONE_MS = 300_000;
+
+/** Why a login is no project: `wsp add user@host` joins a computer, which is the other thing this verb does, and
+ * a person who typed one meant that. */
+export const ADD_IS_A_COMPUTER_LINE = "that is a computer, not a project; wsp add user@host joins it, and a project is a folder here or a repo's url with --on <computer>";
+
+/** The folder a person named as this computer sees it: `~` is their home and a relative word is under the folder
+ * the host runs in, which is where a caller that resolved nothing typed it. */
+const folderNamed = (path: string): string => {
+  const named = path === "~" || path.startsWith("~/") ? join(homedir(), path.slice(1)) : isAbsolute(path) ? path : resolvePathOn(path);
+  // Through the links: a folder under /tmp on a Mac is reached by two names, and git answers with the real one, so
+  // a record written under the other would never match the repo it names.
+  try {
+    return realpathSync(named);
+  } catch {
+    return named;
+  }
+};
+
+/** Whether two sources are the same place: one source on one computer is one project, and the url or the path is
+ * the whole of what says so. */
+const sameSource = (a: ProjectSource, b: ProjectSource): boolean => (a.kind === "git" && b.kind === "git" ? a.url === b.url : a.kind === "folder" && b.kind === "folder" ? a.path === b.path : false);
+
+/** Why a second workspace on one project worked in place is refused: the folder is one working tree, and two
+ * records on it would be two names for the same branch. */
+export const oneWorkspacePerProject = (project: string, standing: string): string =>
+  `${project} is worked where it sits, so it has one workspace and ${standing} is it; run in ${standing}, or delete it first`;
+
+/** Why a host will not serve a state file written before a workspace named its project: nothing reads the old
+ * shape, so the file is moved aside by hand and this host starts empty. */
+export const wipeTheState = (workspaceId: string, statePath: string | undefined): string =>
+  `workspace ${workspaceId} was recorded before a workspace held a project, and nothing reads that shape: move ${statePath ?? "this host's state file"} aside and start again, and wsp add records your projects on the new one`;
+
+/** What a create says when this host has sealed no image yet, so there is nothing for a copy to fork. */
+export const NO_IMAGE_YET = "no image yet; run wsp init";
+
+/** The last line a command said, which is what git puts its reason on. */
+const lastLineOf = (said: string): string => said.trimEnd().split("\n").at(-1)?.trim() ?? "";
 /** How the import's done line reads each agent's outcome, after the agent's name. */
 const OUTCOME_WORDS: Record<Exclude<ProjectAgentOutcome, "failed">, string> = {
   moved: "moved",
@@ -1098,17 +1131,10 @@ export interface Runtime {
    * refuses one with the one sentence, and the lists that serve workspaces leave it out for that caller. */
   readonly workspaces: {
     create(opts: CreateWorkspaceOptions, origin?: Caller): Promise<CreatedWorkspace>;
-    /** Where a fork would land and what that place offers, gated as a create is: the place `on` names, else the
-     * default place; `place` is absent where the landing is the provider this host forks on. Read ahead of a create
-     * so the refusal for a place that forks nothing comes in one sentence before any stage is streamed. */
-    landing(o?: { on?: string }): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
-    /** The one local workspace: this computer. Refused when this host wired no local backend, when one already
-     * exists (one per host), and for a name another workspace holds. It forks nothing; the machine already exists. */
-    createLocal(name?: string, origin?: Caller): Promise<WorkspaceView>;
-    /** A workspace on a machine the person already has, reached over ssh at `user@host`. Refused when this host
-     * wired no ssh backend, when the machine does not answer the dial, when a workspace already stands on it, and
-     * for a name another workspace holds. It forks nothing; the machine already exists. */
-    createSsh(address: string, opts?: { name?: string; port?: number; keyPath?: string }, origin?: Caller): Promise<CreatedWorkspace>;
+    /** Where a workspace of this project would land and what that computer offers, gated as a create is; `place` is
+     * absent where the landing is this computer or the provider this host forks on. Read ahead of a create so the
+     * refusal for a computer that forks nothing comes in one sentence before any stage is streamed. */
+    landing(o: { project: string }): Promise<{ place?: string; name: string; capabilities: Capabilities }>;
     get(id: string, origin?: Caller): Promise<WorkspaceView>;
     /** Every workspace this host holds, less the ones the caller's origin may not drive. */
     list(origin?: Caller): Promise<WorkspaceView[]>;
@@ -1199,6 +1225,19 @@ export interface Runtime {
     seenBy(event: unknown, origin?: Caller): boolean;
   };
   readonly projects: {
+    /** Records a project: the word a person typed, which is a folder on this computer or a repo a computer clones,
+     * and the computer it lives on. Refused when the word is neither, when the computer's kind takes no source of
+     * that shape, and when that source is already a project on that computer. */
+    add(opts: { source: string; on?: string; name?: string; base?: string }, origin?: Caller): Promise<ProjectView & { notice?: string }>;
+    /** Every project this host holds, oldest first. */
+    list(origin?: Caller): Promise<ProjectView[]>;
+    /** The computers a project can live on, by the id and the name each carries in the places table: what `add`
+     * resolves `on` against, read here so a caller names one rather than guessing at the refusal. */
+    computers(): Promise<{ id: string; name: string }[]>;
+    /** The project a word names, by id or by name; refused naming the ones there are. */
+    resolve(ref: string, origin?: Caller): Promise<ProjectView>;
+    /** Drops a project's record; refused while a workspace of it stands, naming them. */
+    remove(id: string, origin?: Caller): Promise<void>;
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
     import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
     /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
@@ -1220,9 +1259,6 @@ export interface Runtime {
         thread?: string;
         /** The folder the thread starts in, absolute; it wins over project and the default folder rule. */
         cwd?: string;
-        /** One of the workspace's projects by name, where the thread starts when cwd names none; refused when the
-         * workspace has no project of that name. */
-        project?: string;
         model?: string;
         effort?: string;
         permissionMode?: string;
@@ -1418,6 +1454,9 @@ export interface OrphansDeleted {
 }
 
 const WORKSPACES = "workspaces";
+/** The projects this host holds, by id: a computer, a source that computer can see and the branch a workspace of
+ * it starts on. A workspace's record names one of these and nothing else about it. */
+const PROJECTS = "projects";
 /** One manifest per place and golden name: a place's own built copy of the image, keyed `<place>/<name>`. A state
  * file written before places carries it under the bare name and the boot moves it under the wired place. */
 const GOLDENS = "goldens";
@@ -1486,10 +1525,13 @@ const SESSION_INDEX_CAP = 200;
  * event, 5000 events cost 4 s of memory-store clones and 6.6 s of file rewrites after the last turn. */
 export const TRANSCRIPT_FLUSH_MS = 250;
 
-/** One workspace's name as a person set it here, kept beside the workspace records so a restore can read it. */
+/** What a restore needs about a workspace that no label on its machine carries: the name as a person set it here,
+ * and the project the workspace was made for. Kept beside the workspace records, so a sweep that finds a machine
+ * whose record this store lost can put the record back under the same name and the same project. */
 interface NamedWorkspace {
   workspaceId: string;
   name: string;
+  project?: string;
 }
 
 interface TranscriptRecord {
@@ -1741,8 +1783,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     /** How a turn's process is launched on this workspace's machine, under the limits the registry hands every turn. */
     execStream: (entry: LiveWorkspace, opts?: MachineExecOptions, waiting?: TurnWaiting) => ExecStreamFactory;
     /** The folder a turn and a command start in on this kind when the caller names none; undefined leaves it to the
-     * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since on
-     * a computer somebody owns the folder sits under the home that computer answered with. */
+     * machine's own road, which for a guest is the home the login shell lands in. A reading of the record, since a
+     * workspace worked in place is its project's own folder. */
     folder: (record: WorkspaceRecord) => string | undefined;
     /** Where the harness keeps its sessions on this workspace's machine: a fixed folder on a kind whose machines
      * wsp makes alike, the record's own on a machine that already existed and answered with its home. */
@@ -1759,6 +1801,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     import: (entry: LiveWorkspace, o: ProjectImportOptions, report: ImportReport) => Promise<ImportLanded>;
     /** Names the project folders the machine's daemon may browse beside its home, where the kind has a daemon. */
     roots: (entry: LiveWorkspace, dests: readonly string[]) => Promise<void>;
+    /** Puts this workspace's project inside it, the step between the machine answering and the workspace being
+     * ready: a kind that works a folder in place has nothing to move and only checks the folder is still a repo,
+     * and a kind that holds a copy clones the repo into it. A throw ends the create as any failed stage does. */
+    landProject: (entry: LiveWorkspace, project: ProjectView, report: StageReport) => Promise<void>;
     /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
      * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
@@ -1811,6 +1857,26 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     done: string;
   }
   const projectOf = (dest: string, size: number): WorkspaceProject => ({ name: folderName(dest), dest, importedAt: new Date(clock.now()).toISOString(), size });
+  /** The command that puts a project's repo inside a copy of an image, word for word, so the test that reads the
+   * machine's log and the machine that runs it read one line. No --branch where the record names no base: the
+   * remote's own default branch is what the clone then takes. */
+  const cloneCommand = (project: ProjectView): string =>
+    project.source.kind === "git" ? shellLine(["git", "clone", ...(project.base !== undefined ? ["--branch", project.base] : []), project.source.url, project.path]) : "";
+  /** The clone inside a copy: git's own last line is the failure, so a person reads what git said and not that a
+   * stage failed. */
+  const cloneProject = async (entry: LiveWorkspace, project: ProjectView, report: StageReport): Promise<void> => {
+    if (project.source.kind !== "git") return;
+    report("project-cloned", `Cloning ${project.name} into ${project.path}.`);
+    const cloned = await entry.machine.exec(cloneCommand(project), { timeoutMs: CLONE_MS });
+    if (cloned.exitCode !== 0) throw new Error(lastLineOf(cloned.stderr) || lastLineOf(cloned.stdout) || `git clone exited ${cloned.exitCode}`);
+  };
+  /** Whether this computer holds a git repo at exactly this folder, which is what a project here stands on: the
+   * top of the work tree is the folder itself, not a folder above it. */
+  const isRepoHere = async (path: string): Promise<boolean> => {
+    const machine = await moduleOf("local").backend({ kind: "local" } as WorkspaceRecord).get(LOCAL_MACHINE_ID);
+    const read = await machine.exec(shellLine(["git", "-C", path, "rev-parse", "--show-toplevel"]), { timeoutMs: INLINE_EXEC_MS });
+    return read.exitCode === 0 && read.stdout.trim() === path;
+  };
   /** The import road on this computer: the folder is here already, so its path is recorded at once and nothing is
    * packed or sent. The plan is still read, since it is the one measure of the folder and the one check that it is
    * there, and its bytes are the size the record shows. */
@@ -1894,20 +1960,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     daemonTokens.delete(entry.machine.id);
     await daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
   };
-  /** Puts this runtime's daemon under the login the machine answered with. The record keeps that it happened, so
-   * a later host process knows the machine has one without dialling it, and the panes refuse with the sentence
-   * that names the verb rather than waiting on a port nothing binds. */
-  const sshDeploy = async (entry: LiveWorkspace): Promise<void | string> => {
-    if (ssh?.deployDaemon === undefined) throw new Error(noKindLine("ssh"));
-    const login = loginOf(entry.record);
-    const home = sshHomeDir(entry);
-    const detail = await ssh.deployDaemon(entry.machine, { home, path: login["PATH"] ?? "" });
-    daemonTokens.delete(entry.machine.id);
-    await daemonTokenOf(entry.machine, sshDaemonPaths(home).tokenPath);
-    entry.record.daemon = { deployedAt: new Date(clock.now()).toISOString(), version: DAEMON_VERSION };
-    await persist(entry.record);
-    return detail;
-  };
   /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind
    * this host does not serve answers. */
   let placeDoor: PlaceDoor | undefined;
@@ -1947,6 +1999,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       ...(opts.goldenRecipe?.deployDaemon !== undefined ? { deployDaemon: async (entry: LiveWorkspace) => cloudDeploy(entry) } : {}),
       import: (entry, o, report) => copyImport(entry, o, report),
       roots: (entry, dests) => writeRoots(entry, dests),
+      landProject: (entry, project, report) => cloneProject(entry, project, report),
     },
     local:
       local === undefined
@@ -1954,7 +2007,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         : {
             backend: () => local.backend,
             execStream: (_entry, o, waiting) => local.execStream(o, waiting),
-            folder: () => local.backend.folder,
+            // The workspace here is the project's own folder worked in place, so that folder is the word its view
+            // carries and where a thread on it starts; the same reading threadFolder takes.
+            folder: record => projectHeld(record.project).path,
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
             env: () => local.env(),
@@ -1979,6 +2034,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             import: (_entry, o, report) => registerImport(o, report),
             // This computer's daemon browses from the person's home, so its roots file sits beside that home.
             roots: (entry, dests) => writeRoots(entry, dests, rootsPathIn(local.homeDir)),
+            // The folder is already here and is the workspace: nothing moves, and the one thing worth reading
+            // again is that it is still the repo the project was recorded on.
+            landProject: async (_entry, project) => {
+              if (project.source.kind === "folder" && !(await isRepoHere(project.path))) throw new Error(`${project.path} ${NOT_A_REPO_LINE}`);
+            },
           },
     ssh:
       ssh === undefined
@@ -2039,11 +2099,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
                 await ssh.dropForward?.(entry.machine);
               }
             },
-            ...(ssh.deployDaemon === undefined ? {} : { deployDaemon: sshDeploy }),
             // The machine is the person's own and the folder is theirs to land on, so the bytes travel the way a
             // fork's do; the road that carries them reads the machine for how, and over ssh that is the connection.
             import: (entry, o, report) => copyImport(entry, o, report),
             roots: (entry, dests) => writeRoots(entry, dests, sshDaemonPaths(sshHomeDir(entry)).rootsPath),
+            // No project lives on a machine wsp only reaches: its row in the kind table takes no source, so no
+            // workspace of this kind is ever made and nothing reaches here.
+            landProject: async () => {},
           },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
@@ -2073,25 +2135,28 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * a command runs in cannot differ, and the app, the command line and the tool need not restate it; the roads that
    * reach `entry.machine` directly land in the folder that machine was built with, which for this computer is the
    * same one, since the kind reads it off the backend. */
-  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined; project?: string | undefined }): Promise<string | undefined> => {
-    if (o.cwd !== undefined) return o.cwd;
-    const projects = workspaceProjects(entry.record);
-    const last = projects.length === 0 ? undefined : (await preferences.get()).project[entry.record.id];
-    return projectFor(projects, { named: o.project, last })?.dest ?? moduleOf(entry.record.kind).folder(entry.record);
+  const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string | undefined> => {
+    return o.cwd ?? projectHeld(entry.record.project).path;
   };
   /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
    * workspace, the second branch of threadFolder for the next thread there, and the target, the workspace and project
    * a thread or an import asked for from nowhere goes to. Written only when it moves the record, so a second thread
    * on the same project pushes no record to any socket. */
-  const rememberTarget = async (record: WorkspaceRecord, cwd: string | undefined): Promise<void> => {
-    const used = projectAt(workspaceProjects(record), cwd);
+  /** The agent a thread on this project last ran under, kept on the project's own record: what a start that names
+   * none takes, and what the composer shows as the default. Written only when it moves, so a second thread on the
+   * same agent writes nothing. */
+  const rememberAgent = async (project: ProjectView, harness: string): Promise<void> => {
+    if (project.lastAgent === harness) return;
+    const next: ProjectView = { ...project, lastAgent: harness };
+    projectsHeld.set(next.id, next);
+    await store.put(PROJECTS, next.id, next);
+  };
+
+  const rememberTarget = async (record: WorkspaceRecord): Promise<void> => {
     const current = await preferences.get();
-    const target = { workspace: record.id, ...(used !== null ? { project: used.name } : {}) };
-    const patch: PreferencesPatch = {
-      ...(used !== null && current.project[record.id] !== used.name ? { project: { [record.id]: used.name } } : {}),
-      ...(current.target?.workspace !== target.workspace || current.target?.project !== target.project ? { target } : {}),
-    };
-    if (Object.keys(patch).length > 0) await preferences.set(patch);
+    if (current.target?.workspace === record.id) return;
+    const patch: PreferencesPatch = { target: { workspace: record.id } };
+    await preferences.set(patch);
   };
   /** Why a verb this workspace's machine cannot take is refused, in the three sentences the three reasons have: a
    * machine wsp does not run has no meaning for a verb that moves a fork, a host with no provider forks nothing at
@@ -2319,6 +2384,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
           await ready();
           return [...live.values()].filter(e => e.record.place === placeId).map(e => e.record.name);
         },
+        projectsOn: async placeId => {
+          await ready();
+          return [...projectsHeld.values()].filter(p => p.computer === placeId).map(p => p.name);
+        },
       },
     });
     // The door's four events ride the one stream every other event rides, so the app follows a computer joining
@@ -2365,6 +2434,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the first await of a fork and handed back when it lands or fails, so the cap counts what is on its way too. */
   const landing = new Map<string, number>();
   const live = new Map<string, LiveWorkspace>();
+  /** Every project this host holds, by id, read from the store once at hydration and kept here: a workspace's view
+   * joins its project off this map on every read, and the map is the one place a project's name, path and computer
+   * are known without a store read. */
+  const projectsHeld = new Map<string, ProjectView>();
   const builders = new Map<string, LiveBuilder>();
   /** The prepare in flight per place and golden name; a second call for the same recipe joins it instead of running the stages twice on one machine. */
   const preparing = new Map<string, { hash: string | undefined; promise: Promise<GoldenBuilderView> }>();
@@ -2582,6 +2655,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   const providerOf = (r: WorkspaceRecord): string | undefined =>
     r.place !== undefined ? placeDoor?.offerOf(r.place) : kindWords(r.kind).driven ? places.wired : undefined;
 
+  /** The project a record names. A record whose project this host does not hold is the one shape the boot refuses,
+   * so every read after the boot has one. */
+  const projectHeld = (id: string): ProjectView => {
+    const found = projectsHeld.get(id);
+    if (found === undefined) throw new Error(noSuchProjectLine(id, [...projectsHeld.values()].map(p => p.name)));
+    return found;
+  };
+
+  /** What a workspace's view carries about its project: the four facts a row and a thread need, joined rather than
+   * stored a second time. */
+  const refOf = (p: ProjectView): ProjectRef => ({ id: p.id, name: p.name, path: p.path, computer: p.computer });
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...((): { folder?: string } => {
       const folder = moduleOf(r.kind).folder(r);
@@ -2595,9 +2680,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     kind: r.kind,
     golden: r.golden,
     createdAt: r.createdAt,
+    project: refOf(projectHeld(r.project)),
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
-    ...(r.projects !== undefined ? { projects: r.projects } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
     ...(r.theme !== undefined ? { theme: r.theme } : {}),
     ...(r.glyph !== undefined ? { glyph: r.glyph } : {}),
@@ -2625,6 +2710,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const entry = live.get(r.id);
     if (entry !== undefined) entry.generation++;
     await store.put(WORKSPACES, r.id, r);
+    // The two facts a machine's own labels cannot carry, written beside the record rather than only on a rename:
+    // a sweep that finds the machine after this document is lost puts the record back under both.
+    await store.put(WORKSPACE_NAMES, r.id, { workspaceId: r.id, name: r.name, project: r.project } satisfies NamedWorkspace);
   };
 
   const shapeOf = async (m: Machine): Promise<MachineShape | undefined> => {
@@ -2924,8 +3012,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
    * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
   const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
-    const dests = workspaceProjects(entry.record).map(p => p.dest);
-    if (dests.length === 0) return;
+    const dests = [projectHeld(entry.record.project).path];
     // Through the kind, which is what knows where that machine's daemon looks; the import road writes the same
     // file through the same call, so a folder is browsable at the same path whichever of the two got there first.
     await moduleOf(entry.record.kind)
@@ -3713,11 +3800,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * the record follows. Read once for every record at hydration, and again for a record on a place the moment that
    * place dials in, since until then nothing could be asked about its machine. */
   const hydrateWorkspace = async (raw: unknown): Promise<void> => {
-    const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind; project?: WorkspaceProject };
+    const stored = raw as Omit<WorkspaceRecord, "size" | "kind"> & { size?: WorkspaceSize; kind?: WorkspaceKind };
     const kind: WorkspaceKind = stored.kind ?? "cloud";
-    // A record from before a workspace held a list of projects carries the one it imported under `project`.
-    const { project: single, ...rest } = stored;
-    const projects = rest.projects ?? (single !== undefined ? [single] : undefined);
+    const rest = stored;
+    // Nothing reads a record from before projects were records of their own: the owner ruled no migration, so a
+    // state file holding one is refused in one sentence and this host does not serve it.
+    if (typeof stored.project !== "string" || !projectsHeld.has(stored.project)) throw new Error(wipeTheState(stored.id, opts.statePath));
     // A record whose kind this host wired no module for, or whose place forks nothing any more, is left as it
     // was: only the host that owns that machine can serve it.
     let at: MachineBackend;
@@ -3776,7 +3864,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       kind,
       phase,
       size: stored.size ?? sizeBuilt(await shapeOf(machine), at.pricing.defaultSize),
-      ...(projects !== undefined ? { projects } : {}),
       ...(machine.streamUrl !== undefined ? { screen: { streamUrl: machine.streamUrl } } : {}),
     };
     if (phase === "gone") record.gone = stored.gone ?? goneWords(stored.machineId, { by: "record load", at: clock.now(), ...(missing !== undefined ? { answer: missing } : {}) });
@@ -3786,7 +3873,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (phase === "gone") console.warn(goneLogLine(stored.id, record.gone!));
       else console.warn(`workspace ${stored.id} was left ${stored.phase} and its machine is ${String(atProvider)} at the provider; the record hydrates ${phase}`);
       await persist(record);
-    } else if (single !== undefined) await persist(record);
+    }
     if (phase === "running" && !absent) {
       idle.touch(stored.id);
       void syncDaemon(live.get(stored.id)!);
@@ -3806,6 +3893,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The places are read before the workspaces: a fork standing on one asks which backend it lives on, and that
       // answer comes off what the place last said about itself rather than off a socket that may not be open.
       await placeDoor?.load();
+      // The projects are read before the workspaces: every workspace record names one, and its view joins that
+      // project's name, path and computer off this map.
+      for (const raw of await store.list(PROJECTS)) {
+        const project = raw as ProjectView;
+        projectsHeld.set(project.id, project);
+      }
       for (const raw of await store.list(WORKSPACES)) await hydrateWorkspace(raw);
       for (const raw of await store.list(TRANSCRIPTS)) {
         const t = raw as TranscriptRecord;
@@ -3889,16 +3982,40 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * is asked and before the workspace is listed or reachable, so no shell can open under the guest's boot name. */
   /** Where a fork lands: the word the person typed, else the place a fork last landed on. This host's own provider is
    * a place with no id, which is what every fork before joined computers existed stood on. */
-  const landingPlace = async (on: string | undefined): Promise<{ placeId?: string }> => (on === undefined ? ((await placeDoor?.defaultPlace()) ?? {}) : placeDoorOf().placeFor(on));
+  /** The computers a project can live on, by the row each carries in the places table: this computer, the ones
+   * joined to it and the providers. A host wired without places holds the two it has anyway, so a project can be
+   * recorded before anybody joins a computer. */
+  const computerRows = async (): Promise<{ id: string; name: string }[]> => {
+    const rows = placeDoor === undefined ? [{ id: HERE_PLACE_ID, name: hostname() }] : (await placeDoor.list(clock.now())).map(p => ({ id: p.id, name: p.name }));
+    // The provider this host forks on is a computer a project can live on whether or not the places table lists it:
+    // a host wired without places holds no table at all, and one whose door has not heard of its provider yet
+    // still forks there.
+    return rows.some(r => r.id === places.wired) ? rows : [...rows, { id: places.wired, name: places.wired }];
+  };
 
-  const createStaged = async (o: CreateWorkspaceOptions, id: string, report: StageReport, spawned?: ThreadScope, landed?: () => void): Promise<CreatedWorkspace> => {
-    // Where this fork lands: the word the person typed, else the place a fork last landed on. This host's own
-    // provider is a place with no id, which is what every fork before joined computers existed stood on.
-    const { placeId } = await landingPlace(o.on);
+  /** What a sentence calls a computer: the name its row carries, the id where this host holds no row for it. */
+  const nameOfComputer = (computer: string, rows: readonly { id: string; name: string }[]): string => rows.find(r => r.id === computer)?.name ?? computer;
+
+  /** The image a workspace forks when nobody named a project image: the head of this host's own. */
+  const imageHead = async (): Promise<string> => {
+    const head = goldenHead(await copyOf(await imagePlace("default"), "default"));
+    if (head === undefined) throw new Error(NO_IMAGE_YET);
+    return head.snapshotId;
+  };
+
+  /** Where a workspace of a project lands, as a place: this computer and the provider this host forks on are both
+   * the host's own backend and carry no place id, and every other computer is the place it is. */
+  const landingPlace = async (computer: string): Promise<{ placeId?: string }> =>
+    computer === HERE_PLACE_ID || computer === places.wired ? {} : placeDoorOf().placeFor(computer);
+
+  const createStaged = async (o: CreateWorkspaceOptions, project: ProjectView, id: string, report: StageReport, spawned?: ThreadScope, landed?: () => void): Promise<CreatedWorkspace> => {
+    // Where this fork lands is the project's computer and nothing else: one workspace is one project's copy, so
+    // no flag and no default place has a say in it.
+    const { placeId } = await landingPlace(project.computer);
     const at = await landingBackend(placeId);
     // What this workspace forks: at a place that is not the image's own, that place's copy of the image, once a
     // build of it running there has finished; everywhere else the snapshot asked for.
-    const golden = await copyForFork(o.golden, placeId);
+    const golden = await copyForFork(o.golden ?? (await imageHead()), placeId);
     const image = await imageOf(golden);
     const inherited = image.version?.size;
     const record: WorkspaceRecord = {
@@ -3909,7 +4026,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       phase: "running",
       golden,
       createdAt: new Date().toISOString(),
-      ...(image.projects !== undefined ? { projects: image.projects } : {}),
+      project: project.id,
       spec: {
         ...(o.envs !== undefined ? { envs: o.envs } : {}),
         ...(o.labels !== undefined ? { labels: o.labels } : {}),
@@ -4003,6 +4120,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       report("daemon-answering", fault === undefined ? "Daemon answered." : "Daemon did not answer.", { notice: fault });
       void syncDaemon(entry);
     }
+    // The project goes in before the workspace is ready: a copy without the work in it is not a workspace of that
+    // project, so a clone that fails ends the create and the machine goes with it.
+    await moduleOf(record.kind).landProject(entry, project, report);
+    await writeDaemonRoots(entry);
     await persist(record);
     // The place a fork landed on is where the next one lands when nobody says.
     await placeDoor?.markUsed(placeId);
@@ -4028,76 +4149,53 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return forking.has(name) ? nameTakenRefusal(name) : undefined;
   };
 
-  /** The one road that records a machine that already exists: this computer, or one the person reaches over ssh.
-   * Nothing is forked, so the record stands on the machine the kind's module hands back, and one record stands on
-   * one machine. Its phase is running and its auto-nap window is off from the start: a machine wsp does not run
-   * neither naps nor wakes. */
-  const recordExisting = async (
-    kind: WorkspaceKind,
-    name: string,
-    caller: Caller | undefined,
-    read: () => Promise<{ machine: Machine; size: WorkspaceSize; shape?: MachineShape; login?: Readonly<Record<string, string>>; identity?: string }>,
-  ): Promise<WorkspaceView> => {
-    const n = nameGiven(name);
+  /** The in-place road: a project on the computer the host runs on is worked where it already sits, so nothing is
+   * forked and nothing is copied. One workspace per such project, since two records on one folder would be two
+   * names for one working tree; the machine is this computer, and its phase is running with auto-nap off from the
+   * start, a machine wsp does not run neither napping nor waking. */
+  const recordExisting = async (project: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined): Promise<WorkspaceView> => {
+    const n = nameGiven(o.name);
     refuseRecording(n, caller);
+    // The folder is the workspace, so the words a fork takes have nothing to act on here: they are refused in one
+    // sentence rather than taken and ignored.
+    const forkWords = [o.golden !== undefined ? "--from" : "", o.cpu !== undefined || o.memMb !== undefined ? "--size" : "", o.engine === true ? "--engine" : ""].filter(w => w !== "");
+    if (forkWords.length > 0) throw Object.assign(new Error(worksInPlaceTakesNone(project.name, forkWords)), { kind: "invalid" });
     const refusal = nameRefusal(n);
     if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
-    const { machine, size, shape, login, identity } = await read();
-    const standing = identity ?? machine.id;
-    const existing = [...live.values()].find(e => identityOf(e.record) === standing);
-    if (existing !== undefined) throw Object.assign(new Error(alreadyRecorded(machineWord(kind), existing.record.name)), { kind: "conflict" });
+    const standing = [...live.values()].find(e => e.record.project === project.id);
+    if (standing !== undefined) throw Object.assign(new Error(oneWorkspacePerProject(project.name, standing.record.name)), { kind: "conflict" });
+    const mine = backendOfKind("local");
+    const machine = await mine.get(LOCAL_MACHINE_ID);
     const record: WorkspaceRecord = {
       id: `ws_${randomBytes(4).toString("hex")}`,
       name: n,
-      kind,
+      kind: "local",
       machineId: machine.id,
       phase: "running",
       golden: "",
       createdAt: new Date().toISOString(),
+      project: project.id,
       spec: {},
-      size,
+      size: mine.pricing.defaultSize,
       firstLife: false,
       idleWindowMs: null,
-      ...(shape !== undefined ? { shape } : {}),
-      ...(login !== undefined ? { login } : {}),
-      ...(identity !== undefined ? { machineIdentity: identity } : {}),
     };
     attach(record, machine);
+    await moduleOf("local").landProject(live.get(record.id)!, project, () => {});
     await persist(record);
     const v = view(record);
     bus.emit({ type: "workspace.created", workspace: v });
     return v;
   };
 
-  /** The daemon goes on a machine reached over ssh the moment it is recorded: the person ran the verb and is
-   * waiting on it, and the terminal, files and ports they came for ride that daemon. A deploy that fails leaves
-   * the record standing, since the machine is theirs and was already proved to answer: what it costs them is the
-   * panes, and the line says which verb puts one on later. Answers nothing when it worked and the reason when it
-   * did not. */
-  const deploySshDaemon = async (workspace: WorkspaceView): Promise<string | undefined> => {
-    const entry = live.get(workspace.id);
-    const deploy = moduleOf("ssh").deployDaemon;
-    if (entry === undefined || deploy === undefined) return undefined;
-    const began = clock.now();
-    const report: StageReport = (stage, message) => {
-      bus.emit({ type: "workspace.creating", workspaceId: workspace.id, name: workspace.name, stage, message, elapsedMs: clock.now() - began });
-    };
-    report("daemon-answering", `Putting the daemon on ${workspace.name} under its own login.`);
-    try {
-      const detail = await deployDaemonOn(entry, deploy);
-      report("ready", `Daemon answering on ${workspace.name}${typeof detail === "string" && detail !== "" ? ` (${detail})` : ""}.`);
-      return undefined;
-    } catch (e) {
-      const reason = e instanceof Error ? e.message : String(e);
-      report("ready", `The daemon did not go on ${workspace.name}.`);
-      return `${reason}\nits terminal, files and ports wait on a daemon; this host offers it again later on its own, so put right what the machine asked for and nothing else is needed`;
-    }
-  };
-
   const workspaces: Runtime["workspaces"] = {
     async landing(o) {
       await ready();
-      const { placeId } = await landingPlace(o?.on);
+      const project = await projectsDoor.resolve(o.project);
+      const computer = project.computer;
+      const kind = kindForComputer(computer);
+      if (worksInPlace(kind)) return { name: placeName(HERE_PLACE_ID), capabilities: backendOfKind(kind).capabilities };
+      const { placeId } = await landingPlace(computer);
       const at = await landingBackend(placeId);
       return { ...(placeId !== undefined ? { place: placeId } : {}), name: placeName(placeId ?? places.wired), capabilities: at.capabilities };
     },
@@ -4105,8 +4203,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async create(opts, origin) {
       await ready();
       const o = { ...opts, name: nameGiven(opts.name) };
-      // A fork is a cloud machine, so the origin rule is read on the kind this create would make.
-      refuseRelayed({ kind: "cloud", name: o.name }, origin);
+      const project = await projectsDoor.resolve(o.project, origin);
+      // The project's computer decides which road this create takes, off the one table that says whether a kind
+      // works a folder where it sits or holds a copy of one; the origin rule is then read on that kind.
+      const kind = kindForComputer(project.computer);
+      // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads, so a
+      // create on a computer whose agents could not drive this host is refused rather than given a dead switch.
+      if (o.agents?.spawn === true && !agentsMayDrive(kind)) throw Object.assign(new Error(agentsKindRefusal(kind)), { kind: "invalid" });
+      if (worksInPlace(kind)) return recordExisting(project, o, origin);
+      refuseRelayed({ kind, name: o.name }, origin);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on.
       const freePlace = spawnGuard("fork", origin);
@@ -4142,7 +4247,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
       };
       try {
-        return await createStaged(o, id, report, spawned, freePlace);
+        return await createStaged(o, project, id, report, spawned, freePlace);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
         // will not part with keeps its record instead, since a machine nobody records bills unseen.
@@ -4186,36 +4291,6 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return view(entry.record);
     },
 
-    async createLocal(name, origin) {
-      await ready();
-      const mine = backendOfKind("local");
-      // The one place a local workspace's default name lives: this computer's own, so the command line, the app and
-      // the MCP tool all land on the same one rather than each defaulting it.
-      return recordExisting("local", name ?? hostname(), origin, async () => ({ machine: await mine.get(LOCAL_MACHINE_ID), size: mine.pricing.defaultSize }));
-    },
-
-    async createSsh(address, opts, origin) {
-      await ready();
-      if (ssh === undefined) throw new Error(noKindLine("ssh"));
-      // Nothing is dialled for a request relayed from a machine: the address and the key are this computer's to name,
-      // and a dial made on a machine's word would reach whatever it named.
-      refuseRecording(opts?.name ?? address, origin);
-      // The dial is made before a name is held: a machine that does not answer leaves no record and no held name.
-      const adopted = await ssh.adopt(address, { ...(opts?.port !== undefined ? { port: opts.port } : {}), ...(opts?.keyPath !== undefined ? { keyPath: opts.keyPath } : {}) });
-      const workspace = await recordExisting("ssh", opts?.name ?? adopted.name, origin, async () => ({
-        machine: adopted.machine,
-        size: { cpu: adopted.shape.cpu ?? 0, memMb: adopted.shape.memMb ?? 0 },
-        shape: adopted.shape,
-        login: adopted.login,
-        ...(adopted.identity !== undefined ? { identity: adopted.identity } : {}),
-      }));
-      const failed = await deploySshDaemon(workspace);
-      // The key the machine answered with, said once where the person is looking, so they can compare it with the
-      // machine's own; the record keeps it as the machine's identity.
-      const notice = [adopted.hostKey !== undefined ? sshHostKeyNotice(adopted.hostKey) : undefined, failed].filter(line => line !== undefined).join("\n");
-      return { ...view(live.get(workspace.id)!.record), ...(notice !== "" ? { notice } : {}) };
-    },
-
     async list(origin) {
       await ready();
       return listedFor(origin).map(e => view(e.record));
@@ -4224,8 +4299,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     async resolve(ref, origin) {
       await ready();
       const rows = held();
-      // A name names one workspace at most: the create and the rename both refuse a name another already holds.
-      const entry = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
+      // The whole of an id, then the whole of a name, as a thread's own reference does: a name names one workspace at
+      // most, since the create and the rename both refuse a name another already holds, and a word that is one is
+      // that workspace whatever else it starts. Only a word that is neither reaches the prefix, where enough of an
+      // id is the way round quoting a name with spaces and a word that starts two is refused with both ids.
+      const exact = rows.find(e => e.record.id === ref) ?? rows.find(e => e.record.name === ref);
+      const started = exact === undefined && ref.length >= ID_PREFIX_MIN ? rows.filter(e => e.record.id.startsWith(ref)) : [];
+      if (started.length > 1) throw new Error(idPrefixRefusal(ref, started.map(e => e.record.id)));
+      const entry = exact ?? started[0];
       if (entry === undefined) {
         // A computer somebody joined is a place, and a place is no workspace: the word is answered with the road to
         // one there rather than with absence, since the person typed the name of something this host does hold.
@@ -4425,7 +4506,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
       entry.record.name = name;
       await persist(entry.record);
-      await store.put(WORKSPACE_NAMES, id, { workspaceId: id, name } satisfies NamedWorkspace);
+      await store.put(WORKSPACE_NAMES, id, { workspaceId: id, name, project: entry.record.project } satisfies NamedWorkspace);
       bus.emit({ type: "workspace.renamed", workspaceId: id, name });
       return view(entry.record);
     },
@@ -4443,11 +4524,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const entry = await entryOf(id, origin);
       refuseCannot(entry, "diskSnapshots", "be snapshotted");
       const { name } = entry.record;
-      // The snapshot is the whole disk and carries every project on it; it is named after the one the rule would
-      // start a thread in, else the newest import.
-      const projects = workspaceProjects(entry.record);
-      const project = projectFor(projects, { named: undefined, last: (await preferences.get()).project[id] }) ?? projects.at(-1);
-      if (project === undefined) throw new Error(`${name} has no project loaded; import one before snapshotting it`);
+      // The snapshot is the whole disk and carries the project in it, which is the one the workspace was made for.
+      const held = projectHeld(entry.record.project);
+      const project: WorkspaceProject = { name: held.name, dest: held.path, importedAt: held.createdAt };
+      const projects = [project];
       if (entry.record.phase !== "running") throw new Error(`${name} is ${entry.record.phase}; only a running machine can be snapshotted`);
       const createdAt = new Date(clock.now()).toISOString();
       const snapshotId = await entry.ws.checkpoint(projectSnapshotName(templateHostId, project.name, createdAt.replace(/[:.]/g, "-")));
@@ -5519,8 +5599,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
 
   const sessionsApi: Runtime["sessions"] = {
-    async start(workspaceId, o, origin) {
+    async start(workspaceId, opened, origin) {
       const entry = await entryOf(workspaceId, origin);
+      // A start that names no agent runs the one the last thread on this project used, so the command line, the
+      // composer and a tool all open the next thread on the agent the work is being done with. A remembered agent
+      // this host has no adapter for drops through to the default, as a remembered access pick does: the memory is
+      // the project's and the adapters are this host's.
+      const heldProject = projectHeld(entry.record.project);
+      const remembered = heldProject.lastAgent !== undefined && adapters[heldProject.lastAgent] !== undefined ? heldProject.lastAgent : undefined;
+      const o = opened.harness === undefined && remembered !== undefined ? { ...opened, harness: remembered } : opened;
       const refuse = (): void => {
         const refusal = sendRefusal(workspaceState({ phase: entry.record.phase }), entry.record.gone);
         if (refusal !== null) throw new Error(refusal);
@@ -5755,7 +5842,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         handedOver = true;
         launched();
         // The turn is running; what the record failed to remember must not read as a start that failed.
-        if (resume === undefined) await rememberTarget(entry.record, cwd).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
+        await rememberAgent(heldProject, harness).catch((e: unknown) => console.warn(`the agent for ${heldProject.name} was not remembered: ${e instanceof Error ? e.message : String(e)}`));
+        if (resume === undefined) await rememberTarget(entry.record).catch((e: unknown) => console.warn(`last target for ${workspaceId} not remembered: ${e instanceof Error ? e.message : String(e)}`));
         return handle;
       } catch (e: unknown) {
         failure = e instanceof Error ? e.message : String(e);
@@ -7086,7 +7174,86 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     };
   };
 
+  /** Recording, reading and dropping a project, the four acts that keep the projects map and the store together.
+   * Named apart from the door below so the create and the landing can resolve a project without reaching through
+   * the public object. */
+  const projectsDoor = {
+    async add(o: { source: string; on?: string; name?: string; base?: string }, origin?: Caller): Promise<ProjectView & { notice?: string }> {
+      await ready();
+      // A project is this computer's to record: the folder and the computer named are read here, and a machine
+      // that asked would be naming paths on a computer it cannot see.
+      refuseRecording(o.source, origin);
+      const rows = await computerRows();
+      const clones = rows.filter(r => kindWords(kindForComputer(r.id)).projectSources.includes("git")).map(r => r.name);
+      const kind = sourceKind(o.source);
+      if (kind === "computer") throw new Error(ADD_IS_A_COMPUTER_LINE);
+      const source: ProjectSource = kind === "git" ? { kind: "git", url: o.source } : { kind: "folder", path: folderNamed(o.source) };
+      // No --on: a folder is worked here, and a repo needs the computer that clones it, since this computer never
+      // does. The kind table says which computers those are.
+      const computer = o.on === undefined ? (kind === "folder" ? HERE_PLACE_ID : undefined) : (rows.find(r => r.id === o.on || r.name === o.on)?.id ?? undefined);
+      if (computer === undefined) {
+        if (o.on === undefined) throw new Error(noComputerForSourceLine(o.source, clones));
+        throw new Error(noSuchPlaceRefusal(o.on, rows.map(r => r.name)));
+      }
+      const takes = kindWords(kindForComputer(computer)).projectSources;
+      if (!takes.includes(source.kind)) throw new Error(source.kind === "git" ? gitOnThisMacRefusal : folderOnCopyRefusal(nameOfComputer(computer, rows)));
+      const held = [...projectsHeld.values()].find(p => p.computer === computer && sameSource(p.source, source));
+      if (held !== undefined) throw Object.assign(new Error(sameSourceRefusal(held.name, nameOfComputer(computer, rows))), { kind: "conflict" });
+      // A folder here is a project only if it is the top of a git repo: a workspace of it starts on a branch, and
+      // a folder with no git in it has none.
+      if (source.kind === "folder" && !(await isRepoHere(source.path))) throw new Error(`${source.path} ${NOT_A_REPO_LINE}`);
+      const name = o.name ?? projectNameOf(source);
+      const project: ProjectView = {
+        id: `pr_${randomBytes(4).toString("hex")}`,
+        name,
+        computer,
+        source,
+        path: projectPathOn(source, name),
+        ...(o.base !== undefined ? { base: o.base } : {}),
+        createdAt: new Date(clock.now()).toISOString(),
+      };
+      projectsHeld.set(project.id, project);
+      await store.put(PROJECTS, project.id, project);
+      bus.emit({ type: "project.added", project });
+      return project;
+    },
+
+    async list(): Promise<ProjectView[]> {
+      await ready();
+      return [...projectsHeld.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+
+    async computers(): Promise<{ id: string; name: string }[]> {
+      await ready();
+      return computerRows();
+    },
+
+    async resolve(ref: string, _origin?: Caller): Promise<ProjectView> {
+      await ready();
+      const all = [...projectsHeld.values()];
+      const found = all.find(p => p.id === ref) ?? all.find(p => p.name === ref);
+      if (found === undefined) throw notFoundRefusal(noSuchProjectLine(ref, all.map(p => p.name)));
+      return found;
+    },
+
+    async remove(id: string, origin?: Caller): Promise<void> {
+      await ready();
+      spawnGuard("delete", origin);
+      const project = await projectsDoor.resolve(id);
+      const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
+      if (standing.length > 0) throw Object.assign(new Error(projectInUseRefusal(project.name, standing)), { kind: "conflict" });
+      projectsHeld.delete(project.id);
+      await store.delete(PROJECTS, project.id);
+      bus.emit({ type: "project.removed", projectId: project.id });
+    },
+  };
+
   const projects: Runtime["projects"] = {
+    add: projectsDoor.add,
+    list: projectsDoor.list,
+    computers: projectsDoor.computers,
+    resolve: projectsDoor.resolve,
+    remove: projectsDoor.remove,
     async import(o, origin) {
       spawnGuard("import", origin);
       const entry = await entryOf(o.workspaceId, origin);
@@ -7099,10 +7266,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       try {
         const kind = moduleOf(entry.record.kind);
         const landed = await kind.import(entry, o, report);
-        const projects = withProject(workspaceProjects(entry.record), landed.result.project);
-        await kind.roots(entry, projects.map(p => p.dest));
-        entry.record.projects = projects;
-        await persist(entry.record);
+        // The workspace's own project is its record's; a folder landed beside it is browsable too, and neither is
+        // written onto the record, which names one project and nothing else.
+        await kind.roots(entry, [...new Set([projectHeld(entry.record.project).path, landed.result.dest])]);
         report("done", landed.done);
         return landed.result;
       } catch (e) {
@@ -7251,13 +7417,21 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       const id = stamped ?? `ws_${randomBytes(4).toString("hex")}`;
       // The name a person typed here outranks the one the fork stamped: the label is what the machine was forked
       // under, and no provider road updates it.
-      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined)?.name;
-      const named = kept ?? row.labels[NAME_LABEL];
+      const kept = stamped === undefined ? undefined : ((await store.get(WORKSPACE_NAMES, stamped)) as NamedWorkspace | undefined);
+      const named = kept?.name ?? row.labels[NAME_LABEL];
+      // A workspace is one project's copy, so a machine whose project this host cannot name is not a workspace
+      // here: it is reported rather than recorded, and the sweep's own --older-than is the road that ends it.
+      if (kept?.project === undefined || !projectsHeld.has(kept.project)) {
+        known.add(row.id);
+        failed.push({ id: row.id, message: `not recorded: this host holds no project for it, and a workspace is one project's copy; it is a machine of yours still running` });
+        continue;
+      }
       const bornAt = row.labels[CREATED_AT_LABEL];
       const record: WorkspaceRecord = {
         id,
         name: named !== undefined && nameRefusal(named) === undefined ? named : row.id,
         kind: "cloud",
+        project: kept.project,
         machineId: row.id,
         phase: state === "paused" ? "napping" : "running",
         golden: row.labels[GOLDEN_LABEL] ?? goldenHead(await golden.get())?.snapshotId ?? "",

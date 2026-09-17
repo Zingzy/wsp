@@ -36,7 +36,7 @@ const SIZE = { cpu: 2, memMb: 4096 }; // filled: the 0.11 USD/h rate in the cost
 export const LIVE_WORKSPACE_1 = {
   id: LIVE_WS,
   name: "first",
-  machineId: "machine-1",
+  machineId: "machine-1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: GOLDEN,
   createdAt: at(643.8),
@@ -45,7 +45,7 @@ export const LIVE_WORKSPACE_1 = {
 export const LIVE_WORKSPACE_2 = {
   id: LIVE_WS_2,
   name: "yolo",
-  machineId: "machine-2",
+  machineId: "machine-2", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: GOLDEN,
   createdAt: at(1098.5),

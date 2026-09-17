@@ -11,7 +11,7 @@
 // absolute. Not persisted: a reload follows the thread again.
 import { useMemo } from "react";
 import { create } from "zustand";
-import { projectFor, type WorkspaceProject } from "@wsp/protocol";
+import type { ProjectRef } from "@wsp/protocol";
 import { useStore } from "../protocol/store.js";
 import { parentPath, pathSegments, type PathSegment } from "./entries.js";
 import { useDaemonRoot } from "./wire.js";
@@ -105,21 +105,17 @@ export function selectRoot(byWorkspaceId: Record<string, WorkspaceRoot>, workspa
   return entry.pinned ?? shell ?? entry.followed ?? roots[0] ?? null;
 }
 
-const NO_PROJECTS: WorkspaceProject[] = [];
-
-/** The workspace's projects off the store. Read here rather than through workspaceProjects because a selector must
- * answer the one array while the record does not change; a fresh [] on every read would rerender every reader. */
-export function useProjects(workspaceId: string): WorkspaceProject[] {
-  return useStore(s => {
-    const workspace = s.workspaces.find(w => w.id === workspaceId);
-    return workspace?.projects ?? NO_PROJECTS;
-  });
+/** The workspace's one project off the store: a workspace is one project's copy, so this is the whole of what it
+ * holds. Null while the store has no record for it yet. */
+export function useProject(workspaceId: string): ProjectRef | null {
+  return useStore(s => s.workspaces.find(w => w.id === workspaceId)?.project ?? null);
 }
 
 export function useRoots(workspaceId: string): string[] {
   const home = useDaemonRoot(workspaceId);
-  const projects = useProjects(workspaceId);
-  return useMemo(() => rootsOf(home, projects.map(p => p.dest)), [home, projects]);
+  const project = useProject(workspaceId);
+  const path = project?.path;
+  return useMemo(() => rootsOf(home, path === undefined ? [] : [path]), [home, path]);
 }
 
 export function useRoot(workspaceId: string): string | null {
@@ -131,14 +127,10 @@ export function usePinned(workspaceId: string): boolean {
   return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).pinned !== null);
 }
 
-/** The project the next thread on the workspace starts in when no folder was chosen outright: the runtime's rule
- * read off the same facts it reads, the record's projects and the preferences record's last project for this
- * workspace, so the pick the composer shows is the folder the runtime will open. Null where the rule falls to the
- * kind's own folder. */
-export function useDefaultProject(workspaceId: string): WorkspaceProject | null {
-  const projects = useProjects(workspaceId);
-  const last = useStore(s => s.preferences.project[workspaceId]);
-  return useMemo(() => projectFor(projects, { named: undefined, last }), [projects, last]);
+/** The project the next thread on the workspace starts in when no folder was chosen outright: the workspace's own,
+ * since a workspace is one project's copy. Null while the store has no record for it yet. */
+export function useDefaultProject(workspaceId: string): ProjectRef | null {
+  return useProject(workspaceId);
 }
 
 /** The folder the workspace's thread works in, for a dialog about that folder (export): the thread's own as the
@@ -146,7 +138,7 @@ export function useDefaultProject(workspaceId: string): WorkspaceProject | null 
 export function useWorkingFolder(workspaceId: string): string | null {
   const daemonRoot = useDaemonRoot(workspaceId);
   const project = useDefaultProject(workspaceId);
-  return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).followed) ?? project?.dest ?? daemonRoot;
+  return useRootStore(s => (s.byWorkspaceId[workspaceId] ?? NONE).followed) ?? project?.path ?? daemonRoot;
 }
 
 export function useChosenFolder(workspaceId: string): string | null {
@@ -162,19 +154,17 @@ export function useThreadFolder(workspaceId: string): string | null {
   const kindFolder = useStore(s => s.workspaces.find(w => w.id === workspaceId)?.folder);
   const project = useDefaultProject(workspaceId);
   const chosen = useChosenFolder(workspaceId);
-  return chosen ?? project?.dest ?? kindFolder ?? daemonRoot;
+  return chosen ?? project?.path ?? kindFolder ?? daemonRoot;
 }
 
-/** What the start names about its folder: the folder chosen outright as cwd, else the default project by name, else
- * nothing, which leaves the runtime's rule to land it in the kind's own folder. Never the shown folder itself, so the
- * rule has one home and a project picked here is the same start the command line's --project makes. */
-export function threadStart(chosen: string | null, project: WorkspaceProject | null): { cwd?: string; project?: string } {
-  if (chosen !== null) return { cwd: chosen };
-  return project === null ? {} : { project: project.name };
+/** What the start names about its folder: the folder chosen outright as cwd, else nothing, which leaves the
+ * runtime's rule to land the thread in the workspace's own project. Never the shown folder itself, so the rule has
+ * one home and the composer opens where the command line does. */
+export function threadStart(chosen: string | null): { cwd?: string } {
+  return chosen === null ? {} : { cwd: chosen };
 }
 
-export function useThreadStart(workspaceId: string): { cwd?: string; project?: string } {
+export function useThreadStart(workspaceId: string): { cwd?: string } {
   const chosen = useChosenFolder(workspaceId);
-  const project = useDefaultProject(workspaceId);
-  return useMemo(() => threadStart(chosen, project), [chosen, project]);
+  return useMemo(() => threadStart(chosen), [chosen]);
 }

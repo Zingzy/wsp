@@ -30,7 +30,7 @@ const scope = { workspaceId: WS, sessionId: "sess_0001", turnId: CHAT_TURN };
 const workspace: WorkspaceView = {
   id: WS,
   name: "api",
-  machineId: "m1",
+  machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -70,7 +70,6 @@ function fixtureApi(workspaces: WorkspaceView[], history: Record<string, Session
     listSessions: async () => [],
     listHarnesses: async () => [CLAUDE_CATALOG],
     watchStatuses: async () => statuses,
-    createFromGoldenHead: async () => workspaces[0]!,
     subscribe: fn => { listeners.add(fn); return () => listeners.delete(fn); },
     getGolden: async () => undefined,
     startSession: async opts => {
@@ -637,7 +636,7 @@ describe("composer while the workspace is not live", () => {
   /** The composer on a workspace whose computer went quiet, by the road the places list takes: the row for its
    * computer stops answering while the record still says running. */
   async function onSilentComputer() {
-    const onPlace: WorkspaceView = { ...workspace, kind: "cloud", machineId: "ctr_9f", place: "p_oldlaptop" };
+    const onPlace: WorkspaceView = { ...workspace, kind: "cloud", machineId: "ctr_9f", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, place: "p_oldlaptop" };
     const fixture = fixtureApi([onPlace]);
     await setup(fixture.api);
     act(() =>

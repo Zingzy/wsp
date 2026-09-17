@@ -42,9 +42,6 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const openSettings = useStore(s => s.openSettings);
   const openAddComputer = useStore(s => s.openAddComputer);
   const openConnectProvider = useStore(s => s.openConnectProvider);
-  const createLocalWorkspace = useStore(s => s.createLocalWorkspace);
-  // One local workspace per host: the row the section registry gives says whether a pick makes it or goes to it.
-  const hasLocal = workspaces.some(w => isLocalWorkspace(w));
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
   const [sidebarMode, setSidebarMode] = useSidebarMode();
@@ -78,17 +75,15 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       nextThread: () => cycleThreadInSpace(1),
       previousThread: () => cycleThreadInSpace(-1),
       setSidebarMode,
-      // This computer forks nothing and boots nothing, so it needs no dialog: the host names it after itself.
-      newLocalWorkspace: () => void createLocalWorkspace(),
       openSettings,
       openAddComputer,
       openConnectProvider,
     }),
-    [createLocalWorkspace, openAddComputer, openConnectProvider, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [openAddComputer, openConnectProvider, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, hasLocal, labs, sidebarMode, handlers, verbs, places }),
-    [api, handlers, hasLocal, labs, places, projects, query, selectedId, sidebarMode, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, labs, sidebarMode, handlers, verbs, places }),
+    [api, handlers, labs, places, projects, query, selectedId, sidebarMode, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { copyKey, createRuntime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const GB = 1e9;
 const version = (n: number, templateId?: string) => ({
@@ -65,8 +65,8 @@ describe("golden templates", () => {
   it("a workspace forks from the version's template when it has one and from the snapshot when it has none; a project golden forks from its own snapshot", async () => {
     const { backend, rt } = await seeded([version(1), version(2, "tpl_two")]);
     backend.templates.set("tpl_two", { id: "tpl_two", name: "wsp-default-v2", status: "ready", snapshotId: "snap_golden-v2" });
-    const volatile = await rt.workspaces.create({ golden: "snap_golden-v1", name: "old" });
-    const durable = await rt.workspaces.create({ golden: "snap_golden-v2", name: "new" });
+    const volatile = await createOn(rt, { golden: "snap_golden-v1", name: "old" });
+    const durable = await createOn(rt, { golden: "snap_golden-v2", name: "new" });
     const specOf = (machineId: string) => {
       const { template, fromSnapshot } = backend.machines.find(m => m.id === machineId)!.spec;
       return { template, fromSnapshot };
@@ -84,7 +84,7 @@ describe("golden templates", () => {
     await store2.put("goldens", "default", { head: 2, versions: [version(1), version(2, "tpl_two")] });
     await store2.put("project-goldens", "snap_project", { snapshotId: "snap_project", golden: "snap_golden-v2", version: 2, workspaceName: "new", createdAt: "2026-09-07T00:00:00Z", project: { name: "app", path: "/root/app", importedAt: "2026-09-07T00:00:00Z" } });
     const rt2 = createRuntime({ backend, store: store2, adapters: {}, hostId: "h1" });
-    const task = await rt2.workspaces.create({ golden: "snap_project", name: "task" });
+    const task = await createOn(rt2, { golden: "snap_project", name: "task" });
     expect(specOf(task.machineId)).toEqual({ template: undefined, fromSnapshot: "snap_project" });
   });
 

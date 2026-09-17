@@ -1,3 +1,4 @@
+import { HERE_PLACE_ID } from "@wsp/protocol";
 // SPDX-License-Identifier: AGPL-3.0-only
 // The one title question a thread on this computer costs, read off a fake
 // binary on the person's own PATH that records the store it was pointed at and
@@ -11,6 +12,7 @@ import { HARNESS_ADAPTERS, createRuntime, memoryStore, type HarnessAdapterFactor
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring } from "../src/cli.js";
 import { stubBackend } from "./stub-backend.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 const SESSION = "44444444-4444-4444-8444-444444444444";
 const MADE = "Named through the store a shell reads";
@@ -80,7 +82,7 @@ describe("the title a thread on this computer gets", () => {
     const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}`, CLAUDE_CONFIG_DIR: store });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
     runtimes.push(rt);
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(ws.id, { prompt: "read the daemon's reconnect path" })).finished;
 
     await vi.waitFor(async () => expect((await rt.sessions.list(ws.id))[0]?.harnessTitle).toBe(MADE), { timeout: 10_000 });
@@ -105,7 +107,7 @@ describe("the title a thread on this computer gets", () => {
     const wiring = localWiring(home, { HOME: home, PATH: `${bin}:${process.env["PATH"] ?? ""}` });
     const rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: titlingClaude }, local: wiring });
     runtimes.push(rt);
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(ws.id, { prompt: "read the daemon's reconnect path" })).finished;
 
     await vi.waitFor(async () => expect((await rt.sessions.list(ws.id))[0]?.harnessTitle).toBe(MADE), { timeout: 10_000 });

@@ -48,11 +48,8 @@
 // every picker; ?panel=preview opens the right panel inline with nothing in
 // it, the narrowest the centre column gets at a width; ?panel=browser&at=<address>
 // opens it on a browser tab framing that address, so the bar can be measured
-// with a path and a query in it; ?drop=1 holds the page
-// mid-drag of a folder from the desktop, with the desktop bridge that reads a
-// dropped path, so every workspace row's drop tile can be measured; ?import=1
-// opens the import dialog on ws_a already reading a folder, as a drop on its
-// tile leaves it; ?panel=machine opens the right panel on the Machine tab of
+// with a path and a query in it; ?export=1 opens the dialog that brings a
+// folder home on ws_a; ?panel=machine opens the right panel on the Machine tab of
 // the workspace ?ws names, so its PROJECTS section can be measured with two
 // projects (ws_a under ?projects=1) and with none;
 // ?places=1 fills the Where agents run table with four computers, one of them
@@ -60,7 +57,7 @@
 // mid-build so the cloud row's progress line can be measured; ?version=behind holds a shell older than the host that
 // served the page, so the one line the app says about it can be measured.
 import { createRoot } from "react-dom/client";
-import { DAEMON_UPDATING, DEFAULT_PREFERENCES, folderName, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_UPDATING, DEFAULT_PREFERENCES, DEFAULT_THEME, DESKTOP_MAC_CLASS, GOLDEN_STAGE_WORDS, SIGN_IN_OPEN_STATE, workspaceAccess, THEME_PRESETS, vaultOverCapLine, type HarnessCatalog, type SessionEvent, type SessionView, type TerminalConfig, type WorkspaceView } from "@wsp/protocol";
 import { statusOf } from "../workspace-status";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import type { Api, ProtocolEvent } from "../../src/protocol/client";
@@ -93,14 +90,13 @@ document.documentElement.classList.toggle(DESKTOP_MAC_CLASS, params.get("mac") =
 if (params.get("shell") === "desktop") {
   window.wsp = { capturePreview: async () => undefined, workspacePreview: async () => undefined };
 }
-// ?drop=1 and ?import=1 are the desktop's roads: the bridge that reads a dropped folder's path is what lets the rows
-// become tiles at all, and the picker is what the dialog draws for the folder there.
-if (params.get("drop") === "1" || params.get("import") === "1") window.wsp = { ...window.wsp, droppedPath: file => `/Users/dev/${file.name}`, pickFolder: async () => undefined };
+// The desktop's road: the folder picker is what a dialog draws for a folder on this computer.
+if (params.get("export") === "1") window.wsp = { ...window.wsp, pickFolder: async () => undefined };
 
 const view = (id: string, name: string, phase: WorkspaceView["phase"] = "running"): WorkspaceView => ({
   id,
   name,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: "2026-09-05T11:00:00Z",
@@ -121,7 +117,7 @@ if (projects) Object.assign(cloud[0]!, { projects: PROJECTS });
 // wide in a narrow window, so the composer on a kept machine draws every picker it has and the one label a person
 // names, which no width bounds.
 const LONG_PROJECT = { name: "customer-billing-service-platform", dest: "/Users/zingzy/customer-billing-service-platform", importedAt: "2026-09-06T08:00:00Z", size: 912_000_000 };
-const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", golden: "", ...(projects ? { projects: [...PROJECTS, LONG_PROJECT] } : {}) };
+const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "", ...(projects ? { project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } } : {}) };
 const workspaces = params.get("local") === "1" ? [...cloud, MAC] : cloud;
 // ?look=1 gives the first two workspaces a theme and the first a glyph of its own, and leaves the rest with neither, so
 // one page holds two themed spaces, a plain one and, with ?local=1 and ?ssh=1, every kind's own glyph on the bar. The
@@ -131,7 +127,7 @@ if (params.get("look") === "1") {
   Object.assign(workspaces[1]!, { theme: { ...DEFAULT_THEME, dots: [...THEME_PRESETS[2]!.dots], harmony: THEME_PRESETS[2]!.harmony, grain: 0.5, opacity: 0.7, mode: "dark" } });
 }
 // ?ssh=1 adds a machine over ssh, the third kind, so the space bar can be shot with every kind's own glyph.
-if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", golden: "" });
+if (params.get("ssh") === "1") workspaces.push({ ...view("ws_s", "build-box"), kind: "ssh", machineId: "ssh:build-box", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" });
 // ?many=<n> adds n more running forks, so the space bar can be measured once its icons outgrow the footer.
 for (let i = 0; i < Number(params.get("many") ?? 0); i++) workspaces.push(view(`ws_x${i}`, `extra-${i}`));
 // The ticket's rows: long titles with the agent and both opener words. ws_a mixes a working thread with an idle
@@ -397,33 +393,10 @@ const chatHistory: SessionEvent[] = [
   { type: "session.done", ...chatTurn, result: { status: "completed", durationMs: 2400, costUsd: 0.004 } },
 ];
 
-// The import ops ride the api only where a case reads them (the tiles, the dialog, the Machine tab), so the rows'
-// menu the shell case counts keeps the import refused as a client without the ops has it.
-const importOps: Pick<Api, "planProject" | "importProject"> = {
-  // The import dialog's plan for the folder a drop hands it: a repository of some files, two caches left behind, one
-  // secret-shaped file cut and one offered rewritten, so every row of the plan draws.
-  planProject: async source => ({
-    source,
-    repo: true,
-    files: 412,
-    bytes: 48_200_000,
-    secrets: [
-      { path: ".env", bytes: 120, signals: ["name", "keys"] },
-      { path: ".git/config", bytes: 300, signals: ["url"], rewrite: { urls: ["https://github.com/zingzy/spoo"], drop: [] } },
-    ],
-    excluded: ["node_modules", ".next"],
-    skipped: [],
-    agents: [],
-  }),
-  importProject: async o => ({ dest: o.dest, files: 412, bytes: 48_200_000, parts: 1, cut: [".env"], rewritten: [".git/config"], agents: [], project: { name: folderName(o.dest), dest: o.dest, importedAt: new Date().toISOString(), size: 48_200_000 } }),
-};
-const withImport = params.get("drop") === "1" || params.get("import") === "1" || params.get("panel") === "machine";
-
 const api: Api = {
   listWorkspaces: async () => workspaces,
   getWorkspace: async id => workspaces.find(w => w.id === id)!,
   createWorkspace: async () => workspaces[0]!,
-  createFromGoldenHead: async () => workspaces[0]!,
   watchStatuses: async () =>
     workspaces.map(w =>
       w.id === MAC.id
@@ -501,7 +474,6 @@ const api: Api = {
   },
   getGolden: async () => undefined,
   hostTerminalConfig: async () => TRANSLUCENT,
-  ...(withImport ? importOps : {}),
   listProjectGoldens: async () => [],
   snapshotWorkspace: async id => ({ snapshotId: "snap_taken", projects: PROJECTS, golden: "snap_g", workspaceId: id, workspaceName: "api", createdAt: new Date().toISOString() }),
 };
@@ -685,11 +657,11 @@ createRoot(document.getElementById("root")!).render(
     <AppShell>{settings ? <SettingsPage /> : shown === null ? <div /> : <WorkspaceThread workspaceId={shown} />}</AppShell>
   </TooltipProvider>,
 );
-// ?import=1: the dialog as a drop on the first workspace's tile leaves it, asked for once the sidebar is listening.
-if (params.get("import") === "1") {
+// ?export=1: the dialog that brings a folder home, asked for once the sidebar is listening.
+if (params.get("export") === "1") {
   const ask = (): void => {
     if (document.querySelector("[data-sidebar-row]") === null) setTimeout(ask, 20);
-    else requestProjectTrip({ workspaceId: "ws_a", trip: "import", source: "/Users/dev/spoo" });
+    else requestProjectTrip({ workspaceId: "ws_a", trip: "export" });
   };
   ask();
 }

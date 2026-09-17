@@ -1,3 +1,4 @@
+import { HERE_PLACE_ID } from "@wsp/protocol";
 // SPDX-License-Identifier: AGPL-3.0-only
 // The readings of the workspace that is this computer, over the socket the
 // page already holds. Nothing here wires a daemon at all, so a figure that
@@ -12,7 +13,7 @@ import { localExecStream } from "../src/local-exec.js";
 import { createRuntime, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { createOn, stubBackend } from "./stub-backend.js";
 import { until } from "./until.js";
 import { WsClient } from "./ws-client.js";
 
@@ -59,7 +60,7 @@ async function served(sampler: ReturnType<typeof fakeSampler>): Promise<string> 
   };
   rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local });
   srv = await serveRuntime(rt, { port: 0, authToken: HOST_TOKEN });
-  return (await rt.workspaces.createLocal("this computer")).id;
+  return (await createOn(rt, { on: HERE_PLACE_ID, name: "this computer" })).id;
 }
 
 const client = (): Promise<WsClient> => WsClient.connect(srv!.port, { token: HOST_TOKEN });
@@ -121,7 +122,7 @@ describe("the readings of the workspace that is this computer", () => {
   it("are refused for a machine that reads its own, which a pane asks over its daemon link", async () => {
     const sampler = fakeSampler();
     await served(sampler);
-    const fork = await rt!.workspaces.create({ golden: "snap_g", name: "fork" });
+    const fork = await createOn(rt!, { golden: "snap_g", name: "fork" });
     const c = await client();
     expect(await c.request("sys.subscribe", { workspaceId: fork.id })).toMatchObject({ ok: false, error: expect.stringMatching(/over its daemon link/) });
     expect(sampler.asks).toBe(0);

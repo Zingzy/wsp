@@ -22,6 +22,7 @@ import { hostAddress } from "../src/verbs.js";
 import { startHost, type HostHandle } from "../src/server.js";
 import { SEALED_GOLDEN as GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 const DEV_BOOT = `<script>window.__WSP__ = window.__WSP__ || { wsPort: 4410, token: "" };</script>`;
 const PAGE = `<!doctype html>
@@ -187,7 +188,7 @@ describe("a host that listens beyond this computer", () => {
 
   it("a token scoped to a thread is that thread on the JSON routes too, not a paired computer", async () => {
     const { handle: h, runtime } = await up("0.0.0.0");
-    const own = await runtime.workspaces.create({ golden: GOLDEN.versions[0]!.snapshotId, name: "lead" });
+    const own = await createOn(runtime, { golden: GOLDEN.versions[0]!.snapshotId, name: "lead" });
     const thread = await runtime.devices.mint("thread abcd1234", { kind: "thread", threadId: "t_1", workspaceId: own.id, rootThreadId: "t_1" }, Date.now());
     const auth = { authorization: `Bearer ${thread.deviceToken}` };
 

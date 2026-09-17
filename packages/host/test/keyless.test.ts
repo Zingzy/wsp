@@ -3,7 +3,8 @@
 // machines the person already has are recorded and listed, and the roads that
 // would fork one answer the sentence naming what is missing. Nothing here
 // asks for a key, and the ssh client never leaves this computer.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fmtSize, kindWords, NO_PROVIDER_LINE } from "@wsp/protocol";
@@ -11,6 +12,7 @@ import { localShape, NoProviderBackend } from "@wsp/engine";
 import { createRuntime, jsonFileStore } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cli, localWiring, noClaudeKeyNote, up } from "../src/cli.js";
+import { NO_PROJECT_YET } from "../src/verbs.js";
 import type { HostHandle } from "../src/server.js";
 import { fakeSsh } from "../../runtime/test/fake-ssh.js";
 import { PAGE, captured } from "./verbs-fixture.js";
@@ -64,18 +66,24 @@ describe("a computer with no machine provider key", () => {
     expect(io.errors).toEqual([]);
   }
 
-  it("makes this computer the workspace as it starts, serves it and lists it, with no key and nothing asked", async () => {
+  it("serves with no key and nothing asked, records no workspace, and lists the one a project here makes", async () => {
     // The whole real wiring, provider module and all, brought up with no key in the environment.
     const served = captured();
     handle = await up(served, { port: 0, wsPort: 0, statePath, webDir });
     expect(handle).toBeDefined();
     expect(served.errors).toEqual([]);
-    // The record is in the state file, which is the one thing a host needs to serve anything.
+    // A workspace is one project's copy, so a start records none and the first line says what records one.
+    expect(served.lines[0]).toBe(NO_PROJECT_YET);
+    expect(served.lines[1]).toBe(`app         http://127.0.0.1:${handle!.port}`);
+    // A folder of the person's own, worked in place, is the workspace here.
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-keyless-")));
+    execFileSync("git", ["init", "-q", folder]);
+    const added = captured();
+    expect(await cli(["add", folder, "--state", statePath], added), added.errors.join("\n")).toBe(0);
+    const made = captured();
+    expect(await cli(["new", "work here", "--state", statePath], made), made.errors.join("\n")).toBe(0);
     const stored = JSON.parse(readFileSync(statePath, "utf8")) as { workspaces: Record<string, { name: string; kind: string }> };
     expect(Object.values(stored.workspaces).map(w => w.kind)).toEqual(["local"]);
-    // The first line is the workspace this start recorded; the addresses follow it.
-    expect(served.lines[0]).toMatch(/^Workspace .+ is this computer;/);
-    expect(served.lines[1]).toBe(`app         http://127.0.0.1:${handle!.port}`);
     // Nothing forks here, so the missing Claude key is about the threads that run on this computer, not about forks.
     expect(served.lines.at(-1)).toBe(noClaudeKeyNote(true));
     const listed = captured();
@@ -88,12 +96,11 @@ describe("a computer with no machine provider key", () => {
 
   it("answers the sentence naming what is missing on every road that would fork a machine, once and with nothing before it", async () => {
     await serving();
-    // The golden's head, a project golden, and a sibling of a workspace that is here: three roads whose own
-    // refusals would each name a second road that cannot be taken on a computer with no provider.
-    const listed = captured();
-    expect(await cli(["workspaces", "--state", statePath], listed)).toBe(0);
-    const here = listed.lines[0]!.split("\n")[1]!.split(/ {2,}/)[0]!;
-    for (const argv of [["new", "alpha"], ["new", "beta", "--from", "proj"], ["fork", here]]) {
+    // Two roads to a copy, whose own refusals would each name a second road that cannot be taken here.
+    // A project on the computer this host forks at, which forks nothing here: every road to a copy of it names the
+    // one sentence, and nothing is minted.
+    expect(await cli(["add", "https://github.com/dev/proj.git", "--on", "default", "--state", statePath], captured())).toBe(0);
+    for (const argv of [["new", "proj", "alpha"], ["new", "proj", "beta", "--from", "proj"]]) {
       const road = argv.join(" ");
       const asked = captured();
       expect([road, await cli([...argv, "--state", statePath], asked)]).toEqual([road, 1]);

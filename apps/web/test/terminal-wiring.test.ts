@@ -27,7 +27,7 @@ async function until(cond: () => boolean, ms = 5000): Promise<void> {
 const view = (id: string, phase: "running" | "napping" = "running"): WorkspaceView => ({
   id,
   name: id,
-  machineId: `m_${id}`,
+  machineId: `m_${id}`, project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" },
   phase,
   golden: "snap_g",
   createdAt: "2026-09-01T00:00:00Z",
@@ -43,7 +43,6 @@ function fakeApi(workspaces: WorkspaceView[], relay: () => RelayHarness) {
     listWorkspaces: async () => workspaces,
     getWorkspace: async id => workspaces.find(w => w.id === id)!,
     createWorkspace: async () => workspaces[0]!,
-    createFromGoldenHead: async () => workspaces[0]!,
     watchStatuses: async () => [],
     nap: async id => workspaces.find(w => w.id === id)!,
     wake: async id => workspaces.find(w => w.id === id)!,

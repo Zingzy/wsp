@@ -11,7 +11,7 @@ import { goneRefusal, goneWords, NOT_GONE, type EventUnion, type WorkspaceStatus
 import { createRuntime, type RuntimeOptions } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubMachine } from "./stub-backend.js";
+import { stubBackend, type StubMachine, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 
 const WINDOW = 5 * 60_000;
@@ -93,7 +93,7 @@ describe("a 404 settles the record gone through one road", () => {
     const { rt, backend, fc, statuses, costs } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const reads = countReads(m);
@@ -157,7 +157,7 @@ describe("a 404 settles the record gone through one road", () => {
     const { rt, backend, fc, statuses, costs } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       let calls = 0;
       m.pause = async () => {
@@ -190,7 +190,7 @@ describe("a 404 settles the record gone through one road", () => {
     const { rt, backend } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       m.pause = async () => {
         m.killed = true;
@@ -210,7 +210,7 @@ describe("a 404 settles the record gone through one road", () => {
     const { rt, backend, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       m.killed = true;
       await expect(rt.workspaces.wake(ws.id)).rejects.toThrow("Workspace machine is gone; rebuild it to wake");
@@ -229,9 +229,9 @@ describe("a 404 settles the record gone through one road", () => {
     const { rt, backend, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const a = await rt.workspaces.create({ golden: "snap_g", name: "a" });
-      const b = await rt.workspaces.create({ golden: "snap_g", name: "b" });
-      const c = await rt.workspaces.create({ golden: "snap_g", name: "c" });
+      const a = await createOn(rt, { golden: "snap_g", name: "a" });
+      const b = await createOn(rt, { golden: "snap_g", name: "b" });
+      const c = await createOn(rt, { golden: "snap_g", name: "c" });
       const [ma, mb, mc] = backend.machines as [StubMachine, StubMachine, StubMachine];
       ma.killed = true;
       // The listing lags: b is missing from it but the provider still has it; c answers 404 in words to the read.
@@ -288,7 +288,7 @@ describe("the host's metrics as the early warning", () => {
     const { rt, backend, fc, statuses, costs } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const asks = countAsks(m);
@@ -333,7 +333,7 @@ describe("the host's metrics as the early warning", () => {
     const { rt, backend, fc, statuses, costs } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const asks = countAsks(m);
@@ -373,7 +373,7 @@ describe("the host's metrics as the early warning", () => {
     const { rt, backend, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       edge.fromDaemon = true;
@@ -402,7 +402,7 @@ describe("the host's metrics as the early warning", () => {
     const { rt, backend, fc, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const asks = countAsks(m);
@@ -444,7 +444,7 @@ describe("the host's metrics as the early warning", () => {
     const { rt, backend, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const metrics = m.metrics.bind(m);
@@ -497,7 +497,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
     const { rt, backend, fc, statuses, events } = testRuntime({ goneConfirmMs: CONFIRM });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const stop = rt.status.watch();
@@ -542,7 +542,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
     const { rt, backend, fc, events } = testRuntime({ goneConfirmMs: CONFIRM });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const stop = rt.status.watch();
@@ -577,7 +577,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
     const { rt, backend, fc, events } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const edge = await edgeHolding(m);
       const stop = rt.status.watch();
@@ -618,7 +618,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
     const { rt, backend, fc, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       m.pause = async () => {
         throw missing("Sandbox not found");
@@ -642,7 +642,7 @@ describe("a gone verdict is checked against the state read before it ends a turn
 describe("a record marked gone recovers on a state read that says running", () => {
   /** A record settled gone by a wake over a machine the provider then has again: what the incident left behind. */
   const wronglyGone = async (t: ReturnType<typeof testRuntime>) => {
-    const ws = await t.rt.workspaces.create({ golden: "snap_g", name: "a" });
+    const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
     const m = t.backend.machines[0]!;
     m.killed = true;
     await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
@@ -773,7 +773,7 @@ describe("the awake meter across a verdict that did not hold", () => {
     const t = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await t.rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
       const m = t.backend.machines[0]!;
       await until(() => t.costs.some(c => c.phase === "running"));
       expect(t.costs.at(-1)).toMatchObject({ phase: "running", awakeMs: 0 });
@@ -803,7 +803,7 @@ describe("the awake meter across a verdict that did not hold", () => {
     const t = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await t.rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(t.rt, { golden: "snap_g", name: "a" });
       const m = t.backend.machines[0]!;
       m.killed = true;
       await expect(t.rt.workspaces.wake(ws.id)).rejects.toThrow(goneRefusal("wake", (await t.rt.workspaces.get(ws.id)).gone));
@@ -823,7 +823,7 @@ describe("a nap the provider refuses in words", () => {
     const { rt, backend, fc, statuses } = testRuntime();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
-      const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+      const ws = await createOn(rt, { golden: "snap_g", name: "a" });
       const m = backend.machines[0]!;
       const pause = m.pause.bind(m);
       let calls = 0;

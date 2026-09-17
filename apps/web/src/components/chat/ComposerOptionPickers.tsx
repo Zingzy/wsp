@@ -31,9 +31,9 @@
 import { BrainIcon, ChevronDownIcon, CircleSlashIcon, FolderIcon, FolderOpenIcon, HandIcon, LockIcon, LockOpenIcon, PenLineIcon, PencilRulerIcon, ShieldIcon, SparklesIcon, type LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DEFAULT_AGENT } from "@wsp/catalog";
-import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type WorkspaceProject } from "@wsp/protocol";
+import { ACCESS_REFUSED_LINE, accessReachLine, contextWindowsFor, effortsFor, movesRunningAccess, type HarnessCatalog, type HarnessModel, type HarnessOption, type ProjectRef } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
-import { useChosenFolder, useDefaultProject, useProjects, useRootStore } from "../../files/root";
+import { useChosenFolder, useDefaultProject, useProject, useRootStore } from "../../files/root";
 import { useHarnessCatalog, useHarnessCatalogs, useLatestSession, useStore, useThreadSessions, useWorkspace } from "../../protocol/store";
 import { useWhereWord } from "../../sidebar/workspaceRows";
 import { Button } from "../ui/button";
@@ -284,14 +284,13 @@ function AccessPicker({
 /** The word other folder wears in the project menu and, once one is chosen, the folder's own name on the trigger. */
 export const OTHER_FOLDER = "other folder";
 
-/** The project pick: the default project's name, or the chosen folder's last segment, or the word Project while two
- * or more projects wait for a pick. A project pick lands on the host's record and clears any chosen folder, so the
- * rule's answer is the folder shown; other folder hands the pick to the folder picker under the box. The button is
- * capped at the row's width, since a folder's name is as long as the person made it. */
-function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: string; projects: readonly WorkspaceProject[]; onOtherFolder: () => void }) {
+/** The project the workspace holds, and the road to a folder beside it: the project's own name, or the chosen
+ * folder's last segment once one is picked. A workspace is one project's copy, so the menu offers that project and
+ * other folder, which hands the pick to the folder picker under the box. The button is capped at the row's width,
+ * since a folder's name is as long as the person made it. */
+function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: string; projects: readonly ProjectRef[]; onOtherFolder: () => void }) {
   const project = useDefaultProject(workspaceId);
   const chosen = useChosenFolder(workspaceId);
-  const setPreferences = useStore(s => s.setPreferences);
   const unchoose = useRootStore(s => s.unchoose);
   const follow = useRootStore(s => s.follow);
   const value = chosen === null ? project?.name ?? null : null;
@@ -317,12 +316,11 @@ function ProjectPicker({ workspaceId, projects, onOtherFolder }: { workspaceId: 
             const picked = projects.find(p => p.name === next);
             if (picked === undefined) return;
             unchoose(workspaceId);
-            follow(workspaceId, picked.dest);
-            void setPreferences({ project: { [workspaceId]: picked.name } });
+            follow(workspaceId, picked.path);
           }}
         >
           {projects.map(p => (
-            <MenuRadioItem key={p.name} value={p.name} data-composer-project={p.name} title={p.dest}>
+            <MenuRadioItem key={p.name} value={p.name} data-composer-project={p.name} title={p.path}>
               <span className="flex min-w-0 items-center gap-2">
                 <FolderIcon className="mx-0! size-3.5 shrink-0 text-muted-foreground" aria-hidden />
                 <span className="truncate font-mono">{p.name}</span>
@@ -355,7 +353,8 @@ export function ComposerOptionPickers({
   useMachineCatalogs(workspaceId);
   const pick = useComposerOptionsStore(s => s.pick);
   const catalogs = useHarnessCatalogs(workspaceId);
-  const projects = useProjects(workspaceId);
+  const project = useProject(workspaceId);
+  const projects = useMemo(() => (project === null ? [] : [project]), [project]);
   const where = useWhereWord(workspaceId);
   const { catalog, model, picks, pinned } = useComposerPicks(workspaceId, thread);
   if (catalog === null || picks === null) return null;

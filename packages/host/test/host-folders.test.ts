@@ -47,6 +47,7 @@ const workspace = (over: Partial<WorkspaceView>): WorkspaceView => ({
   phase: "running",
   golden: "snap_g",
   createdAt: "2026-09-06T10:00:00Z",
+  project: { id: "pr_a", name: "api", path: "/root/api", computer: "default" },
   ...over,
 });
 
@@ -149,8 +150,9 @@ describe("this computer's folder listing", () => {
 
   it("reads the project folders off the records, each once, and answers a listing over them", async () => {
     const { project } = tree();
-    const records = [workspace({ projects: [{ name: "api", dest: project, importedAt: "2026-09-06T10:00:00Z" }] }), workspace({ id: "ws_b", projects: [{ name: "api", dest: project, importedAt: "2026-09-06T11:00:00Z" }] }), workspace({ id: "ws_c" })];
-    expect(importedProjectFolders(records)).toEqual([project]);
+    const held = { id: "pr_api", name: "api", path: project, computer: "here" };
+    const records = [workspace({ project: held }), workspace({ id: "ws_b", project: held }), workspace({ id: "ws_c" })];
+    expect(importedProjectFolders(records)).toEqual([project, "/root/api"]);
     expect(importedProjectFolders([])).toEqual([]);
     const folders = hostFolders(async () => records);
     // hostFolders reads this computer's own home folder, which the paths argument is not given for.

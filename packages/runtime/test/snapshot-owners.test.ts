@@ -4,7 +4,7 @@ import { copyKey, createRuntime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { OWN_GRACE_MS } from "@wsp/engine";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const GB = 1e9;
 /** templateHost() takes the part after the last colon, so this host's mark on every name it writes is "h1". */
@@ -91,7 +91,7 @@ describe("who owns what on the account", () => {
   it("a snapshot a live workspace forks from is recorded, so it is never an orphan whatever its name", async () => {
     const { rt, backend } = await account();
     backend.snapshots.push({ id: "snap_forked", name: "wsp-h1-default-v8", sizeBytes: 5 * GB, createdAt: OLD });
-    await rt.workspaces.create({ golden: "snap_forked", name: "alpha" });
+    await createOn(rt, { golden: "snap_forked", name: "alpha" });
     expect((await rt.golden.orphans())!.snapshots.map(r => r.id)).toEqual(["snap_orphan"]);
     await rt.golden.deleteOrphans();
     expect(backend.snapshots.map(r => r.id)).toContain("snap_forked");

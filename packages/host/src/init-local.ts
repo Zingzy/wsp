@@ -37,6 +37,9 @@ export interface LocalInitOptions {
   address?: string;
   /** The command that starts the app again, with the flags this run was given. */
   upCommand: string;
+  /** A folder on this computer to record as a project and work in place, which is what a workspace here is;
+   * absent, this run makes none. */
+  importFolder?: string;
   /** The runtime over this state file, its provider module the one that holds no machine. */
   runtime(): Runtime;
   /** The workspace roads for a run that serves nothing. */
@@ -89,13 +92,13 @@ export async function runLocalInit(opts: LocalInitOptions, io: InitIO): Promise<
       await closeRuntime();
       return { code: 1 };
     }
-    if (tick) workspace = await runLocal(roads, io.output);
+    if (tick) workspace = await runLocal(roads, io.output, opts.importFolder);
   } else {
     log.step(`${workspace.name} (${workspace.id}) is already ${THIS_COMPUTER}; this run opens the app on it.`, out);
   }
   if (handle === undefined) {
     io.json?.({ event: "done", nextCommand: opts.upCommand, ...(workspace !== undefined ? { workspace: { id: workspace.id, name: workspace.name } } : {}) });
-    outro(`Done. ${workspace === undefined ? `Nothing was made; wsp new <name> --on ${THIS_COMPUTER} makes it a workspace.` : `${opts.upCommand} starts the app on ${workspace.name}.`}`, out);
+    outro(`Done. ${workspace === undefined ? `Nothing was made; wsp add <folder> records a project here and wsp new "<what you are working on>" makes its workspace.` : `${opts.upCommand} starts the app on ${workspace.name}.`}`, out);
     await closeRuntime();
     return { code: 0 };
   }

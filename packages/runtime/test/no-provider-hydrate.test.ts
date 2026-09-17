@@ -10,13 +10,13 @@ import { NoProviderBackend } from "@wsp/engine";
 import { NO_PROVIDER_LINE } from "@wsp/protocol";
 import { createRuntime } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 /** A state a host with a provider wrote: one running cloud workspace, read again by a host with no key. */
 async function keyless(): Promise<{ store: Store; workspaceId: string }> {
   const store = memoryStore();
   const first = createRuntime({ backend: stubBackend(), store, adapters: {} });
-  const ws = await first.workspaces.create({ golden: "snap_g", name: "first" });
+  const ws = await createOn(first, { golden: "snap_g", name: "first" });
   await first.close();
   return { store, workspaceId: ws.id };
 }

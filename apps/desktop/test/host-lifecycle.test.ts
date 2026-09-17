@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -215,7 +215,10 @@ describe("openHost", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     const statePath = join(home, "state.json");
     const recorded = makeRuntime({}, statePath);
-    await recorded.workspaces.createLocal("thisbox");
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-lifecycle-")));
+    execFileSync("git", ["init", "-q", folder]);
+    const project = await recorded.projects.add({ source: folder, name: "thisbox" });
+    await recorded.workspaces.create({ project: project.id, name: "thisbox" });
     await recorded.close();
 
     // The two steps main.ts takes, over the runtime the gate built rather than a fixture's.

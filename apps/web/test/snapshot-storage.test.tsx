@@ -15,7 +15,7 @@ const PRICING = { freeGb: 10, usdPerGbMonth: 0.05, billedFrom: "2026-10-01" };
 /** Who made each snapshot rides on the wire beside the sum; this line reads the sum, and wsp up and the doctor read the split. */
 const owners = (count: number, bytes: number) => ({ kept: { count, bytes }, orphans: { count: 0, bytes: 0 }, others: { count: 0, bytes: 0 } });
 const PROJECT = { name: "alpha", dest: "/root/work/alpha", importedAt: "2026-08-31T09:00:00Z" };
-const WS: WorkspaceView = { id: "ws1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_golden-v1", createdAt: "2026-08-30T09:00:00Z", projects: [PROJECT] };
+const WS: WorkspaceView = { id: "ws1", name: "alpha", machineId: "m1", phase: "running", golden: "snap_golden-v1", createdAt: "2026-08-30T09:00:00Z", project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } };
 const STATUS: WorkspaceStatus = { ...WS, machineState: "running", reach: { state: "reachable" }, size: { cpu: 2, memMb: 4096 }, rateUsdPerHour: 0.11 };
 
 function fakeApi(storage: SnapshotStorage | null) {
@@ -24,7 +24,6 @@ function fakeApi(storage: SnapshotStorage | null) {
     listWorkspaces: async () => [WS],
     getWorkspace: async () => WS,
     createWorkspace: async () => WS,
-    createFromGoldenHead: async () => WS,
     watchStatuses: async () => [STATUS],
     nap: async () => WS,
     wake: async () => WS,
@@ -43,7 +42,7 @@ function fakeApi(storage: SnapshotStorage | null) {
     rollbackSnapshot: async () => ({ lineage: { name: "default", head: null, versions: [] }, existingWorkspaces: "untouched" as const }),
     snapshotStorage: vi.fn(async () => storage),
     listProjectGoldens: async () => [],
-    snapshotWorkspace: async (id: string): Promise<ProjectGolden> => ({ snapshotId: "snap_taken", projects: [PROJECT], golden: "snap_golden-v1", workspaceId: id, workspaceName: "alpha", createdAt: new Date().toISOString() }),
+    snapshotWorkspace: async (id: string): Promise<ProjectGolden> => ({ snapshotId: "snap_taken", projects: [{ name: "api", dest: "/root/api", importedAt: "2026-09-06T10:00:00.000Z" }], golden: "snap_golden-v1", workspaceId: id, workspaceName: "alpha", createdAt: new Date().toISOString() }),
     emit: e => {
       for (const fn of listeners) fn(e);
     },

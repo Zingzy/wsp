@@ -16,6 +16,7 @@ import { guestDoor, type GuestOpening } from "../src/guest.js";
 import { CALLBACK_HOLD_MAX_BYTES, CALLBACK_HOLD_MAX_CONNS, CALLBACK_HOLD_MS, FORWARD_IDLE_MS, FORWARD_MAX_PER_TARGET, REDIAL_CEILING_MS, RELAY_CAP_MS, RELAY_MIN_PORT, RELAY_WINDOW_MS, startCallbackRelay, type CallbackRelay } from "../src/relay.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
+import { createOn, projectOn } from "./verbs-fixture.js";
 
 runsFromItsOwnFolder();
 
@@ -272,7 +273,7 @@ describe("callback relay over a fake daemon link", () => {
     const clock = fakeClock();
     const opened: string[] = [];
     const lines: string[] = [];
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     relay = startCallbackRelay({
       runtime: rt,
       openUrl: async url => {
@@ -304,7 +305,7 @@ describe("callback relay over a fake daemon link", () => {
     const fake = fakeConnect();
     const opened: string[] = [];
     const lines: string[] = [];
-    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const builder = await rt.golden.prepare({ name: "default" });
     relay = startCallbackRelay({
       runtime: rt,
@@ -324,7 +325,7 @@ describe("callback relay over a fake daemon link", () => {
   it("takes the guest sessions on each machine it links, hands their frames to the door and answers back down the link", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const heard: { workspaceId: string; type: string }[] = [];
     const dropped: string[] = [];
     const guest = {
@@ -357,7 +358,7 @@ describe("callback relay over a fake daemon link", () => {
   it("keeps a guest session across a nap, so the open the machine names on the redial runs its kind module once", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const token = (await rt.devices.mint("thread t1", { kind: "thread", threadId: "t1", workspaceId: ws.id, rootThreadId: "t1" }, Date.now())).deviceToken;
     let runs = 0;
     const kind = {
@@ -400,7 +401,7 @@ describe("callback relay over a fake daemon link", () => {
   it("drops the sessions of a workspace deleted while it napped, which holds no link for their end to ride", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const dropped: (string | undefined)[] = [];
     const guest = { event: () => undefined, closeAll: (workspaceId?: string) => dropped.push(workspaceId) };
     relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
@@ -420,7 +421,7 @@ describe("callback relay over a fake daemon link", () => {
   it("drops every session it holds when the host closes, a napped workspace's with the rest", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const dropped: (string | undefined)[] = [];
     const guest = { event: () => undefined, closeAll: (workspaceId?: string) => dropped.push(workspaceId) };
     relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect, guest });
@@ -437,7 +438,7 @@ describe("callback relay over a fake daemon link", () => {
   it("holds a frame that goes down while the link is between sockets, and sends it on the one that lands", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    await createOn(rt, { golden: "snap_gold", name: "task-1" });
     let answer: ((op: string, params: Record<string, unknown>) => Promise<unknown>) | undefined;
     const guest = {
       event: (link: { request(op: string, params: Record<string, unknown>): Promise<unknown> }) => (answer = link.request),
@@ -473,7 +474,7 @@ describe("callback relay over a fake daemon link", () => {
   it("holds a frame that goes down while the fresh socket is still watching, so none reaches it ahead of the watch", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    await createOn(rt, { golden: "snap_gold", name: "task-1" });
     let answer: ((op: string, params: Record<string, unknown>) => Promise<unknown>) | undefined;
     const guest = {
       event: (link: { request(op: string, params: Record<string, unknown>): Promise<unknown> }) => (answer = link.request),
@@ -515,7 +516,7 @@ describe("callback relay over a fake daemon link", () => {
     const { rt, backend } = relayRuntime("http://guest.test");
     backend.capabilities.callbackRelay = false;
     const fake = fakeConnect();
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     const heard: { workspaceId: string; type: string }[] = [];
     const guest = {
       event: (link: { workspaceId: string; request(op: string, params: Record<string, unknown>): Promise<unknown> }, e: { type: string; session?: string }) => {
@@ -543,7 +544,7 @@ describe("callback relay over a fake daemon link", () => {
   it("leaves the guest road off where no door was given, so a link with nobody to serve a session asks for none", async () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
-    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    await createOn(rt, { golden: "snap_gold", name: "task-1" });
     relay = startCallbackRelay({ runtime: rt, openUrl: async () => true, log: () => {}, clock: fakeClock(), connect: fake.connect });
     await until(() => fake.links.length >= 1);
     await until(() => fake.links[0]!.ops.some(x => x.op === "ports.watch"));
@@ -631,7 +632,7 @@ describe("callback relay over a fake daemon link", () => {
     const { rt } = relayRuntime("http://guest.test");
     const fake = fakeConnect();
     const opened: string[] = [];
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     relay = startCallbackRelay({
       runtime: rt,
       openUrl: async url => (opened.push(url), true),
@@ -1267,7 +1268,7 @@ describe("callback relay end to end through a real daemon", () => {
     procRoot = fakeProcTree([]);
     daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: sockPath, procRoot });
     const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
-    await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    await createOn(rt, { golden: "snap_gold", name: "task-1" });
 
     // Guest and laptop share this machine's loopback, so the guest tool takes 127.0.0.1 (where the daemon dials first) and the laptop side [::1].
     const seen: string[] = [];
@@ -1344,7 +1345,7 @@ describe("localhost forwards over a fake daemon link", () => {
     const events: ForwardEvent[] = [];
     /** What every link's ports.watch answers; a test mutates it before a redial or a wake. */
     const guestPorts = o.guestPorts ?? [];
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
     relay = startCallbackRelay({
       runtime: rt,
       openUrl: async () => true,
@@ -1751,7 +1752,7 @@ describe("localhost forwards over a fake daemon link", () => {
     const port = await freePort();
     link.emit({ type: "localhost.url", port });
     await until(() => relay!.forwards().length === 1);
-    await rt.workspaces.create({ golden: "snap_gold", name: "task-2" });
+    await createOn(rt, { golden: "snap_gold", name: "task-2" });
     await until(() => fake.links.length === 2);
     const second = fake.links[1]!;
     await until(() => second.ops.some(x => x.op === "ports.watch"));
@@ -1786,7 +1787,7 @@ describe("localhost forwards end to end through a real daemon", () => {
     procRoot = fakeProcTree([]);
     daemon = await daemonUnderTest({ host: "127.0.0.1", port: 0, token: TOKEN, openSocket: join(dir, "open.sock"), procRoot });
     const { rt } = relayRuntime(`http://127.0.0.1:${daemon.port}/?pt_token=ignored`);
-    const ws = await rt.workspaces.create({ golden: "snap_gold", name: "task-1" });
+    const ws = await createOn(rt, { golden: "snap_gold", name: "task-1" });
 
     // Guest and laptop share this machine's loopback: the guest server takes 127.0.0.1 (where the daemon dials first), the laptop side [::1].
     const seen: string[] = [];

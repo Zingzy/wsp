@@ -14,7 +14,7 @@ import type { MachineExecOptions } from "../src/machine-exec.js";
 import { createRuntime, type HarnessAdapterFactory, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { scriptGuest } from "./script-guest.js";
-import { stubBackend, type StubBackend } from "./stub-backend.js";
+import { stubBackend, type StubBackend, createOn, projectOn } from "./stub-backend.js";
 import { until } from "./until.js";
 
 const GONE = "machine gone at the provider while the agent was working";
@@ -111,7 +111,7 @@ async function box(): Promise<{
   });
   const events: EventUnion[] = [];
   rt.events.on("*", e => events.push(e));
-  const ws = await rt.workspaces.create({ golden: "snap_g", name: "a" });
+  const ws = await createOn(rt, { golden: "snap_g", name: "a" });
   backend.machines[0]!.previewUrl = async p => ({ url: `http://127.0.0.1:1/?port=${p}`, token: "t", expiresAt: Date.now() + 3_600_000 });
   return {
     rt,

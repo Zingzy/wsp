@@ -11,12 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalBackend } from "@wsp/engine";
-import { PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
+import { HERE_PLACE_ID, PERMISSION_ALLOW, PERMISSION_DENY, PERMISSION_DENIED_LINE, QUESTION_TOOL, pickedOptionId, questionOptions, askingLine, THIS_COMPUTER, threadWordOf, foldThreads, type PermissionAsk, type PermissionOutcome, type SessionEvent } from "@wsp/protocol";
 import { createRuntime, type HarnessAdapterFactory, type LocalWiring, type Runtime, type SessionHandle } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeClock } from "./fake-clock.js";
-import { stubBackend } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn } from "./stub-backend.js";
 
 const SESSION = "22222222-2222-4222-8222-222222222222";
 
@@ -112,7 +112,7 @@ describe("a permission prompt relayed into the chat", () => {
 
   /** A started turn on the one local workspace, with the fake turn it opened. */
   const started = async (): Promise<{ handle: SessionHandle; turn: Turn; workspaceId: string }> => {
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const handle = await rt.sessions.start(ws.id, { prompt: "write it" });
     await vi.waitFor(() => expect(turns).toHaveLength(1));
     return { handle, turn: turns[0]!, workspaceId: ws.id };
@@ -272,7 +272,7 @@ describe("a permission prompt relayed into the chat", () => {
   it("a turn the runtime cuts under an open prompt closes its row and stops its wait, so no row waits on an answer forever", async () => {
     // The cut roads (a nap, a machine gone, a zombie, a delete) all end the turn from this side rather than through
     // the harness, so this is the road the adapter's own close never travels.
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
     const handle = await rt.sessions.start(cloud.id, { prompt: "write it" });
     await vi.waitFor(() => expect(turns).toHaveLength(1));
     const turn = turns[0]!;
@@ -350,7 +350,7 @@ describe("the access a thread starts at", () => {
 
   it("on this computer the composer's access list marks the mode that asks nothing and names the machine on it", async () => {
     const { rt } = recording();
-    const local = await rt.workspaces.createLocal("mac");
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const [claude] = await rt.harnesses.list(local.id);
     expect(claude!.keptMode).toBe("default");
     expect(claude!.permissionModes.find(o => o.isDefault)?.value).toBe("bypassPermissions");
@@ -361,7 +361,7 @@ describe("the access a thread starts at", () => {
 
   it("a thread on this computer runs every action without asking, explicitly, and a send that names none keeps it", async () => {
     const { rt, picks } = recording();
-    const local = await rt.workspaces.createLocal("mac");
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const first = await rt.sessions.start(local.id, { prompt: "one" });
     await first.finished;
     expect(picks).toEqual(["bypassPermissions"]);
@@ -376,7 +376,7 @@ describe("the access a thread starts at", () => {
 
   it("a resumed thread whose rows fell off the index cap reads its access off its own start event, not off the adapter's default", async () => {
     const { rt, picks } = recording();
-    const local = await rt.workspaces.createLocal("mac");
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const first = await rt.sessions.start(local.id, { prompt: "one", permissionMode: "default" });
     await first.finished;
     expect(picks).toEqual(["default"]);
@@ -403,7 +403,7 @@ describe("the access a thread starts at", () => {
 
   it("a thread nobody named an access for starts at the pick the composer last made in that workspace", async () => {
     const { rt, picks } = recording();
-    const local = await rt.workspaces.createLocal("mac");
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     await (await rt.sessions.start(local.id, { prompt: "one" })).finished;
     expect(picks).toEqual(["bypassPermissions"]);
 
@@ -414,7 +414,7 @@ describe("the access a thread starts at", () => {
     expect(picks).toEqual(["bypassPermissions", "default"]);
 
     // A pick in one workspace says nothing about another's: that one still starts at what its catalog marks.
-    const other = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const other = await createOn(rt, { golden: "snap_g", name: "b1" });
     await (await rt.sessions.start(other.id, { prompt: "three" })).finished;
     expect(picks).toEqual(["bypassPermissions", "default", "bypassPermissions"]);
     await rt.preferences.set({ access: { [local.id]: "plan" } });
@@ -424,7 +424,7 @@ describe("the access a thread starts at", () => {
 
   it("a pick this harness does not take is dropped, not a refusal: the send runs the harness's own default", async () => {
     const { rt, picks } = recording();
-    const local = await rt.workspaces.createLocal("mac");
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     // A mode the other harness's list carries and claude's does not; the record is keyed by workspace, and a
     // workspace's threads may run on either.
     await rt.preferences.set({ access: { [local.id]: "read-only" } });
@@ -442,7 +442,7 @@ describe("the access a thread starts at", () => {
 
   it("a start that names an access still wins over the pick, and a resumed thread keeps its own", async () => {
     const { rt, picks } = recording();
-    const local = await rt.workspaces.createLocal("mac");
+    const local = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const first = await rt.sessions.start(local.id, { prompt: "one" });
     await first.finished;
     await rt.preferences.set({ access: { [local.id]: "acceptEdits" } });
@@ -455,7 +455,7 @@ describe("the access a thread starts at", () => {
 
   it("a throwaway machine's list and its threads are unchanged: bypass is the default and carries no machine's name", async () => {
     const { rt, picks } = recording();
-    const cloud = await rt.workspaces.create({ golden: "snap_g", name: "b1" });
+    const cloud = await createOn(rt, { golden: "snap_g", name: "b1" });
     const [claude] = await rt.harnesses.list(cloud.id);
     expect(claude!.permissionModes.find(o => o.isDefault)?.value).toBe("bypassPermissions");
     expect(claude!.permissionModes.find(o => o.value === "bypassPermissions")?.label).toBe("Bypass");
@@ -524,7 +524,7 @@ describe("an access picked while a turn runs", () => {
 
   /** A running turn on the one local workspace. */
   const running = async (rt: Runtime, turns: unknown[]): Promise<{ handle: SessionHandle; workspaceId: string }> => {
-    const ws = await rt.workspaces.createLocal("mac");
+    const ws = await createOn(rt, { on: HERE_PLACE_ID, name: "mac" });
     const handle = await rt.sessions.start(ws.id, { prompt: "run it" });
     await vi.waitFor(() => expect(turns).toHaveLength(1));
     return { handle, workspaceId: ws.id };

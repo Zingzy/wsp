@@ -14,7 +14,7 @@ import { CLIENT_CANNOT_REBUILD } from "../../actions/format.js";
 import { actionById, resolveActions, rowLabelOf } from "../../actions/registry.js";
 import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { workspaceActions, workspaceTarget } from "../../actions/workspaceActions.js";
-import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, servesReading, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceProjects, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceStatus, type WorkspaceView, REPORTED_WORD, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
+import { FREE_WORD, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, LINEAGE_MARKS, NOT_ON_THIS_KIND, agentsLine, behindGoldenLine, biggerSizeLine, diskTone, fmtBytes, fmtBytesOfTotal, fmtCost, fmtSize, fmtUptime, foldThreads, goldenForkName, goldenImage, imageKeptLine, imageMoveRefusal, isBilling, kindWords, missingToolRow, needsRebuild, outOfMemoryLine, plural, servesReading, vaultKeptLine, vaultStaleLine, wakeAskingAgainLine, workspaceKind, workspacePlace, workspaceState, workspaceStateOf, workspaceWord, type GoldenLeftBehind, type GoldenMissingTool, type GoldenRetired, type GoldenVersion, type LineageMark, type ProjectGolden, type SizeTone, type SnapshotLineage, type SysSample, type WorkspaceCostEvent, type WorkspaceKindWords, type WorkspaceStatus, type WorkspaceView, REPORTED_WORD, absentRoad, awayMsOf, lastKnown } from "@wsp/protocol";
 import { isDesktopShell } from "../../lib/desktopShell.js";
 import { cn, errorText } from "../../lib/utils.js";
 import { LIVE_WINDOW, staleWord, useOutOfMemoryReading, useWorkspaceLive, type StaleWord } from "../../machine/live.js";
@@ -76,7 +76,7 @@ function Surface({ workspace, series }: { workspace: WorkspaceView; series: Work
       <Header workspace={workspace} status={status} />
       <ScrollArea className="min-h-0 flex-1">
         <Facts workspace={workspace} status={status} kind={kind} />
-        <Projects workspace={workspace} status={status} kind={kind} onTaken={() => setTakes(n => n + 1)} />
+        <Projects workspace={workspace} kind={kind} onTaken={() => setTakes(n => n + 1)} />
         <Live workspace={workspace} />
         {kind.driven && <Usage workspace={workspace} status={status} series={series} takes={takes} />}
         {kind.driven && <GoldenLineage workspace={workspace} projects={goldens} />}
@@ -325,12 +325,9 @@ function useProjectGoldens(wanted: boolean, takes: number): ProjectGolden[] {
  * where the import measured one and the day it landed. Under them the two roads that change the list: the import
  * the row's menu offers, through the registry so it is refused where that is, and the snapshot that images the disk
  * with every project on it, offered only where the Versions section draws: a machine with an image behind it. */
-function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceView; status: WorkspaceStatus | null; kind: WorkspaceKindWords; onTaken: () => void }) {
+function Projects({ workspace, kind, onTaken }: { workspace: WorkspaceView; kind: WorkspaceKindWords; onTaken: () => void }) {
   const api = useStore(s => s.api);
-  const verbs = useWorkspaceVerbs();
-  const places = usePlaces();
-  const projects = workspaceProjects(workspace);
-  const importAction = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), verbs, false), "import-project");
+  const project = workspace.project;
   const images = kind.driven && api?.snapshotWorkspace !== undefined;
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -340,7 +337,7 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
     try {
       const taken = await api.snapshotWorkspace(workspace.id);
       onTaken();
-      setNote(`Image of ${taken.projects.map(p => p.name).join(", ")} taken. ${NEW_WORKSPACE_FROM_THIS} starts with the projects in place.`);
+      setNote(`Image of ${taken.projects.map(p => p.name).join(", ")} taken. ${NEW_WORKSPACE_FROM_THIS} starts with the project in place.`);
     } catch (e) {
       setNote(errorText(e));
     } finally {
@@ -348,53 +345,29 @@ function Projects({ workspace, status, kind, onTaken }: { workspace: WorkspaceVi
     }
   };
   return (
-    <Section label="Projects" aside={projects.length > 0 ? plural(projects.length, "project") : undefined}>
-      {projects.length === 0 ? (
-        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground" data-k="projects-none">
-          {isDesktopShell() ? "No projects yet. Import a folder, or drop one on the workspace's row." : "No projects yet. Import a folder."}
-        </p>
-      ) : (
-        <ul className="mt-1 divide-y divide-border/40">
-          {projects.map(p => (
-            <li key={p.dest} data-k={`project-${p.name}`} className="grid h-7 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_4.5rem_5.5rem] items-center gap-3 font-mono text-xs tabular-nums">
-              <span data-cell="name" className="truncate text-foreground" title={p.name}>
-                {p.name}
-              </span>
-              <span data-cell="folder" className="truncate text-muted-foreground" title={p.dest}>
-                {p.dest}
-              </span>
-              <span data-cell="size" className="text-right text-muted-foreground">
-                {p.size === undefined ? "" : fmtBytes(p.size)}
-              </span>
-              <span data-cell="imported" className="text-right text-muted-foreground">
-                {p.importedAt.slice(0, 10)}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <div className="mt-2 flex items-center gap-1.5">
-        <Button size="xs" variant="outline" data-k="import-project" disabled={importAction.refusal !== null} title={importAction.refusal ?? importAction.hint ?? undefined} onClick={() => void runAction(importAction)}>
-          Import a folder
-        </Button>
-        {images && (
-          <Button size="xs" variant="outline" disabled={busy || projects.length === 0 || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as an image`} onClick={() => void snapshot()}>
+    <Section label="Project">
+      <ul className="mt-1 divide-y divide-border/40">
+        <li data-k={`project-${project.name}`} className="grid h-7 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3 font-mono text-xs tabular-nums">
+          <span data-cell="name" className="truncate text-foreground" title={project.name}>
+            {project.name}
+          </span>
+          <span data-cell="folder" className="truncate text-muted-foreground" title={project.path}>
+            {project.path}
+          </span>
+        </li>
+      </ul>
+      {images && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <Button size="xs" variant="outline" disabled={busy || workspace.phase !== "running"} aria-label={`snapshot ${workspace.name} as an image`} onClick={() => void snapshot()}>
             Snapshot as image
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       <p className="mt-1 min-h-4 text-[11px] text-muted-foreground" data-k="projects-note">
-        {busy ? "Taking the snapshot…" : (note ?? importWord(kind))}
+        {busy ? "Taking the snapshot…" : note}
       </p>
     </Section>
   );
-}
-
-/** What the import road on this kind does to the folder, as the note under the buttons: on this computer nothing
- * is carried, and a person about to import a 4 GB repo is owed that before they press it. Read off the kind's own
- * import road, so a kind that copies says nothing here and the road is never compared by kind. */
-function importWord(kind: WorkspaceKindWords): string | null {
-  return kind.imports === "registers" ? `On ${THIS_COMPUTER_WORD} a folder is registered where it is, not copied.` : null;
 }
 
 /** Re-renders once a second while a countdown is showing. */
@@ -689,9 +662,10 @@ function GoldenLineage({ workspace, projects }: { workspace: WorkspaceView; proj
   };
 
   // A copy of a project image, named after the project it carries: the name is the row's title in the sidebar, so
-  // it reads as what it is rather than as the verb underneath.
+  // it reads as what it is rather than as the verb underneath. The image is of this workspace's own project, so
+  // that project is what the copy is made of and the image says which version of it.
   const fork = (g: ProjectGolden): void => {
-    void createWorkspace(`${goldenForkName(g)}-copy`, g.snapshotId);
+    void createWorkspace(workspace.project.id, `${goldenForkName(g)}-copy`, { golden: g.snapshotId });
   };
 
   const under = (snapshotId: string): ReactNode => <ProjectGoldens goldens={projects.filter(p => p.golden === snapshotId)} forkOf={workspace.golden} busy={busy !== null} onFork={fork} />;

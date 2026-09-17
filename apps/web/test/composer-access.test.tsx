@@ -82,7 +82,7 @@ const view: ChatThreadView = {
 
 const handle = { view, hydrated: true, busy: false, sending: false, fresh: true, resume: null, thread: "t1", threadKey: "t1", named: null } as unknown as ChatThreadHandle;
 
-const WORKSPACE: WorkspaceView = { id: WS, name: "api", machineId: "m1", phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
+const WORKSPACE: WorkspaceView = { id: WS, name: "api", machineId: "m1", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, phase: "running", golden: "snap_g", createdAt: "2026-09-01T00:00:00Z" };
 
 const accessButton = () => document.querySelector<HTMLElement>('[data-composer-picker="permissionMode"]');
 

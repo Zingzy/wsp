@@ -9,7 +9,7 @@
 // reads the same answers off --first-workspace, --import and --no-local.
 import type { Readable, Writable } from "node:stream";
 import { statSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { isCancel, log } from "@clack/prompts";
 import type { Platform } from "@wsp/collect";
@@ -195,7 +195,7 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
     log.step(planLine(plan), out);
     spinner = o.spin(`Importing ${o.first.folder}`);
     // The app's dialog seeds its ticks from these two and sends this request; nothing is changed on the way here.
-    const imported = await o.handle.importProject({ workspaceId: workspace.id, ...importRequest(plan, o.first.folder, defaultConsent(plan.secrets), defaultAgents(plan.agents), undefined, workspace) });
+    const imported = await o.handle.importProject({ workspaceId: workspace.id, ...importRequest(plan, o.first.folder, defaultConsent(plan.secrets), defaultAgents(plan.agents)) });
     spinner.stop();
     o.json?.({ event: "import", folder: o.first.folder, state: "imported", dest: imported.dest, files: imported.files, bytes: imported.bytes });
     log.step(importedLine(imported, workspace.name), out);
@@ -208,16 +208,22 @@ export async function runFirst(o: FirstRun): Promise<FirstResult | undefined> {
   }
 }
 
-/** The tick taken: this computer as a workspace, through the same road the app's own row takes. A host that refuses
- * it (one is already there, a name taken) is one line and never unwinds the run: the fork above it still stands and
- * the address still opens. */
-export async function runLocal(roads: Pick<WorkspaceRoads, "createLocalWorkspace">, output: Writable): Promise<WorkspaceView | undefined> {
+/** The tick taken: a folder of the person's own on this computer, recorded as a project and worked in place, which
+ * is what a workspace here is. A run that named no folder makes none and says the road; a host that refuses it (a
+ * folder that is no repo, a name taken) is one line and never unwinds the run, so the fork above it still stands
+ * and the address still opens. */
+export async function runLocal(roads: Pick<WorkspaceRoads, "addProject" | "createWorkspace">, output: Writable, folder?: string, name: string = hostname()): Promise<WorkspaceView | undefined> {
+  if (folder === undefined) {
+    log.warn(`${THIS_COMPUTER} was not made a workspace: a workspace is one project's, and this run named no folder here. wsp add <folder> records one and wsp new "<what you are working on>" makes its workspace.`, { output });
+    return undefined;
+  }
   try {
-    const workspace = await roads.createLocalWorkspace();
+    const project = await roads.addProject(folder);
+    const workspace = await roads.createWorkspace(name, undefined, project.id);
     log.step(thisComputerLine(workspace.name, workspace.id), { output });
     return workspace;
   } catch (e) {
-    log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp new <name> --on it makes it a workspace from a terminal.`, { output });
+    log.warn(`${THIS_COMPUTER} was not made a workspace: ${errorText(e)}. wsp add <folder> records a project here and wsp new "<what you are working on>" makes its workspace.`, { output });
     return undefined;
   }
 }

@@ -105,9 +105,6 @@ function fakeApi(over: { setup?: InitSetup; refuse?: string; key?: KeyAnswer } =
     createWorkspace: vi.fn(async () => {
       throw new Error("none");
     }),
-    createFromGoldenHead: vi.fn(async () => {
-      throw new Error("none");
-    }),
     watchStatuses: vi.fn(async () => []),
     nap: vi.fn(async () => {
       throw new Error("none");

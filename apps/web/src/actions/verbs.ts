@@ -22,7 +22,6 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
   const forget = api?.forget;
   const canRename = api?.renameWorkspace !== undefined;
   const canLook = api?.setWorkspaceLook !== undefined;
-  const canImport = api?.planProject !== undefined && api.importProject !== undefined;
   const canExport = api?.exportProject !== undefined;
   return useMemo<WorkspaceVerbs>(
     () => ({
@@ -42,10 +41,9 @@ export function useWorkspaceVerbs(): WorkspaceVerbs {
       forget: forget === undefined ? undefined : requestForgetWorkspace,
       rename: canRename ? requestRenameWorkspace : undefined,
       pickLook: canLook ? requestWorkspaceLook : undefined,
-      importProject: canImport ? workspaceId => requestProjectTrip({ workspaceId, trip: "import" }) : undefined,
       exportProject: canExport ? workspaceId => requestProjectTrip({ workspaceId, trip: "export" }) : undefined,
     }),
-    [canExport, canImport, canLook, canRename, forget, newThread, openSurface, rebuild, restartDaemon, togglePhase],
+    [canExport, canLook, canRename, forget, newThread, openSurface, rebuild, restartDaemon, togglePhase],
   );
 }
 
