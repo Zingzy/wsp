@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
 # What a review keeps finding in a diff, refused before the commit exists.
 # Every check reads the staged content and never the working tree, so what is
 # refused is what the commit would carry.
@@ -19,15 +20,16 @@ labelled=""
 for f in $staged; do
   case "$f" in */fixtures/*|fixtures/*) continue ;; esac
   case "$f" in
-    *.ts|*.tsx|*.js|*.mjs|*.cjs|*.rs|*.md|*.yml|*.yaml|*.toml|*.sh|*.css|*.json) prose="$prose $f" ;;
+    *.ts|*.tsx|*.js|*.mjs|*.cjs|*.rs|*.md|*.mdx|*.yml|*.yaml|*.toml|*.sh|*.css|*.html|*.txt|*.json) prose="$prose $f" ;;
   esac
   case "$f" in
     *.rs|*.ts|*.tsx) labelled="$labelled $f" ;;
   esac
 done
 
-# The lines this commit adds, for one file or for a list of them.
-added() { git diff --cached -U0 -- "$@" | grep '^+' | grep -v '^+++'; }
+# The lines this commit adds, for one file or for a list of them. A diff's own file header carries a space after
+# its three plus signs; an added line that begins with two of its own does not, and is read like any other.
+added() { git diff --cached -U0 -- "$@" | grep '^+' | grep -v '^+++ '; }
 
 if [ -n "$prose" ] && added $prose | grep -q '—'; then
   for f in $prose; do
@@ -38,9 +40,9 @@ if [ -n "$prose" ] && added $prose | grep -q '—'; then
   done
 fi
 
-# wsp-904, live-904 and 904-a-slug, whole tokens. A version number and a hex sha both carry
-# digits beside a hyphen and neither is a label, so a digit or a dot before the run rules it out.
-label='(^|[^[:alnum:]])(wsp|live)-[0-9]{3}([^0-9]|$)|(^|[^[:alnum:]._-])[0-9]{3}-[a-z]'
+# wsp-904 and live-904, whole tokens: a longer number is not a ticket, so sk-live-000fake is a key and not a
+# label. A bare 904-a-slug is not read at all, since the form has no hit on main and number words do (256-colour).
+label='(^|[^[:alnum:]])(wsp|live)-[0-9]{3}([^[:alnum:]]|$)'
 if [ -n "$labelled" ] && added $labelled | grep -qE "$label"; then
   for f in $labelled; do
     if added "$f" | grep -qE "$label"; then
