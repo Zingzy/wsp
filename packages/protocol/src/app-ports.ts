@@ -19,6 +19,14 @@ export const PLACE_PORT_OFFSET = 20;
 /** The port that door answers on for the default pair. */
 export const DEFAULT_PLACE_PORT = DEFAULT_PORT + PLACE_PORT_OFFSET;
 
+/** The first port base a copy of a project folder on this computer is handed, and the step between one copy's base
+ * and the next. Above the ports a person's own dev server binds by habit (3000, 4400 is wsp's own) and below the
+ * ephemeral range, so a base is neither the port somebody is already on nor one the kernel will hand out. The two
+ * numbers live here because the app's own ports do, so nothing in the hidden range can land on a port wsp itself
+ * holds. */
+export const PORT_BASE_FIRST = 3100;
+export const PORT_BASE_STEP = 100;
+
 /** The address every host socket binds when nobody names another: the page carries the host token, so nothing
  * listens beyond this computer. */
 export const LOOPBACK = "127.0.0.1";

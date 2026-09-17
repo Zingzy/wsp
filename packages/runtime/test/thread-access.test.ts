@@ -14,7 +14,7 @@ import { createRuntime, type HarnessAdapterFactory, type HarnessStartOptions, ty
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
 import { fakeSsh } from "./fake-ssh.js";
-import { stubBackend, createOn, projectOn } from "./stub-backend.js";
+import { stubBackend, createOn, projectOn, testPlatform } from "./stub-backend.js";
 
 /** A harness that answers at once and keeps every start it was handed, so a case reads the access the runtime
  * resolved rather than what it asked for. */
@@ -55,6 +55,7 @@ describe("the access a thread starts at, on each kind of workspace", () => {
       home: () => join(root, ".claude"),
       homeDir: root,
       env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
     };
   });
   afterEach(async () => {

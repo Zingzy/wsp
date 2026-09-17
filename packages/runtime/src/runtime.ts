@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, catalogIdOfRow, guestEnv } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, catalogIdOfRow, guestEnv } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -196,14 +196,15 @@ import type {
   WorkspaceView,
 } from "@wsp/protocol";
 import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, sameSourceRefusal, sourceKind, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, sameSourceRefusal, sourceKind, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
-import { isNoProvider, isPlaceAbsent } from "@wsp/engine";
+import { isNoProvider, isPlaceAbsent, projectStateKey, type Copier } from "@wsp/engine";
 import { realClock, type Clock } from "./clock.js";
 import { writeDaemonRootsScript } from "./daemon-roots.js";
 import { assertTokenShape, daemonTokenPathOf, rotateDaemonToken } from "./daemon-token.js";
 import { DEFAULT_IDLE_WINDOW_MS, backstopMs, createIdlePolicy } from "./idle.js";
+import { nextPortBase } from "./ports.js";
 import { connectDaemon, type DaemonReach } from "./reach.js";
 import { POLL_INTERVAL_MS, createStatusTracker, machineStateOf, phaseLeavingGone, providerSaid, type StatusApi, type StatusListOptions, type StatusWatchOptions } from "./status.js";
 import { makeDevices, type DeviceDoor } from "./devices.js";
@@ -227,6 +228,11 @@ export interface HarnessAdapterContext {
    * harness at its store there. On the person's own computer it is their shell's, so a store variable is set only
    * where their shell sets it, and their login is the turn's login. */
   env: Readonly<Record<string, string>>;
+  /** What this agent keys its sessions and its auto memory to on this workspace, where the kind has an answer: on
+   * a computer whose workspaces are copies of a project folder, the original folder's own key, so every copy and
+   * the person's own agent in that folder share one memory. Absent leaves the agent keying off the folder each
+   * turn runs in, which is every machine wsp makes. */
+  projectKey?: string;
   /** wsp's half of a turn this workspace's agent refuses for want of a sign-in, from the one rule every door reads
    * for how it is signed in: it differs between the person's own computer and a machine, which the adapter cannot
    * know, so it is told the road from here rather than guessing one. */
@@ -757,6 +763,13 @@ export interface LocalWiring {
    * that is this computer start it if nothing else has. One watch however many listeners there are; it opens with
    * the first and closes with the last. */
   sysSamples?: (fn: (s: SysSample) => void) => Promise<() => void>;
+  /** How a copy of a project folder is made and taken away on this computer: the daemon binary's own copy verb,
+   * run as a child. Absent leaves every workspace here the folder worked in place, and a second piece of work on
+   * one project is refused rather than copied. */
+  copier?: Copier;
+  /** Which computer this is, for the one line a row says about ports being shared: the word is a Mac's or a plain
+   * computer's and nothing here can know which. */
+  platform: "darwin" | "linux";
   /** Frees whatever the wiring holds open on this computer when the runtime closes. */
   close?: () => Promise<void>;
 }
@@ -924,10 +937,24 @@ const folderNamed = (path: string): string => {
  * the whole of what says so. */
 const sameSource = (a: ProjectSource, b: ProjectSource): boolean => (a.kind === "git" && b.kind === "git" ? a.url === b.url : a.kind === "folder" && b.kind === "folder" ? a.path === b.path : false);
 
-/** Why a second workspace on one project worked in place is refused: the folder is one working tree, and two
- * records on it would be two names for the same branch. */
+/** Why a second workspace on one project worked in place is refused where this computer makes no copy: the folder
+ * is one working tree, and two records on it would be two names for the same branch. A computer that copies takes
+ * the second piece of work as a copy of the folder instead and never reaches this. */
 export const oneWorkspacePerProject = (project: string, standing: string): string =>
   `${project} is worked where it sits, so it has one workspace and ${standing} is it; run in ${standing}, or delete it first`;
+
+/** Why a kind that makes a workspace some other way has no copy of a folder to make. Nothing a person types
+ * reaches it: the create reads the computer's own capabilities first, so this is the wiring's own sentence. */
+export const kindMakesNoCopy = (kind: string): string => `a ${kind} workspace is not a copy of a folder on this computer`;
+
+/** What a second piece of work on a project here is refused with when the host wired no copy road: the daemon
+ * binary is what copies, and a host that cannot find it has one workspace per project. */
+export const NO_COPIER_HERE = "this host has no copy road for a folder on this computer, so a project here has one workspace";
+
+/** The size above which a folder is not directory-cloned and the copy takes the worktree road instead. Twenty
+ * gibibytes is well past the biggest checkout measured here (6 GB with its dependencies) and short of a folder
+ * somebody would be surprised to see doubled. One place, so it is one line to change. */
+export const COPY_SIZE_LINE_BYTES = 20 * 1024 * 1024 * 1024;
 
 /** Why a host will not serve a state file written before a workspace named its project: nothing reads the old
  * shape, so the file is moved aside by hand and this host starts empty. */
@@ -1805,6 +1832,18 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
      * ready: a kind that works a folder in place has nothing to move and only checks the folder is still a repo,
      * and a kind that holds a copy clones the repo into it. A throw ends the create as any failed stage does. */
     landProject: (entry: LiveWorkspace, project: ProjectView, report: StageReport) => Promise<void>;
+    /** Makes this workspace's copy of the project on a computer whose capabilities say it copies by directory: the
+     * folder the copy lands at, the road that made it and what it stands on. Refused with one sentence where the
+     * computer makes no copy. The record is the caller's; this makes the folder and nothing else. */
+    makeCopy: (project: ProjectView, work: { slug: string; base?: string }) => Promise<ProjectCopy>;
+    /** Takes the copy away; the record is the caller's to delete after. The folder worked in place is nobody's to
+     * remove: it is the person's own. */
+    dropCopy: (copy: ProjectCopy) => Promise<void>;
+    /** What one agent on this workspace keys its sessions and its memory to, where the kind has an answer: on a
+     * computer whose workspaces are copies of a folder, the original folder's own key, so every copy and the
+     * person's own terminal in that folder share one memory. Nothing where the folder a turn runs in is the key,
+     * which is every machine wsp makes. */
+    memoryKey: (entry: LiveWorkspace, agentId: string) => string | undefined;
     /** Whether a request relayed from a machine may drive this workspace; a local one answers only this computer,
      * and so does a machine of another kind whose dial names this computer. The machine id is absent on the one
      * road that asks before a machine exists, a fork's create, where only the kind can answer. */
@@ -1870,6 +1909,42 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const cloned = await entry.machine.exec(cloneCommand(project), { timeoutMs: CLONE_MS });
     if (cloned.exitCode !== 0) throw new Error(lastLineOf(cloned.stderr) || lastLineOf(cloned.stdout) || `git clone exited ${cloned.exitCode}`);
   };
+  /** The copy of a project folder one piece of work on this computer gets: a sibling of the folder under the work's
+   * own name, made by the daemon binary's copy verb, which picks the road, applies the two rules and says which
+   * road it took. Every refusal is the verb's, naming the folder in the way or the volume that could not take the
+   * copy, since the verb is what read the disk. */
+  const makeLocalCopy = async (project: ProjectView, work: { slug: string; base?: string }): Promise<ProjectCopy> => {
+    const copier = local?.copier;
+    if (copier === undefined) throw Object.assign(new Error(NO_COPIER_HERE), { kind: "invalid" });
+    const to = copyPathFor(project.path, work.slug);
+    const report = await copier.make({
+      from: project.path,
+      to,
+      ...(work.base !== undefined ? { base: work.base } : {}),
+      exclude: [...PATH_BOUND_DIR_NAMES],
+      sizeLineBytes: COPY_SIZE_LINE_BYTES,
+    });
+    return {
+      road: report.road,
+      path: report.path,
+      base: report.base,
+      branch: report.branch,
+      carried: report.carried,
+      ...(report.fellBack !== undefined ? { fellBack: report.fellBack } : {}),
+      source: project.path,
+    };
+  };
+
+  /** The copy taken away by the road that made it. The folder worked in place is the person's own and nothing here
+   * touches it; every other road hands the verb the road off the record, so a worktree's registration goes with it
+   * rather than being left inside the project's own git directory. */
+  const dropLocalCopy = async (copy: ProjectCopy): Promise<void> => {
+    if (copy.road === "in-place") return;
+    const copier = local?.copier;
+    if (copier === undefined) throw new Error(NO_COPIER_HERE);
+    await copier.remove(copy.source, copy.path, copy.road);
+  };
+
   /** Whether this computer holds a git repo at exactly this folder, which is what a project here stands on: the
    * top of the work tree is the folder itself, not a folder above it. */
   const isRepoHere = async (path: string): Promise<boolean> => {
@@ -2000,6 +2075,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       import: (entry, o, report) => copyImport(entry, o, report),
       roots: (entry, dests) => writeRoots(entry, dests),
       landProject: (entry, project, report) => cloneProject(entry, project, report),
+      // A fork is the copy: the machine is a copy of an image with the project cloned into it, so there is no
+      // folder on this computer to copy and nothing to take away when the record goes.
+      makeCopy: () => Promise.reject(new Error(kindMakesNoCopy("cloud"))),
+      dropCopy: async () => {},
+      // The project sits at its own path inside the fork, which is the path the person's own terminal would key
+      // its state off: nothing has to be told a name.
+      memoryKey: () => undefined,
     },
     local:
       local === undefined
@@ -2007,12 +2089,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         : {
             backend: () => local.backend,
             execStream: (_entry, o, waiting) => local.execStream(o, waiting),
-            // The workspace here is the project's own folder worked in place, so that folder is the word its view
-            // carries and where a thread on it starts; the same reading threadFolder takes.
-            folder: record => projectHeld(record.project).path,
+            // A workspace here is a folder on this computer: the project's own worked in place, or the copy of it
+            // made for this piece of work. Either way that folder is the word its view carries and where a thread
+            // on it starts; the same reading threadFolder takes.
+            folder: record => record.copy?.path ?? projectHeld(record.project).path,
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
-            env: () => local.env(),
+            // The person's own login, plus the port this workspace's apps bind: every copy here shares one
+            // loopback, so a copy with no port of its own would race the person's own dev server for 3000.
+            env: entry => (entry.record.portBase === undefined ? local.env() : { ...local.env(), PORT: String(entry.record.portBase) }),
             relayed: () => false,
             // This computer's own command, told which host to drive: a thread here runs the node wsp, which dials
             // rather than riding a machine's daemon. No thread gets this today, since the kind table lets no agent
@@ -2039,6 +2124,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             landProject: async (_entry, project) => {
               if (project.source.kind === "folder" && !(await isRepoHere(project.path))) throw new Error(`${project.path} ${NOT_A_REPO_LINE}`);
             },
+            makeCopy: (project, work) => makeLocalCopy(project, work),
+            dropCopy: copy => dropLocalCopy(copy),
+            // The original folder's key, which is the one the person's own terminal already writes under: every
+            // copy of that folder and their own agent in it share one memory directory and one sessions list,
+            // with nothing seeded and nothing moved.
+            memoryKey: (entry, agentId) => projectStateKey(agentId, projectHeld(entry.record.project).path),
           },
     ssh:
       ssh === undefined
@@ -2106,6 +2197,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // No project lives on a machine wsp only reaches: its row in the kind table takes no source, so no
             // workspace of this kind is ever made and nothing reaches here.
             landProject: async () => {},
+            makeCopy: () => Promise.reject(new Error(kindMakesNoCopy("ssh"))),
+            dropCopy: async () => {},
+            memoryKey: () => undefined,
           },
   };
   const moduleOf = (kind: WorkspaceKind): KindModule => {
@@ -2133,15 +2227,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   };
   const execFactoryFor = (entry: LiveWorkspace, o?: MachineExecOptions, waiting?: TurnWaiting): ExecStreamFactory =>
     moduleOf(entry.record.kind).execStream(entry, opts.machineExec === undefined ? o : { ...opts.machineExec, ...o }, waiting);
-  /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else the
-   * project named, else the project a thread last landed in on this workspace, else its only project, else the
-   * kind's own folder, where a kind that names none leaves the shell in the machine's home. Both roads that launch a
-   * process through this runtime read it here, the turn and the exec verb, so the folder a turn opens in and the one
-   * a command runs in cannot differ, and the app, the command line and the tool need not restate it; the roads that
-   * reach `entry.machine` directly land in the folder that machine was built with, which for this computer is the
-   * same one, since the kind reads it off the backend. */
+  /** The folder a turn or a command starts in, the one rule every road reads: the folder the caller named, else
+   * the folder this workspace holds its project in, which is the kind's own reading, else the project's own path.
+   * The kind is asked rather than the project read directly, because on a computer that makes a workspace by
+   * copying the project folder the workspace's folder is that copy and never the person's own checkout. Both
+   * roads that launch a process through this runtime read it here, the turn and the exec verb, so the folder a
+   * turn opens in and the one a command runs in cannot differ, and the app, the command line and the tool need
+   * not restate it. */
   const threadFolder = async (entry: LiveWorkspace, o: { cwd?: string | undefined }): Promise<string | undefined> => {
-    return o.cwd ?? projectHeld(entry.record.project).path;
+    return o.cwd ?? moduleOf(entry.record.kind).folder(entry.record) ?? projectHeld(entry.record.project).path;
   };
   /** What a start that opened a thread leaves on the preferences record: the project the thread landed in, by
    * workspace, the second branch of threadFolder for the next thread there, and the target, the workspace and project
@@ -2686,6 +2780,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     golden: r.golden,
     createdAt: r.createdAt,
     project: refOf(projectHeld(r.project)),
+    ...(r.copy !== undefined ? { copy: r.copy } : {}),
+    ...(r.portBase !== undefined ? { portBase: r.portBase } : {}),
     ...(r.claudeSessionId !== undefined ? { claudeSessionId: r.claudeSessionId } : {}),
     ...(r.screen !== undefined ? { screen: r.screen } : {}),
     ...(r.gone !== undefined ? { gone: r.gone } : {}),
@@ -3481,6 +3577,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       await moduleOf(going.record.kind)
         .dropped(going)
         .catch((e: unknown) => console.warn(`${going.record.name}'s machine ${going.machine.id} kept something of this host's: ${e instanceof Error ? e.message : String(e)}`));
+      // The copy this workspace was goes with the record that named it, and the folder worked in place does not:
+      // that one is the person's own. A copy that will not go leaves its record deleted and says so, since the
+      // alternative is a record nobody can delete.
+      if (going.record.copy !== undefined) {
+        await moduleOf(going.record.kind)
+          .dropCopy(going.record.copy)
+          .catch((e: unknown) => console.warn(`${going.record.name}'s copy at ${going.record.copy?.path} is still there: ${e instanceof Error ? e.message : String(e)}`));
+      }
     }
     live.delete(id);
     revivedAt.delete(id);
@@ -4157,10 +4261,20 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return forking.has(name) ? nameTakenRefusal(name) : undefined;
   };
 
-  /** The in-place road: a project on the computer the host runs on is worked where it already sits, so nothing is
-   * forked and nothing is copied. One workspace per such project, since two records on one folder would be two
-   * names for one working tree; the machine is this computer, and its phase is running with auto-nap off from the
-   * start, a machine wsp does not run neither napping nor waking. */
+  /** The port base the next copy on this computer takes, out of the bases every record here already holds. A
+   * computer whose copies each get a network of their own hands out none: the ports inside one are its own. */
+  const portBaseHere = (): number | undefined => {
+    const capabilities = backendOfKind("local").capabilities;
+    if (!capabilities.copies || capabilities.ownNetwork) return undefined;
+    return nextPortBase([...live.values()].flatMap(e => (e.record.portBase !== undefined ? [e.record.portBase] : [])));
+  };
+
+  /** The in-place road: the first piece of work on a project on the computer the host runs on is that folder
+   * itself, worked where it already sits, so nothing is forked and nothing is copied. The second and every one
+   * after is a copy of the folder at a sibling path, which is what makes two pieces of work on one project two
+   * checkouts on two branches rather than two names for one working tree. The machine is this computer either
+   * way, and its phase is running with auto-nap off from the start: a machine wsp does not run neither naps nor
+   * wakes. */
   const recordExisting = async (project: ProjectView, o: CreateWorkspaceOptions, caller: Caller | undefined): Promise<WorkspaceView> => {
     const n = nameGiven(o.name);
     refuseRecording(n, caller);
@@ -4171,8 +4285,19 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const refusal = nameRefusal(n);
     if (refusal !== undefined) throw Object.assign(new Error(refusal), { kind: "conflict" });
     const standing = [...live.values()].find(e => e.record.project === project.id);
-    if (standing !== undefined) throw Object.assign(new Error(oneWorkspacePerProject(project.name, standing.record.name)), { kind: "conflict" });
     const mine = backendOfKind("local");
+    // The folder itself is the first workspace of a project here; a second piece of work on it is a copy, and a
+    // computer that cannot copy keeps the one workspace and says so.
+    if (standing !== undefined && !mine.capabilities.copies) {
+      throw Object.assign(new Error(oneWorkspacePerProject(project.name, standing.record.name)), { kind: "conflict" });
+    }
+    // The folder worked in place carries no base and no branch of its own: it is the workspace for whatever branch
+    // the person has it on right now, and a value written here would be stale by their next checkout.
+    const copy: ProjectCopy =
+      standing === undefined
+        ? { road: "in-place", path: project.path, source: project.path, base: "", branch: "", carried: "nothing" }
+        : await moduleOf("local").makeCopy(project, { slug: folderSlug(n), ...(project.base !== undefined ? { base: project.base } : {}) });
+    const portBase = copy.road === "in-place" ? undefined : portBaseHere();
     const machine = await mine.get(LOCAL_MACHINE_ID);
     const record: WorkspaceRecord = {
       id: `ws_${randomBytes(4).toString("hex")}`,
@@ -4183,14 +4308,23 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       golden: "",
       createdAt: new Date().toISOString(),
       project: project.id,
+      copy,
+      ...(portBase !== undefined ? { portBase } : {}),
       spec: {},
       size: mine.pricing.defaultSize,
       firstLife: false,
       idleWindowMs: null,
     };
     attach(record, machine);
-    await moduleOf("local").landProject(live.get(record.id)!, project, () => {});
-    await persist(record);
+    try {
+      await moduleOf("local").landProject(live.get(record.id)!, project, () => {});
+      await persist(record);
+    } catch (e) {
+      // A copy whose record never landed is a folder nobody can name: it goes with the create that made it.
+      live.delete(record.id);
+      await moduleOf("local").dropCopy(copy).catch(() => {});
+      throw e;
+    }
     const v = view(record);
     bus.emit({ type: "workspace.created", workspace: v });
     return v;
@@ -4922,6 +5056,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         execStream: execFactoryFor(entry, undefined, waiting),
         home: id => kind.home(entry, id),
         env: { ...kind.env(entry, harness), ...turnEnv },
+        ...((): { projectKey?: string } => {
+          const key = kind.memoryKey(entry, harness);
+          return key !== undefined ? { projectKey: key } : {};
+        })(),
         signInRefusal: signInRefusalLine({ kind: entry.record.kind }),
         vault: opts.vault?.() ?? {},
       }),

@@ -14,6 +14,7 @@ import { HERE_PLACE_ID, NO_PROVIDER_LINE } from "@wsp/protocol";
 import { createRuntime, localExecStream, memoryStore, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { ALSO_LOCAL_QUESTION } from "../src/init-first.js";
+import { hostPlatform } from "../src/verbs.js";
 import { runLocalInit, type LocalInitOptions } from "../src/init-local.js";
 import type { InitIO } from "../src/init.js";
 import type { HostHandle, WorkspaceRoads } from "../src/server.js";
@@ -41,7 +42,14 @@ interface Fake {
 /** This computer as the run holds it: a real local backend over a scratch folder and the provider module a keyless
  * host wires, so every road this test does not take refuses the way it does on a person's machine. */
 function localWiring(root: string): LocalWiring {
-  return { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({}) };
+  return {
+    backend: new LocalBackend({ root }),
+    execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+    home: () => join(root, ".claude"),
+    homeDir: root,
+    env: () => ({}),
+    platform: hostPlatform(),
+  };
 }
 
 function fake(over: { tty?: boolean; nonInteractive?: boolean; yes?: boolean; json?: boolean } = {}): Fake {

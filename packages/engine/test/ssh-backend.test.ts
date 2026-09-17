@@ -49,6 +49,9 @@ describe("ssh backend", () => {
       snapshotListing: false,
       templates: false,
       kept: true,
+      // wsp reaches this machine and nothing more: a project on it is worked where it sits and no copy is made.
+      copies: false,
+      ownNetwork: false,
       sizes: [],
     });
     expect(backend.pricing.rateUsdPerHour({ cpu: 8, memMb: 16384 })).toBe(0);

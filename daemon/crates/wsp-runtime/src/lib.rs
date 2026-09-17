@@ -13,6 +13,7 @@ pub mod copy;
 pub mod copy_plain;
 #[cfg(target_os = "linux")]
 pub mod copy_reflink;
+pub mod copy_road;
 #[cfg(target_os = "linux")]
 pub mod copy_snapshot;
 pub mod doctor;

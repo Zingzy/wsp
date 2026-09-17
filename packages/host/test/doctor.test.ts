@@ -10,6 +10,7 @@ import { WebSocketServer } from "ws";
 import { GUEST_USER_ENV, TOOLS_PATH, DAEMON_ENV_FILE } from "@wsp/engine";
 import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness.js";
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
+import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
 import { HERE_PLACE_ID, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
@@ -1130,7 +1131,14 @@ describe("the doctor's local road", () => {
         backend: new NoProviderBackend(),
         store: memoryStore(),
         adapters,
-        local: { backend: new LocalBackend({ root }), execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }), home: () => join(root, ".claude"), homeDir: root, env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }) },
+        local: {
+          backend: new LocalBackend({ root }),
+          execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+          home: () => join(root, ".claude"),
+          homeDir: root,
+          env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+          platform: hostPlatform(),
+        },
         hostId: "box:h1",
       }),
     };

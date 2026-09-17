@@ -25,7 +25,9 @@
           "rateUsdPerHour": 0
         }
       ],
-      "kept": false
+      "kept": false,
+      "copies": true,
+      "ownNetwork": true
     },
     "pricing": {
       "defaultSize": {
@@ -69,7 +71,9 @@
       "snapshotListing": false,
       "templates": false,
       "sizes": [],
-      "kept": false
+      "kept": false,
+      "copies": true,
+      "ownNetwork": true
     },
     "pricing": {
       "defaultSize": {

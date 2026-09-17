@@ -240,6 +240,14 @@ export const Capabilities = z.object({
    * rebuild and nothing else. Whether the access picker names the machine on the pick that asks nothing reads this;
    * what a thread with no access word runs at is the kind's own row, read through workspaceAccess. */
   kept: z.boolean(),
+  /** The computer makes a workspace as a copy of itself with the project inside. A Linux box and a provider fork
+   * yes; the computer the app runs on yes, by copying the project folder to a path of its own; a machine reached
+   * over ssh and a host with no provider no. */
+  copies: z.boolean(),
+  /** A copy gets its own network, its own localhost and its own ports. A Linux box and a provider fork yes; the
+   * computer the app runs on no, so its copies share its ports and the row says so. The one flag the row and the
+   * port base read. */
+  ownNetwork: z.boolean(),
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
@@ -429,6 +437,58 @@ export const AGENTS_OFF: WorkspaceAgents = { spawn: false, maxMachines: 0, maxDe
  * app draws without indenting twice. */
 export const AGENTS_ON: WorkspaceAgents = { spawn: true, maxMachines: 3, maxDepth: 1 };
 
+/** Which road made a workspace's copy on a computer that copies by directory: a directory clone of the project
+ * folder, a git worktree of it, or the folder itself worked where it sits. */
+export const CopyRoad = z.enum(["clonefile", "worktree", "in-place"]);
+export type CopyRoad = z.infer<typeof CopyRoad>;
+
+/** What rode along in the copy: everything the folder held that git ignores, so the dependencies are there and a
+ * build runs at once; the config files alone, so the dependencies install first; or nothing. */
+export const Carried = z.enum(["deps-and-config", "config-only", "nothing"]);
+export type Carried = z.infer<typeof Carried>;
+
+/** One copy as the daemon binary's copy verb is asked for it. The size line rides rather than living in the
+ * daemon: the number is the host's to change in one place, and a copy asked for by a test names a small one to
+ * take the fallback road. */
+export const CopyAsk = z.object({
+  from: z.string(),
+  to: z.string(),
+  /** The ref the copy is reset to; the folder's default branch when absent. */
+  base: z.string().optional(),
+  /** Directories removed after the copy so they rebuild at the new path. */
+  exclude: z.array(z.string()),
+  /** Apparent size above which the directory clone is not taken. */
+  sizeLineBytes: z.number().int().nonnegative(),
+  /** A road named outright; the verb's own pick when absent. */
+  road: CopyRoad.optional(),
+});
+export type CopyAsk = z.infer<typeof CopyAsk>;
+
+/** What the daemon binary's copy verb printed, read back by the host and kept on the workspace's record as
+ * `copy`. */
+export const CopyReport = z.object({
+  road: CopyRoad,
+  path: z.string(),
+  base: z.string(),
+  branch: z.string(),
+  fetched: z.boolean(),
+  carried: Carried,
+  excluded: z.array(z.string()),
+  bytes: z.number().int().nonnegative(),
+  ms: z.number().int().nonnegative(),
+  fellBack: z.string().optional(),
+});
+export type CopyReport = z.infer<typeof CopyReport>;
+
+/** What a workspace on a computer that copies by directory is made of: the road that made the copy, where it
+ * landed, what it stands on and what rode along. Absent on a fork and on a box snapshot, whose project arrives by
+ * the runtime's own road. */
+export const ProjectCopy = CopyReport.pick({ road: true, path: true, base: true, branch: true, carried: true, fellBack: true }).extend({
+  /** The project folder the copy was taken from: what a worktree's remove needs and what the row names. */
+  source: z.string(),
+});
+export type ProjectCopy = z.infer<typeof ProjectCopy>;
+
 /** The switch a patch leaves on the record, the one rule both roads that set one read: every key the patch does not
  * name keeps what the record holds, so turning it off and on again does not throw the caps away, and a workspace
  * that never had one takes the defaults for the caps nobody named. */
@@ -497,6 +557,14 @@ export const WorkspaceView = z.object({
   /** The place a fork lives on, by id; absent on a fork at the host's own provider and on every workspace that is
    * not a fork. The command line and the app show its name after the workspace's. */
   place: z.string().optional(),
+  /** What this workspace's copy of its project is made of, on a computer that makes a workspace by copying the
+   * project folder: the road, the path, the base and the folder it came from. Absent on a fork, whose project
+   * arrives by the runtime's own road. */
+  copy: ProjectCopy.optional(),
+  /** The port an app that reads PORT binds in this workspace, on a computer whose copies share its network.
+   * Absent where a copy has a network of its own, and absent on the folder worked in place, whose ports are the
+   * person's own. */
+  portBase: z.number().int().positive().optional(),
   /** Which provider this workspace's machine was forked at, by the id that provider's own module carries in a
    * registry (`solari`, `box`, `docker`): the host's own where it forked the machine, and the joined computer's
    * own offer where `place` names one, so the two fields cannot disagree about where a machine lives. The runtime
@@ -538,7 +606,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true,
+  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true, copy: true, portBase: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -2353,6 +2421,7 @@ export type WorkspaceCopy = z.infer<typeof WorkspaceCopy>;
 export const CopyWord = z.enum(["reflink", "snapshot", "plain"]);
 export type CopyWord = z.infer<typeof CopyWord>;
 
+
 /** One login the computer running a workspace keeps outside every one of them and mounts into this one at
  * `target`, read-write: signed in once on that computer, so a refresh inside any workspace there is the
  * computer's own refresh rather than a copy going stale. `source` is a file under that computer's own logins
@@ -3308,6 +3377,7 @@ const DAEMON_CONTENTS = [
   "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
   "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
+  "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3433,7 +3503,11 @@ const DAEMON_CONTENTS = [
  * Version 46 makes a workspace on a computer you own out of the computer itself: its system directories under overlays
  * with an upper per workspace, its home shared read-write with the daemon's own files hidden, the engine's data
  * hidden, the project bound at its path; a box pulls no image and keeps no layer store, and the snapshot and template
- * operations leave its wire. The root moves to /wsp so no upper sits under a lower the kernel would refuse. */
+ * operations leave its wire. The root moves to /wsp so no upper sits under a lower the kernel would refuse.
+ * Version 47 adds the copy verb the Mac host runs as a child: a directory clone of a project folder at a sibling path
+ * in one call, a git worktree where a clone cannot work, then the two rules that make the copy a clean checkout with
+ * its ignored files kept; the capabilities say whether a computer copies and whether a copy gets its own network,
+ * which is how the row knows this Mac shares ports. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
@@ -4653,7 +4727,7 @@ export {
   type Rgb,
   type ThemePreset,
 } from "./workspace-look.js";
-export { folderName, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export { copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
