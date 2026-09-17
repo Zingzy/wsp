@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The copy a disk that shares no blocks makes: every byte written, through copy_file_range where the kernel
-//! takes it and a read and a write where it does not. It costs the checkout's bytes and the checkout's time, so
-//! the create says how long it took and the place's row says the word, and neither pretends otherwise. A copies
-//! directory with less room left than the checkout holds is refused before a byte moves, naming both numbers.
+//! The copy a disk that shares no blocks makes: every byte written, through the standard library's own copy,
+//! which asks the kernel to move the bytes and falls back to a read and a write where it will not. It costs the
+//! checkout's bytes and the checkout's time, so the create says how long it took and the place's row says the
+//! word, and neither pretends otherwise. A copies directory with less room left than the checkout holds is
+//! refused before a byte moves, naming both numbers.
 
 use std::fs::File;
 use std::io;
-use std::os::fd::AsRawFd;
 use std::path::Path;
 
 use wsp_frames::CopyWord;
@@ -47,23 +47,16 @@ fn free_bytes(at: &Path) -> io::Result<u64> {
     Ok(stat.blocks_available() as u64 * stat.fragment_size() as u64)
 }
 
-/// One file's bytes into a target that does not exist yet: the kernel's own copy where it takes it, which never
-/// carries the bytes through this process, and a plain read and write where it does not.
+/// One file's bytes into a target that does not exist yet, through the standard library's own copy: on Linux it
+/// asks the kernel to move the bytes itself and falls back to a read and a write where the kernel refuses, and
+/// it reaches that call the way the rest of this binary does. This module calls no C function of its own: a
+/// direct call to copy_file_range in a static musl build with fat link time optimisation linked to address zero
+/// and took the daemon's process down at the first file of every plain copy, since the standard library
+/// declares that name weakly and an undefined weak reference pulls no member out of the C archive.
 fn write_file(source: &Path, target: &Path) -> io::Result<()> {
     let mut read = File::open(source)?;
     let mut write = File::create_new(target)?;
-    let mut left = read.metadata()?.len();
-    while left > 0 {
-        let took = unsafe {
-            nix::libc::copy_file_range(read.as_raw_fd(), std::ptr::null_mut(), write.as_raw_fd(), std::ptr::null_mut(), left as usize, 0)
-        };
-        if took <= 0 {
-            io::copy(&mut read, &mut write).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", target.display())))?;
-            return Ok(());
-        }
-        left -= took as u64;
-    }
-    Ok(())
+    io::copy(&mut read, &mut write).map(|_| ()).map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", target.display())))
 }
 
 #[cfg(test)]

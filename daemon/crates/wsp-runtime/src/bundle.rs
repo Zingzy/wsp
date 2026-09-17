@@ -91,6 +91,14 @@ impl Layout {
     pub fn copy_of(&self, id: &str) -> PathBuf {
         self.copies().join(id)
     }
+    /// Where a copy is made before it is one: a create that dies mid-copy leaves this rather than a half
+    /// written `copy_of`, and the open sweeps every one of them. The copy is renamed into place, which is one
+    /// directory entry, only once every byte of it is there.
+    pub fn copy_being_made(&self, id: &str) -> PathBuf {
+        self.copies().join(format!(".{id}.partial"))
+    }
+    /// The mark a name being made carries, read by the sweep.
+    pub const PARTIAL: &'static str = ".partial";
     /// Where the project checkouts a box holds live; the copies directory sits beside it under the same root,
     /// which is what lets a copy share blocks with the checkout it was made from.
     pub fn projects(&self) -> PathBuf {

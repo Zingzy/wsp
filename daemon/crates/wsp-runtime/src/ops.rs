@@ -191,6 +191,22 @@ pub struct Ops {
     swept: Swept,
     stopped: Vec<String>,
     net_swept: net::Swept,
+    unfinished: Unfinished,
+}
+
+/// What the open took away of creates that never finished: a copy still being made and a claimed run directory
+/// with no record in it are both what a daemon that died in the middle of a create leaves, and neither is a
+/// workspace anything can name.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Unfinished {
+    pub copies: Vec<String>,
+    pub claims: Vec<String>,
+}
+
+impl Unfinished {
+    pub fn is_empty(&self) -> bool {
+        self.copies.is_empty() && self.claims.is_empty()
+    }
 }
 
 impl Ops {
@@ -205,6 +221,9 @@ impl Ops {
         for dir in [layout.run(), layout.state()] {
             fs::create_dir_all(&dir).map_err(|source| store::Error::Io { path: dir.clone(), source })?;
         }
+        // Before anything reads the run directory as a list of workspaces: what a create that died left is not
+        // one, and a copy that was still being made is not a copy.
+        let unfinished = sweep_unfinished(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
         let held = held_chains(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
         let swept = store.sweep(&held)?;
         let runtime = Runtime::new(root, exe);
@@ -224,6 +243,7 @@ impl Ops {
             swept,
             stopped,
             net_swept,
+            unfinished,
         })
     }
 
@@ -290,6 +310,11 @@ impl Ops {
     /// What the network sweep at open removed.
     pub fn net_swept_at_open(&self) -> &net::Swept {
         &self.net_swept
+    }
+
+    /// What the open took away of creates that never finished.
+    pub fn unfinished_at_open(&self) -> &Unfinished {
+        &self.unfinished
     }
 
     pub fn facts(&self) -> BoxFacts {
@@ -620,12 +645,23 @@ impl Ops {
         // The path the project takes inside, read through the same wall the boot's bind is built with and
         // before a byte is copied or anything is mounted: a refusal here costs nothing to take back.
         bundle::inside(&self.layout.rootfs(id), &want.at)?;
-        let (from, to, copies) = (PathBuf::from(&want.from), self.layout.copy_of(id), self.layout.copies());
+        // Made under a name that says it is not finished and renamed into place by one directory entry once it
+        // is: a create that dies in the middle of a copy, which a kernel or a disk can always make happen,
+        // leaves something the open sweeps rather than a copy of half a checkout that reads as whole.
+        let (from, being_made, to) = (PathBuf::from(&want.from), self.layout.copy_being_made(id), self.layout.copy_of(id));
+        let copies = self.layout.copies();
         let started = std::time::Instant::now();
         let made = tokio::task::spawn_blocking(move || -> io::Result<CopyWord> {
             let copier = copy::copier_for(&from, &copies)?;
-            copier.copy(&from, &to)?;
-            Ok(copier.word())
+            let _ = copier.remove(&being_made);
+            copier.copy(&from, &being_made)?;
+            match fs::rename(&being_made, &to) {
+                Ok(()) => Ok(copier.word()),
+                Err(e) => {
+                    let _ = copier.remove(&being_made);
+                    Err(io::Error::new(e.kind(), format!("{}: {e}", to.display())))
+                }
+            }
         })
         .await
         .map_err(|e| OpError::plain(e.to_string()))??;
@@ -1099,6 +1135,49 @@ fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
     Ok(stopped)
 }
 
+/// Every half made copy and every claimed run directory holding no record, taken away. A create claims its run
+/// directory first and writes its record last, so a daemon that died between the two leaves a directory that
+/// names no workspace and, where the create was copying, a copy of part of a checkout under the name the copy
+/// is made under. Neither is anything a machine op can reach, and a create under the same key would be refused
+/// by the claim that outlived it, so the open is where they go.
+fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
+    let mut swept = Unfinished::default();
+    if let Some(entries) = read_dir_or_none(&layout.copies())? {
+        for entry in entries {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(Layout::PARTIAL) {
+                continue;
+            }
+            let path = entry.path();
+            // However it was made: a snapshot that never finished is a subvolume, and a tree is a tree.
+            if copy::copier_of(CopyWord::Snapshot).remove(&path).is_err() {
+                copy::copier_of(CopyWord::Plain).remove(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
+            }
+            swept.copies.push(name);
+        }
+    }
+    if let Some(entries) = read_dir_or_none(&layout.run())? {
+        for entry in entries {
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if bundle::read_record(&layout.record(&id))?.is_some() {
+                continue;
+            }
+            fs::remove_dir_all(entry.path()).map_err(|e| OpError::plain(format!("{}: {e}", entry.path().display())))?;
+            swept.claims.push(id);
+        }
+    }
+    Ok(swept)
+}
+
+/// The entries of a directory, or nothing where there is no such directory.
+fn read_dir_or_none(dir: &Path) -> Result<Option<Vec<fs::DirEntry>>, OpError> {
+    match fs::read_dir(dir) {
+        Ok(entries) => entries.collect::<io::Result<Vec<_>>>().map(Some).map_err(|e| OpError::plain(format!("{}: {e}", dir.display()))),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(OpError::plain(format!("{}: {e}", dir.display()))),
+    }
+}
+
 /// The chains every workspace under the root booted from, running or stopped: the sweep keeps their layers.
 fn held_chains(layout: &Layout) -> Result<Vec<Chain>, OpError> {
     Ok(records_under(layout)?.into_iter().map(|record| record.chain).collect())
@@ -1497,6 +1576,55 @@ mod tests {
         for id in ["wsp-one", "wsp-two"] {
             assert!(Layout::new(root).upper(id).is_dir(), "{id} lost its upper directory");
         }
+    }
+
+    #[test]
+    fn the_open_sweeps_a_copy_still_being_made_and_a_claim_with_no_workspace_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let layout = Layout::new(root);
+        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
+        // What a daemon that died in the middle of a create leaves: the claim it took first, and the copy it
+        // was writing under the name a copy is made under.
+        let half = layout.copy_being_made("wsp-half");
+        fs::create_dir_all(half.join("src")).unwrap();
+        fs::write(half.join("src/index.js"), b"half of a checkout\n").unwrap();
+        fs::create_dir_all(layout.workspace("wsp-half")).unwrap();
+        // And what a workspace looks like, which the sweep may not touch: a record, its upper, its copy.
+        let chain = Chain { config: Digest::of(b"c"), layers: Vec::new() };
+        left_on_disk(root, "wsp-whole", &chain);
+        fs::create_dir_all(layout.copy_of("wsp-whole")).unwrap();
+
+        let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        assert_eq!(again.unfinished_at_open().copies, vec![".wsp-half.partial".to_owned()]);
+        assert_eq!(again.unfinished_at_open().claims, vec!["wsp-half".to_owned()]);
+        assert!(!half.exists() && !layout.workspace("wsp-half").exists());
+        assert!(layout.copy_of("wsp-whole").is_dir() && layout.workspace("wsp-whole").is_dir());
+        assert_eq!(again.list(None).unwrap().len(), 1);
+        // And an open of a root nothing died under says nothing.
+        let third = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
+        assert!(third.unfinished_at_open().is_empty());
+    }
+
+    /// A copy that fails partway leaves nothing under the name a workspace's copy has, so the next create under
+    /// the same key is not handed half a checkout. The walk refuses a named pipe, which is a checkout a person
+    /// can make by accident and the cheapest failure to write here.
+    #[tokio::test]
+    async fn a_copy_that_fails_partway_leaves_no_copy_and_nothing_half_made() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let from = dir.path().join("checkout");
+        fs::create_dir_all(from.join("src")).unwrap();
+        fs::write(from.join("src/index.js"), b"module.exports = 1\n").unwrap();
+        nix::unistd::mkfifo(&from.join("pipe"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+        let want = WorkspaceCopy { from: from.display().to_string(), at: "/Users/zingzy/wsp".to_owned() };
+        let refused = ops.make_copy("wsp-x", &want).await.unwrap_err().message;
+        assert!(refused.contains("pipe") && refused.contains("is a device"), "{refused}");
+        let layout = Layout::new(dir.path());
+        assert!(!layout.copy_of("wsp-x").exists(), "a failed copy left a copy");
+        assert!(!layout.copy_being_made("wsp-x").exists(), "a failed copy left what it was making");
+        let left: Vec<_> = fs::read_dir(layout.copies()).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert!(left.is_empty(), "{left:?}");
     }
 
     #[test]
