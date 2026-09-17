@@ -2191,6 +2191,11 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * would carry. */
   const backendOfKind = (kind: WorkspaceKind, place?: string): MachineBackend =>
     moduleOf(kind).backend({ kind, ...(place !== undefined ? { place } : {}) } as WorkspaceRecord);
+  /** Whether a fork on this backend stands on an image at all: a provider boots a template or a snapshot it keeps,
+   * and a workspace on a computer somebody joined is a copy of that computer's own directories, so it names none
+   * and nothing is looked up or built for it. The one reading of that road above the backend, so no road here
+   * names a provider or a place to learn it. */
+  const keepsImages = (at: MachineBackend): boolean => at.capabilities.images;
   /** The budgets a kind's backend declares for its naps and wakes. Every reader sits behind the pause refusal or
    * behind a machine's preview route, so a kind without one here is a wiring fault, never a person's road. */
   const lifecycleOf = (entry: LiveWorkspace): Lifecycle => {
@@ -3278,7 +3283,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
   /** Size is always explicit: a create that names none gets the provider's own
    * default (2048 MB on Solari), not the size the record and the rate assume. */
-  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"], engine: boolean, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
+  const forkSpec = (r: WorkspaceRecord, kind: MachineKind, image: ReturnType<typeof goldenImage>["spec"] | undefined, engine: boolean, override?: WorkspaceSpec): MachineSpec & WorkspaceSize => ({
     ...image,
     kind,
     ...(engine ? { engine: true } : {}),
@@ -3404,14 +3409,14 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     claiming(
       `workspace/${record.id}`,
       async b => {
-        const image = await imageOf(record.golden);
-        const golden = image.version;
+        const image = keepsImages(b) ? await imageOf(record.golden) : undefined;
+        const golden = image?.version;
         // A project golden's snapshot is the image; only a version's own snapshot may stand behind a template.
-        const spec = forkSpec(record, golden?.kind ?? "sandbox", goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await recipeAsksEngine(golden))), override);
+        const spec = forkSpec(record, golden?.kind ?? "sandbox", image === undefined ? undefined : goldenImage(image.projects === undefined && golden !== undefined ? golden : { snapshotId: record.golden }).spec, record.spec.engine === true || (golden !== undefined && (await recipeAsksEngine(golden))), override);
         // A place that has never held this image says missing about a reference no registry has: the fork lands
         // nowhere and the sentence says where it would land until that place holds a copy.
         const machine = await b.create(spec).catch((e: unknown) => {
-          if (record.place === undefined || !isMissing(e)) throw e;
+          if (image === undefined || record.place === undefined || !isMissing(e)) throw e;
           throw Object.assign(new Error(placeHoldsNoImageLine(placeDoorOf().nameOf(record.place), spec.fromSnapshot ?? spec.template ?? record.golden)), { kind: "invalid" });
         });
         // Named by its record before the claim is released, so no sweep sees it unclaimed.
@@ -4097,13 +4102,15 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     const at = await landingBackend(placeId);
     // What this project's computer mounts into every workspace of it, off the road that landed the project there.
     const binds = projectLanding(landingKind(project.computer, at)).workspaceBinds(project);
-    // What this workspace forks: at a place that is not the image's own, that place's copy of the image, once a
-    // build of it running there has finished; everywhere else the snapshot asked for.
-    // What a workspace of this project forks: the image the add built for the project where it built one, since
-    // that image already holds the clone and its dependencies, else the head of this host's own.
-    const golden = await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId);
-    const image = await imageOf(golden);
-    const inherited = image.version?.size;
+    // A computer that keeps no image is forked from none: the workspace is a copy of that computer itself, so no
+    // image is read, no copy of one is built there ahead of the fork, and the record names none the way a
+    // workspace worked in place does.
+    const fromImage = keepsImages(at);
+    // What this workspace forks: the image the add built for this project where it built one, since that image
+    // already holds the clone and its dependencies; else, at a place that is not the image's own, that place's
+    // copy of the image once a build of it running there has finished, and everywhere else the snapshot asked for.
+    const golden = fromImage ? await copyForFork(o.golden ?? project.image?.snapshotId ?? (await imageHead()), placeId) : "";
+    const inherited = fromImage ? (await imageOf(golden)).version?.size : undefined;
     const record: WorkspaceRecord = {
       id,
       name: o.name,

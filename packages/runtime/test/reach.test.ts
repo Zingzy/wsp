@@ -20,7 +20,7 @@ let inboxDir: string | undefined;
 let procRoot: string | undefined;
 
 // The machine the daemon reads is a fake /proc tree and a folder of this test's own: darwin has neither
-// /proc/net/tcp nor /root/inbox, and a listener here is a row written into that tree.
+// /proc/net/tcp nor /root/.wsp/inbox, and a listener here is a row written into that tree.
 async function startTestDaemon(): Promise<DaemonUnderTest> {
   inboxDir = mkdtempSync(join(tmpdir(), "wsp-reach-inbox-"));
   procRoot = fakeProcTree([]);

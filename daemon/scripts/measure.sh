@@ -13,7 +13,7 @@
 # never silent about which one it measured. The node daemon's pid comes from the systemd unit wsp-daemon.service
 # where one exists (a Box or an ssh fork) and otherwise from the pid file the container supervisor writes,
 # /root/wsp-daemon/daemon.pid (a Docker fork). It listens on WSP_NODE_PORT (7070) with the token in
-# WSP_NODE_TOKEN_PATH (/root/.wsp-daemon-token).
+# WSP_NODE_TOKEN_PATH (/root/.wsp/daemon-token).
 #
 # RSS is VmRSS from /proc/<pid>/status, both the daemon's own and the sum over every process under it (a pty's
 # shell and what it runs), read off /proc alone. The wire client is python3 and its standard library: it is on
@@ -47,7 +47,7 @@ bin=${WSP_DAEMON_BIN:-"$here/../target/release/wsp-daemon"}
 command -v python3 >/dev/null 2>&1 || { echo "measure.sh: python3 is needed for the wire client" >&2; exit 2; }
 
 node_port=${WSP_NODE_PORT:-7070}
-node_token_path=${WSP_NODE_TOKEN_PATH:-/root/.wsp-daemon-token}
+node_token_path=${WSP_NODE_TOKEN_PATH:-/root/.wsp/daemon-token}
 [ -r "$node_token_path" ] || { echo "measure.sh: cannot read the node daemon's token at $node_token_path" >&2; exit 2; }
 step=${WSP_MEASURE_STEP_SECONDS:-60}
 

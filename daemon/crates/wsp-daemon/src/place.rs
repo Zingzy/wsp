@@ -113,6 +113,14 @@ pub(crate) struct ReportInput<'a> {
     pub(crate) runtime_root: &'a Path,
 }
 
+/// Why this computer runs no workspace, as the row carries it: its own reason first, the kernel's and the
+/// login's, then where this daemon's root was put. A root inside one of the directories every workspace reads
+/// through an overlay is refused by the open, so the row says so rather than reading ready and then refusing
+/// every create. One reading, so the row and the open cannot part ways.
+fn workspaces_blocked_by(its_own: Option<String>, runtime_root: &Path) -> Option<String> {
+    its_own.or_else(|| wsp_runtime::doctor::root_under_a_lower(runtime_root))
+}
+
 /// What this computer says about itself on this link, in the shape the host parses.
 pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     let path = std::env::var("PATH").unwrap_or_default();
@@ -120,6 +128,8 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     let free = disk_free(if work.exists() { &work } else { input.home });
     let wsp = if input.wsp_argv.is_empty() { vec!["wsp".to_owned()] } else { input.wsp_argv.to_vec() };
     let doctor = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts());
+    let blocked = workspaces_blocked_by(doctor.blocked.clone(), input.runtime_root);
+    let runs_workspaces = blocked.is_none();
     PlaceReport {
         name: input.file.name.clone(),
         platform: if cfg!(target_os = "macos") { Platform::Darwin } else { Platform::Linux },
@@ -137,13 +147,13 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         ]
         .into_iter()
         .collect(),
-        runs_workspaces: doctor.runs_workspaces,
-        workspaces_blocked: doctor.blocked,
+        runs_workspaces,
+        workspaces_blocked: blocked,
         engine: doctor.engine.word().to_owned(),
         // How a copy of a project is made here, probed on the disk under the runtime's own root, and only
         // where a workspace runs here at all: a computer that boots none has no copy to describe, and the probe
         // is not run for one.
-        copies: doctor.runs_workspaces.then(|| wsp_runtime::copy::copies_word(input.runtime_root)),
+        copies: runs_workspaces.then(|| wsp_runtime::copy::copies_word(input.runtime_root)),
         daemon_version: numbers::DAEMON_VERSION,
         daemon_port: std::num::NonZeroU16::new(input.daemon_port),
         wsp,
@@ -389,6 +399,31 @@ mod tests {
             runtime_root: home.path(),
         });
         assert_eq!(bare.wsp, vec!["wsp"]);
+        // And the root the daemon was given is part of that reading: under one of the directories every
+        // workspace overlays, the open refuses it, so the row says why and carries no copy word rather than
+        // reading ready and refusing every create.
+        let under = std::path::Path::new("/var/lib/wsp-under-a-lower");
+        let bad = place_report(&ReportInput {
+            file: &file,
+            home: home.path(),
+            wsp_argv: &[],
+            agents: &[],
+            daemon_port: 1,
+            dialed: "http://h:1",
+            runtime_root: under,
+        });
+        assert!(!bad.runs_workspaces);
+        assert_eq!(bad.copies, None);
+        // Which reason the row carries is one reading, held here on every computer this builds for: the
+        // computer's own first, where it has one, and the root's where it has none.
+        let its_own = "wsp runs workspaces on a Linux computer, and this computer is not one".to_owned();
+        assert_eq!(workspaces_blocked_by(Some(its_own.clone()), under), Some(its_own));
+        assert_eq!(workspaces_blocked_by(None, under), wsp_runtime::doctor::root_under_a_lower(under));
+        assert!(workspaces_blocked_by(None, under).is_some_and(|said| said.contains("/var")));
+        assert_eq!(workspaces_blocked_by(None, std::path::Path::new(wsp_runtime::DEFAULT_ROOT)), None);
+        // And the row's own reason is whichever of the two this computer gave, never a word written here.
+        let first = wsp_runtime::doctor::assess(&wsp_runtime::doctor::read_facts()).blocked;
+        assert_eq!(bad.workspaces_blocked, workspaces_blocked_by(first, under));
         // The shape the host parses is the shape this serialises to.
         serde_json::from_value::<PlaceReport>(serde_json::to_value(&report).unwrap()).unwrap();
     }

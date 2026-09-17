@@ -89,7 +89,8 @@ pub(crate) struct Flags {
     pub(crate) link_refused_retry_ms: Option<u64>,
     #[arg(long, value_name = "n")]
     pub(crate) link_backoff_ms: Option<u64>,
-    /// Where a place's daemon keeps the layers and the workspaces it runs; /var/lib/wsp when absent.
+    /// Where a place's daemon keeps the workspaces it runs, their copies of a project and the checkouts those
+    /// are made from; /wsp when absent.
     #[arg(long, value_name = "dir")]
     pub(crate) runtime_root: Option<PathBuf>,
 }
@@ -162,7 +163,10 @@ mod tests {
         let f = parse(&[]).unwrap();
         assert_eq!(f.host, "0.0.0.0");
         assert_eq!(f.port, 7070);
-        assert_eq!(f.token_path, PathBuf::from("/root/.wsp-daemon-token"));
+        // Under root's own wsp folder, which is the folder a workspace on a computer somebody joined has of
+        // its own: the default a machine's daemon starts with is never a path in a folder it shares.
+        assert_eq!(f.token_path, PathBuf::from("/root/.wsp/daemon-token"));
+        assert_eq!(f.token_path, PathBuf::from(numbers::DEFAULT_TOKEN_PATH));
         assert_eq!(f.kind, "cloud");
         assert!(f.root.is_none());
     }

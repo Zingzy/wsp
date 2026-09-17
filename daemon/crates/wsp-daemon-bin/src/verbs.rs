@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Verbs beside the daemon: run in the foreground, do one thing, exit. `runtime pull` fills the layer store the
-//! way a machine create will, so the fetch can be timed on a box by itself. `runtime ask` answers one machine
-//! frame from the runtime under a root, so a snapshot or a wake can be driven and timed on a box with nothing else
+//! Verbs beside the daemon: run in the foreground, do one thing, exit. `runtime ask` answers one machine frame
+//! from the runtime under a root, so a create or a wake can be driven and timed on a box with nothing else
 //! running. `runtime create` and `runtime exec` are the fresh processes the daemon runs youki's clone in;
 //! `runtime init` is a workspace's first process.
 
-use std::io::{self, Write};
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 use clap::Subcommand;
 use wsp_frames::numbers;
-use wsp_runtime::fetch::{Client, Reference};
-use wsp_runtime::store::Store;
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum Verb {
@@ -33,19 +28,11 @@ pub(crate) enum Verb {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum RuntimeVerb {
-    /// Pull an image into the layer store under the runtime root, or say it is already there.
-    Pull {
-        /// The image as people write it: ubuntu:24.04, ghcr.io/org/app:tag.
-        image: String,
-        /// The runtime's root; the store lives under <root>/layers.
-        #[arg(long, default_value = wsp_runtime::DEFAULT_ROOT, value_name = "dir")]
-        root: PathBuf,
-    },
     /// One machine frame answered by the runtime under the root, as the daemon answers it on its link: the frame's
     /// JSON without its id, the reply printed with the milliseconds the op took. Not for a root a daemon is serving,
     /// which is why the root has no default: it is named on purpose every time.
     Ask {
-        /// The frame: {"op":"machine.snapshot","machineId":"wsp-x","name":"v1","life":{"firstLife":true}}
+        /// The frame: {"op":"machine.create","spec":{"kind":"sandbox","cpu":1,"memMb":512}}
         frame: String,
         /// The runtime root the frame is answered under; never the one a running daemon serves.
         #[arg(long, value_name = "dir")]
@@ -79,13 +66,6 @@ pub(crate) enum RuntimeVerb {
 
 pub(crate) fn run(verb: Verb) -> i32 {
     match verb {
-        Verb::Runtime { verb: RuntimeVerb::Pull { image, root } } => match pull(&image, &root) {
-            Ok(()) => 0,
-            Err(e) => {
-                eprintln!("runtime pull {image}: {e}");
-                1
-            }
-        },
         Verb::Runtime { verb: RuntimeVerb::Ask { frame, root } } => linux::ask(&root, &frame),
         Verb::Runtime { verb: RuntimeVerb::Create { root, id } } => linux::create(&root, &id),
         Verb::Runtime { verb: RuntimeVerb::Exec { root, id, timeout_ms, cmd } } => linux::exec(&root, &id, cmd, timeout_ms),
@@ -200,28 +180,4 @@ mod linux {
         eprintln!("runtime init: {NOT_HERE}");
         1
     }
-}
-
-fn pull(image: &str, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let started = Instant::now();
-    let source = Reference::parse(image)?;
-    let store = Store::open(root)?;
-    let pulled = store.pull(image, &source, &mut Client::new())?;
-    let verb = if pulled.fetched { "pulled" } else { "in the store" };
-    let mut lines = vec![
-        format!("{verb} {image} in {} ms from {}", started.elapsed().as_millis(), pulled.image.source),
-        format!("manifest {}", pulled.image.manifest),
-        format!("config {}", pulled.image.chain.config),
-    ];
-    lines.extend(
-        pulled.image.chain.layers.iter().zip(&pulled.image.layer_bytes).map(|(digest, bytes)| format!("layer {digest} {bytes} bytes")),
-    );
-    let mut out = io::stdout().lock();
-    for line in lines {
-        // A reader that went away (a pipe into head) ends the report, not the process.
-        if writeln!(out, "{line}").is_err() {
-            break;
-        }
-    }
-    Ok(())
 }

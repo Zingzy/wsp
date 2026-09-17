@@ -30,6 +30,11 @@ pub const HOST_REFUSED_PLACE: &str = "the host refused this place";
 pub const NO_PLACE_FILE: &str =
     "no place file here, so there is no host to dial; wsp join <address> --code <code> makes this computer a place";
 
+/// What a create naming a template or a snapshot is refused with on a computer somebody joined, and what a road
+/// above answers for a saved image there without asking: a workspace on such a computer is made from that
+/// computer's own directories and a copy of a checkout on it, so there is nothing to pull and nothing to build.
+pub const NO_IMAGES_HERE: &str = "this computer keeps no images: a workspace here is a copy of the computer itself";
+
 /// What a socket that never asked to watch guest sessions is told when it answers or ends one.
 pub const GUEST_NOT_WATCHER: &str = "only the socket that sent guest.watch may answer or close a guest session";
 /// Why a session with nobody reading it is ended: the host has been away past the queue's cap.

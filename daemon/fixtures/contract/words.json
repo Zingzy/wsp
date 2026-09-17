@@ -9,6 +9,7 @@
   "portScopeRefusal": "this socket is scoped to port {port}: only tunnel ops on it and ping are allowed",
   "notOnThisRoad": "not on this road",
   "notOnThisKind": "not on this kind",
+  "noImagesHere": "this computer keeps no images: a workspace here is a copy of the computer itself",
   "guestNotWatcher": "only the socket that sent guest.watch may answer or close a guest session",
   "guestQueueFull": "the host has not read this session for too long",
   "guestUnwatched": "the host stopped watching; run it again",

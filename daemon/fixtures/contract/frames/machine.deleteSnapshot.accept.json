@@ -1,7 +1,0 @@
-[
-  {
-    "id": 1,
-    "op": "machine.deleteSnapshot",
-    "snapshotId": "s1"
-  }
-]

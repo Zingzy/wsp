@@ -17,16 +17,11 @@ import {
   MachineFactsReply,
   MachineHandleReply,
   MachineListReply,
-  MachinePromoteReply,
   MachineReachReply,
   MachineShapeReply,
-  MachineSnapshotJobReply,
-  MachineSnapshotReply,
-  MachineSnapshotsReply,
   MachineStateReply,
-  MachineTemplateReply,
-  MachineTemplatesReply,
   MachineUrlReply,
+  NO_IMAGES_HERE,
   type BackendFacts,
   type Capabilities,
   type MachineFacts,
@@ -52,8 +47,6 @@ import type {
   PreviewReach,
   RunOptions,
   SnapshotOptions,
-  SnapshotRow,
-  TemplateRow,
 } from "./machine.js";
 
 /** What one ask on a link may say about itself: how long it waits, and whether asking it again is the same ask. */
@@ -85,16 +78,6 @@ export interface MachineLink {
 
 /** How much longer than the frame's own timeout the client waits for the answer to come back over the link. */
 export const LINK_MARGIN_MS = 5_000;
-
-/** How often a snapshot job is asked after. A layer of a built workspace takes minutes to write on a small box, so
- * the snapshot is a job the far side names at once, and each ask is one short frame of its own; a person watching
- * the stage reads the bytes at this pace. */
-export const SNAPSHOT_POLL_MS = 1_000;
-
-/** How long a job may read running with its bytes standing still before the ask is given up with a reason. The
- * bytes stand still by design while the far side unpacks the layer it has written (46 s for 5 GB, measured), so this
- * is minutes, not the poll's pace; a tar on a stalled disk or a thaw that hangs is what it ends. */
-export const SNAPSHOT_STALL_MS = 10 * 60_000;
 
 /** What every call on a place that is not connected rejects with. Nothing is wrong with the machine: the computer
  * holding it dials this host on its own whenever it is on, and the record waits rather than being called gone. */
@@ -131,8 +114,6 @@ export class LinkMachine implements Machine {
   constructor(
     private readonly link: MachineLink,
     handle: MachineHandle,
-    private readonly snapshotPollMs = SNAPSHOT_POLL_MS,
-    private readonly snapshotStallMs = SNAPSHOT_STALL_MS,
   ) {
     this.id = handle.id;
     this.kind = handle.kind;
@@ -172,28 +153,11 @@ export class LinkMachine implements Machine {
     return execDetached(this, script, opts);
   }
 
-  /** The far side names the job at once and is asked after it until it reads done; a job that failed is refused
-   * with its reason on the ask that finds it so, and a job whose bytes stand still past the stall bound is given up
-   * with the count it stopped at.
-   *
-   * The ask after the job is a read of the job's own state and changes nothing on that computer, so it is named by
-   * the job and waits out a link that drops under it. The frame that names the job is not: asked twice it would
-   * start a second snapshot. That leaves the first frame of a snapshot as the one a gap ends, and the minutes after
-   * it, which is where a layer is written, as time a link may go and come back in. */
-  async snapshot(name: string, life: MachineLife, opts?: SnapshotOptions): Promise<string> {
-    const { job } = await this.ask(MachineSnapshotReply, "machine.snapshot", { name, life });
-    let advanced = { bytes: -1, at: Date.now() };
-    for (;;) {
-      const read = await askLink(this.link, MachineSnapshotJobReply, "machine.snapshotJob", { job }, { idempotencyKey: `snapshotJob/${job}` });
-      opts?.onProgress?.({ bytes: read.bytes, ...(read.total !== undefined ? { total: read.total } : {}) });
-      if (read.state === "done") {
-        if (read.snapshotId === undefined) throw new Error(`the snapshot job ${job} on ${this.id} read done without a snapshot id`);
-        return read.snapshotId;
-      }
-      if (read.bytes !== advanced.bytes) advanced = { bytes: read.bytes, at: Date.now() };
-      else if (Date.now() - advanced.at >= this.snapshotStallMs) throw new Error(`the snapshot job ${job} on ${this.id} has written nothing past ${read.bytes} bytes for ${Math.round(this.snapshotStallMs / 60_000)} minutes; given up`);
-      await new Promise(r => setTimeout(r, this.snapshotPollMs));
-    }
+  /** A computer somebody joined keeps no image, so there is nothing for a copy of this machine's disk to become
+   * and no frame to send: the refusal is the far side's own sentence, said here rather than after a round trip.
+   * Every road above already reads `capabilities.images` before it asks for one; this is the wall behind that. */
+  snapshot(_name: string, _life: MachineLife, _opts?: SnapshotOptions): Promise<string> {
+    return Promise.reject(new Error(NO_IMAGES_HERE));
   }
 
   pause(): Promise<void> {
@@ -294,17 +258,15 @@ async function askLink<T>(
 
 /** A backend on a computer this host reaches over a link. Its facts are read once, when the link opens, and the
  * optional calls are present exactly where those facts say: the rule that ties a capability to the call behind it
- * holds over a link as it does in process. */
+ * holds over a link as it does in process. A computer somebody joined keeps no image, so nothing here saves,
+ * names or lists one: the link carries no frame for it, and the two calls the interfaces require reject with the
+ * far side's own sentence. */
 export class LinkBackend implements MachineBackend {
   readonly capabilities: Capabilities;
   readonly pricing: BackendPricing;
   readonly lifecycle?: Lifecycle;
   readonly baseTemplates?: Readonly<Record<MachineKind, string>>;
-  readonly listSnapshots?: () => Promise<SnapshotRow[]>;
-  readonly promoteSnapshot?: (snapshotId: string, name: string) => Promise<string>;
-  readonly getTemplate?: (id: string) => Promise<TemplateRow>;
-  readonly listTemplates?: () => Promise<TemplateRow[]>;
-  readonly deleteTemplate?: (id: string) => Promise<void>;
+  /** Where the computer on the far side keeps the logins it shares into every workspace on it, as it said. */
   readonly logins?: string;
   readonly projects?: string;
 
@@ -337,13 +299,6 @@ export class LinkBackend implements MachineBackend {
     };
     if (facts.lifecycle !== undefined) this.lifecycle = { budgets: facts.lifecycle.budgets };
     if (facts.baseTemplates !== undefined) this.baseTemplates = facts.baseTemplates;
-    if (facts.capabilities.snapshotListing) this.listSnapshots = () => this.ask(MachineSnapshotsReply, "machine.listSnapshots").then(r => r.snapshots);
-    if (facts.capabilities.templates) {
-      this.promoteSnapshot = (snapshotId, name) => this.ask(MachinePromoteReply, "machine.promoteSnapshot", { snapshotId, name }).then(r => r.templateId);
-      this.getTemplate = templateId => this.ask(MachineTemplateReply, "machine.getTemplate", { templateId }).then(r => r.template);
-      this.listTemplates = () => this.ask(MachineTemplatesReply, "machine.listTemplates").then(r => r.templates);
-      this.deleteTemplate = templateId => this.ask(null, "machine.deleteTemplate", { templateId }).then(() => undefined);
-    }
   }
 
   private ask<T>(reply: { parse(v: unknown): T } | null, op: string, params: Record<string, unknown> = {}, opts?: LinkAsk): Promise<T> {
@@ -377,8 +332,9 @@ export class LinkBackend implements MachineBackend {
     return this.ask(MachineListReply, "machine.list", labels === undefined ? {} : { labels }).then(r => r.machines);
   }
 
-  deleteSnapshot(snapshotId: string): Promise<void> {
-    return this.ask(null, "machine.deleteSnapshot", { snapshotId }).then(() => undefined);
+  /** Nothing here ever made one, so there is nothing to delete and no frame to send it on. */
+  deleteSnapshot(_snapshotId: string): Promise<void> {
+    return Promise.reject(new Error(NO_IMAGES_HERE));
   }
 
   checkKey(): Promise<void> {

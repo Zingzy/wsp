@@ -25,12 +25,11 @@ pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStre
 pub use id::RequestId;
 pub use machine::{
     BackendFacts, BackendPricing, BaseTemplates, Bind, Capabilities, CopyWord, DaemonSupervisor, ExecResult, Lifecycle, LifecycleBudgets,
-    MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind, MachineLife,
-    MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
-    MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
-    MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
-    OnIdle, PauseMode, PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks, Share, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
-    TemplateRow, TemplateStatus, WorkspaceCopy, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
+    MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind,
+    MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply, MachineRoads,
+    MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, OnIdle, PauseMode,
+    PlaceCapacity, PlaceImage, PreviewReach, ResumeAsks, Share, SnapshotStoragePricing, WorkspaceCopy, MACHINE_OPS,
+    MACHINE_OPS_ON_ANY_ROAD,
 };
 pub use place::{
     place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,

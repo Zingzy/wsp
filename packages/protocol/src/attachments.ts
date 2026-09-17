@@ -9,6 +9,7 @@
 // adapters read them rather than each naming its own.
 import { z } from "zod";
 import type { AttachmentRoad } from "./adapter-port.js";
+import { GUEST_WSP_HOME } from "./daemon-contract.js";
 import { fmtBytes } from "./format.js";
 
 /** The image types a message carries, each with the word a transcript prints and the extension its copy on a machine
@@ -137,9 +138,10 @@ export function imagesBlocked(images: readonly ImageRecord[], road: AttachmentRo
 }
 
 /** Where one thread's image copies live on a machine: every send of that thread has a folder under this one, so a
- * thread's copies go together and removing the thread removes all of them at once. */
+ * thread's copies go together and removing the thread removes all of them at once. Under the folder the daemon
+ * inside a machine keeps its own files in, which on a computer somebody joined is the workspace's own. */
 export function threadImagesDir(threadId: string): string {
-  return `/root/.wsp/threads/${threadId}/images`;
+  return `${GUEST_WSP_HOME}/threads/${threadId}/images`;
 }
 
 /** A folder name that is one path segment and nothing else. A request id is a string a client chose, and it travels

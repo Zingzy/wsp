@@ -282,6 +282,7 @@ export class FakeBackend implements MachineBackend {
       signedUrls: false,
       callbackRelay: false,
       diskSnapshots: true,
+      images: true,
       // The stand-in copies whatever it is asked for: nothing here refuses a machine for having been woken.
       snapshotsAnyLife: true,
       snapshotListing: true,

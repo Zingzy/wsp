@@ -106,7 +106,7 @@ describe("provider modules", () => {
       const held = providerSlotOf(rt)!.current();
       // A box: a nap that keeps the disk alone, a tokened route per port, a named snapshot of the disk as it
       // stands, a fresh box that stands in for one a workspace is on, and sizes to offer, so the fork roads are open.
-      expect(held.capabilities).toMatchObject({ previewUrls: true, pauseMode: "disk", liveCloneForks: false, diskSnapshots: true, replacesMachine: true });
+      expect(held.capabilities).toMatchObject({ previewUrls: true, pauseMode: "disk", liveCloneForks: false, diskSnapshots: true, images: true, replacesMachine: true });
       expect(held.capabilities.sizes.length).toBeGreaterThan(0);
       // A cloud key saved later opens that cloud as a place and leaves the words alone: the host forks where it
       // was told to, not where the newest key points.

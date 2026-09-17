@@ -575,6 +575,7 @@ export class SshBackend implements MachineBackend {
     signedUrls: false,
     callbackRelay: false,
     diskSnapshots: false,
+    images: false, // the machine is the person's own and wsp keeps no copy of its disk
     snapshotsAnyLife: false,
     snapshotListing: false,
     templates: false,

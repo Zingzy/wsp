@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! The workspace manager behind the machine ops on a place link. The layer store and the registry fetch hold the
-//! image; on Linux the bundle, the runtime, the freezer and the ops run workspaces from it through youki's library
-//! and answer every `machine.*` frame, the net module gives each workspace its network and its published ports,
-//! and the snapshot module saves a workspace's upper directory as a layer the store holds. Every op on another
-//! platform is answered with one refusal that names it.
+//! The workspace manager behind the machine ops on a place link. A workspace on a computer somebody owns is that
+//! computer's own system directories under a read-only overlay each, the box's /root, and one copy of a checkout
+//! on it: on Linux the bundle, the runtime, the freezer and the ops boot it through youki's library and answer
+//! every `machine.*` frame, the copy modules make the per-workspace copy the way the disk makes one, and the net
+//! module gives each workspace its network and its published ports. This computer keeps no image: nothing is
+//! pulled and nothing is built here. Every op on another platform is answered with one refusal that names it.
 
 #[cfg(target_os = "linux")]
 pub mod bundle;
@@ -17,7 +18,6 @@ pub mod copy_snapshot;
 pub mod doctor;
 #[cfg(target_os = "linux")]
 pub mod engine;
-pub mod fetch;
 #[cfg(target_os = "linux")]
 pub mod freeze;
 #[cfg(target_os = "linux")]
@@ -33,14 +33,14 @@ pub mod profile;
 #[cfg(target_os = "linux")]
 pub mod runtime;
 pub mod size;
-#[cfg(target_os = "linux")]
-pub mod snapshot;
-pub mod store;
 
 use wsp_frames::{DaemonErrorResponse, RequestId};
 
-/// Where the runtime keeps everything it owns on a computer somebody joined, layers under it.
-pub const DEFAULT_ROOT: &str = "/var/lib/wsp";
+/// Where the runtime keeps everything it owns on a computer somebody joined: the workspaces, their copies and the
+/// checkouts those are made from. Not under any directory a workspace's overlay takes as a lower, which is what
+/// `/var/lib/wsp` was: a workspace's upper would sit inside the tree it reads through the overlay, and the open
+/// refuses such a root rather than serving workspaces that read their own uppers.
+pub const DEFAULT_ROOT: &str = "/wsp";
 
 /// What a machine op gets on a computer whose daemon holds no backend for it.
 pub fn no_backend_refusal(op: &str) -> String {

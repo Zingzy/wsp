@@ -344,7 +344,7 @@ describe("protocol event union", () => {
       { type: "session.end", workspaceId: "ws_1", sessionId: "s1", exitCode: 0, sawResult: true },
       { type: "port.open", workspaceId: "ws_1", port: 8080, pid: 123 },
       { type: "port.close", workspaceId: "ws_1", port: 8080 },
-      { type: "inbox.file", workspaceId: "ws_1", path: "/root/inbox/a.png", bytes: 168 },
+      { type: "inbox.file", workspaceId: "ws_1", path: "/root/.wsp/inbox/a.png", bytes: 168 },
     ];
     for (const s of samples) expect(EventUnion.parse(s)).toEqual(s);
     expect(() => EventUnion.parse({ type: "workspace.exploded" })).toThrow();
@@ -636,7 +636,7 @@ describe("daemon wire types (one home for the ops the daemon answers)", () => {
       { type: "pty.exit", ptyId: "p1", exitCode: 0, signal: undefined },
       { type: "port.open", port: 8080, pid: 12 },
       { type: "port.close", port: 8080 },
-      { type: "inbox.file", path: "/root/inbox/x.png", bytes: 10 },
+      { type: "inbox.file", path: "/root/.wsp/inbox/x.png", bytes: 10 },
     ];
     for (const e of events) expect(DaemonEvent.parse(e)).toBeTruthy();
     expect(() => DaemonEvent.parse({ type: "daemon.hello" })).toThrow();
@@ -656,7 +656,7 @@ describe("daemon wire types (one home for the ops the daemon answers)", () => {
 
 describe("backend capabilities", () => {
   it("requires every flag, callbackRelay, templates, diskSnapshots, snapshotsAnyLife, replacesMachine, kept and the sizes list included, so no backend can leave one unstated", () => {
-    const full = { liveCloneForks: true, pauseMode: "memory", replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
+    const full = { liveCloneForks: true, pauseMode: "memory", replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, images: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }] };
     expect(Capabilities.parse(full)).toEqual(full);
     const { templates: _t, ...noTemplates } = full;
     expect(() => Capabilities.parse(noTemplates)).toThrow();
@@ -665,6 +665,11 @@ describe("backend capabilities", () => {
     // A backend that never says whether its machine's disk can be copied would have the snapshot verb guessing.
     const { diskSnapshots: _d, ...noDiskSnapshots } = full;
     expect(() => Capabilities.parse(noDiskSnapshots)).toThrow();
+    // And one that never says whether it keeps an image at all would have the fork road reading three flags to
+    // learn it: a computer somebody joined keeps none, and a fork there names no image and builds no golden.
+    const { images: _i, ...noImages } = full;
+    expect(() => Capabilities.parse(noImages)).toThrow();
+    expect(Capabilities.parse({ ...full, images: false }).images).toBe(false);
     // And one that never says which life the copy may be taken from would have the golden road guessing whether a
     // builder that woke still has a seal in it.
     const { snapshotsAnyLife: _a, ...noAnyLife } = full;
@@ -687,7 +692,7 @@ describe("backend capabilities", () => {
   });
 
   it("pauseMode is optional and one of memory or disk; a boolean is refused", () => {
-    const full = { liveCloneForks: true, replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, sizes: [] };
+    const full = { liveCloneForks: true, replacesMachine: true, previewUrls: true, signedUrls: true, callbackRelay: true, diskSnapshots: true, images: true, snapshotsAnyLife: false, snapshotListing: true, templates: true, kept: false, sizes: [] };
     // Absent is a machine that cannot be paused: this computer, a machine reached over ssh.
     expect(Capabilities.parse(full)).toEqual(full);
     expect(Capabilities.parse({ ...full, pauseMode: "memory" })).toMatchObject({ pauseMode: "memory" });

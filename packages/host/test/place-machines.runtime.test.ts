@@ -6,8 +6,8 @@
 // lifecycle instead of the Docker file's per-case sweep. Root, cgroup v2 and a
 // registry are what it needs, so it runs under WSP_RUNTIME_LIVE=1 alone. The deploy case puts the daemon onto a
 // workspace and reads its hello back through the forward, which takes apt, nodejs.org and npm from inside. The
-// snapshot and pause cases are the store's: a fork from a snapshot, a template, and the nap that stops a workspace
-// and the wake that boots its saved layer on the same address and forward.
+// pause cases are this computer's own: the nap that stops a workspace and the wake that boots it again over what
+// it wrote.
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
 import type { DaemonEvent } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, GUEST_WSP_HOME, NO_IMAGES_HERE } from "@wsp/protocol";
 import { LinkBackend, OWNER_LABEL, type ExecResult, type Machine, type MachineSpec } from "@wsp/engine";
 import { connectDaemon } from "@wsp/runtime";
 import { closeFakePlaceHosts, fakePlaceHost, placePair, testPlaceFile } from "../../daemon/test/fake-place-host.js";
@@ -83,7 +84,6 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     const socket = await host.socket;
     backend = await LinkBackend.open(linkOver(socket as unknown as WebSocket));
     expect(backend.capabilities.pauseMode).toBe("disk");
-    expect(backend.capabilities.diskSnapshots).toBe(true);
   }, 60_000);
 
   afterAll(async () => {
@@ -106,7 +106,7 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     // Two cores of a box that keeps one for itself, read off the box rather than written down here.
     const cores = (await backend.capacity()).cores;
     const givenCpu = Math.min(2, Math.max(1, cores - 1));
-    const machine = await create({ kind: "sandbox", template: "ubuntu:24.04", cpu: 2, memMb: 1024, envs: { WSP_TOKEN: "t" }, labels: { row: "build" }, idempotencyKey: key });
+    const machine = await create({ kind: "sandbox", cpu: 2, memMb: 1024, envs: { WSP_TOKEN: "t" }, labels: { row: "build" }, idempotencyKey: key });
     expect(machine.id).toBe(`wsp-${key}`);
     expect(await machine.state()).toBe("running");
     const seen = await exec(machine, "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.swap.max; echo $WSP_TOKEN; hostname; for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline; echo; done");
@@ -280,79 +280,60 @@ describe.skipIf(!RUNTIME_LIVE)("the whole road, over a daemon link a place prove
     }
   }, 900_000);
 
-  it("commits a snapshot under the name, boots a fork from it with the deleted file still deleted, and lists it with its own bytes", async () => {
-    const machine = await create({ kind: "sandbox" });
-    expect(await exec(machine, "echo taken > /root/marker && rm /usr/bin/passwd && rm -rf /home && mkdir /home && touch /home/only")).toMatchObject({ exitCode: 0 });
-    const started = Date.now();
-    const snapshotId = await machine.snapshot(`live-665-${process.pid}-v1`, { firstLife: true });
-    times["snapshot"] = Date.now() - started;
-    expect(snapshotId).toMatch(/^sha256:[0-9a-f]{64}$/);
-    expect(await machine.state()).toBe("running");
-    const forking = Date.now();
-    const fork = await create({ kind: "sandbox", fromSnapshot: snapshotId });
-    times["fork from a snapshot to ready"] = Date.now() - forking;
-    expect(await exec(fork, "cat /root/marker; test -e /usr/bin/passwd && echo passwd-stays || echo passwd-gone; ls /home")).toMatchObject({ exitCode: 0, stdout: "taken\npasswd-gone\nonly\n" });
-    expect(await exec(fork, "echo small > /root/small")).toMatchObject({ exitCode: 0 });
-    const second = await fork.snapshot(`live-665-${process.pid}-v2`, { firstLife: true });
-    const rows = await backend.listSnapshots!();
-    const first = rows.find(row => row.id === snapshotId);
-    const child = rows.find(row => row.id === second);
-    expect(first).toMatchObject({ name: `live-665-${process.pid}-v1`, parent: null });
-    expect(first!.sizeBytes).toBeGreaterThan(0);
-    expect(first!.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z$/);
-    expect(child).toMatchObject({ name: `live-665-${process.pid}-v2`, parent: snapshotId });
-    expect(child!.sizeBytes).toBeLessThan(first!.sizeBytes);
-    times["snapshot bytes v1"] = first!.sizeBytes;
-    times["snapshot bytes v2"] = child!.sizeBytes;
-    await backend.deleteSnapshot(second);
-    await backend.deleteSnapshot(snapshotId);
-    await expect(backend.deleteSnapshot(snapshotId)).rejects.toMatchObject({ kind: "missing", status: 404 });
-    expect((await backend.listSnapshots!()).map(row => row.id)).not.toContain(snapshotId);
-  }, 120_000);
-
-  it("promotes a snapshot to a template forks boot from, and a commit after a thaw takes the life it is handed", async () => {
-    const machine = await create({ kind: "sandbox", labels: { "wsp.idle": "freeze" } });
-    await machine.pause();
-    await machine.resume();
-    expect(await exec(machine, "echo second life > /root/after-thaw")).toMatchObject({ exitCode: 0 });
-    const snapshotId = await machine.snapshot(`live-665-${process.pid}-thawed`, { firstLife: false });
-    const templateId = await backend.promoteSnapshot!(snapshotId, `live-665-${process.pid}-dev`);
-    expect(templateId).toBe(`wsp/live-665-${process.pid}-dev:template`);
-    expect(await backend.getTemplate!(templateId)).toMatchObject({ id: templateId, name: `live-665-${process.pid}-dev`, status: "ready" });
-    expect((await backend.listTemplates!()).map(row => row.id)).toContain(templateId);
-    const fork = await create({ kind: "sandbox", template: templateId });
-    expect(await exec(fork, "cat /root/after-thaw")).toMatchObject({ exitCode: 0, stdout: "second life\n" });
-    await backend.deleteSnapshot(snapshotId);
-    await backend.deleteTemplate!(templateId);
-    await expect(backend.getTemplate!(templateId)).rejects.toMatchObject({ kind: "missing", status: 404 });
-    expect(await exec(fork, "cat /root/after-thaw")).toMatchObject({ stdout: "second life\n" });
-  }, 120_000);
-
-  // What `wsp image build <place>` drives over this seam: a builder forked from the base runs the recipe as
-  // execs, the vault's sign-ins land on it the way the image build hands them, a snapshot commits the result as a
-  // layer and a template names its chain, and a fork from that image runs the recipe's tool and holds the vault.
-  // The daemon builds no image of its own: the host drives it through create, exec, putBytes, snapshot and
-  // promoteSnapshot, the same calls the Docker road drove.
-  it("builds an image at a place by running a recipe over the seam, its tool and vault in the fork and no secret in the store", async () => {
-    const builder = await create({ kind: "sandbox" });
-    const token = `sign-in-${randomBytes(8).toString("hex")}`;
-    expect(await exec(builder, "install -D -m 0755 /dev/stdin /usr/local/bin/recipe-tool <<'TOOL'\n#!/bin/sh\necho recipe-tool-ran\nTOOL")).toMatchObject({ exitCode: 0 });
-    // The vault handed in the way the image build hands it: a file landed on the builder, never an env on the record.
-    await builder.putBytes!("/root/.wsp/vault", Buffer.from(token));
-    const snapshotId = await builder.snapshot(`live-665-${process.pid}-built`, { firstLife: true });
-    const templateId = await backend.promoteSnapshot!(snapshotId, `live-665-${process.pid}-image`);
-    const fork = await create({ kind: "sandbox", template: templateId });
-    expect(await exec(fork, "recipe-tool; cat /root/.wsp/vault")).toMatchObject({ exitCode: 0, stdout: `recipe-tool-ran\n${token}` });
-    // The vault is in the built layer the fork just read, and in none of the store's metadata records.
-    for (const dir of ["snapshots", "templates", "images"]) {
-      const at = join(root, "layers", dir);
-      for (const name of existsSync(at) ? readdirSync(at) : []) {
-        if (name.endsWith(".json")) expect(readFileSync(join(at, name), "utf8")).not.toContain(token);
-      }
+  it("keeps no image: a create that names one is refused in one sentence, and the snapshot calls are not there", async () => {
+    expect(backend.capabilities.images).toBe(false);
+    expect(backend.capabilities.diskSnapshots).toBe(false);
+    expect(backend.capabilities.templates).toBe(false);
+    expect(backend.capabilities.snapshotListing).toBe(false);
+    expect(backend.baseTemplates).toBeUndefined();
+    for (const call of ["listSnapshots", "promoteSnapshot", "getTemplate", "listTemplates", "deleteTemplate"]) {
+      expect(call in backend, call).toBe(false);
     }
-    await backend.deleteTemplate!(templateId);
-    await backend.deleteSnapshot(snapshotId);
+    await expect(backend.create({ kind: "sandbox", template: "ubuntu:24.04" })).rejects.toThrow(NO_IMAGES_HERE);
+    await expect(backend.create({ kind: "sandbox", fromSnapshot: "sha256:aa" })).rejects.toThrow(NO_IMAGES_HERE);
+    // The two calls the interfaces require answer the same sentence without a frame leaving this computer.
+    const machine = await create({ kind: "sandbox" });
+    await expect(machine.snapshot("v1", { firstLife: true })).rejects.toThrow(NO_IMAGES_HERE);
+    await expect(backend.deleteSnapshot("sha256:aa")).rejects.toThrow(NO_IMAGES_HERE);
   }, 120_000);
+
+  it("takes a workspace of the computer itself: the box's own tools inside, and a wsp folder of its own", async () => {
+    const machine = await create({ kind: "sandbox" });
+    // The box's own /usr and /etc, read through the workspace's own overlay; its own wsp folder and the
+    // engine's data empty inside, whatever the computer holds at either path.
+    const seen = await exec(machine, `command -v sh; head -1 /etc/os-release; find ${GUEST_WSP_HOME} /var/lib/docker -mindepth 1 | wc -l`);
+    expect(seen.exitCode).toBe(0);
+    const onTheBox = readFileSync("/etc/os-release", "utf8").split("\n")[0]!;
+    expect(seen.stdout).toContain(onTheBox);
+    expect(seen.stdout.trimEnd().split("\n").at(-1)).toBe("0");
+    // The binaries the computer itself carries, at the paths it answers with: read off the box here and asked of
+    // the workspace, so what this case expects is whatever this box happens to hold and never a path written down.
+    const tools = new Map<string, string>();
+    for (const tool of ["sh", "env", "git", "node"]) {
+      const found = execFileSync("/bin/sh", ["-c", `command -v ${tool} || true`]).toString().trim();
+      if (found !== "") tools.set(tool, found);
+    }
+    expect([...tools.keys()]).toContain("sh");
+    const answered = await exec(machine, [...tools.keys()].map(tool => `command -v ${tool}`).join("; "));
+    expect(answered.stdout.trimEnd().split("\n")).toEqual([...tools.values()]);
+    // A second workspace of the same computer while the first is up, each with its own view of it.
+    const second = await create({ kind: "sandbox" });
+    expect((await exec(second, "hostname")).stdout.trim()).toBe(second.id);
+    expect(await exec(second, "echo mine > /usr/local/lib/second-probe")).toMatchObject({ exitCode: 0 });
+    expect(await exec(machine, "cat /usr/local/lib/second-probe")).toMatchObject({ exitCode: 1 });
+    expect(existsSync("/usr/local/lib/second-probe")).toBe(false);
+    // And the daemon's own token: each workspace writes one at the path the daemon reads by default and reads
+    // its own back, where a folder shared with the computer would have the second rewriting the first.
+    const held = existsSync(DAEMON_TOKEN_PATH) ? readFileSync(DAEMON_TOKEN_PATH, "utf8") : undefined;
+    for (const [w, word] of [[machine, "first"], [second, "second"]] as const) {
+      expect(await exec(w, `printf '%s' token-of-the-${word} > ${DAEMON_TOKEN_PATH}`)).toMatchObject({ exitCode: 0 });
+    }
+    for (const [w, word] of [[machine, "first"], [second, "second"]] as const) {
+      expect((await exec(w, `cat ${DAEMON_TOKEN_PATH}`)).stdout).toBe(`token-of-the-${word}`);
+      expect(readFileSync(join(root, "run", w.id, "wsp-home/daemon-token"), "utf8")).toBe(`token-of-the-${word}`);
+    }
+    expect(existsSync(DAEMON_TOKEN_PATH) ? readFileSync(DAEMON_TOKEN_PATH, "utf8") : undefined).toBe(held);
+  }, 180_000);
 
   it("naps by stopping, and the wake boots the saved layer with the same id, address and forward, under 200 ms", async () => {
     const machine = await create({ kind: "sandbox", memMb: 512 });
