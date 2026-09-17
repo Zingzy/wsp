@@ -124,6 +124,19 @@ export function livesOnComputer(s: SignIn | { kind: "shell" }): boolean {
   return hasLogin(s) && s.livesOn === "computer";
 }
 
+/** The variable this tool reads an API key from, or nothing: the one reader of that field, so every place that
+ * asks for a key, sets one on a turn or lists what the vault may hold reads the same rule. */
+export function keyEnvOf(s: SignIn | { kind: "shell" }): string | undefined {
+  return "keyEnv" in s ? s.keyEnv : undefined;
+}
+
+/** The token in what a person pasted, or nothing: the whole of the trimmed value has to be the shape that tool
+ * prints, so a line copied with the tool's own prompt around it is refused rather than saved with the junk. */
+export function tokenIn(s: TokenSignIn, pasted: string): string | undefined {
+  const value = pasted.trim();
+  return new RegExp(`^(?:${s.token.source})$`).test(value) ? value : undefined;
+}
+
 /** The questions this login is known to ask, for the relay to watch the tool's output for: it types the ones the
  * row answers and reports the rest, so a question nobody here can answer ends its row where it stands. */
 export function questionsOf(s: SignIn | { kind: "shell" }): readonly Question[] {
@@ -418,5 +431,5 @@ export const SIGN_IN_ROWS = {
 /** Every variable the vault hands a turn: each row's token variable and each row's key variable, derived from the
  * rows and nowhere else, so a tool that reads a new one declares it on its own row and the vault carries it. */
 export const VAULT_VARIABLES: ReadonlySet<string> = new Set(
-  Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(s => [...(mintsToken(s) ? [s.tokenEnv] : []), ...("keyEnv" in s && s.keyEnv !== undefined ? [s.keyEnv] : [])]),
+  Object.values(SIGN_IN_ROWS as Record<string, SignIn>).flatMap(s => [...(mintsToken(s) ? [s.tokenEnv] : []), ...(keyEnvOf(s) !== undefined ? [keyEnvOf(s)!] : [])]),
 );

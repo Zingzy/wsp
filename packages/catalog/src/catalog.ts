@@ -486,6 +486,17 @@ export function loginRow(id: string): LoginRow | undefined {
   return LOGIN_ROW_BY_ID.get(id);
 }
 
+/** The rung a manifest files a login row under. */
+const LOGINS_RUNG = "logins/";
+
+/** The sign-in a manifest's login row stands for, by the row's id or by the bare name at its end, which is the
+ * login id the collector files it under and never an entry id. The one reader of that rule, so a row read in the
+ * pack, in the vault step and in the job cannot come to mean three things. */
+export function loginSignIn(row: string): SignIn | undefined {
+  const name = row.startsWith(LOGINS_RUNG) ? row.slice(LOGINS_RUNG.length) : row;
+  return name.includes("/") ? undefined : loginRow(name)?.signIn;
+}
+
 /** Exits 0 once an entry is on the machine. */
 export function smokeOf(e: CatalogEntry): string {
   return `${e.bin} --version`;

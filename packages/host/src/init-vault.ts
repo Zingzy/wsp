@@ -10,14 +10,14 @@ import { spawn } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import { styleText } from "node:util";
 import { S_BAR, isCancel, log } from "@clack/prompts";
-import { catalogEntry, loginRow, mintsToken } from "@wsp/catalog";
+import { catalogEntry, keyEnvOf, loginSignIn, mintsToken, tokenIn, type TokenSignIn } from "@wsp/catalog";
 import type { ManifestEntry } from "@wsp/collect";
 import { passwordPrompt } from "./init-layout.js";
 import { agentName, loginEntryId } from "./init-recipe.js";
 import { stateLine, type LoginOutcome } from "./init-signin.js";
 
 /** One row the vault step owns: the variable it holds, and the command that mints its value on this computer when
- * the tool has one. `shape` refuses a paste that is not what that tool prints. */
+ * the tool has one. A token row carries the catalog row that says what a paste has to be. */
 export interface VaultRow {
   entry: ManifestEntry;
   /** The variable the wsp home's .env holds it under, and the turn's environment gets. */
@@ -26,7 +26,8 @@ export interface VaultRow {
   word: string;
   /** The tool's own command for minting a token here; absent on a row answered with a key. */
   mint?: string;
-  shape?: RegExp;
+  /** The catalog's token row, which says what a paste has to be; absent on a row answered with a key. */
+  row?: TokenSignIn;
 }
 
 const TOKEN_WORD = "token";
@@ -39,12 +40,12 @@ export function vaultRows(manifest: { entries: readonly ManifestEntry[] }, choic
     if (entry.rung !== "logins") return [];
     const choice = choices.get(entry.id);
     if (choice !== "token" && choice !== "key") return [];
-    const signIn = loginRow(agentName(entry))?.signIn;
+    const signIn = loginSignIn(entry.id);
     if (signIn === undefined) return [];
     if (choice === "token") {
-      return mintsToken(signIn) ? [{ entry, name: signIn.tokenEnv, word: TOKEN_WORD, mint: signIn.mint, shape: signIn.token }] : [];
+      return mintsToken(signIn) ? [{ entry, name: signIn.tokenEnv, word: TOKEN_WORD, mint: signIn.mint, row: signIn }] : [];
     }
-    const keyEnv = "keyEnv" in signIn ? signIn.keyEnv : undefined;
+    const keyEnv = keyEnvOf(signIn);
     return keyEnv === undefined ? [] : [{ entry, name: keyEnv, word: KEY_WORD }];
   });
 }
@@ -169,11 +170,14 @@ export async function vaultStage(o: VaultStageOptions): Promise<LoginOutcome[]> 
       input: o.input,
       output: o.output,
     });
-    const value = isCancel(typed) ? "" : typed.trim();
-    if (value === "") {
+    const pasted = isCancel(typed) ? "" : typed.trim();
+    // A token row takes the token out of the paste, which is the whole of it or nothing; a key row takes what was
+    // typed, since no tool declares a shape for one.
+    const value = row.row === undefined ? pasted : (tokenIn(row.row, pasted) ?? "");
+    if (pasted === "") {
       r.state = "not-signed-in";
       r.note = `no ${row.word} typed`;
-    } else if (row.shape !== undefined && !row.shape.test(value)) {
+    } else if (value === "") {
       r.state = "not-signed-in";
       r.note = `that is not what ${row.mint ?? toolName(row)} prints; nothing was saved`;
     } else {

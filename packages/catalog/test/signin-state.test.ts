@@ -2,7 +2,7 @@
 // Where each tool's login lives on the machine: every row that has one names
 // it, the paths are home-relative, and the reader turns them into guest paths.
 import { describe, expect, it } from "vitest";
-import { CATALOG, CATALOG_AGENTS, GUEST_HOME, NEVER_IN_IMAGE, NO_SIGN_IN, SIGN_IN_ROWS, VAULT_VARIABLES, catalogEntry, hasLogin, livesOnComputer, loginStatePaths, mintsToken, type SignIn } from "../src/index.js";
+import { CATALOG, CATALOG_AGENTS, GUEST_HOME, NEVER_IN_IMAGE, NO_SIGN_IN, SIGN_IN_ROWS, VAULT_VARIABLES, catalogEntry, hasLogin, keyEnvOf, livesOnComputer, loginSignIn, loginStatePaths, mintsToken, tokenIn, type SignIn } from "../src/index.js";
 
 describe("sign-in state on the machine", () => {
   it("every row with a login or a source names at least one path, home-relative and with no ..", () => {
@@ -52,6 +52,34 @@ describe("the token sign-in and the vault", () => {
     expect(s.sources).toEqual([]);
     expect(s.stateOnMachine).toEqual([]);
     expect(livesOnComputer(SIGN_IN_ROWS.gh)).toBe(false);
+  });
+
+  it("the key variable a row reads is written once, and a row that reads none says so", () => {
+    expect(keyEnvOf(SIGN_IN_ROWS.claude)).toBe("ANTHROPIC_API_KEY");
+    expect(keyEnvOf(SIGN_IN_ROWS.codex)).toBe("OPENAI_API_KEY");
+    expect(keyEnvOf(SIGN_IN_ROWS.gemini)).toBe("GEMINI_API_KEY");
+    expect(keyEnvOf(SIGN_IN_ROWS.gh)).toBeUndefined();
+    expect(keyEnvOf(NO_SIGN_IN)).toBeUndefined();
+  });
+
+  it("the token in a paste is the whole of it and nothing around it, trimmed", () => {
+    const row = SIGN_IN_ROWS.claude;
+    const token = "sk-ant-oat01-TESTONLYaaaaaaaaaaaaaaaaaaaa";
+    expect(tokenIn(row, `  ${token}\n`)).toBe(token);
+    // A line copied with the tool's own words around it is not a token, so nothing of it is saved.
+    expect(tokenIn(row, `Paste code here if prompted > ${token}`)).toBeUndefined();
+    expect(tokenIn(row, `${token} # my token`)).toBeUndefined();
+    expect(tokenIn(row, "my password")).toBeUndefined();
+    expect(tokenIn(row, "")).toBeUndefined();
+  });
+
+  it("a manifest's login row reads its catalog sign-in by one rule, with or without the rung in front", () => {
+    expect(loginSignIn("logins/claude")).toBe(SIGN_IN_ROWS.claude);
+    expect(loginSignIn("claude")).toBe(SIGN_IN_ROWS.claude);
+    // The collector files kubectl's login under its kubeconfig, which is the name its row carries.
+    expect(loginSignIn("logins/kube")).toBe(SIGN_IN_ROWS.kubectl);
+    expect(loginSignIn("logins/nothing-here")).toBeUndefined();
+    expect(loginSignIn("agents/claude")).toBeUndefined();
   });
 
   it("the vault holds the agents' token and key variables and nothing else", () => {

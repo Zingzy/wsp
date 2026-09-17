@@ -27,7 +27,8 @@ export interface ClaudeEnvOptions {
   base?: Readonly<Record<string, string | undefined>>;
   apiKey?: string;
   /** The long-lived token from claude setup-token. Set after the strip: the strip removes an inherited CLAUDE_CODE_*
-   * as a nesting mark, and this one is ours. An API key beside it wins inside the CLI; the caller hands one or the other. */
+   * as a nesting mark, and this one is ours. An API key beside it wins inside the CLI, so the caller hands one or
+   * the other and never both, decided by what the vault holds: its token where there is one, else its key. */
   oauthToken?: string;
 }
 

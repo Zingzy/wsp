@@ -370,12 +370,13 @@ export function keysFound(sources: KeySources = keySources(), layers: Array<Reco
   return anthropic !== undefined ? { anthropic } : {};
 }
 
-/** What the vault hands every turn, read at each launch off the same layers every other key read here takes: this
- * run's environment, the folder it runs in, then the wsp home's .env, the first of them that holds a variable
- * winning. A token minted while the host runs is in the next turn, since nothing of this is cached. */
+/** What the vault hands every turn, read at each launch off the wsp home's .env and nothing else. Not this shell:
+ * a host serving under launchd, and the app, start without it, so a key only in a shell would reach the turns one
+ * road launched and none of the others. Not a folder's .env either: the folder a host happened to start in is
+ * nobody's vault. The one file is what wsp init writes and what the person can read, and a token saved there while
+ * the host runs is in the next turn, since nothing of this is cached. */
 export function vaultNow(env: ProviderEnv = process.env): Record<string, string> {
-  const layers = keyLayers(keySources(env));
-  return vaultOf(Object.assign({}, ...[...layers].reverse()) as Record<string, string | undefined>);
+  return vaultOf(savedEnv(wspHome(env)));
 }
 
 /** Names the file only when WSP_HOME moved it off the default. */

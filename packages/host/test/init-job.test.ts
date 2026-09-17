@@ -820,6 +820,8 @@ describe("the init job, manual road", () => {
     expect(await waiting()).toMatchObject({ detail: "run claude setup-token on this computer and paste the token it prints; it stays there" });
     // A value that is not what that command prints is refused, and nothing is saved for it.
     await expect(f.jobs.signInCode({ tool: "claude", code: "my password" })).rejects.toThrow(/not what claude setup-token prints/);
+    // A line the person copied with the tool's own words around it is not a token either, so nothing is saved.
+    await expect(f.jobs.signInCode({ tool: "claude", code: `Paste code here if prompted > ${TOKEN}` })).rejects.toThrow(/not what claude setup-token prints/);
     expect(f.saved).toEqual([]);
     await f.jobs.signInCode({ tool: "claude", code: TOKEN });
     expect(f.saved).toEqual([{ CLAUDE_CODE_OAUTH_TOKEN: TOKEN }]);

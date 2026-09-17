@@ -56,9 +56,12 @@ describe("the vault a turn launches with", () => {
     for (const ctx of contexts) expect(ctx.vault).toEqual({});
   });
 
-  it("hands each agent the variables its own catalog row declares, from one record", () => {
+  it("hands each agent the variables its own catalog row declares, from one record, and its token in place of its key", () => {
     const record = { CLAUDE_CODE_OAUTH_TOKEN: TOKEN, ANTHROPIC_API_KEY: "sk-ant-x", OPENAI_API_KEY: OPENAI, SOLARI_API_KEY: "slr_live_x" };
-    expect(secretsOf(record, "claude")).toEqual({ oauthToken: TOKEN, apiKey: "sk-ant-x" });
+    // An API key beside the token would win inside Claude Code and bill the key on every turn, so the vault hands
+    // the token alone where it holds one.
+    expect(secretsOf(record, "claude")).toEqual({ oauthToken: TOKEN });
+    expect(secretsOf({ ANTHROPIC_API_KEY: "sk-ant-x" }, "claude")).toEqual({ apiKey: "sk-ant-x" });
     expect(secretsOf(record, "codex")).toEqual({ apiKey: OPENAI });
     expect(secretsOf({}, "claude")).toEqual({});
     expect(secretsOf({}, "codex")).toEqual({});

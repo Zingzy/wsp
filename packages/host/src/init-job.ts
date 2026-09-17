@@ -13,7 +13,7 @@ import { EventEmitter } from "node:events";
 import { basename } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
-import { catalogEntry, loginRow, mintsToken } from "@wsp/catalog";
+import { catalogEntry, loginSignIn, mintsToken, tokenIn } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
 import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
@@ -547,10 +547,10 @@ export class InitJobs implements InitDoor {
   async signInCode(o: { tool: string; code: string }): Promise<InitJob> {
     const s = this.state;
     if (s === undefined || initJobOver(s.phase)) throw new Error("no init job is running");
-    const signIn = loginRow(o.tool)?.signIn;
+    const signIn = loginSignIn(o.tool);
     if (signIn !== undefined && mintsToken(signIn)) {
-      const token = o.code.trim();
-      if (!signIn.token.test(token)) throw new Error(`that is not what ${signIn.mint} prints; nothing was saved`);
+      const token = tokenIn(signIn, o.code);
+      if (token === undefined) throw new Error(`that is not what ${signIn.mint} prints; nothing was saved`);
       this.deps.saveKeys({ [signIn.tokenEnv]: token });
       return this.view()!;
     }

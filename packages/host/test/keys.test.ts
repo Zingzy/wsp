@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SERVE_FLAGS, SHARED_FLAGS, cli, forkCommandFor, jsonCliIO, keySources, loadKeys, saveQuestion, terminalIO, upCommandFor, type CliIO, type KeySources, type LoadedKeys, type NoProviderKey } from "../src/cli.js";
 import { BOX_API_URL, BoxBackend, type KeyCheck } from "@wsp/engine";
 import { keysOf, savedEnv, vaultOf } from "../src/env-keys.js";
+import { vaultNow } from "../src/cli.js";
 import { BOX_KEY_ENV, SOLARI_KEY_ENV, providerBackendFor } from "../src/providers.js";
 
 /** What a run came away with, in one shape: the agents' keys it holds and the provider key under the variable the
@@ -146,6 +147,25 @@ describe("the wsp home's own keys, the ones the app's setup reads", () => {
       expect(keysOf(savedEnv(home))).toEqual({});
     } finally {
       delete process.env["ANTHROPIC_API_KEY"];
+    }
+  });
+
+  it("the vault a turn launches with is the wsp home's file alone: a key in this shell or in a folder's .env is not in it", () => {
+    setup();
+    mkdirSync(home);
+    // Both of the other places a key is read from on this computer, and neither is the vault: a host serving under
+    // launchd starts without this shell, and a .env beside whatever folder a host was started in is nobody's vault.
+    writeFileSync(join(cwd, ".env"), `ANTHROPIC_API_KEY=anth-from-cwd\n`);
+    process.env["CLAUDE_CODE_OAUTH_TOKEN"] = "sk-ant-oat01-TESTONLYfromtheshell";
+    const here = process.cwd();
+    process.chdir(cwd);
+    try {
+      expect(vaultNow({ WSP_HOME: home })).toEqual({});
+      writeFileSync(join(home, ".env"), `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-TESTONLYfromthefile\nSOLARI_API_KEY=${SOLARI}\n`);
+      expect(vaultNow({ WSP_HOME: home })).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYfromthefile" });
+    } finally {
+      process.chdir(here);
+      delete process.env["CLAUDE_CODE_OAUTH_TOKEN"];
     }
   });
 

@@ -20,7 +20,7 @@ import { outsideCatalog } from "./recipe-file.js";
 import { answerOf, rungSelect, type Choice, type FooterLine, type RungAnswer, type RungSelectResult, type SelectItem } from "./init-select.js";
 import { BASE_GROUP, FLOOR_LINE, PROJECT_GROUP, agentRows, candidatesLine, groupTotal, recipeTable, sizeCell, totalsLine, whyCell, type TableRow, UNKNOWN_SIZE } from "./init-table.js";
 import { diskHead, diskTone } from "./init-weight.js";
-import { asksThePerson, hasLogin, livesOnComputer, loginWords, mintsToken, signInFor, type SignIn } from "./signin-table.js";
+import { asksThePerson, hasLogin, keyEnvOf, livesOnComputer, loginWords, mintsToken, signInFor, type SignIn } from "./signin-table.js";
 import type { ScanRow } from "./scan.js";
 
 /** The screens of a run, in order, with the one sentence each opens with; the build comes after them. */
@@ -190,7 +190,7 @@ export function choicesFor(e: ManifestEntry, s: SignIn, platform: Platform): Cho
     allowed.add("machine");
     allowed.add("later");
   }
-  if ((hasLogin(s) || token) && s.keyEnv !== undefined) allowed.add("key");
+  if (keyEnvOf(s) !== undefined) allowed.add("key");
   const offered = signInChoices(platform).filter(c => allowed.has(c.value));
   return token ? [...offered.filter(c => c.value === "token"), ...offered.filter(c => c.value !== "token")] : offered;
 }

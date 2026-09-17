@@ -83,6 +83,24 @@ describe("the vault step", () => {
     expect(t.text()).not.toContain(TOKEN);
   });
 
+  it("takes the token out of the paste and nothing around it: a line copied with the tool's prompt is refused", async () => {
+    const dir = home();
+    const t = terminal();
+    const run = vaultStage({
+      rows: vaultRows(manifest, new Map([["logins/claude", "token"]])),
+      held: () => ({}),
+      save: set => writeEnvFile(join(dir, ".env"), set),
+      mint: async () => {},
+      input: t.input,
+      output: t.output,
+    });
+    await t.until("Claude Code token");
+    await t.press(...`Paste code here if prompted > ${TOKEN}`.split(""), KEY.enter);
+    const outcomes = await run;
+    expect(outcomes[0]!.state).toBe("not-signed-in");
+    expect(savedEnv(dir)).toEqual({});
+  });
+
   it("refuses a paste that is not what the tool prints, and saves nothing for that row", async () => {
     const dir = home();
     const t = terminal();
