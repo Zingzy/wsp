@@ -13,7 +13,7 @@ import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/s
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import { CATALOG, THREAD_AGENTS } from "@wsp/catalog";
-import { type ProjectView, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
+import { type ProjectView, HERE_PLACE_ID, addedProjectLine, goneRoadRefusal, EMPTY_TASK_LINE, EXIT_CODES, HOST_STOPPING_LINE, NO_SUCH_TURN, noSuchProjectLine, noThreadTargetLine, ProjectGolden, Recipe, registeredLine, registerTakesNoConsentLine, threadOpenedLine, ThreadView, TURN_TOKEN_ENV, workspaceKind, WorkspaceView, type ExitClass } from "@wsp/protocol";
 import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { localWiring, serve } from "../src/cli.js";
@@ -160,7 +160,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "new", "pause", "projects", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
@@ -594,6 +594,25 @@ describe("the MCP server over the host", () => {
     expect(claude.starts.at(-1)?.cwd).toBe("/root/work/site");
     const { threads } = (await call("threads", { workspace: "worker" })).structured as { threads: ThreadView[] };
     expect(threads.map(t => t.cwd)).toEqual(["/root/work/site"]);
+  });
+
+  it("projects_add records one, a folder here and a repo a computer clones, and the tool door carries it because wsp add also hands out a join code", async () => {
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-mcp-add-")));
+    execFileSync("git", ["init", "-q", folder]);
+    const here = await call("projects_add", { source: folder });
+    expect(here.isError).toBe(false);
+    const recorded = (here.structured as { project: ProjectView }).project;
+    expect(recorded).toMatchObject({ source: { kind: "folder", path: folder }, path: folder, computer: HERE_PLACE_ID });
+    expect(here.text).toBe(addedProjectLine(recorded));
+
+    // A repo needs the computer that clones it, and the same source twice on one computer is refused.
+    const cloned = await call("projects_add", { source: "https://github.com/dev/site.git", on: "default", name: "site", base: "trunk" });
+    expect((cloned.structured as { project: ProjectView }).project).toMatchObject({ name: "site", path: "/root/site", base: "trunk", computer: "default" });
+    expect(await call("projects_add", { source: "https://github.com/dev/site.git", on: "default" })).toMatchObject({ isError: true });
+    expect(await call("projects_add", { source: "https://github.com/dev/other.git" })).toMatchObject({ isError: true });
+
+    const listed = (await call("projects")).structured as { projects: ProjectView[] };
+    expect(listed.projects.map(p => p.name)).toContain("site");
   });
 
   it("projects lists every project this host holds, each on its computer, and new names which one the work is on", async () => {

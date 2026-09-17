@@ -196,6 +196,7 @@ import {
   threadWord,
   workspaceForFolder,
   ProjectView,
+  addedProjectLine,
   computerKindWord,
   nameTheProjectLine,
   noSuchProjectLine,
@@ -2434,6 +2435,32 @@ export const VERBS: readonly Verb[] = [
       input: {},
       output: { projects: z.array(ProjectView) },
       call: async (_args, deps) => asJson({ projects: await projectsOf(await deps.client()) }),
+    }),
+  },
+  {
+    name: "projects add",
+    toolOnly:
+      "the command line records a project with wsp add, the same word that joins a computer and takes a provider's key; those two belong at the terminal the host runs at, so the tool door carries the project half alone",
+    tool: tool({
+      description:
+        "Records a project: one source on one computer, which every workspace of it is a copy for. A folder is worked in place on the computer the app runs on, and a repo is cloned by the computer named with on, which every workspace of it then holds a checkout of. A folder that is not a git repo, a repo without a computer to clone it, and a source already recorded on that computer are each refused in one line. The answer is the project, whose name is what new takes.",
+      input: {
+        source: z.string().describe("a folder on the computer the app runs on, or a repo's url"),
+        on: z.string().optional().describe("the computer that clones the repo, by the name computers lists; a repo needs one and a folder takes none"),
+        name: z.string().optional().describe("what to call the project here; the folder's or the repo's own last word without it"),
+        base: z.string().optional().describe("the branch a workspace of the project starts on; the remote's own default branch at the clone without it"),
+      },
+      output: { project: ProjectView },
+      call: async (args, deps) => {
+        const client = await deps.client();
+        const { project } = await client.request<{ project: ProjectView }>("projects.add", {
+          source: args.source,
+          ...(args.on !== undefined ? { on: args.on } : {}),
+          ...(args.name !== undefined ? { name: args.name } : {}),
+          ...(args.base !== undefined ? { base: args.base } : {}),
+        });
+        return asText(addedProjectLine(project), { project });
+      },
     }),
   },
   {

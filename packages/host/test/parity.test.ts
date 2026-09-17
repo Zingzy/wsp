@@ -317,8 +317,9 @@ describe("the command line, the MCP tools and the skill are one contract", () =>
       "status",
       "up",
     ]);
-    // Every tool has a command line of its own: the seam above still holds a tool that has none to a stated reason.
-    expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual([]);
+    // A tool with no command line of its own is held to a stated reason: recording a project is the one, since the
+    // command line's `wsp add` also hands out a join code and takes a provider's key, neither of which is an agent's.
+    expect(VERBS.filter(v => "toolOnly" in v).map(v => v.name)).toEqual(["projects add"]);
   });
 
   it("every command line is a verb table entry or a command carrying why it has no tool, so a new command sits in neither only by failing here", () => {

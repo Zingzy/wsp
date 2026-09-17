@@ -15,7 +15,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, platform } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { sourceKind, type ProjectView,
+import { addedProjectLine, sourceKind, type ProjectView,
   ALREADY_JOINED_LINE,
   JOIN_ADDRESS_LINE,
   LOOPBACK,
@@ -748,13 +748,6 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
   } finally {
     client.close();
   }
-}
-
-/** What the line prints once a project is recorded: what it is called, where its code comes from, the computer it
- * lives on and where a workspace of it holds the checkout, then the line that makes one. */
-export function addedProjectLine(project: ProjectView): string {
-  const from = project.source.kind === "git" ? project.source.url : project.source.path;
-  return `${project.name} ${project.id}: ${from} on ${project.computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
 
 /** One typed address: the host logs in over ssh, installs the agent and waits for that computer to dial back. The

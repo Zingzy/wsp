@@ -10,6 +10,14 @@ import { folderName, underProject } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
 import { kindWords } from "./workspace-state.js";
 
+/** What a caller is told once a project is recorded: what it is called, where its code comes from, the computer it
+ * lives on and where a workspace of it holds the checkout, then the line that makes one. The command line prints it
+ * and the tool answers it, so both doors say the same thing about the same record. */
+export function addedProjectLine(project: ProjectView): string {
+  const from = project.source.kind === "git" ? project.source.url : project.source.path;
+  return `${project.name} ${project.id}: ${from} on ${project.computer}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
+}
+
 /** What one word to `wsp add` names: a computer of the person's own over ssh, a repo a computer clones, or a
  * folder a computer holds. Read once here, so the command line, the tool and the runtime cannot each decide for
  * themselves what somebody typed. A word that is none of the three throws with the three forms. */
