@@ -3377,6 +3377,7 @@ const DAEMON_CONTENTS = [
   "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
   "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
+  "e84a3a735fac175e251581fc61e29cd446e38142fb4579cae50cdaf30d63b858",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3502,7 +3503,11 @@ const DAEMON_CONTENTS = [
  * Version 46 makes a workspace on a computer you own out of the computer itself: its system directories under overlays
  * with an upper per workspace, its home shared read-write with the daemon's own files hidden, the engine's data
  * hidden, the project bound at its path; a box pulls no image and keeps no layer store, and the snapshot and template
- * operations leave its wire. The root moves to /wsp so no upper sits under a lower the kernel would refuse. */
+ * operations leave its wire. The root moves to /wsp so no upper sits under a lower the kernel would refuse.
+ * Version 47 adds the copy verb the Mac host runs as a child: a directory clone of a project folder at a sibling path
+ * in one call, a git worktree where a clone cannot work, then the two rules that make the copy a clean checkout with
+ * its ignored files kept; the capabilities say whether a computer copies and whether a copy gets its own network,
+ * which is how the row knows this Mac shares ports. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
