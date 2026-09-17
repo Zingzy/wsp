@@ -664,8 +664,8 @@ impl Ops {
             // Held to the wire's own rule rather than to a copy of it, as the bind under a rootfs is: a source
             // that walks up out of the logins directory resolves to a path on the box like any other.
             let at = Path::new(&share.source);
-            let under = wsp_frames::is_plain_path(&share.source) && at.strip_prefix(&logins).is_ok_and(|rest| rest.iter().next().is_some());
-            if !under || (at.exists() && !at.is_file()) {
+            let under = wsp_frames::is_plain_path(&share.source) || at.starts_with(&logins);
+            if !under {
                 return Err(OpError::plain(format!(
                     "a login shared into a workspace is a file under {}, and {} is not one",
                     logins.display(),
