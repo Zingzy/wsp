@@ -130,6 +130,7 @@ import {
   type SessionPermissionEvent,
   notAFileLine,
   notAnImageLine,
+  type NotifyLength,
   notifyLine,
   notifyTail,
   offeredSize,
@@ -278,8 +279,10 @@ export interface DialOpts extends HostPick {
 }
 
 /** No host holds this state file's lock, said once: a line that asked for none to be started reads it, and so does
- * a wait that ran out somewhere a starter could not run. */
-export const noHostServingLine = (statePath: string): string => `no wsp host is serving ${statePath}`;
+ * a wait that ran out somewhere a starter could not run. It ends with the line that serves that file, as every
+ * refusal ends with the command that fixes it, and the flag is always spelled: which file a bare wsp up would
+ * serve is one rule and it lives where the state is picked, not in a second reading here. */
+export const noHostServingLine = (statePath: string): string => `no wsp host is serving ${statePath}; start one with wsp up --state ${statePath}`;
 
 /** Where a line dials and what it presents there: a host on this computer is the address its lock records (one
  * bound to a single address answers only there) and the token it wrote beside its state file, a host somewhere
@@ -1934,10 +1937,11 @@ function answering(ctx: VerbContext, client: HostClient, say: (line: string) => 
   };
 }
 
-/** What wsp send and wsp stop take in place of the whole id, said beside the id the moment a person first meets
- * one: the ids are 36 characters and nobody retypes one, so the line that hands one over says the shorthand that
- * already works rather than leaving it to be found. */
-export const THREAD_PREFIX_WORD = "wsp send and wsp stop take its first characters";
+/** What the verbs take in place of the whole id, said beside the id the moment a person first meets one: the ids
+ * are 36 characters and nobody retypes one, so the line that hands one over says the shorthand that already works
+ * rather than leaving it to be found. It names the verb that reads a thread back as well, since a person holding a
+ * thread id wants what the agent said and nothing else on the page they read said which word does that. */
+export const THREAD_PREFIX_WORD = "wsp thread read, wsp send and wsp stop take its first characters";
 
 /** The first line a thread's opening prints: its id, and where it went when no workspace was named. */
 const openedThreadLine = (threadId: string, opened: ((threadId: string) => string) | undefined): string => (opened === undefined ? `thread ${threadId}` : opened(threadId));
@@ -2260,9 +2264,10 @@ const endView = (ended: Ended): z.infer<typeof ThreadEndOut> => {
 };
 
 /** A wait's answer on both doors: the finished thread's end under the notify line, or timedOut under the line that
- * says who is still running. */
-function waitAnswer(named: readonly ThreadView[], waited: Waited): { value: z.infer<typeof WaitOut>; line: string } {
-  if ("ended" in waited) return { value: { finished: endView(waited.ended) }, line: notifyLine(waited.ended.threadId, waited.ended.result) };
+ * says who is still running. `length` is how much of the reply the line carries; the end's own reply field is the
+ * tail whatever the line says, since that is the field a sidebar row and a notify read. */
+function waitAnswer(named: readonly ThreadView[], waited: Waited, length: NotifyLength = "tail"): { value: z.infer<typeof WaitOut>; line: string } {
+  if ("ended" in waited) return { value: { finished: endView(waited.ended) }, line: notifyLine(waited.ended.threadId, waited.ended.result, length) };
   return { value: { timedOut: true }, line: waitTimedOutLine(named.map(threadIdOf), waited.timedOutMs) };
 }
 
@@ -2546,7 +2551,7 @@ export const VERBS: readonly Verb[] = [
     page: "front",
     options: { tree: { type: "boolean" }, watch: { type: "boolean" } },
     run: async ctx => {
-      if (ctx.args.length > 1) throw usageRefusal("wsp threads takes at most one workspace; wsp threads wait is its one subcommand.", usageIs(ctx));
+      if (ctx.args.length > 1) throw usageRefusal("wsp threads takes at most one workspace; wsp threads wait is its one subcommand, and wsp thread read <thread> prints what one said.", usageIs(ctx));
       return drawRows(ctx, "wsp threads", async client => {
         const rows = await threadRows(client, ctx.args[0]);
         const lines = ctx.flags["tree"] === true ? threadTree(rows).map(t => threadLine(t.row, "  ".repeat(t.depth))) : rows.map(t => threadLine(t));
@@ -2562,16 +2567,19 @@ export const VERBS: readonly Verb[] = [
   },
   {
     name: "threads wait",
-    usage: "wsp threads wait <thread>... [--timeout <s>]",
-    about: "blocks until one of the threads leaves running and prints its finished line, the one a notify sends; --timeout gives up after so many seconds and says so on stderr",
+    usage: "wsp threads wait <thread>... [--timeout <s>] [--tail]",
+    about:
+      "blocks until one of the threads leaves running and prints its finished line, with the reply whole under it; --tail prints the reply's last line alone, which is what a notify sends, and --timeout gives up after so many seconds and says so on stderr",
     page: "agent",
-    options: { timeout: { type: "string" } },
+    options: { timeout: { type: "string" }, tail: { type: "boolean" } },
     run: async ctx => {
       if (ctx.args.length === 0) throw usageRefusal("wsp threads wait takes one thread or more.", usageIs(ctx));
       const timeoutMs = timeoutFlag(flag(ctx.flags, "timeout"));
       const client = await ctx.client();
       const named = await threadsOf(client, ctx.args);
-      const { value, line } = waitAnswer(named, await firstEnded(client, named, timeoutMs));
+      // The whole reply unless the tail was asked for: a last line is a paragraph's end or a code fence, and a
+      // person waiting on a thread is waiting for its answer, not for the shape of its final line.
+      const { value, line } = waitAnswer(named, await firstEnded(client, named, timeoutMs), ctx.flags["tail"] === true ? "tail" : "whole");
       if (value.timedOut === true) {
         ctx.out.emit(value);
         ctx.io.error(line);
@@ -3499,6 +3507,7 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   signin: `<id>=${LOGIN_CHOICES.join("|")} answering one sign-in by catalog id; repeats`,
   size: "the machine size as <cpu>x<memGb>, like 2x4; a size the provider does not offer is refused naming the ones it does",
   spawn: "on lets the agents there open threads and fork machines of their own, capped; off is what a workspace made without it is",
+  "threads wait tail": "print the reply's last line alone, the line a notify sends, rather than the whole reply",
   tick: `the rule that decides every tick: ${RECIPE_TICKS.join(", ")}`,
   timeout: "how long to wait before answering that they are still running",
   title: "what to call the thread; the agent names it from the task without one",

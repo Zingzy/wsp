@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 import { dirname, join } from "node:path";
 import { EXIT_CODES, LOOPBACK } from "@wsp/protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, verbHostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
+import { SERVE_FLAGS, SHARED_OPTIONS, claudeKeyOnlyInThisShell, cli, downCommand, keyOnlyInThisShell, optsFor, statusCommand, upServiceCommand, hostStoppedLine, type CliIO, type ServeAsked, type ServiceDeps } from "../src/cli.js";
 import {
   SERVICE_MANAGERS,
   installService,
@@ -649,7 +649,7 @@ describe("wsp up --service, wsp down and wsp status", () => {
     // The stop takes the lock away, which is what the host it asked to end does as it closes.
     const fake2 = svc({ stop: pid => void (pid === process.pid && rmSync(join(home, ".wsp", "host.lock"), { force: true })) });
     expect(await downCommand(quietIO(lines), opts, fake2.deps)).toBe(0);
-    expect(lines).toEqual([verbHostStoppedLine(process.pid, statePath)]);
+    expect(lines).toEqual([hostStoppedLine("verb", process.pid, statePath)]);
 
     // One that will not go is said so rather than reported as stopped.
     writeFileSync(join(home, ".wsp", "host.lock"), verbLock);
@@ -657,6 +657,26 @@ describe("wsp up --service, wsp down and wsp status", () => {
     expect(await downCommand(quietIO([], held), opts, fake.deps)).toBe(1);
     expect(fake.stopped).toEqual([process.pid]);
     expect(held[0]).toBe(`wsp down: the host a verb started (pid ${process.pid}) is still serving ${statePath}.`);
+  });
+
+  it("wsp down stops the host wsp up started, whatever port it took, and says which line brought it up", async () => {
+    // Both testers ended their session here: up started it, down refused to stop it, and they killed a pid by
+    // hand. The pid comes off the lock that host wrote, so the port it ended up on decides nothing.
+    const upLock = JSON.stringify({ pid: process.pid, port: 4700, wsPort: 4710, startedAt: new Date().toISOString(), startedBy: "up" });
+    writeFileSync(join(home, ".wsp", "host.lock"), upLock);
+    const fake = svc({ stop: pid => void (pid === process.pid && rmSync(join(home, ".wsp", "host.lock"), { force: true })) });
+    const lines: string[] = [];
+    expect(await downCommand(quietIO(lines), opts, fake.deps)).toBe(0);
+    expect(lines).toEqual([hostStoppedLine("up", process.pid, statePath)]);
+    expect(lines[0]).toContain("stopped the host wsp up started");
+
+    // One that will not go is said so in its own words rather than reported as stopped.
+    writeFileSync(join(home, ".wsp", "host.lock"), upLock);
+    const stuck = svc();
+    const held: string[] = [];
+    expect(await downCommand(quietIO([], held), opts, stuck.deps)).toBe(1);
+    expect(stuck.stopped).toEqual([process.pid]);
+    expect(held[0]).toBe(`wsp down: the host wsp up started (pid ${process.pid}) is still serving ${statePath}.`);
   });
 
   it("wsp status exits 1 while nothing serves the state file and 0 once the service does, saying which ports either way", async () => {

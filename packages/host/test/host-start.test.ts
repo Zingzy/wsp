@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The host a verb brings up for itself: what it spawns, what it says, what it
 // does when the child never serves, and which lines start one at all.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRuntime, memoryStore, type Runtime } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES, exitClassOf } from "@wsp/protocol";
-import { cli, serve, type CliIO } from "../src/cli.js";
+import { cli, HOST_STARTS_ITSELF, localWiring, serve, type CliIO } from "../src/cli.js";
 import { hostLogPath, lockPathFor, servingHost, type HostLock } from "../src/host-lock.js";
 import { hostStarter, noHostAnsweredLine, startedByVerb, startingHostLine, STARTED_BY_ENV, type HostStarter } from "../src/host-start.js";
 import { dialer } from "../src/mcp.js";
@@ -38,6 +39,8 @@ describe("a verb starts the host when none serves", () => {
   let webDir: string;
   let rt: Runtime | undefined;
   const handles: HostHandle[] = [];
+  /** Folders a case made outside its own temp dir, for the one line that wants a real git repo. */
+  const repos: string[] = [];
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "wsp-start-"));
@@ -57,6 +60,7 @@ describe("a verb starts the host when none serves", () => {
     rt = undefined;
     vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
+    for (const folder of repos.splice(0)) rmSync(folder, { recursive: true, force: true });
   });
 
   /** A starter that brings the host up in this process, which is what a real one's child does in its own. */
@@ -67,7 +71,9 @@ describe("a verb starts the host when none serves", () => {
       start: async (path, say) => {
         calls.push(path);
         say(startingHostLine(path, hostLogPath(path)));
-        rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {} });
+        // Wired for this computer as well as for the stub provider: wsp add on a folder here records a project on
+        // this computer, and a host with no local backend refuses that rather than the dial.
+        rt = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: {}, local: localWiring(join(dir, "home")) });
         handles.push(await serve(captured(), { port: 0, wsPort: 0, statePath: path, webDir, runtime: rt }));
         return servingHost(path)!;
       },
@@ -131,6 +137,40 @@ describe("a verb starts the host when none serves", () => {
     await rt?.close();
     rt = undefined;
     await expect(dialHost(join(dir, "other", "state.json"), { aim: { kind: "here" } })).rejects.toThrow(noHostServingLine(join(dir, "other", "state.json")));
+  });
+
+  it("a line that starts nothing reads the refusal with the line that serves that file, and exits non-zero", async () => {
+    // Priya's and Marco's first stall, at their second command: a fact with no next step in it, where every other
+    // refusal in wsp ends with the command that fixes it. The flag is spelled out, since a person who named a
+    // state file has to name it again to serve that one.
+    const elsewhere = join(dir, "other", "state.json");
+    expect(noHostServingLine(elsewhere)).toBe(`no wsp host is serving ${elsewhere}; start one with wsp up --state ${elsewhere}`);
+    const errors: string[] = [];
+    // A line handed no starter, which is what a caller that wants the refusal rather than a host hands in.
+    expect(await cli(["add", dir, "--state", elsewhere], quietIO([], errors), undefined, {}, false)).toBe(EXIT_CODES.provider);
+    expect(errors).toEqual([noHostServingLine(elsewhere)]);
+  });
+
+  it("wsp add and wsp remove start the host too, so the front page's claim holds for the second command a person types", async () => {
+    // Both testers typed wsp add second and read a refusal, while every verb around it starts a host for itself.
+    // The claim on the front page is now true of these two as well, and it is that claim this proves.
+    expect(HOST_STARTS_ITSELF).toBe("A line that needs a host starts one when none serves.");
+    const folder = realpathSync(mkdtempSync(join(tmpdir(), "wsp-start-repo-")));
+    repos.push(folder);
+    execFileSync("git", ["init", "-q", folder]);
+    const here = servingStarter();
+    const lines: string[] = [];
+    const errors: string[] = [];
+    expect(await cli(["add", folder, "--state", statePath], quietIO(lines, errors), undefined, {}, here.start), errors.join("\n")).toBe(0);
+    expect(here.calls).toEqual([statePath]);
+    expect(errors).toEqual([startingHostLine(statePath, hostLogPath(statePath))]);
+    expect(lines.join("\n")).toContain(folder);
+    // And the other of the two words, which dials the same way: the host is up now, so this one starts none and
+    // the refusal it reads is about the computer it was asked for, not about a host.
+    const removing: string[] = [];
+    expect(await cli(["remove", "nowhere", "--state", statePath], quietIO([], removing), undefined, {}, here.start)).toBe(1);
+    expect(here.calls).toEqual([statePath]);
+    expect(removing.join("\n")).not.toContain("no wsp host is serving");
   });
 
   it("wsp threads with no host starts one, says so on stderr, and prints the answer on stdout", async () => {
