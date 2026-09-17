@@ -383,7 +383,7 @@ describe("the one rule that decides whether a computer can be a place", () => {
   });
 
   it("names the overlay a workspace's layers stack on, whether the file is missing or does not list it", () => {
-    const overlay = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const overlay = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
     expect(workspacesBlockedBy({ platform: "linux", read: box({ [CGROUP_CONTROLLERS_PATH]: CGROUP[CGROUP_CONTROLLERS_PATH]! }), euid: 0 })).toBe(overlay);
     expect(workspacesBlockedBy({ platform: "linux", read: box({ ...CGROUP, [PROC_FILESYSTEMS_PATH]: "nodev sysfs\next4\n" }), euid: 0 })).toBe(overlay);
   });

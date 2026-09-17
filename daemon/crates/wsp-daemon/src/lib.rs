@@ -205,6 +205,11 @@ pub(crate) struct Ctx {
     /// turned the link on or the runtime root could not be opened.
     #[cfg(target_os = "linux")]
     pub(crate) runtime: Option<Arc<wsp_runtime::ops::Ops>>,
+    /// Why there is no runtime, where the root it was given is the reason: the doctor's reading of that root,
+    /// which every machine op answers instead of the line that names the op alone. None for every other reason,
+    /// where the log carries it and the ops name the op, as they always have.
+    #[cfg(target_os = "linux")]
+    pub(crate) runtime_refusal: Option<String>,
     authed: Mutex<HashMap<u64, Outbound>>,
     keys: AtomicU64,
 }
@@ -224,7 +229,7 @@ impl Ctx {
         let ports = ports::PortWatch::new(ports::source_for(options.proc_root.as_deref()), interval);
         let guest_unwatched = Duration::from_millis(options.guest_unwatched_ms.unwrap_or(numbers::GUEST_UNWATCHED_MS));
         #[cfg(target_os = "linux")]
-        let runtime = open_runtime(&options, &log);
+        let (runtime, runtime_refusal) = open_runtime(&options, &log);
         Ok(Ctx {
             options,
             root,
@@ -242,6 +247,8 @@ impl Ctx {
             stop: tokio::sync::Notify::new(),
             #[cfg(target_os = "linux")]
             runtime,
+            #[cfg(target_os = "linux")]
+            runtime_refusal,
             authed: Mutex::new(HashMap::new()),
             keys: AtomicU64::new(1),
         })
@@ -386,30 +393,33 @@ impl Daemon {
     }
 }
 
-/// The workspace runtime a place's daemon serves on its link, under the runtime root. A daemon that is not a place
-/// serves none; a root this process cannot open leaves the link answering that no backend is here, and says why once.
+/// The workspace runtime a place's daemon serves on its link, under the runtime root, and where the root itself
+/// is the reason there is none, the sentence that says so. A daemon that is not a place serves no runtime and
+/// says nothing of the sort; a root this process cannot open says why once in the log, and every machine op
+/// there answers the line that names the op, as it always has. The one exception is where the root was put: that
+/// is the person's own choice and the reason every create under it would fail, so the reading travels to the
+/// ops, since somebody asking what this computer can do reads the host's answer and not this log.
 #[cfg(target_os = "linux")]
-fn open_runtime(options: &Options, log: &Log) -> Option<Arc<wsp_runtime::ops::Ops>> {
-    options.place_file.as_ref()?;
+fn open_runtime(options: &Options, log: &Log) -> (Option<Arc<wsp_runtime::ops::Ops>>, Option<String>) {
+    if options.place_file.is_none() {
+        return (None, None);
+    }
     let root = options.runtime_root.clone().unwrap_or_else(|| PathBuf::from(wsp_runtime::DEFAULT_ROOT));
+    // Read before the open, which refuses the same root itself: nothing is made under it either way, and the
+    // sentence is the one the host reads when it asks what this computer can do.
+    if let Some(said) = wsp_runtime::doctor::root_under_a_lower(&root) {
+        log(&format!("workspace runtime not served: {said}"));
+        return (None, Some(said));
+    }
     let exe = match std::env::current_exe() {
         Ok(exe) => exe,
         Err(e) => {
             log(&format!("workspace runtime not served: this binary's own path is unknown: {e}"));
-            return None;
+            return (None, None);
         }
     };
     match wsp_runtime::ops::Ops::open(&root, exe) {
         Ok(ops) => {
-            let swept = ops.swept_at_open();
-            if swept.bytes > 0 {
-                log(&format!(
-                    "layer store swept: {} blobs, {} unpacked layers, {} bytes",
-                    swept.blobs.len(),
-                    swept.unpacked.len(),
-                    swept.bytes
-                ));
-            }
             for id in ops.stopped_at_open() {
                 log(&format!("workspace {id} found stopped at start: its init is gone"));
             }
@@ -429,11 +439,11 @@ fn open_runtime(options: &Options, log: &Log) -> Option<Arc<wsp_runtime::ops::Op
                     if net_swept.rules { ", the rules" } else { "" }
                 ));
             }
-            Some(Arc::new(ops))
+            (Some(Arc::new(ops)), None)
         }
         Err(e) => {
             log(&format!("workspace runtime not served: {}: {e}", root.display()));
-            None
+            (None, None)
         }
     }
 }

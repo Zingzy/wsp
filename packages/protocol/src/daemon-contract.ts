@@ -11,16 +11,24 @@
  * loopback answers 502. A local run names loopback with --host so the firewall stays quiet. */
 export const DAEMON_DEFAULT_HOST = "0.0.0.0";
 export const DAEMON_DEFAULT_PORT = 7070;
-/** The one file the daemon reads its token from, at every auth frame; a guest is root's, so it sits in /root. */
-export const DAEMON_TOKEN_PATH = "/root/.wsp-daemon-token";
-export const GUEST_INBOX_DIR = "/root/inbox";
-export const GUEST_MANIFEST_PATH = "/root/.wsp/manifest.json";
+/** Where the daemon inside a machine keeps everything of its own: its token, its inbox, its manifest, its open
+ * socket, its run and log folders and its roots file, every one of them under this folder. A workspace on a
+ * computer somebody joined has this folder of its own bound over the computer's, so two workspaces there never
+ * read or write each other's token and the computer's own daemon folder is not readable from inside at all. The
+ * names are the ones a daemon on a computer somebody joined uses under that computer's home, which
+ * placeDaemonPaths lays out and the contract test holds these to. */
+export const GUEST_WSP_HOME = "/root/.wsp";
+/** The one file the daemon reads its token from, at every auth frame; a guest is root's, so it sits under root's
+ * own wsp folder, where a workspace's is its own and not the computer's. */
+export const DAEMON_TOKEN_PATH = `${GUEST_WSP_HOME}/daemon-token`;
+export const GUEST_INBOX_DIR = `${GUEST_WSP_HOME}/inbox`;
+export const GUEST_MANIFEST_PATH = `${GUEST_WSP_HOME}/manifest.json`;
 /** BROWSER value and xdg-open target on the guest. A bare path: tools append the URL as the one argument, and
  * the harness treats the literal "true" as its never-open sentinel. */
 export const OPEN_SHIM_PATH = "/usr/local/bin/wsp-open";
 export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
 /** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
-export const OPEN_SOCKET_PATH = "/root/.wsp/open.sock";
+export const OPEN_SOCKET_PATH = `${GUEST_WSP_HOME}/open.sock`;
 
 /** Wire bytes a peer may send before its auth frame passes; an auth frame is under 200. */
 export const PRE_AUTH_MAX_BYTES = 4096;

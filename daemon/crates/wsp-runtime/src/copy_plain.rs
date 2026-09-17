@@ -22,7 +22,7 @@ impl Copier for Plain {
 
     fn copy(&self, from: &Path, to: &Path) -> io::Result<()> {
         let parent = to.parent().unwrap_or(to);
-        let wanted = crate::store::tree_bytes(from)?;
+        let wanted = crate::copy::tree_bytes(from)?;
         let free = free_bytes(parent)?;
         if free < wanted {
             return Err(io::Error::new(io::ErrorKind::StorageFull, no_room(parent, wanted, free)));

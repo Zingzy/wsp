@@ -1,7 +1,7 @@
 [
   {
     "type": "inbox.file",
-    "path": "/root/inbox/upload.bin",
+    "path": "/root/.wsp/inbox/upload.bin",
     "bytes": 64
   }
 ]

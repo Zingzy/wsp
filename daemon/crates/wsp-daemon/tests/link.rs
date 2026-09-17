@@ -388,9 +388,10 @@ async fn on_the_link_the_machine_ops_are_the_runtimes_to_answer_and_inbound_the_
     let mut events = Vec::new();
     let answer = ask(&mut ws, 31, "machine.list", &mut events).await;
     assert_eq!(answer, json!({"id": 31, "ok": true, "machines": []}));
-    // The store's listings answer from the runtime too, empty on a fresh root.
-    let later = ask(&mut ws, 32, "machine.listSnapshots", &mut events).await;
-    assert_eq!(later, json!({"id": 32, "ok": true, "snapshots": []}));
+    // And an op a layer store answered is an op no more: this computer keeps no image, so the frame is named the
+    // way any op this daemon does not serve is.
+    let gone = ask(&mut ws, 32, "machine.listSnapshots", &mut events).await;
+    assert_eq!(gone, json!({"id": 32, "ok": false, "error": words::unknown_op("machine.listSnapshots")}));
     // The same op on the place's own door, from a client holding its token, is answered exactly as the link's was:
     // the listing only reads, so which road it came in on makes no difference to it. Whatever this box answers on
     // the link is what is expected here, so the case reads the same on a box with a runtime and on one without.

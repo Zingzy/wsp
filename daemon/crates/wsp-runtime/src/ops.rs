@@ -2,11 +2,12 @@
 //! Every machine op on the link, answered as the Docker backend on a place answers them, so the host's link
 //! backend needs no change: the same handles, rows and results, and every refusal as `{ ok: false, error, kind,
 //! status }` with `kind: missing` for a workspace nothing here knows. A workspace is a record under the run
-//! directory, a container youki made from the store's layers, its cgroup, and its network. Idle means stopped: a
-//! pause kills the processes and takes the network down, its upper directory stays as the saved layer, and the
-//! wake boots from it with the same id, address and forwards; a workspace labelled to keep running is frozen
-//! instead. A snapshot commits the upper directory to the store under a name, and a template is a name over a
-//! snapshot's chain; a fork boots from either as from an image.
+//! directory, a container youki made from this computer's own directories and one copy of a checkout on it, its
+//! cgroup, and its network. This computer keeps no image: a create that names a template or a snapshot is
+//! refused in one sentence, and nothing here pulls, builds, saves or lists one. Idle means stopped: a pause kills
+//! the processes and takes the network down, the workspace's upper directories stay with its copy, and the wake
+//! mounts the computer again and boots from them with the same id, address and forwards; a workspace labelled to
+//! keep running is frozen instead.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -14,8 +15,7 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine;
@@ -23,32 +23,25 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::Mutex;
 use wsp_frames::{
-    BackendFacts, BackendPricing, BaseTemplates, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
+    words, BackendFacts, BackendPricing, Capabilities, CopyWord, DaemonErrorResponse, DaemonSupervisor, ExecResult, Lifecycle,
     LifecycleBudgets, MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply,
-    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachinePromoteReply, MachineReachReply, MachineReading,
-    MachineReadingReply, MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSnapshotJobReply,
-    MachineSnapshotReply, MachineSnapshotsReply, MachineSpec, MachineState, MachineStateReply, MachineTemplateReply, MachineTemplatesReply,
-    PauseMode, PlaceCapacity, PlaceImage, PreviewReach, Reply, RequestId, Share, SnapshotJobState, SnapshotRow, SnapshotStoragePricing,
-    TemplateRow, TemplateStatus, WorkspaceCopy, WorkspaceSize,
+    MachineKind, MachineLinkRequest, MachineListReply, MachineListRow, MachineOp, MachineReachReply, MachineReading, MachineReadingReply,
+    MachineRoads, MachineSeen, MachineShape, MachineShapeReply, MachineSizeOffer, MachineSpec, MachineState, MachineStateReply, PauseMode,
+    PlaceCapacity, PreviewReach, Reply, RequestId, Share, SnapshotStoragePricing, WorkspaceCopy, WorkspaceSize,
 };
 
 use crate::bundle::{self, Config, CopyMade, Init, Layout, Workspace};
 use crate::copy;
 use crate::engine::{self, Fence, Ports};
-use crate::fetch::{self, Client, Digest, Reference};
 use crate::freeze;
 use crate::net::{self, Net};
 use crate::profile;
 use crate::runtime::{self, Runtime, Status};
 use crate::size::{size_on_box, BoxFacts, SizeOnBox};
-use crate::snapshot;
-use crate::store::{self, Chain, Snapshot, Store, Swept};
 use crate::{answer_machine_op, no_backend_refusal};
 
 /// The id of the offer this computer serves, which the host stamps on every fork made here.
 pub const OFFER: &str = "runtime";
-/// The image a workspace boots from when nothing names one: the same long term release the goldens build on.
-pub const BASE_IMAGE: &str = "ubuntu:24.04";
 /// The kernel takes 64 bytes of host name and refuses the boot above it.
 pub const HOSTNAME_MAX: usize = 63;
 /// Where a sealed image keeps the script that keeps its daemon running; the boot runs it when it is there.
@@ -63,9 +56,6 @@ pub const WSP_LABEL: &str = "wsp";
 /// stopping it, which is what a pinned port or a service inside asks for.
 pub const IDLE_LABEL: &str = "wsp.idle";
 pub const IDLE_FREEZE: &str = "freeze";
-/// The repository a promoted snapshot's template id sits in, as the Docker backend tags one: `wsp/<name>:template`.
-pub const TEMPLATE_REPO: &str = "wsp";
-pub const TEMPLATE_TAG: &str = "template";
 const SIZES: [(f64, u64); 2] = [(2.0, 4096), (4.0, 8192)];
 const WAKE_ATTEMPTS: u32 = 1;
 const DAEMON_ANSWERS_MS: u64 = 30_000;
@@ -136,18 +126,6 @@ impl From<net::Error> for OpError {
     }
 }
 
-/// A name the store lacks and no registry answers is missing, as the Docker daemon says of an image it has not got.
-impl From<store::Error> for OpError {
-    fn from(e: store::Error) -> OpError {
-        match &e {
-            store::Error::Fetch(fetch::Error::Status { status: 404, .. } | fetch::Error::BadName(_) | fetch::Error::Denied { .. }) => {
-                OpError::missing(format!("no such image: {e}"))
-            }
-            _ => OpError::plain(e.to_string()),
-        }
-    }
-}
-
 /// The handle a create answers with, carrying what the create has to say about what it gave.
 fn noticed(mut handle: MachineHandle, notice: Option<String>) -> MachineHandle {
     handle.notice = notice;
@@ -175,21 +153,11 @@ pub fn plain_copy_line(root: &Path, filesystem: Option<&str>, ms: u64) -> String
 
 pub struct Ops {
     layout: Layout,
-    store: Arc<Store>,
     runtime: Runtime,
     net: Arc<Net>,
     /// The fenced engine socket's accept loop of every running workspace that asked for one.
     engines: Mutex<BTreeMap<String, tokio::task::JoinHandle<()>>>,
-    /// One pull, commit or sweep at a time, and a create from the resolve of its chain to the record that holds
-    /// it: two pulls of one image would append to the same partial blob, and a sweep between a resolve and the
-    /// record would take a layer the boot is about to mount. Shared with the snapshot jobs, which outlive the frame
-    /// that started them.
-    pulls: Arc<Mutex<()>>,
-    /// Every snapshot job this daemon started, by the name its reply carried, running or finished: the host asks
-    /// after a job until it reads done or failed, and a finished job costs a few words to keep.
-    jobs: std::sync::Mutex<BTreeMap<String, Arc<SnapshotJob>>>,
     facts: BoxFacts,
-    swept: Swept,
     stopped: Vec<String>,
     net_swept: net::Swept,
     unfinished: Unfinished,
@@ -211,16 +179,23 @@ impl Unfinished {
 }
 
 impl Ops {
-    /// Opens the store under the root, sweeps what nothing names, reads the box, marks every workspace whose init
-    /// is gone as stopped (a reboot, or a daemon that was not there when the init died, leaves its record, its upper
-    /// directory and youki's state behind, and youki reads any process on the old pid as the container), and sweeps
-    /// the network of every workspace that is not running. `exe` is this binary. The forwards of the workspaces
-    /// still running come back with `restore`, which wants the runtime the listeners live on.
-    pub fn open(root: &Path, exe: PathBuf) -> Result<Ops, store::Error> {
+    /// Opens the root, sweeps the creates that never finished, reads the box, marks every workspace whose init is
+    /// gone as stopped (a reboot, or a daemon that was not there when the init died, leaves its record, its upper
+    /// directories and youki's state behind, and youki reads any process on the old pid as the container), and
+    /// sweeps the network of every workspace that is not running. `exe` is this binary. The forwards of the
+    /// workspaces still running come back with `restore`, which wants the runtime the listeners live on.
+    pub fn open(root: &Path, exe: PathBuf) -> Result<Ops, OpError> {
+        // Where the root was put, before a directory is made under it: every workspace here reads the computer's
+        // own system directories through an overlay whose upper sits under this root, so a root inside one of
+        // them gives every workspace its own upper, and its neighbours', to read inside the tree it overlays.
+        // Refused whole rather than served: a daemon that made its folders and then failed every create left a
+        // person reading `ready` and nothing else.
+        if let Some(reason) = crate::doctor::root_under_a_lower(root) {
+            return Err(OpError::plain(reason));
+        }
         let layout = Layout::new(root);
-        let store = Store::open(root)?;
-        for dir in [layout.run(), layout.state()] {
-            fs::create_dir_all(&dir).map_err(|source| store::Error::Io { path: dir.clone(), source })?;
+        for dir in [layout.run(), layout.state(), layout.copies()] {
+            fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
         }
         // The logins directory is made before any sign-in on this computer asks for it, and only this login may
         // read it: what lands under it is the person's own sign-in for every workspace here.
@@ -229,27 +204,20 @@ impl Ops {
             .recursive(true)
             .mode(0o700)
             .create(&logins)
-            .map_err(|source| store::Error::Io { path: logins.clone(), source })?;
+            .map_err(|e| OpError::plain(format!("{}: {e}", logins.display())))?;
         // Before anything reads the run directory as a list of workspaces: what a create that died left is not
         // one, and a copy that was still being made is not a copy.
-        let unfinished = sweep_unfinished(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
-        let held = held_chains(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
-        let swept = store.sweep(&held)?;
+        let unfinished = sweep_unfinished(&layout)?;
         let runtime = Runtime::new(root, exe);
-        let stopped = mark_stopped(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
-        let running = running_ids(&layout).map_err(|e| store::Error::Record { path: layout.run(), detail: e.message })?;
-        let (net, net_swept) = Net::open(Layout::new(root), &running)
-            .map_err(|e| store::Error::Io { path: root.to_path_buf(), source: io::Error::other(e.to_string()) })?;
+        let stopped = mark_stopped(&layout)?;
+        let running = running_ids(&layout)?;
+        let (net, net_swept) = Net::open(Layout::new(root), &running).map_err(|e| OpError::plain(format!("{}: {e}", root.display())))?;
         Ok(Ops {
             layout,
-            store: Arc::new(store),
             runtime,
             net: Arc::new(net),
             engines: Mutex::new(BTreeMap::new()),
-            pulls: Arc::new(Mutex::new(())),
-            jobs: std::sync::Mutex::new(BTreeMap::new()),
             facts: BoxFacts::read(),
-            swept,
             stopped,
             net_swept,
             unfinished,
@@ -304,11 +272,6 @@ impl Ops {
             task.abort();
         }
         let _ = fs::remove_file(self.layout.engine(id).join(engine::SOCKET_NAME));
-    }
-
-    /// What the sweep at open removed.
-    pub fn swept_at_open(&self) -> &Swept {
-        &self.swept
     }
 
     /// The workspaces found stopped at open, their init gone.
@@ -408,9 +371,11 @@ impl Ops {
             MachineOp::State { machine_id } => body(MachineStateReply { state: self.state_of(&self.record(&machine_id)?) }),
             MachineOp::Describe { machine_id } => {
                 let record = self.record(&machine_id)?;
+                // Every overlay's upper under one directory, so this is the whole of what the workspace has
+                // written since it booted, the box's own directories not counted.
                 let upper = self.layout.upper(&record.id);
                 // Off the runtime thread: a workspace after a build holds hundreds of thousands of files.
-                let used_bytes = tokio::task::spawn_blocking(move || store::tree_bytes(&upper).ok()).await.ok().flatten();
+                let used_bytes = tokio::task::spawn_blocking(move || copy::tree_bytes(&upper).ok()).await.ok().flatten();
                 body(MachineShapeReply {
                     shape: MachineShape {
                         cpu: record.cpu,
@@ -455,46 +420,6 @@ impl Ops {
                 self.record(&machine_id)?;
                 Err(OpError::plain("a workspace serves no signed upload URL; its files go in through the byte road"))
             }
-            // The disk is the same copy whatever the workspace has done since it booted, so the life it is handed
-            // changes nothing here, as it changes nothing for the Docker backend.
-            MachineOp::Snapshot { machine_id, name, life: _ } => {
-                let record = self.record(&machine_id)?;
-                body(MachineSnapshotReply { job: self.start_snapshot(record, name) })
-            }
-            MachineOp::SnapshotJob { job } => body(self.snapshot_job(&job)?),
-            MachineOp::DeleteSnapshot { snapshot_id } => {
-                let id = Digest::parse(&snapshot_id).map_err(|_| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
-                if !self.remove_and_sweep(move |store| store.remove_snapshot(&id)).await? {
-                    return Err(OpError::missing(format!("no such snapshot: {snapshot_id}")));
-                }
-                body(Empty {})
-            }
-            MachineOp::ListSnapshots => {
-                let snapshots = self.store.snapshots()?.into_iter().map(|s| self.snapshot_row(s)).collect::<Result<_, _>>()?;
-                body(MachineSnapshotsReply { snapshots })
-            }
-            MachineOp::PromoteSnapshot { snapshot_id, name } => {
-                let id = Digest::parse(&snapshot_id).map_err(|_| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
-                let snapshot = self.store.snapshot(&id)?.ok_or_else(|| OpError::missing(format!("no such snapshot: {snapshot_id}")))?;
-                let template_id = template_id(&name);
-                self.store.record_template(&template_id, &name, &snapshot)?;
-                body(MachinePromoteReply { template_id })
-            }
-            MachineOp::GetTemplate { template_id } => {
-                let template =
-                    self.store.template(&template_id)?.ok_or_else(|| OpError::missing(format!("no such template: {template_id}")))?;
-                body(MachineTemplateReply { template: template_row(&template) })
-            }
-            MachineOp::ListTemplates => {
-                body(MachineTemplatesReply { templates: self.store.templates()?.iter().map(template_row).collect() })
-            }
-            MachineOp::DeleteTemplate { template_id } => {
-                let id = template_id.clone();
-                if !self.remove_and_sweep(move |store| store.remove_template(&id)).await? {
-                    return Err(OpError::missing(format!("no such template: {template_id}")));
-                }
-                body(Empty {})
-            }
         }
     }
 
@@ -510,10 +435,13 @@ impl Ops {
                 preview_urls: false,
                 signed_urls: false,
                 callback_relay: true,
-                disk_snapshots: true,
-                snapshots_any_life: true,
-                snapshot_listing: true,
-                templates: true,
+                // This computer keeps no image: a workspace here is a copy of the computer itself, so there is
+                // nothing to save a machine's disk into, nothing to name and nothing to list.
+                disk_snapshots: false,
+                images: false,
+                snapshots_any_life: false,
+                snapshot_listing: false,
+                templates: false,
                 sizes,
                 kept: false,
                 copies: true,
@@ -527,7 +455,8 @@ impl Ops {
             lifecycle: Some(Lifecycle {
                 budgets: LifecycleBudgets { wake_attempts: WAKE_ATTEMPTS, daemon_answers_ms: DAEMON_ANSWERS_MS, resume_asks: None },
             }),
-            base_templates: Some(BaseTemplates { sandbox: BASE_IMAGE.to_owned(), desktop: BASE_IMAGE.to_owned() }),
+            // Nothing boots from a name here, so there is no name to offer for a kind.
+            base_templates: None,
             logins: Some(self.layout.logins().to_string_lossy().into_owned()),
         }
     }
@@ -547,17 +476,32 @@ impl Ops {
         if let Some(reason) = crate::doctor::assess(&crate::doctor::read_facts()).blocked {
             return Err(reason);
         }
+        // Where the root was put, in the same words the open refuses it with: every workspace here reads the
+        // computer's own system directories through an overlay whose upper is under this root, so a root inside
+        // one of them gives a workspace its own upper to read. The open makes nothing under such a root, and
+        // this is the sentence the host reads when it asks.
+        if let Some(reason) = crate::doctor::root_under_a_lower(layout.root()) {
+            return Err(reason);
+        }
+        // And whether this computer's own directories can be a workspace at all: /usr is where every tool a
+        // workspace runs comes from, so a root that keeps /bin of its own is named here and not at a create.
+        if let Some(reason) = bundle::unmerged_root().map_err(|e| e.to_string())? {
+            return Err(reason);
+        }
         let check = layout.check();
-        let (lower, upper, work, merged) = (check.join("lower"), check.join("upper"), check.join("work"), check.join("merged"));
+        let (upper, work, merged) = (check.join("upper"), check.join("work"), check.join("merged"));
+        // One of the overlays a workspace is made of, over the box's own directory rather than over an empty
+        // one: what a create does, done once here, so a box that refuses it says so at the dial.
+        let lower = Path::new(crate::doctor::OVERLAID[0]);
         let overlay = (|| -> Result<(), String> {
-            for dir in [&lower, &upper, &work, &merged] {
+            for dir in [&upper, &work, &merged] {
                 fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
             }
-            bundle::mount_rootfs(std::slice::from_ref(&lower), &upper, &work, &merged).map_err(|e| e.to_string())?;
+            bundle::mount_overlay(lower, &upper, &work, &merged).map_err(|e| e.to_string())?;
             bundle::unmount(&merged).map_err(|e| e.to_string())
         })();
         let _ = fs::remove_dir_all(&check);
-        overlay.map_err(|e| format!("this computer refuses an overlay mount: {e}"))?;
+        overlay.map_err(|e| format!("this computer refuses an overlay mount of {}: {e}", lower.display()))?;
         let cgroup = Path::new(freeze::CGROUP_ROOT).join("wsp").join(format!("check-{}", std::process::id()));
         fs::create_dir_all(&cgroup).map_err(|e| format!("this computer refuses a cgroup under {}/wsp: {e}", freeze::CGROUP_ROOT))?;
         let _ = fs::remove_dir(&cgroup);
@@ -584,12 +528,6 @@ impl Ops {
         let stat =
             nix::sys::statvfs::statvfs(self.layout.root()).map_err(|e| OpError::plain(format!("{}: {e}", self.layout.root().display())))?;
         let disk_free_bytes = stat.blocks_available() as u64 * stat.fragment_size() as u64;
-        let images = self
-            .store
-            .images()?
-            .into_iter()
-            .map(|image| PlaceImage { id: image.manifest.to_string(), name: Some(image.name), size_bytes: image.layer_bytes.iter().sum() })
-            .collect();
         Ok(PlaceCapacity {
             cores: self.facts.cores,
             mem_mb: self.facts.mem_mb,
@@ -598,13 +536,18 @@ impl Ops {
             cpu_taken: Some(taken_cpu),
             mem_taken_mb: Some(taken_mb),
             disk_free_bytes,
-            images,
+            // No image is kept here, so the room for one more workspace is the memory rule alone.
+            images: Vec::new(),
             machines: counts,
         })
     }
 
     async fn create(&self, spec: MachineSpec) -> Result<MachineHandle, OpError> {
-        let image = spec.from_snapshot.clone().or_else(|| spec.template.clone()).unwrap_or_else(|| BASE_IMAGE.to_owned());
+        // A workspace here is made of this computer's own directories, so a name for an image to boot from is
+        // not something to fall back from: it is a create meant for another kind of place.
+        if spec.template.is_some() || spec.from_snapshot.is_some() {
+            return Err(OpError::plain(words::NO_IMAGES_HERE));
+        }
         // Read before the claim below, so the answer to a create the first one already made carries the same
         // sentence about the same size rather than going quiet on the second ask.
         let size = size_on_box(&self.facts, spec.cpu, spec.mem_mb);
@@ -613,7 +556,7 @@ impl Ops {
         let shares = self.shares_of(&spec)?;
         let id = match &spec.idempotency_key {
             Some(key) => format!("wsp-{}", workspace_word(key)),
-            None => format!("wsp-{}", store::random_word()),
+            None => format!("wsp-{}", random_word()),
         };
         let dir = self.layout.workspace(&id);
         // The directory is the claim: a second create under the same key answers the workspace the first one made.
@@ -626,8 +569,8 @@ impl Ops {
                 None => Err(OpError::plain(format!("workspace {id} is being created"))),
             };
         }
-        // Before the store and before youki: a copy of the checkout is the slowest thing a create does and the
-        // one thing a person waits on, and a refusal here costs nothing else.
+        // Before anything is mounted and before youki: a copy of the checkout is the slowest thing a create does
+        // and the one thing a person waits on, and a refusal here costs nothing else.
         let copy = match &spec.copy {
             Some(want) => match self.make_copy(&id, want).await {
                 Ok(made) => Some(made),
@@ -639,7 +582,7 @@ impl Ops {
             None => None,
         };
         let notice = notices([size.clamped.clone(), copy.as_ref().and_then(|made| self.plain_copy_notice(made))]);
-        match self.build(&id, &image, &spec, &size, copy.clone(), shares).await {
+        match self.build(&id, &spec, &size, copy.clone(), shares).await {
             Ok(record) => Ok(noticed(self.handle(&record, None, None), notice)),
             Err(e) => {
                 // A workspace that would not come up is ours and nobody else's: nothing of it stays behind, the
@@ -718,33 +661,26 @@ impl Ops {
     async fn build(
         &self,
         id: &str,
-        image: &str,
         spec: &MachineSpec,
         size: &SizeOnBox,
         copy: Option<CopyMade>,
         shares: Vec<Share>,
     ) -> Result<Workspace, OpError> {
-        // Held until the record is on disk, which is what makes the sweep keep the chain: a delete of the snapshot
-        // or template the fork boots from waits here instead of taking the layer from under the mount.
-        let _one_at_a_time = self.pulls.lock().await;
         let engine = spec.engine == Some(true);
         if engine {
             engine::socket_of(&crate::doctor::read_facts()).map_err(OpError::plain)?;
         }
-        let chain = self.resolve_chain(image).await?;
         let hostname: String = id.chars().take(HOSTNAME_MAX).collect();
         let mut labels = BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]);
         labels.extend(spec.labels.clone().unwrap_or_default());
         let record = Workspace {
             id: id.to_owned(),
             hostname,
-            image: image.to_owned(),
-            chain,
             labels,
             envs: spec.envs.clone().unwrap_or_default(),
             cpu: Some(size.cpu),
             mem_mb: Some(size.mem_mb),
-            created_at: store::now_iso(),
+            created_at: now_iso(),
             init: Init { pid: 0, started: 0, boot_id: String::new() },
             engine,
             copy,
@@ -753,17 +689,14 @@ impl Ops {
         self.boot(record).await
     }
 
-    /// The workspace's processes from its record: the overlay over its chain and its own upper directory, the
-    /// bundle, youki's create, the network, the start, and the forwards its record names. A first boot and a wake
-    /// are the same road; a wake finds the upper directory as the stop left it, with everything the workspace wrote.
+    /// The workspace's processes from its record: the computer's own directories under the workspace's upper
+    /// directories, the bundle, youki's create, the network, the start, and the forwards its record names. A
+    /// first boot and a wake are the same road; a wake finds the upper directories as the stop left them, with
+    /// everything the workspace wrote, over the box's directories as they are now.
     async fn boot(&self, mut record: Workspace) -> Result<Workspace, OpError> {
         let id = record.id.clone();
-        let lowers = self.lowers_of(&record.chain, &record.image)?;
-        for dir in [self.layout.upper(&id), self.layout.work(&id), self.layout.rootfs(&id)] {
-            fs::create_dir_all(&dir).map_err(|e| OpError::plain(format!("{}: {e}", dir.display())))?;
-        }
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, None)?;
-        bundle::mount_rootfs(&lowers, &self.layout.upper(&id), &self.layout.work(&id), &self.layout.rootfs(&id))?;
+        bundle::mount_computer(&self.layout, &id)?;
         // The copy into the rootfs before youki takes it: youki rebinds the rootfs as it pivots, so the project
         // travels inside with it, and the daemon goes on seeing it at the same path out here. A wake binds the
         // copy the stop left on disk, so everything the workspace wrote in the project is still there.
@@ -822,8 +755,9 @@ impl Ops {
     }
 
     /// Idle means stopped: the processes are killed, youki's state and the cgroup go, the network's link and
-    /// listeners go, the overlay is detached. The upper directory, the record and the network record stay: they are
-    /// the saved layer and what the wake boots it with.
+    /// listeners go, and every mount under the rootfs is detached, deepest first, so a stopped workspace holds
+    /// none of the box's directories and the box may upgrade them while it sleeps. The upper directories, the
+    /// copy, the record and the network record stay: they are what the wake boots it with.
     async fn stop(&self, record: &Workspace) -> Result<(), OpError> {
         self.stop_engine(&record.id).await;
         self.runtime.kill(&record.id, Some(&record.init)).await?;
@@ -832,115 +766,12 @@ impl Ops {
         Ok(())
     }
 
-    /// A stopped workspace booted again from its upper directory.
+    /// A stopped workspace booted again over what it wrote before it stopped.
     async fn wake(&self, record: Workspace) -> Result<Workspace, OpError> {
         if !self.layout.upper(&record.id).is_dir() {
-            return Err(OpError::plain(format!("workspace {} has no saved layer to boot from", record.id)));
+            return Err(OpError::plain(format!("workspace {} has nothing saved to boot from", record.id)));
         }
         self.boot(record).await
-    }
-
-    /// The chain a name resolves to: an image, a template or a snapshot the store holds, else an image pulled into
-    /// the store under that name. Under the store lock, which the caller holds.
-    async fn resolve_chain(&self, name: &str) -> Result<Chain, OpError> {
-        let store = Arc::clone(&self.store);
-        let wanted = name.to_owned();
-        tokio::task::spawn_blocking(move || -> Result<Chain, store::Error> {
-            if let Some(chain) = store.chain_of(&wanted)? {
-                return Ok(chain);
-            }
-            let source = Reference::parse(&wanted)?;
-            Ok(store.pull(&wanted, &source, &mut Client::new())?.image.chain)
-        })
-        .await
-        .map_err(|e| OpError::plain(e.to_string()))?
-        .map_err(OpError::from)
-    }
-
-    /// The unpacked layers of a chain, as the overlay takes them.
-    fn lowers_of(&self, chain: &Chain, name: &str) -> Result<Vec<PathBuf>, OpError> {
-        chain
-            .layers
-            .iter()
-            .map(|digest| {
-                self.store.unpacked(digest).ok_or_else(|| OpError::plain(format!("layer {digest} of {name} is not unpacked in the store")))
-            })
-            .collect()
-    }
-
-    /// The snapshot as a job: named at once, run on a task of its own, read back through `snapshot_job`. A layer
-    /// of a built workspace takes minutes to write on a small box, longer than any one frame over a link may wait.
-    fn start_snapshot(&self, record: Workspace, name: String) -> String {
-        let id = store::random_word();
-        let job = Arc::new(SnapshotJob::default());
-        self.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), Arc::clone(&job));
-        let pulls = Arc::clone(&self.pulls);
-        let store = Arc::clone(&self.store);
-        let layout = Layout::new(self.layout.root());
-        tokio::spawn(async move {
-            let outcome = commit_snapshot(pulls, store, &layout, record, name, &job).await;
-            *job.state.lock().unwrap_or_else(|e| e.into_inner()) = match outcome {
-                Ok(snapshot) => JobState::Done(snapshot),
-                Err(e) => JobState::Failed(e.message),
-            };
-        });
-        id
-    }
-
-    /// One reading of a snapshot job; a job that failed is the refusal it failed with, every time it is asked.
-    fn snapshot_job(&self, id: &str) -> Result<MachineSnapshotJobReply, OpError> {
-        let job = self
-            .jobs
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
-            .cloned()
-            .ok_or_else(|| OpError::missing(format!("no such snapshot job: {id}")))?;
-        // The state first: a job read done after its bytes were read would hand back a count short of the layer.
-        let state = job.state.lock().unwrap_or_else(|e| e.into_inner());
-        let bytes = job.written.load(Ordering::Relaxed);
-        let total = job.total.get().copied();
-        match &*state {
-            JobState::Running => Ok(MachineSnapshotJobReply { state: SnapshotJobState::Running, bytes, total, snapshot_id: None }),
-            JobState::Done(snapshot) => {
-                Ok(MachineSnapshotJobReply { state: SnapshotJobState::Done, bytes, total, snapshot_id: Some(snapshot.id.to_string()) })
-            }
-            JobState::Failed(message) => Err(OpError::plain(message.clone())),
-        }
-    }
-
-    /// A record dropped and the store swept of what no record names and no workspace holds, both under the store
-    /// lock so a create resolving that record has finished, or has not begun, when it goes; the sweep runs off the
-    /// runtime thread and never beside a pull or a commit. Answers whether the record was there.
-    async fn remove_and_sweep(&self, remove: impl FnOnce(&Store) -> Result<bool, store::Error> + Send + 'static) -> Result<bool, OpError> {
-        let _one_at_a_time = self.pulls.lock().await;
-        let store = Arc::clone(&self.store);
-        let held = held_chains(&self.layout)?;
-        tokio::task::spawn_blocking(move || -> Result<bool, store::Error> {
-            if !remove(&store)? {
-                return Ok(false);
-            }
-            store.sweep(&held)?;
-            Ok(true)
-        })
-        .await
-        .map_err(|e| OpError::plain(e.to_string()))?
-        .map_err(OpError::from)
-    }
-
-    /// The row a snapshot lists as: its own layer's bytes, and the snapshot it was taken under when it was one.
-    fn snapshot_row(&self, snapshot: Snapshot) -> Result<SnapshotRow, OpError> {
-        let parent = match Digest::parse(&snapshot.from) {
-            Ok(id) => self.store.snapshot(&id)?.map(|_| snapshot.from.clone()),
-            Err(_) => None,
-        };
-        Ok(SnapshotRow {
-            id: snapshot.id.to_string(),
-            name: Some(snapshot.name),
-            size_bytes: snapshot.layer_bytes,
-            created_at: Some(snapshot.created_at),
-            parent: Some(parent),
-        })
     }
 
     async fn exec(&self, id: &str, cmd: &str, stdin: Option<Vec<u8>>, timeout: Duration) -> Result<ExecResult, OpError> {
@@ -1072,65 +903,6 @@ impl Ops {
     }
 }
 
-/// A snapshot in flight or finished: the layer's bytes written so far, the upper directory's bytes once counted,
-/// and how it ended.
-#[derive(Default)]
-struct SnapshotJob {
-    written: AtomicU64,
-    total: OnceLock<u64>,
-    state: std::sync::Mutex<JobState>,
-}
-
-#[derive(Default)]
-enum JobState {
-    #[default]
-    Running,
-    Done(Snapshot),
-    Failed(String),
-}
-
-/// The upper directory committed to the store as a layer under the name, over the chain the workspace booted from,
-/// under the store lock as every commit is. A running workspace is held still by the freezer only while its size
-/// is counted and its layer is read into the blob, and thawed however that read ends; it runs again while the blob
-/// unpacks and the record is written. One already frozen or stopped is read as it is. A freeze that does not settle
-/// is undone by the freezer itself, so nothing here is left frozen behind a failure.
-async fn commit_snapshot(
-    pulls: Arc<Mutex<()>>,
-    store: Arc<Store>,
-    layout: &Layout,
-    record: Workspace,
-    name: String,
-    job: &Arc<SnapshotJob>,
-) -> Result<Snapshot, OpError> {
-    let _one_at_a_time = pulls.lock().await;
-    let cgroup = layout.cgroup_dir(&record.id);
-    let hold = runtime::alive(&record.init) && !freeze::frozen(&cgroup)?;
-    if hold {
-        freeze::freeze(cgroup.clone()).await?;
-    }
-    let upper = layout.upper(&record.id);
-    let progress = Arc::clone(job);
-    let reading = Arc::clone(&store);
-    // The file each shared login is mounted over is left out of the layer: this runtime made it for the mount to
-    // land on, and a sign-in never sits in an image, not even as the empty file one is read from.
-    let without: Vec<PathBuf> = record.shares.iter().map(|share| PathBuf::from(share.target.trim_start_matches('/'))).collect();
-    let committed = tokio::task::spawn_blocking(move || {
-        let total = store::tree_bytes(&upper).map_err(|source| store::Error::Io { path: upper.clone(), source })?;
-        let _ = progress.total.set(total);
-        reading.commit_blob(|out| snapshot::write_layer(&upper, out, &progress.written, &without))
-    })
-    .await
-    .map_err(|e| OpError::plain(e.to_string()));
-    if hold {
-        freeze::thaw(cgroup).await?;
-    }
-    let committed = committed??;
-    tokio::task::spawn_blocking(move || store.record_snapshot(&name, &record.id, &record.image, &record.chain, &committed))
-        .await
-        .map_err(|e| OpError::plain(e.to_string()))?
-        .map_err(OpError::from)
-}
-
 /// The join of a container's published port to the workspace's loopback, made off the proxy's own task once the
 /// engine has taken the start; a workspace whose init is gone gets none.
 struct Inward {
@@ -1192,13 +964,34 @@ fn mark_stopped(layout: &Layout) -> Result<Vec<String>, OpError> {
     Ok(stopped)
 }
 
-/// Every copy and every claimed run directory that no record names, taken away. A create claims its run
+/// Every claimed run directory and every copy that no record names, taken away. A create claims its run
 /// directory first and writes its record last, so a daemon that died anywhere between the two leaves a
 /// directory naming no workspace and, where the create had got that far, a copy of a checkout or of part of
 /// one. None of it is anything a machine op can reach, and all of it wedges the key it was claimed under until
 /// somebody removes it by hand, so the open is where it goes.
+///
+/// The claims go first, and their mounts with them: a dead create may have left the whole rootfs standing with
+/// the copy bound into it, and a copy removed at its source while that bind is up would be deleted through the
+/// bind before anything took the mount down.
 fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
     let mut swept = Unfinished::default();
+    if let Some(entries) = read_dir_or_none(&layout.run())? {
+        for entry in entries {
+            let id = entry.file_name().to_string_lossy().into_owned();
+            if bundle::read_record(&layout.record(&id))?.is_some() {
+                continue;
+            }
+            // Everything under the rootfs first, as the stop and the sweep of a stopped workspace both do: a
+            // daemon that died between the mounts and the record left the box's directories standing under
+            // there with the copy bound into them, and a remove that walked in would delete the copy's files
+            // through that bind and then answer EBUSY on the mount point itself, which refuses the open rather
+            // than clearing it.
+            bundle::unmount_under(&layout.rootfs(&id))?;
+            let path = entry.path();
+            fs::remove_dir_all(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
+            swept.claims.push(id);
+        }
+    }
     if let Some(entries) = read_dir_or_none(&layout.copies())? {
         for entry in entries {
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -1206,7 +999,7 @@ fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
             // record is a create that died, whether it died before the rename that takes the mark off or
             // after it. Both wedge the same key the same way: the next create under it claims the run
             // directory again and then cannot put its own copy where that one sits.
-            if bundle::read_record(&layout.record(&copy_belongs_to(&name)))?.is_some() {
+            if bundle::read_record(&layout.record(&Layout::copy_belongs_to(&name)))?.is_some() {
                 continue;
             }
             let path = entry.path();
@@ -1223,33 +1016,11 @@ fn sweep_unfinished(layout: &Layout) -> Result<Unfinished, OpError> {
             swept.copies.push(name);
         }
     }
-    if let Some(entries) = read_dir_or_none(&layout.run())? {
-        for entry in entries {
-            let id = entry.file_name().to_string_lossy().into_owned();
-            if bundle::read_record(&layout.record(&id))?.is_some() {
-                continue;
-            }
-            // Everything under the rootfs first, as the stop and the sweep of a stopped workspace both do: a
-            // daemon that died between the mounts and the record left the overlay standing with the copy bound
-            // into it, and a remove that walked in would delete the copy's files through that bind and then
-            // answer EBUSY on the mount point itself, which refuses the open rather than clearing it.
-            bundle::unmount_under(&layout.rootfs(&id))?;
-            let path = entry.path();
-            fs::remove_dir_all(&path).map_err(|e| OpError::plain(format!("{}: {e}", path.display())))?;
-            swept.claims.push(id);
-        }
-    }
     // A directory hands its entries back in whatever order it keeps them, and this is read by a person in a
     // log line and by a test.
     swept.copies.sort();
     swept.claims.sort();
     Ok(swept)
-}
-
-/// The workspace a name under the copies directory belongs to: the name itself, or what the mark of a copy
-/// still being made wraps.
-fn copy_belongs_to(name: &str) -> String {
-    name.strip_suffix(Layout::PARTIAL).and_then(|rest| rest.strip_prefix('.')).unwrap_or(name).to_owned()
 }
 
 /// The entries of a directory, or nothing where there is no such directory.
@@ -1259,11 +1030,6 @@ fn read_dir_or_none(dir: &Path) -> Result<Option<Vec<fs::DirEntry>>, OpError> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(OpError::plain(format!("{}: {e}", dir.display()))),
     }
-}
-
-/// The chains every workspace under the root booted from, running or stopped: the sweep keeps their layers.
-fn held_chains(layout: &Layout) -> Result<Vec<Chain>, OpError> {
-    Ok(records_under(layout)?.into_iter().map(|record| record.chain).collect())
 }
 
 /// The workspaces whose init is still the process their record names: created, running or frozen.
@@ -1338,20 +1104,21 @@ pub fn workspace_word(key: &str) -> String {
     word.chars().take(128).collect()
 }
 
-/// A template's id from the name it was promoted under, as the Docker backend tags one.
-pub fn template_id(name: &str) -> String {
-    format!("{TEMPLATE_REPO}/{}:{TEMPLATE_TAG}", workspace_word(name))
+/// The moment as the wire carries it, ISO 8601 in UTC to the millisecond.
+fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
-/// A promoted snapshot is durable the moment its record exists, so its template reads ready at once.
-fn template_row(template: &store::Template) -> TemplateRow {
-    TemplateRow {
-        id: template.id.clone(),
-        name: template.name.clone(),
-        status: TemplateStatus::Ready,
-        error: None,
-        created_at: Some(template.created_at.clone()),
+/// Sixteen hex digits nothing else on the box is writing under, for the id of a workspace no key names.
+fn random_word() -> String {
+    use std::io::Read;
+    let mut bytes = [0u8; 8];
+    let read = fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes));
+    if read.is_err() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        bytes.copy_from_slice(&(nanos as u64 ^ u64::from(std::process::id())).to_le_bytes());
     }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// A word in single quotes for sh.
@@ -1441,8 +1208,13 @@ mod tests {
         assert_eq!(facts.capabilities.pause_mode, Some(PauseMode::Disk));
         assert!(!facts.capabilities.live_clone_forks && !facts.capabilities.preview_urls);
         assert!(!facts.capabilities.signed_urls && !facts.capabilities.kept);
-        assert!(facts.capabilities.replaces_machine && facts.capabilities.callback_relay && facts.capabilities.disk_snapshots);
-        assert!(facts.capabilities.snapshots_any_life && facts.capabilities.snapshot_listing && facts.capabilities.templates);
+        assert!(facts.capabilities.replaces_machine && facts.capabilities.callback_relay);
+        // This computer keeps no image, so every flag that would promise one is false and no kind names a
+        // template to boot from.
+        assert!(!facts.capabilities.images && !facts.capabilities.disk_snapshots);
+        assert!(!facts.capabilities.snapshots_any_life && !facts.capabilities.snapshot_listing && !facts.capabilities.templates);
+        assert_eq!(facts.base_templates, None);
+        assert!(serde_json::to_value(&facts).unwrap()["capabilities"]["images"] == serde_json::json!(false));
         assert_eq!(facts.capabilities.sizes.len(), 2);
         assert_eq!(
             (facts.capabilities.sizes[1].cpu, facts.capabilities.sizes[1].mem_mb, facts.capabilities.sizes[1].rate_usd_per_hour),
@@ -1452,10 +1224,6 @@ mod tests {
         assert_eq!(
             facts.lifecycle.as_ref().unwrap().budgets,
             LifecycleBudgets { wake_attempts: 1, daemon_answers_ms: 30_000, resume_asks: None }
-        );
-        assert_eq!(
-            facts.base_templates.as_ref().unwrap(),
-            &BaseTemplates { sandbox: "ubuntu:24.04".into(), desktop: "ubuntu:24.04".into() }
         );
         let json = serde_json::to_value(&facts).unwrap();
         assert_eq!(json["pricing"]["snapshotStorage"], serde_json::json!({ "freeGb": 0.0, "usdPerGbMonth": 0.0, "billedFrom": "" }));
@@ -1507,65 +1275,70 @@ mod tests {
             serde_json::from_str(&ops.answer(Some(RequestId::from(3)), &serde_json::json!({ "id": 3, "op": "machine.list" })).await)
                 .unwrap();
         assert_eq!(listed, serde_json::json!({ "id": 3, "ok": true, "machines": [] }));
-        let none: Value = serde_json::from_str(
-            &ops.answer(Some(RequestId::from(4)), &serde_json::json!({ "id": 4, "op": "machine.listSnapshots" })).await,
-        )
-        .unwrap();
-        assert_eq!(none, serde_json::json!({ "id": 4, "ok": true, "snapshots": [] }));
-        let none: Value = serde_json::from_str(
-            &ops.answer(Some(RequestId::from(5)), &serde_json::json!({ "id": 5, "op": "machine.listTemplates" })).await,
-        )
-        .unwrap();
-        assert_eq!(none, serde_json::json!({ "id": 5, "ok": true, "templates": [] }));
-        for (op, field, word) in [
-            ("machine.deleteSnapshot", "snapshotId", "snapshot"),
-            ("machine.promoteSnapshot", "snapshotId", "snapshot"),
-            ("machine.getTemplate", "templateId", "template"),
-            ("machine.deleteTemplate", "templateId", "template"),
-            ("machine.snapshotJob", "job", "snapshot job"),
+        // The eight a layer store answered are not ops here at all: nothing of them is in the frame the runtime
+        // reads, so the frame itself does not read and the reply names the op it carried. The daemon in front of
+        // this never sends one down, since it answers `unknown op` for a name that is not a machine op.
+        for op in [
+            "machine.snapshot",
+            "machine.snapshotJob",
+            "machine.deleteSnapshot",
+            "machine.listSnapshots",
+            "machine.promoteSnapshot",
+            "machine.getTemplate",
+            "machine.listTemplates",
+            "machine.deleteTemplate",
         ] {
             let reply: Value = serde_json::from_str(
-                &ops.answer(Some(RequestId::from(6)), &serde_json::json!({ "id": 6, "op": op, field: "nothing", "name": "x" })).await,
+                &ops.answer(
+                    Some(RequestId::from(4)),
+                    &serde_json::json!({ "id": 4, "op": op, "machineId": "gone", "name": "v1", "snapshotId": "sha256:aa", "templateId": "wsp/dev:template", "job": "j" }),
+                )
+                .await,
             )
             .unwrap();
-            assert_eq!(
-                reply,
-                serde_json::json!({ "id": 6, "ok": false, "error": format!("no such {word}: nothing"), "kind": "missing", "status": 404 }),
-                "{op}"
-            );
+            assert_eq!((reply["ok"].as_bool(), reply.get("kind")), (Some(false), None), "{op}: {reply}");
+            assert!(reply["error"].as_str().unwrap().contains(op), "{op}: {reply}");
         }
     }
 
-    #[tokio::test]
-    async fn a_snapshot_job_that_failed_is_its_refusal_on_every_ask_and_a_running_one_reads_its_count() {
+    /// What the room for one more workspace is read from here: the memory rule alone, since no image is kept on
+    /// this computer and there is nothing to measure a disk against.
+    #[test]
+    fn the_capacity_names_no_image() {
         let dir = tempfile::tempdir().unwrap();
         let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
-        let failed = Arc::new(SnapshotJob::default());
-        *failed.state.lock().unwrap() =
-            JobState::Failed("/var/lib/wsp/layers/blobs/sha256/commit-x.partial: No space left on device".into());
-        let running = Arc::new(SnapshotJob::default());
-        running.written.store(1_520_442_115, Ordering::Relaxed);
-        let _ = running.total.set(5_284_823_040);
-        ops.jobs.lock().unwrap().insert("failed".into(), failed);
-        ops.jobs.lock().unwrap().insert("running".into(), running);
-        for _ in 0..2 {
+        let capacity = ops.capacity().unwrap();
+        assert!(capacity.images.is_empty(), "{:?}", capacity.images);
+        assert_eq!(capacity.machines, MachineCounts { running: 0, paused: 0 });
+        assert!(capacity.disk_free_bytes > 0);
+        // The disk is still read and answered: what the host divides by an image's bytes where a place holds
+        // one, and what a person reads either way.
+        assert_eq!(capacity.mem_room_mb, ops.facts().machine_mem_mb());
+    }
+
+    /// A create meant for a provider, sent to a computer somebody joined: one sentence, and nothing claimed,
+    /// copied or mounted for it. The same sentence a road above answers for a saved image here.
+    #[tokio::test]
+    async fn a_create_that_names_an_image_is_refused_in_one_sentence_and_claims_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        for named in [
+            serde_json::json!({ "kind": "sandbox", "template": "ubuntu:24.04" }),
+            serde_json::json!({ "kind": "sandbox", "fromSnapshot": "sha256:aa" }),
+            serde_json::json!({ "kind": "sandbox", "template": "wsp/dev:template", "idempotencyKey": "k" }),
+        ] {
             let reply: Value = serde_json::from_str(
-                &ops.answer(Some(RequestId::from(8)), &serde_json::json!({ "id": 8, "op": "machine.snapshotJob", "job": "failed" })).await,
+                &ops.answer(Some(RequestId::from(1)), &serde_json::json!({ "id": 1, "op": "machine.create", "spec": named })).await,
             )
             .unwrap();
             assert_eq!(
                 reply,
-                serde_json::json!({ "id": 8, "ok": false, "error": "/var/lib/wsp/layers/blobs/sha256/commit-x.partial: No space left on device" })
+                serde_json::json!({ "id": 1, "ok": false, "error": "this computer keeps no images: a workspace here is a copy of the computer itself" }),
+                "{named}"
             );
         }
-        let reply: Value = serde_json::from_str(
-            &ops.answer(Some(RequestId::from(9)), &serde_json::json!({ "id": 9, "op": "machine.snapshotJob", "job": "running" })).await,
-        )
-        .unwrap();
-        assert_eq!(
-            reply,
-            serde_json::json!({ "id": 9, "ok": true, "state": "running", "bytes": 1_520_442_115u64, "total": 5_284_823_040u64 })
-        );
+        assert_eq!(fs::read_dir(Layout::new(dir.path()).run()).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(Layout::new(dir.path()).copies()).unwrap().count(), 0);
     }
 
     #[test]
@@ -1586,12 +1359,6 @@ mod tests {
         assert_eq!(plain_copy_line(Path::new("/wsp"), None, 120), "copied plainly in 1 s: /wsp shares no blocks between copies");
     }
 
-    #[test]
-    fn a_template_id_is_the_docker_backends_tag_over_the_name() {
-        assert_eq!(template_id("dev"), "wsp/dev:template");
-        assert_eq!(template_id("My Golden/v2"), "wsp/my-golden-v2:template");
-    }
-
     /// One workspace on disk as a daemon that stopped left it: its record under the run directory, its upper
     /// directory (what a nap boots from), and the chain it mounts.
     ///
@@ -1600,14 +1367,12 @@ mod tests {
     /// so a path that is not there answers ENOENT to any login while one that is answers EPERM to a login that is
     /// not root. A mounted rootfs is a thing a boot makes, not a thing a record carries, and none of what this
     /// proves reads it.
-    fn left_on_disk(root: &Path, id: &str, chain: &Chain) {
+    fn left_on_disk(root: &Path, id: &str) {
         let layout = Layout::new(root);
         fs::create_dir_all(layout.upper(id)).unwrap();
         let record = Workspace {
             id: id.to_owned(),
             hostname: id.to_owned(),
-            image: "ubuntu:24.04".to_owned(),
-            chain: chain.clone(),
             labels: BTreeMap::from([(WSP_LABEL.to_owned(), "1".to_owned())]),
             envs: BTreeMap::new(),
             cpu: Some(1.0),
@@ -1623,45 +1388,24 @@ mod tests {
         fs::write(layout.record(id), serde_json::to_vec(&record).unwrap()).unwrap();
     }
 
-    /// A layer unpacked in the store, as a pull left it; the tree is the form a fork mounts.
-    fn unpacked_layer(root: &Path, bytes: &[u8]) -> Digest {
-        let digest = Digest::of(bytes);
-        let tree = root.join("layers").join("unpacked").join(digest.hex());
-        fs::create_dir_all(&tree).unwrap();
-        fs::write(tree.join("marker"), bytes).unwrap();
-        digest
-    }
-
     #[test]
-    fn a_daemon_that_comes_up_finds_the_workspaces_it_left_and_keeps_the_layers_their_forks_mount() {
+    fn a_daemon_that_comes_up_finds_the_workspaces_it_left_and_what_each_of_them_wrote() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        // The store is opened once so its directories are there before anything is written into them.
-        drop(Ops::open(root, PathBuf::from("/bin/true")).unwrap());
-        let config = unpacked_layer(root, b"config of the image these forked from");
-        let layer = unpacked_layer(root, b"the layer they mount");
-        let orphan = unpacked_layer(root, b"a layer no record names");
-        let chain = Chain { config: config.clone(), layers: vec![layer.clone()] };
-        left_on_disk(root, "wsp-one", &chain);
-        left_on_disk(root, "wsp-two", &chain);
+        left_on_disk(root, "wsp-one");
+        left_on_disk(root, "wsp-two");
 
         let again = Ops::open(root, PathBuf::from("/bin/true")).unwrap();
         // The records are there and the listing names both, with the size each was created at.
         let listed = again.list(None).unwrap();
         assert_eq!(listed.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["wsp-one", "wsp-two"]);
         assert!(listed.iter().all(|row| row.state == MachineState::Paused && row.size == Some(WorkspaceSize { cpu: 1.0, mem_mb: 1024 })));
+        // Nothing of either was swept: a record names them both.
+        assert!(again.unfinished_at_open().is_empty(), "{:?}", again.unfinished_at_open());
 
-        // The layers both forks mount are still unpacked under the store, so a wake has something to mount; the
-        // one no record names is what the sweep at the open took.
-        for digest in [&config, &layer] {
-            assert!(again.store.unpacked(digest).is_some(), "{} went with the sweep", digest.hex());
-        }
-        assert_eq!(again.swept_at_open().unpacked, vec![orphan.clone()]);
-        assert!(!root.join("layers").join("unpacked").join(orphan.hex()).exists());
-
-        // And the upper directory each nap is waiting to be woken from is where the record left it.
+        // And what each nap is waiting to be woken over is where the record left it.
         for id in ["wsp-one", "wsp-two"] {
-            assert!(Layout::new(root).upper(id).is_dir(), "{id} lost its upper directory");
+            assert!(Layout::new(root).upper(id).is_dir(), "{id} lost what it wrote");
         }
     }
 
@@ -1728,8 +1472,7 @@ mod tests {
         fs::write(half.join("src/index.js"), b"half of a checkout\n").unwrap();
         fs::create_dir_all(layout.workspace("wsp-half")).unwrap();
         // And what a workspace looks like, which the sweep may not touch: a record, its upper, its copy.
-        let chain = Chain { config: Digest::of(b"c"), layers: Vec::new() };
-        left_on_disk(root, "wsp-whole", &chain);
+        left_on_disk(root, "wsp-whole");
         fs::create_dir_all(layout.copy_of("wsp-whole")).unwrap();
 
         // And a copy that finished but whose create died before the record: it lost the mark at the rename,
@@ -1820,6 +1563,27 @@ mod tests {
         assert!(left.is_empty(), "{left:?}");
     }
 
+    /// A root under one of the five directories every workspace overlays: the open refuses it in the doctor's
+    /// own sentence and makes nothing under it, since a workspace there would read its own upper inside the tree
+    /// it overlays. No root and no disk needed: the reading is of the path, and the refusal comes before the
+    /// first directory.
+    #[test]
+    fn a_root_under_a_directory_every_workspace_overlays_is_refused_by_the_open_and_nothing_is_made() {
+        let under = Path::new("/var/lib/wsp-under-a-lower");
+        let refused = match Ops::open(under, PathBuf::from("/bin/true")) {
+            Ok(_) => panic!("a root under /var opened"),
+            Err(e) => e.message,
+        };
+        assert_eq!(refused, crate::doctor::root_under_a_lower(under).unwrap());
+        assert!(refused.contains("/var/lib/wsp-under-a-lower") && refused.contains("/var"), "{refused}");
+        assert!(!under.exists(), "the open made a folder under a root it refused");
+        // And the same root a directory deeper, since the reading is of the whole path.
+        assert!(Ops::open(Path::new("/etc/wsp/one"), PathBuf::from("/bin/true")).is_err());
+        // A root clear of all five opens as ever.
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Ops::open(dir.path(), PathBuf::from("/bin/true")).is_ok());
+    }
+
     #[test]
     fn a_record_that_does_not_read_refuses_the_open_by_name() {
         let dir = tempfile::tempdir().unwrap();
@@ -1831,14 +1595,5 @@ mod tests {
             Err(e) => e.to_string(),
         };
         assert!(refused.contains("wsp-broken"), "{refused}");
-    }
-
-    #[test]
-    fn a_store_error_for_an_image_no_registry_has_reads_missing() {
-        let e: OpError = store::Error::Fetch(fetch::Error::Status { status: 404, url: "https://registry-1.docker.io/v2/x".into() }).into();
-        assert_eq!((e.kind, e.status), (Some(MachineErrorKind::Missing), Some(404)));
-        assert!(e.message.starts_with("no such image: "));
-        let e: OpError = store::Error::Fetch(fetch::Error::BadName("sha256:abc".into())).into();
-        assert_eq!(e.kind, Some(MachineErrorKind::Missing));
     }
 }

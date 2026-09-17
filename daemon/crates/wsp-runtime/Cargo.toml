@@ -5,7 +5,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "The workspace manager behind the machine ops on a place link: the layer store, the registry fetch, and the workspaces youki's library runs from them"
+description = "The workspace manager behind the machine ops on a place link: the workspaces youki's library runs from the computer's own directories and a copy of one checkout on it"
 
 [dependencies]
 wsp-frames = { path = "../wsp-frames" }
@@ -13,10 +13,6 @@ serde.workspace = true
 serde_json.workspace = true
 base64.workspace = true
 tokio.workspace = true
-ureq = { version = "3", default-features = false, features = ["rustls"] }
-sha2 = "0.10"
-flate2 = "1"
-tar = { version = "0.4", features = ["xattr"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

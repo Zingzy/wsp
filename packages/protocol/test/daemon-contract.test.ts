@@ -27,6 +27,7 @@ import {
   DAEMON_ROOTS_PATH,
   DAEMON_SAMPLER_INTERVAL_MS,
   DAEMON_TOKEN_PATH,
+  GUEST_WSP_HOME,
   DAEMON_TOKEN_REFUSED,
   DAEMON_VERSION,
   CopyReport,
@@ -64,16 +65,11 @@ import {
   MachineExecReply,
   MachineHandleReply,
   MachineListReply,
-  MachinePromoteReply,
   MachineReachReply,
   MachineReadingReply,
   MachineShapeReply,
-  MachineSnapshotJobReply,
-  MachineSnapshotReply,
-  MachineSnapshotsReply,
   MachineStateReply,
-  MachineTemplateReply,
-  MachineTemplatesReply,
+  NO_IMAGES_HERE,
   NO_PLACE_FILE_LINE,
   NOT_ON_THIS_KIND,
   NOT_ON_THIS_ROAD,
@@ -106,6 +102,7 @@ import {
   hostRefusedLine,
   linkedLine,
   notAFrameLine,
+  placeDaemonPaths,
   portScopeRefusal,
   unknownOpLine,
   workScoreLine,
@@ -200,6 +197,7 @@ const words = (): Record<string, string> => ({
   portScopeRefusal: portScopeRefusal("{port}"),
   notOnThisRoad: NOT_ON_THIS_ROAD,
   notOnThisKind: NOT_ON_THIS_KIND,
+  noImagesHere: NO_IMAGES_HERE,
   guestNotWatcher: GUEST_NOT_WATCHER,
   guestQueueFull: GUEST_QUEUE_FULL,
   guestUnwatched: GUEST_UNWATCHED,
@@ -249,6 +247,7 @@ const numbers = (): Record<string, number | string> => ({
   daemonDefaultHost: DAEMON_DEFAULT_HOST,
   daemonDefaultPort: DAEMON_DEFAULT_PORT,
   daemonSamplerIntervalMs: DAEMON_SAMPLER_INTERVAL_MS,
+  guestWspHome: GUEST_WSP_HOME,
   daemonTokenPath: DAEMON_TOKEN_PATH,
   daemonRootsPath: DAEMON_ROOTS_PATH,
   guestInboxDir: GUEST_INBOX_DIR,
@@ -282,6 +281,7 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
           signedUrls: false,
           callbackRelay: true,
           diskSnapshots: true,
+          images: true,
           snapshotsAnyLife: false,
           snapshotListing: true,
           templates: true,
@@ -306,10 +306,11 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
           previewUrls: false,
           signedUrls: false,
           callbackRelay: false,
-          diskSnapshots: true,
+          diskSnapshots: false,
+          images: false,
           snapshotsAnyLife: false,
-          snapshotListing: true,
-          templates: true,
+          snapshotListing: false,
+          templates: false,
           sizes: [],
           kept: false,
           copies: true,
@@ -395,41 +396,6 @@ const REPLIES: Record<string, { schema: ZodTypeAny; samples: unknown[] }> = {
   MachineShapeReply: { schema: MachineShapeReply, samples: [{ shape: { cpu: 2, memMb: 1024, diskGb: 20, createdAt: "2026-09-12T13:00:00.000Z", usedBytes: 5284823040 } }, { shape: {} }] },
   MachineAnswersReply: { schema: MachineAnswersReply, samples: [{ answers: true }, { answers: false }] },
   MachineReachReply: { schema: MachineReachReply, samples: [{ reach: { url: "http://127.0.0.1:41234", token: "", expiresAt: 9007199254740991 } }] },
-  MachineSnapshotReply: { schema: MachineSnapshotReply, samples: [{ job: "3f9a1c2b4d5e6f70" }] },
-  MachineSnapshotJobReply: {
-    schema: MachineSnapshotJobReply,
-    samples: [
-      { state: "running", bytes: 1520442115, total: 5284823040 },
-      { state: "running", bytes: 0 },
-      { state: "done", bytes: 5373952000, total: 5284823040, snapshotId: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1" },
-    ],
-  },
-  MachineSnapshotsReply: {
-    schema: MachineSnapshotsReply,
-    samples: [
-      {
-        snapshots: [
-          { id: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1", name: "v1", sizeBytes: 378880, createdAt: "2026-09-12T18:00:00.000Z", parent: null },
-          { id: "sha256:2bd08e9f8fb66dd5a7b5a9a3a1f5a4c7df0ed1d0b4b5f3b0ecc8ede9d4f6a1b2", name: "v2", sizeBytes: 1024, createdAt: "2026-09-12T18:05:00.000Z", parent: "sha256:1ac97f8d7ea55cc4f6a4f8f2f0e4f3b6ce9dc0c9a3a4e2a9dbb7dcd8c3e5f0a1" },
-          { id: "sha256:3ce19fa09fc77ee6b8c6bab4b2a6b5d8ea1fe2e1c5c6a4c1fdd9fefae5a7b2c3", sizeBytes: 0 },
-        ],
-      },
-      { snapshots: [] },
-    ],
-  },
-  MachinePromoteReply: { schema: MachinePromoteReply, samples: [{ templateId: "wsp/dev:template" }] },
-  MachineTemplateReply: {
-    schema: MachineTemplateReply,
-    samples: [
-      { template: { id: "wsp/dev:template", name: "dev", status: "ready", createdAt: "2026-09-12T18:00:00.000Z" } },
-      { template: { id: "wsp/dev:template", name: "dev", status: "failed", error: "the build exited 1" } },
-      { template: { id: "ubuntu:24.04", name: "ubuntu:24.04", status: "building" } },
-    ],
-  },
-  MachineTemplatesReply: {
-    schema: MachineTemplatesReply,
-    samples: [{ templates: [{ id: "wsp/dev:template", name: "dev", status: "ready", createdAt: "2026-09-12T18:00:00.000Z" }] }, { templates: [] }],
-  },
   GuestOpenReply: { schema: GuestOpenReply, samples: [{ session: "g1" }] },
   GuestCliMessage: { schema: GuestCliMessage, samples: [{ stream: "out", text: "rows\n" }, { stream: "err", text: "one line\n" }, { exit: 3 }] },
   CopyReport: {
@@ -507,6 +473,27 @@ describe("the words and numbers are what this package exports", () => {
       expect(readFileSync(join(CONTRACT, name), "utf8")).toBe(text);
     });
   }
+
+  it("puts every file the daemon inside a machine writes for itself under one folder, by the names a joined computer uses", () => {
+    // A workspace on a computer somebody joined has this folder of its own bound over the computer's, so a path
+    // that slipped out of it would be written into a /root every workspace there shares: the second workspace's
+    // deploy would rewrite the first one's token.
+    for (const path of [DAEMON_TOKEN_PATH, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, OPEN_SOCKET_PATH, DAEMON_ROOTS_PATH]) {
+      expect(path.startsWith(`${GUEST_WSP_HOME}/`), path).toBe(true);
+    }
+    // And they are the names a daemon uses under the home of a computer somebody joined: one daemon, one rule.
+    const at = placeDaemonPaths("/root");
+    expect({ wsp: at.wsp, token: at.tokenPath, inbox: at.inbox, manifest: at.manifestPath, socket: at.openSocket, roots: at.rootsPath }).toEqual({
+      wsp: GUEST_WSP_HOME,
+      token: DAEMON_TOKEN_PATH,
+      inbox: GUEST_INBOX_DIR,
+      manifest: GUEST_MANIFEST_PATH,
+      socket: OPEN_SOCKET_PATH,
+      roots: DAEMON_ROOTS_PATH,
+    });
+    // The binary the host deploys is not one of them: it is the host's to land and sits beside the folder.
+    expect(GUEST_DAEMON_DIR.startsWith(GUEST_WSP_HOME)).toBe(false);
+  });
 
   it("holds every 4401 reason once, and the listening line names a host and a port", () => {
     const w = words();

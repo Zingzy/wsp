@@ -36,12 +36,13 @@ import {
   placeDialBackLine,
   workFolderIn,
   copyStoppedLine,
+  NO_IMAGES_HERE,
   type GoldenStageEvent,
   type PlaceStageEvent,
   type PlaceReport,
   type PlaceView,
 } from "@wsp/protocol";
-import { createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type MachineBackend } from "@wsp/engine";
 import { NO_PLACE_UPDATER, PlaceLoginRefusedError, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
@@ -236,7 +237,7 @@ describe("a computer joining", () => {
 
   it("refuses a computer whose kernel cannot boot the image, in the doctor's own sentence, and writes no record for it", async () => {
     const { hostKey, store } = await serving();
-    const blocked = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const blocked = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
     const { client, reply } = await join(hostKey, { code: await code(), report: report("laptop", { runsWorkspaces: false, workspacesBlocked: blocked }) });
     sockets.push(client.ws);
     expect(String(reply["error"])).toBe(placeCannotBootLine("laptop", blocked));
@@ -317,7 +318,7 @@ describe("a computer joining", () => {
     const joined = await join(hostKey, { code: await code(), answers: c => forks(c) });
     sockets.push(joined.client.ws);
     await until(async () => (await placesOf()).find(p => p.id === joined.placeId)!.present === true);
-    const BLOCKED = "this computer's kernel has no overlay filesystem, which wsp stacks a workspace's layers on";
+    const BLOCKED = "this computer's kernel has no overlay filesystem, which a workspace here reads this computer's own directories through";
     const again = await relink(hostKey, joined.placeId, joined.pair, report("old-macbook", { runsWorkspaces: false, workspacesBlocked: BLOCKED }));
     // The same sentence the join would have refused with: one gate, read on the join and on every link after it.
     expect(again.proved).toMatchObject({ ok: false });
@@ -1632,7 +1633,6 @@ interface ForkingPlace {
   killed: string[];
   paused: number;
   resumed: number;
-  snapshots: string[];
   tunnels: { tunnelId: string; port: number }[];
   /** What the next create answers with instead of a machine; cleared after one use. */
   refuseCreate?: { error: string; kind: string; status: number };
@@ -1642,8 +1642,6 @@ interface ForkingPlace {
   asked: Record<string, number>;
   /** The ask of the machine's own daemon check that first answers yes; every one before it answers no. */
   daemonAnswersAfter: number;
-  /** How long a snapshot job there reads running before it reads done; the layer takes time to write. */
-  snapshotTakesMs: number;
   /** Ops this computer takes and never answers, so a test can close the socket with a frame in flight on it. */
   swallow: Set<string>;
   /** Holds every resume frame until it is called, for a wake a test wants in flight. */
@@ -1660,6 +1658,7 @@ const PLACE_FACTS = {
     signedUrls: false,
     callbackRelay: true,
     diskSnapshots: true,
+    images: true,
     snapshotsAnyLife: false,
     snapshotListing: true,
     templates: true,
@@ -1674,6 +1673,20 @@ const PLACE_FACTS = {
 };
 
 const PLACE_ROADS = { previewUrl: true, daemonAnswers: true, putBytes: true, describe: true, facts: true, metrics: true };
+/** What a computer somebody joined answers about itself once its workspaces are copies of the computer: it keeps
+ * no image, so nothing behind an image is offered either. The shape the daemon of this build reports. */
+const KEEPS_NO_IMAGE = {
+  ...PLACE_FACTS,
+  capabilities: { ...PLACE_FACTS.capabilities, images: false, diskSnapshots: false, snapshotsAnyLife: false, snapshotListing: false, templates: false },
+  baseTemplates: undefined,
+};
+
+/** One sealed version of this host's own image, promoted to a template: what a fork at a provider that keeps
+ * images stands on, and the image a create on a computer that keeps none is handed and must not send. */
+const SEALED = {
+  head: 1,
+  versions: [{ version: 1, snapshotId: "snap_g", templateId: "tpl_g", baseTemplate: "base", setupSha: "s1", createdAt: "2026-09-16T00:00:00.000Z", smoke: { cmd: "true", exitCode: 0 } }],
+};
 
 function forks(
   client: WsClient,
@@ -1696,6 +1709,8 @@ function forks(
   },
   /** What a command run on a machine there answers; nothing and exit 0 unless the test says. */
   exec: (cmd: string) => { exitCode: number; stdout: string; stderr: string } = () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  /** What this computer says it forks with; the default keeps images, which is the shape the copy road is read on. */
+  facts: Record<string, unknown> = PLACE_FACTS,
 ): ForkingPlace {
   let held: ((...args: never[]) => void)[] | undefined;
   const seen: ForkingPlace = {
@@ -1703,12 +1718,10 @@ function forks(
     killed: [],
     paused: 0,
     resumed: 0,
-    snapshots: [],
     tunnels: [],
     ops: [],
     asked: {},
     daemonAnswersAfter: 1,
-    snapshotTakesMs: 0,
     swallow: new Set<string>(),
     holdResumes: () => {
       held = [];
@@ -1719,7 +1732,6 @@ function forks(
     },
   };
   let made = 0;
-  const jobs = new Map<string, { name: string; started: number }>();
   // The container's own word for itself, as a Docker daemon would answer it: a wake reads it before it resumes.
   let state: "running" | "paused" = "running";
   client.ws.on("message", raw => {
@@ -1738,7 +1750,7 @@ function forks(
     if (seen.swallow.has(op)) return;
     switch (op) {
       case "machine.backend":
-        return say(PLACE_FACTS);
+        return say(facts);
       case "machine.capacity":
         return say(capacity);
       case "machine.create": {
@@ -1766,18 +1778,6 @@ function forks(
         return say({ answers: (seen.asked[op] ?? 0) >= seen.daemonAnswersAfter });
       case "machine.previewUrl":
         return say({ reach: { url: "http://127.0.0.1:49155", token: "", expiresAt: 1 } });
-      // A snapshot is a job there: named at once, asked after until the layer is written.
-      case "machine.snapshot":
-        seen.snapshots.push(String(frame["name"]));
-        jobs.set(`job-${seen.snapshots.length}`, { name: String(frame["name"]), started: Date.now() });
-        return say({ job: `job-${seen.snapshots.length}` });
-      case "machine.snapshotJob": {
-        const job = jobs.get(String(frame["job"]));
-        if (job === undefined) return void client.ws.send(JSON.stringify({ id, ok: false, error: `no such snapshot job: ${String(frame["job"])}`, kind: "missing", status: 404 }));
-        const elapsed = Date.now() - job.started;
-        if (elapsed < seen.snapshotTakesMs) return say({ state: "running", bytes: Math.floor((elapsed / seen.snapshotTakesMs) * 5_000_000), total: 5_000_000 });
-        return say({ state: "done", bytes: 5_000_000, total: 5_000_000, snapshotId: `sha256:${job.name}` });
-      }
       case "machine.pause":
         seen.paused++;
         state = "paused";
@@ -1900,6 +1900,49 @@ describe("a fork at a provider this host is not wired to", () => {
 });
 
 describe("a fork on a computer you joined", () => {
+  it("names no image where that computer keeps none: no template, no snapshot, and nothing of an image read or built there first", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey, { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, KEEPS_NO_IMAGE)) });
+    sockets.push(client.ws);
+    // This host has sealed no image at all, and a computer that keeps none needs none: the create reads no image
+    // head and builds no copy of one there before the fork, where the road behind it stopped for want of one.
+    const bare = await createOn(runtime, { name: "x", on: "srv" });
+    expect(place.created).toHaveLength(1);
+    expect(place.created[0]).not.toHaveProperty("template");
+    expect(place.created[0]).not.toHaveProperty("fromSnapshot");
+    expect(bare.golden).toBe("");
+    expect(await store.get("workspaces", bare.id)).toMatchObject({ golden: "" });
+    // And where this host does hold an image, the word the verb hands every create down is dropped rather than
+    // sent on to a computer that would refuse it.
+    await store.put("goldens", copyKey("solari", "default"), SEALED);
+    const named = await createOn(runtime, { golden: "snap_g", name: "y", on: "srv" });
+    expect(place.created).toHaveLength(2);
+    expect(place.created[1]).not.toHaveProperty("template");
+    expect(place.created[1]).not.toHaveProperty("fromSnapshot");
+    expect(named.golden).toBe("");
+    // Nothing was forked at this host's own provider for either, which is where a copy would have been built.
+    expect(backend.machines).toHaveLength(0);
+  });
+
+  it("still names the image where the computer keeps them: a fork at this host's own provider carries the template its version was promoted to", async () => {
+    const backend = stubBackend();
+    const store = memoryStore();
+    backend.capabilities.templates = true;
+    backend.templates.set("tpl_g", { id: "tpl_g", name: "wsp-default-v1", status: "ready", snapshotId: "snap_g" });
+    runtime = createRuntime({ backend, store, adapters: {}, places: wiredPlace("solari", backend), placeLinks: wiring(newPlaceKeyPair(), { id: "solari", rateUsdPerHour: 0.11 }) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    await store.put("goldens", copyKey("solari", "default"), SEALED);
+    const made = await createOn(runtime, { golden: "snap_g", name: "y", on: "solari" });
+    expect(backend.machines).toHaveLength(1);
+    expect(backend.machines[0]!.spec).toMatchObject({ template: "tpl_g" });
+    expect(made.golden).toBe("snap_g");
+  });
+
   it("lands on that computer's backend and not on this host's, and the record and the view say where", async () => {
     const backend = stubBackend();
     const store = memoryStore();
@@ -2038,7 +2081,7 @@ describe("a fork on a computer you joined", () => {
     expect(backend.machines).toHaveLength(0);
   });
 
-  it("takes a snapshot of a fork on that computer there, and asks this host's provider for none", async () => {
+  it("refuses a snapshot of a fork on that computer in one sentence, and asks that computer and this host's provider for none", async () => {
     const backend = stubBackend();
     const store = memoryStore();
     const hostKey = newPlaceKeyPair();
@@ -2047,8 +2090,8 @@ describe("a fork on a computer you joined", () => {
     let place!: ForkingPlace;
     const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
     sockets.push(client.ws);
-    // A fork of a project golden carries that project from birth, which is what the verb names the image after;
-    // nothing is imported here, since what this test reads is which computer the snapshot is taken on.
+    // A fork of a project golden carries that project from birth, so the verb gets past its own project wall and
+    // what it meets is the computer's.
     await store.put("project-goldens", "snap_p", {
       snapshotId: "snap_p",
       golden: "snap_g",
@@ -2058,39 +2101,11 @@ describe("a fork on a computer you joined", () => {
       createdAt: "2026-09-12T00:00:00.000Z",
     });
     const made = await createOn(runtime, { golden: "snap_p", name: "x", on: "srv" });
-    const golden = await runtime.workspaces.snapshot(made.id);
-    expect(place.snapshots).toHaveLength(1);
-    expect(place.snapshots[0]).toContain("proj");
-    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
+    // A computer somebody joined keeps no image, so there is nothing for a copy of this fork's disk to become:
+    // the sentence is the far side's own and no frame is sent for it.
+    await expect(runtime.workspaces.snapshot(made.id)).rejects.toThrow(NO_IMAGES_HERE);
+    expect(place.ops.filter(op => op.startsWith("machine.snapshot"))).toEqual([]);
     expect(backend.snapshots).toEqual([]);
-  });
-
-  it("a snapshot there that outlasts the link's frame bound completes: the job is asked after a frame at a time, and every frame answers inside the bound", async () => {
-    const backend = stubBackend();
-    const store = memoryStore();
-    const hostKey = newPlaceKeyPair();
-    // A frame bound far under the job: the old road, one frame waiting on the whole layer, failed here.
-    runtime = createRuntime({ backend, store, adapters: {}, placeLinks: wiring(hostKey), placeFrameWaitMs: 300 });
-    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
-    let place!: ForkingPlace;
-    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c)) });
-    sockets.push(client.ws);
-    place.snapshotTakesMs = 1_500;
-    await store.put("project-goldens", "snap_p", {
-      snapshotId: "snap_p",
-      golden: "snap_g",
-      projects: [{ name: "proj", dest: "/root/proj", importedAt: "2026-09-12T00:00:00.000Z", size: 20 }],
-      workspaceId: "ws_older",
-      workspaceName: "older",
-      createdAt: "2026-09-12T00:00:00.000Z",
-    });
-    const made = await createOn(runtime, { golden: "snap_p", name: "x", on: "srv" });
-    const started = Date.now();
-    const golden = await runtime.workspaces.snapshot(made.id);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1_500);
-    expect(golden.snapshotId).toBe(`sha256:${place.snapshots[0]!}`);
-    expect(place.asked["machine.snapshot"]).toBe(1);
-    expect(place.asked["machine.snapshotJob"]).toBeGreaterThanOrEqual(2);
   });
 
   it("says the computer is not connected rather than asking the provider anything, and reads it again when it is back", async () => {

@@ -24,6 +24,7 @@ describe("SolariBackend", () => {
       signedUrls: true,
       callbackRelay: true,
       diskSnapshots: true,
+      images: true,
       // The provider answers 502 on a machine that was resumed, so a copy comes from a first life alone.
       snapshotsAnyLife: false,
       snapshotListing: true,

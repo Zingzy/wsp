@@ -15,7 +15,7 @@ import { stripVTControlCharacters } from "node:util";
 import { S_RADIO_ACTIVE, S_RADIO_INACTIVE } from "@clack/prompts";
 import { RUNGS, parseManifest, type Manifest, type ManifestEntry } from "@wsp/collect";
 import { BUILDER_DISK_GB, LocalBackend, SNAPSHOT_STORAGE, type BackendPricing, type ExecResult } from "@wsp/engine";
-import { HERE_PLACE_ID, ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SEAL_FAILED_LINE, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
+import { HERE_PLACE_ID, ALREADY_APPLIED, BUILD_NEEDS_FILE_FIX, DAEMON_TOKEN_PATH, buildNeedsFileLine, folderName, MACHINE_GONE_LINE, Recipe, SEAL_FAILED_LINE, SIGN_IN_DEFERRED_WORD, SIGN_IN_LATER, type GoldenManifest, type ProjectImportResult, type ProjectPlan } from "@wsp/protocol";
 import { copyKey, DAEMON_TOKEN_SET, LOOPBACK, createRuntime, goldenHead, localExecStream, memoryStore, type GoldenRecipe, type LocalWiring, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogEntry } from "@wsp/catalog";
@@ -1588,7 +1588,7 @@ describe("wsp init, the sign-in stage", () => {
   it("outside a pty the openLine hook says exactly what the relay says by itself, hostname and all", async () => {
     // The relay's default line, read off a real relay over a fake link and a workspace named task-1.
     const backend = stubBackend();
-    backend.execImpl = (_m, cmd) => (cmd.includes("/root/.wsp-daemon-token") ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
+    backend.execImpl = (_m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : { exitCode: 0, stdout: "", stderr: "" });
     const create = backend.create.bind(backend);
     backend.create = async spec => Object.assign(await create(spec), { previewUrl: async () => ({ url: "http://guest.test", token: "pt", expiresAt: Date.now() + 3_600_000 }) });
     const store = memoryStore();

@@ -44,6 +44,7 @@ export class NoProviderBackend implements MachineBackend {
     signedUrls: false,
     callbackRelay: false,
     diskSnapshots: false,
+    images: false, // no provider, so no image either
     snapshotsAnyLife: false,
     snapshotListing: false,
     templates: false,

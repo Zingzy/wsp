@@ -126,6 +126,7 @@ export function stubBackend(): StubBackend {
       signedUrls: true,
       callbackRelay: true,
       diskSnapshots: true,
+      images: true,
       snapshotsAnyLife: false,
       snapshotListing: true,
       templates: false,
