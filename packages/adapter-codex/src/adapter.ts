@@ -47,6 +47,8 @@ export interface CodexAdapterDeps {
   home: string;
   /** The catalog's command for signing codex in on a machine, named when a turn fails for want of one. */
   login: string;
+  /** The API key the vault holds for this agent; set on every turn's environment. */
+  apiKey?: string;
   baseEnv?: Readonly<Record<string, string | undefined>>;
   interruptGraceMs?: number;
   /** How long the CLI gets to exit on its own after its turn's result, before its process and its tree are ended
@@ -181,7 +183,7 @@ function itemDeltas(phase: string, item: Item, sessionId: string): AdapterEvent[
 
 export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
   const sessions = new Map<string, CodexSession>();
-  const env = buildEnv({ base: deps.baseEnv, home: deps.home });
+  const env = buildEnv({ base: deps.baseEnv, home: deps.home, ...(deps.apiKey !== undefined ? { apiKey: deps.apiKey } : {}) });
 
   /** Everything a turn is once its stream exists. The launch and the attach differ only in where the stream came
    * from and in what is already known: an attached turn's thread, model and folder come off the row that outlived

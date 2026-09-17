@@ -8,7 +8,12 @@ import type { GoldenImport } from "@wsp/engine";
 import type { Recipe, RecipeDigest } from "@wsp/protocol";
 import type { GoldenRecipe } from "../src/runtime.js";
 
-/** The exec answers a builder needs: a disk reading, the ready check, the context probe and one vault path. */
+/** The paths such a seal archives: a login's file and the secrets file the secrets step writes. */
+export const VAULT_PATHS = ["/root/.codex/auth.json", "/etc/profile.d/wsp-secrets.sh"];
+
+/** The exec answers a builder needs: a disk reading, the ready check, the context probe, and the vault paths it
+ * holds. The seal's guard probe asks about the paths no image may hold, and a builder that answered it with one
+ * would be refused, so only the probe naming the vault's own is answered. */
 export const dfOk = (m: unknown, cmd: string) =>
   cmd.startsWith("df -Pk")
     ? { exitCode: 0, stdout: `${3000 * 1024}\n`, stderr: "" }
@@ -16,8 +21,8 @@ export const dfOk = (m: unknown, cmd: string) =>
       ? { exitCode: 0, stdout: "ok\n", stderr: "" }
       : cmd.includes("echo WSP_CTX")
         ? { exitCode: 0, stdout: "WSP_CTX\nWSP_CTX_END\n", stderr: "" }
-        : cmd.startsWith("for p in ")
-          ? { exitCode: 0, stdout: "/root/.codex/auth.json\n", stderr: "" }
+        : cmd.startsWith("for p in ") && cmd.includes(VAULT_PATHS[1]!)
+          ? { exitCode: 0, stdout: `${VAULT_PATHS[1]!}\n`, stderr: "" }
           : { exitCode: 0, stdout: "", stderr: "" };
 
 export const digestOf = (recipeHash: string): RecipeDigest => ({ ticks: [{ id: "agents/codex" }], files: [{ id: "agents/codex", dest: ".codexrc", path: "~/.codexrc", digest: `d-${recipeHash}` }] });
@@ -29,7 +34,6 @@ export const importOf = (recipeHash = "h1"): GoldenImport => ({
   agents: [],
 });
 export const SMALL: Recipe = { version: 1, at: "2026-09-12T00:00:00.000Z", histories: [], rows: [{ id: "codex", kind: "agent", on: true, source: { kind: "used", sessions: 3, calls: 12 } }] };
-export const VAULT_PATHS = ["/root/.codex/auth.json", "/etc/profile.d/wsp-secrets.sh"];
 export const recipeWith = (o: { recipeHash?: string; vault?: boolean } = {}): GoldenRecipe => ({
   setup: "true",
   smoke: "true",

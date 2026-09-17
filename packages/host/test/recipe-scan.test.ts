@@ -71,7 +71,7 @@ describe("wsp recipe scan", () => {
     expect(scan.tools.find(r => r.id === "java")?.recommended).toEqual({ value: "off", why: "installed here, never used" });
     for (const row of [...scan.agents, ...scan.tools]) expect(row.recommended.value, row.id).toBe(row.on ? "on" : "off");
     for (const row of scan.signIns) expect(row.recommended.why.length, row.id).toBeGreaterThan(0);
-    expect(scan.signIns.find(r => r.id === "claude")?.recommended.value).toBe("machine");
+    expect(scan.signIns.find(r => r.id === "claude")?.recommended.value).toBe("token");
   });
 
   it("says a heavy row is worth a question in the same line, and nothing else is", () => {
@@ -117,10 +117,11 @@ describe("wsp recipe scan", () => {
     expect(lines[lines.indexOf(FLOOR_LINE) - 1]).toMatch(/^On: \d+ tools/);
   });
 
-  it("recommends the key files where a login cannot produce them, and the machine where a browser can", () => {
+  it("recommends the key files where a login cannot produce them, the token where the tool mints one here, and the machine where a browser can", () => {
     // Hermes signs in on the machine and its keys file cannot be produced there, so key gets both.
     expect(signInAdvice("hermes")).toMatchObject({ value: "key" });
-    expect(signInAdvice("claude")).toMatchObject({ value: "machine" });
+    expect(signInAdvice("claude")).toMatchObject({ value: "token", why: "claude setup-token runs here and the token is set on every turn; nothing of it is on any machine" });
+    expect(signInAdvice("codex")).toMatchObject({ value: "later", why: "it signs in once on the computer that runs the workspaces, never on a machine of its own" });
     expect(signInAdvice("gh")).toMatchObject({ value: "machine" });
   });
 

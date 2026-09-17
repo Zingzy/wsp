@@ -3,10 +3,10 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { UNMEASURED_ROAD, customInstallsFor, recipeDigest, toolInstallsFor, type BrewTable, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes, retiredBy, rowsToApply } from "../src/golden-diff.js";
-import { BUILDER_IDLE_MS, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
+import { BUILDER_IDLE_MS, CredentialOnBuilderError, MachineAliveError, SnapshotFailedError, applyDelta, applyGoldenImport, buildGolden, forkGolden, nextLeftBehind, nextSetupSha, nextMissing, nextSmoke, prepareBuilder, rollback, promoteVersion, sealGolden, smokeTally, templatesOf, upgradeBuilder, type GoldenDelta, type GoldenImport, type GoldenStage, type GoldenVersion, type ImportResult, type PackedFiles } from "../src/golden.js";
 import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
-import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
-import { shellQuote, type RecipeDigest } from "@wsp/protocol";
+import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
+import { credentialOnBuilderLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
 import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
@@ -366,11 +366,11 @@ describe("interactive golden: prepare then seal", () => {
   });
 
   it("seal reads the vault off the builder before it asks for the snapshot, and hands it back with the version", async () => {
-    const paths = ["/root/.codex/auth.json", "/etc/profile.d/wsp-secrets.sh"];
+    const paths = ["/root/.config/gh/hosts.yml", "/etc/profile.d/wsp-secrets.sh"];
     const order: string[] = [];
     const { backend, timeline } = recordingBackend({}, {
       exec: cmd => {
-        if (cmd.startsWith("for p in ")) {
+        if (cmd.startsWith("for p in ") && cmd.includes(paths[0]!)) {
           order.push("vault");
           return { exitCode: 0, stdout: `${paths.join("\n")}\n`, stderr: "" };
         }
@@ -392,27 +392,52 @@ describe("interactive golden: prepare then seal", () => {
     const b = await prepareBuilder({ backend, setup: "true" });
     const sealed = await sealGolden(b, { backend, hostId: "h1", smoke: "true" });
     expect(sealed.vault).toBeUndefined();
-    expect(asked.some(c => c.startsWith("for p in "))).toBe(false);
+    expect(asked.some(c => c.startsWith("tar czf"))).toBe(false);
+    // The one probe such a seal runs is the guard's own, over the paths a builder may never hold.
+    expect(asked.filter(c => c.startsWith("for p in "))).toHaveLength(1);
   });
 
   it("a vault the builder would not hand over leaves it alive and unsnapshotted, as a refused snapshot does", async () => {
     const { backend, timeline, killed } = recordingBackend({}, {
-      exec: cmd => (cmd.startsWith("tar czf") ? { exitCode: 2, stdout: "", stderr: "tar: cannot read" } : { exitCode: 0, stdout: "/root/.codex/auth.json\n", stderr: "" }),
+      exec: cmd => (cmd.startsWith("tar czf") ? { exitCode: 2, stdout: "", stderr: "tar: cannot read" } : { exitCode: 0, stdout: cmd.includes("/etc/profile.d/wsp-secrets.sh") ? "/etc/profile.d/wsp-secrets.sh\n" : "", stderr: "" }),
     });
     const b = await prepareBuilder({ backend, setup: "true" });
-    await expect(sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: ["/root/.codex/auth.json"], fetch: vaultFetch() })).rejects.toThrow(/vault export tar failed/);
+    await expect(sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: ["/etc/profile.d/wsp-secrets.sh"], fetch: vaultFetch() })).rejects.toThrow(/vault export tar failed/);
     expect(timeline).toEqual(["create m1"]);
     expect(killed).toEqual([]);
   });
 
   it("a builder that will not say which vault paths it holds stops the seal, rather than sealing an image with no sign-ins in it", async () => {
     const { backend, timeline, killed } = recordingBackend({}, {
-      exec: cmd => (cmd.startsWith("for p in ") ? { exitCode: 127, stdout: "", stderr: "bash: for: command not found" } : { exitCode: 0, stdout: "", stderr: "" }),
+      exec: cmd => (cmd.startsWith("for p in ") && cmd.includes("/root/.codex/auth.json") ? { exitCode: 127, stdout: "", stderr: "bash: for: command not found" } : { exitCode: 0, stdout: "", stderr: "" }),
     });
     const b = await prepareBuilder({ backend, setup: "true" });
     await expect(sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: ["/root/.codex/auth.json"], fetch: vaultFetch() })).rejects.toThrow(/would not say which/);
     expect(timeline).toEqual(["create m1"]);
     expect(killed).toEqual([]);
+  });
+
+  it("a builder holding a sign-in file is refused before the snapshot: nothing is sealed and the builder is left as it is", async () => {
+    const { backend, timeline, killed } = recordingBackend({}, {
+      exec: cmd => (cmd.includes("/root/.claude-cfg/.credentials.json") ? { exitCode: 0, stdout: "/root/.claude-cfg/.credentials.json\n", stderr: "" } : { exitCode: 0, stdout: "", stderr: "" }),
+    });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const err = await sealGolden(b, { backend, hostId: "h1", smoke: "true", vaultPaths: ["/etc/profile.d/wsp-secrets.sh"], fetch: vaultFetch() }).catch(e => e as unknown);
+    expect(err).toBeInstanceOf(CredentialOnBuilderError);
+    expect((err as CredentialOnBuilderError).paths).toEqual(["/root/.claude-cfg/.credentials.json"]);
+    expect((err as Error).message).toBe(credentialOnBuilderLine(["/root/.claude-cfg/.credentials.json"]));
+    expect(timeline).toEqual(["create m1"]);
+    expect(killed).toEqual([]);
+  });
+
+  it("a builder holding none of them seals, and the paths it was asked about are the catalog's own", async () => {
+    const asked: string[] = [];
+    const { backend } = recordingBackend({}, { exec: cmd => (asked.push(cmd), { exitCode: 0, stdout: "", stderr: "" }) });
+    const b = await prepareBuilder({ backend, setup: "true" });
+    const { version } = await sealGolden(b, { backend, hostId: "h1", smoke: "true" });
+    expect(version.version).toBe(1);
+    const probe = asked.find(c => c.startsWith("for p in "))!;
+    for (const path of NEVER_IN_IMAGE) expect(probe).toContain(path);
   });
 
   it("seal records the disk the snapshot took, read once for the stage line and the version", async () => {

@@ -3,7 +3,7 @@
 // by service name without -w, and no login file is ever read. The rc files
 // and Claude Code's settings.json are read for names alone: which variable is
 // exported, whether a helper command is set.
-import { CLAUDE_SETTINGS_FILE, LOGIN_ROWS, loginRow, signsInByDefault } from "@wsp/catalog";
+import { CLAUDE_SETTINGS_FILE, LOGIN_ROWS, SIGN_IN_ROWS, livesOnComputer, loginRow, mintsToken, signsInByDefault } from "@wsp/catalog";
 import { type Host, type Platform, expand } from "../host.js";
 import { RC_PATHS, stripExports } from "./shell-rc.js";
 import type { Default, ManifestEntry } from "../manifest.js";
@@ -19,12 +19,17 @@ interface Login {
   detail?: string;
 }
 
-/** What a login row starts as: a copy (bring) for a key, a keys row or a tool with no sign-in, a sign-in on the
- * machine (skip) for a browser or device flow the catalog names; a tool the catalog does not know starts as a copy. */
+/** What a login row starts as: a copy (bring) for a key, a keys row or a tool with no sign-in, and nothing to copy
+ * (skip) for a browser or device flow the catalog names and for a tool that mints its token on this computer; a
+ * tool the catalog does not know starts as a copy. */
 export function loginDefault(id: string): Default {
   const row = loginRow(id);
-  return row !== undefined && signsInByDefault(row.signIn) ? "skip" : "bring";
+  return row !== undefined && (signsInByDefault(row.signIn) || mintsToken(row.signIn)) ? "skip" : "bring";
 }
+
+/** The detail on a login that is signed in once on the computer that runs the workspaces: it is found here, and
+ * none of it is offered to copy, since no machine ever holds a copy of it. */
+export const LIVES_ON_COMPUTER_DETAIL = "it signs in once on the computer that runs your workspaces; nothing of it travels";
 
 const LOGINS: readonly Login[] = [
   { id: "gcloud", label: "Google Cloud login", group: "CLI logins", paths: { all: ["~/.config/gcloud/credentials.db", "~/.config/gcloud/access_tokens.db", "~/.config/gcloud/application_default_credentials.json", "~/.config/gcloud/configurations", "~/.config/gcloud/active_config", "~/.config/gcloud/legacy_credentials"] } },
@@ -89,31 +94,28 @@ async function exportedIn(host: Host, name: string): Promise<string | undefined>
   return undefined;
 }
 
-// Claude Code takes its key from ANTHROPIC_API_KEY first, then the apiKeyHelper, then the OAuth
-// credentials (measured on 2.1.257). An API key travels: the exported one is cut from the rc file
-// and set on the machine in the secrets step, the helper's is read here with the Keychain logins.
-// The OAuth credential defaults to a sign-in on the machine: the vendor's terms forbid a host
-// to collect or intermediate it, and a copy would transit the wsp process.
+/** What the row says instead of a path: the login on the workspace is the token the tool mints here, so whatever
+ * signed Claude Code in on this computer stays on it. */
+export const CLAUDE_TOKEN_DETAIL = `Claude Code signs in with the token ${SIGN_IN_ROWS.claude.mint} prints on this computer; nothing of its login here travels`;
+
+// Claude Code takes its key from ANTHROPIC_API_KEY first, then the apiKeyHelper, then the OAuth credentials
+// (measured on 2.1.257), so any of them found here is a login this computer has. None of them travels: the
+// workspace reads the long-lived token the row's own command mints, held in the wsp home and set on every turn.
+// The row is still here, because it is where the person answers how Claude Code signs in.
 async function claudeRow(host: Host): Promise<ManifestEntry | undefined> {
-  const oauth = host.platform === "darwin" ? { paths: (await keychainHas(host, "Claude Code-credentials")) ? ["Keychain: Claude Code-credentials"] : [], bytes: 0 } : await found(host, ["~/.claude/.credentials.json"]);
+  const oauth = host.platform === "darwin" ? (await keychainHas(host, "Claude Code-credentials")) : (await found(host, ["~/.claude/.credentials.json"])).paths.length > 0;
   const helper = apiKeyHelperOf(await host.fs.readText(expand(host, CLAUDE_SETTINGS_FILE)));
   const exported = await exportedIn(host, CLAUDE_KEY_ENV);
-  const sources = [
-    ...(exported !== undefined ? [`the API key exported in ${exported} (set on the machine in the secrets step if ${exported} comes along)`] : []),
-    ...(helper !== undefined ? [`the apiKeyHelper in ${CLAUDE_SETTINGS_FILE}`] : []),
-    ...(oauth.paths.length > 0 ? ["OAuth credentials"] : []),
-  ];
-  if (sources.length === 0) return undefined;
-  const [used, ...rest] = sources;
+  if (!oauth && helper === undefined && exported === undefined) return undefined;
   return entry({
     rung: "logins",
     id: "logins/claude",
     label: "Claude Code login",
     group: "Agent logins",
-    paths: [...oauth.paths, ...(helper !== undefined ? [`Helper: ${CLAUDE_SETTINGS_FILE}`] : [])],
-    bytes: oauth.bytes,
-    default: exported !== undefined || helper !== undefined ? "bring" : "skip",
-    detail: `Claude Code uses ${used}${rest.length > 0 ? `; also found: ${rest.join(", ")}` : ""}`,
+    paths: [],
+    bytes: 0,
+    default: "skip",
+    detail: CLAUDE_TOKEN_DETAIL,
   });
 }
 
@@ -122,7 +124,21 @@ export async function detectLogins(host: Host): Promise<ManifestEntry[]> {
   for (const l of LOGINS) {
     const f = await found(host, [...(l.paths[host.platform] ?? []), ...(l.paths.all ?? [])]);
     if (f.paths.length === 0) continue;
-    rows.push(entry({ rung: "logins", id: `logins/${l.id}`, label: l.label, group: l.group, ...f, default: l.default ?? loginDefault(l.id), ...(l.detail !== undefined ? { detail: l.detail } : {}) }));
+    // A login that lives on the computer that runs the workspaces is found here and offered nowhere: it is shared
+    // into each workspace from that computer, so no path of it travels and no row can answer copy.
+    const signIn = loginRow(l.id)?.signIn;
+    const here = signIn !== undefined && livesOnComputer(signIn);
+    rows.push(
+      entry({
+        rung: "logins",
+        id: `logins/${l.id}`,
+        label: l.label,
+        group: l.group,
+        ...(here ? { paths: [], bytes: 0 } : f),
+        default: here ? "skip" : (l.default ?? loginDefault(l.id)),
+        ...(here ? { detail: LIVES_ON_COMPUTER_DETAIL } : l.detail !== undefined ? { detail: l.detail } : {}),
+      }),
+    );
   }
   rows.push(...(await keysRows(host)));
   if (await host.exec.which("op")) {

@@ -13,13 +13,13 @@ import { EventEmitter } from "node:events";
 import { basename } from "node:path";
 import { PassThrough, Writable } from "node:stream";
 import { stripVTControlCharacters } from "node:util";
-import { catalogEntry } from "@wsp/catalog";
+import { catalogEntry, loginSignIn, mintsToken, tokenIn } from "@wsp/catalog";
 import { keyCheckLine, type BackendPricing, type KeyCheck, type MachineBackend } from "@wsp/engine";
 import { RUNGS } from "@wsp/collect";
-import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, FIRST_WORKSPACE, GOLDEN_STAGE_WORDS, INIT_BUILD_STEP, INIT_ROW_STATES, KEY_REFUSED, KEY_UNCHECKED, NEVER_REACHED, NO_FIRST_WORKSPACE, pasteHereLine, STOP_LEFT_MACHINE_LINE, shellQuote, SIGN_IN_NEVER_REACHED, LoginState, SignInFinish, THIS_COMPUTER, initAgentNoRecipeLine, initAgentPrompt, initBuildRows, initJobOver, MACHINE_ROW_LABEL, initNeedWhat, initRowOver, initSignInOutcome, initFailedLine, initStageCount, initStoppedAt, isLocalWorkspace, isSessionEvent, noMcpServersLine, plural, takesMcpServers, threadWorkingLine, type GoldenStep, type InitJob, type InitJobEvent, type InitKeys, type InitNeedsYouEvent, type InitPhase, type InitRoad, type InitRow, type InitScreen, type InitScreenId, type InitSetup, type McpServerSpec, type TurnResult } from "@wsp/protocol";
 import { harnessCatalog, smallestModel, type GoldenRecipe, type InitDoor, type Runtime, type SessionHandle } from "@wsp/runtime";
 import type { AgentHere } from "./agents-here.js";
-import { agentKeysIn } from "./env-keys.js";
+import { vaultOf } from "./env-keys.js";
 import { firstWorkspaceName, folderOf } from "./init-first.js";
 import { wspToolsAgent, wspToolsItems } from "./init-pick.js";
 import { RUNG_TITLE, agentName, recipeWithAnswers } from "./init-recipe.js";
@@ -78,6 +78,8 @@ export interface InitJobDeps {
   };
   retry?: InitOptions["retry"];
   pollMs?: InitOptions["pollMs"];
+  /** How long the vault step waits for this client to send a token or key it asked for; the sign-in cap otherwise. */
+  vaultWaitMs?: InitOptions["vaultWaitMs"];
   now?(): number;
 }
 
@@ -490,7 +492,8 @@ export class InitJobs implements InitDoor {
       ...(first !== undefined ? { firstWorkspace: first } : {}),
       ...(folder !== undefined ? { importFolder: folder } : {}),
       ...this.deps.read,
-      agentKeys: agentKeysIn(saved),
+      vault: () => vaultOf(this.deps.saved()),
+      saveKeys: this.deps.saveKeys,
       signIns: ctx => {
         s.signIns = ctx;
       },
@@ -512,6 +515,7 @@ export class InitJobs implements InitDoor {
       ...(this.deps.build.daemon !== undefined ? { daemon: this.deps.build.daemon } : {}),
       ...(this.deps.retry !== undefined ? { retry: this.deps.retry } : {}),
       ...(this.deps.pollMs !== undefined ? { pollMs: this.deps.pollMs } : {}),
+      ...(this.deps.vaultWaitMs !== undefined ? { vaultWaitMs: this.deps.vaultWaitMs } : {}),
     };
     this.run(s, async () => {
       try {
@@ -537,10 +541,19 @@ export class InitJobs implements InitDoor {
   }
 
   /** The code a sign-in's page handed back, typed into the tool waiting for it on the machine. The code passes
-   * straight to that pty: it is never kept here, logged, or carried on the view. */
+   * straight to that pty: it is never kept here, logged, or carried on the view. A row whose tool mints a token on
+   * this computer has no pty and no machine: what a client sends for it is the token itself, refused unless it is
+   * the shape that tool prints, and saved in the wsp home for the vault to set on every turn. */
   async signInCode(o: { tool: string; code: string }): Promise<InitJob> {
     const s = this.state;
     if (s === undefined || initJobOver(s.phase)) throw new Error("no init job is running");
+    const signIn = loginSignIn(o.tool);
+    if (signIn !== undefined && mintsToken(signIn)) {
+      const token = tokenIn(signIn, o.code);
+      if (token === undefined) throw new Error(`that is not what ${signIn.mint} prints; nothing was saved`);
+      this.deps.saveKeys({ [signIn.tokenEnv]: token });
+      return this.view()!;
+    }
     await this.codes.submit(o.tool, o.code);
     return this.view()!;
   }
@@ -852,10 +865,22 @@ export class InitJobs implements InitDoor {
       case "sign-in": {
         const tool = text("tool") ?? "";
         const id = `sign-in/${tool}`;
-        // Without a page the command is still starting on the machine; with one, the person is waited on.
+        // Without a page the command is still starting on the machine; with one, the person is waited on. A row of
+        // the vault step has no page and no machine: what it waits on is the value they paste, named here.
         const page = text("browserUrl");
+        const waitingFor = text("waitingFor");
         const finish = SignInFinish.safeParse(record["finish"]);
-        const next: InitRow = { id, kind: "sign-in", tool, label: text("label") ?? tool, state: page === undefined ? STATE.running : STATE.open, ...(page !== undefined ? { page } : {}), ...(text("code") !== undefined ? { code: text("code")! } : {}), ...(finish.success ? { finish: finish.data } : {}) };
+        const next: InitRow = {
+          id,
+          kind: "sign-in",
+          tool,
+          label: text("label") ?? tool,
+          state: page === undefined && waitingFor === undefined ? STATE.running : STATE.open,
+          ...(page !== undefined ? { page } : {}),
+          ...(waitingFor !== undefined ? { detail: pasteHereLine(waitingFor, text("mint")) } : {}),
+          ...(text("code") !== undefined ? { code: text("code")! } : {}),
+          ...(finish.success ? { finish: finish.data } : {}),
+        };
         const had = row(id);
         if (had === undefined) s.rows.push(next);
         else {

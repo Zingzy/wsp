@@ -27,7 +27,7 @@ import { workspaceRoads } from "../src/server.js";
 import type { AgentHere } from "../src/agents-here.js";
 import type { FakePtyLink } from "./fake-pty-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
-import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
+import { DEVICE_URL, GEMINI_URL, scriptedLink } from "./init-link.js";
 import type { HostHooks } from "../src/init-signin.js";
 import { stubBackend, type StubBackend, type StubMachine } from "./stub-backend.js";
 import { holdingAgent, scriptedAgent } from "./verbs-fixture.js";
@@ -143,7 +143,7 @@ interface Fake {
   settled(): Promise<void>;
 }
 
-function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends } = {}): Fake {
+function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string>; provider?: MachineBackend; configured?: boolean; read?: Partial<InitJobDeps["read"]>; now?: () => number; agent?: { adapter: HarnessAdapterFactory; starts: HarnessStartOptions[] }; writesRecipe?: boolean; agents?: AgentHere[]; adapters?: Record<string, HarnessAdapterFactory>; deployDaemon?: () => Promise<string>; /** The provider whose key this host's own step asks for; absent from the object leaves it Solari's. */ keyProvider?: string; /** The places this host can build at, over the runtime's own stub as the wired one. */ places?: (wired: StubBackend) => PlaceBackends; /** How long the vault step waits for this client's token. */ vaultWaitMs?: number; /** The wsp home holds the Claude token unless a case says it does not. */ tokenHeld?: boolean } = {}): Fake {
   const dir = mkdtempSync(join(tmpdir(), "wsp-init-job-"));
   dirs.push(dir);
   const home = mkdtempSync(join(tmpdir(), "wsp-init-job-home-"));
@@ -173,7 +173,7 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
   const saved: Record<string, string>[] = [];
   const swapped: Readonly<Record<string, string>>[] = [];
   const installed: string[][] = [];
-  let env: Record<string, string> = over.env ?? { SOLARI_API_KEY: SOLARI };
+  let env: Record<string, string> = over.env ?? { SOLARI_API_KEY: SOLARI, ...(over.tokenHeld === false ? {} : { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-TESTONLYaaaaaaaaaaaaaaaaaaaa" }) };
   const deps: InitJobDeps = {
     rt,
     statePath,
@@ -230,6 +230,8 @@ function fake(over: { platform?: "darwin" | "linux"; env?: Record<string, string
     },
     retry: { waitMs: 1, attempts: 3 },
     pollMs: 5,
+    // The vault step waits for this client to send a token it asked for; these runs send none, so the wait is short.
+    vaultWaitMs: over.vaultWaitMs ?? 20,
     ...(over.now !== undefined ? { now: over.now } : {}),
   };
   const jobs = new InitJobs(deps);
@@ -421,7 +423,7 @@ describe("the init job, manual road", () => {
 
     const answered = await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
     expect(answered.screens[0]!.ticks.sort()).toEqual(["claude", "codex"]);
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "later" } });
     await f.jobs.answer({ screen: "wsp", ticks: ["wsp-tools/claude"] });
     await expect(f.jobs.start({ road: "manual" })).rejects.toThrow(/already/);
 
@@ -452,8 +454,9 @@ describe("the init job, manual road", () => {
     const ids = done.rows.map(r => r.id);
     expect(ids.indexOf("sign-in/gh")).toBeGreaterThan(ids.indexOf("stage/ready"));
     expect(ids.indexOf("sign-in/gh")).toBeLessThan(ids.indexOf("stage/snapshotting"));
-    // A copied credential is a row that needs nothing, and while the phase says signing in a sign-in row is on the list.
-    expect(done.rows.find(r => r.id === "sign-in/codex")).toMatchObject({ kind: "sign-in", ...initSignInOutcome("copied", "darwin") });
+    // A login left to first use is a row that needs nothing, and while the phase says signing in a sign-in row is
+    // on the list.
+    expect(done.rows.find(r => r.id === "sign-in/codex")).toMatchObject({ kind: "sign-in", ...initSignInOutcome("deferred", "darwin") });
     const signing = f.events.filter(e => e.job.phase === "signing-in");
     expect(signing.length).toBeGreaterThan(0);
     expect(signing.every(e => e.job.rows.some(r => r.kind === "sign-in"))).toBe(true);
@@ -477,7 +480,8 @@ describe("the init job, manual road", () => {
     expect(gh.state).toBe("done");
     const waited = f.events.map(e => e.job.rows.find(r => r.id === "sign-in/gh")).find(r => r?.state === SIGN_IN_OPEN_STATE);
     expect(waited).toMatchObject({ page: DEVICE_URL });
-    expect(f.events.some(e => e.job.rows.some(r => r.id === "sign-in/claude" && r.page === CLAUDE_URL))).toBe(true);
+    // Claude Code's row waits on a paste here rather than a page on the machine, and its token was already held.
+    expect(f.events.some(e => e.job.rows.some(r => r.id === "sign-in/claude" && r.page !== undefined))).toBe(false);
     expect(done.rows.filter(r => r.kind === "stage").every(r => r.state === "done")).toBe(true);
     expect(done.rows.find(r => r.kind === "workspace")).toMatchObject({ state: "forked" });
     expect(phases(f)).toEqual(["reading", "answering", "building", "signing-in", "sealing", "finishing", "done"]);
@@ -499,12 +503,12 @@ describe("the init job, manual road", () => {
       await f.jobs.start({ road: "manual" });
       await f.settled();
       await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
-      await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+      await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "copy", "logins/claude": "token", "logins/codex": "later" } });
       await f.jobs.build({ firstWorkspace: "first" });
       await f.settled();
       const done = f.jobs.view()!;
       expect(done.phase).toBe("done");
-      const copied = done.rows.find(r => r.id === "sign-in/codex")!;
+      const copied = done.rows.find(r => r.id === "sign-in/gh")!;
       expect(copied, platform).toMatchObject({ kind: "sign-in", state: word, login: "copied" });
       // The name is what a client reads, so a row a Linux host worded ends, folds and counts where a Mac's does.
       expect(initRowOver(copied)).toBe(true);
@@ -520,10 +524,10 @@ describe("the init job, manual road", () => {
     await f.jobs.start({ road: "manual" });
     await f.settled();
     await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "later", "logins/claude": "later", "logins/codex": "copy" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "later", "logins/claude": "later", "logins/codex": "later" } });
     const building = await f.jobs.build({ firstWorkspace: "first" });
     // The row is there from the first frame, so the count means the same thing whichever answer it carries.
-    expect(building.rows.filter(r => r.kind === "sign-in").map(r => r.id).sort()).toEqual(["sign-in/claude", "sign-in/codex", "sign-in/gh"]);
+    expect(building.rows.filter(r => r.kind === "sign-in").map(r => r.id).sort()).toEqual(["sign-in/codex", "sign-in/gh"]);
     await f.settled();
     const done = f.jobs.view()!;
     expect(done.phase).toBe("done");
@@ -545,7 +549,7 @@ describe("the init job, manual road", () => {
     const f = fake({ platform: "linux", read: { scan: async () => [JQ] } });
     await f.jobs.start({ road: "manual" });
     await f.settled();
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "copy", "logins/codex": "copy" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "later" } });
     await f.jobs.build({ firstWorkspace: "first" });
     await f.settled();
     expect(f.jobs.view()!.phase).toBe("done");
@@ -621,7 +625,7 @@ describe("the init job, manual road", () => {
 
   it("the job carries what it waits on the person for and the event says it arrived, once per need: each sign-in's open page and nothing else, cleared when the row moves on, and never the screens the person just opened", async () => {
     let clock = 1_760_000_000_000;
-    const f = fake({ now: () => (clock += 1_000) });
+    const f = fake({ now: () => (clock += 1_000), tokenHeld: false });
     await f.jobs.start({ road: "manual" });
     await f.settled();
     // The screens wait on the person, but they are what the person is looking at: no need, no event, and the phase
@@ -631,7 +635,7 @@ describe("the init job, manual road", () => {
     expect(answering.needsYou).toBeUndefined();
     expect(f.needs).toEqual([]);
     await f.jobs.answer({ screen: "agents", ticks: ["claude", "codex"] });
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "later" } });
     expect(f.jobs.view()!.needsYou).toBeUndefined();
     expect(f.needs).toEqual([]);
 
@@ -641,8 +645,9 @@ describe("the init job, manual road", () => {
     await f.settled();
     const waited = f.events.map(e => e.job.needsYou?.what).filter(w => w !== undefined);
     expect(waited).toContain("sign in to GitHub CLI login");
-    // Every sign-in whose page opened is one need, and each carries the clock of its own arrival.
-    expect(f.needs.map(e => e.needsYou.what)).toEqual(["sign in to GitHub CLI login", "sign in to Claude Code login"]);
+    // Every sign-in the person is waited on for is one need, and each carries the clock of its own arrival: the
+    // token this computer holds comes before the machine's own sign-ins.
+    expect(f.needs.map(e => e.needsYou.what)).toEqual(["sign in to Claude Code login", "sign in to GitHub CLI login"]);
     expect(f.needs.map(e => e.needsYou.since)).toEqual([...f.needs].map(e => e.needsYou.since).sort((a, b) => a - b));
     expect(new Set(f.needs.map(e => e.needsYou.since)).size).toBe(2);
     // The same need over many views is one need: while a page stands open the clock does not move and nothing fires again.
@@ -665,7 +670,7 @@ describe("the init job, manual road", () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
     await f.settled();
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "skip" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "skip" } });
     expect((await f.jobs.get()).job!.stoppable).toBe(true);
     f.setLink(scriptedLink({ signedIn: false, hold: true, missing: false }));
     await f.jobs.build({ firstWorkspace: "alpha" });
@@ -762,35 +767,71 @@ describe("the init job, manual road", () => {
     const f = fake();
     await f.jobs.start({ road: "manual" });
     await f.settled();
-    // Claude Code's login alone: the page it prints hands a code back, which is the road with no terminal to paste into.
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "machine", "logins/codex": "skip" } });
-    await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running|waiting for a code/);
+    // Gemini CLI's login alone: the page it prints hands a code back, which is the road with no terminal to paste into.
+    await f.jobs.answer({ screen: "agents", ticks: ["claude", "gemini"] });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "skip", "logins/codex": "skip", "logins/gemini": "machine" } });
+    await expect(f.jobs.signInCode({ tool: "gemini", code: PASTED })).rejects.toThrow(/no init job is running|waiting for a code/);
     const held = scriptedLink({ signedIn: true, hold: true, missing: false });
     f.setLink(held);
     await f.jobs.build({});
     const waiting = async () => {
       for (let i = 0; i < 600; i++) {
-        const row = f.jobs.view()?.rows.find(r => r.id === "sign-in/claude");
+        const row = f.jobs.view()?.rows.find(r => r.id === "sign-in/gemini");
         if (row?.state === SIGN_IN_OPEN_STATE && row.finish === "code") return row;
         await new Promise(r => setTimeout(r, 10));
       }
       throw new Error("the sign-in row never opened on the code road");
     };
-    expect(await waiting()).toMatchObject({ page: CLAUDE_URL, finish: "code" });
+    expect(await waiting()).toMatchObject({ page: GEMINI_URL, finish: "code" });
     // A login on the callback road runs with a browser to find, so its page can return to the machine instead.
     expect(held.ptys.some(p => (p.created["env"] as Record<string, string> | undefined)?.["DISPLAY"] !== undefined)).toBe(true);
-    await f.jobs.signInCode({ tool: "claude", code: PASTED });
-    const login = held.ptys.find(p => p.writes[0]?.includes("exec claude auth login"))!;
+    await f.jobs.signInCode({ tool: "gemini", code: PASTED });
+    const login = held.ptys.find(p => p.writes[0]?.includes("exec gemini"))!;
     expect(login.writes.slice(1)).toContain(`${PASTED}\r`);
     await f.settled();
     const done = f.jobs.view()!;
     expect(done.phase).toBe("done");
-    expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ ...initSignInOutcome("signed-in", "darwin") });
+    expect(done.rows.find(r => r.id === "sign-in/gemini")).toMatchObject({ ...initSignInOutcome("signed-in", "darwin") });
     // The row is over: no page left to open and no code left to take.
-    expect(done.rows.find(r => r.id === "sign-in/claude")).not.toHaveProperty("finish");
+    expect(done.rows.find(r => r.id === "sign-in/gemini")).not.toHaveProperty("finish");
     // The code went to the machine and nowhere else: not a row, not the log, not an event.
     expect(JSON.stringify(f.events)).not.toContain(PASTED);
-    await expect(f.jobs.signInCode({ tool: "claude", code: PASTED })).rejects.toThrow(/no init job is running/);
+    await expect(f.jobs.signInCode({ tool: "gemini", code: PASTED })).rejects.toThrow(/no init job is running/);
+  });
+
+  it("a row whose token is minted on this computer takes it from the app: the token is saved in the wsp home, the row signs in, and nothing of it is typed on a machine", async () => {
+    const TOKEN = "sk-ant-oat01-TESTONLYaaaaaaaaaaaaaaaaaaaa";
+    const f = fake({ vaultWaitMs: 5_000, tokenHeld: false });
+    await f.jobs.start({ road: "manual" });
+    await f.settled();
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "skip", "logins/claude": "token", "logins/codex": "skip" } });
+    const link = scriptedLink({ signedIn: true, hold: false, missing: false });
+    f.setLink(link);
+    await f.jobs.build({});
+    // The row waits on the person, saying what to run here and paste, and no machine is asked for anything.
+    const waiting = async () => {
+      for (let i = 0; i < 600; i++) {
+        const row = f.jobs.view()?.rows.find(r => r.id === "sign-in/claude");
+        if (row?.state === SIGN_IN_OPEN_STATE) return row;
+        await new Promise(r => setTimeout(r, 10));
+      }
+      throw new Error("the token row never waited on the person");
+    };
+    expect(await waiting()).toMatchObject({ detail: "run claude setup-token on this computer and paste the token it prints; it stays there" });
+    // A value that is not what that command prints is refused, and nothing is saved for it.
+    await expect(f.jobs.signInCode({ tool: "claude", code: "my password" })).rejects.toThrow(/not what claude setup-token prints/);
+    // A line the person copied with the tool's own words around it is not a token either, so nothing is saved.
+    await expect(f.jobs.signInCode({ tool: "claude", code: `Paste code here if prompted > ${TOKEN}` })).rejects.toThrow(/not what claude setup-token prints/);
+    expect(f.saved).toEqual([]);
+    await f.jobs.signInCode({ tool: "claude", code: TOKEN });
+    expect(f.saved).toEqual([{ CLAUDE_CODE_OAUTH_TOKEN: TOKEN }]);
+    await f.settled();
+    const done = f.jobs.view()!;
+    expect(done.phase).toBe("done");
+    expect(done.rows.find(r => r.id === "sign-in/claude")).toMatchObject({ ...initSignInOutcome("signed-in", "darwin"), detail: "token held on this computer" });
+    // Nothing of the token is on the view, and no pty ran for it.
+    expect(JSON.stringify(f.events)).not.toContain(TOKEN);
+    expect(link.ptys.map(p => p.writes[0]).filter(w => w?.startsWith("exec "))).toEqual([]);
   });
 
   it("a build the network stopped says what happened in this computer's own words, keeps every stage row in its order, and closes the failed stage's block with that sentence, never the raw error", async () => {
@@ -1158,7 +1199,7 @@ describe("the init job, manual road", () => {
     const f = fake({ deployDaemon: async () => Promise.reject(new Error("the daemon would not deploy")) });
     await f.jobs.start({ road: "manual" });
     await f.settled();
-    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "machine", "logins/codex": "copy" } });
+    await f.jobs.answer({ screen: "logins", answers: { "logins/gh": "machine", "logins/claude": "token", "logins/codex": "later" } });
     await f.jobs.build({ firstWorkspace: "e2e" });
     await f.settled();
     const view = f.jobs.view()!;
@@ -1492,7 +1533,9 @@ describe("the init job, terminal road", () => {
     await yes.settled();
     const done = yes.jobs.view()!;
     expect(done.phase).toBe("done");
-    expect(done.rows.filter(r => r.kind === "sign-in").every(r => r.state === INIT_ROW_STATES.skipped)).toBe(true);
+    // Every sign-in on the machine is skipped; Claude Code's row is the vault's and its token is already held here.
+    expect(done.rows.filter(r => r.kind === "sign-in" && r.tool !== "claude").every(r => r.state === INIT_ROW_STATES.skipped)).toBe(true);
+    expect(done.rows.find(r => r.tool === "claude")).toMatchObject(initSignInOutcome("signed-in", "darwin"));
   });
 
   it("the provider the host wired is what may build, not a key: a host forking containers with no key builds, one with no provider prices nothing and refuses", async () => {

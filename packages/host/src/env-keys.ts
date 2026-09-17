@@ -7,7 +7,7 @@
 // business and never reads as saved on a screen.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { CATALOG_AGENTS, hasLogin } from "@wsp/catalog";
+import { VAULT_VARIABLES } from "@wsp/catalog";
 
 export const ANTHROPIC_KEY = "ANTHROPIC_API_KEY";
 
@@ -50,17 +50,10 @@ export function keysOf(env: Readonly<Record<string, string | undefined>>): Keys 
   return anthropic !== undefined ? { anthropic } : {};
 }
 
-/** The variables the catalog's agents read an API key from, each declared once on its agent's sign-in. */
-export const AGENT_KEY_VARIABLES: ReadonlySet<string> = new Set(CATALOG_AGENTS.flatMap(a => (hasLogin(a.signIn) && a.signIn.keyEnv !== undefined ? [a.signIn.keyEnv] : [])));
-
-/** The agents' keys a record holds, under the variables the catalog declares: what rides onto the image. */
-export function agentKeysIn(env: Readonly<Record<string, string>>): Record<string, string> {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => AGENT_KEY_VARIABLES.has(name) && keyIn(env, name) !== undefined));
-}
-
-/** The terminal's keys as the image's variables: the one agent key it asks for, under the variable Claude Code reads. */
-export function agentKeyEnvs(keys: Pick<Keys, "anthropic">): Record<string, string> {
-  return keys.anthropic !== undefined ? { [ANTHROPIC_KEY]: keys.anthropic } : {};
+/** What the vault hands a turn: a record cut to the variables the catalog declares, empty values dropped. Nothing
+ * of it is written to a machine; the runtime reads it at each launch and sets it in that turn's environment. */
+export function vaultOf(env: Readonly<Record<string, string | undefined>>): Record<string, string> {
+  return Object.fromEntries([...VAULT_VARIABLES].flatMap(name => (keyIn(env, name) !== undefined ? [[name, env[name]!]] : [])));
 }
 
 /** The one writer of the wsp home's .env: a key line it knows is rewritten in place, the rest appended, mode 0600. */

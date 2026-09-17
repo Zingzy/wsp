@@ -31,7 +31,7 @@ import { appendCommand, readCommand } from "../src/init-secrets.js";
 import { importResultPath } from "../src/init-import.js";
 import { noteOutcomes } from "../src/init-signin.js";
 import type { FakePtyLink } from "./fake-pty-link.js";
-import { CLAUDE_URL, DEVICE_URL, scriptedLink } from "./init-link.js";
+import { DEVICE_URL, GEMINI_URL, scriptedLink } from "./init-link.js";
 import { FIXTURE, RECIPE } from "./init-fixture.js";
 import { runRecipe } from "../src/recipe-command.js";
 import { saveSmallRecipe } from "../src/recipe-file.js";
@@ -184,7 +184,8 @@ function fake(over: Partial<InitOptions> & { tty?: boolean; env?: Record<string,
     collect: async () => FIXTURE,
     recipe: async () => RECIPE,
     scanProject: async folder => ({ dir: folder, rows: [], candidates: [] }),
-    agentKeys: {},
+    vault: () => ({}),
+    saveKeys: () => {},
     pricing: PRICING,
     statePath: join(dir, "state.json"),
     home,
@@ -322,8 +323,24 @@ async function forkHead(rt: Runtime, name: string) {
   return rt.workspaces.create({ golden: head.snapshotId, name });
 }
 
+/** The prompt the vault step raises for a row answered on this computer; these runs have nothing to paste. */
+const VAULT_ASK = "Claude Code token";
+
+const reEscape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Escape at the vault step's prompt, when the run reaches one before `next`: the row is left not signed in and
+ * the run goes on. Nothing is ever run for it here, since these runs hand in no mint command. */
+async function pastTheVault(f: Fake, next: string): Promise<void> {
+  await f.until(new RegExp(`${VAULT_ASK}|${reEscape(next)}`));
+  // The screen keeps everything the run has printed, so it is the newer of the two that says where the run is.
+  const text = f.text();
+  if (text.lastIndexOf(VAULT_ASK) < text.lastIndexOf(next)) return;
+  await f.press(KEY.esc);
+}
+
 /** Enter at the seal question: the default answer is yes. */
 async function sealIt(f: Fake, version = 1): Promise<void> {
+  await pastTheVault(f, SEAL_Q(version));
   await f.until(SEAL_Q(version));
   await f.press(KEY.enter);
 }
@@ -717,6 +734,7 @@ describe("wsp init, interactive", () => {
     await throughScreens(f);
     await f.until(BOOT);
     await f.press("y");
+    await pastTheVault(f, SEAL_Q(1));
     await f.until(SEAL_Q(1));
     expect(f.text()).toContain("Enter seals: a snapshot, then a fork to prove it. No leaves the machine up.");
     await f.press("n");
@@ -1014,8 +1032,11 @@ describe("wsp init, the summary-first screens", () => {
     await f.until("Sign-ins  3/5");
     const four = f.text().slice(f.text().lastIndexOf("◆  Sign-ins"));
     // Every row carries the word it will act on, the agents first, then the CLIs, then the servers with auth.
-    expect(four).toMatch(/▾ Agents\s+2 copy\s+2 during the build\s+1 when you need it\s+0 API key\s+0 skip\n/);
-    expect(four).toMatch(/Claude Code login\s+[^\n]*sign in during the build\n/);
+    expect(four).toMatch(/▾ Agents\s+2 copy\s+0 during the build\s+2 when you need it\s+0 API key\s+0 skip\s+1 token\n/);
+    // Claude Code's token is minted on this computer, and Codex signs in once on the computer that runs the
+    // workspaces, so neither of them is a sign-in during the build.
+    expect(four).toMatch(/Claude Code login\s+[^\n]*token from this computer\n/);
+    expect(four).toMatch(/Codex login\s+[^\n]*sign in when you first need it\n/);
     // Hermes signs in through a menu only the person can work through, so its row opens on the copy instead.
     expect(four).toMatch(/Hermes Agent login\s+[^\n]*copy from this Mac\n/);
     expect(four).toMatch(/Hermes Agent API keys\s+[^\n]*copy from this Mac\n/);
@@ -1046,7 +1067,7 @@ describe("wsp init, the summary-first screens", () => {
     // The four agents and both MCP servers, the one with a token by the copy it was given on the screen.
     // Gemini's row is the catalog's, added after what the collector found, so it installs last.
     expect(summary).toMatch(/Agents\s+6 of 8/);
-    expect(summary).toMatch(/Sign-ins\s+2 copy, 3 during the build, 1 when you need it\s+25 KB\n/);
+    expect(summary).toMatch(/Sign-ins\s+2 copy, 1 during the build, 2 when you need it, 1 token\s+25 KB\n/);
     expect(summary).toMatch(/Hermes Agent login\s+copy\n/);
     expect(summary).toMatch(/Hermes Agent API keys\s+copy\n/);
     expect(summary).toMatch(/kubectl config\s+skip\n/);
@@ -1064,7 +1085,9 @@ describe("wsp init, the summary-first screens", () => {
     // sign-ins opted in to the build ran here; Hermes, whose menu is the person's, copied instead; and Gemini's row,
     // left on the default, ran nothing at all and says where it is signed in instead.
     expect(out).toMatch(/Agents\n│\s+4 installed: Claude Code, Codex, Hermes Agent, Gemini CLI\n/);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual([`exec ${loginOf("gh")} || exit\r`, "exec claude auth login || exit\r", "exec codex login || exit\r"]);
+    // Only the GitHub CLI signs in on the machine: Claude Code's token is this computer's and Codex's login is the
+    // computer's that runs the workspaces, so neither opens a pty there.
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual([`exec ${loginOf("gh")} || exit\r`]);
     expect(out).toContain(`Gemini CLI login: ${SIGN_IN_DEFERRED_WORD}`);
     expect(f.reads).toEqual([]);
     const log = f.backends[0]!.machines[0]!.execLog;
@@ -1103,8 +1126,10 @@ describe("wsp init, the summary-first screens", () => {
     const rows = new Map(small.rows.map(r => [r.id, r]));
     // A recipe is the whole answer, so the row left to first use records that word and not an absence.
     expect(rows.get("gemini")).toMatchObject({ on: true, signIn: "later" });
-    expect(rows.get("codex")).toMatchObject({ on: true, signIn: "machine" });
-    expect(rows.get("claude")).toMatchObject({ on: true, signIn: "machine" });
+    // The saved recipe asked for a sign-in during the build for both agents; neither row takes that word any more,
+    // so each opened on its own first one and the file records what was answered.
+    expect(rows.get("codex")).toMatchObject({ on: true, signIn: "later" });
+    expect(rows.get("claude")).toMatchObject({ on: true, signIn: "token" });
     expect(rows.get("hermes")).toMatchObject({ on: true, signIn: "copy" });
     expect(rows.get("yq")).toMatchObject({ on: false });
     expect(rows.get("gh")).toMatchObject({ on: true, signIn: "machine" });
@@ -1228,7 +1253,10 @@ describe("wsp init, the summary-first screens", () => {
     expect(out).not.toMatch(/github\s+copy/);
     // The copied keys are on the machine; their status is the catalog's to check from the app, not this terminal's.
     expect(out).toContain("Hermes Agent API keys: copied");
-    expect(out).toContain("Sign-ins on the machine skipped: GitHub CLI login, Claude Code login, Codex login. --yes asks nothing; sign in from the app's terminal.");
+    expect(out).toContain("Sign-ins on the machine skipped: GitHub CLI login. --yes asks nothing; sign in from the app's terminal.");
+    // Claude Code's token and Codex's login never run on a machine, so neither is among them; the token is asked
+    // for on this computer, and a run that asks nothing leaves it where it stands.
+    expect(out).toContain("Nothing asked for on this computer: Claude Code login. --yes asks nothing; paste it from the app.");
     expect(f.reads).toEqual([]);
     const saved = new Map(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.map(e => [e.id, e]));
     expect(saved.get("agents/codex")).toMatchObject({ bring: true });
@@ -1252,18 +1280,17 @@ describe("wsp init, the summary-first screens", () => {
     }
   });
 
-  it("a run taken as yes leaves a Keychain-held login nobody can consent to where a row with no copy goes, and runs no sign-in for it", async () => {
-    // The recipe answers nothing for this login, so the screen would have opened it on the copy; macOS's consent
-    // dialog has nobody to click it here, so there is no copy to be had and the row cannot stay on one.
+  it("a Keychain-held Claude login is never copied: the row is the token's, nothing is read of the Keychain and nothing runs on the machine", async () => {
+    // The Keychain item is here and the recipe answers nothing, so the screen opens the row on the one word it
+    // takes. A sign-in never sits in an image, so there is nothing to consent to and nothing to read.
     const held: Manifest = { entries: [FIXTURE.entries[0]!, { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Keychain: Claude Code-credentials"], bytes: 0, default: "bring" }] };
     const f = fake({ yes: true, collect: async () => held, recipe: async () => ticking("claude") });
-    expect(signInItems(applyRecipe(withCatalogAgents(held), ticking("claude")), new Map(), "darwin", HOME_HERE).initial.get("logins/claude")).toBe("copy");
+    expect(signInItems(applyRecipe(withCatalogAgents(held), ticking("claude")), new Map(), "darwin", HOME_HERE).initial.get("logins/claude")).toBe("token");
     expect((await runInit(f.opts, f.io)).code).toBe(0);
-    // Nothing was asked of macOS and nothing was run on the machine: the row is saved where such a row goes.
     expect(f.reads).toEqual([]);
     expect(f.link.ptys.map(p => p.writes[0]).filter(w => w?.startsWith("exec claude"))).toEqual([]);
-    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("later");
-    expect(f.text()).toContain(`Claude Code login: ${SIGN_IN_DEFERRED_WORD}`);
+    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("token");
+    expect(f.text()).toContain("Nothing asked for on this computer: Claude Code login. --yes asks nothing; paste it from the app.");
   });
 });
 
@@ -1282,7 +1309,8 @@ describe("wsp init, the secrets step", () => {
     // row says where its sign-in happens instead.
     expect(pipe.text()).not.toContain("Sign-ins on the machine skipped");
     expect(pipe.text()).toContain(`GitHub CLI login: ${SIGN_IN_DEFERRED_WORD}`);
-    expect(pipe.text()).toContain(`Claude Code login: ${SIGN_IN_DEFERRED_WORD}`);
+    // Claude Code's token is this computer's to paste, and off a terminal there is nobody to paste it.
+    expect(pipe.text()).toContain("Nothing asked for on this computer: Claude Code login. No terminal to paste into; paste it from the app.");
   });
 
   it("an rc file with a cut secret export is named in the secrets step, skipped under --yes with the reason and recorded", async () => {
@@ -1301,7 +1329,7 @@ describe("wsp init, the secrets step", () => {
   });
 
   it("on a terminal each cut secret is asked for hidden and set before any sign-in runs; the pasted value rides the pty's environment into the machine's secrets file, out of the screen and the run log", async () => {
-    const f = fake({ recipe: async () => answeredInBuild("claude") });
+    const f = fake({ recipe: async () => answeredInBuild("gh") });
     writeFileSync(join(f.opts.home, ".zshrc"), "export A=1\nexport ANTHROPIC_API_KEY=fake\n");
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
@@ -1312,7 +1340,9 @@ describe("wsp init, the secrets step", () => {
     await f.until("cut from ~/.zshrc; the value is set on the machine and never shown here");
     await f.press(..."s3cret-value".split(""), KEY.enter);
     await f.until("ANTHROPIC_API_KEY: set in /etc/profile.d/wsp-secrets.sh on the machine");
-    await f.until("Claude Code login: signed in (claude auth login exited 0)");
+    // Claude Code's token is asked for on this computer, between the secrets and the machine's own sign-ins.
+    await pastTheVault(f, "Signing in on the machine");
+    await f.until(`GitHub CLI login: signed in (${loginOf("gh")} exited 0)`);
     await sealIt(f);
     await firstWorkspace(f, "");
     const result = await run;
@@ -1334,10 +1364,11 @@ describe("wsp init, the secrets step", () => {
     expect(pty.killed).toBe(true);
     const lines = f.link.ptys.map(p => p.writes[0]!);
     expect(lines.indexOf(pty.writes[0]!)).toBeLessThan(lines.findIndex(l => l.startsWith("exec ")));
-    // The read, the write and claude's sign-in; gh's row is left to first use, so nothing is dialled for it.
+    // The read, the write and the GitHub CLI's sign-in; Claude Code's token is asked for here, so nothing is
+    // dialled for it.
     expect(f.link.dials).toBe(3);
     expect(JSON.parse(readFileSync(join(dirs[0]!, "golden-import.json"), "utf8"))).toMatchObject({
-      logins: [{ id: "logins/gh", state: "deferred" }, { id: "logins/claude", state: "signed-in", note: "claude auth login exited 0" }],
+      logins: [{ id: "logins/claude", state: "not-signed-in" }, { id: "logins/gh", state: "signed-in", note: `${loginOf("gh")} exited 0` }],
       secrets: [{ name: "ANTHROPIC_API_KEY", from: "cut from ~/.zshrc", state: "set" }],
     });
     expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("s3cret");
@@ -1346,13 +1377,15 @@ describe("wsp init, the secrets step", () => {
 });
 
 describe("wsp init, the sign-in stage", () => {
-  /** Codex alone is on, so its login is the one listed; the kubeconfig's command is not coming, so that row is locked at skip. */
-  const CODEX = answeredInBuild("codex", without(ticking("codex"), "claude"));
+  /** The Supabase CLI alone is on, so its login is the one listed; the kubeconfig's command is not coming, so that row is locked at skip. */
+  // The Supabase CLI stands in for every login that still signs in on the machine: a browser flow, a no-browser
+  // variant to retry with, and a status command of its own. The agents' own rows sign in nowhere near a machine.
+  const CODEX = answeredInBuild("supabase", without(ticking("supabase"), "claude"));
   const CODEX_MANIFEST: Manifest = {
     entries: [
       FIXTURE.entries[0]!,
       { rung: "tools", id: "tools/brew/kubernetes-cli", label: "kubernetes-cli", group: "Homebrew", paths: [], bytes: 0, default: "bring", linux: "yes" },
-      { rung: "logins", id: "logins/codex", label: "Codex login", group: "Agent logins", paths: ["~/.codex/auth.json"], bytes: 300, default: "skip" },
+      { rung: "logins", id: "logins/supabase", label: "Supabase login", group: "CLI logins", paths: ["~/.supabase"], bytes: 300, default: "skip" },
       { rung: "logins", id: "logins/kube", label: "kubectl config", group: "CLI logins", paths: ["~/.kube/config"], bytes: 900, default: "skip" },
     ],
   };
@@ -1361,12 +1394,12 @@ describe("wsp init, the sign-in stage", () => {
     const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST, recipe: async () => CODEX });
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
-    expect(f.text()).toMatch(/Codex login\s+[^\n]*sign in during the build/);
+    expect(f.text()).toMatch(/Supabase login\s+[^\n]*sign in during the build/);
     await f.until(BOOT);
     await f.press("y");
 
     // The default flow first: the shim would open the page; here the printed URL is offered with o.
-    await f.until(/Codex login\s+codex login\n/);
+    await f.until(/Supabase login\s+supabase login\n/);
     await f.until("Press Enter to open https://github.com/login/device");
     // The terminal's stage answers Ctrl-C itself: the run puts no stop handler on the signals here, as it does on the hand-off road.
     expect(f.signals.listenerCount("SIGINT") + f.signals.listenerCount("SIGTERM")).toBe(0);
@@ -1393,18 +1426,18 @@ describe("wsp init, the sign-in stage", () => {
     expect(f.hooks[0]!.onLine("default (builder): forwarding localhost:1455 on this computer")).toBe(true);
     expect(f.text()).toContain("default (builder): forwarding localhost:1455 on this computer");
     await f.press("\x03");
-    await f.until("Codex login: not signed in (codex login exited 130)");
+    await f.until("Supabase login: not signed in (supabase login exited 130)");
     expect(f.hooks[0]!.autoOpen(builderId, "https://other.test/c")).toBe(false);
     expect(f.hooks[0]!.onLine("later")).toBe(false);
     expect(f.hooks[0]!.openLine("default (builder)", "github.com", DEVICE_URL)).toBe("default (builder): a sign-in page for github.com is ready; open it from the app");
 
-    await f.until("r retry   f retry with codex login --device-auth   s skip");
+    await f.until("r retry   f retry with supabase login --no-browser   s skip");
     await f.press("r");
-    await f.until(/codex login\n[\s\S]*Press Enter to open[\s\S]*Press Enter to open/);
+    await f.until(/supabase login\n[\s\S]*Press Enter to open[\s\S]*Press Enter to open/);
     await f.press("\x03");
     await f.until(/not signed in[\s\S]*not signed in[\s\S]*r retry/);
     await f.press("f");
-    await f.until(/Codex login\s+codex login --device-auth/);
+    await f.until(/Supabase login\s+supabase login --no-browser/);
     await f.press("\x03");
     await f.until(/not signed in[\s\S]*not signed in[\s\S]*not signed in[\s\S]*r retry/);
     await f.press("s");
@@ -1414,19 +1447,19 @@ describe("wsp init, the sign-in stage", () => {
     const result = await run;
     expect(result.code).toBe(0);
     const out = f.text();
-    expect(out).toMatch(/Codex login\s+skipped\s+skipped by you/);
+    expect(out).toMatch(/Supabase login\s+skipped\s+skipped by you/);
     // Three login ptys (default, retry, fallback), no status run after any of them and no check script since nothing was copied; o never reached the machine.
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec codex login || exit\r", "exec codex login || exit\r", "exec codex login --device-auth || exit\r"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec supabase login || exit\r", "exec supabase login || exit\r", "exec supabase login --no-browser || exit\r"]);
     expect(f.link.ptys.flatMap(p => p.writes.slice(1))).toEqual(["\x03", "\x03", "\x03"]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
-      logins: [{ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login --device-auth", note: "skipped by you" }],
+      logins: [{ id: "logins/supabase", label: "Supabase login", state: "skipped", command: "supabase login --no-browser", note: "skipped by you" }],
     });
     expect(result.logins?.map(l => l.state)).toEqual(["skipped"]);
     expect(out).not.toMatch(/—/);
     // o opened the page twice; the device URL, the second o, then the app after the seal.
     expect(f.opened).toEqual([DEVICE_URL, DEVICE_URL, expect.stringMatching(URL_RE)]);
     // The seal stamps their states on the version.
-    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([{ name: "Codex login", state: "skipped" }]);
+    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([{ name: "Supabase login", state: "skipped" }]);
   });
 
   it("a tool that is not on the machine (exit 127) is skipped with that reason, its status command never runs, and nothing is asked", async () => {
@@ -1435,43 +1468,43 @@ describe("wsp init, the sign-in stage", () => {
     await throughScreens(f);
     await f.until(BOOT);
     await f.press("y");
-    await f.until("Codex login: skipped (codex is not on the machine)");
+    await f.until("Supabase login: skipped (supabase is not on the machine)");
     await sealIt(f);
     await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec codex login || exit\r"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec supabase login || exit\r"]);
     expect(f.text()).not.toContain("r retry");
-    expect(result.logins?.[0]).toEqual({ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", exit: 127, note: "codex is not on the machine" });
+    expect(result.logins?.[0]).toEqual({ id: "logins/supabase", label: "Supabase login", state: "skipped", command: "supabase login", exit: 127, note: "supabase is not on the machine" });
   });
 
   it("a browser-only row takes the default, so the build runs nothing for it, says where it is signed in instead and goes on to the seal", async () => {
-    // Codex's login can only happen in a browser: nothing of it is on this Mac to copy. Nobody answers the screens,
-    // so the row keeps the answer it opened on, which is the one that waits on nobody.
-    const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST, recipe: async () => without(ticking("codex"), "claude") });
+    // The Supabase CLI's login can only happen in a browser: nothing of it is on this Mac to copy. Nobody answers
+    // the screens, so the row keeps the answer it opened on, which is the one that waits on nobody.
+    const f = fake({ signedIn: false, hold: true, collect: async () => CODEX_MANIFEST, recipe: async () => without(ticking("supabase"), "claude") });
     const run = runInit(f.opts, f.io);
     await throughScreens(f);
-    expect(f.text()).toMatch(/Codex login\s+[^\n]*sign in when you first need it/);
+    expect(f.text()).toMatch(/Supabase login\s+[^\n]*sign in when you first need it/);
     await f.until(BOOT);
     await f.press("y");
-    await f.until(`Codex login: ${SIGN_IN_DEFERRED_WORD}`);
+    await f.until(`Supabase login: ${SIGN_IN_DEFERRED_WORD}`);
     // The seal comes on its own: nothing was waited on, so no retry is offered and no key is read for one.
     await sealIt(f);
     await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
     // Not one pty ran the sign-in: the only commands on the machine are the build's own.
-    expect(f.link.ptys.map(p => p.writes[0]).filter(w => w?.includes("codex login"))).toEqual([]);
+    expect(f.link.ptys.map(p => p.writes[0]).filter(w => w?.includes("supabase login"))).toEqual([]);
     expect(f.text()).not.toContain("r retry");
     expect(f.text()).not.toContain("r sign in on the machine");
-    expect(result.logins).toEqual([{ id: "logins/codex", label: "Codex login", state: "deferred" }]);
+    expect(result.logins).toEqual([{ id: "logins/supabase", label: "Supabase login", state: "deferred" }]);
     // The version carries the row, so the image says which of its sign-ins is still to be made.
-    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([{ name: "Codex login", state: "deferred" }]);
+    expect((await f.runtimes.at(-1)!.golden.get())?.versions[0]?.logins).toEqual([{ name: "Supabase login", state: "deferred" }]);
     // The recipe records the answer, and a second run reads it back rather than deciding again.
     const small = Recipe.parse(JSON.parse(readFileSync(join(dirs[0]!, "recipe.json"), "utf8")));
-    expect(small.rows.find(r => r.id === "codex")).toMatchObject({ on: true, signIn: "later" });
-    expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/codex")?.choice).toBe("later");
-    expect(signInItems(applyRecipe(withCatalogAgents(CODEX_MANIFEST), small), new Map(), "darwin", HOME_HERE).initial.get("logins/codex")).toBe("later");
+    expect(small.rows.find(r => r.id === "supabase")).toMatchObject({ on: true, signIn: "later" });
+    expect(loadManifest(join(dirs[0]!, "golden-recipe.json")).entries.find(e => e.id === "logins/supabase")?.choice).toBe("later");
+    expect(signInItems(applyRecipe(withCatalogAgents(CODEX_MANIFEST), small), new Map(), "darwin", HOME_HERE).initial.get("logins/supabase")).toBe("later");
   });
 
   it("a machine sign-in that ended with a non-zero exit is not signed in and offered a retry or a skip; a clean exit signs it in", async () => {
@@ -1526,13 +1559,13 @@ describe("wsp init, the sign-in stage", () => {
     await f.until("Press Enter to open https://github.com/login/device");
     expect(f.link.dials).toBe(1);
     f.link.drop();
-    await f.until("Codex login: not signed in (the machine's terminal link dropped)");
-    await f.until("r retry   f retry with codex login --device-auth   s skip");
+    await f.until("Supabase login: not signed in (the machine's terminal link dropped)");
+    await f.until("r retry   f retry with supabase login --no-browser   s skip");
     await f.press("r");
     await f.until(/Press Enter to open[\s\S]*Press Enter to open/);
     expect(f.link.dials).toBe(2);
     await f.press("\x03");
-    await f.until(/not signed in \(codex login exited 130\)/);
+    await f.until(/not signed in \(supabase login exited 130\)/);
     await f.until(/exited 130[\s\S]*r retry   f retry/);
     await f.press("s");
     await sealIt(f);
@@ -1581,21 +1614,21 @@ describe("wsp init, the sign-in stage", () => {
     await throughScreens(f);
     await f.until(BOOT);
     await f.press("y");
-    await f.until("Codex login: not signed in (no daemon token)");
-    await f.until("r retry   f retry with codex login --device-auth   s skip");
+    await f.until("Supabase login: not signed in (no daemon token)");
+    await f.until("r retry   f retry with supabase login --no-browser   s skip");
     await f.press("s");
     await sealIt(f);
     await firstWorkspace(f, "");
     const result = await run;
     expect(result.code).toBe(0);
-    expect(result.logins).toEqual([{ id: "logins/codex", label: "Codex login", state: "skipped", command: "codex login", note: "skipped by you" }]);
+    expect(result.logins).toEqual([{ id: "logins/supabase", label: "Supabase login", state: "skipped", command: "supabase login", note: "skipped by you" }]);
     // The typed key never echoes into the next line.
     expect(f.text()).not.toMatch(/\ns[│◇]/);
   });
 });
 
 describe("wsp init, logins copied to the machine", () => {
-  it("a Claude login with an apiKeyHelper runs the helper once, before the boot and with the Keychain reads; a helper that fails there leaves the row where a row nobody can copy goes, with the reason", async () => {
+  it("a Claude login with an apiKeyHelper here has nothing read and nothing copied, and the settings.json that travels loses its helper line", async () => {
     const withHelper: Manifest = {
       entries: [
         FIXTURE.entries[0]!,
@@ -1603,78 +1636,23 @@ describe("wsp init, logins copied to the machine", () => {
         { rung: "logins", id: "logins/claude", label: "Claude Code login", group: "Agent logins", paths: ["Helper: ~/.claude/settings.json"], bytes: 0, default: "bring", detail: "Claude Code uses the apiKeyHelper in ~/.claude/settings.json" },
       ],
     };
-    const helper = "security find-generic-password -s anthropic-api-key -w";
-    const settings = (f: Fake, line = helper): void => {
-      mkdirSync(join(f.opts.home, ".claude"), { recursive: true });
-      writeFileSync(join(f.opts.home, ".claude", "settings.json"), `{"apiKeyHelper": "${line}"}`);
-    };
-    const saved = (f: Fake): void => {
-      f.opts.collect = async () => withHelper;
-      f.opts.recipe = async () => answeredCopy("claude");
-    };
     const f = fake({ tty: false });
-    settings(f);
-    saved(f);
+    mkdirSync(join(f.opts.home, ".claude"), { recursive: true });
+    writeFileSync(join(f.opts.home, ".claude", "settings.json"), '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w"}');
+    f.opts.collect = async () => withHelper;
+    // Even a saved recipe answering copy brings nothing: the row takes no such answer any more.
+    f.opts.recipe = async () => answeredCopy("claude");
     expect((await runInit(f.opts, f.io)).code).toBe(0);
-    expect(f.reads).toEqual([helper]);
+    // The helper is never run and macOS is never asked: a key it printed would outrank the vault's token inside
+    // the CLI on every turn, so nothing of it travels.
+    expect(f.reads).toEqual([]);
     const out = f.text();
-    const said = out.indexOf("Running the ~/.claude/settings.json helper, as the saved recipe answered copy; macOS may ask you to allow it.");
-    expect(said).toBeGreaterThan(-1);
-    expect(said).toBeLessThan(out.search(BOOT));
-    expect(out).toContain("Claude Code login: copied");
-    // The key travelled as the pack's secret and the copied settings.json reads it on the machine.
+    expect(out).not.toContain("Running the ~/.claude/settings.json helper");
+    expect(out).not.toContain("Claude Code login: copied");
+    expect(loadManifest(join(dirname(f.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("token");
+    // The settings.json that does travel comes out with no helper in it.
     const landed = JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
-    expect(landed.files.skipped).toEqual([]);
-    expect(readFileSync(join(dirname(f.opts.statePath), "init.log"), "utf8")).not.toContain("sk-ant-x-helper");
-
-    // A settings.json the pack leaves out (here a link into a dotfiles checkout outside home) still gets its key read on
-    // the machine: the pack writes a settings.json naming only the key file, and the row says so.
-    const bare = fake({ tty: false });
-    settings(bare);
-    const outside = mkdtempSync(join(tmpdir(), "wsp-init-dotfiles-"));
-    dirs.push(outside);
-    renameSync(join(bare.opts.home, ".claude", "settings.json"), join(outside, "settings.json"));
-    symlinkSync(join(outside, "settings.json"), join(bare.opts.home, ".claude", "settings.json"));
-    saved(bare);
-    const bareResult = await runInit(bare.opts, bare.io);
-    expect(bareResult.code).toBe(0);
-    expect(bare.reads).toEqual([helper]);
-    const bareNote = "the machine's settings.json names only the key file; your Claude Code config stayed here";
-    expect(bare.text()).toContain(`Claude Code login: copied (${bareNote})`);
-    expect(bareResult.logins?.[0]).toEqual({ id: "logins/claude", label: "Claude Code login", state: "copied", left: bareNote });
-    const landedBare = JSON.parse(readFileSync(join(dirname(bare.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
-    expect(landedBare.files.skipped).toEqual([
-      { id: "agents/claude", path: "~/.claude/settings.json", note: `a link to ${realpathSync(outside)}/settings.json, outside your home directory` },
-      { id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: bareNote },
-    ]);
-
-    // A helper written with its key inline fails without stderr: the command line is what the shell's error carries, and it never reaches the terminal or the log.
-    const inline = "printf sk-ant-x-inline; exit 1";
-    const refused = fake({ yes: true });
-    settings(refused, inline);
-    saved(refused);
-    refused.opts.secrets = {
-      read: async () => {
-        throw new Error("no Keychain item in this fixture");
-      },
-      run: async command => {
-        refused.reads.push(command);
-        throw Object.assign(new Error(`Command failed: /bin/sh -c ${command}\n`), { code: 1 });
-      },
-    };
-    expect((await runInit(refused.opts, refused.io)).code).toBe(0);
-    expect(refused.reads).toEqual([inline]);
-    // On a terminal the spinner names what runs: the helper alone here, no Keychain item being read.
-    expect(refused.text()).toContain("Running the ~/.claude/settings.json helper");
-    expect(refused.text()).not.toContain("Reading your Keychain");
-    expect(refused.text()).toContain(`Claude Code login: the ~/.claude/settings.json helper failed (exit status 1); changed to ${SIGN_IN_LATER}.`);
-    expect(refused.text()).not.toContain("sk-ant-x-inline");
-    expect(readFileSync(join(dirname(refused.opts.statePath), "init.log"), "utf8")).not.toContain("sk-ant-x-inline");
-    // The copy the recipe asked for cannot happen here, so the row is saved where such a row goes, not opted in to the build.
-    expect(loadManifest(join(dirname(refused.opts.statePath), "golden-recipe.json")).entries.find(e => e.id === "logins/claude")?.choice).toBe("later");
-    // The copied settings.json lost its helper line, since the command runs on this computer only.
-    const landedRefused = JSON.parse(readFileSync(join(dirname(refused.opts.statePath), "golden-import.json"), "utf8")) as { files: { skipped: unknown[] } };
-    expect(landedRefused.files.skipped).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" }]);
+    expect(landed.files.skipped).toEqual([{ id: "agents/claude", path: "~/.claude/settings.json", note: "apiKeyHelper left out of the copy: the command runs on this computer only" }]);
   });
 
   it("a gh login whose account in use here has no Keychain item is refused with that account named and is left to first use", async () => {
@@ -1743,7 +1721,7 @@ describe("wsp init, flags and no terminal", () => {
 
   it("off a terminal a saved copy answer still reads the Keychain, and says what is read before macOS can ask", async () => {
     const f = fake({ tty: false });
-    f.opts.recipe = async () => answeredInBuild("claude", answeredCopy("gh"));
+    f.opts.recipe = async () => answeredInBuild("gemini", answeredCopy("gh", ticking("gemini")));
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
     expect((await runInit(f.opts, f.io)).code).toBe(0);
@@ -1755,12 +1733,14 @@ describe("wsp init, flags and no terminal", () => {
     // The copied gh login is recorded as copied with nobody here and nothing runs for it; the one sign-in chosen
     // for the machine is run there and its page handed over.
     expect(f.text()).toContain("GitHub CLI login: copied");
-    expect(f.text()).toContain(`Claude Code login: open ${CLAUDE_URL} on this computer`);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r"]);
+    expect(f.text()).toContain(`Gemini CLI login: open ${GEMINI_URL} on this computer`);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec gemini --skip-trust || exit\r"]);
     expect(JSON.parse(readFileSync(join(dirname(f.opts.statePath), "golden-import.json"), "utf8"))).toMatchObject({
       logins: [
+        // Claude Code's row is the vault's, and off a terminal there is nobody to paste its token.
+        { id: "logins/claude", state: "not-signed-in", note: "no terminal to paste into; paste it from the app" },
         { id: "logins/gh", state: "copied" },
-        { id: "logins/claude", state: "signed-in", note: "claude auth login exited 0" },
+        { id: "logins/gemini", state: "signed-in", note: "gemini --skip-trust exited 0" },
       ],
     });
   });
@@ -1768,7 +1748,7 @@ describe("wsp init, flags and no terminal", () => {
   it("under --non-interactive --json on a terminal with the app's ports taken: no screens, each sign-in's page and outcome as one object, no host, the golden recorded, and one last object naming it and the wsp up to run", async () => {
     // Another host holds the app's port, as the coordinator's did: a run nobody is at never binds it, so it never notices.
     const port = await heldPort();
-    const f = fake({ nonInteractive: true, json: true, ports: { port, wsPort: port, named: true }, upCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json", recipe: async () => answeredInBuild("gh", answeredInBuild("claude")) });
+    const f = fake({ nonInteractive: true, json: true, ports: { port, wsPort: port, named: true }, upCommand: "wsp up --state /tmp/wsp-test/state.json", forkCommand: "wsp new first --state /tmp/wsp-test/state.json", recipe: async () => answeredInBuild("gh", answeredInBuild("gemini", ticking("gemini"))) });
     const result = await runInit(f.opts, f.io);
     expect(result.code).toBe(0);
     expect(result.handle).toBeUndefined();
@@ -1790,21 +1770,25 @@ describe("wsp init, flags and no terminal", () => {
     expect(stages.map(r => r["stage"])).toEqual(expect.arrayContaining(["creating", "installing-tools", "ready", "snapshotting", "sealed"]));
     expect(stages.some(r => r["stage"] === "installing-tools" && typeof (r["step"] as { command?: unknown } | undefined)?.command === "string")).toBe(true);
     expect(f.records.filter(r => r["event"] !== "stage")).toEqual([
-      // Each sign-in is an object as its command starts, then again with its page and the road that page names, then
-      // its outcome.
+      // Claude Code's token is this computer's and nobody is at this terminal to paste it, so its row is one object
+      // and no machine is asked for anything.
+      { event: "sign-in-result", tool: "claude", label: "Claude Code login", state: "not-signed-in", note: "--non-interactive asks nothing; paste it from the app" },
+      // Each sign-in on the machine is an object as its command starts, then again with its page and the road that
+      // page names, then its outcome.
       { event: "sign-in", tool: "gh", label: "GitHub CLI login" },
       { event: "sign-in", tool: "gh", label: "GitHub CLI login", browserUrl: DEVICE_URL, finish: "none", nextCommand: `open '${DEVICE_URL}'`, waitSeconds: 120 },
       { event: "sign-in-result", tool: "gh", label: "GitHub CLI login", state: "signed-in", note: `${loginOf("gh")} exited 0` },
-      { event: "sign-in", tool: "claude", label: "Claude Code login" },
-      // claude's row is declared callback, and the page it printed here redirects to the hosted paste-code page, not
-      // to a port on the machine, so the row takes a code.
+      { event: "sign-in", tool: "gemini", label: "Gemini CLI login" },
+      // Gemini's row is declared callback, and the page it printed here returns to a hosted page rather than to a
+      // port on the machine, so the row takes a code.
       // Every row is given the same two minutes, whatever the tool itself would have waited for.
-      { event: "sign-in", tool: "claude", label: "Claude Code login", browserUrl: CLAUDE_URL, finish: "code", nextCommand: `open '${CLAUDE_URL}'`, waitSeconds: 120 },
-      { event: "sign-in-result", tool: "claude", label: "Claude Code login", state: "signed-in", note: "claude auth login exited 0" },
+      { event: "sign-in", tool: "gemini", label: "Gemini CLI login", browserUrl: GEMINI_URL, finish: "code", nextCommand: `open '${GEMINI_URL}'`, waitSeconds: 120 },
+      { event: "sign-in-result", tool: "gemini", label: "Gemini CLI login", state: "signed-in", note: "gemini --skip-trust exited 0" },
       // The tick made a workspace, so the last object names it in place of the fork command an agent would run.
       { event: "done", golden: "default", version: 1, snapshotId: "snap_wsp-h1-default-v1", recipe: join(dirname(f.opts.statePath), "recipe.json"), nextCommand: "wsp up --state /tmp/wsp-test/state.json", workspace: { id: expect.stringMatching(/^ws_/) as unknown as string, name: LOCAL_NAME } },
     ]);
-    expect(result.logins?.map(l => l.state)).toEqual(["signed-in", "signed-in"]);
+    // Claude Code's token is the vault's and nobody is at this terminal to paste it; the two machine sign-ins ran.
+    expect(result.logins?.map(l => l.state)).toEqual(["not-signed-in", "signed-in", "signed-in"]);
     // No process stays to end a kept builder's window, so the builder goes with the seal; the smoke fork too; nothing else boots.
     expect(f.backends[0]!.machines.map(m => [m.spec.fromSnapshot, m.killed])).toEqual([[undefined, true], ["snap_wsp-h1-default-v1", true]]);
     expect(await f.store.list("builders")).toEqual([]);
@@ -1894,7 +1878,7 @@ describe("wsp init, flags and no terminal", () => {
 
   it("under --non-interactive a recipe answering copy for a Keychain login asks nothing and still copies it", async () => {
     const f = fake({ nonInteractive: true });
-    f.opts.recipe = async () => answeredInBuild("claude", answeredCopy("gh"));
+    f.opts.recipe = async () => answeredInBuild("gemini", answeredCopy("gh", ticking("gemini")));
     mkdirSync(join(f.opts.home, ".config", "gh"), { recursive: true });
     writeFileSync(join(f.opts.home, ".config", "gh", "hosts.yml"), "github.com:\n    user: Zingzy\n");
     expect((await runInit(f.opts, f.io)).code).toBe(0);
@@ -1902,7 +1886,7 @@ describe("wsp init, flags and no terminal", () => {
     expect(f.text()).toContain("GitHub CLI login: copied");
     // The screens never ran, so nothing was typed at: the only pty is the one sign-in chosen for the machine.
     expect(f.text()).not.toMatch(/◆  Agents|◆  Sign-ins/);
-    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec claude auth login || exit\r"]);
+    expect(f.link.ptys.map(p => p.writes[0])).toEqual(["exec gemini --skip-trust || exit\r"]);
   });
 
   it("on a terminal without the flag the screens still run", async () => {
@@ -3594,9 +3578,9 @@ describe("wsp init with a golden already built from a recipe", () => {
     expect(after.recipeHash).not.toBe(before.recipeHash);
     expect(after.build).toEqual(before.build);
     expect(await store.get("goldens", copyKey("default", "default"))).toMatchObject({ head: 2 });
-    // The update kept the golden's disk, so what v1's sign-in stage recorded (both left to first use, since neither
-    // was opted in to the build) is stamped on v2 as it was.
-    const deferred = [{ name: "GitHub CLI login", state: "deferred" }, { name: "Claude Code login", state: "deferred" }];
+    // The update kept the golden's disk, so what v1's stages recorded is stamped on v2 as it was: the GitHub CLI
+    // left to first use, and Claude Code's token not pasted with nobody at this terminal.
+    const deferred = [{ name: "Claude Code login", state: "not-signed-in" }, { name: "GitHub CLI login", state: "deferred" }];
     expect(((await store.get("goldens", copyKey("default", "default"))) as { versions: { logins?: unknown }[] }).versions.map(v => v.logins)).toEqual([deferred, deferred]);
     expect(await store.get("golden-recipes", copyKey("default", "default@v2"))).toBeDefined();
     // The saved recipe is the new one, and a run on the same answers finds nothing to update.
@@ -3686,6 +3670,7 @@ describe("wsp init with a golden already built from a recipe", () => {
     await rebuilt.press(KEY.enter);
     await rebuilt.until(BOOT);
     await rebuilt.press("y");
+    await pastTheVault(rebuilt, SEAL_Q(2));
     await rebuilt.until(SEAL_Q(2));
     await rebuilt.press("n");
     expect((await run).code).toBe(1);

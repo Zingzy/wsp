@@ -15,14 +15,13 @@ import { answeredRows, defaultAnswers, goldenRecipeFor, lockRefused, manifestFor
 import { withoutPins } from "./recipe-file.js";
 
 /** What a build is planned against beyond the rows themselves: this computer, its Homebrew table for the rows a
- * formula installs, the Keychain values already read for it, and the keys its agents run with. A copy's build reads
- * no Keychain, so its values are empty and the pack finds none to carry. */
+ * formula installs, and the Keychain values already read for it. A copy's build reads no Keychain, so its values
+ * are empty and the pack finds none to carry. */
 export interface BuildContext {
   home: string;
   platform: Platform;
   brew: BrewTable;
   secrets: ReadonlyMap<string, string>;
-  agentKeys: Readonly<Record<string, string>>;
 }
 
 /** What the ticked rows come to on the builder: the files plan, the installs and the MCP plan. `picked` is the rows
@@ -53,13 +52,13 @@ export function planGoldenRecipe(
   return {
     bring,
     import: imp,
-    recipe: goldenRecipeFor(bring, o.agentKeys, { import: imp, source: withoutPins(o.small), ...(o.deployDaemon !== undefined ? { deployDaemon: o.deployDaemon } : {}) }),
+    recipe: goldenRecipeFor(bring, { import: imp, source: withoutPins(o.small), ...(o.deployDaemon !== undefined ? { deployDaemon: o.deployDaemon } : {}) }),
   };
 }
 
 /** What a copy's build reads off this computer: the collector and the Homebrew table where there is one. The same
  * readers wsp init takes, minus the ones that only a person's screens use. */
-export interface CopyReaders extends Pick<BuildContext, "home" | "platform" | "agentKeys"> {
+export interface CopyReaders extends Pick<BuildContext, "home" | "platform"> {
   collect(): Promise<Manifest>;
   brew?: () => Promise<BrewTable>;
   deployDaemon?: (machine: Machine) => Promise<void | string>;
@@ -126,7 +125,6 @@ export async function copyGoldenRecipe(image: SealedImage, o: CopyReaders): Prom
     // Nothing of the Keychain travels to a copy: what a sign-in left on the builder is in the vault already, and
     // reading the Keychain again would raise macOS's consent dialog for a build nobody is sitting at.
     secrets: new Map(),
-    agentKeys: o.agentKeys,
     ...(o.deployDaemon !== undefined ? { deployDaemon: o.deployDaemon } : {}),
   }).recipe;
 }

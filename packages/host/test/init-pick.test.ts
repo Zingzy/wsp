@@ -157,8 +157,10 @@ describe("the sign-ins screen", () => {
     expect(s.items.every(i => i.choices !== undefined && i.choices.length > 0)).toBe(true);
     // Copy where there is something here to copy, the two sign-in answers where the catalog has a flow (during the
     // build, or left to first use), the key where the tool reads one.
-    expect(words(s, "logins/claude")).toEqual(["copy", "machine", "later", "key", "skip"]);
-    expect(words(s, "logins/codex")).toEqual(["copy", "machine", "later", "key", "skip"]);
+    // Claude signs in with a token minted here, so its own word leads and no copy is offered; Codex signs in once
+    // on the computer that runs the workspaces, so neither is a copy or a sign-in during the build.
+    expect(words(s, "logins/claude")).toEqual(["token", "key", "skip"]);
+    expect(words(s, "logins/codex")).toEqual(["later", "key", "skip"]);
     // hermes stops on a menu only the person can work through, so the machine is no road for it: copy or skip.
     expect(words(s, "logins/hermes")).toEqual(["copy", "skip"]);
     expect(s.items.find(i => i.id === "logins/hermes")!.detail).toContain("asks questions only you can answer");
@@ -169,7 +171,7 @@ describe("the sign-ins screen", () => {
     // A row with a file here to copy starts on the copy; every browser-only row starts left to first use, since
     // running it during the build would wait on the person and the build waits on nobody.
     expect([...s.initial].sort()).toEqual([
-      ["logins/claude", "later"], ["logins/codex", "later"], ["logins/gh", "later"], ["logins/hermes", "copy"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
+      ["logins/claude", "token"], ["logins/codex", "later"], ["logins/gh", "later"], ["logins/hermes", "copy"], ["logins/hermes-keys", "copy"], ["logins/kube", "copy"], ["logins/op", "skip"],
     ]);
     // The words the row shows for those two answers, which are the protocol's and nobody else's.
     const gh = s.items.find(i => i.id === "logins/gh")!;
@@ -244,7 +246,7 @@ describe("the sign-ins screen", () => {
   it("a group header counts how its rows answered, in the choice order", () => {
     const s = signInItems(applyRecipe(withCatalogAgents(laptop), recipe), new Map(), "darwin", HOME_HERE);
     const agents = s.items.filter(i => i.group === AGENT_LOGINS);
-    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  0 during the build  2 when you need it  0 API key  0 skip");
+    expect(signInGroupLine(agents, { ticks: new Set(), answers: new Map(s.initial) })).toBe("2 copy  1 when you need it  0 API key  0 skip  1 token");
   });
 
   it("the disk estimate counts what the build takes before anyone answers", () => {
@@ -476,7 +478,7 @@ describe("the whole flow", () => {
     if (picked === "cancel") return;
     // Four keypresses, and every answer is the one each screen opened on.
     expect(picked.recipe.rows.filter(r => r.on).map(r => r.id)).toEqual(RECIPE.rows.filter(r => r.on).map(r => r.id));
-    expect([...picked.logins].sort()).toEqual([["logins/claude", "later"], ["logins/gh", "later"]]);
+    expect([...picked.logins].sort()).toEqual([["logins/claude", "token"], ["logins/gh", "later"]]);
     expect([...picked.wspTools]).toEqual([]);
   });
 
@@ -567,7 +569,7 @@ describe("the whole flow", () => {
     o.input.write(KEY.enter);
     await settle(20);
     const at = () => o.text().slice(o.text().lastIndexOf("◆  Sign-ins"));
-    expect(at()).toMatch(/▾ Agents\s+0 copy\s+0 during the build\s+1 when you need it\s+0 API key\s+0 skip\n┃\s+Claude Code login\s+Keychain: Claude Code-credentials\s+sign in when you first need it\n/);
+    expect(at()).toMatch(/▾ Agents\s+0 API key\s+0 skip\s+1 token\n┃\s+Claude Code login\s+Keychain: Claude Code-credentials\s+token from this computer\n/);
     expect(at()).toMatch(/▾ Developer CLIs\s+0 copy\s+0 during the build\s+1 when you need it\s+0 skip\n/);
     expect(at()).toContain("┗  ← → choose • enter next • esc back");
     expect(at()).not.toMatch(/[●○] all/);
@@ -581,17 +583,18 @@ describe("the whole flow", () => {
     expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+API key/);
     o.input.write(KEY.left);
     await settle();
-    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+sign in when you first need it/);
-    // Left again reaches the answer that opts the row into signing in while the build runs.
+    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+token from this computer/);
+    // Left again reaches the last word the row takes; a copy is not among them, since nothing of this login is
+    // ever on a machine to copy.
     o.input.write(KEY.left);
     await settle();
-    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+sign in during the build/);
+    expect(at()).toMatch(/Claude Code login\s+Keychain: Claude Code-credentials\s+skip/);
     o.input.write(KEY.enter);
     await settle(20);
     o.input.write(KEY.enter);
     const picked = await p;
     if (picked === "cancel") throw new Error("cancelled");
-    expect(picked.logins.get("logins/claude")).toBe("machine");
+    expect(picked.logins.get("logins/claude")).toBe("skip");
   });
 });
 
