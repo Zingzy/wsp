@@ -3324,6 +3324,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * one place, and the file follows it on every connect, so a project that landed before the daemon read that file
    * is browsable without a second import. Non-fatal: an update or a turn must not fail on it. */
   const writeDaemonRoots = async (entry: LiveWorkspace): Promise<void> => {
+    // A host that has closed writes nothing more on a machine: the boot fires this at every running workspace
+    // without waiting for it, and a write that landed after the close would be this process touching a computer
+    // it has let go of.
+    if (closed) return;
     // Every checkout the daemon serving this machine has to browse, not this workspace's alone: the file is that
     // daemon's one list and is written whole, and on the computer the host runs on one daemon serves every
     // workspace here, each in a copy of the project folder at a path of its own.
