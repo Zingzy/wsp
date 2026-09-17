@@ -851,6 +851,10 @@ impl Ops {
             self.serve_engine(&id).await?;
         }
         self.runtime.start(&id).await?;
+        // Ready is the boot command running, not the start returning: the start execs the workspace's first
+        // process and that process spawns the boot command a moment later, so a create that answered in between
+        // handed back a workspace whose cgroup held one pid, which a stop asked right then could not stop.
+        self.runtime.boot_child_up(&id, &record.init).await?;
         self.net.restore(std::slice::from_ref(&id)).await?;
         if record.engine {
             self.join_ports(&record).await;

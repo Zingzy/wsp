@@ -376,9 +376,23 @@ async fn a_pause_asks_the_processes_to_end_before_it_kills_them() {
     let mut w = World::open().await;
     let id = w.create(spec(json!({ "memMb": 1024 }))).await;
 
-    // First with nothing inside but the boot, which is the shape a workspace nobody has run anything in has and
-    // the one the box measured at the whole patience: the boot command took the signal only once it started with
-    // an empty mask, since this init blocks the forwarded set for itself and a child inherits that mask.
+    // What the create answered ready with, read before anything else runs: the workspace's first process and the
+    // one child it started. The create waits for that child, so a pause asked in the same breath as the create,
+    // which is what the next line does, meets a cgroup the stop can act on. On a box the child appeared about a
+    // sixth of a second after the first process, and a create that answered inside that window handed back a
+    // workspace whose every pause ran the whole patience.
+    let cgroup = Path::new(CGROUPS).join(&id);
+    let pids = wsp_runtime::freeze::pids_under(&cgroup).unwrap();
+    let init = init_pid(&id);
+    assert!(pids.contains(&init), "the workspace's own first process is not in its cgroup: {pids:?}");
+    assert!(
+        wsp_runtime::runtime::boot_child(&pids, init).is_some(),
+        "the create answered before the first process had started the boot command: {pids:?}"
+    );
+
+    // First with nothing inside but the boot, and with no pause between the create and this: the shape a
+    // workspace nobody has run anything in has, and the one the box measured at the whole patience twice, once
+    // because the boot command could not take a signal and once because the create answered before it existed.
     let started = Instant::now();
     w.ok("machine.pause", json!({ "machineId": id })).await;
     let bare = started.elapsed();
