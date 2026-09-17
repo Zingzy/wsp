@@ -3307,6 +3307,7 @@ const DAEMON_CONTENTS = [
   "c2f00944a79a850450b11b4610b93ac4894b7da39282755a9bfef55776a11dff",
   "c1fba7f2f77da32e75e8099b3ffd8bb36c0dbddfe88b0f018a2e59ac0e3b6905",
   "b9025a75a5b7f55164be73f60b2fd9f64510f74ad17d8fb24b18af168587899f",
+  "022f1786d1aca054624bb042955dbbde64ecb4c974e918bbe95cf53e5d29cf0b",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3428,7 +3429,11 @@ const DAEMON_CONTENTS = [
  * Version 45 lets a machine specification name shares: files the computer keeps outside every workspace under the
  * daemon's logins directory and binds into each workspace at a target path, so a login signed in once on the computer
  * is the same file in every workspace there and a refresh in one is the computer's refresh; a share whose source sits
- * outside that directory is refused at create. */
+ * outside that directory is refused at create.
+ * Version 46 makes a workspace on a computer you own out of the computer itself: its system directories under overlays
+ * with an upper per workspace, its home shared read-write with the daemon's own files hidden, the engine's data
+ * hidden, the project bound at its path; a box pulls no image and keeps no layer store, and the snapshot and template
+ * operations leave its wire. The root moves to /wsp so no upper sits under a lower the kernel would refuse. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary
