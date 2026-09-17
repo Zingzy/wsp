@@ -326,11 +326,11 @@ pub fn bind_into(source: &Path, target: &Path) -> Result<(), Error> {
     mount(Some(source), target, None::<&str>, MsFlags::MS_BIND | MsFlags::MS_REC, None::<&str>).map_err(nix_at(target))
 }
 
-/// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own: a
-/// path that walks up out of the rootfs resolves to a path on the box, and a bind mount is the one place a slip
-/// cannot be undone afterwards.
+/// Where a path inside a workspace lands under its rootfs on the box. A second wall after the wire's own, held
+/// to the wire's own rule rather than to a copy of it: a path that walks up out of the rootfs resolves to a
+/// path on the box, and a bind mount is the one place a slip cannot be undone afterwards.
 pub fn inside(rootfs: &Path, at: &str) -> Result<PathBuf, Error> {
-    if !at.starts_with('/') || at.split('/').any(|part| part == "." || part == "..") {
+    if !wsp_frames::is_plain_path(at) {
         let detail = format!("{at} is not a path inside a workspace");
         return Err(Error { path: rootfs.to_owned(), source: io::Error::new(io::ErrorKind::InvalidInput, detail) });
     }

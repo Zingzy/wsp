@@ -71,6 +71,20 @@ impl Copier for BtrfsSnapshot {
     }
 }
 
+/// Whether this checkout can be snapshotted into that directory, asked by taking one and taking it away again
+/// rather than by comparing any id: btrfs gives every subvolume a device and a filesystem id of its own, so the
+/// only honest question is the one the kernel answers. A subvolume on another filesystem answers EXDEV and
+/// anything that is not btrfs answers ENOTTY; every refusal falls through to the next road, since a copy that
+/// writes every byte is always there.
+pub fn snapshots_into(from: &Path, copies: &Path) -> bool {
+    let probe = crate::copy::probe_path(copies, "snapshot-probe");
+    if BtrfsSnapshot.copy(from, &probe).is_err() {
+        return false;
+    }
+    let _ = BtrfsSnapshot.remove(&probe);
+    true
+}
+
 /// Whether this directory is a btrfs subvolume of its own, which is the one thing a snapshot can be taken of:
 /// the kernel says btrfs for it and its inode is the number every subvolume root carries.
 pub fn is_subvolume(path: &Path) -> bool {

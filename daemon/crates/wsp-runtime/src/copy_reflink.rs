@@ -8,7 +8,7 @@
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use wsp_frames::CopyWord;
 
@@ -45,6 +45,43 @@ pub fn clone_file(source: &Path, target: &Path) -> io::Result<()> {
     unsafe { ficlone(write.as_raw_fd(), read.as_raw_fd()) }
         .map(|_| ())
         .map_err(|e| io::Error::new(io::Error::from(e).kind(), format!("{}: {e}", target.display())))
+}
+
+/// Whether the kernel clones a file of this checkout into that directory, asked with one of the checkout's own
+/// files rather than with a file written beside itself: a clone inside the copies directory proves what that
+/// volume can do and nothing about a clone from the checkout, which is the copy about to be made. FICLONE
+/// across two filesystems answers EXDEV, a filesystem that shares no blocks answers EOPNOTSUPP, and a checkout
+/// holding no file with bytes in it answers nothing at all, which reads as the plain copy that tree costs
+/// anyway.
+pub fn clones_into(from: &Path, copies: &Path) -> bool {
+    let Some(file) = first_file(from, &mut 0) else { return false };
+    let probe = crate::copy::probe_path(copies, "clone-of-checkout");
+    let took = clone_file(&file, &probe).is_ok();
+    let _ = std::fs::remove_file(&probe);
+    took
+}
+
+/// The first regular file with bytes in it, depth first, following no link. `looked` bounds the search, since a
+/// checkout whose first thousands of entries are empty directories is still a create somebody is waiting on.
+fn first_file(dir: &Path, looked: &mut u32) -> Option<PathBuf> {
+    const LOOK_AT_MOST: u32 = 4096;
+    let mut folders = Vec::new();
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        *looked += 1;
+        if *looked > LOOK_AT_MOST {
+            return None;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_file() && meta.len() > 0 {
+            return Some(entry.path());
+        }
+        // A directory entry's own metadata is the link itself where it is one, so a link to a folder is not
+        // walked into and a checkout that points at the whole disk costs nothing here.
+        if meta.is_dir() {
+            folders.push(entry.path());
+        }
+    }
+    folders.into_iter().find_map(|folder| first_file(&folder, looked))
 }
 
 #[cfg(test)]

@@ -617,13 +617,9 @@ impl Ops {
     /// Off the runtime thread: a plain copy of a package tree is minutes of a core, and nothing else this daemon
     /// serves may wait behind it.
     async fn make_copy(&self, id: &str, want: &WorkspaceCopy) -> Result<CopyMade, OpError> {
-        let at = Path::new(&want.at);
-        if !at.is_absolute() || at.parent().is_none() {
-            return Err(OpError::plain(format!(
-                "a project is mounted at an absolute path of its own inside the workspace, and {} is not one",
-                want.at
-            )));
-        }
+        // The path the project takes inside, read through the same wall the boot's bind is built with and
+        // before a byte is copied or anything is mounted: a refusal here costs nothing to take back.
+        bundle::inside(&self.layout.rootfs(id), &want.at)?;
         let (from, to, copies) = (PathBuf::from(&want.from), self.layout.copy_of(id), self.layout.copies());
         let started = std::time::Instant::now();
         let made = tokio::task::spawn_blocking(move || -> io::Result<CopyWord> {
