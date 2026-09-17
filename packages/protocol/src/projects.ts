@@ -5,6 +5,7 @@
 // command line, the runtime and the app all read them here, so no road can
 // record a project one way and read it back another.
 import { THIS_COMPUTER } from "./format.js";
+import { HERE_PLACE_ID } from "./index.js";
 import type { ProjectSource, ProjectView, WorkspaceKind, WorkspaceProject, WorkspaceView } from "./index.js";
 import { folderName, underProject } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -149,6 +150,13 @@ export function workspaceForFolder<W extends Pick<WorkspaceView, "id" | "project
  * one reading of the kind table both the create and the folder rule take. */
 export function worksInPlace(kind: WorkspaceKind): boolean {
   return kindWords(kind).projectSources.includes("folder");
+}
+
+/** The kind of workspace a computer makes: the computer the app runs on works a folder of the person's own in
+ * place, and every other computer takes a copy of its own image. The one place a computer's id is read for its
+ * kind, so no road anywhere compares that id itself. */
+export function kindForComputer(computer: string): WorkspaceKind {
+  return computer === HERE_PLACE_ID ? "local" : "cloud";
 }
 
 /** Why a thread opened with no workspace named, from a folder that is not inside a repo, opens nothing; `named` is
