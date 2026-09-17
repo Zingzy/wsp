@@ -17,8 +17,10 @@ const NO_SANDBOX = "danger-full-access";
 
 export interface CodexEnvOptions {
   base?: Readonly<Record<string, string | undefined>>;
-  /** Absolute path for CODEX_HOME, where the golden's sign-in put auth.json. */
+  /** Absolute path for CODEX_HOME, where the box's own login is mounted or a sign-in there wrote auth.json. */
   home: string;
+  /** The API key the vault holds for this agent; set on every turn's environment. */
+  apiKey?: string;
 }
 
 /** CODEX_HOME points codex at the home the sign-in wrote, since a guest exec carries no HOME to derive it from. */
@@ -27,7 +29,7 @@ export function buildEnv(options: CodexEnvOptions): Record<string, string> {
   if (!home.startsWith("/")) throw new Error(`home must be an absolute path, got "${options.home}"`);
   const clean: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.base ?? {})) if (value !== undefined) clean[key] = value;
-  return { ...clean, CODEX_HOME: home };
+  return { ...clean, CODEX_HOME: home, ...(options.apiKey === undefined ? {} : { OPENAI_API_KEY: options.apiKey }) };
 }
 
 export interface BuildCommandOptions {

@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, shellLine, shellQuote, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, CLAUDE_KEY_FILE, CLAUDE_SETTINGS_FILE, GUEST_HOME, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -413,7 +413,6 @@ interface KeychainItem {
 /** Where a Keychain item the recipe lists as `Keychain: <service>` lands on the
  * guest and how; on Linux the same tools keep the token in the file itself. */
 const KEYCHAIN: Record<string, KeychainItem> = {
-  "Claude Code-credentials": { dest: ".claude/.credentials.json", place: secret => secret },
   "gh:github.com": {
     dest: ".config/gh/hosts.yml",
     place: (secret, existing, account) => placeGhToken("github.com", secret, existing, account),
@@ -425,18 +424,6 @@ const KEYCHAIN: Record<string, KeychainItem> = {
     },
   },
 };
-
-/** The apiKeyHelper command a Claude Code settings file names, when the file parses and has one. */
-function apiKeyHelperOf(text: string | undefined): string | undefined {
-  if (text === undefined) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(text);
-    const helper = typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>)["apiKeyHelper"] : undefined;
-    return typeof helper === "string" && helper.trim() !== "" ? helper : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 /** The settings file with its apiKeyHelper set to the line given, or taken out with none; a file that is not
  * JSON or names no helper is returned as it is. Absent, a file is made for the helper alone. */
@@ -456,16 +443,18 @@ export function withApiKeyHelper(text: string | undefined, helper: string | unde
   return `${JSON.stringify(settings, null, 2)}\n`;
 }
 
-/** Where the key a settings file's helper prints lands on the guest, and how the command is read from the file. */
-const HELPERS: Record<string, { dest: string; command: (text: string | undefined) => string | undefined }> = {
-  [CLAUDE_SETTINGS_FILE]: { dest: `.claude/${CLAUDE_KEY_FILE}`, command: apiKeyHelperOf },
-};
-
 /** Where every login the pack copies lands on the guest, home-relative and before the pack's own rewrites: what the
- * catalog's rows have to hold between them, so a new Keychain or helper reader cannot land a login the image vault
- * never archives. */
+ * catalog's rows have to hold between them, so a new Keychain reader cannot land a login the image vault never
+ * archives. */
 export function copiedLoginDests(): string[] {
-  return [...Object.values(KEYCHAIN).map(k => k.dest), ...Object.values(HELPERS).map(h => h.dest)];
+  return Object.values(KEYCHAIN).map(k => k.dest);
+}
+
+/** Why a credential-shaped path does not travel for a tool whose login is a token minted here, said in the words of
+ * the row's own command; nothing for a tool that has no such row. */
+function tokenInstead(id: string): string | undefined {
+  const s = loginSignIn(id);
+  return s !== undefined && mintsToken(s) ? `${s.mint} on this computer holds this login as a token; nothing of it travels` : undefined;
 }
 
 export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOptions): FilesPlan {
@@ -493,7 +482,9 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
       if (keychainPath !== null) {
         const service = keychainPath[1]!.trim();
         const keychain = KEYCHAIN[service];
-        if (opts.platform !== "darwin") skip("a macOS Keychain item; sign in on the machine");
+        const token = tokenInstead(e.id);
+        if (token !== undefined) skip(token);
+        else if (opts.platform !== "darwin") skip("a macOS Keychain item; sign in on the machine");
         else if (keychain === undefined) skip("no Keychain reader for this login yet; sign in on the machine");
         else {
           const dest = rewrite(keychain.dest);
@@ -523,21 +514,10 @@ export function planFiles(entries: readonly RecipeEntry[], opts: PlanFilesOption
         }
         continue;
       }
-      const helperPath = /^helper:\s*(.+)$/i.exec(p);
-      if (helperPath !== null) {
-        const file = helperPath[1]!.trim();
-        const helper = HELPERS[file];
-        if (helper === undefined) {
-          skip("no helper reader for this login yet; sign in on the machine");
-          continue;
-        }
-        const command = helper.command(opts.read?.(join(opts.home, file.slice(2))));
-        if (command === undefined) {
-          skip(`no apiKeyHelper in ${file} any more; sign in on the machine`);
-          continue;
-        }
-        plan.secrets.push({ id: e.id, service: file, command, dest: rewrite(helper.dest), place: secret => `${secret}\n` });
-        brought++;
+      // No helper key travels any more: a configured apiKeyHelper outranks the token the vault hands every turn
+      // inside Claude Code, so a fork that kept one would bill the key instead (credential order, measured 2.1.257).
+      if (/^helper:\s*(.+)$/i.test(p)) {
+        skip(tokenInstead(e.id) ?? "no helper reader for this login yet; sign in on the machine");
         continue;
       }
       if (!p.startsWith("~/")) {

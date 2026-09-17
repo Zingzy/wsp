@@ -228,6 +228,10 @@ export interface HarnessAdapterContext {
    * for how it is signed in: it differs between the person's own computer and a machine, which the adapter cannot
    * know, so it is told the road from here rather than guessing one. */
   signInRefusal: string;
+  /** The tokens and API keys the vault holds, by variable. Its own field rather than part of `env`: the Claude
+   * adapter strips every inherited CLAUDE_CODE_* off the base environment as a nesting mark, so a token merged
+   * into the environment would be stripped and never reach the CLI. Empty where the host wired no vault. */
+  vault: Readonly<Record<string, string>>;
 }
 
 /** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
@@ -813,6 +817,9 @@ export interface RuntimeOptions {
   placeRelinkWaitMs?: number;
   store: Store;
   adapters: Record<string, HarnessAdapterFactory>;
+  /** The variables the vault hands a turn, read at each launch off the wsp home's .env, never copied: a token
+   * minted after the host started reaches the next turn. Absent, turns get none. */
+  vault?: () => Readonly<Record<string, string>>;
   /** Required for golden.prepare / golden.seal; the scripted golden.build carries its own. */
   goldenRecipe?: GoldenRecipe;
   /** How a copy of the image is planned off the record, every login set to skip. The runtime writes no recipe of
@@ -4828,6 +4835,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         home: id => kind.home(entry, id),
         env: { ...kind.env(entry, harness), ...turnEnv },
         signInRefusal: signInRefusalLine({ kind: entry.record.kind }),
+        vault: opts.vault?.() ?? {},
       }),
     };
   };

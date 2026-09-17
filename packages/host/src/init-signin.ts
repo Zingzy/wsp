@@ -11,14 +11,12 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { Writable } from "node:stream";
 import { styleText } from "node:util";
 import type { ManifestEntry } from "@wsp/collect";
-import { catalogEntry } from "@wsp/catalog";
 import { LOGIN_STATE_WORDS, type LoginChoice, type LoginState } from "@wsp/protocol";
 import type { GoldenBuilderView, Runtime } from "@wsp/runtime";
 import { S_BAR, log, note } from "@clack/prompts";
 import { connectDaemonSocket, type ConnectOptions, type DaemonSocket } from "./doctor.js";
 import { GUTTER, ellipsize, table, widthOf } from "./init-layout.js";
-import { agentName, loginEntryId } from "./init-recipe.js";
-import type { SecretAsk } from "./init-secrets.js";
+import { agentName } from "./init-recipe.js";
 import { readKey } from "./init-select.js";
 import { relayPty, type PtyLink, type RelayTerminal } from "./signin-relay.js";
 import { hasLogin, signInFor, type SignIn } from "./signin-table.js";
@@ -194,7 +192,7 @@ export function stateLine(o: LoginOutcome, width = Infinity): string {
  * the catalog's to check from the app and not this terminal's, and a login left to first use never runs here at all.
  * Nothing for the answers a stage signs in or another step takes. One entry per answer, so a fifth cannot be offered
  * before it says whether the build runs it. */
-const SETTLED_AT: Record<LoginChoice, LoginState | undefined> = { copy: "copied", later: "deferred", machine: undefined, key: undefined, skip: undefined };
+const SETTLED_AT: Record<LoginChoice, LoginState | undefined> = { copy: "copied", later: "deferred", machine: undefined, key: undefined, skip: undefined, token: undefined };
 
 /** Where this row lands with nothing run for it, or nothing when the stage is to sign it in. */
 const settledAt = (e: ManifestEntry): LoginState | undefined => (e.choice === undefined ? undefined : SETTLED_AT[e.choice]);
@@ -384,23 +382,6 @@ export function noteOutcomes(path: string, outcomes: Record<string, unknown>): {
   }
   writeFileSync(path, `${JSON.stringify({ ...existing, ...outcomes }, null, 2)}\n`);
   return { replaced };
-}
-
-/** The API keys the sign-ins screen chose instead of a login: the variable the tool reads there, and the row it
- * belongs to, for the secrets step to ask once the machine is up. */
-export interface KeyAsk extends SecretAsk {
-  /** The sign-in row's tool and label, for the row the job draws when the key is already held. */
-  tool: string;
-  label: string;
-}
-
-export function keyAsks(manifest: { entries: readonly ManifestEntry[] }, choices: ReadonlyMap<string, string>): KeyAsk[] {
-  return manifest.entries.flatMap((e): KeyAsk[] => {
-    if (e.rung !== "logins" || choices.get(e.id) !== "key") return [];
-    const s = signInFor(agentName(e));
-    const name = hasLogin(s) ? s.keyEnv : undefined;
-    return name === undefined ? [] : [{ name, from: `the key ${catalogEntry(loginEntryId(e))?.name ?? e.label} reads on the machine`, tool: agentName(e), label: e.label }];
-  });
 }
 
 /** The logins the stage owns, each carrying its answer: those to sign in on the machine, those left to first use

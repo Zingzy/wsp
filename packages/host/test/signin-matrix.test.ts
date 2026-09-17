@@ -123,7 +123,8 @@ const MATRIX: readonly Cell[] = [
   ...filesOnly("kube"),
   { tool: "kube", source: "none", laptop: {} },
 
-  { tool: "codex", source: "file", laptop: { files: { "~/.codex/auth.json": 900 } }, row: { paths: ["~/.codex/auth.json"], default: "skip", starts: "later" } },
+  // Codex's login lives on the computer that runs the workspaces, so its file is found here and offered nowhere.
+  { tool: "codex", source: "file", laptop: { files: { "~/.codex/auth.json": 900 } }, row: { paths: [], default: "skip", detail: "it signs in once on the computer that runs your workspaces; nothing of it travels", starts: "later" } },
   { tool: "codex", source: "rc-key", unreachable: "the key alone makes no row; it travels as a secret with the rc file, and what codex login status prints for it was not measured", laptop: { files: { "~/.zshrc": "export OPENAI_API_KEY=sk-oai-x\n" } } },
   ...filesOnly("codex", "rc-key"),
   { tool: "codex", source: "none", laptop: {} },
@@ -191,30 +192,31 @@ const MATRIX: readonly Cell[] = [
   ...(["keychain", "rc-key", "file", "helper"] as const).map((source): Unreachable => ({ tool: "op", source, unreachable: "op signs in through the 1Password desktop app; nothing of it is copied" })),
   { tool: "op", source: "none", laptop: { which: ["op"] }, row: { paths: [], default: "skip", starts: "later" } },
 
-  // Claude Code: the env key wins over the helper, the helper over the OAuth credentials (measured on 2.1.257).
+  // Claude Code: any of these says this computer is signed in, and none of them travels. The workspace reads the
+  // long-lived token instead, so every cell makes the same row, with nothing to copy.
   {
     tool: "claude",
     source: "keychain",
     laptop: { exec: { "security find-generic-password -s Claude Code-credentials": "keychain: ...\n" } },
-    row: { paths: ["Keychain: Claude Code-credentials"], default: "skip", detail: "Claude Code uses OAuth credentials", starts: "later" },
+    row: { paths: [], default: "skip", detail: "Claude Code signs in with the token claude setup-token prints on this computer; nothing of its login here travels", starts: "token" },
   },
   {
     tool: "claude",
     source: "file",
     laptop: { platform: "linux", files: { "~/.claude/.credentials.json": 800 } },
-    row: { paths: ["~/.claude/.credentials.json"], default: "skip", detail: "Claude Code uses OAuth credentials", starts: "later" },
+    row: { paths: [], default: "skip", detail: "Claude Code signs in with the token claude setup-token prints on this computer; nothing of its login here travels", starts: "token" },
   },
   {
     tool: "claude",
     source: "rc-key",
     laptop: { files: { "~/.zshrc": "export ANTHROPIC_API_KEY=sk-ant-x\n" } },
-    row: { paths: [], default: "bring", detail: "Claude Code uses the API key exported in ~/.zshrc (set on the machine in the secrets step if ~/.zshrc comes along)", starts: "copy" },
+    row: { paths: [], default: "skip", detail: "Claude Code signs in with the token claude setup-token prints on this computer; nothing of its login here travels", starts: "token" },
   },
   {
     tool: "claude",
     source: "helper",
     laptop: { files: { "~/.claude/settings.json": '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w"}' } },
-    row: { paths: ["Helper: ~/.claude/settings.json"], default: "bring", detail: "Claude Code uses the apiKeyHelper in ~/.claude/settings.json", starts: "copy" },
+    row: { paths: [], default: "skip", detail: "Claude Code signs in with the token claude setup-token prints on this computer; nothing of its login here travels", starts: "token" },
   },
   { tool: "claude", source: "none", laptop: {} },
 ];
@@ -247,11 +249,14 @@ describe("the sign-in matrix covers every tool and source", () => {
         expect(cell !== undefined && reachable(cell) && cell.row !== undefined, cellName(tool, source)).toBe(true);
       }
     }
-    // A cell with a row is a source the table lists, so the table and the collector cannot drift apart silently.
+    // A cell whose row carries a path to copy is a source the table lists, so the table and the collector cannot
+    // drift apart silently. A row with nothing to copy is a tool whose login never travels, and its table row
+    // lists no source at all.
     for (const c of MATRIX) {
       if (!reachable(c) || c.row === undefined || c.source === "none") continue;
       const s = SIGN_INS[c.tool]!;
-      expect(s.sources.includes(c.source), cellName(c.tool, c.source)).toBe(true);
+      const lists = (s.sources as readonly string[]).includes(c.source);
+      expect(c.row.paths.length > 0 ? lists : s.sources.length === 0, cellName(c.tool, c.source)).toBe(true);
     }
   });
 });

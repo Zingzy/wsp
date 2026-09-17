@@ -7,8 +7,8 @@
 // long as they like, as long as nobody pauses it (snapshot-fresh rule).
 
 import { createHash } from "node:crypto";
-import { ROAD_STEPS } from "@wsp/catalog";
-import { ALREADY_APPLIED, MCP_ID_PREFIX, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
+import { NEVER_IN_IMAGE, ROAD_STEPS } from "@wsp/catalog";
+import { ALREADY_APPLIED, MCP_ID_PREFIX, credentialOnBuilderLine, SAVING_IMAGE_LINE, SNAPSHOT_GONE_REASON, fmtBytes, goldenHead, goldenImage, machineLeftLine, snapshotAttemptLine, snapshotFailedLine, snapshotProgressLine, snapshotStageLine, templateFailedLine, templateStatusLine, templateWaitedLine, pinsReadLine, type GoldenBaseTool, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenRetired, type GoldenStage, type GoldenStep, type GoldenVersion, type BuilderReading, type ProviderAnswer, type RecipeDigest, type ToolPin } from "@wsp/protocol";
 import { nameOf, rungOf } from "./golden-diff.js";
 import { AGENT_INSTALLERS, NODE_PATH_LINE, TOOLS_PATH, type AgentInstall, type LoginShell, type NodeInstall, type ShellInstall, type SkippedPath, type ToolInstall } from "./golden-import.js";
 import { PRELUDE } from "./dotfiles-presets.js";
@@ -22,7 +22,7 @@ import { isMissing, NotFirstLifeError } from "./errors.js";
 import { BUILDER_LABEL, CREATED_AT_LABEL, SMOKE_LABEL } from "./labels.js";
 import { goldenName } from "./snapshot-names.js";
 import { recipeOwnedFiles } from "./recipe-owned.js";
-import { exportImageVault, type ImageVault } from "./image-vault.js";
+import { exportImageVault, presentPaths, type ImageVault } from "./image-vault.js";
 import { importInto } from "./vault.js";
 
 export { goldenHead, type GoldenLeftBehind, type GoldenLogin, type GoldenManifest, type GoldenMissingTool, type GoldenStage, type GoldenVersion };
@@ -71,6 +71,16 @@ export class SnapshotFailedError extends Error {
   ) {
     super(snapshotFailedLine(attempts, answer, builderState, readError));
     this.name = "SnapshotFailedError";
+  }
+}
+
+/** The builder holds a file a sign-in leaves behind, read off it before the snapshot. Typed as a failure that
+ * leaves the builder, the way a refused snapshot does: nothing on it was touched. */
+export class CredentialOnBuilderError extends Error {
+  readonly kind = "credentialOnBuilder" as const;
+  constructor(readonly paths: readonly string[]) {
+    super(credentialOnBuilderLine(paths));
+    this.name = "CredentialOnBuilderError";
   }
 }
 
@@ -867,6 +877,11 @@ export async function sealGolden(builder: Builder, opts: SealGoldenOptions): Pro
   const retryMs = opts.snapshotRetryMs ?? SNAPSHOT_RETRY_MS;
   // Read before the snapshot is asked for, off the disk the snapshot takes, and before the try: a builder whose
   // files cannot be read is left as the person set it up, the way a refused snapshot leaves it.
+  // A sign-in never sits in an image: a credential file left on the builder would ride into every fork of it, and
+  // inside Claude Code a helper key file outranks the token the vault hands each turn. Read before anything else,
+  // so a builder that holds one is left exactly as the person set it up.
+  const held = await presentPaths(builder.machine, NEVER_IN_IMAGE);
+  if (held.length > 0) throw new CredentialOnBuilderError(held);
   const owned = builder.import?.recipe === undefined ? undefined : await recipeOwnedFiles(builder.machine, builder.import.recipe);
   // The person's logins as the sign-in and secrets stages left them, read off the same disk the snapshot takes and
   // under the same rule as the owned files: a builder whose vault cannot be read is left as the person set it up.

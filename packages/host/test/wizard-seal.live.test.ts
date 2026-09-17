@@ -45,7 +45,7 @@ describe.runIf(LIVE)("wizard seal with a live daemon link (live)", () => {
       backend,
       store: memoryStore(),
       adapters: {},
-      goldenRecipe: { ...goldenRecipe({ anthropic: env.ANTHROPIC_API_KEY }), labels: LABEL },
+      goldenRecipe: { ...goldenRecipe(), labels: LABEL },
     });
     const stages: string[] = [];
     rt.events.on("golden.stage", e => {

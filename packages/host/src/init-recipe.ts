@@ -6,7 +6,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { LOGIN_CHOICES, type Manifest, type ManifestEntry, type Rung } from "@wsp/collect";
-import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths } from "@wsp/catalog";
+import { CATALOG_AGENTS, catalogEntry, catalogIdOfRow, catalogToolFor, guestEnv, hasLogin, loginIdOf, loginRow, loginStatePaths, mintsToken } from "@wsp/catalog";
 import { CATALOG_PREFIX, agentOwning, diffRecipes, isMcpRow, isTap, neverCopied, packageOf, parseMcpId, rowRoad, type BrewTable, type RecipeDigest } from "@wsp/engine";
 import { Recipe, SIGN_IN_ANSWERS, type LoginChoice, type RecipeRow } from "@wsp/protocol";
 import type { GoldenImport, GoldenRecipe, Machine } from "@wsp/runtime";
@@ -137,6 +137,10 @@ export function initialChoice(e: ManifestEntry): LoginChoice {
   // A credential-shaped row copies only on a saved copy answer; a tick alone, or an answer it never offered, is skip.
   if (e.consent === true) return e.choice === "copy" ? "copy" : "skip";
   if (e.choice !== undefined) return e.choice;
+  // A tool that mints its token on this computer has one road and it is not a machine's, so an unanswered row of
+  // its own opens there rather than on a sign-in nobody would ever run.
+  const signIn = loginRow(agentName(e))?.signIn;
+  if (signIn !== undefined && mintsToken(signIn)) return "token";
   if (!isTickable(e)) return WITHOUT_A_COPY;
   if (e.bring !== undefined) return e.bring ? "copy" : WITHOUT_A_COPY;
   return e.default === "bring" ? "copy" : WITHOUT_A_COPY;
@@ -334,19 +338,18 @@ export function recipeChanges(from: RecipeDigest, to: RecipeDigest, manifest: Ma
  * carries every ticked agent with its own installer and version check, and
  * the builder's seal smokes the ones that installed. Nothing ticked means a
  * bare machine that still has to fork and boot to seal. The envs are every
- * guest's plus what each ticked agent's entry asks for: its state home
- * variable, and a loaded key under the variable its sign-in reads, out of the keys given by variable. */
+ * guest's plus the state home variable each ticked agent's entry asks for. No
+ * key and no token is among them: a sign-in never sits in an image, and the
+ * vault sets both in the environment of each turn instead. */
 export function goldenRecipeFor(
   bring: readonly ManifestEntry[],
-  loaded: Readonly<Record<string, string>>,
   hooks: { deployDaemon?: (machine: Machine) => Promise<void | string>; import?: GoldenImport; source?: Recipe } = {},
 ): GoldenRecipe {
   const envs: Record<string, string> = { ...GUEST_ENVS };
   for (const e of bring) {
     const agent = e.rung === "agents" ? catalogEntry(agentName(e)) : undefined;
     if (agent?.kind !== "agent") continue;
-    const key = hasLogin(agent.signIn) ? agent.signIn.keyEnv : undefined;
-    Object.assign(envs, guestEnv(agent), key !== undefined && loaded[key] !== undefined ? { [key]: loaded[key] } : {});
+    Object.assign(envs, guestEnv(agent));
   }
   return {
     setup: "true",

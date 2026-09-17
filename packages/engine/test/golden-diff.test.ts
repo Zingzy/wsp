@@ -291,15 +291,17 @@ describe("what the build line counts", () => {
   });
 });
 
-describe("a login answered with an API key", () => {
+describe("a login answered with an API key or a token", () => {
   const keyed = (from: LoginChoice, to: LoginChoice) => diffRecipes(snap([row("logins", "logins/claude", { choice: from })]), snap([row("logins", "logins/claude", { choice: to })]));
 
   it("is named for what it is, never as a login taken off the machine", () => {
-    expect(describeDiff(keyed("copy", "key"))).toEqual(["claude: the API key is set when the machine is created, so it would not be on an updated one; pick the rebuild for it"]);
+    expect(describeDiff(keyed("copy", "key"))).toEqual(["claude: the API key is held on this computer and set on every turn, so nothing of it lands on the machine"]);
+    expect(describeDiff(keyed("copy", "token"))).toEqual(["claude: the token is held on this computer and set on every turn, so nothing of it lands on the machine"]);
   });
 
-  it("takes the rebuild road: a key reaches a machine at create time, so an update would not carry it", () => {
-    expect(isSmallDelta(keyed("copy", "key"), () => 0)).toBe(false);
+  it("takes no rebuild: the vault hands both to a turn at launch, so a machine already running carries them", () => {
+    expect(isSmallDelta(keyed("copy", "key"), () => 0)).toBe(true);
+    expect(isSmallDelta(keyed("copy", "token"), () => 0)).toBe(true);
     expect(isSmallDelta(keyed("copy", "machine"), () => 0)).toBe(false);
     // The answers an update can carry stay small.
     expect(isSmallDelta(keyed("machine", "copy"), () => 0)).toBe(true);

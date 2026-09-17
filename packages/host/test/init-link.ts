@@ -5,7 +5,9 @@
 import { fakePtyLink, type FakePtyLink } from "./fake-pty-link.js";
 
 export const DEVICE_URL = "https://github.com/login/device";
-export const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?code=true&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback";
+/** The page a callback login prints when its own browser did not open: it returns somewhere that is not the
+ * machine, so the flow hands a code back. Gemini CLI is the agent these tests sign in on a machine. */
+export const GEMINI_URL = "https://accounts.google.com/o/oauth2/auth?response_type=code&redirect_uri=https%3A%2F%2Fsdk.cloud.google.com%2Fauthcode.html";
 
 /** Ptys on the fake builder: a login prints its page's URL and exits (or waits for Ctrl-C, or for a code typed into
  * it, when held). */
@@ -29,7 +31,7 @@ export function scriptedLink(state: { signedIn: boolean; hold: boolean; missing:
       link.exit(pty, 0);
       return;
     }
-    if (line.includes("exec claude")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${CLAUDE_URL}\x1b\\${CLAUDE_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
+    if (line.includes("exec gemini")) link.data(pty, `Opening browser to sign in...\r\nIf the browser didn't open, visit: \x1b]8;;${GEMINI_URL}\x1b\\${GEMINI_URL}\x1b]8;;\x1b\\\r\nPaste code here if prompted > `);
     else link.data(pty, `Press Enter to open ${DEVICE_URL} in your browser...\r\n`);
     if (!state.hold) link.exit(pty, state.signedIn ? 0 : 1);
   };

@@ -32,7 +32,7 @@ describe.runIf(LIVE)("golden on a sandbox builder (live)", () => {
       backend,
       store: memoryStore(),
       adapters: {},
-      goldenRecipe: { ...goldenRecipe({ anthropic: env.ANTHROPIC_API_KEY }), labels: LABEL },
+      goldenRecipe: { ...goldenRecipe(), labels: LABEL },
     });
     rt.events.on("golden.stage", e => {
       if (e.type === "golden.stage") stages.push({ stage: e.stage, at: Date.now() - t0, ...(e.detail !== undefined ? { detail: e.detail } : {}) });

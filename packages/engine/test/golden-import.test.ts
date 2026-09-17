@@ -20,6 +20,7 @@ import {
   agentInstallsFor,
   agentOwning,
   brewfileFor,
+  copiedLoginDests,
   dropGhAccount,
   ghAccounts,
   HOMEBREW,
@@ -247,24 +248,34 @@ describe("planFiles: which laptop files travel and where they land", () => {
   });
 
   it("a Keychain item becomes a secret to read at pack time on macOS, and a skip note elsewhere", () => {
-    const rows = [
-      row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "copy" }),
-      row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" }),
-    ];
-    const mac = plan(rows, { rewrites: [[".claude/", ".claude-cfg/"]] });
-    expect(mac.secrets.map(s => [s.id, s.service, s.dest])).toEqual([
-      ["logins/claude", "Claude Code-credentials", ".claude-cfg/.credentials.json"],
-      ["logins/gh", "gh:github.com", ".config/gh/hosts.yml"],
-    ]);
+    const rows = [row({ rung: "logins", id: "logins/gh", paths: ["~/.config/gh/hosts.yml", "Keychain: gh:github.com"], choice: "copy" })];
+    const mac = plan(rows);
+    expect(mac.secrets.map(s => [s.id, s.service, s.dest])).toEqual([["logins/gh", "gh:github.com", ".config/gh/hosts.yml"]]);
     expect(mac.files.map(f => f.dest)).toEqual([".config/gh/hosts.yml"]);
-    expect(mac.secrets[0]!.place("{\"claudeAiOauth\":{}}", undefined)).toBe("{\"claudeAiOauth\":{}}");
 
     const linux = plan(rows, { platform: "linux" });
     expect(linux.secrets).toEqual([]);
-    expect(linux.skipped).toEqual([
-      { id: "logins/claude", path: "Keychain: Claude Code-credentials", note: "a macOS Keychain item; sign in on the machine" },
-      { id: "logins/gh", path: "Keychain: gh:github.com", note: "a macOS Keychain item; sign in on the machine" },
-    ]);
+    expect(linux.skipped).toEqual([{ id: "logins/gh", path: "Keychain: gh:github.com", note: "a macOS Keychain item; sign in on the machine" }]);
+  });
+
+  it("the Claude credential never travels on either platform: its row's token is minted on this computer and nothing of it is copied", () => {
+    const note = "claude setup-token on this computer holds this login as a token; nothing of it travels";
+    const claude = row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], choice: "copy" });
+    const settings = '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w", "model": "opus"}';
+    for (const platform of ["darwin", "linux"] as const) {
+      const p = planFiles([claude], { home: HOME, stat, platform, read: () => settings, rewrites: [[".claude/", ".claude-cfg/"]] });
+      expect(p.secrets).toEqual([]);
+      expect(p.files).toEqual([]);
+      expect(p.skipped).toEqual([
+        { id: "logins/claude", path: "Keychain: Claude Code-credentials", note },
+        { id: "logins/claude", path: "Helper: ~/.claude/settings.json", note },
+      ]);
+    }
+  });
+
+  it("nothing the pack copies lands a Claude Code login: the dests it carries are the ones the image vault archives", () => {
+    expect(copiedLoginDests().some(d => d.startsWith(".claude"))).toBe(false);
+    expect(copiedLoginDests()).toEqual([".config/gh/hosts.yml"]);
   });
 
   it("a Keychain read is planned only for a Keychain: path the row carries; a gh row with hosts.yml alone reads nothing", () => {
@@ -286,23 +297,10 @@ describe("planFiles: which laptop files travel and where they land", () => {
     expect(p.skipped).toEqual([{ id: "logins/glab", path: "Keychain: glab:gitlab.com", note: "no Keychain reader for this login yet; sign in on the machine" }]);
   });
 
-  it("a Helper: path plans the key the settings file's apiKeyHelper prints as a secret to run at pack time, on either platform, with a note when the file names no helper", () => {
-    const settings = '{"apiKeyHelper": "security find-generic-password -s anthropic-api-key -w", "model": "opus"}';
-    const claude = row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials", "Helper: ~/.claude/settings.json"], choice: "copy" });
-    for (const platform of ["darwin", "linux"] as const) {
-      const p = planFiles([claude], { home: HOME, stat, platform, read: abs => (abs === `${HOME}/.claude/settings.json` ? settings : undefined), rewrites: [[".claude/", ".claude-cfg/"]] });
-      const helper = p.secrets.find(s => s.command !== undefined)!;
-      expect(helper).toMatchObject({ id: "logins/claude", service: "~/.claude/settings.json", command: "security find-generic-password -s anthropic-api-key -w", dest: ".claude-cfg/anthropic-api-key" });
-      expect(helper.place("sk-ant-x", undefined)).toBe("sk-ant-x\n");
-      expect(secretPath(helper)).toBe("Helper: ~/.claude/settings.json");
-      expect(secretKey(helper)).toBe("~/.claude/settings.json");
-      expect(p.rungs).toEqual({ logins: platform === "darwin" ? 2 : 1 });
-    }
+  it("a Helper: path plans nothing: the key an apiKeyHelper prints outranks the vault's token inside the tool, so no helper key travels", () => {
     expect(secretPath({ service: "gh:github.com", account: "Zingzy" })).toBe("Keychain: gh:github.com (Zingzy)");
-    const none = planFiles([row({ rung: "logins", id: "logins/claude", paths: ["Helper: ~/.claude/settings.json"], choice: "copy" })], { home: HOME, stat, platform: "darwin", read: () => '{"model": "opus"}' });
-    expect(none.secrets).toEqual([]);
-    expect(none.skipped).toEqual([{ id: "logins/claude", path: "Helper: ~/.claude/settings.json", note: "no apiKeyHelper in ~/.claude/settings.json any more; sign in on the machine" }]);
     const unknown = planFiles([row({ rung: "logins", id: "logins/x", paths: ["Helper: ~/.x/settings.json"], choice: "copy" })], { home: HOME, stat, platform: "darwin", read: () => "{}" });
+    expect(unknown.secrets).toEqual([]);
     expect(unknown.skipped).toEqual([{ id: "logins/x", path: "Helper: ~/.x/settings.json", note: "no helper reader for this login yet; sign in on the machine" }]);
   });
 
@@ -316,7 +314,7 @@ describe("planFiles: which laptop files travel and where they land", () => {
   });
 
   it("a Keychain login not chosen as copy is neither read nor noted", () => {
-    const p = plan([row({ rung: "logins", id: "logins/claude", paths: ["Keychain: Claude Code-credentials"], choice: "machine" })]);
+    const p = plan([row({ rung: "logins", id: "logins/gh", paths: ["Keychain: gh:github.com"], choice: "machine" })]);
     expect(p.secrets).toEqual([]);
     expect(p.skipped).toEqual([]);
   });

@@ -23,7 +23,7 @@ async function findKeys(sources?: KeySources): Promise<LoadedKeys> {
 /** The runtime this window serves over: the provider picked out of the environment the keys were read through, so
  * a key in the wsp home's .env wires the same module here as it does at a terminal. */
 const runtimeOf = (opts: SetupOptions, loaded: LoadedKeys, statePath: string): Runtime =>
-  (opts.runtimeFor ?? ((keys, path, env) => makeRuntime(keys, path, goldenRecipe(keys), env)))(loaded.keys, statePath, loaded.env);
+  (opts.runtimeFor ?? ((keys, path, env) => makeRuntime(keys, path, goldenRecipe(), env)))(loaded.keys, statePath, loaded.env);
 
 /** Ready means the state holds something to show: a golden with a head version to fork from, or any workspace
  * record, this computer's or a machine over ssh. That is the test wsp up applies, so a computer with no provider
