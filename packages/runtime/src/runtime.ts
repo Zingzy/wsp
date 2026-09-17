@@ -104,6 +104,7 @@ import {
   LOCAL_MACHINE_ID,
   TOOLS_PATH,
 } from "@wsp/engine";
+import type { DaemonFrame, DaemonResponse } from "@wsp/protocol";
 import type {
   AdapterAttachOptions,
   AdapterEvent,
@@ -195,8 +196,9 @@ import type {
   WorkspaceStatus,
   WorkspaceView,
 } from "@wsp/protocol";
-import { agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
+import { BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
 import { DAEMON_TOKEN_PATH, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, projectInUseRefusal, projectNameOf, projectPathOn, sameSourceRefusal, sourceKind, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeDaemonPaths, placeDialBackLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { openDaemonChannel } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
 import { isNoProvider, isPlaceAbsent, projectStateKey, type Copier } from "@wsp/engine";
@@ -435,6 +437,10 @@ export interface CreateWorkspaceOptions extends WorkspaceSpec {
   agents?: Partial<WorkspaceAgents>;
   /** Auto-nap window; undefined takes the runtime default, null turns auto-nap off. */
   idleWindowMs?: number | null;
+  /** The workspace this one is forked out of, by id: a child of it, holding the same project and starting on the
+   * branch that workspace is on right now. A create a thread asked for is a child of the thread's own workspace
+   * whether or not this names one. */
+  parent?: string;
 }
 
 /** A folder's archive as the host packs it: the bytes, what went in, the secret-shaped paths left out, and the ones
@@ -604,6 +610,8 @@ interface WorkspaceRecord extends Omit<WorkspaceView, "project"> {
    * what says a second workspace would stand on a machine one already stands on. A kind whose id is the machine
    * (a fork at the provider, this computer) carries none and is compared by that id. */
   machineIdentity?: string;
+  /** The workspace this one was forked out of, by id; absent on every workspace that is not a fork of another. */
+  parentWorkspaceId?: string;
   /** With phase gone: the provider's words when the machine was found missing; cleared when a fresh machine lands. */
   gone?: string;
   /** That this host put a daemon on the machine, and which one. Only a kind whose machine wsp did not make carries
@@ -870,12 +878,21 @@ export interface RuntimeOptions {
   agents?: { reach?: HostReach; wspMcp?: McpServerSpec };
   /** The token every daemon this runtime reaches is given; minted fresh per process when absent (tests pin one). */
   daemonToken?: string;
+  /** How this host opens a channel to a workspace's daemon for the frames the runtime sends itself, which today is
+   * the bring back's two; the real dial unless a test hands in its own. */
+  daemonChannel?: (o: { url: string; token: string }) => Promise<RuntimeDaemonChannel>;
   /** How long a daemon gets to announce itself when an update reads the version either side of its deploy; the
    * hello lands on connect, so a daemon that is there answers in one round trip (tests shrink it). */
   daemonHelloTimeoutMs?: number;
   /** The environment labs is read from; this process's when unset, which the entry points mean and a test does not:
    * a test says the environment it means here rather than inheriting the shell that started it. */
   env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** One open channel to a workspace's daemon, as the runtime drives it: a frame in, its reply out, and a close. */
+export interface RuntimeDaemonChannel {
+  send(frame: DaemonFrame): Promise<DaemonResponse>;
+  close(): void;
 }
 
 /** Where this host answers, as the host itself knows it: the address the person named with --advertise, which
@@ -911,6 +928,10 @@ const WAKE_LATE_READ_MS = 3 * 60_000;
 const DAEMON_HELLO_TIMEOUT_MS = 5_000;
 /** The probe's fetch bound; the frame keeps loading meanwhile, so silence costs nothing but the sentence. */
 const PORT_PROBE_TIMEOUT_MS = 10_000;
+
+/** How long one read of a checkout's current branch may take. A git call on a checkout that is already there, so
+ * the bound is for a machine that has gone quiet rather than for the work. */
+const BRANCH_READ_MS = 30_000;
 
 /** How long a project's clone inside a fresh copy may take before the create gives up on it. A repo of the size
  * wsp is dogfooded on lands in seconds; the budget is for a cold cache on a small machine. */
@@ -1226,6 +1247,11 @@ export interface Runtime {
      * carries that folder back as `ranIn`, so a client says where the command ran rather than restating the rule.
      * Rejects when the workspace or that harness's adapter is unknown; a launch that fails ends the stream. */
     execStream(id: string, argv: ReadonlyArray<string>, cwd?: string, origin?: Caller): Promise<RunningExec>;
+    /** Pushes the branch this workspace's copy is on and opens or finds its pull request against the base. The
+     * base is the parent workspace's current branch for a child and the project's own base otherwise, and the
+     * base branch itself is refused: work leaves a workspace as a branch of its own. A machine with no signed-in
+     * command line for the git host still pushes, and says why the pull request waits as the result's note. */
+    bringBack(o: { workspaceId: string; title?: string; body?: string }, origin?: Caller): Promise<BringBackResult>;
     /** How a browser dials this workspace's daemon; throws on backends without preview URLs. */
     daemonReach(id: string, origin?: Caller): Promise<DaemonReachView>;
     /** This workspace's own utilisation, pushed to the listener every poll tick until the returned detach runs.
@@ -1792,6 +1818,22 @@ function forwardedCalls(backend: MachineBackend): Partial<MachineBackend> {
   return out as Partial<MachineBackend>;
 }
 
+/** What a daemon refused a frame with, the code beside the sentence: a caller branches on the reason rather than
+ * on the words, which is what the code is for. */
+class DaemonRefusal extends Error {
+  constructor(
+    readonly code: string | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = "DaemonRefusal";
+  }
+}
+
+/** Whether a refusal is the one a bring back carries as a note: the push landed and the machine has no signed-in
+ * command line for the git host, so there is a branch on the remote and no pull request. */
+const isNoHostCli = (e: unknown): boolean => e instanceof DaemonRefusal && e.code === "no-host-cli";
+
 export function createRuntime(opts: RuntimeOptions): Runtime {
   const { backend, store, adapters } = opts;
   const local = opts.local;
@@ -2092,7 +2134,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // A workspace here is a folder on this computer: the project's own worked in place, or the copy of it
             // made for this piece of work. Either way that folder is the word its view carries and where a thread
             // on it starts; the same reading threadFolder takes.
-            folder: record => record.copy?.path ?? projectHeld(record.project).path,
+            folder: record => checkoutOf(record),
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
             // The person's own login, plus the port this workspace's apps bind: every copy here shares one
@@ -2208,6 +2250,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     return found;
   };
   const backendFor = (record: WorkspaceRecord): MachineBackend => moduleOf(record.kind).backend(record);
+  const openChannel = opts.daemonChannel ?? (o => openDaemonChannel({ ...o, onEvent: () => {} }));
   /** The backend a kind's machines live on where no record is in hand yet: the create that is about to write one,
    * and the roads that ask what this host can do at all. The same reading a record gets, off the two facts a record
    * would carry. */
@@ -2297,6 +2340,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * workspace answers nothing relayed. Today no machine has a road into the host, so nothing relays yet; the rule
    * holds when one appears. */
   const drives = (record: { kind: WorkspaceKind; machineId?: string }, caller: Caller | undefined): boolean => roadOf(caller) !== "relayed" || moduleOf(record.kind).relayed(record.machineId);
+  /** What the two rules a request is read against need of a workspace: what a record holds, and what a create is
+   * checked with before there is a record. */
+  type WorkspaceLike = { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string; project?: string };
   /** Which workspaces a thread's own token reaches: the one its turn runs on, and the ones its root thread forked.
    * A thread never sees or drives a workspace outside its own tree, whatever the verb, so this sits beside the
    * kind rule rather than in any one of them. A caller that is no thread reaches everything the kind rule allows. */
@@ -2304,16 +2350,25 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // A record with no id is a workspace that does not exist yet, the shape a create is checked against: what a
     // thread may make is the guard's question, not this one's.
     scope === undefined || record.id === undefined || record.id === scope.workspaceId || record.rootThreadId === scope.rootThreadId;
+  /** Which project a thread works on: the one its own workspace holds. A thread whose workspace this host no longer
+   * holds works on none, and the project rule then has nothing to compare and leaves the tree rule to refuse. */
+  const projectOfScope = (scope: ThreadScope): string | undefined => live.get(scope.workspaceId)?.record.project;
   /** The rule as a sentence: what this request is refused with for that record, or nothing when it may drive it.
    * A record this host does not hold, which a port forward's target may be since the host forwards a builder's
-   * ports too, is nobody's to refuse for. */
-  const refusalFor = (record: { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string } | undefined, caller: Caller | undefined): string | undefined => {
+   * ports too, is nobody's to refuse for. The project rule is read before the tree rule and answers first: a
+   * workspace of another project is outside the tree as well, and the project is why. */
+  const refusalFor = (record: WorkspaceLike | undefined, caller: Caller | undefined): string | undefined => {
     if (record === undefined) return undefined;
     if (!drives(record, caller)) return relayedRefusal(record.name);
     const scope = scopeOf(caller);
-    return scope !== undefined && !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
+    if (scope === undefined) return undefined;
+    const mine = projectOfScope(scope);
+    if (mine !== undefined && record.project !== undefined && record.project !== mine) {
+      return spawnProjectRefusal(scope.threadId, projectHeld(mine).name, projectHeld(record.project).name);
+    }
+    return !inTree(record, scope) ? spawnReachRefusal(scope.threadId, record.name) : undefined;
   };
-  const refuseRelayed = (record: { id?: string; kind: WorkspaceKind; name: string; machineId?: string; rootThreadId?: string } | undefined, caller: Caller | undefined): void => {
+  const refuseRelayed = (record: WorkspaceLike | undefined, caller: Caller | undefined): void => {
     const line = refusalFor(record, caller);
     if (line !== undefined) throw new Error(line);
   };
@@ -2377,7 +2432,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Read at the act and not at the mint: a person who turns the switch off while a turn runs has turned it off.
     if (policy?.spawn !== true) throw new Error(agentsOffRefusal(own?.name ?? scope.workspaceId, act));
     if (!SPAWN_ACTS_ALLOWED.includes(act)) throw new Error(spawnActRefusal(scope.threadId, act));
-    if (act === "send") return free;
+    // The depth cap counts what a thread starts under itself; a send and a bring back start nothing, so a thread
+    // at the cap still talks to its tree and still gets its work out.
+    if (act === "send" || act === "bring_back") return free;
     const depth = depthUnderRoot(scope.threadId);
     if (depth >= policy.maxDepth) throw new Error(spawnDepthRefusal(scope.threadId, depth, policy.maxDepth));
     if (act !== "fork") return free;
@@ -2766,6 +2823,38 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
    * stored a second time. */
   const refOf = (p: ProjectView): ProjectRef => ({ id: p.id, name: p.name, path: p.path, computer: p.computer });
 
+  /** Where a workspace's checkout of its project sits on its machine: the copy made for this piece of work, else
+   * the project's own path, which is the folder worked in place on this computer and the clone inside a fork. */
+  const checkoutOf = (r: WorkspaceRecord): string => r.copy?.path ?? projectHeld(r.project).path;
+  /** One dial of a workspace's own daemon for the frames this host sends itself, closed however the work ends: the
+   * road the app's panes take for git.status, taken here for the two a bring back is made of. A refusal comes back
+   * with the code the daemon put on it, so a caller reads the reason rather than the sentence. */
+  const withDaemon = async <T>(entry: LiveWorkspace, work: (ask: (frame: DaemonFrame) => Promise<Record<string, unknown>>) => Promise<T>): Promise<T> => {
+    const reach = await moduleOf(entry.record.kind).daemonRoad(entry);
+    if (reach.daemonToken === undefined) throw new Error(`${entry.record.name} has no daemon answering yet`);
+    const channel = await openChannel({ url: reach.url, token: reach.daemonToken });
+    try {
+      return await work(async frame => {
+        const reply = (await channel.send(frame)) as Record<string, unknown>;
+        if (reply["ok"] === true) return reply;
+        throw new DaemonRefusal(typeof reply["code"] === "string" ? reply["code"] : undefined, String(reply["error"] ?? `${frame.op} was refused`));
+      });
+    } finally {
+      channel.close();
+    }
+  };
+
+  /** The branch a workspace's checkout is on right now, read off the machine itself rather than off the record: a
+   * person or an agent switches branches inside a workspace and nothing here is told. Nothing where the machine
+   * would not answer or is on no branch at all, which leaves the caller its own default. */
+  const branchOn = async (entry: LiveWorkspace): Promise<string | undefined> => {
+    const read = await entry.machine
+      .exec(`git -C ${shellQuote(checkoutOf(entry.record))} rev-parse --abbrev-ref HEAD`, { timeoutMs: BRANCH_READ_MS })
+      .catch(() => undefined);
+    const branch = read?.exitCode === 0 ? read.stdout.trim() : "";
+    return branch === "" || branch === "HEAD" ? undefined : branch;
+  };
+
   const view = (r: WorkspaceRecord): WorkspaceView => ({
     ...((): { folder?: string } => {
       const folder = moduleOf(r.kind).folder(r);
@@ -2795,6 +2884,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     ...(agentsOf(r) !== undefined ? { agents: agentsOf(r)! } : {}),
     ...(r.parentThreadId !== undefined ? { parentThreadId: r.parentThreadId } : {}),
     ...(r.rootThreadId !== undefined ? { rootThreadId: r.rootThreadId } : {}),
+    ...(r.parentWorkspaceId !== undefined ? { parentWorkspaceId: r.parentWorkspaceId } : {}),
     ...(r.place !== undefined ? { place: r.place } : {}),
     ...(providerOf(r) !== undefined ? { provider: providerOf(r)! } : {}),
   });
@@ -4154,6 +4244,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // Written before the machine is asked for: the cap counts machines under a root off these two fields, so a
       // fork that is still landing already holds its place and two forks at once cannot both pass the count.
       ...(spawned !== undefined ? { parentThreadId: spawned.threadId, rootThreadId: spawned.rootThreadId } : {}),
+      ...(o.parent !== undefined && live.has(o.parent) ? { parentWorkspaceId: o.parent } : {}),
       // A fork a thread asked for stores no switch of its own: it carries the tree it belongs to, and the switch is
       // read off that tree's root wherever it is asked for, so one workspace holds the answer for the whole tree.
       ...(spawned === undefined && o.agents !== undefined ? { agents: agentsFrom(undefined, o.agents) } : {}),
@@ -4310,6 +4401,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       project: project.id,
       copy,
       ...(portBase !== undefined ? { portBase } : {}),
+      ...(o.parent !== undefined && live.has(o.parent) ? { parentWorkspaceId: o.parent } : {}),
       spec: {},
       size: mine.pricing.defaultSize,
       firstLife: false,
@@ -4344,7 +4436,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
 
     async create(opts, origin) {
       await ready();
-      const o = { ...opts, name: nameGiven(opts.name) };
+      // A create a thread asked for is a child of the workspace that thread runs on, named or not: a thread's
+      // workspaces are its own tree, and nothing it makes stands beside it as a sibling of the person's.
+      const bornOf = opts.parent ?? scopeOf(origin)?.workspaceId;
+      const o = { ...opts, name: nameGiven(opts.name), ...(bornOf !== undefined ? { parent: bornOf } : {}) };
       const project = await projectsDoor.resolve(o.project, origin);
       // The project's computer decides which road this create takes, off the one table that says whether a kind
       // works a folder where it sits or holds a copy of one; the origin rule is then read on that kind.
@@ -4352,8 +4447,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // The same rule and the same sentence the verb that sets the switch on a workspace that exists reads, so a
       // create on a computer whose agents could not drive this host is refused rather than given a dead switch.
       if (o.agents?.spawn === true && !agentsMayDrive(kind)) throw Object.assign(new Error(agentsKindRefusal(kind)), { kind: "invalid" });
-      if (worksInPlace(kind)) return recordExisting(project, o, origin);
-      refuseRelayed({ kind, name: o.name }, origin);
+      // Read before anything is asked of a machine: the project rule refuses a thread naming another project here,
+      // as the same reading refuses it every workspace of one. A computer that works its folders in place takes no
+      // relayed request at all and says so in its own words below.
+      const inPlace = worksInPlace(kind);
+      if (!inPlace) refuseRelayed({ kind, name: o.name, project: project.id }, origin);
+      // A child of another workspace starts where that workspace is now, not where the project starts: the branch
+      // is read off the parent's own machine, and the child's work goes back into it.
+      const parent = o.parent === undefined ? undefined : live.get(o.parent);
+      const branch = parent === undefined ? undefined : await branchOn(parent);
+      const seeded: ProjectView = branch === undefined ? project : { ...project, base: branch };
+      if (inPlace) return recordExisting(seeded, o, origin);
       // The place under the root is taken here, with no await between the count and the taking, and handed back in
       // the finally below however this create ends: the record it becomes is what holds it from then on.
       const freePlace = spawnGuard("fork", origin);
@@ -4389,7 +4493,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         });
       };
       try {
-        return await createStaged(o, project, id, report, spawned, freePlace);
+        return await createStaged(o, seeded, id, report, spawned, freePlace);
       } catch (e) {
         // A machine already forked goes with the failed create, so the retry forks a fresh one; one the provider
         // will not part with keeps its record instead, since a machine nobody records bills unseen.
@@ -4780,6 +4884,36 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         }
       };
       return { ...inner, lines: lines(), exited: Promise.race([inner.exited, ended.then(() => null)]), ...(ranIn !== undefined ? { ranIn } : {}) };
+    },
+
+    async bringBack({ workspaceId, title, body }, origin) {
+      spawnGuard("bring_back", origin);
+      const entry = await entryOf(workspaceId, origin);
+      const cwd = checkoutOf(entry.record);
+      // A child's work goes back into the branch its parent is on right now; every other workspace measures
+      // against the branch its project starts from, and a project that named none leaves it to the checkout.
+      const parent = entry.record.parentWorkspaceId === undefined ? undefined : live.get(entry.record.parentWorkspaceId);
+      const base = (parent === undefined ? undefined : await branchOn(parent)) ?? projectHeld(entry.record.project).base;
+      const at = { ...(base !== undefined ? { base } : {}) };
+      return withDaemon(entry, async ask => {
+        const push = GitPushReply.parse(await ask({ op: "git.push", cwd, ...at }));
+        const asked = { op: "git.pr", cwd, ...at, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) };
+        // The push has landed by here, so a machine with no command line for the host is not a failed bring back:
+        // the branch is on the remote and the sentence rides back as the note beside it.
+        const opened = await ask(asked).catch((e: unknown) => {
+          if (isNoHostCli(e)) return { note: (e as Error).message };
+          throw e;
+        });
+        const note = (opened as { note?: string }).note;
+        return {
+          branch: push.branch,
+          base: push.base,
+          ahead: push.ahead,
+          uncommitted: push.uncommitted,
+          stat: push.stat,
+          ...(note === undefined ? { pr: GitPrReply.parse(opened).pr } : { note }),
+        };
+      });
     },
 
     async daemonReach(id, origin) {

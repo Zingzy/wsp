@@ -160,7 +160,7 @@ describe("the MCP server over the host", () => {
   it("offers the verbs as tools, each described", async () => {
     const c = await connect();
     const { tools } = await c.listTools();
-    expect(tools.map(t => t.name).sort()).toEqual(["computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
+    expect(tools.map(t => t.name).sort()).toEqual(["bring_back", "computers", "delete", "exec", "export", "folders", "forget", "fork", "image", "image_build", "image_move", "new", "pause", "projects", "projects_add", "projects_remove", "rebuild", "recipe", "recipe_scan", "rename", "run", "send", "setup", "snapshot", "stop", "terminal_config", "thread_allow", "thread_deny", "thread_forget", "thread_read", "thread_rename", "threads", "threads_wait", "wake", "workspaces", "workspaces_agents"]);
     expect(Object.keys((tools.find(t => t.name === "folders")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["folder", "hidden"]);
     expect(Object.keys((tools.find(t => t.name === "terminal_config")!.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(["scheme"]);
     for (const t of tools) expect(t.description, t.name).toMatch(/\S/);
@@ -276,9 +276,10 @@ describe("the MCP server over the host", () => {
     expect(JSON.parse(listed.text)).toEqual(listed.structured);
   });
 
-  /** The one url an agent is promised and should be: a project's own source, the repo the person named, which is
-   * what the record is and carries no bearer. Every other field ending in url would be a route a provider minted. */
-  const OWN_URL = /\.source\.url$/;
+  /** The two urls an agent is promised and should be: a project's own source, the repo the person named, and the
+   * pull request a bring back opened, which is a page on the git host and the whole point of the verb. Neither
+   * carries a bearer. Every other field ending in url would be a route a provider minted. */
+  const OWN_URL = /(\.source\.url|\.pr\.url)$/;
 
   /** Every field name in a JSON Schema, deep, that reads as a route: what an agent is promised, not what one run answered. */
   const routeFields = (schema: unknown, at: string): string[] => {

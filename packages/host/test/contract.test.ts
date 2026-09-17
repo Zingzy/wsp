@@ -13,8 +13,8 @@ import { type AddressInfo } from "node:net";
 import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { EXIT_CODES, VerbFailure } from "@wsp/protocol";
-import { copyKey, createRuntime, memoryStore, type Runtime, type Store } from "@wsp/runtime";
+import { DAEMON_TOKEN_PATH, EXIT_CODES, VerbFailure } from "@wsp/protocol";
+import { copyKey, createRuntime, DAEMON_TOKEN_SET, memoryStore, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import { z } from "zod";
@@ -77,6 +77,14 @@ describe("the agent contract on the command line and the tool door", () => {
       store,
       adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
       goneConfirmMs: 0,
+      // The daemon inside a workspace, as far as the one verb that asks it anything is concerned.
+      daemonChannel: async () => ({
+        send: async frame =>
+          frame.op === "git.push"
+            ? { id: 1, ok: true, branch: "work", base: "main", remote: "origin", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"] }
+            : { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" }, created: true },
+        close: () => {},
+      }),
       placeLinks: placeWiring(statePath, {}),
       // Two places over one backend: this host's own, and one more for the image build road, which never boots a
       // machine here because the place already stands on the record.
@@ -130,6 +138,25 @@ describe("the agent contract on the command line and the tool door", () => {
     const created = (await last("new", "new", "alpha")) as { workspace: { id: string } };
     const alpha = created.workspace.id;
     await last("workspaces", "workspaces");
+    // The one verb that asks the workspace's own daemon anything: the guest carries this host's token and the
+    // machine has a route, which is what the channel behind a bring back is opened on.
+    const machine = backend.machines[0]!;
+    const noRoute = machine.previewUrl;
+    const guestSoFar = backend.execImpl;
+    machine.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+    backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestSoFar(m, cmd));
+    expect(await last("bring back", "bring", "back", "alpha")).toEqual({
+      branch: "work",
+      base: "main",
+      ahead: 1,
+      uncommitted: 0,
+      stat: [" a.ts | 2 +-"],
+      pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" },
+    });
+    // The route goes again with the guest that answered for it: a machine wearing one has every later verb wait on
+    // a daemon that is not there, which is the rest of this run.
+    machine.previewUrl = noRoute;
+    backend.execImpl = guestSoFar;
     expect(await last("workspaces agents", "workspaces", "agents", "alpha", "--spawn", "on", "--max-machines", "2")).toEqual({
       workspace: expect.objectContaining({ name: "alpha", agents: { spawn: true, maxMachines: 2, maxDepth: 1 } }),
     });

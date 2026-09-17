@@ -21,7 +21,7 @@ pub mod words;
 
 pub use auth::DaemonAuthRequest;
 pub use copy::{Carried, CopyAsk, CopyReport, CopyRoadName};
-pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, ProcSignal, PtyMode, WorkspaceKind};
+pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, ProcSignal, PtyMode, PullRequestState, WorkspaceKind};
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
 pub use id::RequestId;
@@ -40,9 +40,9 @@ pub use place::{
 pub use place_paths::{place_daemon_paths, place_owned_paths, PlaceDaemonPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
-    GitStatusEntry, GitStatusReply, InboxRescanReply, ListeningPort, ManifestEntry, ManifestGetReply, ManifestRecordReply,
-    ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, ProcInspectReply, PtyAttachReply, PtyCreateReply,
-    PtyListEntry, PtyListReply, Reply, True,
+    GitPrReply, GitPrStateReply, GitPushReply, GitStatusEntry, GitStatusReply, InboxRescanReply, ListeningPort, ManifestEntry,
+    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply,
+    ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
 pub use validate::{is_http_url, is_plain_path, RelayPort};

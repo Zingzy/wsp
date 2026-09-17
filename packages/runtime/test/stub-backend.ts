@@ -7,7 +7,7 @@ import type { AddressInfo } from "node:net";
 import { gzipSync } from "node:zlib";
 import { LocalBackend, NotFirstLifeError, SNAPSHOT_STORAGE } from "@wsp/engine";
 import type { ExecResult, Lifecycle, Machine, MachineBackend, MachineLife, MachineShape, MachineSpec, MachineState, RunOptions, SnapshotRow, TemplateRow } from "@wsp/engine";
-import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, type Caller, type ProjectView } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, HERE_PLACE_ID, scopeOf, type Caller, type ProjectView } from "@wsp/protocol";
 import type { CreatedWorkspace, CreateWorkspaceOptions, LocalWiring, Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { DAEMON_TOKEN_SET } from "../src/daemon-token.js";
@@ -307,13 +307,18 @@ export function tempRepo(): string {
  * projectOn, so the project a test never names is still a real record with a real computer behind it. */
 export async function createOn(rt: ProjectMaker & WorkspaceMaker, o: CreateOn, origin?: Caller): Promise<CreatedWorkspace> {
   const { on, project, ...rest } = o;
-  const id = project ?? (await projectOn(rt, on)).id;
+  // A thread works on its own project alone, so a fork a thread asks for is of the project its own workspace
+  // holds; a test that means another names it. Read here rather than in every case, since a fresh project per
+  // call is what a test that never names one gets.
+  const scope = scopeOf(origin);
+  const own = scope === undefined ? undefined : (await rt.workspaces.get(scope.workspaceId, origin)).project.id;
+  const id = project ?? own ?? (await projectOn(rt, on)).id;
   return rt.workspaces.create({ ...rest, project: id }, origin);
 }
 
 export type CreateOn = Omit<CreateWorkspaceOptions, "project"> & { project?: string; on?: string };
 type ProjectMaker = { projects: Pick<Runtime["projects"], "add" | "computers"> };
-type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create"> };
+type WorkspaceMaker = { workspaces: Pick<Runtime["workspaces"], "create" | "get"> };
 
 /** The computer this suite is running on, in the two words every line that names this computer takes. Read rather
  * than written down: the landing gate runs on a Mac and ci runs on Linux, and a literal here would pin the word

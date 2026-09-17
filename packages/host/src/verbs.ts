@@ -97,6 +97,7 @@ import {
   fmtThreads,
   foldThreads,
   threadWordOf,
+  BringBackResult,
   foreignFlagLine,
   forgetNotice,
   goldenHead,
@@ -950,6 +951,28 @@ const MACHINE_DOWN: ReadonlySet<WorkspaceState> = new Set<WorkspaceState>(["paus
 /** Every verb that needs the machine goes through here, so a paused or waking workspace is a wait and never the
  * provider's error. The runtime is asked even when the view says running: only its state read catches a provider-side
  * pause. The runtime refuses a gone workspace too; the refusal here exists to carry the verb's own action word. */
+/** The bring back over the wire, one road for the command line and the tool. */
+async function broughtBack(client: HostClient, workspaceId: string, title?: string, body?: string): Promise<BringBackResult> {
+  return BringBackResult.parse(
+    await client.request("workspaces.bringBack", { workspaceId, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) }),
+  );
+}
+
+/** What a bring back reads as: where the branch went and how far it is over the base, git's own diffstat under it,
+ * then the pull request or why there is none, and last what stayed behind in the workspace. */
+function broughtBackLine(name: string, back: BringBackResult): string {
+  const commits = `${back.ahead} commit${back.ahead === 1 ? "" : "s"}`;
+  const left = `${back.uncommitted} change${back.uncommitted === 1 ? "" : "s"}`;
+  return [
+    `${name}: ${back.branch} pushed, ${commits} over ${back.base}`,
+    ...back.stat,
+    back.pr === undefined ? back.note : `${back.pr.url} (${back.pr.state})`,
+    back.uncommitted === 0 ? undefined : `${left} left in the workspace; nothing uncommitted travels`,
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
+}
+
 export async function awake(client: HostClient, workspace: WorkspaceView, action: string, tell: (line: string) => void): Promise<Woken> {
   const before = workspaceState({ phase: workspace.phase });
   if (before === "gone") throw new Error(goneRefusal(action, workspace.gone));
@@ -2853,6 +2876,40 @@ export const VERBS: readonly Verb[] = [
     }),
   },
   {
+    name: "bring back",
+    usage: 'wsp bring back <workspace> [--title "<title>"] [--body "<body>"]',
+    about: "pushes the workspace's branch and opens its pull request; the branch the work started from is refused",
+    page: "agent",
+    options: { title: { type: "string" }, body: { type: "string" } },
+    run: async ctx => {
+      const [ref] = ctx.args;
+      if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp bring back takes one workspace.", usageIs(ctx));
+      const client = await ctx.client();
+      const workspace = await workspaceOf(client, ref);
+      const { workspace: awoken } = await awake(client, workspace, "bring back", line => ctx.io.error(line));
+      const back = await broughtBack(client, awoken.id, flag(ctx.flags, "title"), flag(ctx.flags, "body"));
+      ctx.out.emit({ ...back }, broughtBackLine(awoken.name, back));
+      return 0;
+    },
+    tool: tool({
+      description:
+        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the parent workspace's current branch for a workspace forked out of another and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. A machine with no signed-in command line for the git host still pushes, and note says why the pull request waits.",
+      input: {
+        workspace: WorkspaceIn,
+        title: z.string().optional().describe("the pull request's title; without one the host fills the title and the body from the commits"),
+        body: z.string().optional().describe("the pull request's body, which needs a title beside it"),
+      },
+      output: BringBackResult.shape,
+      call: async ({ workspace: ref, title, body }, deps) => {
+        const client = await deps.client();
+        const workspace = await workspaceOf(client, ref);
+        const { workspace: awoken } = await awake(client, workspace, "bring back", QUIET_LINE);
+        const back = await broughtBack(client, awoken.id, title, body);
+        return asText(broughtBackLine(awoken.name, back), { ...back });
+      },
+    }),
+  },
+  {
     name: "pause",
     usage: "wsp pause <workspace>",
     about: "naps the workspace's machine",
@@ -3498,6 +3555,8 @@ export const FLAG_WORDS: Readonly<Record<string, string>> = {
   tick: `the rule that decides every tick: ${RECIPE_TICKS.join(", ")}`,
   timeout: "how long to wait before answering that they are still running",
   title: "what to call the thread; the agent names it from the task without one",
+  "bring back title": "what to call the pull request; the host fills its title and its body from the commits without one",
+  "bring back body": "the pull request's body, which needs a title beside it",
   tree: "indent the threads an agent opened under the one that opened them",
   watch: "draw the table again every second where it stands, until Ctrl-C; it needs a terminal to redraw on",
   yes: "go ahead without being asked",

@@ -4,12 +4,14 @@
 //! passes a socket and nothing here binds anything but the address it was told.
 
 mod auth;
+mod bring_back;
 mod clock;
 mod door;
 mod exec;
 mod fs;
 mod git;
 mod guest;
+mod hosts;
 mod inbox;
 mod link;
 mod manifest;

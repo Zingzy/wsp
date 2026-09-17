@@ -1,0 +1,7 @@
+[
+  {
+    "id": 1,
+    "op": "git.prState",
+    "cwd": "repo"
+  }
+]

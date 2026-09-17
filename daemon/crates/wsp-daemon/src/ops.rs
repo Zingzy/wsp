@@ -12,9 +12,10 @@ use base64::Engine;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GuestOpen, GuestOpenReply, InboxRescanReply,
-    ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply, PortsWatchReply, PtyAttachReply,
-    PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS, MACHINE_OPS_ON_ANY_ROAD,
+    numbers, words, DaemonErrorCode, DaemonErrorResponse, DaemonOp, Empty, FsReadEncoding, GitPrStateReply, GuestOpen, GuestOpenReply,
+    InboxRescanReply, ManifestGetReply, ManifestRecordReply, ManifestRestartScriptReply, PlaceLeaveReply, PlaceUpdateReply,
+    PortsWatchReply, PtyAttachReply, PtyCreateReply, PtyListReply, Reply, RequestId, DAEMON_OPS, GUEST_OPS, MACHINE_OPS,
+    MACHINE_OPS_ON_ANY_ROAD,
 };
 
 use crate::exec::{run_exec, ExecOptions};
@@ -24,7 +25,7 @@ use crate::paths::OpError;
 use crate::proc::{kill_process, ProcSampler, ProtectedPids};
 use crate::pty::{passwd_row, process_env, pump, PtyCreateOpts};
 use crate::tunnel::Tunnels;
-use crate::{frame_text as text, fs, git, paths, Ctx, Listener, Outbound, Outgoing};
+use crate::{bring_back, frame_text as text, fs, git, hosts, paths, Ctx, Listener, Outbound, Outgoing};
 
 type Detach = Box<dyn FnOnce() + Send>;
 
@@ -231,6 +232,9 @@ async fn handle_op(conn: &Arc<Conn>, ctx: &Arc<Ctx>, frame: &Value, id: Option<R
             | "fs.read"
             | "git.status"
             | "git.diff"
+            | "git.push"
+            | "git.pr"
+            | "git.prState"
             | "ports.watch"
             | "manifest.get"
             | "manifest.record"
@@ -435,6 +439,30 @@ async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &s
         DaemonOp::GitDiff { cwd, scope, path } => {
             let diff = async { git::git_diff(&locate(ctx, &cwd).await?, scope, path.as_deref(), numbers::GIT_DIFF_CAP_BYTES).await };
             answer(id, diff.await)
+        }
+        DaemonOp::GitPush { cwd, base } => answer(id, async { bring_back::push(&locate(ctx, &cwd).await?, base.as_deref()).await }.await),
+        DaemonOp::GitPr { cwd, base, title, body } => {
+            let opened = async {
+                let at = locate(ctx, &cwd).await?;
+                let (remote, remote_url) = bring_back::remote_url(&at).await?;
+                let base = bring_back::base_of(&at, &remote, base.as_deref()).await?;
+                let branch = bring_back::head_for(&at, &base).await?;
+                let path = hosts::daemon_path();
+                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch, path: &path };
+                hosts::open(&ask, &base, title.as_deref(), body.as_deref()).await
+            };
+            answer(id, opened.await)
+        }
+        DaemonOp::GitPrState { cwd } => {
+            let read = async {
+                let at = locate(ctx, &cwd).await?;
+                let branch = bring_back::branch_at(&at).await?;
+                let (_, remote_url) = bring_back::remote_url(&at).await?;
+                let path = hosts::daemon_path();
+                let ask = hosts::Ask { cwd: &at, remote_url: &remote_url, branch: &branch, path: &path };
+                Ok(GitPrStateReply { pr: hosts::find(&ask).await? })
+            };
+            answer(id, read.await)
         }
         DaemonOp::PortsWatch => {
             let key = ctx.next_key();
@@ -657,6 +685,9 @@ mod tests {
             "fs.read",
             "git.status",
             "git.diff",
+            "git.push",
+            "git.pr",
+            "git.prState",
             "ports.watch",
             "manifest.get",
             "manifest.record",

@@ -93,6 +93,31 @@ pub enum DaemonOp {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<String>,
     },
+    /// Pushes the branch this checkout is on to its remote, refusing the base branch itself: work leaves a
+    /// workspace through git, and the branch is the agent's own to make.
+    #[serde(rename = "git.push", rename_all = "camelCase")]
+    GitPush {
+        cwd: String,
+        /// The branch the work started from; without one the checkout's own default branch, which is what a
+        /// project recorded without a base was cloned at.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
+    },
+    /// Opens the branch's pull request against the base through the git host's own signed-in command line, or
+    /// answers with the one that is already open.
+    #[serde(rename = "git.pr", rename_all = "camelCase")]
+    GitPr {
+        cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<String>,
+    },
+    /// Where the branch's pull request stands, read back through that same command line.
+    #[serde(rename = "git.prState", rename_all = "camelCase")]
+    GitPrState { cwd: String },
     #[serde(rename = "tunnel.open", rename_all = "camelCase")]
     TunnelOpen { tunnel_id: String, port: NonZeroU16 },
     #[serde(rename = "tunnel.write", rename_all = "camelCase")]
@@ -155,7 +180,7 @@ pub enum DaemonOp {
 
 /// The op names above, in the protocol's order; the daemon's switch reads this to tell an op it knows from one it
 /// does not.
-pub const DAEMON_OPS: [&str; 33] = [
+pub const DAEMON_OPS: [&str; 36] = [
     "pty.create",
     "pty.attach",
     "pty.write",
@@ -178,6 +203,9 @@ pub const DAEMON_OPS: [&str; 33] = [
     "fs.read",
     "git.status",
     "git.diff",
+    "git.push",
+    "git.pr",
+    "git.prState",
     "tunnel.open",
     "tunnel.write",
     "tunnel.close",

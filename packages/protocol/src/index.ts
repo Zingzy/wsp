@@ -554,6 +554,10 @@ export const WorkspaceView = z.object({
    * workspace a person made. The root is what the machine cap counts against. */
   parentThreadId: z.string().optional(),
   rootThreadId: z.string().optional(),
+  /** The workspace this one was forked out of, by id; absent on every workspace that is not a fork of another. A
+   * child holds the same project as its parent and starts on the branch the parent was on, and its work goes back
+   * into that branch. */
+  parentWorkspaceId: z.string().optional(),
   /** The place a fork lives on, by id; absent on a fork at the host's own provider and on every workspace that is
    * not a fork. The command line and the app show its name after the workspace's. */
   place: z.string().optional(),
@@ -606,7 +610,7 @@ export type WorkspaceStatus = z.infer<typeof WorkspaceStatus>;
 const WORKSPACE_OUT = {
   id: true, name: true, machineId: true, phase: true, kind: true, golden: true, createdAt: true, project: true, folder: true, home: true,
   claudeSessionId: true, gone: true, theme: true, glyph: true, daemonNote: true, daemonRefusedAt: true, vaultedAt: true, vaultRefused: true, wakeRefused: true,
-  agents: true, parentThreadId: true, rootThreadId: true, place: true, provider: true, copy: true, portBase: true,
+  agents: true, parentThreadId: true, rootThreadId: true, parentWorkspaceId: true, place: true, provider: true, copy: true, portBase: true,
 } as const;
 
 /** A workspace as every verb answers with it: the view without the display stream a desktop machine carries, which
@@ -2832,6 +2836,15 @@ export const DaemonRequest = z.discriminatedUnion("op", [
   z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),
   z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string() }),
   z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional() }),
+  /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
+   * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
+   * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
+  z.object({ id: reqId, op: z.literal("git.push"), cwd: z.string(), base: z.string().optional() }),
+  /** Opens the branch's pull request against the base through the git host's own signed-in command line, or
+   * answers with the one already open. Refused with code no-host-cli where that command line is not there. */
+  z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional() }),
+  /** Where the branch's pull request stands, read back through that same command line. */
+  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -3274,6 +3287,9 @@ export const DaemonErrorCode = z.enum([
   "not-a-git-repo",
   "bad-request",
   "forbidden",
+  /** No command line for the git host the remote names is on the machine, so the pull request waits; the push
+   * itself landed, which is why a client reads this one as a note beside the push and not as a failure. */
+  "no-host-cli",
 ]);
 export type DaemonErrorCode = z.infer<typeof DaemonErrorCode>;
 
@@ -4156,6 +4172,10 @@ const RuntimeOp = z.discriminatedUnion("op", [
    * null clears it, so the colour picker and the icon picker each send their own without reading the other's. The
    * record alone changes: nothing on the machine is touched. */
   z.object({ id: reqId, op: z.literal("workspaces.look"), workspaceId: z.string() }).extend(WorkspaceLook.shape),
+  /** Pushes the branch the workspace's copy is on and opens or finds its pull request, and replies with a
+   * BringBackResult. The base is the parent workspace's current branch for a child and the project's own base
+   * otherwise; the base branch itself is refused, since work leaves a workspace as a branch of its own. */
+  z.object({ id: reqId, op: z.literal("workspaces.bringBack"), workspaceId: z.string(), title: z.string().optional(), body: z.string().optional() }),
   z.object({ id: reqId, op: z.literal("workspaces.delete"), workspaceId: z.string() }),
   /** Turns the workspace's agents switch on or off and names its caps. Every key left out keeps what the record
    * holds, so the two flags a person gives on one line never clear the third. */
@@ -4469,6 +4489,9 @@ export const THREAD_OPS: readonly string[] = [
   "workspaces.touch",
   "workspaces.wake",
   "workspaces.exec",
+  // A thread's work leaves its workspace the one way any work does, as a branch on the project's remote: the tree
+  // rule refuses every workspace but its own, and the guard reads the switch as it does for a fork.
+  "workspaces.bringBack",
   "harnesses.list",
   "sessions.start",
   "sessions.list",
@@ -4728,6 +4751,7 @@ export {
   type ThemePreset,
 } from "./workspace-look.js";
 export { copyPathFor, folderName, folderSlug, hiddenFolder, parentFolderName, placeDaemonPaths, placeOwnedPaths, rootsPathIn, sshDaemonPaths, standInMachinePath, standInRecordsPath, underProject, workFolderIn, type FolderMachine } from "./project-path.js";
+export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";

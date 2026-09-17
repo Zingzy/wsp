@@ -87,7 +87,7 @@ pub(crate) async fn run_git(cwd: &Path, args: &[&str], input: Option<&[u8]>, max
 }
 
 /// Exit 0 and 1 are answers, a cut is the cap's doing; anything else failed, and a missing repo has its own code.
-fn check(res: &GitResult, what: &str) -> Result<(), OpError> {
+pub(crate) fn check(res: &GitResult, what: &str) -> Result<(), OpError> {
     if res.truncated || matches!(res.code, Some(0 | 1)) {
         return Ok(());
     }
@@ -98,7 +98,7 @@ fn check(res: &GitResult, what: &str) -> Result<(), OpError> {
     Err(OpError::plain(format!("git {what} failed ({code}): {}", res.stderr.trim())))
 }
 
-fn stdout_text(res: &GitResult) -> String {
+pub(crate) fn stdout_text(res: &GitResult) -> String {
     String::from_utf8_lossy(&res.stdout).into_owned()
 }
 
@@ -155,12 +155,12 @@ pub(crate) async fn git_status(cwd: &Path) -> Result<GitStatusReply, OpError> {
     Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned() })
 }
 
-async fn rev_exists(cwd: &Path, rev: &str) -> Result<bool, OpError> {
+pub(crate) async fn rev_exists(cwd: &Path, rev: &str) -> Result<bool, OpError> {
     Ok(run_git(cwd, &["rev-parse", "--verify", "-q", rev], None, None).await?.code == Some(0))
 }
 
 /// origin/HEAD when a remote set it, else a local main or master.
-async fn default_branch(cwd: &Path) -> Result<Option<String>, OpError> {
+pub(crate) async fn default_branch(cwd: &Path) -> Result<Option<String>, OpError> {
     let remote = run_git(cwd, &["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], None, None).await?;
     check(&remote, "symbolic-ref")?;
     if remote.code == Some(0) {
