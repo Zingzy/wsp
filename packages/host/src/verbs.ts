@@ -491,13 +491,14 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     p.shape === undefined ? "" : fmtBytes(p.shape.memMb * 1024 * 1024),
     p.diskFreeBytes === undefined ? "" : fmtBytes(p.diskFreeBytes),
     p.engine === undefined ? "" : p.engine,
+    p.copies === undefined ? "" : p.copies,
     p.kind === "provider" ? fmtPrice(p.rateUsdPerHour ?? 0) : p.present === true ? "yes" : "no",
     p.forks === undefined ? "" : `${p.forks.running} of ${p.forks.running + p.forks.room}`,
     p.kind === "provider" ? "" : (p.lastSeenAt ?? ""),
     placeDaemonBehind(p) ?? "",
     p.build ?? "",
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE"], ...rows]);
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */
