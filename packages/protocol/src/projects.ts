@@ -14,8 +14,8 @@ import { kindWords } from "./workspace-state.js";
 /** What a caller is told once a project is recorded: what it is called, where its code comes from, the computer it
  * lives on and where a workspace of it holds the checkout, then the line that makes one. The command line prints it
  * and the tool answers it, so both doors say the same thing about the same record. The computer is named the way
- * every table names it, off the same places reading; a caller with none says the id. */
-export function addedProjectLine(project: ProjectView, named?: ReadonlyMap<string, string>, platform: "darwin" | "linux" = "darwin"): string {
+ * every table names it, off the same places reading and the same platform word; a caller with no map says the id. */
+export function addedProjectLine(project: ProjectView, named: ReadonlyMap<string, string> | undefined, platform: "darwin" | "linux"): string {
   const from = project.source.kind === "git" ? project.source.url : project.source.path;
   return `${project.name} ${project.id}: ${from} on ${computerNamed(project.computer, named, platform)}, at ${project.path} inside a workspace of it\nmake one with: wsp new ${shellQuote(project.name)} "<what you are working on>"`;
 }
@@ -170,9 +170,10 @@ export const worksInPlaceTakesNone = (project: string, words: readonly string[])
 
 /** What a computer is called in a row or a line: the name this wsp holds for it, and this computer's own word
  * where the record names this one. `named` is the places table by id, which every caller already reads for its
- * other columns. The one reading, so a project's row, a workspace's row and the line a recorded project answers
- * with can never print one computer three ways. */
-export function computerNamed(computer: string, named?: ReadonlyMap<string, string>, platform: "darwin" | "linux" = "darwin"): string {
+ * other columns, and `platform` is the computer the host runs on, since its own word is Mac or computer and no
+ * default can know which. The one reading, so a project's row, a workspace's row and the line a recorded project
+ * answers with can never print one computer three ways. */
+export function computerNamed(computer: string, named: ReadonlyMap<string, string> | undefined, platform: "darwin" | "linux"): string {
   return computer === HERE_PLACE_ID ? thisComputer(platform) : (named?.get(computer) ?? computer);
 }
 

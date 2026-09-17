@@ -94,18 +94,21 @@ describe("what a computer is called in a row", () => {
     const named = new Map([["pl_box", "hetzner"]]);
     expect(computerNamed(HERE_PLACE_ID, named, "darwin")).toBe("this Mac");
     expect(computerNamed(HERE_PLACE_ID, named, "linux")).toBe("this computer");
-    expect(computerNamed("pl_box", named)).toBe("hetzner");
+    expect(computerNamed("pl_box", named, "linux")).toBe("hetzner");
     // A caller that could not read the list says the id rather than inventing a name for it.
-    expect(computerNamed("pl_box")).toBe("pl_box");
+    expect(computerNamed("pl_box", undefined, "darwin")).toBe("pl_box");
   });
 
   it("the line a recorded project answers with names the computer the same way, and says the command that makes its workspace", () => {
     const project = { id: "pr_1", name: "spoo-landing", computer: "pl_box", source: { kind: "git" as const, url: "https://github.com/dev/spoo.git" }, path: "/root/spoo-landing", createdAt: "t" };
-    expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]))).toBe(
+    expect(addedProjectLine(project, new Map([["pl_box", "hetzner"]]), "darwin")).toBe(
       'spoo-landing pr_1: https://github.com/dev/spoo.git on hetzner, at /root/spoo-landing inside a workspace of it\nmake one with: wsp new \'spoo-landing\' "<what you are working on>"',
     );
+    // This computer's own word is the host's platform's, never a default: a line written on a Linux host says
+    // this computer where a Mac says this Mac, and neither reads the other's word.
     const here = { ...project, id: "pr_2", name: "wsp", computer: HERE_PLACE_ID, source: { kind: "folder" as const, path: "/Users/dev/wsp" }, path: "/Users/dev/wsp" };
     expect(addedProjectLine(here, new Map(), "darwin")).toContain("on this Mac, at /Users/dev/wsp");
+    expect(addedProjectLine(here, new Map(), "linux")).toContain("on this computer, at /Users/dev/wsp");
   });
 });
 

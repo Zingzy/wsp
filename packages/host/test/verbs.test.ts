@@ -19,7 +19,7 @@ import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import type { HostHandle } from "../src/server.js";
 import { awake, CLI_VERBS, runVerb, PLAN_ONLY, ANSWER_IN_THE_APP, answerKeysLine, answerVerbsLine, answeredLine, noSuchAnswerLine, deleteQuestion, deletedLine, dialHost, firstEnded, messageTo, napAfterDeadLaunch, noOpenAskLine, threadRows, threadTree, threadsOf, workspaceLine, type HostClient } from "../src/verbs.js";
-import { HOST_SIDE_VAULT, THREAD_PREFIX_WORD } from "../src/verbs.js";
+import { HOST_SIDE_VAULT, hostPlatform, THREAD_PREFIX_WORD } from "../src/verbs.js";
 import { hostSideOnlyFix, hostSideOnlyLine } from "../src/hosts.js";
 import type { WatchSignals } from "../src/watch.js";
 import { writeHost } from "../src/hosts.js";
@@ -1893,14 +1893,15 @@ describe("wsp verbs over the host", () => {
     expect(heading!.split(/ {2,}/)).toEqual(["PROJECT", "ID", "COMPUTER", "SOURCE", "PATH", "BASE", "WORKSPACES"]);
     expect(rows.map(r => r.split(/ {2,}/)).find(r => r[0] === "spoo")).toEqual(["spoo", spoo.id, spoo.computer, "https://github.com/dev/spoo.git", "/root/spoo", "1"]);
 
-    // The computer's own word, never the place id: a project on the computer the host runs on reads as this Mac,
-    // the same word the workspaces table gives its row.
+    // The computer's own word, never the place id: a project on the computer the host runs on reads as that
+    // computer's own word, the same one the workspaces table gives its row.
     const folder = realpathSync(mkdtempSync(join(dir, "repo-here-")));
     execFileSync("git", ["init", "-q", folder]);
     const here = await projectOn(rt, HERE_PLACE_ID, folder);
     const both = await run("projects");
     const cell = both.io.lines[0]!.split("\n").map(r => r.split(/ {2,}/)).find(r => r[0] === here.name)!;
-    expect(cell[2]).toBe(thisComputer("darwin"));
+    // The host's own platform word: this Mac where the host runs on one, this computer on a Linux runner.
+    expect(cell[2]).toBe(thisComputer(hostPlatform()));
     expect(cell[2]).not.toBe(HERE_PLACE_ID);
     const raw = await run("projects", "--json");
     expect((json(raw.io)[0] as { projects: { name: string }[] }).projects.map(p => p.name)).toContain("spoo");

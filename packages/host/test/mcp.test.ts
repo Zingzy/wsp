@@ -603,7 +603,8 @@ describe("the MCP server over the host", () => {
     expect(here.isError).toBe(false);
     const recorded = (here.structured as { project: ProjectView }).project;
     expect(recorded).toMatchObject({ source: { kind: "folder", path: folder }, path: folder, computer: HERE_PLACE_ID });
-    expect(here.text).toBe(addedProjectLine(recorded));
+    // The host's own platform word, so this reads the same on the Mac it was written on and on the Linux runner.
+    expect(here.text).toBe(addedProjectLine(recorded, new Map(), hostPlatform()));
 
     // A repo needs the computer that clones it, and the same source twice on one computer is refused.
     const cloned = await call("projects_add", { source: "https://github.com/dev/site.git", on: "default", name: "site", base: "trunk" });

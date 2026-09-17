@@ -86,7 +86,7 @@ import {
   type ServiceManager,
   type ServiceRunner,
 } from "./service.js";
-import { dialHost, sshAsked, type DialOpts, type HostClient } from "./verbs.js";
+import { dialHost, hostPlatform, sshAsked, type DialOpts, type HostClient } from "./verbs.js";
 import { writeEnvFile } from "./env-keys.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
@@ -745,7 +745,7 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
     });
     // The computer by the name this wsp holds for it, off the same list every table reads.
     const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
-    io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), platform() === "darwin" ? "darwin" : "linux"));
+    io.log(addedProjectLine(project, new Map(places.map(p => [p.id, p.name])), hostPlatform()));
     return 0;
   } finally {
     client.close();
