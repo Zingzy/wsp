@@ -902,8 +902,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     if (provisioner === undefined) return {};
     const record = await recordOf(placeId);
     if (record === undefined) return {};
+    // The one answer a busy computer gets, whoever asked: the same conflict the update throws, from the same
+    // reading. A join takes it as the sentence its reply carries, since a computer that just joined is nobody's
+    // to be running the recipe on and a join that reached here is not failed by it.
     const busy = provisioningNow(record);
-    if (busy !== undefined) return { said: busy };
+    if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
     const home = record.report.login["HOME"];
     // Every path the job builds comes off that home, so a computer that reported none gets no recipe and says so.
     if (home === undefined) return { said: placeNoHomeLine(record.name) };

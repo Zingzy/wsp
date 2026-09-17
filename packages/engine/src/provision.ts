@@ -6,7 +6,7 @@
 // the computer is reached: it drives a Machine, which for a box is that
 // computer over the link its daemon holds.
 import { shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
-import { INLINE_EXEC_MS, execFits } from "./exec-detached.js";
+import { markersOf, pagedReads } from "./exec-detached.js";
 import { installBase } from "./golden-base.js";
 import { TOOLS_PATH, agentSteps, type ToolInstall } from "./golden-import.js";
 import { installTools, type ToolResult } from "./golden-tools.js";
@@ -59,41 +59,21 @@ function presenceTests(step: ToolInstall): string[] {
   return tests;
 }
 
-/** How many steps one read asks about. The reads are `brew list`, `npm root -g` and a command's own version line,
- * about a second each on a box, and one exec has the inline bound to answer inside; the byte cap below pages a
- * long read too. */
-const PRESENT_BATCH = 8;
-
-/** The steps the computer already satisfies, by the rule above, read on the tools PATH. As few execs as the reads
- * fit in: a batch at a time, and a batch that would not fit one exec body is split again. */
+/** The steps the computer already satisfies, by the rule above, read on the tools PATH, a page of reads to an exec
+ * by the one paging rule every batched read here takes. A page that could not be made says nothing is present in
+ * it, which installs those steps again rather than skipping one that is not there. */
 export async function presentSteps(machine: Machine, steps: readonly ToolInstall[]): Promise<Set<string>> {
   const asked = steps.flatMap(step => {
     const tests = presenceTests(step);
     return tests.length === 0 || (step.check === undefined && step.bin === undefined) ? [] : [{ step, tests }];
   });
-  const path = `export PATH=${TOOLS_PATH}`;
   const present = new Set<string>();
-  const lineFor = (i: number, tests: string[]): string => `if ${tests.join(" && ")}; then printf '${PRESENT} %s\\n' ${i}; fi`;
-  let batch: { line: string; id: string }[] = [];
-  const readBatch = async (): Promise<void> => {
-    if (batch.length === 0) return;
-    const res = await machine.exec([path, ...batch.map(b => b.line)].join("\n"), { timeoutMs: INLINE_EXEC_MS });
-    for (const line of res.stdout.split("\n")) {
-      const words = line.trim().split(" ");
-      const at = words[0] === PRESENT ? Number(words[1]) : Number.NaN;
-      const held = Number.isInteger(at) ? batch[at] : undefined;
-      if (held !== undefined) present.add(held.id);
-    }
-    batch = [];
-  };
-  for (const { step, tests } of asked) {
-    const line = lineFor(batch.length, tests);
-    if (batch.length > 0 && (batch.length >= PRESENT_BATCH || !execFits([path, ...batch.map(b => b.line), line].join("\n")))) {
-      await readBatch();
-      batch.push({ line: lineFor(0, tests), id: step.id });
-    } else batch.push({ line, id: step.id });
+  const pages = await pagedReads(machine, asked, (row, at) => `if ${row.tests.join(" && ")}; then printf '${PRESENT} %s\\n' ${at}; fi`, `export PATH=${TOOLS_PATH}`);
+  for (const { rows, res } of pages) {
+    if (res.exitCode !== 0) continue;
+    const marked = markersOf(res.stdout, PRESENT);
+    for (const [at, row] of rows.entries()) if (marked.has(String(at))) present.add(row.step.id);
   }
-  await readBatch();
   return present;
 }
 

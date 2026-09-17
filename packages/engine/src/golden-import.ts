@@ -779,12 +779,17 @@ export const BREW_HOUSEKEEPING: readonly string[] = [`${PATH_LINE}\n${asLinuxbre
 /** Dependencies two or more of the formulae share install in one brew process before any
  * of them, marked as dependencies so autoremove still owns them; each formula then finds
  * its shared dependencies present and installs only its own. */
+/** The line that puts the dependencies two or more of the formulae share in `shared`, Homebrew's own toolchain
+ * left out: the step installs them and its check reads them back, so the list is derived once and the two cannot
+ * ask about different formulae. */
+const sharedDepsLine = (formulae: readonly string[]): string =>
+  `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${BREW_TOOLCHAIN.map(f => `-e ${f}`).join(" ")} | sort | uniq -d || true)`;
+
 function brewSharedDeps(formulae: readonly string[]): string {
-  const keep = BREW_TOOLCHAIN.map(f => `-e ${f}`).join(" ");
   return asLinuxbrewScript(
     [
       "set -uo pipefail",
-      `shared=$(${BREW} deps --for-each ${formulae.map(shellQuote).join(" ")} | sed 's/^[^:]*: *//' | tr ' ' '\\n' | grep -vx -e '' ${keep} | sort | uniq -d || true)`,
+      sharedDepsLine(formulae),
       'if [ -z "$shared" ]; then echo "no shared dependencies"; exit 0; fi',
       'echo "shared: $(echo $shared)"',
       `${BREW} install $shared; rc=$?`,
@@ -793,6 +798,19 @@ function brewSharedDeps(formulae: readonly string[]): string {
     ].join("\n"),
   );
 }
+
+/** Whether the dependencies the shared step installs are already on the machine: the same list that step derives,
+ * read back by Homebrew's own list. A list with nothing in it is a step with nothing to do rather than a row that
+ * failed, and a formula of its own that did not install is that row's failure and not this one's. */
+const brewSharedCheck = (formulae: readonly string[]): string =>
+  asLinuxbrewScript(
+    [
+      "set -uo pipefail",
+      sharedDepsLine(formulae),
+      'if [ -z "$shared" ]; then exit 0; fi',
+      `${BREW} list --versions $shared >/dev/null`,
+    ].join("\n"),
+  );
 
 function homebrewBootstrap(): string {
   return [
@@ -1121,9 +1139,9 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     installs.push(...toolchain.steps);
     for (const t of brew.taps) installs.push({ id: `tools/brew-tap/${t}`, label: t, manager: "brew", cmd: withPath(asLinuxbrew(`tap ${t}`)), shown: `brew tap ${t}`, after: toolchain.last, check: brewTapCheck(t) });
     const formulae = [...brew.formulae, ...managerFormulae, ...catalogFormulae];
-    // The shared step's work is done once every formula it was built for is installed, since brew installs each
-    // one's dependencies with it: that is the check it reads as already done.
-    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewHasCheck(...formulae) });
+    // The check reads the dependencies this step installs, not the formulae they belong to: a formula whose own
+    // step failed is that row's failure, and this one did its work.
+    if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewSharedCheck(formulae) });
     for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, check: brewHasCheck(f), pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on

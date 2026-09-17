@@ -8,7 +8,7 @@
 // cellar lock into the next tool's turn.
 import { BREW_PREFIX, HOMEBREW, MIB, ROAD_MODULES, ROAD_STEPS, type RoadName } from "@wsp/catalog";
 import { fmtBytes, listedName, nameList, pinsReadLine, shellQuote, stepRetryLine, timedOutLine, type GoldenStage, type GoldenStep, type RecipeDigest, type ToolPin } from "@wsp/protocol";
-import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { INLINE_EXEC_MS, markersOf, pagedReads } from "./exec-detached.js";
 import { BREW_HOUSEKEEPING, TOOLS_PATH, type ToolInstall } from "./golden-import.js";
 import type { ExecResult, Machine } from "./machine.js";
 
@@ -130,20 +130,17 @@ async function readPins(machine: Machine, tools: readonly ToolInstall[], results
     if (row.result.road?.tag !== undefined) row.result.pin = { tag: row.result.road.tag, ...(row.result.road.sha256 !== undefined ? { sha256: row.result.road.sha256 } : {}), ...(row.pin.fixed ? {} : { latest: true as const }) };
   }
   const reads = rows.filter(row => row.result.pin === undefined && row.pin.read !== undefined);
-  if (reads.length > 0) {
-    const cmd = [`export PATH=${TOOLS_PATH}`, ...reads.map((row, i) => `printf '${VERSION_READ} %s %s\\n' ${i} "$( ( ${row.pin.read} ) 2>/dev/null | head -n 1 )"`)].join("\n");
-    const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
+  // Paged as the checks are: a version line on a manager's own store is as slow as any other read, and a page that
+  // could not be made costs its own rows their pin rather than every row's.
+  for (const { rows: page, res } of await pagedReads(machine, reads, (row, at) => `printf '${VERSION_READ} %s %s\\n' ${at} "$( ( ${row.pin.read} ) 2>/dev/null | head -n 1 )"`, `export PATH=${TOOLS_PATH}`)) {
     if (res.exitCode !== 0) {
-      stage(`the versions could not be read back (${reasonOf(res, INLINE_EXEC_MS / 1000)}): ${nameList(reads.map(r => r.result.label))} record no pin`);
-    } else {
-      const printed = new Map(res.stdout.split("\n").flatMap(line => {
-        const words = line.trim().split(" ");
-        return words[0] === VERSION_READ && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
-      }));
-      for (const [i, row] of reads.entries()) {
-        const pin = pinRead(printed.get(String(i)) ?? "", row.pin.fixed);
-        if (pin !== undefined) row.result.pin = pin;
-      }
+      stage(`the versions could not be read back (${reasonOf(res, INLINE_EXEC_MS / 1000)}): ${nameList(page.map(r => r.result.label))} record no pin`);
+      continue;
+    }
+    const printed = markersOf(res.stdout, VERSION_READ);
+    for (const [at, row] of page.entries()) {
+      const pin = pinRead(printed.get(String(at)) ?? "", row.pin.fixed);
+      if (pin !== undefined) row.result.pin = pin;
     }
   }
   const pinned = rows.filter(row => row.result.pin !== undefined);
@@ -338,38 +335,40 @@ async function verifyCommands(machine: Machine, tools: readonly ToolInstall[], r
  * trip each. */
 const CHECK_FAILED = "wsp-check";
 
-/** The installs that carry a check of their own, all read in one run on the tools PATH after the stage: a row whose
- * install exited 0 without leaving its tool on the machine is a failure, not an install, and so is every row when
- * the run itself could not be made, which is said in the stage detail rather than passing quietly. */
+/** The installs that carry a check of their own, read on the tools PATH after the stage, a page of reads to an
+ * exec: a row whose install exited 0 without leaving its tool on the machine is a failure, not an install, and so
+ * is every row of a page that could not be run at all, which is said in the stage detail rather than passing
+ * quietly. Paged because a check can be a `brew list` of about a second and a recipe can carry a dozen: one read
+ * of all of them reaches the inline bound and would fail every row on the machine, agents included. */
 async function verifyChecks(machine: Machine, tools: readonly ToolInstall[], results: readonly ToolResult[], stage: (detail: string) => void): Promise<void> {
   const checked = results.flatMap(r => {
     const check = r.outcome === "installed" ? tools.find(t => t.id === r.id)?.check : undefined;
     return check === undefined ? [] : [{ result: r, check }];
   });
   if (checked.length === 0) return;
-  const cmd = [
+  const pages = await pagedReads(
+    machine,
+    checked,
+    (c, at) => `if ! out="$( ( ${c.check} ) 2>&1 )"; then printf '${CHECK_FAILED} %s %s\\n' ${at} "$(printf '%s' "$out" | tail -1)"; fi`,
     `export PATH=${TOOLS_PATH}`,
-    ...checked.map((c, i) => `if ! out="$( ( ${c.check} ) 2>&1 )"; then printf '${CHECK_FAILED} %s %s\\n' ${i} "$(printf '%s' "$out" | tail -1)"; fi`),
-  ].join("\n");
-  const res = await machine.exec(cmd, { timeoutMs: INLINE_EXEC_MS });
-  if (res.exitCode !== 0) {
-    const why = reasonOf(res, INLINE_EXEC_MS / 1000);
-    stage(`the checks could not be run (${why}): ${nameList(checked.map(c => c.result.label))} count as failed`);
-    for (const c of checked) {
-      c.result.outcome = "failed";
-      c.result.note = `the check could not be run (${c.check}): ${why}`;
+  );
+  for (const { rows, res } of pages) {
+    if (res.exitCode !== 0) {
+      const why = reasonOf(res, INLINE_EXEC_MS / 1000);
+      stage(`the checks could not be run (${why}): ${nameList(rows.map(c => c.result.label))} count as failed`);
+      for (const c of rows) {
+        c.result.outcome = "failed";
+        c.result.note = `the check could not be run (${c.check}): ${why}`;
+      }
+      continue;
     }
-    return;
-  }
-  const failed = new Map(res.stdout.split("\n").flatMap(line => {
-    const words = line.trim().split(" ");
-    return words[0] === CHECK_FAILED && words[1] !== undefined ? [[words[1], words.slice(2).join(" ")] as const] : [];
-  }));
-  for (const [i, c] of checked.entries()) {
-    const why = failed.get(String(i));
-    if (why === undefined) continue;
-    c.result.outcome = "failed";
-    c.result.note = `the check did not pass (${c.check})${why === "" ? "" : `: ${why}`}`;
+    const failed = markersOf(res.stdout, CHECK_FAILED);
+    for (const [at, c] of rows.entries()) {
+      const why = failed.get(String(at));
+      if (why === undefined) continue;
+      c.result.outcome = "failed";
+      c.result.note = `the check did not pass (${c.check})${why === "" ? "" : `: ${why}`}`;
+    }
   }
 }
 

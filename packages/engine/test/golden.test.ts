@@ -8,9 +8,10 @@ import { BUILDER_DISK_GB } from "../src/tool-sizes.js";
 import { CURL_NET, GOLDEN_SETUP, MCP_SERVERS_JSON, NEVER_IN_IMAGE, NODE_RELEASES, ROAD_STEPS, nodeInstallScript } from "@wsp/catalog";
 import { credentialOnBuilderLine, shellQuote, type RecipeDigest } from "@wsp/protocol";
 import { NotFirstLifeError } from "../src/errors.js";
-import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, type ToolInstall } from "../src/golden-import.js";
+import { AGENT_INSTALLERS, HOMEBREW, NODE_PATH_LINE, TOOLS_PATH, type ToolInstall } from "../src/golden-import.js";
 import { INLINE_EXEC_MS } from "../src/exec-detached.js";
 import { MIB, USED_KB_CMD, installTools } from "../src/golden-tools.js";
+import { READS_PER_EXEC } from "../src/exec-detached.js";
 import { ALREADY_ON_MACHINE } from "../src/golden-base.js";
 import { goldenName } from "../src/snapshot-names.js";
 import type { ExecResult, Machine, MachineBackend, MachineShape, MachineSpec, SnapshotProgress, TemplateRow } from "../src/machine.js";
@@ -2656,6 +2657,80 @@ describe("the tools loop on a machine that is not a fresh builder", () => {
     { id: "agents/node", label: "Node 22.23.2", manager: "script", cmd: "install node" },
     { id: "agents/codex", label: "Codex", manager: "npm", cmd: "install codex", after: "agents/node", bin: "codex" },
   ];
+
+  it("reads the checks a page at a time, so a recipe with a dozen of them never asks one exec to run them all", async () => {
+    // A check can be a brew list of about a second, which is why the presence read is paged: one read of twenty
+    // of them reaches the inline bound, and a bound reached there used to fail every checked row on the machine.
+    const many: ToolInstall[] = Array.from({ length: 20 }, (_, i) => ({ id: `tools/brew/f${i}`, label: `f${i}`, manager: "brew", cmd: `install f${i}`, check: `brew list --versions f${i}` }));
+    const { machine, calls } = loopMachine();
+    const { tools } = await installTools(machine, many, () => {}, "installing-tools");
+    const reads = calls.filter(c => c.includes("wsp-check"));
+    // Twenty checks, eight to a page: three pages, and every page opens with the tools PATH.
+    expect(reads).toHaveLength(Math.ceil(many.length / READS_PER_EXEC));
+    for (const read of reads) expect(read.split("\n").filter(l => l.includes("wsp-check")).length).toBeLessThanOrEqual(READS_PER_EXEC);
+    // No exec carries the lot, which is what reached the bound and failed every checked row at once.
+    expect(reads.some(r => r.split("\n").filter(l => l.includes("wsp-check")).length === many.length)).toBe(false);
+    expect(reads.every(r => r.startsWith(`export PATH=${TOOLS_PATH}`))).toBe(true);
+    expect(tools.every(t => t.outcome === "installed")).toBe(true);
+  });
+
+  it("fails only the rows of a page it could not run, not every checked row on the machine", async () => {
+    const many: ToolInstall[] = Array.from({ length: 20 }, (_, i) => ({ id: `tools/brew/f${i}`, label: `f${i}`, manager: "brew", cmd: `install f${i}`, check: `brew list --versions f${i}` }));
+    let read = 0;
+    const calls: string[] = [];
+    const machine = {
+      id: "spoo",
+      kind: "sandbox",
+      // The second page of checks runs its deadline out, as a page of brew lists on a slow box would.
+      exec: async (cmd: string) => {
+        calls.push(cmd);
+        if (cmd === FREE) return { exitCode: 0, stdout: `${9_000_000}\n`, stderr: "" };
+        if (!cmd.includes("wsp-check")) return ok;
+        return ++read === 2 ? { exitCode: 124, stdout: "", stderr: "" } : ok;
+      },
+      run: async () => ok,
+    } as unknown as Machine;
+    const { tools } = await installTools(machine, many, () => {}, "installing-tools");
+    expect(calls.filter(c => c.includes("wsp-check"))).toHaveLength(Math.ceil(many.length / READS_PER_EXEC));
+    const failed = tools.filter(t => t.outcome === "failed");
+    // The eight rows that page carried, and no others: the rows on either side of it kept what they landed as.
+    expect(failed).toHaveLength(READS_PER_EXEC);
+    expect(failed.map(t => t.label)).toEqual(many.slice(8, 16).map(t => t.label));
+    for (const t of failed) expect(t.note).toContain("the check could not be run");
+    expect(tools.filter(t => t.outcome === "installed")).toHaveLength(many.length - READS_PER_EXEC);
+  });
+
+  it("keeps the shared Homebrew step as it landed when a formula of its own failed, since its check reads what it installs", async () => {
+    // The plan a recipe with two formulae gets: Homebrew, its toolchain, the shared step, then each formula. One
+    // formula's install fails; the dependencies the shared step put on are there, and that row did its work.
+    const plan = toolInstallsFor([
+      { rung: "tools", id: "tools/brew/gh", label: "gh", paths: [], bytes: 0, default: "bring", bring: true },
+      { rung: "tools", id: "tools/brew/yq", label: "yq", paths: [], bytes: 0, default: "bring", bring: true },
+    ]).installs;
+    const shared = plan.find(t => t.id === "tools/brew-shared")!;
+    // The check reads the dependencies, derived the way the install derives them, not the formulae themselves.
+    expect(shared.check).toContain("deps --for-each");
+    expect(shared.check).toContain("list --versions $shared");
+    const calls: string[] = [];
+    const machine = {
+      id: "spoo",
+      kind: "sandbox",
+      exec: async (cmd: string) => {
+        calls.push(cmd);
+        if (cmd === FREE) return { exitCode: 0, stdout: `${9_000_000}\n`, stderr: "" };
+        if (!cmd.includes("wsp-check")) return ok;
+        // gh is not installed, so its own check fails; every other check on the page passes.
+        const at = cmd.split("\n").findIndex(l => l.includes("list --versions gh"));
+        return at === -1 ? ok : { exitCode: 0, stdout: `wsp-check ${at - 1} Error: No available formula gh\n`, stderr: "" };
+      },
+      run: async (script: string) => (script.includes("install gh") ? { exitCode: 1, stdout: "", stderr: "Error: gh did not build" } : ok),
+    } as unknown as Machine;
+    const { tools } = await installTools(machine, plan, () => {});
+    const row = (id: string) => tools.find(t => t.id === id)!;
+    expect(row("tools/brew/gh").outcome).toBe("failed");
+    expect(row("tools/brew-shared").outcome).toBe("installed");
+    expect(row("tools/brew/yq").outcome).toBe("installed");
+  });
 
   it("pushes a step the caller already found on the machine as installed, runs nothing for it, and lets what waits on it run", async () => {
     const { machine, calls } = loopMachine();
