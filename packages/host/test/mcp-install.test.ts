@@ -13,6 +13,7 @@ import { HELP, JSON_COMMANDS, PROSE_COMMANDS, agentPage, cli, type CliIO } from 
 import { SECTION_BEGIN, sectionText } from "../src/agents-md.js";
 import { agentsOnPath, installEach, installLines, installMcp, mcpServerSpec, refreshSkills, removeLines, runningWsp, thisComputersPath, type RunningWsp } from "../src/mcp-install.js";
 import { shimPath } from "../src/shim.js";
+import { noHostServingLine } from "../src/verbs.js";
 import { SKILL_NAME, WSP_SKILL } from "../src/skill.js";
 import { VERSION } from "../src/version.js";
 
@@ -287,7 +288,7 @@ describe("installing the MCP server for a local agent", () => {
     // when it is handed nothing to start one with.
     const verbLine = io();
     expect(await cli(["--state", statePath, "threads"], verbLine, undefined, process.env, false)).toBe(1);
-    expect(verbLine.errors[0]).toContain(`no wsp host is serving ${statePath}`);
+    expect(verbLine.errors[0]).toContain(noHostServingLine(statePath));
     const nonsense = io();
     expect(await cli(["--state", statePath, "nope"], nonsense)).toBe(3);
     expect(nonsense.errors[0]).toContain("unknown command: nope");

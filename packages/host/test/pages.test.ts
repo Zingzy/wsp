@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EXIT_CODES } from "@wsp/protocol";
-import { agentPage, cli, COMMAND_LINES, devPage, HELP, hostPage, MCP_OPTIONS, SHARED_FLAGS, type CliIO } from "../src/cli.js";
+import { agentPage, cli, COMMAND_LINES, devPage, HELP, HOST_STARTS_ITSELF, hostPage, MCP_OPTIONS, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { WSP_SKILL, INSTRUCTIONS } from "../src/skill.js";
 import { CLI_VERBS, hasTool, THREAD_PREFIX_WORD, VERBS } from "../src/verbs.js";
 
@@ -42,7 +42,7 @@ describe("the pages wsp prints", () => {
     expect(COMMAND_LINES.filter(l => l.page === "front").map(l => l.words).sort()).toEqual([...FRONT].sort());
     // The three rules and the two pages behind it, which is what makes "nothing else" findable.
     expect(HELP).toContain("A workspace or a thread comes right after the verb.");
-    expect(HELP).toContain("new takes the project once");
+    expect(HELP).toContain("new takes the project when");
     expect(HELP).toContain("Sleeping is automatic.");
     expect(HELP).toContain("wsp --help agent");
     expect(HELP).toContain("wsp host --help");
@@ -54,11 +54,15 @@ describe("the pages wsp prints", () => {
     const block = HELP.split("\n\n").at(-1)!;
     expect(block).toContain("wsp up ");
     expect(block).toContain("wsp down ");
-    expect(HELP).toContain("any verb starts one when none does");
+    expect(HELP).toContain(HOST_STARTS_ITSELF);
     expect(HELP).not.toContain("and up and down");
-    // The page for agents still carries their flags, under a title that says who the lines on it are for.
+    // The page for agents still carries their flags, under a title that says who the lines on it are for, and the
+    // claim about a host starting itself is one sentence both pages read.
     expect(agentPage()).toContain("wsp up [--port");
     expect(agentPage()).toContain("the lines you type yourself");
+    expect(agentPage()).toContain(HOST_STARTS_ITSELF);
+    // And it is true of the two words a person types second: both are handed the run's starter.
+    expect(agentPage()).toContain("otherwise the host the command line brought up");
   });
 
   it("the agent page says a reply is printed once, not that stdout carries a second copy of it", () => {
@@ -74,13 +78,16 @@ describe("the pages wsp prints", () => {
     expect(THREAD_PREFIX_WORD).toBe("wsp thread read, wsp send and wsp stop take its first characters");
   });
 
-  it("the front page's init line says what init does in the person's words, with no sealing and no image in it", () => {
+  it("the front page's init line says what init does in the person's words, and none of the five words a tester could not read is on the page at all", () => {
     // Priya skipped wsp init outright: she did not know what sealing was, whether it was reversible, or what it
-    // would take from her machine, and "once" read as permanent.
+    // would take from her machine, and "once" read as permanent. The other four she named are words for what is
+    // under the product, not for what a person does with it, and the first page carries none of them.
     const init = frontLines().find(line => line.trim().startsWith("wsp init"))!;
     const row = HELP.split("\n").slice(HELP.split("\n").indexOf(init), HELP.split("\n").indexOf(init) + 2).join(" ");
     expect(row).toContain("set this computer up");
-    for (const word of ["seal", "image", "once"]) expect(row, word).not.toContain(word);
+    for (const word of ["seal", "once", "place", "recipe", "tick"]) expect(HELP, word).not.toContain(word);
+    // The one the front page does still need is the noun for a folder on a computer, which is a project.
+    expect(HELP).toContain("wsp projects");
   });
 
   it("the rules under the front page hold against the lines above them, and the page fits one screen", () => {

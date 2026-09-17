@@ -90,6 +90,7 @@ import {
   type ServiceRunner,
 } from "./service.js";
 import { dialHost, hostPlatform, sshAsked, table, type DialOpts, type HostClient } from "./verbs.js";
+import type { HostStarter } from "./host-start.js";
 import { writeEnvFile } from "./env-keys.js";
 
 /** What this computer is called when the person named no name: its own name lowercased, which is what they would
@@ -687,6 +688,18 @@ export interface PlaceOpts extends HostPick {
   /** The environment the provider is picked out of, carrying every registered row's key off the three layers a key
    * is read through: a provider added as a place is put the key this computer already holds under its own variable. */
   providerEnv?: ProviderEnv;
+  /** What brings a host up when none serves this state file here, as every verb is handed one: these two words are
+   * the host's work too, so a person who has not typed wsp up gets a host rather than a refusal. Absent starts
+   * nothing, which is what a caller that wants the refusal hands in. */
+  start?: HostStarter;
+}
+
+/** Where these words dial and what brings a host up if none does: the aim is always this computer (the two words
+ * are refused anywhere else), the starter is the line's own, and the one line a start prints goes where everything
+ * else this line says goes. Written once, so no road out of here can dial without offering to start the host the
+ * others start. */
+function dialHere(io: CliIO, opts: PlaceOpts, aim: HostAim): DialOpts {
+  return { aim, say: line => io.error(line), ...(opts.start !== undefined ? { start: opts.start } : {}) };
 }
 
 /** Handing out a join code and taking a place back out happen at the host's own terminal and nowhere else, the same
@@ -741,7 +754,7 @@ export async function addCommand(io: CliIO, opts: PlaceOpts, args: readonly stri
   }
   const lock = servingHost(opts.statePath);
   const address = lock?.address ?? LOOPBACK;
-  const client = await deps.dial(opts.statePath, { aim });
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
     const { code, expiresAt } = await client.request<{ code: string; expiresAt: number }>("pair.issue");
     const publicAt = publicHostname(opts.statePath);
@@ -796,7 +809,7 @@ export function updatedLines(answer: { name: string; from: number; to: number; r
  * is: the binary goes over the link that place is holding, or over the ssh road the install used when it holds
  * none, and the workspaces on it are kept either way. */
 async function updatePlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: string, deps: PlaceDeps): Promise<number> {
-  const client = await deps.dial(opts.statePath, { aim });
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
     const picked = await onePlace(client, placeUpdateLine(ref), ref);
     if ("refusal" in picked) {
@@ -828,7 +841,7 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
     io.error(ADD_FLAGS_REFUSAL);
     return 1;
   }
-  const client = await deps.dial(opts.statePath, { aim });
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
     // A folder of the person's seeding a project on a computer that clones: the menu first, and nothing is sent
     // until they have said what travels. A folder worked where it sits seeds nothing and reads no menu, which the
@@ -888,7 +901,7 @@ function choiceFrom(plan: SeedPlan, flags: AddFlags): SeedChoice {
  * work is the host's, over the socket this line opens, so what the app does and what this prints are one road; the
  * steps come back as events and each is printed as it lands. */
 async function addOverSsh(io: CliIO, opts: PlaceOpts, aim: HostAim, address: string, flags: AddFlags, deps: PlaceDeps): Promise<number> {
-  const client = await deps.dial(opts.statePath, { aim });
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   // Minted here rather than read off the reply: the steps come back while the install runs and the reply lands
   // only once it is over, so a line printed as it happens has to know which stream is this one's.
   const addId = `a_${randomBytes(6).toString("hex")}`;
@@ -967,7 +980,7 @@ async function signInOnPlace(io: CliIO, opts: PlaceOpts, aim: HostAim, ref: stri
     io.error(signInAgentRefusal(agent));
     return 1;
   }
-  const client = await deps.dial(opts.statePath, { aim });
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   try {
     const picked = await onePlace(client, `wsp add ${ref} --sign-in ${agent}`, ref);
     if ("refusal" in picked) {
@@ -1014,7 +1027,7 @@ export async function removeCommand(io: CliIO, opts: PlaceOpts, args: readonly s
   const [ref] = args;
   if (ref === undefined || args.length !== 1) throw usageRefusal("wsp remove takes one place.", "usage: wsp remove <place>");
   const aim = aimHere("remove", opts);
-  const client = await deps.dial(opts.statePath, { aim });
+  const client = await deps.dial(opts.statePath, dialHere(io, opts, aim));
   const typed = `wsp remove ${ref}`;
   try {
     const picked = await onePlace(client, typed, ref);

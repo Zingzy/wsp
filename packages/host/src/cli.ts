@@ -95,6 +95,12 @@ import { agentsOnPath, installEach, installLines, mcpServerCommand, mcpServerSpe
 import { CLI_VERBS, COMMON, COMMON_FLAG_WORDS, hostPlatform, NO_PROJECT_YET, type DialOpts, dialHost, failed, findVerb, HELP_WIDTH, helpPage, type HostClient, jsonAsked, type Page, runVerb, takeCommon, toolName, usageLines, verbUsage, type VerbDeps } from "./verbs.js";
 import { VERSION } from "./version.js";
 
+/** The one claim about the host a person reads twice, on the front page and on wsp up's own page: which is why up
+ * is for a host somebody wants to watch and not the switch that turns wsp on. Said once here, so the page and the
+ * line cannot promise different things; the words that need a host and start one are the verbs, wsp add and wsp
+ * remove, and wsp status and wsp down deliberately start none, which is why this says a line that needs one. */
+export const HOST_STARTS_ITSELF = "A line that needs a host starts one when none serves.";
+
 /** One line per exit class, the code first, wrapped to the help's width. */
 const exitCodeHelp = (): string => ExitClass.options.map(cls => wrap(`  ${EXIT_CODES[cls]} ${cls.padEnd(8)}  ${EXIT_WORDS[cls]}`, 80, " ".repeat(14)).join("\n")).join("\n");
 
@@ -130,12 +136,12 @@ usage: wsp <verb> ...
   wsp status                      whether a host serves, and where
   wsp mcp                         the verbs as tools for agents on this computer
 
-A workspace or a thread comes right after the verb. new takes the project once
+A workspace or a thread comes right after the verb. new takes the project when
 you have more than one; run and send take the agent's own flags, run --help
 lists them. wsp thread read <thread> prints what a thread said.
-Sleeping is automatic.
+Sleeping is automatic. ${HOST_STARTS_ITSELF}
 
-wsp up                 serve a host here; any verb starts one when none does
+wsp up                 serve a host in this terminal, to watch it
 wsp down               stop it
 wsp <verb> --help      the verb's own flags
 wsp --help agent       the verbs your agents use
@@ -619,6 +625,9 @@ export interface SharedOpts extends ServeAsked {
   /** The environment the caller runs in, as given: what reads WSP_HOST and the pair a turn's launch left, so a
    * command decides where a line is aimed from the run's own environment rather than this process's. */
   env: Readonly<Record<string, string | undefined>>;
+  /** What brings a host up when none serves this state file, as the verbs are handed one. Set by the run, not by
+   * the flags, and read only by the words whose work is the host's; absent leaves a line to read the refusal. */
+  start?: HostStarter;
 }
 
 /** The environment the caller runs in decides the home, the same reading the verbs take, so a run with its own
@@ -1313,10 +1322,14 @@ export interface ServiceDeps {
   signals?: WatchSignals;
 }
 
+/** Which line brought a host up, in the words every sentence about it uses: a person who typed wsp up reads their
+ * own line back, and a host a verb started for itself is nobody's line. */
+export const hostRoadWord = (started: HostStarted): string => (started === "up" ? "wsp up" : "a verb");
+
 /** What wsp down says for a host the command line brought up, whichever of its two roads did: the same shape the
- * service's own stop line takes, naming the road, since a person who typed wsp up reads their own line back. */
+ * service's own stop line takes, naming the road. */
 export const hostStoppedLine = (started: HostStarted, pid: number, statePath: string): string =>
-  `stopped the host ${started === "up" ? "wsp up" : "a verb"} started (pid ${pid}); nothing serves ${statePath} now`;
+  `stopped the host ${hostRoadWord(started)} started (pid ${pid}); nothing serves ${statePath} now`;
 
 export function systemService(): ServiceDeps {
   const os = platform();
@@ -1448,7 +1461,7 @@ export async function downCommand(io: CliIO, opts: { statePath: string }, deps: 
       deps.stop(serving.pid);
       const left = await untilLock(opts.statePath, false, deps.waitMs);
       if (left !== undefined) {
-        io.error(`wsp down: the host ${serving.startedBy === "up" ? "wsp up" : "a verb"} started (pid ${left.pid}) is still serving ${opts.statePath}.`);
+        io.error(`wsp down: the host ${hostRoadWord(serving.startedBy)} started (pid ${left.pid}) is still serving ${opts.statePath}.`);
         return 1;
       }
       io.log(hostStoppedLine(serving.startedBy, serving.pid, opts.statePath));
@@ -1629,6 +1642,13 @@ function aimPick(opts: SharedOpts, values: SharedFlags): { statePath: string } &
   return { statePath: opts.statePath, home: opts.home, env: opts.env, ...(values.host !== undefined ? { host: values.host } : {}) };
 }
 
+/** The same pick with the run's starter on it, for wsp add and wsp remove: both do their work through the host, as
+ * every verb does, so both start one when none serves and the front page's claim holds for them. wsp status reads
+ * whether a host serves and must never start one, and wsp down has nothing to start, so neither takes this. */
+function startingPick(opts: SharedOpts, values: SharedFlags): { statePath: string } & HostPick & { start?: HostStarter } {
+  return { ...aimPick(opts, values), ...(opts.start !== undefined ? { start: opts.start } : {}) };
+}
+
 /** The pair wsp up binds: the one asked for when both ports are free, the next free pair with the step said out
  * loud where nobody named the pair, and nothing where a port a person named is held, which is the whole run's
  * refusal. The sentences are the protocol's, the same three wsp init's road prints, and a held port never reaches
@@ -1656,7 +1676,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     page: "agent",
     usage: "wsp up [--port <n>] [--ws-port <n>] [--listen <addr>] [--advertise <url>] [--provider <name>] [--no-relay] [--service]",
-    about: "serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. Every other line starts a host for itself when none serves",
+    about: `serve the host in this terminal, for a host you want to watch or one that serves beyond this computer; --service hands the same line to this computer's own service manager, which starts it now and again at every login. ${HOST_STARTS_ITSELF}`,
     json: false,
     host: "refused",
     cliOnly: "starts the host on the person's computer; a tool runs against a host that is already up",
@@ -1673,7 +1693,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
   down: {
     page: "agent",
     usage: "wsp down",
-    about: "stop the host: the service and its unit where one holds it up, and the host a verb started otherwise",
+    about: "stop the host: the service and its unit where one holds it up, and otherwise the host the command line brought up, whether wsp up or a verb that needed one started it",
     json: false,
     host: "refused",
     cliOnly: "stops the service holding the host up on the person's computer, which a tool would be cutting the ground from under",
@@ -1813,7 +1833,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     host: "hostSide",
     cliOnly: "hands out a code that lets another computer join this wsp, or takes a provider's key into this person's own files; both belong with the terminal the host runs at",
     run: (io, opts, values, args) =>
-      addCommand(io, { ...aimPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values.on, values.base, values["sign-in"], {
+      addCommand(io, { ...startingPick(opts, values), providerEnv: opts.providerEnv }, args, addFlags(values.name, values["ssh-port"], values["ssh-key"], values.update, values.on, values.base, values["sign-in"], {
         ...(values.yes === true ? { yes: true } : {}),
         ...(values.keep !== undefined ? { keep: values.keep } : {}),
         ...(values.cut !== undefined ? { cut: values.cut } : {}),
@@ -1829,7 +1849,7 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     json: false,
     host: "hostSide",
     cliOnly: "takes a computer out of this wsp and sweeps wsp off it, which belongs with the terminal that joined it",
-    run: (io, opts, values, args) => removeCommand(io, aimPick(opts, values), args),
+    run: (io, opts, values, args) => removeCommand(io, startingPick(opts, values), args),
   },
   join: {
     page: "agent",
@@ -2291,7 +2311,7 @@ export async function cli(
     }
     return failed(io, values.json === true, usageRefusal(`wsp --help takes a page, and got ${word}.`, `The pages are ${HELP_PAGES.map(p => `wsp --help ${p}`).join(", ")} and wsp host --help.`));
   }
-  const opts = optsFor(values, env, line => io.error(line));
+  const opts = { ...optsFor(values, env, line => io.error(line)), ...starts };
   const found = findCommand(asked);
   const json = values.json === true;
   if (found === undefined) {
