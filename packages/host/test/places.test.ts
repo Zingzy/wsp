@@ -363,6 +363,22 @@ describe("the table wsp places prints", () => {
     expect(over[1]!.slice(over[0]!.indexOf("TOOLS")).trim()).toBe("1 tool ready");
   });
 
+  it("says nothing in the image column across the three states of the recipe, while the tools column beside it says what is happening", () => {
+    const job: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "2026-09-17T10:00:00.000Z", startedAt: "2026-09-17T10:01:00.000Z", rows: [], at: { label: "your agents' files", index: 36, of: 37 } };
+    const done: PlaceProvision = { ...job, state: "done", at: undefined, rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] };
+    const of = (place: PlaceView): { image: string; tools: string } => {
+      const printed = computerLines([place], "darwin");
+      const header = printed[0]!;
+      const line = printed[1]!;
+      return { image: line.slice(header.indexOf("IMAGE"), header.indexOf("TOOLS")).trim(), tools: line.slice(header.indexOf("TOOLS")).trim() };
+    };
+    // A computer that keeps no image says nothing in that column in any state of the job, and the refusal a fork
+    // there meets while the job runs is never one of them.
+    expect(of(rows[1]!)).toEqual({ image: "", tools: "" });
+    expect(of({ ...rows[1]!, provision: job })).toEqual({ image: "", tools: "setting up 36/37: your agents' files" });
+    expect(of({ ...rows[1]!, provision: done })).toEqual({ image: "", tools: "1 tool ready" });
+  });
+
   it("says how many forks a place holds of how many it takes, and nothing there for one that has not said yet", () => {
     const printed = placeLines([
       { ...rows[1]!, forks: { running: 1, room: 2 } },

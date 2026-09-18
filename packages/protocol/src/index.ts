@@ -2472,6 +2472,9 @@ export const PlaceStageEvent = z.object({
   step: PlaceAddStep,
   state: z.enum(["running", "done", "failed"]),
   note: z.string().optional(),
+  /** The computer the step ran on, carried by the steps of a job on a computer this host already holds: a reader
+   * that acts on a step rather than printing it needs the row and not the stream it rode. */
+  placeId: z.string().optional(),
 });
 export type PlaceStageEvent = z.infer<typeof PlaceStageEvent>;
 
