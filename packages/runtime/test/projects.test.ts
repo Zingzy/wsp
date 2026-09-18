@@ -267,13 +267,14 @@ describe("a project recorded before a later build's fields", () => {
     const store = memoryStore();
     await store.put("projects", old.id, old);
     const backend = stubBackend();
-    // What the computer says about itself: it keeps the project checkouts and their memory on a disk of its own.
+    // What the computer says about itself: it keeps the project checkouts on a disk of its own and no image.
     (backend as { projects?: string }).projects = "/wsp/projects";
     backend.capabilities.images = false;
     const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(here()) });
     const [project] = await rt.projects.list();
-    // The road's own rule, not a guest path: the folder under that computer's projects directory.
-    expect(project?.memoryDir).toBe(`/wsp/projects/${old.id}/memory`);
+    // The road's own rule: the agent's own state home on that computer, which every workspace of it reads from
+    // the computer itself, so nothing of wsp's is mounted over that home.
+    expect(project?.memoryDir).toBe(`/root/.claude-cfg/projects/${project?.memoryKey}/memory`);
     // What a workspace of a project on such a computer mounts is proved in project-landing.test.ts, on a record
     // the add cloned a checkout for. A record with none, which is this one, is refused a workspace there instead,
     // since nothing clones one at a create any more.
