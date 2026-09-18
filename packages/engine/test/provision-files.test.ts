@@ -3,7 +3,7 @@
 // real shell over a real directory standing in for that computer's home: what
 // it is for is deciding whether a file there is theirs or wsp's own copy, and
 // only a shell reading the bytes decides that.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { placeProvisionPaths } from "@wsp/protocol";
@@ -263,6 +263,25 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     const third = await provisionFiles(machine, { home: root, lands, pack: async () => packed(tar("gsc")) });
     expect(third.rows.at(-1)!.outcome).toBe("installed");
     expect(read(root, ".claude-cfg/.claude.json")).toContain("gsc");
+  });
+
+  it("sweeps the markers the job's own log left in wsp's folder there, and keeps the files a person reads", async () => {
+    const { root, machine } = box();
+    const at = placeProvisionPaths(root);
+    mkdirSync(at.dir, { recursive: true });
+    for (const name of [at.log, `${at.log}.appended`, at.result, at.landed]) writeFileSync(name, "x\n");
+    // What two updates left on a box: one zero-byte marker per batch of log lines appended, 117 of them beside
+    // the log itself, swept by nothing.
+    for (const mark of ["afff817b8c5d9", "afe821d3a8a49"]) writeFileSync(`${at.log}.${mark}`, "");
+    await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
+    await closeAgentFiles(machine, root);
+    expect(
+      readdirSync(at.dir)
+        .filter(f => f.startsWith("log"))
+        .sort(),
+    ).toEqual(["log", "log.appended"]);
+    expect(existsSync(at.result)).toBe(true);
+    expect(existsSync(at.landed)).toBe(true);
   });
 
   it("puts what travels under wsp's own folder on that computer, never the folder every login there shares", async () => {

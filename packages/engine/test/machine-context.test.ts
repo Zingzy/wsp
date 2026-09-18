@@ -136,11 +136,12 @@ describe("the probe", () => {
     expect(probe.facts).toBeUndefined();
   });
 
-  it("asks the base floor's commands for their versions on the tools PATH", () => {
+  it("asks the base floor's commands for their versions on the tools PATH, keeping the first line that carries one", () => {
     const cmd = probeCommand();
-    expect(cmd).toContain('echo "VERSION uv: $(uv --version 2>/dev/null | head -n 1)"');
-    expect(cmd).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
-    expect(cmd).toContain('echo "VERSION unzip: $(unzip -v 2>/dev/null | head -n 1)"');
+    const first = String.raw`grep -m1 -E '[0-9]+\.[0-9]+'`;
+    expect(cmd).toContain(`echo "VERSION uv: $(uv --version 2>/dev/null | ${first})"`);
+    expect(cmd).toContain(`echo "VERSION python3: $(python3 --version 2>/dev/null | ${first})"`);
+    expect(cmd).toContain(`echo "VERSION unzip: $(unzip -v 2>/dev/null | ${first})"`);
     expect(cmd.split("\n").filter(l => l.startsWith("export PATH="))).toHaveLength(1);
   });
 });
