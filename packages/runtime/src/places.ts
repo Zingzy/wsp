@@ -437,8 +437,11 @@ export class PlaceForksNowhereError extends Error {}
 
 /** A computer that is not forked into while the recipe job on it runs, which is a state of that job and not a
  * fact about the computer: the sentence is the person's own either way, and the class is what tells the roads
- * that only wait for the job apart from the ones that report a refusal. */
-export class PlaceProvisioningError extends Error {}
+ * that only wait for the job apart from the ones that report a refusal. The kind rides the class, so every road
+ * that throws one answers the person in the class a create there has always been refused in. */
+export class PlaceProvisioningError extends Error {
+  readonly kind = "conflict";
+}
 
 /** What an install answers once the computer has dialled in: which stream of steps it was, the place it became,
  * the key its ssh answered with, and why the recipe job did not start where it did not. The place's own row
@@ -1330,10 +1333,9 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       // A computer whose recipe is still going on is not forked into while it runs: the workspace would come up
       // without the agent the job is putting there. The running workspaces on it are untouched, since they read
-      // backendOf and not this. The class keeps the conflict it has always been refused with, so a create during a
-      // job answers the person in the same class it did.
+      // backendOf and not this.
       const busy = provisioningNow(record);
-      if (busy !== undefined) throw Object.assign(new PlaceProvisioningError(busy), { kind: "conflict" });
+      if (busy !== undefined) throw new PlaceProvisioningError(busy);
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
       // The first fork on this computer is where the host learns what it forks with; every road after it reads the
