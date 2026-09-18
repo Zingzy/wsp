@@ -6,10 +6,11 @@
 // a tool.
 import { describe, expect, it } from "vitest";
 import { PNPM_HOME } from "@wsp/protocol";
-import { APT_BIN, BREW_PREFIX, CARGO_BIN, HOME_BIN, LOCAL_BIN, ROADS, ROAD_MODULES, roadModule, type InstallRoad } from "../src/index.js";
+import { APT_BIN, BREW_PREFIX, CARGO_BIN, FROM_A_READABLE_DIR, HOME_BIN, LOCAL_BIN, ROADS, ROAD_MODULES, asLinuxbrew, roadModule, type InstallRoad } from "../src/index.js";
 
 const present = (road: InstallRoad, bin = "x"): string | undefined => roadModule(road).present?.(road, bin);
 const bins = (road: InstallRoad): readonly string[] => roadModule(road).bins(road);
+const check = (road: InstallRoad, bin = "x"): string | undefined => roadModule(road).check?.(road, bin);
 
 describe("a road's own presence read", () => {
   it("is the prefix's link for a core formula and the link or the command for a tap formula, and no other road has one", () => {
@@ -21,6 +22,16 @@ describe("a road's own presence read", () => {
     // Every other road puts its own command on PATH under the name the row carries, so the command is the read and
     // the step's own check is what runs after an install.
     for (const road of ROADS.filter(r => r !== "brew")) expect(ROAD_MODULES[road].present, road).toBeUndefined();
+  });
+});
+
+describe("a road's own check", () => {
+  it("is Homebrew's own list for a formula, on the one linuxbrew line, and no other road has one", () => {
+    // The read after an install, which runs brew and so cannot be answered inside a workspace; a row read by a
+    // command written beside it reads whatever that command said on the day it was written.
+    expect(check({ road: "brew", formula: "bat" })).toBe(asLinuxbrew("list --versions bat"));
+    expect(check({ road: "brew", formula: "bat" })).toContain(FROM_A_READABLE_DIR);
+    for (const road of ROADS.filter(r => r !== "brew")) expect(ROAD_MODULES[road].check, road).toBeUndefined();
   });
 });
 

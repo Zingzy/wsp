@@ -36,6 +36,11 @@ export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
    * reading is not the command it puts on PATH: Homebrew's prefix keeps a link per formula it installed, and a
    * command of that name is another road's work. Absent leaves the step's own check and its command as the read. */
   present?(road: R, bin: string): string;
+  /** One shell line that exits 0 once the road's argument is on the machine, asked of the road itself, for a road
+   * whose own word on that is worth more than a line written beside the row: Homebrew's own list, which runs brew
+   * and so is the read after an install, never the presence read a workspace answers (that is `present`). Absent
+   * leaves the step the check whoever wrote the row gave it. */
+  check?(road: R, bin: string): string;
   /** The one line a person reads while the install runs, for a road whose install line is not that: the brew line
    * without its su, where a release comes from. Absent, the install line is its own. */
   shown?(road: R, bin: string): string;
@@ -165,12 +170,18 @@ const formulaPresent = (formula: string): string => {
   return formula.includes("/") ? `${linked} || command -v ${shellQuote(short)} >/dev/null 2>&1` : linked;
 };
 
+/** Whether Homebrew already holds every formula named, as its own list answers it: the check a brew step reads as
+ * already done. `brew list --versions a b` exits non-zero as soon as one of them is not installed, and on a
+ * computer with no Homebrew at all the su itself fails, which reads the same way. */
+export const brewHasCheck = (...formulae: readonly string[]): string => asLinuxbrew(`list --versions ${formulae.join(" ")}`);
+
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
   // A formula lands in the prefix; a tap formula with no Linux bottle takes the road to /usr/local/bin.
   roots: [BREW_PREFIX, "/usr/local/bin"],
   bins: () => [`${BREW_PREFIX}/bin`, `${BREW_PREFIX}/sbin`, LOCAL_BIN],
   present: r => formulaPresent(r.formula),
+  check: r => brewHasCheck(r.formula),
   after: HOMEBREW_STEP,
   fromRow: r => ({ road: "brew", formula: r.name }),
   shown: r => `brew install ${r.formula}`,
@@ -410,12 +421,18 @@ export const ROAD_MODULES: { readonly [K in RoadName]: RoadModule<Road<K>> } = {
   script,
 };
 
+/** The reader a manager's own module has for a tools row filed under that manager's id, or nothing where it has
+ * none. Every caller that turns such a row into a road goes through this one, so the plan of a row the collector
+ * filed and the plan of a row an agent added read the same road. */
+export const rowRoadReader = (manager: string): ((row: ToolRow) => InstallRoad) | undefined =>
+  (ROADS as readonly string[]).includes(manager) ? ROAD_MODULES[manager as RoadName].fromRow : undefined;
+
 /** Whether the build can read a package's install road off a tools row a manager filed under its own id, the same
  * question `rowRoad` answers with the reader itself. Every language manager can. apt cannot: it is on every
  * machine and brings no row of its own, so a row it filed can neither install the package nor stand in for the
  * catalog row of a tool the catalog carries, whose own road installs that one. The collector and the recipe verb
  * read this before filing or ticking such a row. */
-export const readsRowRoad = (manager: string): boolean => (ROADS as readonly string[]).includes(manager) && ROAD_MODULES[manager as RoadName].fromRow !== undefined;
+export const readsRowRoad = (manager: string): boolean => rowRoadReader(manager) !== undefined;
 
 /** What a road's step gets from the guard that runs it. */
 export interface RoadStep {

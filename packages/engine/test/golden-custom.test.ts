@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { APT_INDEX, BREW_ENV, BREW_REAL, LINUXBREW_SHIM } from "@wsp/catalog";
+import { APT_INDEX, BREW_ENV, BREW_PREFIX, BREW_REAL, FROM_A_READABLE_DIR, LINUXBREW_SHIM, brewHasCheck } from "@wsp/catalog";
 import type { RecipeCustomRow } from "@wsp/protocol";
 import { CUSTOM_PREFIX, CUSTOM_PRELUDE, customInstallsFor, recipeDigest, recipeHash, toolInstallsFor, type RecipeEntry } from "../src/golden-import.js";
 import { diffRecipes } from "../src/golden-diff.js";
@@ -130,6 +130,61 @@ describe("the plan's rows outside the catalog", () => {
 
   it("has no plan at all when the recipe carries none", () => {
     expect(toolInstallsFor([], new Map()).installs.filter(t => t.id.startsWith(CUSTOM_PREFIX))).toEqual([]);
+  });
+});
+
+describe("how a row outside the catalog is read back off a machine", () => {
+  /** The form the scan wrote beside a formula row on the day it ran: Homebrew's own list, without the line that
+   * leaves a directory linuxbrew cannot read, so it refuses from the working directory the job runs in. A recipe
+   * carries this string unchanged for as long as the row lives, which is why the row cannot be read by it. */
+  const frozenCheck = (formula: string): string =>
+    `su -s /bin/bash linuxbrew -c 'HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1 HOMEBREW_NO_ENV_HINTS=1 NONINTERACTIVE=1 /home/linuxbrew/.linuxbrew/bin/brew list --versions '\\''${formula}'\\'''`;
+  const formulaRow = (formula: string): RecipeCustomRow => ({ kind: "custom", id: `brew/${formula}`, name: formula, install: [`brew install ${formula}`], check: frozenCheck(formula), manager: "brew", why: "installed on this computer by brew" });
+
+  it("is its road's two reads for a row whose manager the catalog knows: the prefix's link, and Homebrew's own list as the check", () => {
+    const [step] = customInstallsFor([formulaRow("bat")]);
+    expect(step!.present).toBe(`test -e ${BREW_PREFIX}/opt/bat`);
+    expect(step!.check).toBe(brewHasCheck("bat"));
+    // The presence read runs no brew at all, which is what lets a workspace answer it.
+    expect(step!.present).not.toContain("list --versions");
+    expect(step!.present).not.toContain("su -s");
+    // The check does run brew, through the one line that leaves a directory linuxbrew cannot read.
+    expect(step!.check).toContain(FROM_A_READABLE_DIR);
+  });
+
+  it("is never the check the recipe froze into the row, where the catalog knows the row's manager", () => {
+    const frozen = formulaRow("bat");
+    const [step] = customInstallsFor([frozen]);
+    expect([step!.check, step!.present, step!.cmd, step!.shown]).not.toContain(frozen.check);
+    // What the frozen string is missing, and the road's own check is not.
+    expect(frozen.check).not.toContain(FROM_A_READABLE_DIR);
+    expect(step!.check).toContain(FROM_A_READABLE_DIR);
+  });
+
+  it("is the row's own check where the catalog reads no road for its manager, since nothing else can read the row", () => {
+    const byHand = customInstallsFor([just])[0]!;
+    expect(byHand.check).toBe("command -v just");
+    expect(byHand).not.toHaveProperty("present");
+    const mise: RecipeCustomRow = { ...ruff, id: "mise/ruff", manager: "mise", check: "mise which ruff" };
+    expect(customInstallsFor([mise])[0]!.check).toBe("mise which ruff");
+    // apt is a road the catalog has and reads no row of its own, since every machine carries apt already.
+    const apt: RecipeCustomRow = { kind: "custom", id: "apt/direnv", name: "direnv", install: ["apt-get install -y -qq direnv"], check: "dpkg -s 'direnv'", manager: "apt", why: "installed on this computer by apt" };
+    expect(customInstallsFor([apt])[0]!.check).toBe("dpkg -s 'direnv'");
+  });
+
+  it("reads a formula the same way whether the recipe carried the row or the tools rung did", () => {
+    const fromRung = toolInstallsFor([row({ id: "tools/brew/bat" })], new Map()).installs.find(t => t.id === "tools/brew/bat")!;
+    const fromRecipe = toolInstallsFor([], new Map(), [formulaRow("bat")]).installs.at(-1)!;
+    expect(fromRecipe.id).toBe(`${CUSTOM_PREFIX}brew/bat`);
+    expect([fromRecipe.present, fromRecipe.check, fromRecipe.bins]).toEqual([fromRung.present, fromRung.check, fromRung.bins]);
+  });
+
+  it("reads every formula row a recipe carries by its own link, whatever each row froze", () => {
+    const formulae = ["bat", "beads", "btop", "dust", "eza"];
+    const plan = toolInstallsFor([], new Map(), formulae.map(formulaRow));
+    const rows = plan.installs.filter(t => t.id.startsWith(`${CUSTOM_PREFIX}brew/`));
+    expect(rows.map(t => [t.present, t.check])).toEqual(formulae.map(f => [`test -e ${BREW_PREFIX}/opt/${f}`, brewHasCheck(f)]));
+    for (const t of plan.installs) if (t.check?.includes("brew list") === true) expect(t.check, t.id).toContain(FROM_A_READABLE_DIR);
   });
 });
 

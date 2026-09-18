@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { BREW_ID_PREFIX, MCP_ID_PREFIX, packageOf, PNPM_HOME, shellLine, shellQuote, TOOLS_PATH, toolRowId, toolRowPrefix, type LoginChoice, type RecipeCustomRow, type RecipeDigest } from "@wsp/protocol";
 import { APT, PRELUDE } from "./dotfiles-presets.js";
-import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
+import { APT_ENV, APT_INDEX, APT_UPDATE, asLinuxbrew, asLinuxbrewScript, BASE_FLOOR, BASE_IMAGE_COMMANDS, baseEntryFor, BREW, BREW_ENV, BREW_PREFIX, BREW_REAL, BREW_REPO, brewHasCheck, LINUXBREW_HOME, MAC_BIN_DIRS, MAC_BREW, MAC_ONLY, CATALOG_AGENTS, CATALOG_TOOLS, catalogEntry, catalogToolFor, GUEST_HOME, loginSignIn, mintsToken, HOMEBREW, HOMEBREW_STEP, fixesVersion, installAfter, installLine, LINUXBREW_SHIM, NODE_PATH_LINE, NODE_RELEASES, nodeInstallScript, ROAD_MODULES, roadModule, ROADS, rowRoadReader, smokeOf, standingPin, unpinned, UV_INSTALL, versionOf, type AgentEntry, type InstallRoad, type NodeMajor, type RoadName, type ToolEntry, type ToolPin } from "@wsp/catalog";
 
 export { CLAUDE_KEY_FILE, HOMEBREW, NODE_PATH_LINE, NODE_RELEASES, UV, UV_INSTALL, nodeInstallScript, type NodeMajor, type NodeRelease, type ToolPin } from "@wsp/catalog";
 export { packageOf } from "@wsp/protocol";
@@ -693,6 +693,14 @@ export function roadReads(road: InstallRoad, bin: string): { present?: string; b
   return { ...(present !== undefined ? { present } : {}), ...(bins.length > 0 ? { bins } : {}) };
 }
 
+/** What a step reads off its road: `roadReads`, and the road's own check where the road has one of its own. Read
+ * by the steps whose reads are the road's word and nothing else, a formula the plan installs and a row outside the
+ * catalog whose manager names a road, so both answer the same questions however the row reached the plan. */
+export function roadStepReads(road: InstallRoad, bin: string): { present?: string; bins?: readonly string[]; check?: string } {
+  const check = roadModule(road).check?.(road, bin);
+  return { ...roadReads(road, bin), ...(check !== undefined ? { check } : {}) };
+}
+
 /** The pin read a road gives a step: its module's version line on the command it puts on PATH, whether it fixes one, and its words. */
 export function pinReadOf(road: InstallRoad, bin: string): PinRead {
   const mod = roadModule(road);
@@ -992,7 +1000,7 @@ export function rowRoad(e: RecipeEntry, brew: BrewTable): PlannedRow | undefined
   // The manager the row's id names, and the road its own module reads off such a row; a manager whose module reads
   // none (apt, which every machine has already and no row of its own brings) leaves the row to the hand that added it.
   const manager = ROADS.find(m => e.id.startsWith(toolRowPrefix(m)));
-  const fromRow = manager === undefined ? undefined : ROAD_MODULES[manager].fromRow;
+  const fromRow = manager === undefined ? undefined : rowRoadReader(manager);
   if (fromRow === undefined) return undefined;
   const road = fromRow({ name: pkg, ...(e.version !== undefined ? { version: e.version } : {}), paths: e.paths, label: e.label });
   const bin = roadModule(road).bin?.(road);
@@ -1033,17 +1041,29 @@ export const CUSTOM_PREFIX = "tools/custom/";
  * which the shim on that PATH carries through to brew. */
 export const CUSTOM_PRELUDE = [PATH_LINE, APT_ENV, `export ${BREW_ENV}`].join("\n");
 
+/** The road a row outside the catalog installs by, read off the manager it names by that manager's own module;
+ * nothing for a row that names no manager, or one whose module reads no row of its own (apt, on every machine
+ * already). The row carries a name and nothing else a road reads. */
+const customRoad = (c: RecipeCustomRow): InstallRoad | undefined => (c.manager === undefined ? undefined : rowRoadReader(c.manager)?.({ name: c.name, paths: [], label: c.name }));
+
 /** The rows outside the catalog as installs, in the order the recipe carries them; each runs its own lines as given.
- * `after` is what the plan brings the row's manager by, when the row names one and the plan brings it. */
+ * A row whose manager names a road takes its reads off that road's module, the road's presence read and the road's
+ * own check, the same two a catalog row of that road gets: the check the scan wrote beside the row is a command
+ * frozen on the day it ran, and a recipe carries it unchanged for as long as the row lives. The row's own check
+ * stands where no module reads the row. `after` is what the plan brings the row's manager by, when the row names
+ * one and the plan brings it. */
 export function customInstallsFor(custom: readonly RecipeCustomRow[], after: (c: RecipeCustomRow) => string | undefined = () => undefined): ToolInstall[] {
   return custom.map(c => {
     const waits = after(c);
+    const road = customRoad(c);
+    const reads = road === undefined ? undefined : roadStepReads(road, c.name);
     return {
       id: `${CUSTOM_PREFIX}${c.id}`,
       label: c.name,
       manager: "script" as const,
       cmd: [CUSTOM_PRELUDE, ...c.install].join("\n"),
-      check: c.check,
+      ...reads,
+      check: reads?.check ?? c.check,
       shown: shownOf(c.install),
       ...(waits !== undefined ? { after: waits } : {}),
     };
@@ -1066,11 +1086,6 @@ export function viaRoad(road: InstallRoad, bin: string): { cmd: string; shown: s
 export function aptIndexStep(id: string, cmd: string): ToolInstall {
   return { id, label: "apt index", manager: "apt", cmd, shown: "apt-get update" };
 }
-
-/** Whether Homebrew already holds every formula named, as its own list answers it: the check a brew step reads as
- * already done. `brew list --versions a b` exits non-zero as soon as one of them is not installed, and on a
- * computer with no Homebrew at all the su itself fails, which reads the same way. */
-export const brewHasCheck = (...formulae: readonly string[]): string => asLinuxbrew(`list --versions ${formulae.join(" ")}`);
 
 /** Whether a tap is already tapped, off the list Homebrew prints of them. */
 export const brewTapCheck = (tap: string): string => `${asLinuxbrew("tap")} 2>/dev/null | grep -qx ${shellQuote(tap)}`;
@@ -1166,7 +1181,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     // The check reads the dependencies this step installs, not the formulae they belong to: a formula whose own
     // step failed is that row's failure, and this one did its work.
     if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewSharedCheck(formulae) });
-    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), ...roadReads({ road: "brew", formula: f }, f), after: toolchain.last, check: brewHasCheck(f), pin: pinReadOf({ road: "brew", formula: f }, f) });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), ...roadStepReads({ road: "brew", formula: f }, f), after: toolchain.last, pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on
   // it, the manager's step otherwise; a floor row is there already.
