@@ -33,7 +33,7 @@ const Fact = ({ k, line }: { k: string; line: string }) => (
   </span>
 );
 
-export function ImageSection() {
+export function ImageSection({ title = IMAGE_WORDS.title }: { /** The zone label over the section: the cloud this image is built at while that is the road a workspace there is made on. */ title?: string }) {
   const api = useStore(s => s.api);
   const [view, setView] = useState<SealedImageView | null>(null);
   // One door on those screens, and the host's own flag is it: a job that stops for a sign-in asks for them from
@@ -63,7 +63,7 @@ export function ImageSection() {
     </Button>
   );
   return (
-    <Section id="settings-image" title={IMAGE_WORDS.title}>
+    <Section id="settings-image" title={title}>
       {/* Until the host has answered there is no fact to say: the row stands with its label and its button, and
           `not built yet` is drawn only once the read has come back holding no record. */}
       <Row id="settings-image-row" label={IMAGE_WORDS.image} {...(view === null ? {} : { fact: <Fact k="image-facts" line={image === null ? IMAGE_WORDS.notBuilt : imageFacts(image)} /> })}>

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The theme rule: which side each preference draws, the html element following
-// the record without a reload, the system value following the computer's own
-// scheme, and the desktop shell told the value so its frame follows.
+// The theme rule: which side each value draws, the html element following the
+// computer's own scheme without a reload, and the desktop shell told that value
+// so its frame follows. No screen picks a side, so a side left in the record
+// from before is not read: the rule under test is the computer's scheme alone.
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES } from "@wsp/protocol";
@@ -35,7 +36,7 @@ describe("the theme", () => {
     expect(isDark()).toBe(true);
   });
 
-  it("the html element follows the record as it changes, and the computer's scheme under system, with no reload", () => {
+  it("the html element follows the computer's own scheme as it changes, with no reload, and no record can pin a side", () => {
     let systemDark = false;
     const listeners = new Set<() => void>();
     vi.spyOn(window, "matchMedia").mockImplementation(query => {
@@ -49,39 +50,39 @@ describe("the theme", () => {
       for (const fn of listeners) fn();
     });
     expect(isDark()).toBe(true);
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "light" } }));
-    expect(isDark()).toBe(false);
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "dark" } }));
+    // A side left in the record from before is not drawn: nothing in the app can undo one, so nothing reads it.
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light" } }));
     expect(isDark()).toBe(true);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
+    expect(isDark()).toBe(true);
+    act(() => {
+      systemDark = false;
+      for (const fn of listeners) fn();
+    });
+    expect(isDark()).toBe(false);
   });
 
-  it("a load paints the theme this browser last applied before the host answers, and the record wins the moment it arrives", async () => {
-    // A fresh boot: the store and the theme rule read again with the cache in place, the html on the stylesheet's dark default.
-    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "light", labs: true }));
+  it("a load keeps the side and the width this browser last held, and nothing the page no longer picks", async () => {
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "light", sidebarWidth: 312 }));
     vi.resetModules();
     const { useStore: bootStore } = await import("../src/protocol/store.js");
-    const { useThemeEffect: bootEffect } = await import("../src/settings/theme.js");
-    expect(bootStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, labs: true, theme: "light" });
-    expect(isDark()).toBe(true);
-    renderHook(() => bootEffect());
-    expect(isDark()).toBe(false);
-    // The host's record says dark: it paints and the cache follows it, never the other way round.
-    act(() => bootStore.getState().applyEvent({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "dark" } }));
-    expect(isDark()).toBe(true);
-    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "dark", sidebarMode: "list", labs: true });
+    expect(bootStore.getState().preferences).toEqual({ ...DEFAULT_PREFERENCES, theme: "light", sidebarWidth: 312 });
+    act(() => bootStore.getState().applyEvent({ type: "preferences.changed", preferences: { ...DEFAULT_PREFERENCES, theme: "dark" } }));
+    // The sidebar's body and the labs flag are off what this browser keeps: neither is drawn and neither is read.
+    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "dark" });
     window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "sepia" }));
     vi.resetModules();
     const { useStore: cleanStore } = await import("../src/protocol/store.js");
     expect(cleanStore.getState().preferences).toEqual(DEFAULT_PREFERENCES);
   });
 
-  it("the desktop shell hears each value, so the window's frame draws the same side", () => {
+  it("the desktop shell hears the one value, so the window's frame draws the same side as the page", () => {
     const setTheme = vi.fn();
     window.wsp = { setTheme };
     renderHook(() => useThemeEffect());
     expect(setTheme).toHaveBeenLastCalledWith("system");
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, theme: "light" } }));
-    expect(setTheme).toHaveBeenLastCalledWith("light");
-    expect(setTheme).toHaveBeenCalledTimes(2);
+    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, theme: "light" } }));
+    // One value, whatever the record says: the shell and the page cannot draw two sides.
+    expect(setTheme).toHaveBeenLastCalledWith("system");
   });
 });

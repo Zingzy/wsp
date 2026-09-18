@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The words the settings page and its palette row say, one place, keyed by the
 // preference value where a value has words of its own.
-import { CLOUD_SETUP_WORDS, PLACE_CONNECTS, fmtPx, type PlaceDialRoad, type TerminalSizeSource, type ThemePreference } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, fmtPx, type PlaceDialRoad, type PlaceProvisionRow, type TerminalSizeSource } from "@wsp/protocol";
 
 /** The caps mono label over a section, and the muted mono a fact wears in a row's slot. Two class strings the page,
  * the table and the sheet all draw with, so one type ladder holds across the three files. */
@@ -16,10 +16,8 @@ export const TWO_LINE_SLOT = "min-h-[2lh] line-clamp-2";
 
 export const SETTINGS_WORDS = {
   title: "Settings",
-  hint: "Theme, sidebar and terminal",
+  hint: "Computers, agents and the terminal",
   appearance: "Appearance",
-  theme: "Theme",
-  sidebar: "Sidebar",
   sidebarWidth: "Sidebar width",
   reset: "Reset",
   terminal: "Terminal",
@@ -28,10 +26,22 @@ export const SETTINGS_WORDS = {
   version: "Version",
 } as const;
 
-/** What the Where agents run section says beyond the words the wire already carries in PLACES_WORDS: the row's
- * detail, its menu and the Remove dialog, which are this build's and are drawn nowhere else. No word is in both. */
+/** What the Computers section says beyond the words the wire already carries in PLACES_WORDS: the row's detail,
+ * its agents block, its menu and the Remove dialog, which are this build's and are drawn nowhere else. No word is
+ * in both. */
 export const WHERE_WORDS = {
   more: "More",
+  /** How a workspace's copy of a project is made on that computer, and the sentence for one that makes none. */
+  copies: "Copies",
+  copiesNothing: "copies nothing",
+  /** What a copy there has for a network, in the protocol's own words off the flags the landing carries. */
+  ports: "Ports",
+  /** Puts this wsp's daemon on that computer and runs the recipe there again. One word in both states, held and
+   * dimmed while it runs: a label that changed to Updating moved the button's own width. */
+  update: "Update",
+  /** Why a cell of the table holds no figure on a cloud account's row: the size and the disk are the workspace's
+   * there, asked for one at a time, so the account has neither of its own. */
+  noFactOfACloud: "A cloud account has no size and no disk of its own: every workspace there is asked for with one.",
   default: "default",
   setDefault: "Set as default",
   rename: "Rename",
@@ -62,76 +72,23 @@ export const WHERE_WORDS = {
   cannotDial: "This wsp cannot dial a computer from here.",
 } as const;
 
-/** What Add a computer says beyond PLACES_WORDS.sheet: the two roads, every line the ssh road says, and the one
- * description the sheet has that the wire's table does not, for a computer that can run copies of the image. */
+/** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the
+ * joined screen says. One road, so no word here names one. */
 export const ADD_COMPUTER_WORDS = {
-  cancel: "Cancel",
-  app: {
-    road: "Runs the wsp app",
-    /** The words beside the esc keycap; PLACES_WORDS.sheet.escStays carries the keycap in its own string. */
-    escCloses: "closes, the code stays good",
-  },
-  ssh: {
-    road: "Linux box over ssh",
-    description: `The app logs in over ssh as your terminal would, installs wsp on the box, and the box ${PLACE_CONNECTS}.`,
-    login: "Login",
-    loginPlaceholder: "user@host",
-    port: "Port",
-    portWord: "port",
-    portPlaceholder: "22",
-    addon: "ssh",
-    note: "Your ssh agent and config are used as they stand. Nothing is asked for a key unless ssh refuses.",
-    add: "Add",
-    adds: "adds",
-    loginFirst: "type the login first",
-    /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
-    noRoad: "this wsp cannot log in over ssh yet",
-    /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
-     * slot's two lines: a third line moves the note under them. There is no file picker on this road: the host
-     * reads the ssh agent and config as they stand, so the key a box wants is named where every other ssh client
-     * reads it. */
-    refusedFix: "Check the user and the address, or name a key in your ssh config.",
-    running: "closing keeps it going",
-    named: "Named after its hostname. Rename it from its row.",
-  },
+  login: "ssh login",
+  loginPlaceholder: "root@host",
+  add: "Add",
+  adds: "adds",
+  loginFirst: "type the login first",
+  /** Why Add is held on a wsp whose host cannot log in over ssh yet. */
+  noRoad: "this wsp cannot log in over ssh yet",
+  /** What to do about a login ssh would not take, short enough that what ssh said and this together stand on the
+   * slot's two lines: a third line moves what is under them. There is no file picker on this road: the host reads
+   * the ssh agent and config as they stand, so the key a box wants is named where every other ssh client reads it. */
+  refusedFix: "Check the user and the address, or name a key in your ssh config.",
+  running: "closing keeps it going",
+  named: "Named after its hostname. Rename it from its row.",
   runsWorkspaces: "It runs your workspaces. Your image is built there the first time a workspace is created on it.",
-} as const;
-
-/** Connect a provider: the pick, the key and what the provider said. */
-export const CONNECT_PROVIDER_WORDS = {
-  title: "Connect a provider",
-  description: "A provider runs workspaces from your image on its computers and bills by the hour while they run. ASCII starts with a free trial.",
-  prices: "Prices are read from the provider for a 2 vCPU, 4 GB workspace. Your key stays on this Mac.",
-  cancel: "Cancel",
-  continueWord: "Continue",
-  back: "Back",
-  save: "Save",
-  saves: "saves",
-  tryAgain: "Try again",
-  /** What the keycap says while the provider is being asked about the key: the one loud button on the sheet keeps
-   * its variant and says what it is doing, since a press that answers in its own time is not a held one. */
-  checking: (name: string): string => `Checking with ${name}`,
-  /** Why the keycap is held, which stands in the field's own slot until a key is typed. */
-  pasteFirst: "paste the key first",
-  key: "API key",
-  keyTitle: (name: string): string => `Connect ${name}`,
-  keyDescription: (name: string): string => `Paste an API key from your ${name} account. It is checked with ${name} before it is saved.`,
-  where: (name: string): string => `Get one at ${name}`,
-  refused: (name: string, said: string): string => `${name} refused this key (${said}).`,
-  refusedFix: (name: string): string => `Paste one from your ${name} account, or make a new one there.`,
-  unreached: (name: string): string => `${name} could not be reached to check the key.`,
-  unreachedFix: "Check the network and try again.",
-  /** The already connected state, opened again on a provider whose key this computer holds. */
-  savedWord: "saved",
-  change: "Change",
-  dots: "\u2022".repeat(12),
-  sizes: { size: "Size", memory: "Memory", rate: "Rate" },
-  connectedTitle: (name: string): string => `${name} connected`,
-  connectedDescription: (name: string): string => `Workspaces can be created on ${name}. Your image is built there the first time, about three minutes.`,
-  savedHere: "saved on this Mac \u00b7 never sent anywhere else",
-  accepted: "key accepted",
-  newWorkspace: (name: string): string => `New workspace on ${name}`,
-  close: "Close",
 } as const;
 
 /** Both halves on the about row: the shell holding the page and the host that served it, which are one release run
@@ -141,9 +98,6 @@ export function versionFact(app: string | undefined, host: string | undefined, i
   const hostPart = `host ${host ?? "unknown"}`;
   return inShell ? `app ${app ?? "unknown"} · ${hostPart}` : hostPart;
 }
-
-/** Each theme as its segment names it. */
-export const THEME_WORDS: Record<ThemePreference, string> = { system: "System", light: "Light", dark: "Dark" };
 
 /** Each size source as its segment names it. */
 export const TERMINAL_SIZE_WORDS: Record<TerminalSizeSource, string> = {
@@ -175,15 +129,31 @@ export const ACCOUNT_WORDS = {
   noDevices: "none",
 } as const;
 
-/** Settings > Agents: one row per agent this computer has, saying whether its config names the wsp tools, and the
- * one row that stands in its place when it has none. */
+/** The agents block under a computer's own row: one line per agent that computer has, the word for what stands
+ * there, the sign-in that has no road from here, and the line for a computer that reported none. */
 export const AGENTS_WORDS = {
   title: "Agents",
+  /** An agent a joined computer reported on itself before any recipe ran there. */
+  found: "found",
+  signIn: "Sign in",
+  /** Why that sign-in is held: nothing on the wire runs one on a computer from here, so the line names the
+   * command that does, built from the row's own two names. */
+  signInHeld: (computer: string, agent: string): string => `Sign in from a terminal for now: wsp add ${computer} --sign-in ${agent}`,
   /** An agent whose own config already names the wsp tools. */
   added: "wsp tools added",
   add: "Add the wsp tools",
   /** An agent wsp cannot hand the tools to at launch: its state, and no action beside it. The picker on the init
    * screens says the same of the same agent, so the word has one home. */
   noTools: CLOUD_SETUP_WORDS.choice.noTools,
-  none: "No agents found on this Mac.",
+  /** The line under a computer that reported no agent at all, whichever computer it is. */
+  noneOn: (computer: string): string => `No agents found on ${computer}.`,
 } as const;
+
+/** What one row of the recipe on a computer came to, in the words the terminal's own lines say it in. The note a
+ * row carries follows the word where it says why, which is a row that failed or was set aside. */
+export const PROVISION_OUTCOME_WORDS: Record<PlaceProvisionRow["outcome"], string> = {
+  installed: "installed",
+  present: "already there",
+  failed: "failed",
+  skipped: "set aside",
+};

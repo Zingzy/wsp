@@ -922,10 +922,11 @@ describe("where a workspace runs", () => {
     await waitFor(() => expect(fact("where")).toBe("hetzner · a computer you joined"));
   });
 
-  it("says the provider a fork was made at, and says this computer is this computer", async () => {
+  it("says the cloud a fork was made at, and says this computer is this computer", async () => {
     useStore.setState({ places: [HERE_PLACE, HETZNER, ASCII] });
     await mount([view("ws_a", "api")]);
-    expect(fact("where")).toBe("ASCII · a provider");
+    // The row's kind word, which the computers table's own rows read too: a cloud account, not a provider.
+    expect(fact("where")).toBe("ASCII · cloud");
     cleanup();
 
     const mac: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };

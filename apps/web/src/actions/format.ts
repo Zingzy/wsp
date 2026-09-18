@@ -4,7 +4,7 @@
 // sentence for why it cannot run right now. Every surface reads these, so a
 // menu, a palette row and a button never say two things about one action.
 import { agentName } from "@wsp/catalog";
-import { actionRefusal, FORGET_NEEDS_GONE, goneRefusal, goneRoadRefusal, isBilling, keepsRename, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type SidebarMode, type WorkspaceState } from "@wsp/protocol";
+import { actionRefusal, FORGET_NEEDS_GONE, goneRefusal, goneRoadRefusal, isBilling, keepsRename, threadForgetRefusal, type HarnessCatalog, type SessionRenameOutcome, type WorkspaceState } from "@wsp/protocol";
 import { MAX_TERMINALS_PER_GROUP } from "../terminal/groups.js";
 
 export const WORKSPACE_WORDS = {
@@ -25,13 +25,6 @@ export const WORKSPACE_WORDS = {
   forget: "Forget workspace",
   startDaemon: "Start the daemon",
 } as const;
-
-/** The sidebar's two bodies, keyed by mode: the body's name as the settings page lists it, the toggle's words as the
- * palette and the Workspaces section menu name a pick that moves to it, and the sentence under both for what it shows. */
-export const SIDEBAR_MODE_WORDS: Record<SidebarMode, { readonly name: string; readonly title: string; readonly hint: string }> = {
-  spaces: { name: "Spaces", title: "Show Spaces", hint: "One workspace at a time, with an icon per workspace at the bottom" },
-  list: { name: "List", title: "Show the workspace list", hint: "Every workspace and its threads" },
-};
 
 /** What the creation log and the sidebar's creation row say before the runtime's first stage line lands; one
  * sentence in one place, since both surfaces stand in for the same silence. */

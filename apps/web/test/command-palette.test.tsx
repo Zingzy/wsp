@@ -17,6 +17,7 @@ import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
 import { cancelWorkspaceSwitch, stepInOrder } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
+import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
 import { caps } from "./caps.js";
@@ -272,17 +273,18 @@ describe("command palette", () => {
     expect(useStore.getState().addComputerOpen).toBe(true);
   });
 
-  it("carries Connect a provider beside it, and reaches it by what it costs rather than the word provider", async () => {
+  it("carries Add a project, which opens the sheet the sidebar's own row opens, and no cloud to connect", async () => {
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
-    expect(inPalette().getByText(PLACES_WORDS.connectProvider)).toBeTruthy();
-    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "cost" } });
+    // The provider noun has left the app: there is no row for it and nothing about it to find.
+    expect(inPalette().queryByText(PLACES_WORDS.connectProvider)).toBeNull();
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "provider" } });
     await waitFor(() => expect(inPalette().queryByText(PLACES_WORDS.addComputer)).toBeNull());
-    fireEvent.click(inPalette().getByText(PLACES_WORDS.connectProvider));
+    fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "" } });
+    fireEvent.click(inPalette().getByText(PROJECT_WORDS.add));
     await waitFor(() => expect(palette()).toBeNull());
-    expect(useStore.getState().settingsOpen).toBe(true);
-    expect(useStore.getState().connectProviderOpen).toBe(true);
+    await waitFor(() => expect(document.querySelector("[data-k='add-project']")).not.toBeNull());
   });
 
   it("filters by query and switches workspace from a row", async () => {
@@ -308,7 +310,8 @@ describe("command palette", () => {
 
 
   it("the Settings row and its chord open the settings page, whose row names the chord; a workspace row closes it again", async () => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
+    // No flag over the page: the row stands for everybody.
+    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
@@ -856,13 +859,15 @@ describe("typing contexts", () => {
     }
   });
 
-  it("with labs off the palette offers no Settings row and no Spaces row", async () => {
+  it("holds the rows of the four nouns with no flag over any of them, and no Spaces row among them", async () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: false } });
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     const titles = Array.from(palette()!.querySelectorAll("[data-slot=command-item] span")).map(el => el.textContent ?? "");
-    expect(titles.some(t => t === "Settings" || /Spaces/.test(t))).toBe(false);
-    expect(titles.length).toBeGreaterThan(0);
+    for (const said of [NEW_WORKSPACE, PROJECT_WORDS.add, PLACES_WORDS.addComputer, "Settings", "Toggle right panel"]) {
+      expect(titles).toContain(said);
+    }
+    expect(titles.some(t => /Spaces/.test(t) || t === PLACES_WORDS.connectProvider)).toBe(false);
   });
 });
