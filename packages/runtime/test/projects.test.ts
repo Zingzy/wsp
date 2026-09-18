@@ -267,17 +267,19 @@ describe("a project recorded before a later build's fields", () => {
     const store = memoryStore();
     await store.put("projects", old.id, old);
     const backend = stubBackend();
-    // What the computer says about itself: it keeps the project checkouts and their memory on a disk of its own.
+    // What the computer says about itself: it keeps the project checkouts on a disk of its own and no image.
     (backend as { projects?: string }).projects = "/wsp/projects";
     backend.capabilities.images = false;
     const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(here()) });
     const [project] = await rt.projects.list();
-    // The road's own rule, not a guest path: the folder under that computer's projects directory.
-    expect(project?.memoryDir).toBe(`/wsp/projects/${old.id}/memory`);
-    // And it is exactly what a workspace of the project mounts, which is the whole point of filling it.
+    // The road's own rule: the agent's own state home on that computer, which every workspace of it reads from
+    // the computer itself.
+    expect(project?.memoryDir).toBe(`/root/.claude-cfg/projects/${project?.memoryKey}/memory`);
+    // So a workspace of the project mounts nothing for it, and no mount point of a workspace's is made on the
+    // computer's own home.
     const ws = await rt.workspaces.create({ project: old.id, name: "work" });
     const spec = backend.machines.find(m => m.id === ws.machineId)?.spec;
-    expect(spec?.binds).toEqual([{ source: project?.memoryDir, target: `/root/.claude-cfg/projects/${project?.memoryKey}/memory` }]);
+    expect(spec?.binds).toBeUndefined();
   });
 
   it("keeps every field a record already carries, and reads a folder here against this computer's own store", async () => {

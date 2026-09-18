@@ -121,6 +121,53 @@ describe("the script that clones and seeds a project on a computer", () => {
     expect(existsSync(join(checkout, ".wsp-seed"))).toBe(false);
   });
 
+  it("leaves the memory already standing at the agent's path alone, and says so on its own output", () => {
+    const { origin, folder, root } = originAndClone();
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const patch = git(folder, "format-patch", "--stdout", `${base}..HEAD`);
+    const checkout = join(root, "checkout");
+    // The memory the agent on that computer has kept for this project, which the seed must not write over.
+    const memoryDir = join(root, "state", "projects", "-root-spoo-landing", "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "MEMORY.md"), "- what the agent learned here\n");
+    const script = cloneScript({
+      source: projectSource("git"),
+      remote: origin,
+      checkout,
+      computer: "spoo",
+      seedTar: seedTar(root, { patch, memory: "- what the folder carried\n" }),
+      seed: { plan: plan({ source: folder, remote: origin, branch: "main", base, commits: 0 }), choice: { files: [".env.local"], memory: true, commits: false } },
+      memoryDir,
+    });
+    const said = execFileSync("sh", ["-c", script], { encoding: "utf8" });
+    // Byte for byte what the agent had, and the mark the landing reads to say the seed's memory was not landed.
+    expect(readFileSync(join(memoryDir, "MEMORY.md"), "utf8")).toBe("- what the agent learned here\n");
+    expect(said).toContain("wsp-memory-kept");
+    // And the rest of the seed landed as it always does: the ticked file, and wsp's own folder gone.
+    expect(readFileSync(join(checkout, ".env.local"), "utf8")).toBe("TOKEN=abc\n");
+    expect(existsSync(join(checkout, ".wsp-seed"))).toBe(false);
+  });
+
+  it("lands the seed's memory where nothing stands at all, making the folder above it", () => {
+    const { origin, folder, root } = originAndClone();
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const patch = git(folder, "format-patch", "--stdout", `${base}..HEAD`);
+    const checkout = join(root, "checkout");
+    const memoryDir = join(root, "state", "projects", "-root-spoo-landing", "memory");
+    const script = cloneScript({
+      source: projectSource("git"),
+      remote: origin,
+      checkout,
+      computer: "spoo",
+      seedTar: seedTar(root, { patch, memory: "- what the folder carried\n" }),
+      seed: { plan: plan({ source: folder, remote: origin, branch: "main", base, commits: 0 }), choice: { files: [".env.local"], memory: true, commits: false } },
+      memoryDir,
+    });
+    const said = execFileSync("sh", ["-c", script], { encoding: "utf8" });
+    expect(readFileSync(join(memoryDir, "MEMORY.md"), "utf8")).toBe("- what the folder carried\n");
+    expect(said).not.toContain("wsp-memory-kept");
+  });
+
   it("clones and seeds with no patch at all where the person kept none", () => {
     const { origin, folder, root } = originAndClone();
     const checkout = join(root, "checkout");

@@ -2034,6 +2034,60 @@ async fn a_create_whose_project_is_not_there_is_refused_by_name_and_leaves_nothi
     assert!(!Path::new(CGROUPS).join(&id).exists());
 }
 
+/// The computer's own directories are not a place for a workspace's mounts: a workspace whose copy lands at a
+/// path of its own leaves the box's home exactly as it found it, and a copy asking for a path under that home is
+/// refused before anything is made at it.
+#[tokio::test]
+async fn a_copy_at_a_path_of_the_workspaces_own_leaves_the_boxs_home_alone_and_one_under_it_is_refused() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let from = root().join("projects").join(format!("live-trees-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    let home = Path::new("/root");
+    let listing = |at: &Path| -> Vec<String> {
+        let mut names: Vec<String> =
+            fs::read_dir(at).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    };
+    let before = listing(home);
+    // A path of the workspace's own: its mount point is made under the rootfs the daemon holds, so the box's
+    // home never sees it.
+    let at = "/live-trees";
+    let id = w
+        .create(spec(json!({
+            "copy": { "from": from.display().to_string(), "at": at },
+            "idempotencyKey": format!("live-trees-{key}"),
+        })))
+        .await;
+    let (code, out, err) = w.exec(&id, &format!("cat {at}/README.md")).await;
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "the checkout\n", ""));
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert_eq!(listing(home), before, "a workspace's copy left something on the box's own home");
+
+    // And a copy under that home: one sentence, and no mount point of a workspace's made on the computer.
+    let under = "/root/live-trees";
+    let reply = w
+        .ask(
+            "machine.create",
+            json!({ "spec": spec(json!({
+                "copy": { "from": from.display().to_string(), "at": under },
+                "idempotencyKey": format!("live-trees-under-{key}"),
+            })) }),
+        )
+        .await;
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!(reply["error"], wsp_runtime::bundle::computer_tree_refusal(under, "/root"), "{reply}");
+    assert!(!Path::new(under).exists(), "the refused create made a folder on the box's own home");
+    assert_eq!(listing(home), before);
+    let _ = fs::remove_dir_all(&from);
+    w.close().await;
+}
+
 /// A throwaway volume of its own filesystem, made as a file and mounted on a loop device, so a box whose root
 /// shares no blocks can still be asked what it does when a disk shares them. Unmounted and removed when the case
 /// ends, a panic included.

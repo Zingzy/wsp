@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeLocal, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -183,17 +183,41 @@ describe("a folder seeding a project on a computer that clones", () => {
     expect((await rt.projects.add({ source: folder, on: "default", seed: TICKED })).notice).toBeUndefined();
   });
 
-  it("keeps the project's memory on the computer, and every workspace of it binds that folder read-write", async () => {
+  it("keeps the project's memory where the agent on that computer reads it, and no workspace of it mounts a thing for it", async () => {
     const folder = repo();
     const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
     answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
-    expect(project.memoryDir).toBe(`/wsp/projects/${project.id}/memory`);
     // The key is the folder's own here, so the memory the agent already kept for it is the memory it keeps.
     expect(project.memoryKey).toBe("-Users-dev-spoo-landing");
+    // The agent's own state home on the computer, which every workspace of it reads from the computer itself:
+    // nothing of wsp's is mounted over the computer's home, so no mount point of a workspace's is left on it.
+    expect(project.memoryDir).toBe(`/root/.claude-cfg/projects/${project.memoryKey}/memory`);
     const before = backend.machines.length;
     await rt.workspaces.create({ project: project.id, name: "work" });
-    expect(specs(backend)[before]?.binds).toEqual([{ source: project.memoryDir, target: `/root/.claude-cfg/projects/${project.memoryKey}/memory` }]);
+    expect(specs(backend)[before]?.binds).toBeUndefined();
+    // The seed's memory is moved where nothing stands, and nothing standing there is ever removed.
+    const ran = commands(backend);
+    expect(ran).toContain(`if [ -e '${project.memoryDir}' ]`);
+    expect(ran).not.toContain(`rm -rf '${project.memoryDir}'`);
+  });
+
+  it("leaves the memory the agent has kept on that computer alone, records that it did and says so", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    // The computer answers the clone with the mark the script prints where a memory folder already stands at
+    // the agent's path: what is there is the agent's own work for this project.
+    answering(backend, cmd => (cmd.includes("if [ -e ") ? { exitCode: 0, stdout: "wsp-memory-kept\n", stderr: "" } : undefined));
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    expect(project.seeded).toMatchObject({ memory: true, memoryKept: true });
+    expect(stages(events).map(e => e.message)).toContain(seedMemoryKeptLine("default"));
+    // And a computer with nothing there says nothing of the kind and records nothing of the kind.
+    const second = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
+    answering(second.backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const landed = await second.rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    expect(landed.seeded?.memoryKept).toBeUndefined();
   });
 
   it("leaves the checkout on the computer, and every workspace of the project takes its own copy of it", async () => {
@@ -237,9 +261,10 @@ describe("a computer that keeps no image of its own", () => {
     expect(specs(backend)[0]?.fromSnapshot).toBeUndefined();
     expect(commands(backend)).toContain(`git clone ${REMOTE}`);
     expect(project.installed).toMatchObject({ command: "npm ci" });
-    // The machine the work ran in is stopped, and the project keeps its memory on that computer.
+    // The machine the work ran in is stopped, and the project's memory sits where that computer's own agent
+    // reads it.
     expect(stopped(backend)).toBe(1);
-    expect(project.memoryDir).toBe(`/wsp/projects/${project.id}/memory`);
+    expect(project.memoryDir).toBe(`/root/.claude-cfg/projects/${project.memoryKey}/memory`);
   });
 });
 

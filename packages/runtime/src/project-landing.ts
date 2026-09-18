@@ -7,7 +7,7 @@
 // module and its row.
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
 import { INSTALL_MS, installScript, projectInstalls, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, shellQuote, type MachineBind, type ProjectAddStage, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { claudeMemoryDir, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedMemoryKeptLine, shellQuote, type MachineBind, type ProjectAddStage, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -95,6 +95,10 @@ export function cloneLines(o: { source: ProjectSourceModule; remote: string; che
   ];
 }
 
+/** What the memory step prints where the computer already keeps memory at the agent's path: read off the clone's
+ * own output, since the script is the only thing that sees what stands there. */
+const MEMORY_KEPT_MARK = "wsp-memory-kept";
+
 /** The clone with the seed on top of it, which is the add's own road. */
 export function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; seed?: { plan: SeedPlan; choice: SeedChoice }; memoryDir: string }): string {
   const at = shellQuote(o.checkout);
@@ -112,7 +116,12 @@ export function cloneScript(o: { source: ProjectSourceModule; remote: string; ch
     );
   }
   if (o.seed?.choice.memory === true && o.seed.plan.memory !== null) {
-    lines.push(`mkdir -p ${shellQuote(o.memoryDir.replace(/\/[^/]+$/, ""))}`, `rm -rf ${shellQuote(o.memoryDir)}`, `mv ${shellQuote(`${o.checkout}/${SEED_MEMORY_DIR}`)} ${shellQuote(o.memoryDir)}`);
+    // Nothing standing at that path is removed: on a computer that keeps the memory where its own agent reads
+    // it, what is there is the agent's own work for this project, and the seed's memory is not landed over it.
+    const memory = shellQuote(o.memoryDir);
+    lines.push(
+      `if [ -e ${memory} ]; then echo ${shellQuote(MEMORY_KEPT_MARK)}; else mkdir -p ${shellQuote(o.memoryDir.replace(/\/[^/]+$/, ""))} && mv ${shellQuote(`${o.checkout}/${SEED_MEMORY_DIR}`)} ${memory}; fi`,
+    );
   }
   if (o.seedTar !== undefined) lines.push(`rm -rf ${shellQuote(`${o.checkout}/${SEED_DIR}`)} ${shellQuote(o.seedTar)}`);
   return lines.join("\n");
@@ -138,6 +147,10 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
   if (o.seed !== undefined) report("seeding", `Landing ${o.seed.choice.files.length} file${o.seed.choice.files.length === 1 ? "" : "s"} from ${o.seed.plan.source}.`);
   const ran = await machine.exec(script, { timeoutMs: CLONE_MS });
   if (ran.exitCode !== 0) throw new Error(lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `the clone exited ${ran.exitCode}`);
+  // The memory that computer already kept for this project stayed, so the person is told rather than left to
+  // find the folder they seeded from is not what their agent reads there.
+  const memoryKept = ran.stdout.includes(MEMORY_KEPT_MARK);
+  if (memoryKept) report("seeding", seedMemoryKeptLine(o.computerName));
   const landed: Landed = {
     ...(o.seed === undefined
       ? {}
@@ -148,6 +161,7 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
             memory: o.seed.choice.memory && o.seed.plan.memory !== null,
             commits: o.seed.choice.commits && o.seed.plan.unpushed !== null ? o.seed.plan.unpushed.commits : 0,
             at: new Date(deps.now()).toISOString(),
+            ...(memoryKept ? { memoryKept: true } : {}),
           },
         }),
   };
@@ -176,26 +190,28 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
   };
 }
 
-/** A computer the person owns: its daemon holds the disk, so the checkout and the memory folder sit on that disk
- * beside each other under wsp's own folder for the project, and every workspace of the project binds the memory
- * folder read-write. The clone, the seed and the install run inside one short-lived workspace of that computer,
- * with that folder bound in, so the toolchain and the logins are the ones its workspaces run with and nothing of
- * wsp's is installed on the computer itself. */
+/** A computer the person owns: its daemon holds the disk, so the checkout sits on that disk under wsp's own folder
+ * for the project. The memory sits where the agent on that computer already reads it, in the agent's own state
+ * home under the computer's home, and no workspace binds it: that home is the computer's own inside every
+ * workspace of it, so the memory is already at the path each of them reads, and a mount point made under that
+ * home would be left on the computer once the workspace was gone. The clone, the seed and the install run inside
+ * one short-lived workspace of that computer, with wsp's folder for the project bound in, so the toolchain and
+ * the logins are the ones its workspaces run with and nothing of wsp's is installed on the computer itself. */
 const boxLanding: ProjectLanding = {
   kind: "box",
-  places({ project, deps }) {
-    const dir = projectDir(deps, project.id);
-    return { checkout: `${dir}/checkout`, memoryDir: `${dir}/memory` };
+  places({ project, memoryKey, deps }) {
+    return { checkout: `${projectDir(deps, project.id)}/checkout`, memoryDir: guestMemoryDir(memoryKey) };
   },
   async land(o, deps) {
     const dir = projectDir(deps, o.project.id);
     const checkout = `${dir}/checkout`;
-    // Two folders of the computer's own, bound into the machine that does the work: the project's own folder at
-    // its own path, so the memory the seed carries and the install's log land on the computer and stay there once
-    // the machine is gone; and the checkout at the path the project has inside every workspace of it, so the
-    // clone and the install run where the workspaces will read them. An install that writes an absolute path (a
-    // virtualenv's own shebangs, its pyvenv.cfg) then names the path the workspaces have rather than the folder
-    // the computer keeps the checkout in.
+    // Two folders of the computer's own, bound into the machine that does the work: wsp's own folder for the
+    // project at its own path, so the install's log lands on the computer and stays there once the machine is
+    // gone; and the checkout at the path the project has inside every workspace of it, so the clone and the
+    // install run where the workspaces will read them. An install that writes an absolute path (a virtualenv's
+    // own shebangs, its pyvenv.cfg) then names the path the workspaces have rather than the folder the computer
+    // keeps the checkout in. The memory needs no bind: the machine's home is the computer's own, so the seed's
+    // memory lands where the agent reads it on that computer.
     const binds = [
       { source: dir, target: dir },
       { source: checkout, target: o.project.path },
@@ -209,7 +225,7 @@ const boxLanding: ProjectLanding = {
       await machine.kill().catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
     }
   },
-  workspaceBinds: project => [{ source: project.memoryDir, target: guestMemoryDir(project.memoryKey) }],
+  workspaceBinds: () => [],
 };
 
 /** A provider: nothing of the project sits on a disk of this person's there, so the clone, the seed and the

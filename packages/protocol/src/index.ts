@@ -446,7 +446,18 @@ export const ProjectView = z.object({
    * computer keeps the project inside an image instead, and where the project is worked where it already sits. */
   checkout: z.string().optional(),
   /** What the seed carried, once, where the source was a folder on this computer. */
-  seeded: z.object({ files: z.number().int(), bytes: z.number().int(), memory: z.boolean(), commits: z.number().int(), at: z.string() }).optional(),
+  seeded: z
+    .object({
+      files: z.number().int(),
+      bytes: z.number().int(),
+      memory: z.boolean(),
+      commits: z.number().int(),
+      at: z.string(),
+      /** The seed carried memory and the computer already kept some at the agent's path, so what stands there
+       * was left alone and the seed's memory was not landed. */
+      memoryKept: z.boolean().optional(),
+    })
+    .optional(),
   /** What the install ran and how long it took, once; absent where no catalog row named an install for this repo. */
   installed: z.object({ row: z.string(), command: z.string(), at: z.string(), seconds: z.number() }).optional(),
   /** On a provider computer: the project image every workspace of this project forks from. */

@@ -105,6 +105,12 @@ export const gitOnThisMacRefusal = `${THIS_COMPUTER} takes a folder of yours and
 export const folderOnCopyRefusal = (computer: string): string =>
   `${computer} takes a repo it can clone, not a folder on this computer; give the repo's url, or add the folder here with no --on`;
 
+/** What the seeding says where the computer already keeps this project's memory at the path its agent reads:
+ * that memory is the agent's own work on that computer and stays, so the folder the seed carried is not landed
+ * over it. */
+export const seedMemoryKeptLine = (computer: string): string =>
+  `${computer} already keeps this project's memory where its agent reads it, so what the agent has kept there stays and the memory from your folder was not landed over it`;
+
 /** Why a project cannot be dropped yet, with the workspaces standing on it. */
 export const projectInUseRefusal = (name: string, workspaces: readonly string[]): string =>
   `${name} has ${workspaces.length === 1 ? "a workspace" : "workspaces"} standing on it: ${workspaces.join(", ")}; delete ${workspaces.length === 1 ? "it" : "them"} first`;

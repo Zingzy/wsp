@@ -674,6 +674,27 @@ pub fn inside(rootfs: &Path, at: &str) -> Result<PathBuf, Error> {
     Ok(rootfs.join(at.trim_start_matches('/')))
 }
 
+/// Which tree a rootfs takes from the computer itself this path is, or sits under: the person's own home, bound
+/// into every workspace at the same path, and every shared install root. A mount point under one of them is made
+/// through the computer's own directory and stays on it once the workspace is gone, which is why a copy or a bind
+/// asking for one is refused rather than made.
+///
+/// The roots are read from the list and not off the disk. Presence is read again at every boot, so a destination
+/// under a prefix this computer has no Homebrew at yet would be taken by the create and mounted through the
+/// prefix at the first wake after a recipe run installed it.
+pub fn under_computer_tree(at: &str) -> Option<&'static str> {
+    std::iter::once(BOX_ROOT)
+        .chain(wsp_frames::numbers::SHARED_TOOL_ROOTS)
+        .find(|tree| at == *tree || at.strip_prefix(*tree).is_some_and(|under| under.starts_with('/')))
+}
+
+/// What such a destination is refused with, wherever it is read: at the create and at every boot.
+pub fn computer_tree_refusal(at: &str, tree: &str) -> String {
+    format!(
+        "the computer's own directories are not a place for a workspace's mounts: {at} sits under {tree}, which every workspace here reads from the computer itself"
+    )
+}
+
 /// Every mount under this path taken down, deepest first, and then the path itself: a rootfs carries the
 /// overlay, the copy bound into it and whatever youki mounted under that, and a stop that detached only the
 /// rootfs would leave the rest of them on the box. Read off this process's own mount table, so nothing outside
@@ -954,6 +975,32 @@ mod tests {
         assert_eq!(tool_roots_present(&[]), Vec::<&str>::new());
         // And the roots this computer is asked about are the ones the wire names, whatever this computer has.
         assert_eq!(wsp_frames::numbers::SHARED_TOOL_ROOTS, [wsp_frames::numbers::HOMEBREW_HOME]);
+    }
+
+    /// Which destinations sit under a tree the rootfs takes from the computer, read off the list rather than off
+    /// this computer's disk: the prefix answers whether a Homebrew is installed at it or not, since a wake after
+    /// a recipe run installed one would find it there.
+    #[test]
+    fn a_destination_under_the_computers_own_home_or_a_tool_root_names_the_tree_it_is_under() {
+        let brew = wsp_frames::numbers::HOMEBREW_HOME;
+        assert_eq!(under_computer_tree("/root/x"), Some(BOX_ROOT));
+        assert_eq!(under_computer_tree(BOX_ROOT), Some(BOX_ROOT));
+        assert_eq!(under_computer_tree("/root/.claude-cfg/projects/k/memory"), Some(BOX_ROOT));
+        assert_eq!(under_computer_tree(&format!("{brew}/bin")), Some(brew));
+        assert_eq!(under_computer_tree(brew), Some(brew));
+        // Every path a workspace's own mounts land at: the projects folder, a copy at the checkout's own path,
+        // and the scratch a case writes in.
+        for taken in ["/private/tmp/repo", "/wsp/projects/p", "/var/tmp/x", "/Users/zingzy/wsp"] {
+            assert_eq!(under_computer_tree(taken), None, "{taken}");
+        }
+        // A name the tree's own name is a prefix of is not under it: the reading is by path component.
+        assert_eq!(under_computer_tree("/rootfs"), None);
+        assert_eq!(under_computer_tree(&format!("{brew}er")), None);
+        // One sentence, naming the destination and the tree it sits under.
+        assert_eq!(
+            computer_tree_refusal("/root/x", BOX_ROOT),
+            "the computer's own directories are not a place for a workspace's mounts: /root/x sits under /root, which every workspace here reads from the computer itself"
+        );
     }
 
     #[test]
