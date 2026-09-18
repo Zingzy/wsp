@@ -19,9 +19,11 @@
 //   first-run-refused    the runtime's own sentence in the slot under the button
 //   first-run-starting   Start held while the create runs
 //   first-run-no-agent   the line for a computer with no agent on it, Start held
+//   first-run-agents     six agents on this computer, which fill the line's two
+//                        lines and are cut at the second
 //   creating         the creation view with its stage log
 import { createRoot } from "react-dom/client";
-import { DEFAULT_PREFERENCES, type Capabilities, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
+import { CREATE_READY, DEFAULT_PREFERENCES, startingLine, type Capabilities, type InitAgent, type PlaceView, type ProjectView, type SessionView, type WorkspaceLanding, type WorkspaceView } from "@wsp/protocol";
 import { AppShell } from "../../src/shell/AppShell";
 import { FirstRun } from "../../src/shell/FirstRun";
 import { WorkspaceCreation } from "../../src/shell/WorkspaceCreation";
@@ -124,7 +126,10 @@ const SESSIONS: Record<string, SessionView[]> = {
   ws_fork: [thread("th_child", "ws_fork", "move the pricing table", { startedBy: "agent", parentThreadId: "th_lead" } as Partial<SessionView>)],
 };
 
-const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting", "first-run-no-agent"];
+/** Six agents on one computer, the list that fills the first run's line to both its lines and is cut there. */
+const MANY_AGENTS: InitAgent[] = ["Claude Code", "Codex", "Gemini CLI", "Cursor Agent", "Aider", "Amp"].map(name => ({ id: name.toLowerCase().replace(/ /g, "-"), name, configured: true, takesTools: true }));
+
+const firstRunScreens = ["first-run", "first-run-refused", "first-run-starting", "first-run-no-agent", "first-run-agents"];
 const drawsSidebar = !firstRunScreens.includes(screen) && screen !== "creating";
 
 const api = {
@@ -141,7 +146,7 @@ const api = {
   initGet: async () => ({
     keys: { solari: false },
     home: "/Users/dev",
-    agents: screen === "first-run-no-agent" ? [] : [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }],
+    agents: screen === "first-run-no-agent" ? [] : screen === "first-run-agents" ? MANY_AGENTS : [{ id: "claude", name: "Claude Code", configured: true, takesTools: true }],
     pricing: null,
     job: null,
   }),
@@ -169,6 +174,9 @@ useStore.setState({
 } as never);
 useStore.getState().bind(api);
 
+/** How the runtime names the computer the host runs on in a line of prose. */
+const THIS_COMPUTER_LOWER = "this Mac";
+
 /** The creation view's own log, as the stages arrive. */
 const creation = {
   key: "creating:1",
@@ -177,10 +185,12 @@ const creation = {
   project: SPOO.id,
   workspaceId: null,
   failed: null,
+  // The lines the runtime reports for a create on the computer the host runs on, in its own words rather than words
+  // written here: the fork itself, and the last line the word table ends a create with. A workspace that is the
+  // folder worked in place lands no project, so those two are the whole log.
   lines: [
-    { stage: "asked" as const, message: "Asked for a workspace on spoo.", at: AT, elapsedMs: 0 },
-    { stage: "copy" as const, message: "Copying the folder beside itself.", at: AT, elapsedMs: 1200 },
-    { stage: "ready" as const, message: "Workspace ready.", at: AT, elapsedMs: 2400 },
+    { stage: "fork-requested" as const, message: startingLine("add a LICENSE file", THIS_COMPUTER_LOWER), at: AT, elapsedMs: 0 },
+    { stage: "ready" as const, message: CREATE_READY, at: AT, elapsedMs: 900 },
   ],
 };
 
@@ -219,10 +229,17 @@ setTimeout(() => {
     typed("work", "add a README badge");
     setTimeout(() => document.querySelector<HTMLButtonElement>("[data-k=start]")?.click(), 60);
   }
-  if (screen === "first-run-no-agent") {
+  if (screen === "first-run-no-agent" || screen === "first-run-agents") {
     typed("folder", "/Users/dev/spoo");
     typed("work", "add a README badge");
   }
-  if (screen === "sidebar-fallback") document.querySelector<HTMLButtonElement>('[aria-label="Collapse webhook retries"]')?.click();
+  // At 390 the sidebar is a sheet that opens after this page does, so the collapse is tried until the row is there.
+  if (screen === "sidebar-fallback") {
+    const collapse = setInterval(() => {
+      const shut = document.querySelector<HTMLButtonElement>('[aria-label="Expand webhook retries"]');
+      if (shut !== null) return clearInterval(collapse);
+      document.querySelector<HTMLButtonElement>('[aria-label="Collapse webhook retries"]')?.click();
+    }, 250);
+  }
   if (screen === "dialog") requestNewWorkspace();
 }, 400);

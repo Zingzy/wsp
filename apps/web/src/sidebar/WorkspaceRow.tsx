@@ -19,7 +19,7 @@
 // a double-click on the name, so the row keeps its height and its grammar. The
 // words come from workspaceRows.ts and the actions from the workspace registry.
 import { ChevronDownIcon, PlayIcon, PlusIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
-import { kindWords, needsRebuild, workspaceKind, type Capabilities, type MemoryReading } from "@wsp/protocol";
+import { needsRebuild, workspaceKind, type Capabilities, type MemoryReading } from "@wsp/protocol";
 import { runAction } from "../actions/contextMenu.js";
 import { WORKSPACE_WORDS } from "../actions/format.js";
 import { actionById, rowLabelOf, type ResolvedAction } from "../actions/registry.js";
@@ -31,7 +31,7 @@ import { useAbsentComputer } from "../protocol/store.js";
 import { workspaceKindGlyph } from "../workspaceKindGlyph.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_LEAD_CLASS, ROW_MADE_OF_SLOT, ROW_META_CLASS, ROW_PROSE_CLASS, THREE_LINE_ROW_CLASS, rowLineCut, workspaceRowId } from "./rowGrammar.js";
-import { NEW_THREAD_TITLE, glyphStateClass, madeOfLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
+import { NEW_THREAD_TITLE, glyphStateClass, holdsStateWord, madeOfLine, metaSentences, stateSlotWord, workspaceMetaLine } from "./workspaceRows.js";
 
 /** The glyphs sit on line one inside the state slot, the inner one and the one at the row's inset; the kit's own place is the row's middle and edge. */
 const GLYPH_CLASS = "peer-data-[size=lg]/menu-button:top-1 right-2";
@@ -102,9 +102,9 @@ export function WorkspaceRow({
   const gone = project.state === "gone";
   const madeOf = madeOfLine({ project, landing, computer });
   const absent = useAbsentComputer(project.id, nowMs);
-  /** Whether this row's kind has a state word to show at all: a machine wsp drives has one, and so has a row whose
-   * computer is not answering, whatever its kind. Every other row keeps the glyphs' room and nothing more. */
-  const holdsState = kindWords(workspaceKind(project.workspace)).driven || absent !== null;
+  // Whether a word can stand in the slot, read where the word itself is decided: a row that holds one keeps the
+  // slot's width, and every other row keeps the glyphs' room and nothing more.
+  const holdsState = holdsStateWord(project, absent);
   const meta = workspaceMetaLine({ project, absent, outOfMemory });
   // The same slot carries the branch most of the time and a sentence when something needs reading.
   const metaIsProse = meta !== "" && metaSentences({ project, absent, outOfMemory }).includes(meta);

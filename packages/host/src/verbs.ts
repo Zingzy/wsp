@@ -845,9 +845,10 @@ export async function rebuild(client: HostClient, ref: string): Promise<Workspac
 }
 
 /** The state line every director prints after a rebuild, with the machine now under the workspace: the id changed,
- * so a caller that held the old one is told. */
-export function rebuiltLine(workspace: WorkspaceView, pauseMode?: PauseMode): string {
-  return `${stateLine(workspace, pauseMode)} on ${workspace.machineId}`;
+ * so a caller that held the old one is told. No pause mode rides: a machine forked a moment ago is running, and the
+ * mode only ever picks between the words for a machine that is not. */
+export function rebuiltLine(workspace: WorkspaceView): string {
+  return `${stateLine(workspace)} on ${workspace.machineId}`;
 }
 
 /** The image and its copies as this host serves them, parsed and not trusted, for every director that draws them. */

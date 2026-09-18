@@ -18,7 +18,7 @@ import { desktopBridge } from "../lib/desktopShell.js";
 import { cn, errorText } from "../lib/utils.js";
 import { useStore } from "../protocol/store.js";
 import { placeName } from "../settings/places.js";
-import { FACT } from "../settings/format.js";
+import { FACT, TWO_LINE_SLOT } from "../settings/format.js";
 import { carriesFiles, droppedFolder } from "../sidebar/folderDrag.js";
 import { FIELD_LABEL, LONE_FIELD } from "../sidebar/cloud-setup/rows.js";
 import { RefusalSlot } from "../settings/sheetParts.js";
@@ -147,8 +147,10 @@ export function FirstRun() {
         </span>
         {/* The agents line says what was found here, and its absence is the one thing that holds Start. Two lines
             of height from the first paint, filled to as many as the list takes and cut at the second: six agents
-            wrapped and pushed the button down as they arrived, and one line cut the list in half at 1280. */}
-        <span className={cn(FACT, "mt-1 min-h-8 line-clamp-2")} title={agents === null || noAgent ? undefined : agents.map(agent => agent.name).join(" · ")} data-k="agents">
+            wrapped and pushed the button down as they arrived, and one line cut the list in half at 1280. The slot
+            is the shared one, whose height is two of this line's own line heights: a height written as a figure was
+            half a pixel short of two lines and moved the title and the button by one between the two states. */}
+        <span className={cn(FACT, "mt-1", TWO_LINE_SLOT)} title={agents === null || noAgent ? undefined : agents.map(agent => agent.name).join(" · ")} data-k="agents">
           {agents === null ? "" : noAgent ? FIRST_RUN_WORDS.noAgent : agents.map(agent => agent.name).join(" · ")}
         </span>
         <div className="mt-6 flex items-center gap-3">

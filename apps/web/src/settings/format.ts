@@ -8,6 +8,12 @@ import { CLOUD_SETUP_WORDS, PLACE_CONNECTS, fmtPx, type PlaceDialRoad, type Term
 export const ZONE_LABEL = "font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground";
 export const FACT = "font-mono text-[11px] tabular-nums text-muted-foreground";
 
+/** A fact's slot where its words may take two lines: exactly two of the line's own line heights, held whether the
+ * words take one line or two, and cut at the second with the whole on the element's hover text. The height is read
+ * off the line itself (2lh) rather than written as a figure, so a slot and the text in it cannot disagree by the
+ * half pixel that moved the first run's button between one line and two. */
+export const TWO_LINE_SLOT = "min-h-[2lh] line-clamp-2";
+
 export const SETTINGS_WORDS = {
   title: "Settings",
   hint: "Theme, sidebar and terminal",

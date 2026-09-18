@@ -7,6 +7,7 @@
 // and the one id each row wears, which the keyboard traversal walks and the
 // name box is opened by.
 import { ROW_LINE_MAX, cutLine } from "@wsp/protocol";
+import { TWO_LINE_SLOT } from "../settings/format.js";
 
 export const TOP_ROW_CLASS = "px-2 transition-[background-color,color] duration-150";
 const ROW_META_GRAMMAR = "font-mono text-[11px] tabular-nums";
@@ -20,10 +21,10 @@ export const TWO_LINE_ROW_CLASS = "h-11 items-start py-1.5 text-left";
  * what a copy is and whose ports it has are the row's own, and cut to one line the ports half was the first thing
  * a 256 px sidebar dropped. Fixed, so every row has one shape and one height whatever its words. */
 export const THREE_LINE_ROW_CLASS = "h-20 items-start py-1.5 text-left";
-/** The made-of line's own slot: two lines of the meta grammar, held at that height whether the words take one or
- * two, and cut at the second with the whole on the row's hover text. The row's column is a truncating one for the
- * name's sake, so the wrap is turned back on here or the line would be cut at the first space past the edge. */
-export const ROW_MADE_OF_SLOT = "min-h-8 whitespace-normal line-clamp-2";
+/** The made-of line's own slot: the two-line slot every fact that may wrap wears, held at that height whether the
+ * words take one line or two. The row's column is a truncating one for the name's sake, so the wrap is turned back
+ * on here or the line would be cut at the first space past the edge. */
+export const ROW_MADE_OF_SLOT = `${TWO_LINE_SLOT} whitespace-normal`;
 export const ROW_LEAD_CLASS = "mt-0.5 flex size-3.5 shrink-0 items-center justify-center";
 
 /** The sidebar footer's own row: 28 px, muted mono, the whole width. Every row in the foot wears it, so the foot

@@ -105,13 +105,21 @@ export function daemonNote(project: Pick<SidebarProjectSnapshot, "status" | "wor
   return project.status !== null ? project.status.daemonNote : project.workspace.daemonNote;
 }
 
-/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise. A
- * machine wsp does not drive has no state of its own to name, since wsp neither pauses nor wakes it. The one
- * exception is the computer under it not answering, which is a state of that computer rather than of wsp's
- * handling of it: a slot that stayed blank there was the row that read nothing beside readings of unreachable. */
+/** Whether a word can ever stand in this row's state slot: a machine wsp drives has a state of its own to name,
+ * since wsp pauses and wakes it, and one wsp does not drive has none. The one exception is the computer under it
+ * not answering, which is a state of that computer rather than of wsp's handling of it: a slot that stayed blank
+ * there was the row that read nothing beside readings of unreachable. The row reads this to know how wide to keep
+ * the slot, and the word below reads it to know whether to write one, so a row cannot keep room for a word that
+ * never comes or cut a name short of one that does. */
+export function holdsStateWord(project: Pick<SidebarProjectSnapshot, "workspace">, absent?: AbsentComputer | null): boolean {
+  return absent != null || kindWords(workspaceKind(project.workspace)).driven;
+}
+
+/** The word in the row's state slot: nothing while running, since the dot says it; the state's word otherwise, and
+ * nothing at all in a slot no word can stand in. */
 export function stateSlotWord(project: Pick<SidebarProjectSnapshot, "state" | "indicator" | "workspace">, absent?: AbsentComputer | null): string {
+  if (!holdsStateWord(project, absent)) return "";
   if (absent != null) return absent.word;
-  if (!kindWords(workspaceKind(project.workspace)).driven) return "";
   return project.state === "running" ? "" : project.indicator.label;
 }
 

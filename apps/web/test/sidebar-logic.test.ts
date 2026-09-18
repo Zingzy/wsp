@@ -28,6 +28,7 @@ import {
   compactTimeLabel,
   metaSentences,
   glyphStateClass,
+  holdsStateWord,
   stateSlotWord,
   daemonGoneLine,
   whereWord,
@@ -175,6 +176,22 @@ describe("workspace row labels", () => {
     expect(slot("paused", "Paused", "paused")).toBe("Paused");
     expect(slot("gone", "Gone", "neutral")).toBe("Gone");
     expect(slot("waking", "Waking", "neutral", true)).toBe("Waking");
+  });
+
+  it("one rule says whether a word can stand in the slot at all, and the row's room and its word both read it", () => {
+    const slot = (view: Partial<WorkspaceView>) => ({ ...project({}, view), indicator: { label: "Paused", tone: "paused" as const, pulse: false }, state: "paused" as const });
+    const cloud = slot({ kind: "cloud" });
+    const local = slot({ kind: "local" });
+    const absent = { word: "No daemon", said: "this Mac's daemon is not running" } as Parameters<typeof stateSlotWord>[1];
+    // A machine wsp drives holds a word; the folder worked in place holds none, and the room the row keeps for one
+    // follows the same reading, so a row cannot keep width for a word that never comes.
+    expect(holdsStateWord(cloud)).toBe(true);
+    expect(stateSlotWord(cloud)).toBe("Paused");
+    expect(holdsStateWord(local)).toBe(false);
+    expect(stateSlotWord(local)).toBe("");
+    // Whatever its kind, a row whose computer is not answering holds that computer's own word.
+    expect(holdsStateWord(local, absent)).toBe(true);
+    expect(stateSlotWord(local, absent)).toBe("No daemon");
   });
 
   it("one rule maps a workspace's state to the row's kind glyph class: the success green while the machine runs, dimmed while it is paused, nothing for every other state", () => {
