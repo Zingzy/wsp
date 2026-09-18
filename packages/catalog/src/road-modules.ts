@@ -5,8 +5,8 @@
 // what it runs on top of, and how the install reads to a person. The stages
 // and the wizard ask a module through roadModule(); nothing outside this file
 // decides by a road's name. Every line is text: nothing here runs a command.
-import { shellQuote } from "@wsp/protocol";
-import { APT_ENV, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
+import { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX, PNPM_HOME, shellQuote } from "@wsp/protocol";
+import { APT_ENV, GUEST_HOME, ROADS, type InstallRoad, type PackageRoad, type RoadName, pinCheckLine, standingPin, versionOf } from "./roads.js";
 
 type Road<K extends RoadName> = Extract<InstallRoad, { road: K }>;
 
@@ -22,6 +22,11 @@ export interface ToolRow {
 export interface RoadModule<R extends { road: RoadName } = InstallRoad> {
   /** How an install by this road reads beside the tool's name: "by apt", "from its release". */
   words: string;
+  /** Every directory on the machine this road writes an install into. A workspace on a computer somebody owns is
+   * made of that computer's directories: it overlays the trees in the protocol's WORKSPACE_OVERLAID, binds /root,
+   * and reads nothing else of the computer unless it is a shared tool root. A road that installs anywhere else
+   * puts its tool on the computer and out of every workspace's sight, which is what the test below reads. */
+  roots: readonly string[];
   /** The one line a person reads while the install runs, for a road whose install line is not that: the brew line
    * without its su, where a release comes from. Absent, the install line is its own. */
   shown?(road: R, bin: string): string;
@@ -87,9 +92,11 @@ export const APT_UPDATE = `${APT_ENV}\napt-get update -qq`;
 /** Homebrew itself is a git checkout at a release tag whose commit is checked
  * before anything runs (https://docs.brew.sh/Homebrew-on-Linux#alternative-installation). */
 export const HOMEBREW = { tag: "6.0.21", commit: "560147012b9678b42ef5e83b690f0895552d1366" } as const;
-/** The user Homebrew runs as and the home useradd makes for it. */
-export const LINUXBREW_HOME = "/home/linuxbrew";
-export const BREW_PREFIX = `${LINUXBREW_HOME}/.linuxbrew`;
+/** The user Homebrew runs as and the home useradd makes for it, and the prefix under it. The protocol's, since a
+ * workspace on a computer somebody owns is made of that computer's directories and the daemon binds this prefix in
+ * for the tools installed here to answer inside: the road that installs them and the bundle that brings them in
+ * cannot name two directories. */
+export { HOMEBREW_HOME as LINUXBREW_HOME, HOMEBREW_PREFIX as BREW_PREFIX } from "@wsp/protocol";
 /** Homebrew's own checkout, where its Linux install puts it. */
 export const BREW_REPO = `${BREW_PREFIX}/Homebrew`;
 // Install-time cleanup stays on: with it off, one recipe left 2.6 GB of bottles in the download cache on a 20 GB disk.
@@ -123,8 +130,29 @@ export function asLinuxbrew(cmd: string): string {
  * update, and a caller that wants otherwise exports it, which su carries through. */
 export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\nexec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
 
+/** A formula's own short name, the part after the tap: the name Homebrew links it under in the prefix, and the
+ * name the road below installs the binary under where a tap formula has no Linux bottle. Not the command the
+ * formula puts on PATH, which is the formula's business and often another word (git-delta puts delta on PATH,
+ * gnupg puts gpg, c-ares puts adig and ahost); nothing a recipe carries names those. */
+export const formulaShortName = (formula: string): string => formula.slice(formula.lastIndexOf("/") + 1);
+
+/** Whether a formula is on a machine, as one shell test a workspace can answer, and neither half runs brew, which
+ * cannot run inside a workspace at all: the prefix keeps an `opt/<short name>` link per formula it installed,
+ * whatever binaries that formula puts on PATH, and that link alone is the answer for a core formula. A tap formula
+ * falls back to a command of that name, since a tap formula with no Linux bottle took the road to /usr/local/bin
+ * under it, which is the same split the uninstall above reads. A core formula is never read by its name: the base
+ * stage's node and the release road's gh are on the PATH under theirs, and a formula Homebrew never installed
+ * would read present off another road's work. */
+export const formulaPresent = (formula: string): string => {
+  const short = formulaShortName(formula);
+  const linked = `test -e ${BREW_PREFIX}/opt/${short}`;
+  return formula.includes("/") ? `${linked} || command -v ${shellQuote(short)} >/dev/null 2>&1` : linked;
+};
+
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
+  // A formula lands in the prefix; a tap formula with no Linux bottle takes the road to /usr/local/bin.
+  roots: [BREW_PREFIX, "/usr/local/bin"],
   after: HOMEBREW_STEP,
   fromRow: r => ({ road: "brew", formula: r.name }),
   shown: r => `brew install ${r.formula}`,
@@ -132,7 +160,7 @@ const brew: RoadModule<Road<"brew">> = {
   uninstall: r => {
     if (!r.formula.includes("/")) return { cmd: asLinuxbrew(`uninstall ${r.formula}`) };
     // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
-    const bin = r.formula.slice(r.formula.lastIndexOf("/") + 1);
+    const bin = formulaShortName(r.formula);
     return { cmd: `if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${r.formula}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${r.formula}`)}; else rm -f /usr/local/bin/${shellQuote(bin)}; fi` };
   },
   names: r => [r.formula],
@@ -143,6 +171,8 @@ const brew: RoadModule<Road<"brew">> = {
 
 const npm: RoadModule<Road<"npm">> = {
   words: "as an npm global",
+  // npm's global root under the Node the base stage unpacks into /usr/local.
+  roots: ["/usr/local/lib/node_modules", "/usr/local/bin"],
   after: "node",
   fromRow: r => ({ road: "npm", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `npm install -g ${r.ignoreScripts === true ? "--ignore-scripts " : ""}${pinned(r.package, versionOf(r), "@")}`,
@@ -155,6 +185,7 @@ const npm: RoadModule<Road<"npm">> = {
 /** pnpm and bun keep npm's global shape under their own verbs; bun lists its globals as a tree and keeps no root command. */
 const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
+  roots: [road === "pnpm" ? PNPM_HOME : "/root/.bun"],
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `${road} add -g ${pinned(r.package, versionOf(r), "@")}`,
   uninstall: r => ({ cmd: `${road} remove -g ${r.package}` }),
@@ -166,6 +197,8 @@ const nodeGlobal = <K extends "pnpm" | "bun">(road: K): RoadModule<PackageRoad<K
 /** uv and pipx install a Python tool into its own environment, pinned the pip way. */
 const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<PackageRoad<K>> => ({
   words: `with ${road}`,
+  // Both install a tool into an environment under the machine's home and link its command into /root/.local/bin.
+  roots: [`${GUEST_HOME}/.local`],
   fromRow: r => ({ road, package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => `${cmd} install ${pinned(r.package, versionOf(r), "==")}`,
   uninstall: r => ({ cmd: `${cmd} uninstall ${r.package}` }),
@@ -176,6 +209,7 @@ const pythonTool = <K extends "uv" | "pipx">(road: K, cmd: string): RoadModule<P
 
 const cargo: RoadModule<Road<"cargo">> = {
   words: "with cargo",
+  roots: ["/root/.cargo"],
   fromRow: r => ({ road: "cargo", package: r.name, ...(r.version !== undefined ? { version: r.version } : {}) }),
   install: r => {
     const version = versionOf(r);
@@ -208,6 +242,7 @@ export function goBinary(module: string): string {
 
 const go: RoadModule<Road<"go">> = {
   words: "with go install",
+  roots: [GO_BIN],
   fromRow: r => {
     const mod = goModule(r);
     return mod === undefined ? { road: "go" } : { road: "go", module: mod.path, version: r.version ?? mod.version };
@@ -278,6 +313,7 @@ const NO_RELEASE = "no GitHub release to install from";
 
 const release: RoadModule<Road<"release">> = {
   words: "from its release",
+  roots: ["/usr/local/bin"],
   shown: r => (r.repo === undefined ? NO_RELEASE : `the ${versionOf(r) ?? "latest"} release of github.com/${r.repo}`),
   install: (r, bin) => {
     if (r.repo === undefined) return { note: NO_RELEASE };
@@ -291,6 +327,8 @@ const release: RoadModule<Road<"release">> = {
 
 const vendor: RoadModule<Road<"vendor">> = {
   words: "from its vendor's release",
+  // The cask's own prefix under /opt and the links it puts on PATH; the cask rows carry the paths themselves.
+  roots: ["/opt", "/usr/local/bin"],
   shown: r => r.cask.from,
   install: r => r.cask.install(r),
   uninstall: r => ({ cmd: r.cask.uninstall }),
@@ -303,6 +341,7 @@ const vendor: RoadModule<Road<"vendor">> = {
 
 const apt: RoadModule<Road<"apt">> = {
   words: "by apt",
+  roots: ["/usr", "/etc", "/var"],
   after: APT_INDEX,
   shown: r => `apt-get install ${r.packages.join(" ")}`,
   install: r => `${APT_ENV}\napt-get install -y -qq ${r.packages.join(" ")}`,
@@ -314,6 +353,9 @@ const apt: RoadModule<Road<"apt">> = {
 
 const script: RoadModule<Road<"script">> = {
   words: "by its own installer",
+  // A vendor's own installer: every script the catalogue carries unpacks under /usr/local or /opt, installs by apt,
+  // or writes under the machine's home, which is the /root every workspace on a computer somebody owns shares.
+  roots: ["/usr", "/opt", "/root"],
   install: r => r.script,
   uninstall: (_r, bin) => ({ note: `${bin} has no uninstaller; left on the machine` }),
   names: () => [],

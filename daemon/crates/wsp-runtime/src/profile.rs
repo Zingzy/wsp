@@ -12,9 +12,6 @@ const PROFILE: &str = include_str!("profile.json");
 /// Where the workspace's first process, this binary as its reaper, is bound inside the rootfs.
 pub const INIT_PATH: &str = "/sbin/wsp-init";
 
-/// The PATH a Docker container starts with when its image names none; ubuntu:24.04 names none.
-pub const DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-
 /// The profile as a JSON object to build one workspace's config.json on.
 pub fn profile() -> Value {
     serde_json::from_str(PROFILE).expect("the embedded profile is JSON")

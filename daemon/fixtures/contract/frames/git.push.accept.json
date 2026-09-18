@@ -9,5 +9,12 @@
     "id": 2,
     "op": "git.push",
     "cwd": "repo"
+  },
+  {
+    "id": 1,
+    "op": "git.push",
+    "cwd": "/root/repo",
+    "base": "main",
+    "machineId": "wsp-a"
   }
 ]

@@ -147,14 +147,17 @@ export function connectDaemon(opts: ReachOptions): DaemonReach {
     if (parsed.success) opts.onEvent(parsed.data);
   }
 
-  /** A refused frame as the caller's error. The two fields the machine ops answer with ride along, so a backend's
-   * own refusal keeps its meaning on the computer that asked: a machine the far side lost reads missing here. */
+  /** A refused frame as the caller's error. The fields the daemon answers with ride along, so a refusal keeps its
+   * meaning on the computer that asked: a machine the far side lost reads missing here, and the code a files or git
+   * frame was refused with is what tells a checkout with no remote from a computer with no signed-in gh. */
   function refused(msg: Record<string, unknown>): Error {
     const kind = MachineErrorKind.safeParse(msg["kind"]);
     const status = msg["status"];
+    const code = msg["code"];
     return Object.assign(new Error(String(msg["error"] ?? "daemon error")), {
       ...(kind.success ? { kind: kind.data } : {}),
       ...(typeof status === "number" ? { status } : {}),
+      ...(typeof code === "string" ? { code } : {}),
     });
   }
 

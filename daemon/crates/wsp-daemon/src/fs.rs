@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use wsp_frames::{DaemonErrorCode, FsEntry, FsEntryType, FsListReply, FsReadEncoding, FsReadReply};
 
-use crate::git::run_git;
+use crate::git::{run_git, Runs};
 use crate::paths::OpError;
 
 /// Runs blocking work off the runtime thread and folds a lost worker into the op's failure.
@@ -20,12 +20,17 @@ pub(crate) async fn blocking<T: Send + 'static>(work: impl FnOnce() -> Result<T,
 
 /// One directory's direct children, directories first, the cap spent on this directory alone; only the kept
 /// entries are stat'ed. Symlinks are reported, never followed.
-pub(crate) async fn list_dir(dir: PathBuf, gitignore: bool, cap: usize) -> Result<FsListReply, OpError> {
+///
+/// `dir` is where this daemon reads the names and `at` is that same directory as the way of running git sees it:
+/// the two are one path on this computer, and for a workspace on a computer somebody owns the names are read
+/// through its rootfs while the ignore rules are read by a git inside the workspace, where a checkout's own config
+/// belongs.
+pub(crate) async fn list_dir<R: Runs>(dir: PathBuf, at: &Path, gitignore: bool, cap: usize, runner: &R) -> Result<FsListReply, OpError> {
     let scanned = dir.clone();
     let mut names = blocking(move || read_names(&scanned)).await?;
     if gitignore {
         names.retain(|(name, _)| name != ".git");
-        let ignored = ignored_among(&dir, names.iter().map(|(name, _)| name.as_str()).collect()).await?;
+        let ignored = ignored_among(runner, at, names.iter().map(|(name, _)| name.as_str()).collect()).await?;
         names.retain(|(name, _)| !ignored.contains(name.as_bytes()));
     }
     // Directories first, then by name with case folded, the nearest plain rule to node's localeCompare.
@@ -53,17 +58,17 @@ fn read_names(dir: &Path) -> Result<Vec<(String, bool)>, OpError> {
 /// git check-ignore over the whole level in one call; exit 1 means nothing matched and 128 means no repo here, both
 /// leave the level as it is. Inside an ignored directory every child reports ignored, so a directory that is itself
 /// ignored lists in full: someone asked to look in there.
-async fn ignored_among(dir: &Path, names: Vec<&str>) -> Result<HashSet<Vec<u8>>, OpError> {
+async fn ignored_among<R: Runs>(runner: &R, dir: &Path, names: Vec<&str>) -> Result<HashSet<Vec<u8>>, OpError> {
     if names.is_empty() {
         return Ok(HashSet::new());
     }
-    let this_dir = run_git(dir, &["check-ignore", "-q", "."], None, None).await?;
+    let this_dir = run_git(runner, dir, &["check-ignore", "-q", "."], None, None).await?;
     if this_dir.code != Some(1) {
         return Ok(HashSet::new());
     }
     let mut input = names.join("\0").into_bytes();
     input.push(0);
-    let res = run_git(dir, &["check-ignore", "-z", "--stdin"], Some(&input), None).await?;
+    let res = run_git(runner, dir, &["check-ignore", "-z", "--stdin"], Some(&input), None).await?;
     if res.code != Some(0) {
         return Ok(HashSet::new());
     }
@@ -151,6 +156,7 @@ pub(crate) fn utf8_text(bytes: &[u8], cut: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::here::Here;
     use std::fs;
     use std::process::Command;
 
@@ -173,13 +179,16 @@ mod tests {
         for i in 0..12 {
             fs::write(deep.path().join(format!("wide/f{i:02}.txt")), "x\n").unwrap();
         }
-        let top = list_dir(deep.path().to_path_buf(), false, 5).await.unwrap();
+        let top = list_dir(deep.path().to_path_buf(), deep.path(), false, 5, &Here::new()).await.unwrap();
         assert_eq!(names(&top), ["src", "wide", "package.json"]);
         assert_eq!((top.truncated, top.total), (false, 3));
-        let wide = list_dir(deep.path().join("wide"), false, 5).await.unwrap();
+        let wide = list_dir(deep.path().join("wide"), &deep.path().join("wide"), false, 5, &Here::new()).await.unwrap();
         assert_eq!(names(&wide), ["f00.txt", "f01.txt", "f02.txt", "f03.txt", "f04.txt"]);
         assert_eq!((wide.truncated, wide.total), (true, 12));
-        let full = list_dir(deep.path().join("wide"), false, wsp_frames::numbers::FS_LIST_CAP_ENTRIES).await.unwrap();
+        let full =
+            list_dir(deep.path().join("wide"), &deep.path().join("wide"), false, wsp_frames::numbers::FS_LIST_CAP_ENTRIES, &Here::new())
+                .await
+                .unwrap();
         assert_eq!((full.truncated, full.total, full.entries.len()), (false, 12, 12));
     }
 
@@ -195,10 +204,10 @@ mod tests {
         for name in ["one.txt", "two.txt", "three.txt", "four.txt", "five.txt", "six.txt", "seven.txt"] {
             fs::write(r.join(name), "x\n").unwrap();
         }
-        let listed = list_dir(r.to_path_buf(), true, 2).await.unwrap();
+        let listed = list_dir(r.to_path_buf(), r, true, 2, &Here::new()).await.unwrap();
         assert_eq!(listed.entries.len(), 2);
         assert_eq!((listed.total, listed.truncated), (8, true));
-        let plain = list_dir(r.to_path_buf(), false, 2).await.unwrap();
+        let plain = list_dir(r.to_path_buf(), r, false, 2, &Here::new()).await.unwrap();
         assert_eq!((plain.total, plain.truncated), (11, true));
     }
 
@@ -206,7 +215,7 @@ mod tests {
     async fn a_target_that_is_not_a_directory_or_not_a_file_is_typed() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("f"), "x").unwrap();
-        let err = list_dir(dir.path().join("f"), false, 10).await.unwrap_err();
+        let err = list_dir(dir.path().join("f"), &dir.path().join("f"), false, 10, &Here::new()).await.unwrap_err();
         assert_eq!(err.code, Some(wsp_frames::DaemonErrorCode::NotADirectory));
         assert_eq!(err.message, format!("{} is not a directory", dir.path().join("f").display()));
         let err = read_file_bounded(dir.path().to_path_buf(), FsReadEncoding::Utf8, 10).await.unwrap_err();

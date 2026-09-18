@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import * as catalog from "../src/index.js";
-import { pinMismatchLine } from "@wsp/protocol";
-import { agentName, APT_INDEX, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
+import { pinMismatchLine, SHARED_TOOL_ROOTS, TOOLS_PATH, WORKSPACE_OVERLAID } from "@wsp/protocol";
+import { agentName, APT_INDEX, BREW_PREFIX, GUEST_HOME, APT_UPDATE, BASE_FLOOR, baseEntryFor, baseNote, BREW_ENV, CATALOG, CATALOG_AGENTS, catalogEntry, catalogToolFor, catalogToolForDependency, CLAUDE_CONFIG_DIR, CURL_NET, DEFAULT_AGENT, GCLOUD, guestEnv, hasLogin, HISTORY_FORMATS, HOMEBREW_STEP, installAfter, installLine, keysIdOf, keysRowOf, KUBECTL, LINUX_CASKS, LOGIN_ROWS, loginIdOf, loginRow, mintsToken, NET_READ_S, NET_RETRIES, pinCheckLine, PLAYWRIGHT, readsRowRoad, ROAD_MODULES, ROAD_STEPS, roadModule, ROADS, SIGN_IN_ROWS, SIZE_METHODS, sizeBytes, smokeOf, standingPin, unpinned, versionOf, fixesVersion, catalogIdOfRow, type AgentEntry, type InstallRoad, type ToolEntry } from "../src/index.js";
 
 describe("catalog", () => {
   it("the default agent is the first entry, and it is an agent with a context module", () => {
@@ -391,6 +391,29 @@ describe("catalog", () => {
     expect(shown({ road: "release", repo: "cli/cli", pin: { tag: "v2.86.0", sha256: "d".repeat(64) } }, "gh")).toBe("the v2.86.0 release of github.com/cli/cli");
     expect(shown({ road: "vendor", cask: GCLOUD })).toBe(GCLOUD.from);
     for (const road of ["npm", "pnpm", "bun", "uv", "pipx", "cargo", "go", "script"] as const) expect(ROAD_MODULES[road].shown, road).toBeUndefined();
+  });
+
+  it("installs every road inside a tree a workspace on a computer somebody owns can see: an overlaid tree, the machine's home, or a shared tool root", () => {
+    // Found on spoo, 2026-09-18: gh and every other Homebrew row was on the box and in no workspace of it, because
+    // /home/linuxbrew is outside the trees a workspace overlays and outside the /root it binds, while the PATH
+    // inside named the prefix all the same. A road that installs somewhere else is the same bug, so every road
+    // says where it installs and this holds the lot of them to what a workspace can see.
+    expect(Object.keys(ROAD_MODULES).sort()).toEqual([...ROADS].sort());
+    const visible = [...WORKSPACE_OVERLAID, GUEST_HOME, ...SHARED_TOOL_ROOTS];
+    for (const road of ROADS) {
+      const roots = ROAD_MODULES[road].roots;
+      expect(roots.length, road).toBeGreaterThan(0);
+      for (const root of roots) {
+        expect(root.startsWith("/"), `${road} installs into ${root}, which is no absolute path`).toBe(true);
+        const under = visible.filter(tree => root === tree || root.startsWith(`${tree}/`));
+        expect(under, `${road} installs into ${root}, which no workspace on a computer somebody owns can see: it belongs under ${visible.join(", ")}, or the protocol's SHARED_TOOL_ROOTS gains its root and the daemon binds it in`).not.toEqual([]);
+      }
+    }
+    // And every shared tool root is on the one PATH a machine's tools sit on: a root brought into a workspace whose
+    // bin directories nothing names is a prefix no command is found in.
+    for (const root of SHARED_TOOL_ROOTS) expect(TOOLS_PATH.split(":").some(dir => dir.startsWith(`${root}/`)), root).toBe(true);
+    // The formula road's own prefix is that root, read from the protocol by both sides.
+    expect(BREW_PREFIX.startsWith(`${SHARED_TOOL_ROOTS[0]}/`)).toBe(true);
   });
 
   it("gives every road a step: how long it may run, whether a run that hit the limit is tried once more, and the lines that clock its network reads", () => {

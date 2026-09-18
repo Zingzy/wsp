@@ -3030,25 +3030,33 @@ export const DaemonRequest = z.discriminatedUnion("op", [
    * with --root) or absolute inside it or an imported project folder named in
    * DAEMON_ROOTS_PATH; anything resolving outside every root, through .. or a
    * symlink, is refused with code outside-root. gitignore hides .git and the
-   * entries git would ignore. */
+   * entries git would ignore.
+   *
+   * machineId, on these seven and on no other op of this road: the workspace the frame is for, on a daemon that
+   * runs workspaces. A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the
+   * computer holding it answers for it: the path then names the folder as that workspace sees it, a file is read
+   * through the workspace's own rootfs and a git operation runs inside the workspace, in its namespaces and its
+   * cgroup. Without one the path is resolved under the daemon's own roots, which is every other machine. A daemon
+   * that runs no workspace answers the missing refusal for any machineId. */
   z.object({
     id: reqId,
     op: z.literal("fs.list"),
     path: z.string(),
     gitignore: z.boolean().optional(),
+    machineId: z.string().optional(),
   }),
-  z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional() }),
-  z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string() }),
-  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("fs.read"), path: z.string(), encoding: FsReadEncoding.optional(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.status"), cwd: z.string(), machineId: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.diff"), cwd: z.string(), scope: GitDiffScope, path: z.string().optional(), machineId: z.string().optional() }),
   /** Pushes the branch the checkout is on to its remote and answers a GitPushReply. The base branch itself is
    * refused: wsp makes no branch and pushes none of the branch the work started from. Without a base the
    * checkout's own default branch is read, which is what a project recorded without one was cloned at. */
-  z.object({ id: reqId, op: z.literal("git.push"), cwd: z.string(), base: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.push"), cwd: z.string(), base: z.string().optional(), machineId: z.string().optional() }),
   /** Opens the branch's pull request against the base through the git host's own signed-in command line, or
    * answers with the one already open. Refused with code no-host-cli where that command line is not there. */
-  z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional() }),
+  z.object({ id: reqId, op: z.literal("git.pr"), cwd: z.string(), base: z.string().optional(), title: z.string().optional(), body: z.string().optional(), machineId: z.string().optional() }),
   /** Where the branch's pull request stands, read back through that same command line. */
-  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string() }),
+  z.object({ id: reqId, op: z.literal("git.prState"), cwd: z.string(), machineId: z.string().optional() }),
   /** One laptop-side connection to a guest loopback port, for the sign-in
    * callback forward. The daemon dials 127.0.0.1 then ::1 (a Node 22 tool
    * binds [::1] only). data is base64; the reply to tunnel.open comes after
@@ -3440,6 +3448,13 @@ export const placeForksNowhereLine = (place: string): string => `${place} is no 
 export const placeNotAWorkspaceLine = (place: string): string => `${place} is a computer you joined, not a workspace; its forks are the workspaces`;
 export const placeNotAWorkspaceFix = (place: string): string => `Fork one there: wsp new <name> --on ${place}.`;
 
+/** What a caller asking for the road to a workspace's own daemon is told, where that workspace runs none: a
+ * workspace on a computer somebody owns is that computer's directories under the computer's own daemon, and that
+ * daemon answers its files and its git through the host. Said rather than a route minted to a port nothing listens
+ * on, which is what the panes and the relay read before. */
+export const placeServesDaemonLine = (workspace: string, computer: string): string =>
+  `${workspace} has no daemon of its own: ${computer} answers its files and git through this host`;
+
 /** What a person asking for a second workspace on the computer the app itself runs on is told. Its local mode is
  * one workspace, the one it already has; every other workspace is forked at a place. */
 export const localRunsOneLine = (workspace: string): string => `${THIS_COMPUTER} is already a workspace, ${workspace}, the only one it can be`;
@@ -3612,6 +3627,7 @@ const DAEMON_CONTENTS = [
   "ed2fb414194ec877f031cb6a09e7869b4727132e25768eca2da581c8b902a0d1",
   "4453f856251c047172490b84c8502f74b6a1d25744f6878a382ac32fe45f2c46",
   "4605e734f4735405ddefd0478583032757ca8ad0b2dc8ce9a14e92789c2800a0",
+  "52dc451ba47d583759687b0d9c8b5f3dc1d9f820ca25dc1e030e1268cc2b5157",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3753,7 +3769,11 @@ const DAEMON_CONTENTS = [
  * empty files over the box's secrets, its ssh keys and the engine's paths; the compose project is named per workspace.
  * Version 50 adds the git road out of a workspace: a push of the branch the copy is on with a refusal to push the
  * base, the pull request opened or found through the signed-in host command line on the computer and its state read
- * back, three operations behind one trait with one module per host. */
+ * back, three operations behind one trait with one module per host.
+ * Version 51 gives a workspace on a box the box's tools and a daemon that answers for it: the box's Homebrew prefix and
+ * every install root the recipe lands outside the overlaid trees are bound read-only into the workspace's rootfs, and the
+ * place daemon serves a workspace's git, file and exec operations with the workspace's checkout as the working directory,
+ * so nothing runs a daemon inside a workspace and the init's supervisor lookup is gone. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

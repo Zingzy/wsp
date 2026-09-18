@@ -3,5 +3,11 @@
     "id": 1,
     "op": "git.prState",
     "cwd": "repo"
+  },
+  {
+    "id": 1,
+    "op": "git.prState",
+    "cwd": "/root/repo",
+    "machineId": "wsp-a"
   }
 ]
