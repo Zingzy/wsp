@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { SeedChoice, SeedPlan } from "@wsp/protocol";
-import { cloneScript, patchCleanupScript, patchScript, seedRestScript } from "../src/project-landing.js";
+import { cloneScript, MEMORY_KEPT_MARK, patchCleanupScript, patchScript, seedRestScript } from "../src/project-landing.js";
 import { projectSource } from "../src/project-sources.js";
 
 const roots: string[] = [];
@@ -180,6 +180,107 @@ describe("the scripts that clone and seed a project on a computer with no git id
     expect(git(checkout, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
     expect(git(checkout, "log", "--format=%s", "-3").trim().split("\n")).toEqual(["three", "two", "first"]);
     expect(existsSync(join(checkout, ".wsp-seed"))).toBe(false);
+  });
+
+  it("leaves the memory already standing at the agent's path alone, and says so on its own output", () => {
+    const { origin, folder, root } = originAndClone();
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const checkout = join(root, "checkout");
+    // The memory the agent on that computer has kept for this project, which the seed must not write over.
+    const memoryDir = join(root, "state", "projects", "-srv-spoo-landing", "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(join(memoryDir, "MEMORY.md"), "- what the agent learned here\n");
+    const ran = landing({
+      root,
+      remote: origin,
+      checkout,
+      memoryDir,
+      plan: plan({ source: folder, remote: origin, branch: "main", base, commits: 0 }),
+      seedTar: seedTar(root, { patch: "", memory: "- what the folder carried\n" }),
+      choice: { files: [".env.local"], memory: true, commits: false },
+    });
+    expect(ran.clone.exitCode).toBe(0);
+    const rest = ran.rest();
+    expect(rest.exitCode, rest.stderr).toBe(0);
+    // Byte for byte what the agent had, and the mark the landing reads to say the seed's memory was not landed.
+    expect(readFileSync(join(memoryDir, "MEMORY.md"), "utf8")).toBe("- what the agent learned here\n");
+    expect(rest.stdout).toContain(MEMORY_KEPT_MARK);
+    // And the rest of the step ran as it always does: wsp's own folder gone from the checkout every copy is
+    // taken of, and the ticked file still there.
+    expect(readFileSync(join(checkout, ".env.local"), "utf8")).toBe("TOKEN=abc\n");
+    expect(existsSync(join(checkout, ".wsp-seed"))).toBe(false);
+  });
+
+  it("takes an empty folder at the agent's path as nothing kept, so the seed's memory lands in its place", () => {
+    const { origin, folder, root } = originAndClone();
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const checkout = join(root, "checkout");
+    // What an older bind left on the computer as its mount point, and what the agent makes before it writes a
+    // line in it: a folder with no memory in it.
+    const memoryDir = join(root, "state", "projects", "-srv-spoo-landing", "memory");
+    mkdirSync(memoryDir, { recursive: true });
+    const ran = landing({
+      root,
+      remote: origin,
+      checkout,
+      memoryDir,
+      plan: plan({ source: folder, remote: origin, branch: "main", base, commits: 0 }),
+      seedTar: seedTar(root, { patch: "", memory: "- what the folder carried\n" }),
+      choice: { files: [".env.local"], memory: true, commits: false },
+    });
+    expect(ran.clone.exitCode).toBe(0);
+    const rest = ran.rest();
+    expect(rest.exitCode, rest.stderr).toBe(0);
+    expect(readFileSync(join(memoryDir, "MEMORY.md"), "utf8")).toBe("- what the folder carried\n");
+    // Nothing was kept, so nothing is said to have been kept.
+    expect(rest.stdout).not.toContain(MEMORY_KEPT_MARK);
+  });
+
+  it("is one command per line, so a step that cannot make the folder ends before the seed is swept", () => {
+    const { origin, folder, root } = originAndClone();
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const checkout = join(root, "checkout");
+    // A file standing where the folder above the memory has to be made: the mkdir cannot succeed.
+    const parent = join(root, "state");
+    writeFileSync(parent, "not a folder\n");
+    const memoryDir = join(parent, "projects", "-srv-spoo-landing", "memory");
+    const ran = landing({
+      root,
+      remote: origin,
+      checkout,
+      memoryDir,
+      plan: plan({ source: folder, remote: origin, branch: "main", base, commits: 0 }),
+      seedTar: seedTar(root, { patch: "", memory: "- what the folder carried\n" }),
+      choice: { files: [".env.local"], memory: true, commits: false },
+    });
+    expect(ran.clone.exitCode).toBe(0);
+    const rest = ran.rest();
+    // The step fails and stops there: the seed's own folder is still in the checkout with the memory in it, so
+    // the add says the step failed and nothing of the person's was swept away behind a mkdir nobody read.
+    expect(rest.exitCode).not.toBe(0);
+    expect(rest.stdout).not.toContain(MEMORY_KEPT_MARK);
+    expect(existsSync(join(checkout, ".wsp-seed", "memory", "MEMORY.md"))).toBe(true);
+  });
+
+  it("lands the seed's memory where nothing stands at all, making the folder above it", () => {
+    const { origin, folder, root } = originAndClone();
+    const base = git(folder, "merge-base", "HEAD", "origin/main").trim();
+    const checkout = join(root, "checkout");
+    const memoryDir = join(root, "state", "projects", "-srv-spoo-landing", "memory");
+    const ran = landing({
+      root,
+      remote: origin,
+      checkout,
+      memoryDir,
+      plan: plan({ source: folder, remote: origin, branch: "main", base, commits: 0 }),
+      seedTar: seedTar(root, { patch: "", memory: "- what the folder carried\n" }),
+      choice: { files: [".env.local"], memory: true, commits: false },
+    });
+    expect(ran.clone.exitCode).toBe(0);
+    const rest = ran.rest();
+    expect(rest.exitCode, rest.stderr).toBe(0);
+    expect(readFileSync(join(memoryDir, "MEMORY.md"), "utf8")).toBe("- what the folder carried\n");
+    expect(rest.stdout).not.toContain(MEMORY_KEPT_MARK);
   });
 
   it("clones and seeds with no patch at all where the person kept none", () => {

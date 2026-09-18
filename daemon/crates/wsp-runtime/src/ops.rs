@@ -108,6 +108,16 @@ pub fn box_full_refusal(need_mb: u64, free_mb: u64, quietest: Option<(String, u6
     }
 }
 
+/// A destination that is one of the trees the rootfs takes from the computer, or sits under one, refused: its
+/// mount point would be made through the computer's own directory and left on it once the workspace is gone. The
+/// one place the reading is turned into a refusal, read by the create's copy and folder roads and by every boot.
+fn no_computer_tree(at: &str) -> Result<(), OpError> {
+    match bundle::under_computer_tree(at) {
+        Some(tree) => Err(OpError::plain(bundle::computer_tree_refusal(at, tree))),
+        None => Ok(()),
+    }
+}
+
 /// A refusal on the wire: the sentence, and the engine's kind and status where a client branches on them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpError {
@@ -723,6 +733,8 @@ impl Ops {
         let projects = self.layout.projects();
         let asked = spec.binds.clone().unwrap_or_default();
         for bind in &asked {
+            // Read before the source folder is made, so a refused create leaves nothing of itself anywhere.
+            no_computer_tree(&bind.target)?;
             let at = Path::new(&bind.source);
             let under =
                 wsp_frames::is_plain_path(&bind.source) && at.strip_prefix(&projects).is_ok_and(|rest| rest.iter().next().is_some());
@@ -743,7 +755,9 @@ impl Ops {
     /// serves may wait behind it.
     async fn make_copy(&self, id: &str, want: &WorkspaceCopy) -> Result<CopyMade, OpError> {
         // The path the project takes inside, read through the same wall the boot's bind is built with and
-        // before a byte is copied or anything is mounted: a refusal here costs nothing to take back.
+        // before a byte is copied or anything is mounted: a refusal here costs nothing to take back, and the
+        // create gives the claim back with it.
+        no_computer_tree(&want.at)?;
         bundle::inside(&self.layout.rootfs(id), &want.at)?;
         // Made under a name that says it is not finished and renamed into place by one directory entry once it
         // is: a create that dies in the middle of a copy, which a kernel or a disk can always make happen,
@@ -813,6 +827,12 @@ impl Ops {
     /// everything the workspace wrote, over the box's directories as they are now.
     async fn boot(&self, mut record: Workspace) -> Result<Workspace, OpError> {
         let id = record.id.clone();
+        // Before the first directory of this boot is made: a record written before this rule, or one whose
+        // destination fell under a tool root the computer has installed since, is refused at its wake rather
+        // than mounted through the computer's own home.
+        for at in record.copy.iter().map(|made| made.at.as_str()).chain(record.binds.iter().map(|bind| bind.target.as_str())) {
+            no_computer_tree(at)?;
+        }
         bundle::write_etc(&self.layout.etc(&id), &record.hostname, None)?;
         // Read at every boot and written on no record: a Homebrew installed on this computer after the create is
         // inside the workspace at its next wake, and one taken off it is gone from the next boot.
@@ -1528,6 +1548,58 @@ mod tests {
         assert!(ops.create_with_room(bare_spec(), Some(1)).await.is_err());
     }
 
+    /// The wall between a workspace's own mounts and the computer's directories: a copy or a folder whose
+    /// destination is one of the trees the rootfs takes from the computer, or sits under one, is refused at the
+    /// create and at every boot, and a destination of the workspace's own is taken.
+    #[tokio::test]
+    async fn a_destination_under_the_computers_own_trees_is_refused_at_the_create_and_at_the_boot() {
+        let dir = tempfile::tempdir().unwrap();
+        let ops = Ops::open(dir.path(), PathBuf::from("/bin/true")).unwrap();
+        let layout = Layout::new(dir.path());
+        let checkout = layout.projects().join("a-checkout");
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(checkout.join("README.md"), "the checkout\n").unwrap();
+
+        // A copy whose destination is the person's own home: one sentence, and the claim the create took is
+        // given back with it, so nothing of a refused create is left anywhere.
+        let key = "copy-under-root";
+        let id = format!("wsp-{}", workspace_word(key));
+        let asking = MachineSpec {
+            idempotency_key: Some(key.to_owned()),
+            copy: Some(WorkspaceCopy { from: checkout.display().to_string(), at: "/root/x".to_owned() }),
+            ..bare_spec()
+        };
+        let refused = ops.create_with_room(asking, None).await.unwrap_err().message;
+        assert_eq!(refused, bundle::computer_tree_refusal("/root/x", "/root"));
+        assert!(!layout.workspace(&id).exists(), "the refused create kept its claim");
+        assert!(!layout.copy_of(&id).exists(), "the refused create left a copy");
+
+        // A folder bound where the agent keeps its own state on the computer, which is what a box project's
+        // memory asked for before this rule: refused before the source folder is made.
+        let memory = layout.projects().join("pr_1").join("memory");
+        let bound = |target: &str| MachineSpec {
+            binds: Some(vec![Bind { source: memory.display().to_string(), target: target.to_owned(), read_only: false }]),
+            ..bare_spec()
+        };
+        let under = "/root/.claude-cfg/projects/k/memory";
+        assert_eq!(ops.binds_of(&bound(under)).unwrap_err().message, bundle::computer_tree_refusal(under, "/root"));
+        assert!(!memory.exists(), "the refused create made the folder it was refused for");
+
+        // The destinations a workspace's own mounts land at are taken: a folder under the projects directory
+        // inside, and a copy at the path its checkout has on the computer it came from.
+        let own = "/wsp/projects/p/memory";
+        assert_eq!(ops.binds_of(&bound(own)).unwrap().first().map(|bind| bind.target.clone()), Some(own.to_owned()));
+        let taken = WorkspaceCopy { from: checkout.display().to_string(), at: "/private/tmp/repo".to_owned() };
+        assert_eq!(ops.make_copy("wsp-taken", &taken).await.unwrap().at, taken.at);
+
+        // A record written before this rule keeps its bind: its wake is refused with the same sentence, and the
+        // boot reads it before it makes the first directory of the workspace.
+        let mut record = awake("wsp-old", Some("vault proof"));
+        record.binds = vec![Bind { source: memory.display().to_string(), target: under.to_owned(), read_only: false }];
+        assert_eq!(ops.boot(record).await.unwrap_err().message, bundle::computer_tree_refusal(under, "/root"));
+        assert!(!layout.etc("wsp-old").exists(), "the refused boot wrote the workspace's own /etc");
+    }
+
     /// A spec asking for nothing at all: the kind, and no image, size, copy, login or folder of the computer's.
     fn bare_spec() -> MachineSpec {
         MachineSpec {
@@ -1839,14 +1911,12 @@ mod tests {
         assert_eq!(ops.backend_facts().logins, Some(logins.display().to_string()));
     }
 
-    /// A spec asking for one folder of the computer's own to be bound in, with the source spelled as given.
+    /// A spec asking for one folder of the computer's own to be bound in, with the source spelled as given. The
+    /// destination is where the add's own worker reads a project's checkout inside, since a destination under one
+    /// of the computer's own trees is refused before the source is read at all.
     fn binding(source: &Path) -> MachineSpec {
         MachineSpec {
-            binds: Some(vec![Bind {
-                source: source.display().to_string(),
-                target: "/root/.claude-cfg/projects/-root-wsp/memory".to_owned(),
-                read_only: false,
-            }]),
+            binds: Some(vec![Bind { source: source.display().to_string(), target: "/srv/spoo-landing".to_owned(), read_only: false }]),
             shares: None,
             ..asking_for(source)
         }

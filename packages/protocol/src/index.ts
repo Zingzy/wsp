@@ -454,7 +454,18 @@ export const ProjectView = z.object({
    * computer keeps the project inside an image instead, and where the project is worked where it already sits. */
   checkout: z.string().optional(),
   /** What the seed carried, once, where the source was a folder on this computer. */
-  seeded: z.object({ files: z.number().int(), bytes: z.number().int(), memory: z.boolean(), commits: z.number().int(), at: z.string() }).optional(),
+  seeded: z
+    .object({
+      files: z.number().int(),
+      bytes: z.number().int(),
+      memory: z.boolean(),
+      commits: z.number().int(),
+      at: z.string(),
+      /** The seed carried memory and the computer already kept some at the agent's path, so what stands there
+       * was left alone and the seed's memory was not landed. */
+      memoryKept: z.boolean().optional(),
+    })
+    .optional(),
   /** What the install ran and how long it took, once; absent where no catalog row named an install for this repo. */
   installed: z.object({ row: z.string(), command: z.string(), at: z.string(), seconds: z.number() }).optional(),
   /** On a provider computer: the project image every workspace of this project forks from. */
@@ -3650,6 +3661,7 @@ const DAEMON_CONTENTS = [
   "4453f856251c047172490b84c8502f74b6a1d25744f6878a382ac32fe45f2c46",
   "4605e734f4735405ddefd0478583032757ca8ad0b2dc8ce9a14e92789c2800a0",
   "52dc451ba47d583759687b0d9c8b5f3dc1d9f820ca25dc1e030e1268cc2b5157",
+  "eb6eb2701b4edafd3f62e17ab032313660bafbfe80ce973bd56a56c86662aff8",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3795,7 +3807,10 @@ const DAEMON_CONTENTS = [
  * Version 51 gives a workspace on a box the box's tools and a daemon that answers for it: the box's Homebrew prefix and
  * every install root the recipe lands outside the overlaid trees are bound read-only into the workspace's rootfs, and the
  * place daemon serves a workspace's git, file and exec operations with the workspace's checkout as the working directory,
- * so nothing runs a daemon inside a workspace and the init's supervisor lookup is gone. */
+ * so nothing runs a daemon inside a workspace and the init's supervisor lookup is gone.
+ * Version 52 refuses a bind whose destination is one of the trees the rootfs takes from the computer, the box's /root
+ * and every shared tool root whether present on the computer yet or not, or sits under one, at the create, so a
+ * workspace's copy or folder bind can never leave its mount point on the computer's own home. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

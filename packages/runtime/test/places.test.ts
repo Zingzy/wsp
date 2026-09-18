@@ -3240,7 +3240,7 @@ describe("a project on a computer you joined", () => {
     // The remove runs one command on the computer itself, over the same link, and says what went.
     const { said } = await runtime!.projects.remove(project.id);
     expect(ran.filter(cmd => cmd.startsWith("rm -rf"))).toEqual([`rm -rf '/wsp/projects/${project.id}'`]);
-    expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout and its memory`);
+    expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout, and the memory its agent keeps on that computer stays`);
     expect(await runtime!.projects.list()).toEqual([]);
   });
 
