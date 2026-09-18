@@ -446,6 +446,14 @@ export class PlaceLoginRefusedError extends Error {}
  * The one refusal a default place may be passed over for; every other failure on it is the person's to read. */
 export class PlaceForksNowhereError extends Error {}
 
+/** A computer that is not forked into while the recipe job on it runs, which is a state of that job and not a
+ * fact about the computer: the sentence is the person's own either way, and the class is what tells the roads
+ * that only wait for the job apart from the ones that report a refusal. The kind rides the class, so every road
+ * that throws one answers the person in the class a create there has always been refused in. */
+export class PlaceProvisioningError extends Error {
+  readonly kind = "conflict";
+}
+
 /** What an install answers once the computer has dialled in: which stream of steps it was, the place it became,
  * the key its ssh answered with, and why the recipe job did not start where it did not. The place's own row
  * carries that job while it runs, so a caller reads one or the other and never both. */
@@ -855,8 +863,11 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     await keep({ ...now, provision });
   };
 
-  const provisionStage = (addId: string, state: "running" | "done" | "failed", note?: string): void => {
-    opts.onStage?.({ type: "place.stage", addId, step: "provision", state, ...(note !== undefined ? { note } : {}) });
+  /** One step of the recipe job on the stream whoever asked for it is watching. The computer rides every one of
+   * them: this job is on a computer this host already holds, so a reader that acts on the job's end rather than
+   * printing it reads the row off the event and not off the stream's own id. */
+  const provisionStage = (placeId: string, addId: string, state: "running" | "done" | "failed", note?: string): void => {
+    opts.onStage?.({ type: "place.stage", addId, placeId, step: "provision", state, ...(note !== undefined ? { note } : {}) });
   };
 
   /** The job's own log and outcome on the computer itself, so a person at its shell reads what happened without
@@ -907,7 +918,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     };
     const stage: ProvisionStage = (detail, at, row) => {
       log.write(detail);
-      provisionStage(addId, "running", detail);
+      provisionStage(placeId, addId, "running", detail);
       // The record is written when the job moved, not on every line a step prints: a step's output is hundreds of
       // lines and each write is the whole state file.
       const moved = at !== undefined && (held.at?.index !== at.index || held.at.label !== at.label);
@@ -919,13 +930,13 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       const { at: _under, ...rest } = held;
       push({ ...rest, state: "done", finishedAt: new Date(clockNow()).toISOString(), rows });
       await writing;
-      provisionStage(addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "));
+      provisionStage(placeId, addId, "done", provisionLines(kept.get(placeId)?.name ?? placeId, held).join("; "));
     } catch (e) {
       const said = (e instanceof Error ? e.message : String(e)).split("\n")[0]!;
       const { at: _under, ...rest } = held;
       push({ ...rest, state: "stopped", said, finishedAt: new Date(clockNow()).toISOString() });
       await writing;
-      provisionStage(addId, "failed", said);
+      provisionStage(placeId, addId, "failed", said);
     }
     // Behind the job rather than inside it: the outcome on that computer is the last write and a link that has
     // gone waits out its own retries, and a second update is refused only while rows are actually going on.
@@ -960,7 +971,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       }
       const provision: PlaceProvision = { state: "running", addId, recipeAt: planned.recipeAt, startedAt: new Date(clockNow()).toISOString(), rows: [] };
       await writeProvision(placeId, provision);
-      provisionStage(addId, "running", `${provisionCountWord(provisionCountsOf(planned))} from the recipe of ${planned.recipeAt}`);
+      provisionStage(placeId, addId, "running", `${provisionCountWord(provisionCountsOf(planned))} from the recipe of ${planned.recipeAt}`);
       // The computer itself, not a workspace on it: the link it is holding to this host, driven as a machine.
       const machine = new PlaceMachine(linkTo(placeId), { id: record.name, home });
       void runProvision(placeId, addId, planned, machine, home, provision).finally(() => provisioning.delete(placeId));
@@ -1261,7 +1272,12 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       woken(placeId, true);
       // What the computer forks with is asked behind the attach and not in front of it, so the link is held whether
       // or not that answer comes and the first listing after a join carries the room it has left.
-      void door.forkingBackend(placeId).catch((e: unknown) => console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`));
+      // A computer whose recipe is running has said nothing wrong: that job's own end asks again, so the read is
+      // quiet about it rather than logging a computer that would not say.
+      void door.forkingBackend(placeId).catch((e: unknown) => {
+        if (e instanceof PlaceProvisioningError) return;
+        console.warn(`${moved.name} did not say what it forks with: ${e instanceof Error ? e.message : String(e)}`);
+      });
       socket.once("close", () => {
         const mine = live.get(placeId);
         if (mine?.socket !== socket) return;
@@ -1370,7 +1386,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
       // without the agent the job is putting there. The running workspaces on it are untouched, since they read
       // backendOf and not this.
       const busy = provisioningNow(record);
-      if (busy !== undefined) throw Object.assign(new Error(busy), { kind: "conflict" });
+      if (busy !== undefined) throw new PlaceProvisioningError(busy);
       const made = door.backendOf(placeId);
       if (made !== undefined) return made;
       // The first fork on this computer is where the host learns what it forks with; every road after it reads the

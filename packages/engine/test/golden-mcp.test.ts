@@ -165,10 +165,15 @@ describe("applyMcp", () => {
     // The read's answer is every config whole, the servers' secrets with it, so it says its output is not a log's.
     expect(runOpts[0]).toMatchObject({ unlogged: true });
     expect(runOpts[1]?.unlogged).toBeUndefined();
-    // Each edited config lands beside itself and is poured over the file, so its mode and owner stand.
+    // Each edited config lands beside itself, is poured into a copy of the file so its mode and owner stand, and
+    // that copy is renamed over it, so an agent launching in that moment reads one whole copy or the other.
     expect(landed).toEqual([join(root, ".claude-cfg/.claude.json.wsp-mcp"), join(root, ".codex/config.toml.wsp-mcp"), join(root, ".gemini/settings.json.wsp-mcp")]);
-    expect(cmds.some(c => c.includes(`cat '${join(root, ".codex/config.toml.wsp-mcp")}' > '${join(root, ".codex/config.toml")}' && rm -f`))).toBe(true);
-    expect(existsSync(join(root, ".codex/config.toml.wsp-mcp"))).toBe(false);
+    const at = join(root, ".codex/config.toml");
+    const pour = cmds.find(c => c.includes(`cat '${at}.wsp-mcp' > '${at}.wsp-new'`))!;
+    expect(pour).toContain(`cp -p '${at}' '${at}.wsp-new'`);
+    expect(pour.indexOf(`mv '${at}.wsp-new' '${at}'`)).toBeGreaterThan(pour.indexOf(`cat '${at}.wsp-mcp'`));
+    expect(existsSync(`${at}.wsp-mcp`)).toBe(false);
+    expect(existsSync(`${at}.wsp-new`)).toBe(false);
     const check = cmds.find(c => c.split("\n")[1]?.startsWith("if command -v"))!;
     expect(check).toBeDefined();
     expect(runs).not.toContain(check);
@@ -340,7 +345,33 @@ describe("applyMcp", () => {
     });
     return { text: `${out.join("\n")}\n`, results: [...written, ...scope.drop.map(name => ({ name, outcome: "dropped" as const }))] };
   };
-  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), edit: linesEditor };
+  const lineOf = (text: string, name: string): string | undefined => text.split("\n").find(l => l.startsWith(`${name} `));
+  /** The same format's merge, so a fourth format is still one module: each kept name's line taken from the copy
+   * that travelled, the lines of the agent's own file that are not wsp's left where they are. */
+  const linesMerge: McpFormat["merge"] = (lib, scope, own, travelled) => {
+    const replace = new Set(scope.replace);
+    let lines = (own ?? "").split("\n").filter(l => l !== "");
+    const results = scope.keep.map(name => {
+      const line = lineOf(travelled, name);
+      if (line === undefined) return { name, outcome: "missing" as const };
+      const [, command, ...args] = line.split(" ");
+      const next = [name, lib.rewriteString(command!, true), ...args.map(a => lib.rewriteString(a, false))].join(" ");
+      const here = lineOf(lines.join("\n"), name);
+      const said = (outcome: "added" | "replaced" | "same" | "theirs") => ({ name, outcome, command: next.split(" ")[1]! });
+      if (here === next) return said("same");
+      if (here !== undefined && !replace.has(name)) return said("theirs");
+      lines = [...lines.filter(l => l !== here), next];
+      return said(here === undefined ? "added" : "replaced");
+    });
+    const dropped = scope.drop.map(name => {
+      const here = lineOf(lines.join("\n"), name);
+      if (here === undefined || !replace.has(name)) return { name, outcome: "left" as const };
+      lines = lines.filter(l => l !== here);
+      return { name, outcome: "dropped" as const };
+    });
+    return { text: `${lines.join("\n")}\n`, results: [...results, ...dropped], commentsDropped: false };
+  };
+  const LINES: McpFormat = { read: () => [], place: () => ({ text: "", commentsDropped: false }), edit: linesEditor, entryOf: (text, name) => lineOf(text, name), merge: linesMerge };
 
   it("a format the catalog gains is one module: the stage runs the module's editor over the text it read and reports through it, with no format of its own", async () => {
     const { root, cmds, machine } = guest(["alpha"]);
@@ -394,11 +425,12 @@ describe("applyMcp", () => {
   it("a pour-over the machine refuses leaves no landing beside the config: those bytes are the whole file at the upload road's own mode", async () => {
     const { root, cmds, machine } = guest(["codebase-memory-mcp"]);
     seed(root);
-    const refusing = { ...machine, exec: async (cmd: string) => (cmd.startsWith("set -e\ncat ") ? { exitCode: 1, stdout: "", stderr: "cat: write error: No space left on device" } : machine.exec(cmd)) } as unknown as Machine;
+    const refusing = { ...machine, exec: async (cmd: string) => (cmd.startsWith("set -e\nif [ -f ") ? { exitCode: 1, stdout: "", stderr: "cat: write error: No space left on device" } : machine.exec(cmd)) } as unknown as Machine;
     const results = await applyMcp(refusing, geminiOnly(root), () => {});
     expect(results.find(r => r.name === "memory")?.note).toBe("the edited config did not land (cat: write error: No space left on device)");
     expect(existsSync(join(root, ".gemini", "settings.json.wsp-mcp"))).toBe(false);
-    expect(cmds.some(c => c === `rm -f '${join(root, ".gemini", "settings.json.wsp-mcp")}'`)).toBe(true);
+    // Both names beside the config go: either could hold the whole file at the upload road's own mode.
+    expect(cmds.some(c => c === `rm -f '${join(root, ".gemini", "settings.json.wsp-mcp")}' '${join(root, ".gemini", "settings.json.wsp-new")}'`)).toBe(true);
     // The config itself is as it was: the pour never ran.
     expect(readFileSync(join(root, ".gemini", "settings.json"), "utf8")).toBe(GEMINI);
   });

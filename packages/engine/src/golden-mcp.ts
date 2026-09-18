@@ -6,7 +6,7 @@
 // read off the machine, edited here by the catalog format's own module, and the
 // bytes land back; the machine runs nothing of its own for it.
 import { BREW_PREFIX, GUEST_HOME, MAC_BIN_DIRS, MAC_BREW } from "@wsp/catalog";
-import type { McpEditLib, McpEditResult, McpFormat } from "@wsp/catalog";
+import type { McpEditLib, McpEditResult, McpFormat, McpMergeResult } from "@wsp/catalog";
 import { MCP_ID_PREFIX, shellQuote } from "@wsp/protocol";
 import { TOOLS_PATH, UV_INSTALL, WITHHELD_NOTE, withheld, type RecipeEntry } from "./golden-import.js";
 import { INLINE_EXEC_MS } from "./exec-detached.js";
@@ -137,22 +137,22 @@ export function mcpPlanFor(rows: readonly RecipeEntry[], opts: McpPlanOptions): 
 // --- the files, off the machine and back ------------------------------------------
 
 /** How long the read of every config off the machine may take. */
-const READ_MS = 120_000;
+export const READ_MS = 120_000;
 /** What each config's line starts with, so no text of a person's own can be read as the run's own words. */
 export const MCP_READ_MARK = "wsp-mcp";
 
 /** A call the machine never ran (refused by the provider, lost while it napped) reads as a failed one with the
  * error's words, so the stage names it on every server and the build goes on. */
-const refused = (e: unknown): ExecResult => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) });
+export const refused = (e: unknown): ExecResult => ({ exitCode: -1, stdout: "", stderr: e instanceof Error ? e.message : String(e) });
 
 /** Why the read did not answer, worded without a line of its output. That output is every config whole, and this
  * sentence is every skipped server's note, the stage line, the run log and the saved result: a read that stopped
  * says so by what it exited with. A machine that refused the call still says its own words, which are on stderr. */
-const readFailed = (res: ExecResult): string => `the config edit did not run (${reasonOf({ ...res, stdout: "" }, READ_MS / 1000)})`;
+export const readFailed = (res: ExecResult): string => `the config edit did not run (${reasonOf({ ...res, stdout: "" }, READ_MS / 1000)})`;
 
 /** One run reads every scope's config: the first of the scope's files that exists, base64 on one line, under the
  * scope's place in the plan and the file's place in the scope. */
-function readConfigsCmd(scopes: readonly { files: readonly string[] }[]): string {
+export function readConfigsCmd(scopes: readonly { files: readonly string[] }[]): string {
   return [
     "wsp_mcp_read() {",
     '  i="$1"; shift; n=0',
@@ -167,7 +167,7 @@ function readConfigsCmd(scopes: readonly { files: readonly string[] }[]): string
 }
 
 /** The config one scope points at, as it stands on the machine; nothing when none of the scope's files is there. */
-interface ScopeFile {
+export interface ScopeFile {
   path: string;
   text: string;
 }
@@ -175,7 +175,7 @@ interface ScopeFile {
 /** What the read printed, one entry per scope in plan order; nothing when not one line carried the mark, since the
  * read says something about every scope it was given and a run that says nothing did not run. An empty file prints
  * three words and is a file that is there and holds nothing, never a scope with no config on the machine. */
-function parseConfigs(stdout: string, scopes: readonly { files: readonly string[] }[]): (ScopeFile | undefined)[] | undefined {
+export function parseConfigs(stdout: string, scopes: readonly { files: readonly string[] }[]): (ScopeFile | undefined)[] | undefined {
   const out: (ScopeFile | undefined)[] = scopes.map(() => undefined);
   let answered = false;
   for (const line of stdout.split("\n")) {
@@ -190,7 +190,7 @@ function parseConfigs(stdout: string, scopes: readonly { files: readonly string[
 
 /** A kept definition's string as the machine reads it: a command right under a bin directory becomes its bare name,
  * and a laptop prefix becomes what it stands for there, a flag's `--name=` left in front of it. */
-function rewriteString(plan: McpPlan, s: string, command: boolean): string {
+export function rewriteString(plan: McpPlan, s: string, command: boolean): string {
   if (command) for (const d of plan.binDirs) if (s.startsWith(d) && !s.slice(d.length).includes("/")) return s.slice(d.length);
   const flag = /^--?[\w-]+=/.exec(s);
   const head = flag !== null ? flag[0] : "";
@@ -199,10 +199,20 @@ function rewriteString(plan: McpPlan, s: string, command: boolean): string {
   return s;
 }
 
-interface ScopeOutcome {
+/** A per-name outcome either road answers with, as the rows and the words read it: the one word they read is
+ * `missing`, a name the copy that travelled does not define. */
+export interface EditedName {
+  name: string;
+  outcome: McpEditResult["outcome"] | McpMergeResult["outcome"];
+  /** The kept server's command as the machine will run it. */
+  command?: string;
+}
+
+/** What one scope's config came to: the file the edit ran over, why it did not run, and what became of each name. */
+export interface ScopeOutcome {
   file: string | null;
   error?: string;
-  results: McpEditResult[];
+  results: EditedName[];
 }
 
 /** Every scope edited in plan order, each on its file's text as the scopes before it left it: two scopes of one
@@ -231,22 +241,31 @@ function editScopes(plan: McpPlan, agents: readonly McpAgentPlan[], read: readon
   return { outcomes, texts };
 }
 
-/** Where a config's edited bytes land before they are poured over it. */
+/** Where a config's edited bytes land before they go over it, and the copy of it they are poured into. */
 const landing = (path: string): string => `${path}.wsp-mcp`;
+const beside = (path: string): string => `${path}.wsp-new`;
 
-/** The bytes land beside the file and are poured over it rather than put in its place: a signed upload writes a new
- * file at the road's own mode, and a config that held a login would come back readable to anyone on the machine. */
-const pourOver = (path: string): string => `cat ${shellQuote(landing(path))} > ${shellQuote(path)} && rm -f ${shellQuote(landing(path))}`;
+/** The bytes land beside the file, are poured into a copy of it and that copy is renamed over it. The pour keeps
+ * the file's own mode, since a signed upload writes a new file at the road's own and a config that held a login
+ * would come back readable to anyone on the machine; the rename means an agent launching in that moment reads the
+ * whole of one copy or the whole of the other, never a file cut in half. */
+const pourOver = (path: string): string =>
+  [
+    `if [ -f ${shellQuote(path)} ]; then cp -p ${shellQuote(path)} ${shellQuote(beside(path))}; else : > ${shellQuote(beside(path))}; fi`,
+    `cat ${shellQuote(landing(path))} > ${shellQuote(beside(path))}`,
+    `mv ${shellQuote(beside(path))} ${shellQuote(path)}`,
+    `rm -f ${shellQuote(landing(path))}`,
+  ].join("\n");
 
 /** Puts every config the edit changed back on the machine; the words when one of them did not land. A landing that
  * was never poured over is swept: it holds the whole config at the upload road's own mode, and the machine it sits
  * on is about to be sealed into an image. */
-async function landConfigs(machine: Machine, read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
+export async function landConfigs(machine: Machine, read: readonly (ScopeFile | undefined)[], texts: ReadonlyMap<string, string>): Promise<string | undefined> {
   const was = new Map(read.flatMap(f => (f === undefined ? [] : [[f.path, f.text] as const])));
   const changed = [...texts].filter(([path, text]) => was.get(path) !== text);
   if (changed.length === 0) return undefined;
   const swept = async (why: string): Promise<string> => {
-    await machine.exec(`rm -f ${changed.map(([path]) => shellQuote(landing(path))).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
+    await machine.exec(`rm -f ${changed.flatMap(([path]) => [shellQuote(landing(path)), shellQuote(beside(path))]).join(" ")}`, { timeoutMs: INLINE_EXEC_MS }).catch(() => undefined);
     return `the edited config did not land (${why})`;
   };
   try {
@@ -269,17 +288,21 @@ interface Pending extends McpResult {
 
 const basename = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
 /** Runners that pull the server's package down when the agent first starts it: the definition is in place, the package is not. */
-const FETCHERS: Record<string, string> = { npx: "npx", uvx: "uv", uv: "uv" };
+export const FETCHERS: Record<string, string> = { npx: "npx", uvx: "uv", uv: "uv" };
 
-/** Installed servers by name; then, per distinct wording, the servers whose package is fetched on first use or
- * whose runner was installed or is missing; then each skipped server with its reason. */
-function summarize(rows: readonly Pending[]): string {
+/** The servers that were already there by name, then the ones installed; then, per distinct wording, the servers
+ * whose package is fetched on first use or whose runner was installed or is missing; then each skipped server with
+ * its reason. `present` is the rows the round read as already there, and a server in it is said that way and no
+ * other, so these words never read installed one line above a row reading present. */
+function summarize(rows: readonly Pending[], present: ReadonlySet<string>): string {
   const parts: string[] = [];
-  const installed = rows.filter(r => r.outcome === "installed" && r.shorts.length === 0);
+  const already = rows.filter(r => present.has(r.id));
+  if (already.length > 0) parts.push(`${already.map(r => r.name).join(", ")} already there`);
+  const installed = rows.filter(r => r.outcome === "installed" && r.shorts.length === 0 && !present.has(r.id));
   if (installed.length > 0) parts.push(`${installed.map(r => r.name).join(", ")} installed`);
   const byNote = new Map<string, string[]>();
   for (const r of rows) {
-    if (r.outcome === "skipped" || r.shorts.length === 0) continue;
+    if (r.outcome === "skipped" || r.shorts.length === 0 || present.has(r.id)) continue;
     const key = r.shorts.join(", ");
     (byNote.get(key) ?? byNote.set(key, []).get(key)!).push(r.name);
   }
@@ -305,7 +328,7 @@ const tail = (id: string): string => id.slice(id.lastIndexOf("/") + 1);
 
 /** Why a server whose command the machine does not have is skipped: when the recipe has a tool row for that
  * binary, what became of the row. */
-function absentReason(command: string, plan: McpPlan, tools: readonly ToolResult[]): string {
+export function absentReason(command: string, plan: McpPlan, tools: readonly ToolResult[]): string {
   const base = "command not on the machine";
   const row = plan.tools.find(t => tail(t.id) === basename(command));
   if (row === undefined) return base;
@@ -315,18 +338,35 @@ function absentReason(command: string, plan: McpPlan, tools: readonly ToolResult
   return `${base}; ${row.id} was ticked, but nothing by that name is on PATH`;
 }
 
+/** A command as the machine will run it: what the person's own home spells as a tilde is the machine's home. */
+export const asRun = (plan: McpPlan, command: string): string => (command.startsWith("~/") ? `${plan.guestHome}${command.slice(1)}` : command);
+
+/** Which commands of a plan's kept servers the machine does not have on its tools PATH, asked in one call; none
+ * when no kept server names a command, and none when the call itself did not answer. */
+export async function absentCommands(machine: Machine, plan: McpPlan, read: readonly ScopeOutcome[]): Promise<string[]> {
+  const commands = [...new Set(read.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(plan, r.command)] : []))))];
+  if (commands.length === 0) return [];
+  const check = await machine
+    .exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS })
+    .catch(refused);
+  return check.stdout
+    .split("\n")
+    .filter(line => line.startsWith("no "))
+    .map(line => line.slice(3));
+}
+
 /** The agents with every kept server whose command is neither on the machine nor fetched on first use moved to
  * the drops, with its reason. */
-function withoutAbsent(plan: McpPlan, read: readonly ScopeOutcome[], missing: ReadonlySet<string>, asRun: (c: string) => string, tools: readonly ToolResult[]): McpAgentPlan[] {
+export function withoutAbsent(plan: McpPlan, agents: readonly McpAgentPlan[], read: readonly ScopeOutcome[], missing: ReadonlySet<string>, tools: readonly ToolResult[]): McpAgentPlan[] {
   let at = 0;
-  return plan.agents.map(agent => ({
+  return agents.map(agent => ({
     ...agent,
     scopes: agent.scopes.map(scope => {
       const results = read[at++]?.results ?? [];
       const commandOf = (name: string): string | undefined => results.find(r => r.name === name)?.command;
       const absent = scope.keep.filter(name => {
         const command = commandOf(name);
-        return command !== undefined && FETCHERS[basename(command)] === undefined && missing.has(asRun(command));
+        return command !== undefined && FETCHERS[basename(command)] === undefined && missing.has(asRun(plan, command));
       });
       if (absent.length === 0) return scope;
       return { ...scope, keep: scope.keep.filter(name => !absent.includes(name)), drop: [...scope.drop, ...absent.map(name => ({ name, reason: absentReason(commandOf(name)!, plan, tools) }))] };
@@ -334,39 +374,22 @@ function withoutAbsent(plan: McpPlan, read: readonly ScopeOutcome[], missing: Re
   }));
 }
 
-/** Runs the plan on the builder in two edits of the text it read off the machine: the first says each kept server's
- * command as the machine will run it, every command is looked for on the machine's PATH, and the second is what
- * lands, with the servers whose command is neither there nor fetched on first use taken out. uv is installed by its
- * checksummed release when a server runs through it and it is missing. Each server is named on the stage as
- * installed or skipped with its reason; `tools` is what the tools stage did, so a skipped server can name the row
- * that would have brought its command. Nothing here fails the build. */
-export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageListener, tools: readonly ToolResult[] = []): Promise<McpResult[]> {
-  const count = (a: McpAgentPlan): number => a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length;
-  stage("installing-mcp", plan.agents.map(a => `${a.label} ${count(a)}`).join(", "));
-  const asRun = (command: string): string => (command.startsWith("~/") ? `${plan.guestHome}${command.slice(1)}` : command);
-  const missing = new Set<string>();
-  let agents = plan.agents;
-  const scopes = plan.agents.flatMap(a => a.scopes);
-  // The answer is every config whole, the servers' env and headers with it. No backend the seal runs on carries a
-  // byte road out of a machine (a signed download URL is minted by one provider of the several), so the read goes
-  // by the road every backend has and says that its output is not a log's.
-  const res = await machine.run(readConfigsCmd(scopes), { deadlineMs: READ_MS, unlogged: true }).catch(refused);
-  let failure = res.exitCode === 0 ? undefined : readFailed(res);
-  let report: ScopeOutcome[] | undefined;
-  const files = failure === undefined ? parseConfigs(res.stdout, scopes) : undefined;
-  if (files === undefined) failure ??= readFailed(res);
-  else {
-    const first = editScopes(plan, agents, files);
-    const commands = [...new Set(first.outcomes.flatMap(s => s.results.flatMap(r => (r.command !== undefined ? [asRun(r.command)] : []))))];
-    if (commands.length > 0) {
-      const check = await machine.exec(`export PATH=${TOOLS_PATH}\n${commands.map(c => `if command -v ${shellQuote(c)} >/dev/null 2>&1; then echo ${shellQuote(`ok ${c}`)}; else echo ${shellQuote(`no ${c}`)}; fi`).join("\n")}`, { timeoutMs: INLINE_EXEC_MS }).catch(refused);
-      for (const line of check.stdout.split("\n")) if (line.startsWith("no ")) missing.add(line.slice(3));
-    }
-    agents = withoutAbsent(plan, first.outcomes, missing, asRun, tools);
-    const second = editScopes(plan, agents, files);
-    report = second.outcomes;
-    failure = await landConfigs(machine, files, second.texts);
-  }
+/** The count line a servers round opens with: each agent and how many servers of its the plan names. */
+export const mcpOpening = (agents: readonly McpAgentPlan[]): string =>
+  agents.map(a => `${a.label} ${a.scopes.reduce((n, s) => n + s.keep.length + s.drop.length, 0) + a.aside.length}`).join(", ");
+
+/** Every server of a plan as a row, and the words a person reads for them, whichever road wrote the configs: one
+ * row per kept name, per dropped name and per name set aside, uv installed where a kept server runs through it and
+ * is missing, each server whose command the machine does not have named on its row, and the closing line. `report`
+ * is what became of each scope, in plan order; `failure` is a sentence every kept server is skipped with, for a
+ * round that never got its configs off the machine or back onto it; `present` is the rows the caller reads as
+ * already there, which the closing words then say the same way. */
+export async function mcpRows(
+  machine: Machine,
+  plan: McpPlan,
+  o: { agents: readonly McpAgentPlan[]; report?: readonly ScopeOutcome[]; failure?: string; missing: ReadonlySet<string>; present?: ReadonlySet<string>; stage: StageListener },
+): Promise<McpResult[]> {
+  const { agents, report, failure, missing, stage } = o;
   const rows: Pending[] = [];
   let at = 0;
   for (const agent of agents) {
@@ -395,7 +418,7 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
     for (const a of agent.aside) rows.push(skipped(a.id, agent.label, a.name, a.reason));
   }
 
-  const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(r.command)));
+  const viaUv = rows.filter(r => r.command !== undefined && ["uv", "uvx"].includes(basename(r.command)) && missing.has(asRun(plan, r.command)));
   if (viaUv.length > 0) {
     stage("installing-mcp", `uv for ${viaUv.map(r => r.name).join(", ")}`);
     // uv's catalog row walks the script road, so the road carries the strict shell line and uv's own limit; the stage writes neither.
@@ -413,13 +436,43 @@ export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageList
   }
   const viaUvNames = new Set(viaUv.map(r => r.id));
   for (const r of rows) {
-    if (r.command === undefined || viaUvNames.has(r.id) || !missing.has(asRun(r.command))) continue;
+    if (r.command === undefined || viaUvNames.has(r.id) || !missing.has(asRun(plan, r.command))) continue;
     const short = `${basename(r.command)} is not on the machine`;
     r.shorts.push(short);
     r.notes.push(`${short}; the server starts once it is installed there`);
   }
-  stage("installing-mcp", closing(summarize(rows), await freeNote(machine).catch(() => undefined)));
+  stage("installing-mcp", closing(summarize(rows, o.present ?? new Set()), await freeNote(machine).catch(() => undefined)));
   return rows.map(strip);
+}
+
+/** Runs the plan on the builder in two edits of the text it read off the machine: the first says each kept server's
+ * command as the machine will run it, every command is looked for on the machine's PATH, and the second is what
+ * lands, with the servers whose command is neither there nor fetched on first use taken out. uv is installed by its
+ * checksummed release when a server runs through it and it is missing. Each server is named on the stage as
+ * installed or skipped with its reason; `tools` is what the tools stage did, so a skipped server can name the row
+ * that would have brought its command. Nothing here fails the build. */
+export async function applyMcp(machine: Machine, plan: McpPlan, stage: StageListener, tools: readonly ToolResult[] = []): Promise<McpResult[]> {
+  stage("installing-mcp", mcpOpening(plan.agents));
+  const missing = new Set<string>();
+  let agents = plan.agents;
+  const scopes = plan.agents.flatMap(a => a.scopes);
+  // The answer is every config whole, the servers' env and headers with it. No backend the seal runs on carries a
+  // byte road out of a machine (a signed download URL is minted by one provider of the several), so the read goes
+  // by the road every backend has and says that its output is not a log's.
+  const res = await machine.run(readConfigsCmd(scopes), { deadlineMs: READ_MS, unlogged: true }).catch(refused);
+  let failure = res.exitCode === 0 ? undefined : readFailed(res);
+  let report: ScopeOutcome[] | undefined;
+  const files = failure === undefined ? parseConfigs(res.stdout, scopes) : undefined;
+  if (files === undefined) failure ??= readFailed(res);
+  else {
+    const first = editScopes(plan, agents, files);
+    for (const command of await absentCommands(machine, plan, first.outcomes)) missing.add(command);
+    agents = withoutAbsent(plan, agents, first.outcomes, missing, tools);
+    const second = editScopes(plan, agents, files);
+    report = second.outcomes;
+    failure = await landConfigs(machine, files, second.texts);
+  }
+  return mcpRows(machine, plan, { agents, report, missing, stage, ...(failure !== undefined ? { failure } : {}) });
 }
 
 const skipped = (id: string, agent: string, name: string, note: string): Pending => ({ id, agent, name, outcome: "skipped", notes: [note], shorts: [] });
