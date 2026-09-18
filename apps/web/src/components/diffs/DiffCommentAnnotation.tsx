@@ -50,7 +50,7 @@ export function DiffCommentAnnotation({
     return (
       <div
         data-diff-comment-annotation
-        className="group/comment flex min-w-0 items-start gap-2.5 border-s-2 border-primary/55 bg-primary/[0.045] px-3 py-2.5 font-sans text-foreground"
+        className="group/comment flex min-w-0 items-start gap-2.5 border-s border-border bg-muted/30 px-3 py-2.5 font-sans text-foreground"
         contentEditable={false}
         onPointerDown={(event) => event.stopPropagation()}
       >

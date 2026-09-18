@@ -10,7 +10,11 @@
 // the dollar figures beside the models are. Cmd-1 to cmd-9 pick a
 // listed model while the menu is open. The harness is pinned once the thread
 // has a turn: a thread is one resumed session, so picking another harness
-// changes nothing and the footer says to start a new thread for it.
+// changes nothing and the footer says to start a new thread for it. A
+// workspace whose project remembers no agent and whose turns have not started
+// has the rail opened for it once, without taking focus: the box under it is
+// where the ask is typed, the pick is one click away beside it, and the first
+// keystroke takes the list away again.
 import { ChevronDownIcon, SearchIcon, StarIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { catalogSourceLine, noModelsLine, whoPaysLines } from "@wsp/protocol";
@@ -33,6 +37,9 @@ export interface ModelPickerProps {
   pinned: boolean;
   /** Where this workspace's turns run, as the rest of the app names it, for the footer's sentences. */
   where: string;
+  /** Put the rail in front of the person: a project nobody has run an agent on has no agent to default to, so the
+   * list is opened for them the one time. It takes no focus, since the box under it is where the ask is typed. */
+  offerAgents?: boolean;
   onPickHarness: (harness: string) => void;
   onPickModel: (harness: string, model: string) => void;
 }
@@ -75,8 +82,11 @@ export function newThreadNotice(entry: HarnessCatalog): string {
   return `Start a new thread to use ${entry.label} here`;
 }
 
-export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, onPickHarness, onPickModel }: ModelPickerProps) {
+export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, offerAgents = false, onPickHarness, onPickModel }: ModelPickerProps) {
   const [open, setOpen] = useState(false);
+  // Opened by the composer rather than by the person. Every interaction of theirs clears it, so the rail keeps
+  // focus off the search box only for the one opening they did not ask for.
+  const [offered, setOffered] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -87,10 +97,22 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   const platform = typeof navigator === "undefined" ? "" : navigator.platform;
 
   useEffect(() => {
+    if (offerAgents) {
+      setOffered(true);
+      setOpen(true);
+      return;
+    }
+    // The offer is over the moment the person types: a list the composer opened must not stand over the box the
+    // ask is being typed into. One they opened themselves stays where they put it.
+    setOpen(open => (offered ? false : open));
+  }, [offerAgents]);
+
+  useEffect(() => {
     if (!open) return;
     setQuery("");
     setActive(0);
     setNotice(null);
+    if (offered) return;
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
@@ -129,7 +151,13 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
   );
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={next => {
+        setOffered(false);
+        setOpen(next);
+      }}
+    >
       <PopoverTrigger
         render={<Button type="button" variant="ghost" size="xs" />}
         className="shrink-0 font-medium text-muted-foreground/70 hover:text-foreground/80"
@@ -144,7 +172,7 @@ export function ComposerModelPicker({ catalogs, catalog, model, pinned, where, o
         <span className="truncate">{agentAndModelLine(catalog, model)}</span>
         <ChevronDownIcon className="size-3 shrink-0 opacity-50" />
       </PopoverTrigger>
-      <PopoverPopup align="start" side="top" className="w-[22rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]">
+      <PopoverPopup align="start" side="top" className="w-[22rem] p-0" viewportClassName="p-0 [--viewport-inline-padding:0]" initialFocus={offered ? false : undefined}>
         <div className="flex max-h-80 min-h-0" data-composer-model-menu onKeyDown={onKeyDown}>
           <div className="flex w-10 shrink-0 flex-col gap-1 border-e border-border p-1" role="tablist" aria-label="Agents">
             {catalogs.map(entry => {

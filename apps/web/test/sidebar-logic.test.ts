@@ -23,7 +23,6 @@ import {
 } from "../src/sidebar/Sidebar.logic.js";
 import { absenceOf } from "../src/settings/places.js";
 import { currentWorkspaceId } from "../src/adapt/workspaces.js";
-import { ROW_LINE_MAX, rowLineCut } from "../src/sidebar/rowGrammar.js";
 import {
   compactTimeLabel,
   metaSentences,
@@ -151,11 +150,9 @@ describe("workspace row labels", () => {
     expect(line([{ asking: "Run: ls" }, ...asked])).toBe("Run: ls");
     // Nothing waiting and no branch on the record: the line is empty rather than a figure.
     expect(line([{ asking: null }])).toBe("");
-    // The row cuts it at its own cap, as it does every line three; the whole sentence rides the row's title.
+    // The line is handed over whole: the slot's own width cuts it, and the whole sentence rides the row's title.
     const long = "Run: wsp --version && wsp host list && wsp workspaces";
-    const cut = rowLineCut(line([{ asking: long }]));
-    expect(cut).toBe("Run: wsp --version && wsp…");
-    expect(cut.length).toBeLessThanOrEqual(ROW_LINE_MAX);
+    expect(line([{ asking: long }])).toBe(long);
   });
 
   it("what the runtime is doing to the machine's helper, or a drop with memory near full, takes the whole line", () => {
@@ -293,7 +290,6 @@ describe("workspace row labels", () => {
     // row: nothing else there is known while that computer is not connected.
     const line = workspaceMetaLine({ project: on, absent, outOfMemory: undefined });
     expect(line).toBe("no answer 38 min · is it on?");
-    expect(rowLineCut(line)).toBe(line);
     expect(metaSentences({ project: on, absent, outOfMemory: undefined })[0]).toBe(line);
     // The whole sentence is one string every surface reads, and it never names the machine's id.
     expect(absent.sentence).toBe("old-laptop is not answering; it connects on its own when it is on");
@@ -479,16 +475,3 @@ describe("a thread row's words", () => {
   });
 });
 
-describe("the row's third line is cut at the sidebar's own room", () => {
-  const now = Date.parse("2026-09-03T12:00:00Z");
-
-  it("a line within the cap is whole, one over it is cut at a word boundary with the ellipsis inside the cap", () => {
-    expect(ROW_LINE_MAX).toBe(30);
-    expect(rowLineCut("no answer 2 h · threads go on")).toBe("no answer 2 h · threads go on");
-    expect(rowLineCut("$0.09 today · naps in 12m")).toBe("$0.09 today · naps in 12m");
-    const long = "no backup since 2026-09-08, over the cap";
-    expect(rowLineCut(long).length).toBeLessThanOrEqual(ROW_LINE_MAX);
-    expect(rowLineCut(long)).toBe("no backup since 2026-09-08…");
-    expect(rowLineCut("x".repeat(40))).toBe(`${"x".repeat(29)}…`);
-  });
-});

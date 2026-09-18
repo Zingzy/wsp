@@ -123,11 +123,12 @@ export function terminalPaneTitle(pane: TerminalPaneState): string | null {
   }
 }
 
-/** What the app calls the panel a person opens to see what a workspace is doing and to rebuild it. Written once
- * here because three sentences in this file name it and a rename that moved two of them would leave the third. */
-const WORKSPACE_PANEL = "Workspace panel";
+/** Where a person now reads what a workspace is doing and reaches its verbs: its own row in the sidebar, the pane
+ * that held those facts having gone. Written once here because two sentences in this file name it and a rename
+ * that moved one would leave the other. */
+const WORKSPACE_ROW = "workspace's row";
 
-const REBUILD_HINT = `Rebuild it from the ${WORKSPACE_PANEL}`;
+const REBUILD_HINT = `Rebuild it from the ${WORKSPACE_ROW}`;
 
 /** What a shell says when the daemon that was holding it is gone: the pane's overlay and the bytes written into
  * the terminal itself read one sentence, so a person who saw it in the scrollback and a person who saw the overlay
@@ -141,7 +142,7 @@ export const SHELL_ENDED_LINE = "This shell ended when the daemon holding it sto
 const unansweredHint = (pane: { local: boolean; where: string }): string =>
   pane.local
     ? `wsp keeps trying; look at the terminal you started wsp in on ${pane.where}`
-    : `wsp keeps trying; the ${WORKSPACE_PANEL} says what ${pane.where} is doing`;
+    : `wsp keeps trying; the ${WORKSPACE_ROW} says what ${pane.where} is doing`;
 
 /** What a pane says for a machine with no daemon at all. One sentence stating the fact, with no return promised and
  * nothing to wait for: a pane that read "reconnecting" for a workspace that never had a daemon road was the bug
@@ -220,7 +221,7 @@ export function terminalEmptyLine(pane: TerminalPaneState): string | null {
     case "waking":
       return "Workspace is waking; terminals open when it is running";
     case "gone":
-      return `The workspace is gone; rebuild it from the ${WORKSPACE_PANEL}`;
+      return `The workspace is gone; rebuild it from the ${WORKSPACE_ROW}`;
     default: {
       const _exhaustive: never = pane;
       return null;

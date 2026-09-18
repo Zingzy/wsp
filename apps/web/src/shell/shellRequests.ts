@@ -51,11 +51,18 @@ const FORGET_WORKSPACE_EVENT = "wsp:forget-workspace";
 
 export interface ForgetWorkspaceRequest {
   readonly workspaceId: string;
+  /** Which road out: the record alone on a workspace whose machine is gone, or the machine with it. */
+  readonly act: "forget" | "delete";
 }
 
 /** Asks for the forget confirmation; the sidebar answers with its dialog. */
 export function requestForgetWorkspace(workspaceId: string): void {
-  window.dispatchEvent(new CustomEvent(FORGET_WORKSPACE_EVENT, { detail: { workspaceId } }));
+  window.dispatchEvent(new CustomEvent(FORGET_WORKSPACE_EVENT, { detail: { workspaceId, act: "forget" } }));
+}
+
+/** The same dialog for the other road: the machine goes with the record. */
+export function requestDeleteWorkspace(workspaceId: string): void {
+  window.dispatchEvent(new CustomEvent(FORGET_WORKSPACE_EVENT, { detail: { workspaceId, act: "delete" } }));
 }
 
 export function onForgetWorkspaceRequest(listener: (detail: ForgetWorkspaceRequest) => void): () => void {

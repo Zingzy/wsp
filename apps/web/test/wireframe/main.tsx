@@ -36,6 +36,11 @@
 //   add-computer-run the same sheet with the install under way
 //   add-computer-refused  the same sheet with what ssh said in the slot
 //   remove-computer  the Remove dialog over the table
+//   bring-back-paused    the row's menu on a machine that is stopped, with
+//                        Bring back held and its reason under the pointer
+//   bring-back-absent    the same on a workspace whose computer is not
+//                        answering, which says what that computer says
+//   bring-back-roadless  the same on a wsp whose host carries no such request
 import { createRoot } from "react-dom/client";
 import { CATALOG_AGENTS, agentName } from "@wsp/catalog";
 import { manyAgents } from "./agents";
@@ -81,7 +86,17 @@ const landings: Record<string, WorkspaceLanding> = {
 
 const places: PlaceView[] = [
   { id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, shape: { cpu: 10, memMb: 16384 }, takesForks: false } as PlaceView,
-  { id: "p_spoo", kind: "computer", name: "spoo", default: true, present: true, shape: { cpu: 4, memMb: 8192 }, takesForks: true } as PlaceView,
+  // The box stops answering on the screen about a computer that has gone quiet; every other screen has it on.
+  {
+    id: "p_spoo",
+    kind: "computer",
+    name: "spoo",
+    default: true,
+    present: params.get("screen") !== "bring-back-absent",
+    lastSeenAt: new Date(Date.parse(AT) - 40 * 60_000).toISOString(),
+    shape: { cpu: 4, memMb: 8192 },
+    takesForks: true,
+  } as PlaceView,
 ];
 
 const ref = (p: ProjectView) => ({ id: p.id, name: p.name, path: p.path, computer: p.computer });
@@ -134,10 +149,15 @@ const thread = (id: string, workspaceId: string, prompt: string, over: Partial<S
 /** The workspace a create answered with, for the creation view's own last line. */
 const CREATED_ID = "ws_new";
 
+/** The three screens about a held Bring back, and what each holds the row back with. */
+const bringBackScreen = ["bring-back-paused", "bring-back-absent", "bring-back-roadless"].includes(screen);
+
 const WORKSPACES: WorkspaceView[] = [
   inPlace("ws_here", "pricing page", SPOO),
   copyHere("ws_copy", "webhook retries", SPOO, 3100, "agent/webhook-retries"),
-  onBox("ws_box", "import from stripe", LANDING, "agent/stripe-import"),
+  // The box's workspace is stopped on the screen about a machine that is not running, so the row's own state is
+  // what holds the verb rather than a flag this page invents.
+  { ...onBox("ws_box", "import from stripe", LANDING, "agent/stripe-import"), ...(screen === "bring-back-paused" ? { phase: "napping" as const } : {}) },
   { ...copyHere("ws_fork", "pricing table", SPOO, 3200, "agent/pricing-table"), parentThreadId: "th_lead" },
 ];
 const SESSIONS: Record<string, SessionView[]> = {
@@ -270,6 +290,8 @@ const api = {
     if (screen === "first-run-starting") return new Promise<ProjectView>(() => {});
     return SPOO;
   },
+  // The one road Bring back takes; the screen about a wsp whose host carries no such request has none.
+  ...(screen === "bring-back-roadless" ? {} : { bringBack: async () => ({ branch: "agent/stripe-import", base: "main", ahead: 1, uncommitted: 0, stat: [] }) }),
   daemon: { open: () => () => {} },
   spend: async () => [],
   image: async () => ({ image: null, copies: [] }),
@@ -386,6 +408,16 @@ setTimeout(() => {
       then?.();
     }, 120);
   };
+  // The row's own menu over the workspace on the box, where Bring back is the row the shot is about.
+  if (bringBackScreen) {
+    const waiting = setInterval(() => {
+      const row = document.querySelector<HTMLElement>('[data-row-id="ws:ws_box"]');
+      if (row === null) return;
+      clearInterval(waiting);
+      const box = row.getBoundingClientRect();
+      row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, composed: true, clientX: Math.round(box.left + 80), clientY: Math.round(box.top + 20) }));
+    }, 120);
+  }
   if (screen === "computers-open") clickWhenThere('[data-place-row="p_spoo"]');
   if (screen === "computers-failed") clickWhenThere('[data-place-row="p_lab"]');
   if (screen === "computers-here") clickWhenThere('[data-place-row="here"]');

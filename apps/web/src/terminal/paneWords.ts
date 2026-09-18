@@ -37,12 +37,21 @@ const NEVER = (): (() => void) => () => {};
 
 /** This workspace's link as the registry holds it, for a surface that draws no pane of its own. A workspace with no
  * model yet reads as a link nothing has been open on, which is what it is. */
-function useLinkSocket(workspaceId: string | null): { socket: DaemonLinkStatus; refusal: string | null } {
+export function useLinkSocket(workspaceId: string | null): { socket: DaemonLinkStatus; refusal: string | null } {
   const terms = useSyncExternalStore(onTerminals, () => (workspaceId === null ? null : getTerminals(workspaceId)));
   const subscribe = useCallback((fn: () => void) => terms?.onStatus(fn) ?? NEVER(), [terms]);
   const socket = useSyncExternalStore(subscribe, () => terms?.status() ?? NOT_OPENED_YET);
   const refusal = useSyncExternalStore(subscribe, () => terms?.refusal() ?? null);
   return { socket, refusal };
+}
+
+/** The word every git read over this workspace's wire keys on, so each reader asks again when the link changes it.
+ * The wire is handed out before the link's first status lands, and a read made over a link that is not up yet comes
+ * back unreachable: asked once, that failure stands as the reader's last word for the whole of a session, on a folder
+ * it could read fine. The composer's folder row and the Diff pane's header both read the folder's branch, and both
+ * key their read on this. */
+export function useLinkWord(workspaceId: string | null): DaemonLinkStatus {
+  return useLinkSocket(workspaceId).socket;
 }
 
 /** The one line the main screen shows while this workspace's link is down, else null. */

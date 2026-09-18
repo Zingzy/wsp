@@ -18,13 +18,14 @@
 // not switched: the daemon has no checkout op.
 import { ArrowLeftIcon, ChevronDownIcon, CheckIcon, FolderGitIcon, FolderIcon, FolderSearchIcon, GitBranchIcon, LoaderCircleIcon, MessageSquarePlusIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type FolderMachine, type RepoStateWord } from "@wsp/protocol";
+import { hiddenFolder, isMacMachine, REPO_STATE_WORDS, type DaemonLinkStatus, type FolderMachine, type RepoStateWord } from "@wsp/protocol";
 import { baseName } from "../../files/entries";
 import { FOLDER_GHOST_WITH_WALK, FolderPathField, folderPathRefusal, useFolderPick, type FolderRefusal } from "../../files/FolderPathField";
 import { useWorkspaceListing } from "../../files/listing";
 import { parentWithin, rootOf, useRoots, useRootStore, useThreadFolder } from "../../files/root";
 import { useDaemonRoot, useDaemonWire } from "../../files/wire";
 import { useStatus } from "../../protocol/store";
+import { useLinkWord } from "../../terminal/paneWords";
 import { repoAbsence } from "../../adapt/git";
 import { desktopBridge } from "../../lib/desktopShell";
 import { cn } from "../../lib/utils";
@@ -39,7 +40,9 @@ import type { ChatThreadHandle } from "./useChatThread";
 /** What git said about the folder: a branch, or one of the states the slot has a word (or none) for. */
 type Branch = { readonly kind: RepoStateWord } | { readonly kind: "repo"; readonly head: string };
 
-function useBranch(wire: TerminalWire | null, folder: string | null, running: boolean): Branch {
+/** The branch git names for the folder under the box, asked again every time the daemon's link changes its word,
+ * which is the rule `useLinkWord` carries and the Diff pane's header reads too. */
+function useBranch(wire: TerminalWire | null, folder: string | null, running: boolean, link: DaemonLinkStatus): Branch {
   const [state, setState] = useState<{ folder: string | null; branch: Branch }>({ folder, branch: { kind: "unknown" } });
   useEffect(() => {
     if (!wire || folder === null || running) return;
@@ -55,7 +58,7 @@ function useBranch(wire: TerminalWire | null, folder: string | null, running: bo
     return () => {
       gone = true;
     };
-  }, [wire, folder, running]);
+  }, [wire, folder, running, link]);
   return state.folder === folder ? state.branch : { kind: "unknown" };
 }
 
@@ -285,12 +288,13 @@ export function ComposerCheckoutRow({
   const shell = useRootStore(s => s.shell);
   const choose = useRootStore(s => s.choose);
   const startFolder = useThreadFolder(workspaceId);
+  const linkWord = useLinkWord(workspaceId);
   const { cwd, shellCwd, running } = thread.view;
   const pickable = canPickFolder(thread);
   // A view on a turn names that turn's folder; a view about to open a thread names the one the thread will start in.
   const folder = pickable ? startFolder : (cwd ?? startFolder);
   const canPick = wire !== null && roots.length > 0 && folder !== null;
-  const branch = useBranch(wire, folder, running);
+  const branch = useBranch(wire, folder, running, linkWord);
 
   useEffect(() => {
     if (cwd !== null) follow(workspaceId, cwd);

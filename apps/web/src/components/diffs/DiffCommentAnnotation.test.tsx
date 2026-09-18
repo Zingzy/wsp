@@ -68,8 +68,11 @@ describe("DiffCommentAnnotation", () => {
     expect(markup).not.toContain("on +78");
     expect(markup).toContain("Please keep this branch explicit.");
     expect(markup).toContain('aria-label="Delete comment"');
-    expect(markup).toContain("border-s-2");
-    expect(markup).toContain("bg-primary/[0.045]");
+    // A hairline and the comment's own icon mark the row; a coloured left border two pixels wide is an accent
+    // doing what a hairline and an icon already do.
+    expect(markup).toContain("border-s border-border");
+    expect(markup).not.toContain("border-s-2");
+    expect(markup).not.toContain("bg-primary/");
     expect(markup).toContain("lucide-message-circle");
   });
 

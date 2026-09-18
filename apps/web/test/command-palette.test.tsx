@@ -6,7 +6,7 @@ import { act, configure, fireEvent, render, screen, waitFor, within } from "@tes
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { NO_DAEMON_TO_START, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { WORKSPACE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
@@ -216,12 +216,10 @@ describe("command palette", () => {
     await waitFor(() => expect(palette()).not.toBeNull());
     await waitFor(() => expect(metaOn("mac")).toContain("No daemon"));
     expect(metaOn("mac")).not.toContain("Unreachable");
-    // The rebuild forks a machine again from the image, and there is no machine of wsp's here to fork; the row
-    // used to answer that this one answers, on a computer whose every pane said it did not.
+    // The rebuild forks a machine again from the image, and there is no machine of wsp's here to fork, so the
+    // palette offers no such row at all rather than one held with a reason nobody can clear.
     fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "rebuild" } });
-    await waitFor(() => expect(palette()!.textContent).toContain("Rebuild"));
-    expect(palette()!.textContent).toContain("which wsp does not run; it cannot be rebuilt");
-    expect(palette()!.textContent).not.toContain("This one answers");
+    await waitFor(() => expect(palette()!.textContent).not.toContain(WORKSPACE_WORDS.rebuild));
     // No row of the list says unreachable about the computer the app is drawn on, whichever verb it refuses.
     for (const query of ["browser", "forget", ""]) {
       fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: query } });
@@ -255,12 +253,12 @@ describe("command palette", () => {
     expect(asked).toEqual([here.id]);
   });
 
-  it("refuses the start on a workspace whose daemon this host does not hold, in one sentence and never by the kind", async () => {
+  it("offers no start on a workspace whose daemon this host does not hold: the row is absent, not dimmed", async () => {
     await mountShell();
     mod("k");
     await waitFor(() => expect(palette()).not.toBeNull());
     fireEvent.change(screen.getByPlaceholderText(/Search commands/), { target: { value: "start the daemon" } });
-    await waitFor(() => expect(palette()!.textContent).toContain(NO_DAEMON_TO_START));
+    await waitFor(() => expect(palette()!.textContent).not.toContain(WORKSPACE_WORDS.startDaemon));
   });
 
   it("carries Add a computer, which opens Settings with the sheet over it", async () => {

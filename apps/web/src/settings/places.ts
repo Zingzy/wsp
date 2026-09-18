@@ -123,8 +123,8 @@ export function placeOf(places: readonly PlaceView[], workspace: Pick<WorkspaceV
 }
 
 /** The one state of the computer a workspace stands on, while that computer is not answering; null while it is,
- * and on every workspace at a provider, which reports no link at all. The sidebar row, the Workspace panel, the
- * composer and the terminal and processes panes all read this one reading, so the silence of one computer is not
+ * and on every workspace at a provider, which reports no link at all. The sidebar row, the
+ * composer and the terminal pane all read this one reading, so the silence of one computer is not
  * worded six ways again.
  *
  * The computer the host runs on is read off its own workspace's reach rather than off the places list, which

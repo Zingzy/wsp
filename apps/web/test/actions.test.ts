@@ -6,11 +6,10 @@
 // menus are built from.
 import { PauseIcon, PlayIcon, SquareIcon } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
-import { goneRefusal, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, undrivenRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { fileActions, type FileVerbs } from "../src/actions/fileActions.js";
-import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { goneRefusal, kindWords, machineWord, notAnsweringYet, ownDaemonDown, threadForgetRefusal, workspaceState, workspaceWord, type HarnessCatalog, type PlaceView, type SessionStatus, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { placeMenu } from "../src/actions/menuPlacement.js";
-import { actionById, resolveActions, toMenuItems } from "../src/actions/registry.js";
+import { actionById, actionIfAny, resolveActions, toMenuItems } from "../src/actions/registry.js";
 import { terminalActions, type TerminalVerbs } from "../src/actions/terminalActions.js";
 import { threadActions, threadTarget, type ThreadTarget, type ThreadVerbs } from "../src/actions/threadActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceTarget, type WorkspaceVerbs } from "../src/actions/workspaceActions.js";
@@ -37,8 +36,9 @@ function workspaceVerbs(over: Partial<WorkspaceVerbs> = {}): WorkspaceVerbs {
     togglePhase: vi.fn(async () => {}),
     openTerminal: vi.fn(async () => {}),
     openBrowser: vi.fn(),
-    openMachine: vi.fn(),
     newThread: vi.fn(),
+    bringBack: vi.fn(async () => {}),
+    deleteWorkspace: vi.fn(),
     copyText: vi.fn(async () => {}),
     rebuild: vi.fn(async () => {}),
     restartDaemon: vi.fn(async () => {}),
@@ -53,24 +53,24 @@ const enabled = (actions: ReturnType<typeof resolveActions>) => actions.filter(a
 const titles = (actions: ReturnType<typeof resolveActions>) => actions.map(a => a.title);
 
 describe("workspace actions", () => {
-  it("a running workspace offers pause, terminal, browser, machine, new thread, the project trips, rename and copy id; fork, rebuild and forget carry their refusal", () => {
+  it("a running workspace offers pause, terminal, browser, new thread, bring back, the project trips, rename and copy id; fork, rebuild and forget carry their refusal", () => {
     const verbs = workspaceVerbs();
     const actions = resolveActions(workspaceActions, workspace("running"), verbs);
+    // The rebuild, the start and the forget are roads out of a state this workspace is not in, so they are not
+    // drawn at all: a row held with a reason a person cannot clear is furniture.
     expect(titles(actions)).toEqual([
       WORKSPACE_WORDS.pause,
-      WORKSPACE_WORDS.rebuild,
-      WORKSPACE_WORDS.startDaemon,
       WORKSPACE_WORDS.newThread,
       WORKSPACE_WORDS.openTerminal,
       WORKSPACE_WORDS.openBrowser,
-      WORKSPACE_WORDS.openMachine,
+      WORKSPACE_WORDS.bringBack,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
-      WORKSPACE_WORDS.forget,
+      WORKSPACE_WORDS.delete,
     ]);
-    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "open-machine", "export-project", "rename", "copy-id"]);
+    expect(enabled(actions)).toEqual(["phase", "new-thread", "open-terminal", "open-browser", "bring-back", "export-project", "rename", "copy-id", "delete"]);
     expect(actionById(actions, "rename").refusal).toBeNull();
     // A workspace name is this computer's own record, so the box opens whatever the machine is doing.
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "rename").refusal).toBeNull();
@@ -79,9 +79,10 @@ describe("workspace actions", () => {
     // The look actions are gone from the registry, so no surface can offer a picker for a colour or a glyph.
     expect(actions.map(action => action.id)).not.toContain("icon");
     expect(actions.map(action => action.id)).not.toContain("theme");
-    expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; take a project snapshot in the Workspace tab and start a workspace from it");
-    expect(actionById(actions, "rebuild").refusal).toBe("This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
-    expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is running");
+    expect(actionById(actions, "fork").refusal).toBe("Running a copy of a workspace is not in the runtime yet; make a second workspace of the same project from the plus on its row");
+    expect(actionIfAny(actions, "rebuild")).toBeUndefined();
+    expect(actionIfAny(actions, "forget")).toBeUndefined();
+    expect(actionIfAny(actions, "start-daemon")).toBeUndefined();
   });
 
   it("pause and wake are one slot: the word follows the state, and the moving states refuse it with a word", () => {
@@ -98,29 +99,54 @@ describe("workspace actions", () => {
     expect(waking.refusal).toBeNull();
     expect(waking.rowLabel).toBe("Stop api");
     expect(actionById(resolveActions(workspaceActions, workspace("gone"), verbs), "phase").refusal).toBe(goneRefusal("wake"));
+    // A machine wsp neither forked nor pays for is neither paused nor woken by wsp, so the slot is not there.
+    expect(actionIfAny(resolveActions(workspaceActions, workspace("running", { kind: "local" }), verbs), "phase")).toBeUndefined();
   });
 
-  it("this computer refuses the pause with the runtime's own sentence, wherever it is offered, and keeps every verb that is about threads", () => {
+  it("this computer offers neither the machine verbs nor the fork, and keeps every verb that is about the work", () => {
     const mac = workspace("running", { kind: "local", displayName: "zingzy-mac" });
     const actions = resolveActions(workspaceActions, mac, workspaceVerbs());
-    expect(actionById(actions, "phase").refusal).toBe(undrivenRefusal("zingzy-mac", machineWord("local"), "be paused"));
+    // Nothing here pauses, wakes, rebuilds or forks this computer, so the row offers none of it.
+    expect(titles(actions)).toEqual([
+      WORKSPACE_WORDS.newThread,
+      WORKSPACE_WORDS.openTerminal,
+      WORKSPACE_WORDS.openBrowser,
+      WORKSPACE_WORDS.bringBack,
+      WORKSPACE_WORDS.exportProject,
+      WORKSPACE_WORDS.rename,
+      WORKSPACE_WORDS.copyId,
+      WORKSPACE_WORDS.delete,
+    ]);
     expect(actionById(actions, "new-thread").refusal).toBeNull();
     expect(actionById(actions, "open-terminal").refusal).toBeNull();
     expect(actionById(actions, "copy-id").refusal).toBeNull();
+    expect(actionById(actions, "delete").refusal).toBeNull();
+    // The delete's hover says what it does to this kind's machine, in that kind's own words.
+    expect(actionById(actions, "delete").hint).toBe(`Its ${kindWords("local").onDelete.asked}`);
+  });
+
+  it("the start of a daemon is drawn only where this host holds the process that is missing", () => {
+    const reading = { word: "No daemon", said: "this Mac's daemon is not running", sentence: "this Mac's daemon is not running", line: "daemon not running · start it", start: "Start it" } as WorkspaceTarget["absent"];
+    const down = resolveActions(workspaceActions, workspace("running", { kind: "local", absent: reading }), workspaceVerbs());
+    expect(actionById(down, "start-daemon").refusal).toBeNull();
+    expect(actionById(resolveActions(workspaceActions, workspace("running", { kind: "local", absent: reading }), workspaceVerbs({ restartDaemon: undefined })), "start-daemon").refusal).toBe("This client cannot start a daemon");
+    expect(actionIfAny(resolveActions(workspaceActions, workspace("running", { kind: "local" }), workspaceVerbs()), "start-daemon")).toBeUndefined();
   });
 
   it("a gone workspace offers rebuild and forget and refuses the machine actions; a zombie offers rebuild alone; a client without the verbs says so", () => {
     const verbs = workspaceVerbs();
     const gone = resolveActions(workspaceActions, workspace("gone"), verbs);
-    expect(enabled(gone)).toEqual(["rebuild", "open-machine", "rename", "copy-id", "forget"]);
+    expect(enabled(gone)).toEqual(["rebuild", "rename", "copy-id", "forget"]);
+    // The delete is the road for a machine that is still there; a gone one has only its record left to lose.
+    expect(actionIfAny(gone, "delete")).toBeUndefined();
     expect(actionById(gone, "new-thread").refusal).toBe("New threads wait for the rebuild");
     expect(actionById(gone, "open-terminal").refusal).toBe(goneRefusal("open a terminal"));
     expect(actionById(gone, "open-browser").refusal).toBe(goneRefusal("preview"));
     const zombie = resolveActions(workspaceActions, workspace("unreachable", { reach: "zombie" }), verbs);
     expect(actionById(zombie, "rebuild").refusal).toBeNull();
-    // A zombie is a machine that answers nothing, so it is refused the forget in the words a machine that answers
-    // nothing is refused every road out of gone with.
-    expect(actionById(zombie, "forget").refusal).toBe(notAnsweringYet("forget"));
+    // A zombie is a machine that is still there, so the road out of it is the delete and not the forget.
+    expect(actionIfAny(zombie, "forget")).toBeUndefined();
+    expect(actionById(zombie, "delete").refusal).toBeNull();
     const bare = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs({ rebuild: undefined, forget: undefined }));
     expect(actionById(bare, "rebuild").refusal).toBe("This client cannot rebuild workspaces");
     expect(actionById(bare, "forget").refusal).toBe("This client cannot forget workspaces");
@@ -141,7 +167,7 @@ describe("workspace actions", () => {
     await actionById(actions, "new-thread").run();
     await actionById(actions, "open-terminal").run();
     await actionById(actions, "open-browser").run();
-    await actionById(actions, "open-machine").run();
+    await actionById(actions, "bring-back").run();
     await actionById(actions, "copy-id").run();
     await actionById(actions, "export-project").run();
     expect(verbs.exportProject).toHaveBeenCalledWith("ws_a");
@@ -149,7 +175,7 @@ describe("workspace actions", () => {
     expect(verbs.newThread).toHaveBeenCalledWith("ws_a");
     expect(verbs.openTerminal).toHaveBeenCalledWith("ws_a");
     expect(verbs.openBrowser).toHaveBeenCalledWith("ws_a");
-    expect(verbs.openMachine).toHaveBeenCalledWith("ws_a");
+    expect(verbs.bringBack).toHaveBeenCalledWith("ws_a");
     expect(verbs.copyText).toHaveBeenCalledWith("m_a");
     const gone = resolveActions(workspaceActions, workspace("gone"), verbs);
     await actionById(gone, "rebuild").run();
@@ -204,17 +230,16 @@ describe("workspace actions", () => {
     expect(workspaceTarget(view, { ...status, phase: "running", machineState: "running", reach: { state: "unreachable" } }, []).absent).toBeNull();
   });
 
-  it("refuses a preview and a forget on this computer in the one sentence, never by calling it unreachable", () => {
+  it("refuses a preview on this computer in the computer's own sentence, never by calling it unreachable", () => {
     const here = workspace("unreachable", { kind: "local", absent: ownDaemonDown("this Mac") });
     const actions = resolveActions(workspaceActions, here, workspaceVerbs({ forget: vi.fn() }));
     expect(actionById(actions, "open-browser").refusal).toBe("this Mac's daemon is not running");
-    expect(actionById(actions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this Mac's daemon is not running");
     for (const action of actions) expect(action.refusal ?? "").not.toMatch(/unreachable/i);
-    // A fork whose machine stopped answering keeps the state table's words, which say what opens when it answers,
-    // and the one sentence both roads out of gone are refused in.
+    // Neither road out of gone is drawn on a machine that is merely not answering: it is still there.
+    expect(actionIfAny(actions, "forget")).toBeUndefined();
     const fork = resolveActions(workspaceActions, workspace("unreachable"), workspaceVerbs({ forget: vi.fn() }));
     expect(actionById(fork, "open-browser").refusal).toBe("Workspace is unreachable; previews open when the machine answers");
-    expect(actionById(fork, "forget").refusal).toBe(notAnsweringYet("forget"));
+    expect(actionIfAny(fork, "forget")).toBeUndefined();
   });
 
   it("a paused machine the provider would not resume offers the rebuild beside the wake, with the record's own words on it", () => {
@@ -227,44 +252,22 @@ describe("workspace actions", () => {
     // The wake stands beside it: the fault is the provider's and may pass, so nothing takes the other road away.
     expect(actionById(actions, "phase").refusal).toBeNull();
     expect(actionById(actions, "phase").buttonWord).toBe("Wake");
-    // The same machine before its wake ran out is refused the rebuild, in the word its own row shows.
-    expect(actionById(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), "rebuild").refusal).toBe(
-      "This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
-    );
+    // The same machine before its wake ran out has nothing to rebuild, so the row is not drawn at all.
+    expect(actionIfAny(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), "rebuild")).toBeUndefined();
   });
 
-  it("a workspace that is not answering says one thing in the rebuild's reason and the forget's, and the state word its row shows", () => {
+  it("a workspace that is not answering offers neither road out of gone, and its row says the state that is so", () => {
     const actions = resolveActions(workspaceActions, workspace("unreachable"), workspaceVerbs());
-    const rebuild = actionById(actions, "rebuild").refusal;
-    const forget = actionById(actions, "forget").refusal;
-    // A person reads these four rows apart in one list. The rebuild used to call the machine one that answers while
-    // the forget and the row beneath both called it unreachable, and a list that says both is a list nobody
-    // believes.
-    expect(rebuild).toBe("This one is not answering yet; the rebuild is offered once it is gone");
-    expect(forget).toBe("This one is not answering yet; the forget is offered once it is gone");
-    expect(rebuild).not.toContain("answers, so nothing");
-    // The state half is one string for both, and the road each names is the only thing that differs.
-    const half = (line: string) => line.split("; ")[0];
-    expect(half(forget!)).toBe(half(rebuild!));
-    // And it is the state the row shows for the same workspace.
+    // A person read these four rows apart in one list, each naming a road that opens only once the machine is
+    // gone; a machine that is merely not answering is not gone, so neither row is there to be read.
+    expect(actionIfAny(actions, "rebuild")).toBeUndefined();
+    expect(actionIfAny(actions, "forget")).toBeUndefined();
     expect(workspaceWord(workspaceState(workspace("unreachable")))).toBe("Unreachable");
-    // A machine that does answer says so in the word its row shows, in both rows.
-    expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs()), "rebuild").refusal).toBe(
-      "This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
-    );
-    expect(actionById(resolveActions(workspaceActions, workspace("running"), workspaceVerbs()), "forget").refusal).toBe(
-      "Only a workspace whose computer is gone can be forgotten; this one is running",
-    );
-    // A paused machine does not answer either. The forget beside it and the row under both read Paused, and the
-    // rebuild was the last row in that list still calling it a machine that answers.
-    const pausedActions = resolveActions(workspaceActions, workspace("paused"), workspaceVerbs());
-    expect(actionById(pausedActions, "rebuild").refusal).toBe(
-      "This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone",
-    );
-    expect(actionById(pausedActions, "forget").refusal).toBe("Only a workspace whose computer is gone can be forgotten; this one is stopped");
-    expect(workspaceWord(workspaceState(workspace("paused")))).toBe("Stopped");
+    // A machine that does answer offers neither either, and the delete is the one road out of it.
+    const running = resolveActions(workspaceActions, workspace("running"), workspaceVerbs());
+    expect(actionIfAny(running, "rebuild")).toBeUndefined();
+    expect(actionById(running, "delete").refusal).toBeNull();
   });
-
   it("the row buttons' labels name the workspace, and the keybindings come from the one table", () => {
     const actions = resolveActions(workspaceActions, workspace("gone"), workspaceVerbs());
     expect(actionById(actions, "forget").rowLabel).toBe("Forget api");
@@ -372,26 +375,6 @@ describe("thread actions", () => {
   });
 });
 
-describe("file actions", () => {
-  const fileVerbs = (): FileVerbs => ({ open: vi.fn(), revealInDiff: vi.fn(), copyText: vi.fn(async () => {}) });
-
-  it("a file opens, shows in the diff and copies its path; a folder copies its path alone", async () => {
-    const verbs = fileVerbs();
-    const file = resolveActions(fileActions, { path: "/root/src/a.ts", kind: "file" }, verbs);
-    expect(titles(file)).toEqual([FILE_WORDS.open, FILE_WORDS.showDiff, FILE_WORDS.copyPath]);
-    expect(enabled(file)).toEqual(["open", "show-diff", "copy-path"]);
-    await actionById(file, "open").run();
-    await actionById(file, "show-diff").run();
-    await actionById(file, "copy-path").run();
-    expect(verbs.open).toHaveBeenCalledWith("/root/src/a.ts");
-    expect(verbs.revealInDiff).toHaveBeenCalledWith("/root/src/a.ts");
-    expect(verbs.copyText).toHaveBeenCalledWith("/root/src/a.ts");
-    const folder = resolveActions(fileActions, { path: "/root/src", kind: "directory" }, verbs);
-    expect(enabled(folder)).toEqual(["copy-path"]);
-    expect(actionById(folder, "open").refusal).toBe("A folder opens in the tree");
-    expect(actionById(folder, "show-diff").refusal).toBe("Only a file has a diff");
-  });
-});
 
 describe("terminal actions", () => {
   const terminalVerbs = (over: Partial<TerminalVerbs> = {}): TerminalVerbs => ({
@@ -432,24 +415,22 @@ describe("menu items from actions", () => {
     const items = toMenuItems(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), DEFAULT_RESOLVED_KEYBINDINGS, { platform: "MacIntel" });
     expect(items.map(i => [i.id, i.label, i.group, i.enabled])).toEqual([
       ["phase", WORKSPACE_WORDS.wake, "state", true],
-      ["rebuild", WORKSPACE_WORDS.rebuild, "state", false],
-      ["start-daemon", WORKSPACE_WORDS.startDaemon, "state", false],
       ["new-thread", WORKSPACE_WORDS.newThread, "open", true],
       ["open-terminal", WORKSPACE_WORDS.openTerminal, "open", true],
       ["open-browser", WORKSPACE_WORDS.openBrowser, "open", false],
-      ["open-machine", WORKSPACE_WORDS.openMachine, "open", true],
+      ["bring-back", WORKSPACE_WORDS.bringBack, "project", false],
       ["export-project", WORKSPACE_WORDS.exportProject, "project", true],
       ["rename", WORKSPACE_WORDS.rename, "edit", true],
       ["fork", WORKSPACE_WORDS.fork, "edit", false],
       ["copy-id", WORKSPACE_WORDS.copyId, "copy", true],
-      ["forget", WORKSPACE_WORDS.forget, "remove", false],
+      ["delete", WORKSPACE_WORDS.delete, "remove", true],
     ]);
     expect(items.find(i => i.id === "open-browser")?.refusal).toBe("Workspace is paused; wake it to preview");
     expect(items.find(i => i.id === "open-terminal")).toMatchObject({ shortcut: "⌘J", accelerator: "CommandOrControl+J" });
     expect(items.find(i => i.id === "new-thread")).toMatchObject({ shortcut: "⌘N", accelerator: "CommandOrControl+N" });
     expect(items.find(i => i.id === "phase")).not.toHaveProperty("shortcut");
     expect(items.find(i => i.id === "phase")).not.toHaveProperty("refusal");
-    expect(items.find(i => i.id === "forget")?.destructive).toBe(true);
+    expect(items.find(i => i.id === "delete")?.destructive).toBe(true);
     const linux = toMenuItems(resolveActions(workspaceActions, workspace("paused"), workspaceVerbs()), DEFAULT_RESOLVED_KEYBINDINGS, { platform: "Linux x86_64" });
     expect(linux.find(i => i.id === "open-terminal")).toMatchObject({ shortcut: "Ctrl+J", accelerator: "CommandOrControl+J" });
     // A terminal's chords are bound while a terminal has focus; read without that context they are nobody's.

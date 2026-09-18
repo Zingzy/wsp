@@ -22,8 +22,11 @@ export function workspaceMenuShape(workspace: WorkspaceView): MenuShape {
   // No places list: only the shape is read, and the one field that reads it is a verb's refusal, which decides
   // whether a row is dimmed rather than whether it is there.
   const target = workspaceTarget(workspace, null, []);
-  // Every row of the registry: it holds none a surface has to hide.
-  const items = workspaceActions.map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true }));
+  // Every row this workspace takes, by the registry's own rule: an action its kind or its state cannot take is not
+  // drawn in the app either, so the shape the smoke expects is the shape a person sees.
+  const items = workspaceActions
+    .filter(entry => entry.applies?.(target) ?? true)
+    .map(entry => ({ id: entry.id, label: entry.title(target), group: entry.group, enabled: true }));
   return contextMenuTemplate(items, () => {}).map(row => (row.type === "separator" ? SEPARATOR : String(row.label)));
 }
 

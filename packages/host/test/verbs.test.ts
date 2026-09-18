@@ -1111,18 +1111,18 @@ describe("wsp verbs over the host", () => {
     const workspace = { id: "ws_mine", name: "box", machineId: "ssh://dev@box:22", phase: "running", kind: "ssh", golden: "", createdAt: "2026-09-08T00:00:00.000Z", project: { id: "pr_1", name: "api", path: "/root/api", computer: "default" } } as const;
     // What wsp put on a machine somebody owns comes off with the record; the machine is theirs and stays.
     expect(deleteQuestion({ workspace, threads: 1 })).toBe(
-      "Delete box?\nIts daemon, its unit and its login line come off the machine, which is otherwise left as it is; its record and 1 thread leave this computer.",
+      "Delete box?\nIts daemon, its unit and its login line come off the computer, which is otherwise left as it is; its record and 1 thread leave this computer.",
     );
     expect(deletedLine({ workspace, threads: 1 })).toBe(
-      "deleted box ws_mine: its daemon, its unit and its login line come off the machine, which is otherwise left as it is, and its record and 1 thread are gone from this computer",
+      "deleted box ws_mine: its daemon, its unit and its login line come off the computer, which is otherwise left as it is, and its record and 1 thread are gone from this computer",
     );
     // This computer took no daemon of wsp's and no line in a login file, so nothing comes off it.
     const here = { ...workspace, kind: "local", machineId: "local" } as const;
-    expect(deleteQuestion({ workspace: here, threads: 1 })).toBe("Delete box?\nIts machine is left as it is; its record and 1 thread leave this computer.");
-    expect(deletedLine({ workspace: here, threads: 1 })).toBe("deleted box ws_mine: its machine is left as it is, and its record and 1 thread are gone from this computer");
+    expect(deleteQuestion({ workspace: here, threads: 1 })).toBe("Delete box?\nIts computer is left as it is; its record and 1 thread leave this computer.");
+    expect(deletedLine({ workspace: here, threads: 1 })).toBe("deleted box ws_mine: its computer is left as it is, and its record and 1 thread are gone from this computer");
     // A fork is wsp's to take away, and its line still names the machine that goes.
     const fork = { ...workspace, kind: "cloud", machineId: "m_ab12" } as const;
-    expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: machine m_ab12 is gone at the provider, and its record and 0 threads are gone from this computer");
+    expect(deletedLine({ workspace: fork, threads: 0 })).toBe("deleted box ws_mine: computer m_ab12 is gone in the cloud, and its record and 0 threads are gone from this computer");
   });
 
   it("delete asks once in the words the app shows, kills the machine at the provider, and drops the record and its threads", async () => {
@@ -1134,7 +1134,7 @@ describe("wsp verbs over the host", () => {
     const kept = await answer("no", "delete", "alpha");
     expect(kept.code).toBe(1);
     expect(kept.io.errors).toEqual(["alpha kept"]);
-    expect(asked).toEqual([`Delete alpha?\nIts machine is deleted at the provider; its record and 1 thread leave this computer.`]);
+    expect(asked).toEqual([`Delete alpha?\nIts computer is deleted in the cloud; its record and 1 thread leave this computer.`]);
     expect((await rt.workspaces.list()).map(w => w.name).sort()).toEqual(["alpha", "beta"]);
     expect(backend.machines[0]!.killed).toBe(false);
 
@@ -1142,7 +1142,7 @@ describe("wsp verbs over the host", () => {
     expect(deleted.code).toBe(0);
     expect(deleted.io.errors).toEqual([]);
     expect(deleted.io.lines).toEqual([
-      `deleted alpha ${alpha.id}: machine ${alpha.machineId} is gone at the provider, and its record and 1 thread are gone from this computer`,
+      `deleted alpha ${alpha.id}: computer ${alpha.machineId} is gone in the cloud, and its record and 1 thread are gone from this computer`,
     ]);
     expect(backend.machines[0]!.killed).toBe(true);
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["beta"]);

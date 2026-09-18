@@ -3,7 +3,7 @@
 // contract components code against.
 import { useEffect, useMemo } from "react";
 import { create } from "zustand";
-import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
+import { CLOUD_SETUP_WORDS, NOTIFY_ME, applyPreferencesPatch, threadsFollowed, type AbsentComputer, type BringBackResult, foldThreads, goldenHead, initNeedsYouLine, isLocalWorkspace, isNeedsYouLine, threadKeyOf, workspaceStateOf, type AppAddress, type Capabilities, type HarnessCatalog, type InitJob, type PlaceView, type PortForward, type ProjectView, type Preferences, type PreferencesPatch, type SessionView, type ThreadView, type WorkspaceCreateStage, type WorkspaceLook, type WorkspacePhase, type WorkspaceProject, type WorkspaceSize, type WorkspaceState, type WorkspaceStatus, type WorkspaceView, type PlaceDial, type WorkspaceLanding } from "@wsp/protocol";
 import { noSuchThreadLine, renameNotTakenLine } from "../actions/format.js";
 import { readAddress, writeAddress } from "./address.js";
 import { deriveSidebarProjects, sidebarWorkspaceOrder } from "../adapt/workspaces.js";
@@ -114,6 +114,10 @@ interface State {
   places: PlaceView[];
   /** Every project this wsp holds, which is what a workspace is made of; the two project events keep it current. */
   projects: ProjectView[];
+  /** What the last bring back on a workspace answered, by its id: the branch it pushed and the pull request it
+   * opened, which the row's third line reads until another one lands. Nothing is kept for a workspace nobody has
+   * brought work back from. */
+  broughtBack: Record<string, BringBackResult>;
   /** Where a workspace of each project would land, by the project's id: asked once per project, and the one home of
    * the flags a row's words about its copy's ports and its state word are read off. A key with null under it is a
    * project the runtime refused a landing for, which is what keeps that refusal from being asked again on every
@@ -179,6 +183,9 @@ interface State {
   addProject(source: string, on?: string): Promise<ProjectView | null>;
   /** Forgets a project; the row leaves on project.removed. A refusal (a workspace still stands on it) is a toast. */
   removeProject(projectId: string): Promise<void>;
+  /** Pushes the agent's branch and opens its pull request. The answer lands under the workspace's id, where the
+   * row's third line reads it; a refusal is thrown for the caller's own toast, in the daemon's own sentence. */
+  bringBack(workspaceId: string): Promise<void>;
   /** Asks where a workspace of this project would land, once per project. A refusal is remembered as no landing
    * rather than asked again on every render. */
   loadLanding(project: string): Promise<void>;
@@ -437,6 +444,7 @@ export const useStore = create<State>((set, get) => {
     connectOpen: false,
     places: [],
     projects: [],
+    broughtBack: {},
     landings: {},
     projectsRead: false,
     placesRead: false,
@@ -533,6 +541,12 @@ export const useStore = create<State>((set, get) => {
       // arrived first, and the create that follows a first run has a project to be made of.
       set(s => ({ projects: [...s.projects.filter(p => p.id !== project.id), project] }));
       return project;
+    },
+    async bringBack(workspaceId) {
+      const api = get().api;
+      if (api?.bringBack === undefined) return;
+      const back = await api.bringBack(workspaceId);
+      set(s => ({ broughtBack: { ...s.broughtBack, [workspaceId]: back } }));
     },
     async removeProject(projectId) {
       const api = get().api;
@@ -779,12 +793,14 @@ export const useStore = create<State>((set, get) => {
             const { [e.workspaceId]: _c, ...costs } = s.costs;
             const { [e.workspaceId]: _p, ...spending } = s.spending;
             const { [e.workspaceId]: _r, ...sessions } = s.sessions;
+            const { [e.workspaceId]: _b, ...broughtBack } = s.broughtBack;
             return {
               workspaces: s.workspaces.filter(x => x.id !== e.workspaceId),
               statuses,
               costs,
               spending,
               sessions,
+              broughtBack,
               forwards: s.forwards.filter(f => f.workspaceId !== e.workspaceId),
             };
           });
@@ -1015,8 +1031,8 @@ export function useWorkspaceState(id: string | null): WorkspaceState | null {
   return view === null ? null : workspaceStateOf(view, status);
 }
 /** The one state of this workspace's computer while it is not answering, null while it is. Every surface that says
- * anything about an absent computer reads it here: the sidebar row, the Workspace panel, the composer's held send
- * and the terminal and processes panes. The clock is the caller's: a surface that ticks passes its own, so it
+ * anything about an absent computer reads it here: the sidebar row, the composer's held send
+ * and the terminal pane. The clock is the caller's: a surface that ticks passes its own, so it
  * cannot date the silence differently from the row beside it, and one that shows the sentence alone passes none
  * and is handed a reading with no figure, rather than a clock read on the render path that never ticks again. */
 export function useAbsentComputer(id: string | null, nowMs: number | null = null): AbsentComputer | null {
@@ -1110,6 +1126,8 @@ export function useProtocolEvents(fn: (e: ProtocolEvent) => void): void {
 }
 export function usePlaces(): PlaceView[] { return useStore(s => s.places); }
 export function useProjects(): ProjectView[] { return useStore(s => s.projects); }
+/** What the last bring back on this workspace answered, for the row that reads it; undefined until one has. */
+export function useBroughtBack(workspaceId: string): BringBackResult | undefined { return useStore(s => s.broughtBack[workspaceId]); }
 export function usePlacesRead(): boolean { return useStore(s => s.placesRead); }
 export function useProjectsRead(): boolean { return useStore(s => s.projectsRead); }
 /** Whether the first run is the whole centre: this wsp holds no project and no workspace, and the host has
