@@ -287,9 +287,10 @@ describe("the socket a place proved, served as an inbound one", () => {
       },
       { timeout: 5_000, interval: 10 },
     );
-    // The sweep is the real one over that home: the place file, its key and the token are gone and named.
-    expect(answer).toMatchObject({ ok: true, swept: [at.placeFile, at.placeKey, at.tokenPath] });
-    for (const path of [at.placeFile, at.placeKey, at.tokenPath]) expect(existsSync(path)).toBe(false);
+    // The sweep is the real one over that home: the place file, its key and the token are gone and named, and
+    // wsp's own folder goes last and whole, so nothing of wsp's is left under the home.
+    expect(answer).toMatchObject({ ok: true, swept: [at.placeFile, at.placeKey, at.tokenPath, at.wsp] });
+    for (const path of [at.placeFile, at.placeKey, at.tokenPath, at.wsp]) expect(existsSync(path)).toBe(false);
     // The process ends after the reply is on the wire, and nothing dials again: the sweep took what would bring it back.
     await Promise.race([d.exited, settled(5_000).then(() => Promise.reject(new Error("the daemon did not end after the leave")))]);
     const dialed = host.dials();
