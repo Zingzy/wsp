@@ -12,7 +12,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { HERE_PLACE_ID, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -59,6 +59,7 @@ import {
   verifyNoneLeft,
   type DaemonSocket,
 } from "../src/doctor.js";
+import { catalogEntry } from "@wsp/catalog";
 import { redact } from "../src/init-log.js";
 import { createOn, projectOn } from "./verbs-fixture.js";
 import type { CliIO } from "../src/cli.js";
@@ -516,23 +517,35 @@ describe("stageDaemonBundle", () => {
 });
 
 describe("the recipe's tools read from inside the workspace", () => {
-  /** A machine whose exec answers the PATH read with the commands this box has, the way the guest's own shell does. */
-  const machineWith = (found: readonly string[]): { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>; asked: string[] } => {
+  /** A workspace as this step can ask it: the commands on its PATH, and the formulas the prefix inside it keeps a
+   * link for. Both reads are answered the way a shell inside would: a `command -v` read prints a line per command
+   * it cannot find, and the formula read prints a line per formula whose link is not there and whose name is on no
+   * command either, which is the fallback the bottle-less tap road leaves. */
+  const workspaceWith = (
+    has: { commands?: readonly string[]; formulas?: readonly string[] },
+  ): { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>; asked: string[] } => {
     const asked: string[] = [];
+    const commands = has.commands ?? [];
+    const formulas = has.formulas ?? [];
     return {
       asked,
       exec: async cmd => {
         asked.push(cmd);
+        if (cmd.includes("test -e ")) {
+          const read = [...cmd.matchAll(/test -e \S+\/opt\/(\S+) \|\| command -v '([^']+)'/g)].map(m => ({ formula: m[1]!, name: m[2]! }));
+          const gone = read.filter(row => !formulas.includes(row.formula) && !commands.includes(row.name));
+          return { exitCode: 0, stdout: gone.map(row => `missing ${row.formula}\n`).join(""), stderr: "" };
+        }
         const bins = [...cmd.matchAll(/'([^']+)'/g)].map(m => m[1]!);
-        return { exitCode: 0, stdout: bins.filter(b => !found.includes(b)).map(b => `missing ${b}\n`).join(""), stderr: "" };
+        return { exitCode: 0, stdout: bins.filter(b => !commands.includes(b)).map(b => `missing ${b}\n`).join(""), stderr: "" };
       },
     };
   };
   const ticks = (...ids: string[]): { ticks: { id: string }[] } => ({ ticks: ids.map(id => ({ id })) });
 
   it("reads every ticked catalogue tool's command on the tools PATH and names the ones it answered for", async () => {
-    const machine = machineWith(["gh", "go"]);
-    expect(await recipeToolsInside(machine, ticks("tools/catalog/gh", "tools/catalog/go"))).toBe("2 answered on the PATH inside: gh, go");
+    const machine = workspaceWith({ commands: ["gh", "go"] });
+    expect(await recipeToolsInside(machine, ticks("tools/catalog/gh", "tools/catalog/go"))).toBe("2 answered inside: gh, go");
     // On the one PATH a machine's tools sit on, which is the PATH the workspace boots with: a read on any other
     // order would answer for a different gh than the workspace's own threads run.
     expect(machine.asked[0]).toContain(`export PATH=${TOOLS_PATH}`);
@@ -540,40 +553,64 @@ describe("the recipe's tools read from inside the workspace", () => {
   });
 
   it("fails naming the rows that did not answer, which is a tool the recipe installed and no workspace can run", async () => {
-    await expect(recipeToolsInside(machineWith(["go"]), ticks("tools/catalog/gh", "tools/catalog/go"))).rejects.toThrow(
-      "gh is not on the PATH inside the workspace, though the recipe installed it on the machine",
+    await expect(recipeToolsInside(workspaceWith({ commands: ["go"] }), ticks("tools/catalog/gh", "tools/catalog/go"))).rejects.toThrow(
+      "gh did not answer inside the workspace, though the recipe installed it on the machine",
     );
   });
 
-  it("reads the formula rows too, by the command a formula puts on PATH, since those are the rows a box installs outside the overlaid trees", async () => {
-    // The rows this step exists for: on the box the proof ran on, go, cloudflared, shellcheck, bat and eza are
-    // Homebrew rows, and gh itself is a Homebrew link. A step that read the catalogue rows alone would pass on
-    // that recipe while every one of those was out of the workspace's sight.
-    const machine = machineWith(["go", "shellcheck", "sketchybar"]);
-    const said = await recipeToolsInside(machine, ticks("tools/brew/go", "tools/brew/shellcheck", "tools/brew/felixkratz/formulae/sketchybar"));
-    expect(said).toBe("3 answered on the PATH inside: go, shellcheck, sketchybar");
-    // A tap formula answers by the name after the tap, which is the name its road puts on PATH.
-    expect(machine.asked[0]).toContain("'sketchybar'");
-    await expect(recipeToolsInside(machineWith(["go"]), ticks("tools/brew/go", "tools/brew/cloudflared"))).rejects.toThrow(
-      "cloudflared is not on the PATH inside the workspace",
+  it("reads a formula by the link the prefix keeps for it, whatever the formula puts on PATH", async () => {
+    // The rows this step exists for are formulas, and a formula's own name is not the command it installs:
+    // git-delta puts delta on PATH, gnupg puts gpg, c-ares puts adig and ahost, and nothing a recipe carries says
+    // so. The prefix keeps one link per formula it installed, and that is what a workspace can be asked for.
+    const machine = workspaceWith({ formulas: ["git-delta", "go", "sketchybar"], commands: ["delta", "go"] });
+    const said = await recipeToolsInside(machine, ticks("tools/brew/git-delta", "tools/brew/go", "tools/brew/felixkratz/formulae/sketchybar"));
+    expect(said).toBe("3 answered inside: felixkratz/formulae/sketchybar, git-delta, go");
+    // One test per row, and neither half of it runs brew, which cannot run inside a workspace at all.
+    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/git-delta || command -v 'git-delta'`);
+    // A tap formula is linked and installed under the name after the tap, which is the name both halves read.
+    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/sketchybar || command -v 'sketchybar'`);
+    // Neither half runs brew itself: the one brew on a machine is the shim in the prefix, and inside a workspace
+    // that prefix is read-only and its user cannot read the folder it would start in.
+    expect(machine.asked[0]).not.toContain(`${HOMEBREW_PREFIX}/bin/brew`);
+    expect(machine.asked[0]).not.toContain("linuxbrew -c");
+    // And a formula the prefix has no link for and no command either did not answer: it is named by its own name,
+    // which is the name the recipe row carries and the person reads.
+    await expect(recipeToolsInside(workspaceWith({ formulas: ["go"] }), ticks("tools/brew/go", "tools/brew/cloudflared"))).rejects.toThrow(
+      "cloudflared did not answer inside the workspace, though the recipe installed it on the machine",
     );
-    // One command is read once, whichever rows named it: the catalogue's gh row and a formula of the same name.
-    expect(await recipeToolsInside(machineWith(["gh"]), ticks("tools/catalog/gh", "tools/brew/gh"))).toBe("1 answered on the PATH inside: gh");
+    // The bottle-less tap road installs the binary under that same name in /usr/local/bin, so a command of that
+    // name answers for the formula where the prefix keeps no link.
+    expect(await recipeToolsInside(workspaceWith({ commands: ["sketchybar"] }), ticks("tools/brew/felixkratz/formulae/sketchybar"))).toBe(
+      "1 answered inside: felixkratz/formulae/sketchybar",
+    );
   });
 
-  it("passes with nothing to read where the recipe ticks no row this can name a command for, and reads no manager row whose package is not its command", async () => {
-    const said = "the recipe ticks no tool this can name a command for, so there is nothing to read inside";
+  it("reads both kinds of row in one step, each by its own read", async () => {
+    const machine = workspaceWith({ commands: ["gh"], formulas: ["ripgrep"] });
+    expect(await recipeToolsInside(machine, ticks("tools/catalog/gh", "tools/brew/ripgrep"))).toBe("2 answered inside: gh, ripgrep");
+    expect(machine.asked).toHaveLength(2);
+    expect(machine.asked[0]).toContain("command -v");
+    expect(machine.asked[1]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/ripgrep`);
+    // The catalogue's own ripgrep row says its command is rg, which is why a formula is never read by a command
+    // the catalogue happens to know: a recipe that ticks the formula carries no such word.
+    expect(catalogEntry("ripgrep")?.kind === "tool" ? catalogEntry("ripgrep")?.bin : undefined).toBe("rg");
+  });
+
+  it("passes with nothing to read where the recipe ticks no row this can ask for, and reads no manager row whose package is not its command", async () => {
+    const said = "the recipe ticks no tool this can ask a workspace for, so there is nothing to read inside";
     // An npm or pnpm row's package name is not the command it installs (`@openai/codex` is `codex`), so a guess
     // there would fail a workspace for a name nothing put on it.
-    expect(await recipeToolsInside(machineWith([]), ticks("agents/claude", "tools/npm/@openai/codex", "mcp/notion"))).toBe(said);
-    expect(await recipeToolsInside(machineWith([]), undefined)).toBe(said);
-    const machine = machineWith([]);
+    expect(await recipeToolsInside(workspaceWith({}), ticks("agents/claude", "tools/npm/@openai/codex", "mcp/notion"))).toBe(said);
+    expect(await recipeToolsInside(workspaceWith({}), undefined)).toBe(said);
+    const machine = workspaceWith({});
     expect(machine.asked).toEqual([]);
   });
 
   it("a read that could not be run at all fails the step rather than passing quietly", async () => {
     const dead = { exec: async () => ({ exitCode: 124, stdout: "", stderr: "" }) };
     await expect(recipeToolsInside(dead, ticks("tools/catalog/gh"))).rejects.toThrow("the tools inside could not be read");
+    // And the formula read the same way: a workspace that would not answer is not a workspace that answered.
+    await expect(recipeToolsInside(dead, ticks("tools/brew/go"))).rejects.toThrow("the tools inside could not be read");
   });
 });
 

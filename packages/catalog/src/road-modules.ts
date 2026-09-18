@@ -130,10 +130,21 @@ export function asLinuxbrew(cmd: string): string {
  * update, and a caller that wants otherwise exports it, which su carries through. */
 export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\nexec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
 
-/** The command a formula puts on PATH: the formula's own name, and for a tap formula the name after the tap. Read
- * by the road that takes a tap formula's binary off again and by the doctor, which asks a workspace whether every
- * formula the recipe ticked answers inside it. */
-export const formulaCommand = (formula: string): string => formula.slice(formula.lastIndexOf("/") + 1);
+/** A formula's own short name, the part after the tap: the name Homebrew links it under in the prefix, and the
+ * name the road below installs the binary under where a tap formula has no Linux bottle. Not the command the
+ * formula puts on PATH, which is the formula's business and often another word (git-delta puts delta on PATH,
+ * gnupg puts gpg, c-ares puts adig and ahost); nothing a recipe carries names those. */
+export const formulaShortName = (formula: string): string => formula.slice(formula.lastIndexOf("/") + 1);
+
+/** Whether a formula is on a machine, as one shell test a workspace can answer: the prefix keeps an `opt/<short
+ * name>` link per formula it installed, whatever binaries that formula puts on PATH, and a tap formula with no
+ * Linux bottle took the road to /usr/local/bin under that same name instead. Two roads, one test, and neither
+ * needs brew, which cannot run inside a workspace: the prefix is bound in read-only and `brew` wants a user and a
+ * writable cellar. */
+export const formulaPresent = (formula: string): string => {
+  const short = formulaShortName(formula);
+  return `test -e ${BREW_PREFIX}/opt/${short} || command -v ${shellQuote(short)} >/dev/null 2>&1`;
+};
 
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
@@ -146,7 +157,7 @@ const brew: RoadModule<Road<"brew">> = {
   uninstall: r => {
     if (!r.formula.includes("/")) return { cmd: asLinuxbrew(`uninstall ${r.formula}`) };
     // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
-    const bin = formulaCommand(r.formula);
+    const bin = formulaShortName(r.formula);
     return { cmd: `if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${r.formula}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${r.formula}`)}; else rm -f /usr/local/bin/${shellQuote(bin)}; fi` };
   },
   names: r => [r.formula],

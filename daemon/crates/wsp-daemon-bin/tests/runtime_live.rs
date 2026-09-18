@@ -642,8 +642,8 @@ async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_b
         assert_eq!(fs::read_dir(root).map(|d| d.count() as u64).unwrap_or(0), own, "{root} on the box changed");
     }
     // And the command the bring back's pull request half needs, where this box has it: gh answers on the PATH the
-    // workspace booted with, at the path the box has it. Asked on that PATH rather than on whatever a shell this
-    // case started inherits, since the boot's PATH is what #924 changed.
+    // workspace booted with, at the path the box has it. Asked for as the boot set it, since a shell this case
+    // starts may be handed another.
     let (code, found, err) = w.exec(&id, &format!("PATH={} command -v gh || true", wsp_frames::numbers::TOOLS_PATH)).await;
     show("gh inside a workspace, on the PATH the boot set", code, &found, &err);
     assert_eq!(code, 0);
