@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { gitOnThisMacRefusal, HERE_PLACE_ID, noRemoteLine, worksInPlaceTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
-import { createRuntime, NO_COPIER_HERE, NO_IMAGE_FOR_SEED, NO_SEED_WIRING, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
+import { gitOnThisMacRefusal, HERE_PLACE_ID, NO_IMAGE_FOR_SEED, noRemoteLine, worksInPlaceTakesNone, idPrefixRefusal, noWorkspaceRefusal, NOT_A_REPO_LINE, projectInUseRefusal, sameSourceRefusal, seedChoiceNeeded, type AdapterEvent, type EventUnion, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { createRuntime, NO_COPIER_HERE, NO_SEED_WIRING, oneWorkspacePerProject, type HarnessAdapterFactory, type HarnessStartOptions, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, fakeLocal, projectOn, stubBackend, tempRepo, type StubBackend } from "./stub-backend.js";
 
@@ -274,10 +274,11 @@ describe("a project recorded before a later build's fields", () => {
     const [project] = await rt.projects.list();
     // The road's own rule, not a guest path: the folder under that computer's projects directory.
     expect(project?.memoryDir).toBe(`/wsp/projects/${old.id}/memory`);
-    // And it is exactly what a workspace of the project mounts, which is the whole point of filling it.
-    const ws = await rt.workspaces.create({ project: old.id, name: "work" });
-    const spec = backend.machines.find(m => m.id === ws.machineId)?.spec;
-    expect(spec?.binds).toEqual([{ source: project?.memoryDir, target: `/root/.claude-cfg/projects/${project?.memoryKey}/memory` }]);
+    // What a workspace of a project on such a computer mounts is proved in project-landing.test.ts, on a record
+    // the add cloned a checkout for. A record with none, which is this one, is refused a workspace there instead,
+    // since nothing clones one at a create any more.
+    await expect(rt.workspaces.create({ project: old.id, name: "work" })).rejects.toThrow("was recorded before a project was cloned once on its computer");
+    expect(await rt.workspaces.list()).toEqual([]);
   });
 
   it("keeps every field a record already carries, and reads a folder here against this computer's own store", async () => {

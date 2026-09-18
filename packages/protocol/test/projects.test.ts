@@ -57,9 +57,13 @@ describe("what one word to wsp add names", () => {
     expect(projectNameOf(folderSource("/Users/z/spoo/spoo-landing/"))).toBe("spoo-landing");
   });
 
-  it("the checkout sits where the workspace's kind puts it: the folder itself on this computer, the copy's own home on a machine", () => {
-    expect(projectPathOn(gitSource("https://github.com/spoo-me/frontend"), "spoo-landing")).toBe("/root/spoo-landing");
+  it("the checkout sits under the folder the landing road names, and a folder of yours is worked where it sits", () => {
+    expect(projectPathOn(gitSource("https://github.com/spoo-me/frontend"), "spoo-landing", "/srv")).toBe("/srv/spoo-landing");
+    expect(projectPathOn(gitSource("https://github.com/spoo-me/frontend"), "spoo-landing", "/root")).toBe("/root/spoo-landing");
+    // A folder is its own path whatever the road says, which is why the road that clones nothing names no folder.
     expect(projectPathOn(folderSource("/Users/z/spoo/spoo-landing"), "spoo-landing")).toBe("/Users/z/spoo/spoo-landing");
+    // And a repo on such a computer is a wiring fault, refused before any path is spelled for it.
+    expect(() => projectPathOn(gitSource("https://github.com/spoo-me/frontend"), "spoo-landing")).toThrow("holds no checkout of its own");
   });
 
   it("which sources a computer takes is its kind's own row, so no road decides it for itself", () => {

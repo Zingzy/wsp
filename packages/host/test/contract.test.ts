@@ -177,7 +177,9 @@ describe("the agent contract on the command line and the tool door", () => {
     expect(await last("projects", "projects")).toEqual({ projects: [expect.objectContaining({ name: "alpha", computer: "default" })] });
     // A second project, recorded and dropped, so the verb that takes one out is run under --json too.
     await rt.projects.add({ source: "https://github.com/dev/spare.git", on: "default" });
-    expect(await last("projects remove", "projects", "remove", "spare")).toEqual({ project: expect.objectContaining({ name: "spare" }) });
+    // The sentence a remove answers with comes off the wire, so the verb and the tool say the same thing about
+    // what went on the computer holding it.
+    expect(await last("projects remove", "projects", "remove", "spare")).toEqual({ project: expect.objectContaining({ name: "spare" }), said: expect.stringContaining("is no longer a project") });
     // Renamed and named back, so the rest of this run still addresses it as alpha.
     expect(await last("rename", "rename", "alpha", "renamed")).toMatchObject({ was: "alpha", workspace: { name: "renamed" } });
     await last("rename", "rename", "renamed", "alpha");
