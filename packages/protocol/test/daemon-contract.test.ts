@@ -28,6 +28,11 @@ import {
   DAEMON_SAMPLER_INTERVAL_MS,
   DAEMON_TOKEN_PATH,
   GUEST_WSP_HOME,
+  HOMEBREW_HOME,
+  HOMEBREW_PREFIX,
+  SHARED_TOOL_ROOTS,
+  TOOLS_PATH,
+  WORKSPACE_OVERLAID,
   DAEMON_TOKEN_REFUSED,
   DAEMON_VERSION,
   CopyReport,
@@ -232,7 +237,7 @@ const words = (): Record<string, string> => ({
   hostRefused: hostRefusedLine("{url}", "{refusal}"),
 });
 
-const numbers = (): Record<string, number | string> => ({
+const numbers = (): Record<string, number | string | readonly string[]> => ({
   daemonVersion: DAEMON_VERSION,
   execBodyMax: EXEC_BODY_MAX,
   guestMessageCapBytes: GUEST_MESSAGE_CAP_BYTES,
@@ -261,6 +266,11 @@ const numbers = (): Record<string, number | string> => ({
   daemonDefaultPort: DAEMON_DEFAULT_PORT,
   daemonSamplerIntervalMs: DAEMON_SAMPLER_INTERVAL_MS,
   guestWspHome: GUEST_WSP_HOME,
+  workspaceOverlaid: WORKSPACE_OVERLAID,
+  homebrewHome: HOMEBREW_HOME,
+  homebrewPrefix: HOMEBREW_PREFIX,
+  sharedToolRoots: SHARED_TOOL_ROOTS,
+  toolsPath: TOOLS_PATH,
   daemonTokenPath: DAEMON_TOKEN_PATH,
   daemonRootsPath: DAEMON_ROOTS_PATH,
   guestInboxDir: GUEST_INBOX_DIR,

@@ -1,89 +1,67 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! git through the git binary the guest carries, never a library: one parser of porcelain v2, and the diff pane's
-//! shared byte budget.
+//! git through the git binary, never a library: one parser of porcelain v2, and the diff pane's shared byte budget.
+//!
+//! Where that binary runs is one seam, `Runs`, with a module per way: `here` runs it on the computer this daemon
+//! is, `inside` runs it in one workspace this daemon holds. A workspace on a computer somebody owns runs no daemon
+//! of its own, so this daemon answers its git, and it runs that git inside the workspace: a checkout's hooks and
+//! its config are agent-written and run code, and code of a workspace's belongs in that workspace's namespaces,
+//! its cgroup and its covers rather than as root on the computer. Adding a third way is a module and nothing in
+//! the callers.
 
+use std::future::Future;
 use std::path::Path;
-use std::process::Stdio;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command;
-use wsp_frames::{numbers, DaemonErrorCode, GitBranch, GitDiffFile, GitDiffReply, GitDiffScope, GitStatusEntry, GitStatusReply};
+use wsp_frames::{DaemonErrorCode, GitBranch, GitDiffFile, GitDiffReply, GitDiffScope, GitStatusEntry, GitStatusReply};
 
 use crate::fs::utf8_text;
 use crate::paths::OpError;
 
+pub(crate) mod here;
+#[cfg(target_os = "linux")]
+pub(crate) mod inside;
+
 pub(crate) struct GitResult {
-    /// None when a signal ended git, which is what the byte cap does.
+    /// None when a signal ended the program, which is what the byte cap does.
     pub(crate) code: Option<i32>,
     pub(crate) stdout: Vec<u8>,
     pub(crate) stderr: String,
-    /// stdout passed the cap; git was killed and code is None.
+    /// stdout passed the cap; the program was killed and code is None.
     pub(crate) truncated: bool,
 }
 
-/// argv behind the work-score line, never interpolated into a shell: sh runs the line, then execs git in its own
-/// place. GIT_OPTIONAL_LOCKS keeps status from touching the index; LC_ALL=C keeps the not-a-repo message matchable.
-fn git_command(cwd: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new("/bin/sh");
-    command
-        .arg("-c")
-        .arg(format!("{}; exec \"$0\" \"$@\"", numbers::work_score_line()))
-        .arg("git")
-        .args(args)
-        .current_dir(cwd)
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("LC_ALL", "C")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    command
+/// One way to run a program for a git operation. Both ways carry the same environment: GIT_OPTIONAL_LOCKS keeps a
+/// status from touching the index, LC_ALL=C keeps the not-a-repo message matchable, GIT_TERMINAL_PROMPT keeps a
+/// push that wants a credential from waiting on a person who is not there, and the work score line puts the
+/// process where every shell of ours runs, last for the kernel's memory killer.
+pub(crate) trait Runs {
+    /// The program with its arguments in that directory, stdin fed then closed, stdout under an optional cap past
+    /// which the program is killed.
+    fn run(
+        &self,
+        cwd: &Path,
+        program: &str,
+        args: &[&str],
+        input: Option<&[u8]>,
+        max_bytes: Option<usize>,
+    ) -> impl Future<Output = Result<GitResult, OpError>> + Send;
+    /// Whether that program is on the PATH this way of running finds programs on: a computer with no gh and a
+    /// workspace with no gh read the same to whoever asked for a pull request, and neither is a failure.
+    fn on_path(&self, program: &str) -> impl Future<Output = Result<bool, OpError>> + Send;
 }
 
-/// Runs git with stdin fed then closed, stdout under an optional cap past which git is killed, stderr as text.
-pub(crate) async fn run_git(cwd: &Path, args: &[&str], input: Option<&[u8]>, max_bytes: Option<usize>) -> Result<GitResult, OpError> {
-    let mut command = git_command(cwd, args);
-    let mut child = command.spawn()?;
-    let stdin = child.stdin.take();
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let feed = async {
-        if let (Some(mut stdin), Some(bytes)) = (stdin, input) {
-            let _ = stdin.write_all(bytes).await;
-        }
-    };
-    let read_out = async {
-        let mut collected = Vec::new();
-        let mut truncated = false;
-        if let Some(mut pipe) = stdout {
-            let mut buf = vec![0u8; 64 * 1024];
-            while let Ok(n) = pipe.read(&mut buf).await {
-                if n == 0 {
-                    break;
-                }
-                if truncated {
-                    continue;
-                }
-                collected.extend_from_slice(&buf[..n]);
-                if max_bytes.is_some_and(|cap| collected.len() > cap) {
-                    truncated = true;
-                    let _ = child.start_kill();
-                }
-            }
-        }
-        (collected, truncated)
-    };
-    let read_err = async {
-        let mut collected = Vec::new();
-        if let Some(mut pipe) = stderr {
-            let _ = pipe.read_to_end(&mut collected).await;
-        }
-        String::from_utf8_lossy(&collected).into_owned()
-    };
-    let ((), (stdout, truncated), stderr) = tokio::join!(feed, read_out, read_err);
-    let status = child.wait().await?;
-    Ok(GitResult { code: status.code(), stdout, stderr, truncated })
+/// The environment every git and every host command line of ours runs with, as shell exports: one line, so the two
+/// ways of running cannot part ways on it.
+pub(crate) const GIT_ENV: [(&str, &str); 3] = [("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C")];
+
+/// Runs git through the way given: the one place the program is named git.
+pub(crate) async fn run_git<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    args: &[&str],
+    input: Option<&[u8]>,
+    max_bytes: Option<usize>,
+) -> Result<GitResult, OpError> {
+    runner.run(cwd, "git", args, input, max_bytes).await
 }
 
 /// Exit 0 and 1 are answers, a cut is the cap's doing; anything else failed, and a missing repo has its own code.
@@ -146,28 +124,28 @@ pub(crate) fn parse_porcelain_v2(text: &str) -> (GitBranch, Vec<GitStatusEntry>)
     (branch, entries)
 }
 
-pub(crate) async fn git_status(cwd: &Path) -> Result<GitStatusReply, OpError> {
-    let res = run_git(cwd, &["status", "--porcelain=v2", "--branch", "-z"], None, None).await?;
+pub(crate) async fn git_status<R: Runs>(runner: &R, cwd: &Path) -> Result<GitStatusReply, OpError> {
+    let res = run_git(runner, cwd, &["status", "--porcelain=v2", "--branch", "-z"], None, None).await?;
     check(&res, "status")?;
-    let top = run_git(cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
+    let top = run_git(runner, cwd, &["rev-parse", "--show-toplevel"], None, None).await?;
     check(&top, "rev-parse")?;
     let (branch, entries) = parse_porcelain_v2(&stdout_text(&res));
     Ok(GitStatusReply { branch, entries, root: stdout_text(&top).trim().to_owned() })
 }
 
-pub(crate) async fn rev_exists(cwd: &Path, rev: &str) -> Result<bool, OpError> {
-    Ok(run_git(cwd, &["rev-parse", "--verify", "-q", rev], None, None).await?.code == Some(0))
+pub(crate) async fn rev_exists<R: Runs>(runner: &R, cwd: &Path, rev: &str) -> Result<bool, OpError> {
+    Ok(run_git(runner, cwd, &["rev-parse", "--verify", "-q", rev], None, None).await?.code == Some(0))
 }
 
 /// origin/HEAD when a remote set it, else a local main or master.
-pub(crate) async fn default_branch(cwd: &Path) -> Result<Option<String>, OpError> {
-    let remote = run_git(cwd, &["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], None, None).await?;
+pub(crate) async fn default_branch<R: Runs>(runner: &R, cwd: &Path) -> Result<Option<String>, OpError> {
+    let remote = run_git(runner, cwd, &["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], None, None).await?;
     check(&remote, "symbolic-ref")?;
     if remote.code == Some(0) {
         return Ok(Some(stdout_text(&remote).trim().to_owned()));
     }
     for name in ["main", "master"] {
-        if rev_exists(cwd, &format!("refs/heads/{name}")).await? {
+        if rev_exists(runner, cwd, &format!("refs/heads/{name}")).await? {
             return Ok(Some(name.to_owned()));
         }
     }
@@ -213,17 +191,23 @@ pub(crate) fn cut_at_line(bytes: &[u8], limit: usize) -> &[u8] {
 /// One name-status pass picks the files (so renames stay renames), then one diff per file spends a shared byte
 /// budget; a file past the budget is still listed with an empty patch so the client knows it changed. path narrows
 /// relative to cwd; per-file pathspecs use :(top) because git reports names from the repo root whatever cwd is.
-pub(crate) async fn git_diff(cwd: &Path, scope: GitDiffScope, path: Option<&str>, cap: usize) -> Result<GitDiffReply, OpError> {
+pub(crate) async fn git_diff<R: Runs>(
+    runner: &R,
+    cwd: &Path,
+    scope: GitDiffScope,
+    path: Option<&str>,
+    cap: usize,
+) -> Result<GitDiffReply, OpError> {
     let mut args: Vec<String> = Vec::new();
     let mut base = None;
     match scope {
         GitDiffScope::Staged => args.push("--cached".to_owned()),
         GitDiffScope::Branch => {
-            base = default_branch(cwd).await?;
+            base = default_branch(runner, cwd).await?;
             match &base {
                 None => args.push("HEAD".to_owned()),
                 Some(base) => {
-                    let mb = run_git(cwd, &["merge-base", base, "HEAD"], None, None).await?;
+                    let mb = run_git(runner, cwd, &["merge-base", base, "HEAD"], None, None).await?;
                     check(&mb, "merge-base")?;
                     args.push(if mb.code == Some(0) { stdout_text(&mb).trim().to_owned() } else { "HEAD".to_owned() });
                 }
@@ -237,7 +221,7 @@ pub(crate) async fn git_diff(cwd: &Path, scope: GitDiffScope, path: Option<&str>
     if let Some(path) = path {
         list_args.extend(["--", path]);
     }
-    let listed = run_git(cwd, &list_args, None, None).await?;
+    let listed = run_git(runner, cwd, &list_args, None, None).await?;
     check(&listed, "diff --name-status")?;
     if listed.code != Some(0) {
         return Err(OpError::plain(format!("git diff --name-status failed: {}", listed.stderr.trim())));
@@ -256,7 +240,7 @@ pub(crate) async fn git_diff(cwd: &Path, scope: GitDiffScope, path: Option<&str>
         diff_args.extend(args.iter().map(String::as_str));
         diff_args.extend(["-M", "--no-color", "--no-ext-diff", "--"]);
         diff_args.extend(specs.iter().map(String::as_str));
-        let res = run_git(cwd, &diff_args, None, Some(remaining)).await?;
+        let res = run_git(runner, cwd, &diff_args, None, Some(remaining)).await?;
         check(&res, "diff")?;
         let mut bytes = res.stdout.as_slice();
         if res.truncated || bytes.len() > remaining {
@@ -271,31 +255,95 @@ pub(crate) async fn git_diff(cwd: &Path, scope: GitDiffScope, path: Option<&str>
     Ok(GitDiffReply { base, files, truncated })
 }
 
+/// A way of running that records what it was asked and answers what a case told it to, for the cases that read
+/// what the halves above hand a runner without a git, a gh or a workspace anywhere.
+#[cfg(test)]
+pub(crate) mod recorded {
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    use super::{GitResult, Runs};
+    use crate::paths::OpError;
+
+    /// One call a way of running was asked to make: where it was to run, the program, its arguments and its stdin.
+    #[derive(Clone)]
+    pub(crate) struct Call {
+        pub(crate) cwd: String,
+        pub(crate) program: String,
+        pub(crate) args: Vec<String>,
+        pub(crate) stdin: Option<Vec<u8>>,
+    }
+
+    pub(crate) struct Recorded {
+        pub(crate) calls: Mutex<Vec<Call>>,
+        pub(crate) answers: Mutex<Vec<GitResult>>,
+        pub(crate) has: Vec<String>,
+    }
+
+    impl Recorded {
+        pub(crate) fn new(has: &[&str]) -> Recorded {
+            Recorded { calls: Mutex::new(Vec::new()), answers: Mutex::new(Vec::new()), has: has.iter().map(|w| (*w).to_owned()).collect() }
+        }
+
+        /// What the next call answers with, in the order they are given.
+        pub(crate) fn answering(self, answers: Vec<(i32, &str)>) -> Recorded {
+            *self.answers.lock().unwrap() = answers
+                .into_iter()
+                .map(|(code, out)| GitResult { code: Some(code), stdout: out.as_bytes().to_vec(), stderr: String::new(), truncated: false })
+                .collect();
+            self
+        }
+
+        pub(crate) fn asked(&self) -> Vec<Call> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    impl Runs for Recorded {
+        async fn run(
+            &self,
+            cwd: &Path,
+            program: &str,
+            args: &[&str],
+            input: Option<&[u8]>,
+            _max_bytes: Option<usize>,
+        ) -> Result<GitResult, OpError> {
+            self.calls.lock().unwrap().push(Call {
+                cwd: cwd.to_string_lossy().into_owned(),
+                program: program.to_owned(),
+                args: args.iter().map(|a| (*a).to_owned()).collect(),
+                stdin: input.map(<[u8]>::to_vec),
+            });
+            let mut answers = self.answers.lock().unwrap();
+            Ok(if answers.is_empty() {
+                GitResult { code: Some(0), stdout: Vec::new(), stderr: String::new(), truncated: false }
+            } else {
+                answers.remove(0)
+            })
+        }
+
+        async fn on_path(&self, program: &str) -> Result<bool, OpError> {
+            Ok(self.has.iter().any(|held| held == program))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::here::Here;
     use super::*;
+    use wsp_frames::numbers;
 
-    #[test]
-    fn git_is_argv_behind_the_work_score_line_with_optional_locks_off_and_the_c_locale() {
-        let command = git_command(Path::new("/srv"), &["status", "--porcelain=v2"]);
-        let std = command.as_std();
-        assert_eq!(std.get_program(), "/bin/sh");
-        let args: Vec<&str> = std.get_args().map(|a| a.to_str().unwrap()).collect();
-        let line = format!("{}; exec \"$0\" \"$@\"", numbers::work_score_line());
-        assert_eq!(args, ["-c", line.as_str(), "git", "status", "--porcelain=v2"]);
-        let env: Vec<(String, Option<String>)> =
-            std.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
-        for pair in [("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0"), ("LC_ALL", "C")] {
-            assert!(env.contains(&(pair.0.to_owned(), Some(pair.1.to_owned()))), "{env:?}");
-        }
-        assert_eq!(std.get_current_dir(), Some(Path::new("/srv")));
+    /// git as the daemon runs it on the computer it is, which is what every case below reads.
+    fn here() -> Here {
+        Here::new()
     }
 
     #[tokio::test]
     async fn every_git_call_carries_optional_locks_off_and_the_c_locale_and_runs_at_the_work_score() {
         let dir = tempfile::tempdir().unwrap();
         let alias = "!sh -c 'echo \"$GIT_OPTIONAL_LOCKS|$LC_ALL|$GIT_TERMINAL_PROMPT\"; cat /proc/self/oom_score_adj'";
-        let res = run_git(dir.path(), &["-c", &format!("alias.probe={alias}"), "probe"], None, None).await.unwrap();
+        let res = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={alias}"), "probe"], None, None).await.unwrap();
         assert_eq!((res.code, res.truncated), (Some(0), false), "{}", res.stderr);
         assert_eq!(String::from_utf8_lossy(&res.stdout), format!("0|C|0\n{}\n", numbers::WORK_OOM_SCORE_ADJ));
     }
@@ -304,24 +352,24 @@ mod tests {
     async fn stdout_past_the_cap_ends_git_and_says_so_while_stdin_reaches_it() {
         let dir = tempfile::tempdir().unwrap();
         let echo = "!sh -c 'cat; yes | head -c 200000'";
-        let res = run_git(dir.path(), &["-c", &format!("alias.probe={echo}"), "probe"], Some(b"in\n"), Some(10)).await.unwrap();
+        let res = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={echo}"), "probe"], Some(b"in\n"), Some(10)).await.unwrap();
         assert!(res.truncated);
         assert_eq!(res.code, None);
         assert!(res.stdout.starts_with(b"in\ny\n"), "{:?}", &res.stdout[..8]);
-        let whole = run_git(dir.path(), &["-c", &format!("alias.probe={echo}"), "probe"], Some(b"in\n"), None).await.unwrap();
+        let whole = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={echo}"), "probe"], Some(b"in\n"), None).await.unwrap();
         assert_eq!((whole.code, whole.truncated, whole.stdout.len()), (Some(0), false, 200_003));
     }
 
     #[tokio::test]
     async fn outside_a_repo_the_refusal_has_its_code_and_other_failures_name_the_command() {
         let dir = tempfile::tempdir().unwrap();
-        let err = git_status(dir.path()).await.unwrap_err();
+        let err = git_status(&here(), dir.path()).await.unwrap_err();
         assert_eq!((err.code, err.message.as_str()), (Some(DaemonErrorCode::NotAGitRepo), "not inside a git repository"));
         let boom = "!sh -c 'echo boom >&2; exit 3'";
-        let res = run_git(dir.path(), &["-c", &format!("alias.probe={boom}"), "probe"], None, None).await.unwrap();
+        let res = run_git(&here(), dir.path(), &["-c", &format!("alias.probe={boom}"), "probe"], None, None).await.unwrap();
         let err = check(&res, "probe").unwrap_err();
         assert_eq!((err.code, err.message.as_str()), (None, "git probe failed (3): boom"));
-        let answered = run_git(dir.path(), &["-c", "alias.probe=!sh -c 'exit 1'", "probe"], None, None).await.unwrap();
+        let answered = run_git(&here(), dir.path(), &["-c", "alias.probe=!sh -c 'exit 1'", "probe"], None, None).await.unwrap();
         assert_eq!(check(&answered, "probe"), Ok(()));
     }
 

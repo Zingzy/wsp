@@ -144,11 +144,10 @@ fn euid_is_root() -> bool {
 
 /// The computer's own system directories, one overlay each: what a workspace here is made of. Each is the box's
 /// directory as it is now, read through an upper of the workspace's own, so a workspace installs a package and
-/// the box does not have it, and the box upgrades its tools and a workspace that boots next reads them. The one
-/// list, read by the bundle that mounts them and by the reading below, which is the one thing that can make
-/// every one of those mounts fail; this module compiles on every target, so the reading and the mount cannot
-/// part ways on a Mac.
-pub const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
+/// the box does not have it, and the box upgrades its tools and a workspace that boots next reads them. Named in
+/// the frames crate beside the shared tool roots outside them, since the host's catalogue is held to the same
+/// list: a road that installs outside these trees and outside /root is in no workspace unless a root brings it in.
+pub use wsp_frames::numbers::OVERLAID;
 
 /// The four names a computer with merged usr keeps as symlinks into /usr. A workspace's rootfs recreates them as
 /// the links they are and reads everything under them through the overlay over /usr; a computer that keeps them

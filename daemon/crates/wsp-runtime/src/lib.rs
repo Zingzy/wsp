@@ -43,6 +43,13 @@ use wsp_frames::{DaemonErrorResponse, RequestId};
 /// refuses such a root rather than serving workspaces that read their own uppers.
 pub const DEFAULT_ROOT: &str = "/wsp";
 
+/// What any op naming a workspace this computer does not run is refused with, wherever it is asked: a machine op
+/// on the link, and a files or git frame that names one. One sentence, so a workspace that is gone and a computer
+/// that runs none read the same.
+pub fn no_such_workspace(id: &str) -> String {
+    format!("no such workspace: {id}")
+}
+
 /// What a machine op gets on a computer whose daemon holds no backend for it.
 pub fn no_backend_refusal(op: &str) -> String {
     format!("this computer's backend has no {op}")

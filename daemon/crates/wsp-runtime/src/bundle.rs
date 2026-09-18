@@ -235,6 +235,11 @@ pub struct Config<'a> {
     pub shares: &'a [Share],
     /// The computer's own folders, each bound at the path the workspace reads inside; empty where there are none.
     pub binds: &'a [Bind],
+    /// The install roots this computer has of the ones outside the overlaid trees, bound read-only at their own
+    /// paths: without them the tools a road installed there are on the computer and out of every workspace's
+    /// sight, while the PATH inside names them. Read at every boot, so a Homebrew installed after the create is
+    /// inside at the next wake.
+    pub tool_roots: &'a [&'a str],
     /// The compose project every container engine call inside the workspace belongs to, where the workspace asked
     /// for an engine; nothing where it did not, since a workspace with no engine runs no compose.
     pub compose_project: Option<&'a str>,
@@ -270,7 +275,10 @@ pub fn config_json(c: &Config) -> Value {
     spec["hostname"] = json!(c.hostname);
     spec["process"]["args"] = json!(c.args);
     spec["process"]["cwd"] = json!("/");
-    let mut env = vec![format!("PATH={}", profile::DEFAULT_PATH), format!("HOSTNAME={}", c.hostname)];
+    // The one PATH the tools on a machine sit on, the same order every thread and exec carries: the boot's first
+    // process and the runtime's own execs would otherwise read one order of directories and a person's thread
+    // another, which is a different gcc and a different gh for the same workspace.
+    let mut env = vec![format!("PATH={}", wsp_frames::numbers::TOOLS_PATH), format!("HOSTNAME={}", c.hostname)];
     env.extend(c.envs.iter().map(|(k, v)| format!("{k}={v}")));
     // Last of the environment, so it stands whatever else was asked for: two workspaces of one project whose
     // compose names are both the project's own directory name fail at compose's network step, the second one
@@ -300,6 +308,12 @@ pub fn config_json(c: &Config) -> Value {
     // `bind_into`, which is where the one propagation rule for everything under a rootfs lives.
     for b in c.binds {
         mounts.push(bind(&b.target, PathBuf::from(&b.source), if b.read_only { &["rbind", "ro"] } else { &["rbind", "rw"] }));
+    }
+    // An install root of the computer's own at its own path inside, read-only: a workspace reads the tools a road
+    // installed there and writes none of them, since an install happens on the computer and nowhere else. What a
+    // tool writes while it runs goes under /root, which is the computer's own and read-write already.
+    for root in c.tool_roots {
+        mounts.push(bind(root, PathBuf::from(root), &["rbind", "ro"]));
     }
     spec["linux"]["cgroupsPath"] = json!(c.cgroup);
     let mut resources = serde_json::Map::new();
@@ -416,7 +430,7 @@ const EMPTIED_AT_BOOT: [&str; 2] = ["run", "tmp"];
 /// a root before it makes anything and `crate::doctor::root_under_a_lower` says which lower it sits under. The
 /// kernel takes that mount, and what it gives is a workspace reading its own upper inside the directory it
 /// overlays, which is why DEFAULT_ROOT is `/wsp`.
-pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
+pub fn mount_computer(layout: &Layout, id: &str, tool_roots: &[&str]) -> Result<(), Error> {
     let rootfs = layout.rootfs(id);
     // Before anything: a computer whose /bin is a directory of its own rather than a link into /usr would give a
     // workspace no shell, since /usr is the only place a tool comes from here.
@@ -492,7 +506,21 @@ pub fn mount_computer(layout: &Layout, id: &str) -> Result<(), Error> {
             bind_over(&empty, &rootfs, &cover.at)?;
         }
     }
+    // Last, and after the covers: the Homebrew prefix sits under /home, which a cover has just emptied, so a bind
+    // made before it would be the one thing the cover hid. What lands here is the computer's own tools at their own
+    // path, and the PATH every process inside starts with names them.
+    for root in tool_roots {
+        bind_into(Path::new(root), &inside(&rootfs, root)?)?;
+    }
     Ok(())
+}
+
+/// Which of those install roots this computer keeps as a directory of its own, in the order they were given: a path
+/// that is not there, a file, or a symlink is passed over. A link is passed over for the reason `hardening::cover_of`
+/// passes one over: an absolute link under a rootfs is resolved by the kernel against this process's own root, so a
+/// bind that followed one would land on whatever the computer keeps at that path instead.
+pub fn tool_roots_present<'a>(roots: &[&'a str]) -> Vec<&'a str> {
+    roots.iter().copied().filter(|root| fs::symlink_metadata(root).is_ok_and(|held| held.is_dir())).collect()
 }
 
 /// One of the workspace's own directories bound over a path inside it. The mount point is under a bind of the
@@ -823,13 +851,15 @@ mod tests {
             engine: None,
             shares: &[],
             binds: &[],
+            tool_roots: &[],
             compose_project: None,
         };
         let spec = config_json(&c);
         assert_eq!(spec["root"]["path"], "rootfs");
         assert_eq!(spec["hostname"], "wsp-a");
         assert_eq!(spec["process"]["args"], json!(args));
-        assert_eq!(spec["process"]["env"], json!([format!("PATH={}", profile::DEFAULT_PATH), "HOSTNAME=wsp-a", "WSP_TOKEN=t"]));
+        // The one PATH a machine's tools sit on, which every thread and exec on this workspace carries too.
+        assert_eq!(spec["process"]["env"], json!([format!("PATH={}", wsp_frames::numbers::TOOLS_PATH), "HOSTNAME=wsp-a", "WSP_TOKEN=t"]));
         assert_eq!(spec["linux"]["resources"]["memory"]["limit"], 1024 * 1024 * 1024);
         assert_eq!(spec["linux"]["resources"]["cpu"], json!({ "quota": 200000, "period": 100000 }));
         assert_eq!(spec["linux"]["cgroupsPath"], "/wsp/wsp-a");
@@ -892,6 +922,38 @@ mod tests {
             json!(["rbind", "ro"])
         );
         assert!(mounts.iter().all(|m| m["destination"] != memory));
+        // An install root of the computer's own outside the overlaid trees: one bind at its own path, read-only,
+        // and nothing else about the mounts moves. A workspace on a computer with none carries no such mount.
+        let with_roots = config_json(&Config { tool_roots: &[wsp_frames::numbers::HOMEBREW_HOME], ..c });
+        let root_mount =
+            with_roots["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == wsp_frames::numbers::HOMEBREW_HOME).unwrap();
+        assert_eq!(root_mount["source"], wsp_frames::numbers::HOMEBREW_HOME);
+        assert_eq!(root_mount["type"], "bind");
+        assert_eq!(root_mount["options"], json!(["rbind", "ro"]));
+        assert_eq!(with_roots["mounts"].as_array().unwrap().len(), mounts.len() + 1);
+        assert!(mounts.iter().all(|m| m["destination"] != wsp_frames::numbers::HOMEBREW_HOME));
+        // The PATH is the same on both, since it is one rule and not a reading of what this computer has: a box
+        // with no Homebrew yet gets a workspace whose PATH names the prefix and whose rootfs carries no bind.
+        assert_eq!(with_roots["process"]["env"], spec["process"]["env"]);
+    }
+
+    #[test]
+    fn a_tool_root_the_computer_keeps_as_a_directory_is_present_and_nothing_else_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let (held, file, link, missing) = ("held", "a-file", "a-link", "not-there");
+        fs::create_dir_all(dir.path().join(held)).unwrap();
+        fs::write(dir.path().join(file), "x\n").unwrap();
+        std::os::unix::fs::symlink(dir.path().join(held), dir.path().join(link)).unwrap();
+        let at = |name: &str| dir.path().join(name).to_string_lossy().into_owned();
+        let (held, file, link, missing) = (at(held), at(file), at(link), at(missing));
+        let roots: Vec<&str> = vec![&held, &file, &link, &missing];
+        // A directory of the computer's own is bound in; a file, a missing path and a link are passed over. The link
+        // for the reason a cover passes one over: the kernel resolves an absolute link under a rootfs against this
+        // process's own root, so a bind that followed it would land somewhere else entirely.
+        assert_eq!(tool_roots_present(&roots), vec![held.as_str()]);
+        assert_eq!(tool_roots_present(&[]), Vec::<&str>::new());
+        // And the roots this computer is asked about are the ones the wire names, whatever this computer has.
+        assert_eq!(wsp_frames::numbers::SHARED_TOOL_ROOTS, [wsp_frames::numbers::HOMEBREW_HOME]);
     }
 
     #[test]
@@ -1037,8 +1099,10 @@ mod tests {
 
     /// The whole of what a workspace on a computer somebody owns is made of, mounted on a throwaway root and
     /// taken down again: the box's own top-level symlinks, the skeleton, an overlay over each of the computer's
-    /// system directories with the workspace's own upper under it, the box's /root, and an empty directory over
-    /// every path nothing inside may read. Root and the live flag, as every mount case here is.
+    /// system directories with the workspace's own upper under it, the box's /root, an empty directory over every
+    /// path nothing inside may read, and this computer's own install roots outside those trees bound in at their
+    /// own paths. Root and the live flag, as every mount case here is. Nothing of the computer's /home is written
+    /// here: the roots are whatever it already has, read rather than made.
     #[test]
     fn a_workspace_is_the_computers_own_directories_over_the_workspaces_own_uppers() {
         if !live_and_root() {
@@ -1055,7 +1119,10 @@ mod tests {
         // neither of which is a thing this reads the content of.
         let box_ssh = fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0);
         let box_shadow = fs::metadata("/etc/shadow").map(|m| m.len()).ok();
-        mount_computer(&layout, id).unwrap();
+        // What this computer has of the install roots outside the overlaid trees: /home/linuxbrew on a box the
+        // recipe's Homebrew rows ran on, nothing on one with no Homebrew, and the case reads both.
+        let roots = tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
+        mount_computer(&layout, id, &roots).unwrap();
         let table = || fs::read_to_string(MOUNTINFO).unwrap();
         let mounted = |at: &Path| mount_points(&table()).contains(&at.to_path_buf());
 
@@ -1067,7 +1134,7 @@ mod tests {
         // And a second mount of the same rootfs, which is what a wake is, writes them again rather than
         // tripping on the links its first boot left.
         unmount_under(&rootfs).unwrap();
-        mount_computer(&layout, id).unwrap();
+        mount_computer(&layout, id, &roots).unwrap();
         for (name, target) in top_level_links().unwrap() {
             assert_eq!(fs::read_link(rootfs.join(&name)).unwrap(), target, "{name} after a second mount");
         }
@@ -1118,14 +1185,36 @@ mod tests {
                 assert_eq!(fs::metadata(&at_path).unwrap().len(), 0, "{} reads bytes inside", cover.at);
                 continue;
             }
-            assert_eq!(fs::read_dir(&at_path).unwrap().count(), 0, "{} is not empty", cover.at);
+            // Empty, but for the install roots the boot binds in after the covers: the only thing under /home a
+            // workspace reads is the prefix a road installed the computer's tools into, which lands inside the
+            // cover because the boot binds it after the cover is up.
+            let mut expected: Vec<String> = roots
+                .iter()
+                .filter_map(|root| Path::new(root).strip_prefix(&cover.at).ok())
+                .filter_map(|rest| rest.components().next().map(|first| first.as_os_str().to_string_lossy().into_owned()))
+                .collect();
+            let mut held: Vec<String> =
+                fs::read_dir(&at_path).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            held.sort();
+            expected.sort();
+            expected.dedup();
+            assert_eq!(held, expected, "{} holds more than the install roots brought in", cover.at);
             fs::write(at_path.join("probe"), b"w").unwrap();
             assert!(layout.empty_at(id, &cover.at).join("probe").is_file(), "{} wrote somewhere else", cover.at);
+            // And the write went to the workspace's own empty directory, never to the bound root inside it.
+            assert_eq!(fs::read_dir(&at_path).unwrap().count(), expected.len() + 1, "{}", cover.at);
         }
-        // Nothing a workspace writes in one of them shows up in another, and nothing it writes reaches the
-        // box's own: the empty directories are one per path, under the workspace's own folder.
-        for cover in covers.iter().filter(|c| !c.file) {
-            assert_eq!(fs::read_dir(inside(&rootfs, &cover.at).unwrap()).unwrap().count(), 1, "{}", cover.at);
+        // Every install root this computer has is mounted at its own path inside, under the cover over /home, and
+        // what it holds is the computer's own: the tools a road installed there answer in the workspace.
+        for root in &roots {
+            let at_path = inside(&rootfs, root).unwrap();
+            assert!(mounted(&at_path), "{root} is not bound into the workspace");
+            let mut inside_names: Vec<String> =
+                fs::read_dir(&at_path).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            let mut own: Vec<String> = fs::read_dir(root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+            inside_names.sort();
+            own.sort();
+            assert_eq!(inside_names, own, "{root} reads differently inside");
         }
         assert_eq!(fs::read_dir("/root/.ssh").map(|d| d.count()).unwrap_or(0), box_ssh, "the computer's own keys changed");
         assert_eq!(fs::metadata("/etc/shadow").map(|m| m.len()).ok(), box_shadow, "the computer's own logins changed");
@@ -1154,7 +1243,7 @@ mod tests {
         assert!(layout.upper_of(id, "/usr").join("lib/wsp-computer-probe").is_file());
         assert_eq!(fs::read(layout.wsp_home(id).join("daemon-token")).unwrap(), b"a-token-of-this-workspace\n");
         // And what it left at /run and /tmp is gone at the next boot, as a boot leaves them.
-        mount_computer(&layout, id).unwrap();
+        mount_computer(&layout, id, &roots).unwrap();
         for name in EMPTIED_AT_BOOT {
             assert_eq!(fs::read_dir(rootfs.join(name)).unwrap().count(), 0, "/{name} carried the last boot's files");
         }

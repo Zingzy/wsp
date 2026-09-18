@@ -2,7 +2,7 @@
 //! The numbers and paths the protocol and the node daemon own, as the contract fixture pins them.
 
 /// The daemon's protocol version, carried in its hello: the length of the protocol's DAEMON_CONTENTS record.
-pub const DAEMON_VERSION: u32 = 50;
+pub const DAEMON_VERSION: u32 = 51;
 
 pub const DEFAULT_HOST: &str = "0.0.0.0";
 pub const DEFAULT_PORT: u16 = 7070;
@@ -27,6 +27,23 @@ pub const DAEMON_ROOTS_PATH: &str = "/root/.wsp/roots";
 pub const OPEN_SHIM_PATH: &str = "/usr/local/bin/wsp-open";
 pub const XDG_OPEN_PATH: &str = "/usr/local/bin/xdg-open";
 pub const OPEN_SOCKET_PATH: &str = "/root/.wsp/open.sock";
+
+/// The computer's own system directories a workspace on a computer somebody owns reads through an overlay of its
+/// own: its /usr is the box's /usr, and what it writes there the box does not have. A directory outside these and
+/// outside /root is in no workspace of that computer unless a shared tool root below brings it in. The bundle
+/// mounts these and the doctor reads them, both off this one list.
+pub const OVERLAID: [&str; 5] = ["/usr", "/etc", "/opt", "/var", "/srv"];
+/// Where Homebrew on Linux keeps its own user's home, and the prefix under it every formula is installed into.
+pub const HOMEBREW_HOME: &str = "/home/linuxbrew";
+pub const HOMEBREW_PREFIX: &str = "/home/linuxbrew/.linuxbrew";
+/// Every install root a road writes outside the overlaid trees and outside /root, bound read-only into a workspace
+/// where the computer has it: a root left off this list is on the computer and out of every workspace's sight while
+/// the PATH inside names it.
+pub const SHARED_TOOL_ROOTS: [&str; 1] = [HOMEBREW_HOME];
+/// The one PATH the tools on a machine sit on, in one order: a sealed image's login shell reads it from the profile
+/// the image writes, every thread and exec carries it, and a workspace on a computer somebody owns boots with it,
+/// so the boot's own children and a person's thread find the same gcc and the same gh.
+pub const TOOLS_PATH: &str = "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 /// Wire bytes a peer may send before its auth frame passes; an auth frame is under 200.
 pub const PRE_AUTH_MAX_BYTES: u64 = 4096;

@@ -1,5 +1,5 @@
 {
-  "daemonVersion": 50,
+  "daemonVersion": 51,
   "execBodyMax": 16384,
   "guestMessageCapBytes": 4194304,
   "guestQueueCapFrames": 256,
@@ -27,6 +27,19 @@
   "daemonDefaultPort": 7070,
   "daemonSamplerIntervalMs": 2000,
   "guestWspHome": "/root/.wsp",
+  "workspaceOverlaid": [
+    "/usr",
+    "/etc",
+    "/opt",
+    "/var",
+    "/srv"
+  ],
+  "homebrewHome": "/home/linuxbrew",
+  "homebrewPrefix": "/home/linuxbrew/.linuxbrew",
+  "sharedToolRoots": [
+    "/home/linuxbrew"
+  ],
+  "toolsPath": "/root/.local/bin:/usr/local/sbin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:/root/go/bin:/root/.cargo/bin:/root/.local/share/pnpm:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin",
   "daemonTokenPath": "/root/.wsp/daemon-token",
   "daemonRootsPath": "/root/.wsp/roots",
   "guestInboxDir": "/root/.wsp/inbox",

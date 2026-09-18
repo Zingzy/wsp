@@ -87,6 +87,11 @@ pub struct Options {
     pub link_backoff_ms: Option<u64>,
     /// Where a place's daemon keeps the layers and the workspaces it runs.
     pub runtime_root: Option<PathBuf>,
+    /// The binary the workspace runtime runs as its helper and as every workspace's init: this process's own where
+    /// nothing names one, which is the daemon binary in every place a daemon runs. A test opens a daemon inside its
+    /// own process, whose executable is the test and not a daemon, so it names the daemon binary it was built
+    /// beside; nothing on a machine names it, so nothing on a machine behaves differently for it being here.
+    pub runtime_helper: Option<PathBuf>,
 }
 
 impl Options {
@@ -124,6 +129,7 @@ impl Options {
             link_refused_retry_ms: None,
             link_backoff_ms: None,
             runtime_root: None,
+            runtime_helper: None,
         }
     }
 }
@@ -413,7 +419,7 @@ fn open_runtime(options: &Options, log: &Log) -> (Option<Arc<wsp_runtime::ops::O
         log(&format!("workspace runtime not served: {said}"));
         return (None, Some(said));
     }
-    let exe = match std::env::current_exe() {
+    let exe = match options.runtime_helper.clone().map(Ok).unwrap_or_else(std::env::current_exe) {
         Ok(exe) => exe,
         Err(e) => {
             log(&format!("workspace runtime not served: this binary's own path is unknown: {e}"));

@@ -30,6 +30,24 @@ export const XDG_OPEN_PATH = "/usr/local/bin/xdg-open";
 /** Where the shim posts in the guest; root-only through the daemon's umask, unreachable from the edge. */
 export const OPEN_SOCKET_PATH = `${GUEST_WSP_HOME}/open.sock`;
 
+/** The computer's own system directories a workspace on a computer somebody owns reads through an overlay of its
+ * own: its /usr is the box's /usr, and what it writes there the box does not have. A directory outside these and
+ * outside /root is in no workspace of that computer unless a shared tool root below brings it in. */
+export const WORKSPACE_OVERLAID = ["/usr", "/etc", "/opt", "/var", "/srv"] as const;
+/** Where Homebrew on Linux keeps its own user's home, and the prefix under it every formula is installed into. */
+export const HOMEBREW_HOME = "/home/linuxbrew";
+export const HOMEBREW_PREFIX = `${HOMEBREW_HOME}/.linuxbrew`;
+/** Every install root a road writes outside the overlaid trees and outside /root, bound read-only into a workspace
+ * on a computer somebody owns where that computer has it: a root left off this list is on the box and out of every
+ * workspace's sight while the PATH inside names it. The catalogue's own test holds every road to it. */
+export const SHARED_TOOL_ROOTS = [HOMEBREW_HOME] as const;
+/** Where pnpm puts what it installs globally on a machine; on the PATH below and in the login line the image writes. */
+export const PNPM_HOME = "/root/.local/share/pnpm";
+/** The one PATH the tools on a machine sit on, in one order: the login shell of a sealed image reads it from the
+ * profile the image writes, every thread and exec carries it, and a workspace on a computer somebody owns boots
+ * with it, so the boot's own children and a person's thread find the same gcc and the same gh. */
+export const TOOLS_PATH = `/root/.local/bin:/usr/local/sbin:/usr/local/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:/root/go/bin:/root/.cargo/bin:${PNPM_HOME}:/root/.bun/bin:/usr/sbin:/usr/bin:/sbin:/bin`;
+
 /** Wire bytes a peer may send before its auth frame passes; an auth frame is under 200. */
 export const PRE_AUTH_MAX_BYTES = 4096;
 /** How long a fresh socket has to send its auth frame. */

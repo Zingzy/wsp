@@ -7,5 +7,11 @@
     "id": 1,
     "op": "git.status",
     "cwd": 1
+  },
+  {
+    "id": 1,
+    "op": "git.status",
+    "cwd": "/root/repo",
+    "machineId": 1
   }
 ]

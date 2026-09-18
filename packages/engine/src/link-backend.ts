@@ -208,6 +208,19 @@ export class LinkMachine implements Machine {
     return { url: `http://127.0.0.1:${localPort}`, token: "", expiresAt: NEVER };
   }
 
+  /** One daemon frame answered for this machine by the place's own daemon: the frame with the machine named on it,
+   * up the link this backend already holds. A refusal is handed back as the reply rather than thrown, since the
+   * caller reads its code to tell a checkout with no remote from a computer with no gh. */
+  async daemonFrame(frame: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { op, ...params } = frame as { op: string };
+    try {
+      return { ok: true, ...(await this.link.request(op, { ...params, machineId: this.id })) };
+    } catch (e) {
+      const said = e as { message?: string; code?: unknown };
+      return { ok: false, error: said.message ?? String(e), ...(typeof said.code === "string" ? { code: said.code } : {}) };
+    }
+  }
+
   private askDaemon(opts?: { timeoutMs?: number }): Promise<boolean> {
     const timeoutMs = opts?.timeoutMs ?? INLINE_EXEC_MS;
     return this.ask(MachineAnswersReply, "machine.daemonAnswers", { timeoutMs }, { timeoutMs: timeoutMs + LINK_MARGIN_MS }).then(r => r.answers);

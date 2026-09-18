@@ -853,6 +853,7 @@ mod tests {
             engine: None,
             shares: &[],
             binds: &[],
+            tool_roots: &[],
             compose_project: None,
         });
         crate::bundle::write_json(&layout.config(id), &spec).unwrap();

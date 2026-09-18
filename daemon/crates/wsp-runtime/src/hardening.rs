@@ -26,11 +26,11 @@ pub const DROPPED_CAPS: [&str; 4] = ["CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS
 /// folders are the box's images and containers, which a workspace reaches through the fenced socket and nowhere
 /// else.
 ///
-/// /home covers nothing in today's rootfs: the overlays are /usr, /etc, /opt, /var and /srv, so a workspace's
-/// /home is the skeleton's own empty directory and the box's is not there to read. The row stays because what a
-/// rootfs is made of is not this list's to know: the moment a build binds the box's root, or overlays /home as
-/// the five above are overlaid, every other person's home on that box is a path away from a turn inside, and
-/// the row is what keeps it empty rather than a change nobody remembers to make.
+/// /home covers every other home on the box: the overlays are /usr, /etc, /opt, /var and /srv, so a workspace's
+/// /home is the skeleton's own empty directory, and the row is what keeps it empty the day a build binds the box's
+/// root or overlays /home as the five above are overlaid. The one thing under it a workspace does read is a shared
+/// tool root, Homebrew's prefix today: the boot binds those in after this cover, at their own paths and read-only,
+/// so the tools a road installed there answer inside while nobody's home does.
 ///
 /// `/root/.wsp` is not here: the boot already binds the workspace's own folder over it, so the daemon inside
 /// writes its token where no other workspace on the box reads it. The sudo rules are not here either: a turn

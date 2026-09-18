@@ -251,8 +251,10 @@ async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_comm
     assert_eq!(lines[2], "0", "{out}");
     assert_eq!(lines[3], "t");
     assert_eq!(lines[4], format!("wsp-live-665-build-{}", checkout_key()));
-    assert!(out.contains("exec sleep infinity"), "the boot command runs: {out}");
-    assert!(out.contains("/sbin/wsp-init runtime init"), "the init runs first: {out}");
+    // One process under the init, and no shell between them: nothing inside a workspace here looks for a daemon
+    // supervisor, since the daemon that serves it is this computer's own.
+    assert!(out.contains("/sbin/wsp-init runtime init -- sleep infinity"), "the init runs the boot command: {out}");
+    assert!(!out.contains("supervise.sh"), "something inside still looks for a daemon supervisor: {out}");
     // The same key again answers the workspace that exists, replayed.
     let again =
         w.ok("machine.create", json!({ "spec": spec(json!({ "idempotencyKey": format!("live-665-build-{}", checkout_key()) })) })).await;
@@ -265,7 +267,8 @@ async fn builds_the_container_from_the_spec_limits_labels_envs_and_the_boot_comm
     let got = w.ok("machine.get", json!({ "machineId": id })).await;
     assert_eq!(got["machine"]["labels"], json!({ "wsp": "1", "wsp-owner": live_owner() }));
     assert_eq!(got["machine"]["seen"]["state"], "running");
-    assert_eq!(got["machine"]["daemonSupervisor"], "entrypoint");
+    // No supervisor: nothing keeps a daemon up inside a workspace here and no deploy puts one there.
+    assert!(got["machine"].get("daemonSupervisor").is_none(), "{got}");
     w.close().await;
 }
 
@@ -565,7 +568,11 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
         .await;
     show("what the box keeps of its own, from inside a workspace", code, &out, &err);
     assert_eq!(code, 0);
-    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["0", "0", "0", "0", "0"], "{out}");
+    // /home holds the install roots this box has of the ones outside the overlaid trees and nothing else: the
+    // Homebrew prefix on a box the recipe's formula rows ran on, nothing on a box with none, and no other home
+    // on the box either way.
+    let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS).len().to_string();
+    assert_eq!(out.split_whitespace().collect::<Vec<_>>(), ["0", "0", roots.as_str(), "0", "0"], "{out}");
     // And what is not covered: the box's sudo rules are read as they are, so a script inside that types sudo
     // gets what root gets rather than a refusal from a file granting nobody anything.
     let (code, sudo, err) = w.exec(&id, "sudo -n true && echo sudo works").await;
@@ -595,6 +602,61 @@ async fn the_boxs_own_logins_keys_and_other_homes_show_nothing_inside() {
             assert_eq!(mask & (1 << bit), 0, "{set} carries {dropped}");
         }
     }
+    w.close().await;
+}
+
+/// The tools a road installed outside the trees a workspace overlays answer inside it: the box's install roots are
+/// bound in read-only at their own paths, the PATH every process inside starts with names their bin directories,
+/// and nothing inside can write the prefix. A box with no such root reads the PATH and no mount, which is the
+/// other half of the case.
+#[tokio::test]
+async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_be_written() {
+    if !live() {
+        return;
+    }
+    let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
+    let mut w = World::open().await;
+    let id = w.create(spec(json!({}))).await;
+    // The PATH the boot hands its first process, read off that process's own environment rather than off a shell
+    // this case started: it is the one every process in the workspace inherits, and the one order of directories
+    // a person's thread on this workspace carries too.
+    let (code, path, err) = w.exec(&id, "tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^PATH=//p'").await;
+    show("the PATH the workspace booted with", code, &path, &err);
+    assert_eq!((code, path.trim()), (0, wsp_frames::numbers::TOOLS_PATH));
+    for root in &roots {
+        // What the box keeps under the root, read from the box before the workspace is asked: the case says
+        // afterwards that nothing inside changed it.
+        let own: u64 = fs::read_dir(root).map(|d| d.count() as u64).unwrap_or(0);
+        let (code, held, err) = w.exec(&id, &format!("ls -A {root} | wc -l; findmnt -no OPTIONS {root}")).await;
+        show(&format!("{root} inside a workspace"), code, &held, &err);
+        assert_eq!(code, 0);
+        let lines: Vec<&str> = held.lines().collect();
+        assert_eq!(lines.first().map(|n| n.trim()), Some(own.to_string().as_str()), "{root} reads differently inside: {held}");
+        // Two mounts stack at the root inside: the boot's own bind, and the read-only one the container runtime
+        // makes over it off the config. findmnt prints them oldest first, and the one a process inside reads is
+        // the last, so the read-only word is read there and not on the bind under it.
+        assert!(lines.last().is_some_and(|options| options.contains("ro")), "{root} is not read-only inside: {held}");
+        // A write into the prefix is refused: an install happens on the computer, through the recipe, and what a
+        // tool writes while it runs goes under /root, which is the computer's own and read-write.
+        let (code, _, refused) = w.exec(&id, &format!("touch {root}/wsp-probe")).await;
+        assert_ne!(code, 0, "a write into {root} was taken inside");
+        assert!(refused.to_ascii_lowercase().contains("read-only"), "{root}: {refused}");
+        assert!(!Path::new(root).join("wsp-probe").exists(), "a write inside reached {root} on the box");
+        assert_eq!(fs::read_dir(root).map(|d| d.count() as u64).unwrap_or(0), own, "{root} on the box changed");
+    }
+    // And the command the bring back's pull request half needs, where this box has it: gh answers on the PATH the
+    // workspace booted with, at the path the box has it. Asked for as the boot set it, since a shell this case
+    // starts may be handed another.
+    let (code, found, err) = w.exec(&id, &format!("PATH={} command -v gh || true", wsp_frames::numbers::TOOLS_PATH)).await;
+    show("gh inside a workspace, on the PATH the boot set", code, &found, &err);
+    assert_eq!(code, 0);
+    let on_the_box = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!("PATH={} command -v gh || true", wsp_frames::numbers::TOOLS_PATH))
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+        .unwrap_or_default();
+    assert_eq!(found.trim(), on_the_box, "gh answers differently inside a workspace than on the box");
     w.close().await;
 }
 
@@ -725,20 +787,34 @@ async fn puts_bytes_where_they_belong_and_serves_no_signed_url() {
     w.close().await;
 }
 
+/// What this computer's daemon answers about one workspace of its own: whether that workspace runs.
+async fn daemon_answers(w: &World, id: &str) -> bool {
+    w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 5000 })).await["answers"].as_bool().unwrap()
+}
+
+/// The daemon that serves a workspace here is this one, so what it answers about that workspace is whether it
+/// runs: nothing listens inside, nothing is asked inside, and a stopped workspace answers no.
 #[tokio::test]
-async fn asks_the_guest_itself_whether_the_daemon_is_listening_and_says_it_is_the_entrypoint() {
+async fn answers_for_a_workspace_itself_rather_than_asking_a_port_inside_it() {
     if !live() {
         return;
     }
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
-    assert_eq!(w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 5000 })).await["answers"], false);
-    // A listener on the guest's own loopback: the base image carries perl, and nothing else that listens.
-    let (code, _, err) = w.exec(&id, "nohup perl -MIO::Socket::INET -e '$s = IO::Socket::INET->new(LocalAddr => \"127.0.0.1\", LocalPort => 7070, Listen => 5, ReuseAddr => 1) or die $!; sleep 60' > /dev/null 2> /tmp/listen.err & sleep 0.5; cat /tmp/listen.err").await;
-    assert_eq!((code, err.as_str()), (0, ""));
-    assert_eq!(w.ok("machine.daemonAnswers", json!({ "machineId": id, "timeoutMs": 5000 })).await["answers"], true);
+
+    // Nothing listens on 7070 inside and the answer is still yes: the workspace runs, and this daemon is the one
+    // that serves its files and its git.
+    let (code, listening, err) = w.exec(&id, "(exec 3<>/dev/tcp/127.0.0.1/7070) 2>/dev/null; echo inside $?").await;
+    show("what listens on the daemon port inside a workspace", code, &listening, &err);
+    assert_eq!(listening.trim(), "inside 1", "something listens on 7070 inside: {listening}");
+    assert!(daemon_answers(&w, &id).await, "the workspace runs and its daemon answered no");
+    // And a stopped workspace answers no, which is what the row reads as napping.
+    w.ok("machine.pause", json!({ "machineId": id })).await;
+    assert!(!daemon_answers(&w, &id).await);
+    w.ok("machine.resume", json!({ "machineId": id })).await;
+    assert!(daemon_answers(&w, &id).await);
     let got = w.ok("machine.get", json!({ "machineId": id })).await;
-    assert_eq!(got["machine"]["daemonSupervisor"], "entrypoint");
+    assert!(got["machine"].get("daemonSupervisor").is_none(), "{got}");
     let facts = w.ask("machine.facts", json!({ "machineId": id })).await;
     assert_eq!(facts["error"], "this computer's backend has no facts");
     w.ok("machine.metrics", json!({ "machineId": id })).await;
@@ -2102,4 +2178,207 @@ async fn a_btrfs_subvolume_is_snapshotted_rather_than_walked_at_all() {
     assert_eq!(fs::read(from.join("README.md")).unwrap(), b"the checkout\n");
     copier.remove(&to).unwrap();
     assert!(!to.exists(), "the snapshot's own directory stayed after the remove");
+}
+
+/// The bare repository a checkout of these cases pushes to, inside the checkout itself: the copy a workspace is
+/// made with carries it in, so a push run inside the workspace has a remote it can reach. Nothing of the runtime
+/// root is inside a workspace, and /tmp there is the skeleton's own emptied directory.
+const BARE_ORIGIN: &str = ".origin.git";
+
+/// git on the box for the cases that build a repo there: the identity every commit here carries, since a box may
+/// have none of its own.
+fn git_at(cwd: impl AsRef<Path>, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd.as_ref())
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@x")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@x")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// A daemon of this computer's on the same runtime root the cases drive, for the frames a workspace's files and
+/// git ride: what a host holding this computer's link sends, sent here over a socket of its own.
+struct FramesDaemon {
+    addr: std::net::SocketAddr,
+    _token: tempfile::NamedTempFile,
+}
+
+const FRAMES_TOKEN: &str = "runtime-live-token";
+
+async fn frames_daemon() -> FramesDaemon {
+    let mut token = tempfile::NamedTempFile::new().unwrap();
+    std::io::Write::write_all(&mut token, format!("{FRAMES_TOKEN}\n").as_bytes()).unwrap();
+    let mut options = wsp_daemon::Options::new(token.path());
+    options.host = "127.0.0.1".to_owned();
+    options.port = 0;
+    options.root = Some(root());
+    options.roots_path = Some(root().join("roots"));
+    options.runtime_root = Some(root());
+    // A daemon serves workspaces only where a place file names one, which is what a computer somebody joined has
+    // and what the product's own daemon on a box is started with. The file itself need not be there: a daemon
+    // whose file is missing logs that it has no host to dial and dials nothing, and the workspaces it runs are
+    // still its own to answer for.
+    options.home = Some(root().join("frames-home"));
+    options.place_file = Some(root().join("frames-home").join("place.json"));
+    // The helper every create and exec inside a workspace runs: the daemon binary this suite drives the ops
+    // through. A daemon opened inside this process would otherwise run this test executable as its helper, and a
+    // test binary answers an exec line by refusing its first flag.
+    options.runtime_helper = Some(bin());
+    let daemon = wsp_daemon::Daemon::bind(options).await.unwrap();
+    let addr = daemon.local_addr();
+    tokio::spawn(daemon.run());
+    FramesDaemon { addr, _token: token }
+}
+
+/// One authed socket on that daemon, one frame at a time.
+struct FrameClient {
+    ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    next_id: u64,
+}
+
+impl FrameClient {
+    async fn connect(addr: std::net::SocketAddr) -> FrameClient {
+        let (ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/")).await.unwrap();
+        let mut c = FrameClient { ws, next_id: 0 };
+        assert_eq!(c.request("auth", json!({ "token": FRAMES_TOKEN })).await["ok"], true);
+        c
+    }
+
+    async fn request(&mut self, op: &str, params: Value) -> Value {
+        use futures_util::{SinkExt, StreamExt};
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut frame = json!({ "id": id, "op": op });
+        for (k, v) in params.as_object().unwrap() {
+            frame[k] = v.clone();
+        }
+        self.ws.send(tokio_tungstenite::tungstenite::Message::text(frame.to_string())).await.unwrap();
+        loop {
+            let next = tokio::time::timeout(Duration::from_secs(120), self.ws.next()).await.expect("the daemon answers");
+            match next {
+                Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t))) => {
+                    let value: Value = serde_json::from_str(&t).unwrap();
+                    if value.get("id") == Some(&json!(id)) {
+                        return value;
+                    }
+                }
+                Some(Ok(_)) => continue,
+                other => panic!("the socket ended while {frame} was pending: {other:?}"),
+            }
+        }
+    }
+}
+
+/// The files and the git of a workspace on a computer somebody owns, answered by that computer's daemon for the
+/// workspace the frame names: a workspace here runs no daemon of its own, so the daemon this case starts on the
+/// same root serves them. Files are read on the box side through the workspace's rootfs, since a read runs no code;
+/// git runs inside the workspace, which is what the hook this case writes proves.
+#[tokio::test]
+async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspace_named() {
+    if !live() {
+        return;
+    }
+    let key = checkout_key();
+    // A checkout with its own bare origin inside it, at a relative remote url, so the copy carries the origin into
+    // the workspace and the push inside has somewhere to land with no network and no credential. The runtime root
+    // itself is no road: inside a workspace /tmp is the skeleton's own directory, emptied at every boot, and the
+    // only thing of this computer's the workspace reads at the project's path is the copy.
+    //
+    // The pre-push hook is what says where git ran: it writes a file, and that file may exist in the workspace's
+    // own upper and nowhere on the box.
+    let from = root().join("projects").join(format!("live-frames-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    fs::create_dir_all(&from).unwrap();
+    let origin = from.join(BARE_ORIGIN);
+    git_at(&from, &["init", "-q", "-b", "main"]);
+    fs::write(from.join("README.md"), b"the checkout\n").unwrap();
+    git_at(&from, &["add", "README.md"]);
+    git_at(&from, &["commit", "-q", "-m", "first"]);
+    // The bare repository is made after that commit and excluded by the checkout's own exclude file, which travels
+    // with the copy: a bare repository is not told from a folder of files by anything git reads, so a status or an
+    // add that took it in would carry its objects as the checkout's own.
+    fs::write(from.join(".git/info/exclude"), format!("/{BARE_ORIGIN}/\n")).unwrap();
+    git_at(&from, &["init", "-q", "--bare", "-b", "main", BARE_ORIGIN]);
+    // Relative, so the one url is the origin beside the checkout on the box and the origin beside the copy inside.
+    git_at(&from, &["remote", "add", "origin", &format!("./{BARE_ORIGIN}")]);
+    git_at(&from, &["push", "-q", "-u", "origin", "main"]);
+    git_at(&from, &["switch", "-q", "-c", "work"]);
+    fs::write(from.join("one.txt"), b"one\n").unwrap();
+    git_at(&from, &["add", "one.txt"]);
+    git_at(&from, &["commit", "-q", "-m", "one"]);
+    // Nothing of the bare repository is in the checkout's own history or its status, which is what the exclude is for.
+    assert_eq!(git_at(&from, &["status", "--porcelain"]).trim(), "");
+    assert!(!git_at(&from, &["ls-files"]).contains(BARE_ORIGIN));
+    let pushing = git_at(&from, &["rev-parse", "work"]).trim().to_owned();
+    let hook = from.join(".git/hooks/pre-push");
+    fs::write(&hook, "#!/bin/sh\nhostname > /var/tmp/wsp-pre-push-ran\n").unwrap();
+    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let marker = "/var/tmp/wsp-pre-push-ran";
+    let _ = fs::remove_file(marker);
+
+    let mut w = World::open().await;
+    // Outside /root and outside every overlaid tree: the mount point a copy's bind makes is made through the
+    // rootfs, and under a tree the boot bound in that means a directory on the computer's own shared home, left
+    // there after the workspace is gone. A path of the workspace's own leaves the mount point in its run folder,
+    // which the kill takes with everything else.
+    let at = "/live-frames";
+    let id = w.create(spec(json!({ "copy": { "from": from.display().to_string(), "at": at } }))).await;
+    // A symlink inside the checkout that leads out of the workspace: read through the frame road it is refused,
+    // since the path is resolved against the workspace's own rootfs and nowhere else.
+    let (code, _, err) = w.exec(&id, &format!("ln -sfn /etc/shadow {at}/escape")).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+
+    let daemon = frames_daemon().await;
+    let mut client = FrameClient::connect(daemon.addr).await;
+    // The checkout as the workspace sees it: one directory read on the box side through the rootfs.
+    let listed = client.request("fs.list", json!({ "path": at, "machineId": &id })).await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    let names: Vec<&str> = listed["entries"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"README.md") && names.contains(&"one.txt"), "{listed}");
+    // The branch the agent made, read by a git that ran inside the workspace.
+    let status = client.request("git.status", json!({ "cwd": at, "machineId": &id })).await;
+    assert_eq!((status["ok"].as_bool(), status["branch"]["head"].as_str()), (Some(true), Some("work")), "{status}");
+    assert_eq!(status["root"].as_str(), Some(at));
+    // A path that leaves the workspace is refused, and so is a workspace this computer does not run.
+    let escaped = client.request("fs.read", json!({ "path": format!("{at}/escape"), "machineId": &id })).await;
+    assert_eq!((escaped["ok"].as_bool(), escaped["code"].as_str()), (Some(false), Some("outside-root")), "{escaped}");
+    // The refusal names the path the frame gave, as the workspace sees it, and not where this computer keeps that
+    // workspace's files: the person who asked knows the folder by the one and never by the other.
+    assert_eq!(escaped["error"].as_str(), Some(format!("{at}/escape resolves outside the workspace root").as_str()), "{escaped}");
+    assert!(!escaped["error"].as_str().unwrap_or_default().contains(&root().display().to_string()), "{escaped}");
+    let nowhere = client.request("git.status", json!({ "cwd": at, "machineId": "wsp-nobody" })).await;
+    assert_eq!((nowhere["ok"].as_bool(), nowhere["error"].as_str()), (Some(false), Some("no such workspace: wsp-nobody")), "{nowhere}");
+
+    // The push: the branch lands on the origin the workspace carries, and the hook ran inside the workspace, which
+    // is the whole reason git runs there. Its marker is in the workspace's own upper and on no path of the box's.
+    let pushed = client.request("git.push", json!({ "cwd": at, "base": "main", "machineId": &id })).await;
+    assert_eq!(pushed["ok"], true, "{pushed}");
+    assert_eq!((pushed["branch"].as_str(), pushed["base"].as_str(), pushed["ahead"].as_u64()), (Some("work"), Some("main"), Some(1)));
+    // The copy's own origin, which the box reads under the copies folder: the branch is there at the commit the
+    // checkout made. And the checkout's own origin on the box has main alone, so nothing of this push ran there.
+    let copy_origin = root().join("copies").join(&id).join(BARE_ORIGIN);
+    assert_eq!(git_at(&copy_origin, &["rev-parse", "work"]).trim(), pushing, "the push did not land in the copy's own origin");
+    let on_the_box = git_at(&origin, &["for-each-ref", "--format=%(refname)"]);
+    assert!(on_the_box.contains("refs/heads/main"), "{on_the_box}");
+    assert!(!on_the_box.contains("refs/heads/work"), "the push reached the checkout's own origin on the box: {on_the_box}");
+    let (code, ran, _) = w.exec(&id, &format!("cat {marker}")).await;
+    assert_eq!(code, 0, "the pre-push hook did not run inside the workspace");
+    assert!(!ran.trim().is_empty(), "the hook wrote nothing inside");
+    assert!(!Path::new(marker).exists(), "the hook ran on the box rather than inside the workspace");
+
+    // A stopped workspace has no rootfs mounted and no process to run git in, and says so in the runtime's words.
+    w.ok("machine.pause", json!({ "machineId": &id })).await;
+    let asleep = client.request("git.status", json!({ "cwd": at, "machineId": &id })).await;
+    assert_eq!(
+        (asleep["ok"].as_bool(), asleep["error"].as_str()),
+        (Some(false), Some(format!("workspace {id} is stopped").as_str())),
+        "{asleep}"
+    );
+    w.close().await;
 }
