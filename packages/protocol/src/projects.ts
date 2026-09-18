@@ -109,9 +109,10 @@ export const folderOnCopyRefusal = (computer: string): string =>
 export const projectRemovedHereLine = (name: string): string => `${name} is no longer a project here; its code is where it was`;
 
 /** What a remove says on a computer the person owns: the folder wsp itself made there at the add goes with the
- * record, checkout and project memory together, and nothing else on that computer is touched. */
+ * record, and nothing else on that computer is touched. The project's memory is not in it: it sits where the
+ * agent on that computer reads it, which is the agent's own work and stays. */
 export const projectRemovedOnComputerLine = (name: string, computer: string, folder: string): string =>
-  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout and its memory`;
+  `${name} is no longer a project on ${computer}; the folder wsp kept for it there, ${folder}, is gone with its checkout, and the memory its agent keeps on that computer stays`;
 
 /** What a remove says for a project a provider keeps in an image: nothing runs on any machine, and the image
  * stays where it is, since no verb deletes one yet. */

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { MEMORY_KEPT_MARK } from "../src/project-landing.js";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeLocal, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -207,7 +208,7 @@ describe("a folder seeding a project on a computer that clones", () => {
     const { rt, backend } = await withImage({ plan: plan(folder), projects: "/wsp/projects" });
     // The computer answers the clone with the mark the script prints where a memory folder already stands at
     // the agent's path: what is there is the agent's own work for this project.
-    answering(backend, cmd => (cmd.includes("if [ -e ") ? { exitCode: 0, stdout: "wsp-memory-kept\n", stderr: "" } : undefined));
+    answering(backend, cmd => (cmd.includes(MEMORY_KEPT_MARK) ? { exitCode: 0, stdout: `${MEMORY_KEPT_MARK}\n`, stderr: "" } : undefined));
     const events: EventUnion[] = [];
     rt.events.on("*", e => events.push(e));
     const project = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
@@ -481,7 +482,7 @@ describe("a repo added by url on a computer the person owns", () => {
     const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
     const { said } = await rt.projects.remove(project.id);
     expect(backend.computerLog).toEqual([`rm -rf '/wsp/projects/${project.id}'`]);
-    expect(said).toBe(`landing-906 is no longer a project on default; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout and its memory`);
+    expect(said).toBe(`landing-906 is no longer a project on default; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout, and the memory its agent keeps on that computer stays`);
     expect(await rt.projects.list()).toEqual([]);
   });
 

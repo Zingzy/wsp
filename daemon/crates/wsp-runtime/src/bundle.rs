@@ -925,10 +925,10 @@ mod tests {
         // A folder of the computer's own, at the path the workspace reads it inside: one more mount after the
         // profile's, read-write, so what the workspace writes in the project's checkout is what the computer
         // holds for the next piece of work on it.
-        let memory = "/srv/spoo-landing";
-        let binds = [Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: memory.to_owned(), read_only: false }];
+        let held = "/srv/spoo-landing";
+        let binds = [Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: held.to_owned(), read_only: false }];
         let bound = config_json(&Config { binds: &binds, ..c });
-        let folder = bound["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap();
+        let folder = bound["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == held).unwrap();
         assert_eq!(folder["source"], "/wsp/projects/pr_1/checkout");
         assert_eq!(folder["type"], "bind");
         // The same words a shared login takes: the boot makes the bind itself, and `bind_steps` is the one place
@@ -936,13 +936,13 @@ mod tests {
         assert_eq!(folder["options"], json!(["rbind", "rw"]));
         assert_eq!(bound["mounts"].as_array().unwrap().len(), mounts.len() + 1);
         // A bind the host asked to be read-only is mounted that way, and a workspace with no bind carries none.
-        let read_only = [Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: memory.to_owned(), read_only: true }];
+        let read_only = [Bind { source: "/wsp/projects/pr_1/checkout".to_owned(), target: held.to_owned(), read_only: true }];
         let fenced = config_json(&Config { binds: &read_only, ..c });
         assert_eq!(
-            fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == memory).unwrap()["options"],
+            fenced["mounts"].as_array().unwrap().iter().find(|m| m["destination"] == held).unwrap()["options"],
             json!(["rbind", "ro"])
         );
-        assert!(mounts.iter().all(|m| m["destination"] != memory));
+        assert!(mounts.iter().all(|m| m["destination"] != held));
         // An install root of the computer's own outside the overlaid trees: one bind at its own path, read-only,
         // and nothing else about the mounts moves. A workspace on a computer with none carries no such mount.
         let with_roots = config_json(&Config { tool_roots: &[wsp_frames::numbers::HOMEBREW_HOME], ..c });
