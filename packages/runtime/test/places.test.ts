@@ -3179,6 +3179,20 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(JSON.parse(written(result[0]!))).toMatchObject({ state: "done", rows: ROWS });
   });
 
+  it("puts the time it was written in front of every line of that log, in UTC", async () => {
+    const cmds: string[] = [];
+    const p = provisioner();
+    const { placeId } = await joined({ provision: p.wired, cmds });
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const at = placeProvisionPaths("/home/maya");
+    await until(async () => cmds.some(c => c.includes(at.result)));
+    const lines = cmds.filter(c => c.includes(at.log)).flatMap(c => written(c).split("\n")).filter(l => l !== "");
+    expect(lines.length).toBeGreaterThan(1);
+    // The header too: every line reads the same way, so what a stage of the job took is one subtraction.
+    for (const line of lines) expect(line).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z /);
+    expect(lines.some(l => l.endsWith("Codex: installed"))).toBe(true);
+  });
+
   it("turns a job the host that drove it did not outlive into one that stopped, at the next host's first read", async () => {
     const store = memoryStore();
     const p = provisioner();

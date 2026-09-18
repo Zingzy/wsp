@@ -64,6 +64,12 @@ export interface SnapshotOptions {
   onProgress?: (progress: SnapshotProgress) => void;
 }
 
+/** What a road that cuts the bytes up to get them onto a machine says about the trip: the pieces it sent, each
+ * one call of its own. A road that lands them in one call says nothing. */
+export interface BytesLanded {
+  pieces: number;
+}
+
 export interface Machine {
   readonly id: string;
   readonly kind: MachineKind;
@@ -115,7 +121,7 @@ export interface Machine {
   daemonAnswers?(opts?: { timeoutMs?: number }): Promise<boolean>;
   /** Optional: bytes onto the machine on a backend that mints no signed upload URL. `landBytes` is what reads it,
    * so no caller picks between the two roads itself. */
-  putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void>;
+  putBytes?(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<BytesLanded | void>;
   /** Optional: what keeps a process running on this machine, read by the daemon deploy. Absent means the guest has
    * a service manager and the deploy registers a unit with it. */
   readonly daemonSupervisor?: DaemonSupervisor;

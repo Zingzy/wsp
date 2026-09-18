@@ -41,6 +41,7 @@ import {
   placeProvisioningLine,
   provisionCountWord,
   provisionLines,
+  provisionLogLine,
   sshRoadOf,
   placeNoDialLine,
   BackendFacts,
@@ -875,7 +876,10 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
    * computer that will not take its own log is still a computer the recipe landed on. */
   const provisionRecord = (machine: Machine, home: string, header: string) => {
     const at = placeProvisionPaths(home);
-    let lines: string[] = [header];
+    // The time goes on the line as it is written, not as its batch goes up: the lines travel in batches, and a
+    // batch's own moment says nothing about when the job reached the line.
+    const stamped = (line: string): string => provisionLogLine(clockNow(), line);
+    let lines: string[] = [stamped(header)];
     let timer: NodeJS.Timeout | undefined;
     let writing: Promise<void> = Promise.resolve();
     const flush = (): Promise<void> => {
@@ -889,7 +893,7 @@ export function makePlaceDoor(opts: PlaceDoorOptions): PlaceDoor {
     };
     return {
       write: (line: string): void => {
-        lines.push(line);
+        lines.push(stamped(line));
         if (lines.length >= PROVISION_LOG_LINES) void flush();
         else if (timer === undefined) {
           timer = setTimeout(() => void flush(), PROVISION_LOG_EVERY_MS);

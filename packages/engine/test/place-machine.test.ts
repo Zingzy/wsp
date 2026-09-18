@@ -68,6 +68,17 @@ describe("bytes onto the computer itself", () => {
     expect(Buffer.from(Buffer.from(landed![1]!, "base64").toString("utf8"), "base64").toString("utf8")).toBe("what this computer is\n");
     expect(cmd).toContain("base64 -d < '/etc/wsp/machine-context.md'.b64 > '/etc/wsp/machine-context.md' && rm -f '/etc/wsp/machine-context.md'.b64");
   });
+
+  it("answers the pieces the base64 was cut into, each an exec frame of its own over the link", async () => {
+    const piecewise = (cmd: string): { exitCode: number; stdout: string; stderr: string } | undefined =>
+      cmd.endsWith("echo WSP_PIECE") ? { exitCode: 0, stdout: "WSP_PIECE\n", stderr: "" } : undefined;
+    const one = link(piecewise);
+    expect(await machineOn(one).putBytes("/etc/wsp/machine-context.md", Buffer.from("what this computer is\n"))).toEqual({ pieces: 0 });
+    const many = link(piecewise);
+    const big = await machineOn(many).putBytes("/etc/wsp/big", Buffer.alloc(64 * 1024, 7));
+    expect(big.pieces).toBe(many.frames.filter(f => String(f.params["cmd"]).endsWith("echo WSP_PIECE")).length);
+    expect(big.pieces).toBeGreaterThan(1);
+  });
 });
 
 describe("the calls that belong to a workspace", () => {

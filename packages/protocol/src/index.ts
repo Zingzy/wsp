@@ -11,7 +11,7 @@ import { z } from "zod";
 import { DEFAULT_PLACE_PORT } from "./app-ports.js";
 import { HOST_TOKEN_ENV, HOST_URL_ENV, LABS_ENV, TURN_TOKEN_ENV } from "./env.js";
 import { ImageAttachment, ImageRecord } from "./attachments.js";
-import { KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
+import { fmtBytes, fmtBytesOfTotal, isoSeconds, KNOWN_HOSTS, nameList, openingTitle, PLACE_INSTALL, PLACE_LEAVE_LINE, plural, thisComputer, THIS_COMPUTER, threadWord, titleLine } from "./format.js";
 import { InitJob, InitJobEvent, InitAgent, InitKeys, InitNeedsYou, InitNeedsYouEvent, InitRoad, InitScreenId, LoginChoice, LoginState, SIGN_IN_CODE_MAX } from "./init-job.js";
 import { rootsPathIn } from "./project-path.js";
 import { shellQuote } from "./shell-quote.js";
@@ -3925,6 +3925,35 @@ export function provisionLines(name: string, p: PlaceProvision): string[] {
     ...(p.said === undefined ? [] : [`${name}: ${p.said}`]),
   ];
 }
+
+/** One line of the job's own log on a computer you own: the time it was written, in UTC to the second, then the
+ * line. Every line that log takes carries one, so what each part of a run took is read off the computer's own log
+ * afterwards rather than timed while it happens. */
+export const provisionLogLine = (at: number, line: string): string => `${isoSeconds(at)} ${line}`;
+
+/** What the round that lands the person's agent files packed on this computer: the paths the recipe planned, the
+ * archive that goes over the link, and what it comes to once it is unpacked there. */
+export const provisionPackedLine = (paths: number, bytes: number, unpacked: number): string =>
+  `packed on this computer: ${plural(paths, "path")}, ${fmtBytes(bytes)} packed, ${fmtBytes(unpacked)} unpacked`;
+
+/** What one part of that archive came to on the way over: the bytes it carried, and the pieces the road cut it
+ * into where the bytes travel as text in one exec each, which is how a computer you own is reached. */
+export const provisionShippedLine = (p: { part: number; parts: number; bytes: number; total: number; pieces?: number }): string => {
+  const took = p.pieces === undefined ? "" : ` in ${plural(p.pieces, "piece")}`;
+  return p.parts === 1 ? `shipped: ${fmtBytes(p.total)}${took}` : `shipped part ${p.part} of ${p.parts}: ${fmtBytesOfTotal(p.bytes, p.total)}${took}`;
+};
+
+/** What the run on that computer walked once the archive was there: every file of the person's copy, each read
+ * against what stands at its path. */
+export const provisionLandedLine = (files: number): string => `landed: ${plural(files, "file")} walked on that computer`;
+
+/** What the list beside the job holds for the servers round: one key per server wsp wrote into an agent's own
+ * file there. */
+export const provisionListReadLine = (keys: number): string => `list read: ${plural(keys, "server key")}`;
+
+/** What the servers round wrote into the agents' own files on that computer, of the servers the recipe names. */
+export const provisionServersLine = (written: number, servers: number): string =>
+  `servers merged: ${written} of ${plural(servers, "server")} written into the agents' own files`;
 
 /** The refusal an update gets where this wsp holds no daemon built for the chip that computer said it is. */
 export const placeNoChipLine = (name: string, platform: string, arch: string): string =>

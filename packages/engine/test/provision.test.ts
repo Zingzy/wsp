@@ -9,7 +9,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { BASE_FLOOR } from "@wsp/catalog";
-import { HOMEBREW_PREFIX, MCP_ID_PREFIX, placeProvisionPaths, provisionCountWord, provisionLines, provisionWord, type PlaceProvisionRow } from "@wsp/protocol";
+import {
+  HOMEBREW_PREFIX,
+  MCP_ID_PREFIX,
+  placeProvisionPaths,
+  provisionCountWord,
+  provisionLandedLine,
+  provisionLines,
+  provisionListReadLine,
+  provisionPackedLine,
+  provisionServersLine,
+  provisionShippedLine,
+  provisionWord,
+  type PlaceProvisionRow,
+} from "@wsp/protocol";
 import { BASE_VERSIONS_CMD } from "../src/golden-base.js";
 import { TOOLS_PATH, agentInstallsFor, toolInstallsFor, type RecipeEntry, type ToolInstall } from "../src/golden-import.js";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
@@ -448,6 +461,30 @@ describe("the person's own files and their servers, on the same run", () => {
     expect(at).toContain("1/3: Codex");
     expect(at).toContain("2/3: your agents' files");
     expect(at).toContain("3/3: MCP servers");
+  });
+
+  it("says each stage of the two rounds as a line of its own, in the order they happen", async () => {
+    const tar = tarOf([{ path: ".claude-cfg/skills/why/SKILL.md", mode: 0o644, content: "why\n" }]);
+    const plan = withFilesAndServers([step({ id: "agents/codex", label: "Codex", bin: "codex" })]);
+    const { machine } = boxMachine();
+    const said: string[] = [];
+    const rows = await provisionBox(
+      machine,
+      { ...plan, files: { lands: plan.files!.lands, pack: async () => ({ tar, bytes: tar.length, unpacked: 4, skipped: [], cut: [], silenced: [], macPaths: [] }) } },
+      detail => said.push(detail),
+      ON,
+    );
+    // The lines the job reads its own minutes off, each written when its stage is done: the log on that computer
+    // carries the time of every one of them.
+    expect(said.filter(l => /^(packed|shipped|landed|list read|servers merged)/.test(l))).toEqual([
+      provisionPackedLine(1, tar.length, 4),
+      provisionShippedLine({ part: 1, parts: 1, bytes: tar.length, total: tar.length }),
+      // This machine's canned run prints no landing line, so the walk reads none; the file counts are the
+      // landing's own test, over a real shell.
+      provisionLandedLine(0),
+      provisionListReadLine(0),
+      provisionServersLine(rows.filter(r => r.kind === "server" && r.outcome === "installed").length, 1),
+    ]);
   });
 
   it("says every path the archive carried failed, with the reason, when the files could not be packed or landed, and goes on with the rest", async () => {

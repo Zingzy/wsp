@@ -172,6 +172,12 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[], 
   return [...execs, last()];
 }
 
+/** What one upload took, beside what its last exec answered: the numbered pieces the files were cut into to fit
+ * an exec body, one exec of its own each. Zero where everything fit the one exec that lands them. */
+export interface UploadResult extends ExecResult {
+  pieces: number;
+}
+
 /** The one way bytes go onto a guest through exec: sends the upload's execs in order, each piece confirmed before the
  * next goes, and answers with the last exec's result, which the caller reads for its own marker.
  *
@@ -179,7 +185,7 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[], 
  * above: a piece is a whole file written under its own name, an append is held behind its marker, and the lines
  * around them are the caller's to write that way. So each carries a key of this upload's, and a road that broke
  * under one sends it again rather than losing the file half written. */
-export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<ExecResult> {
+export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<UploadResult> {
   const timeoutMs = opts.timeoutMs ?? INLINE_EXEC_MS;
   const upload = randomBytes(6).toString("hex");
   const execs = uploadSequence(files, opts.before ?? [], opts.after ?? [], upload);
@@ -189,7 +195,8 @@ export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutF
       throw new Error(`a piece did not land on ${machine.id}: nothing came back saying ${HANDSHAKE.piece}, the word the guest prints once a piece is written; ${machineAnswer(res)}`);
     }
   }
-  return machine.exec(execs.at(-1)!, { timeoutMs, idempotencyKey: `${upload}/last` });
+  const last = await machine.exec(execs.at(-1)!, { timeoutMs, idempotencyKey: `${upload}/last` });
+  return { ...last, pieces: execs.length - 1 };
 }
 
 /** The wrapper is the session leader: its pid is the group the deadline kills, and it writes the exit file

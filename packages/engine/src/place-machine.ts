@@ -8,7 +8,7 @@
 import { DaemonExecReply, EXEC_TIMEOUT_MAX_MS, placeProvisionPaths, shellQuote } from "@wsp/protocol";
 import { INLINE_EXEC_MS, execDetached, putFiles } from "./exec-detached.js";
 import { LINK_MARGIN_MS, type MachineLink } from "./link-backend.js";
-import type { ExecResult, Machine, MachineKind, MachineState, RunOptions } from "./machine.js";
+import type { BytesLanded, ExecResult, Machine, MachineKind, MachineState, RunOptions } from "./machine.js";
 
 /** What every call that belongs to a workspace refuses with on the computer itself. */
 export const NOT_A_WORKSPACE = "this is the computer itself, not a workspace on it";
@@ -49,14 +49,17 @@ export class PlaceMachine implements Machine {
   }
 
   /** Bytes through the one road this machine has: the base64 as text beside the file, decoded in place by the
-   * same exec that landed it, so nothing stays on the computer that the write did not put there. */
-  async putBytes(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<void> {
+   * same exec that landed it, so nothing stays on the computer that the write did not put there. The pieces that
+   * text was cut into ride back on the answer: each is an exec frame of its own over the link, which is what a
+   * trip over this road costs. */
+  async putBytes(path: string, bytes: Uint8Array, opts?: { timeoutMs?: number }): Promise<BytesLanded> {
     const at = shellQuote(path);
-    await putFiles(
+    const landed = await putFiles(
       this,
       [{ path: `${path}.b64`, text: Buffer.from(bytes).toString("base64") }],
       { after: [`base64 -d < ${at}.b64 > ${at} && rm -f ${at}.b64`], ...(opts?.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}) },
     );
+    return { pieces: landed.pieces };
   }
 
   state(): Promise<MachineState> {

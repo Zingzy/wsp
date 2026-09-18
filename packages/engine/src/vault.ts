@@ -56,6 +56,9 @@ export interface UploadProgress {
   parts: number;
   bytes: number;
   total: number;
+  /** The pieces the part was cut into where the road it took cuts them, one call each; absent on a road that
+   * takes the part whole. */
+  pieces?: number;
 }
 
 const feed = async (sink: Writable, chunk: Buffer): Promise<void> => {
@@ -453,9 +456,10 @@ export async function importInto(machine: Machine, tar: Buffer, destDir: string,
       const part = tar.subarray(i * UPLOAD_PART_BYTES, end);
       // The backend's own road where it has one; the signed URL keeps the retries below, which are this road's own
       // answer to a part lost between here and the provider's storage.
-      if (hasByteRoad(machine)) await landBytes(machine, path, part);
+      let pieces: number | undefined;
+      if (hasByteRoad(machine)) pieces = (await landBytes(machine, path, part))?.pieces;
       else await putPart(doFetch, await machine.uploadUrl(path), new Uint8Array(part), i + 1, parts);
-      opts.onPart?.({ part: i + 1, parts, bytes: end, total: tar.length });
+      opts.onPart?.({ part: i + 1, parts, bytes: end, total: tar.length, ...(pieces !== undefined ? { pieces } : {}) });
     }
   } catch (e) {
     // Every part path, not only those that answered ok: a body can land before the response fails.

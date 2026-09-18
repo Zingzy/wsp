@@ -1584,12 +1584,17 @@ export interface GoneSighting {
   answer?: string;
 }
 
+/** A moment as a person reads it in a line of wsp's own: UTC to the second, since the milliseconds are noise in a
+ * sentence and a second is what a reader compares two lines by. The one spelling, read wherever a line carries a
+ * time of its own. */
+export const isoSeconds = (at: number): string => new Date(at).toISOString().replace(/\.\d+Z$/, "Z");
+
 /** What a record says about a machine the provider stopped knowing: which call found it gone and the second it did,
  * quoting the provider where it said anything. Without a sighting, only that it is gone. */
 export function goneWords(machineId: string, seen?: GoneSighting): string {
   const base = `machine ${machineId} is gone at the provider`;
   if (seen === undefined) return base;
-  const at = new Date(seen.at).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const at = isoSeconds(seen.at);
   const answer = seen.answer === undefined || seen.answer === "" ? "" : ` (${seen.answer})`;
   return `${base}: the ${seen.by} found it gone at ${at}${answer}`;
 }
