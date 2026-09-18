@@ -432,10 +432,12 @@ async fn answers_place_leave_with_what_the_sweep_took_and_then_ends_the_daemon()
     let mut ws = host.held().await;
     let mut events = Vec::new();
     let answer = ask(&mut ws, 21, "place.leave", &mut events).await;
-    // The sweep is the real one over that home: the place file, its key and the token are gone and named.
-    let swept = json!([at.place_file.to_string_lossy(), at.place_key.to_string_lossy(), at.token_path.to_string_lossy()]);
+    // The sweep is the real one over that home: the place file, its key and the token are gone and named, and
+    // wsp's own folder goes last and whole, so nothing of wsp's is left under the home.
+    let swept =
+        json!([at.place_file.to_string_lossy(), at.place_key.to_string_lossy(), at.token_path.to_string_lossy(), at.wsp.to_string_lossy()]);
     assert_eq!(answer, json!({"id": 21, "ok": true, "swept": swept}));
-    for path in [&at.place_file, &at.place_key, &at.token_path] {
+    for path in [&at.place_file, &at.place_key, &at.token_path, &at.wsp] {
         assert!(!path.exists(), "{}", path.display());
     }
     // The daemon ends after the reply is on the wire, and nothing dials again: the sweep took what would bring it back.

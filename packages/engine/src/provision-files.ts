@@ -148,6 +148,32 @@ export function landedServersScript(home: string): string {
   ].join("\n");
 }
 
+/** What the ownership read prints for one path of the list, so no path of the person's reads as the run's own words. */
+export const OWN_MARK = "wsp-own";
+
+/** The run that reads which files in the agents' homes on that computer are wsp's own: every path the list beside
+ * the job names whose bytes there are still the ones wsp left. It reads the computer and the list and nothing of
+ * any run, so a leave tells wsp's own copies from the person's whatever has happened since the round that landed
+ * them. A line the servers step wrote names a key in an agent's own file and no path, so nothing under the home
+ * stands at one and this passes over it; those lines are landedServers' to read. The leave is the one caller, on
+ * both roads it runs: the daemon over the link runs this same text through sh. */
+export function landedFilesScript(home: string): string {
+  const at = placeProvisionPaths(home);
+  return [
+    "set -u",
+    `home=${shellQuote(home)}; ledger=${shellQuote(at.landed)}`,
+    '[ -f "$ledger" ] || exit 0',
+    `tab=$(printf "${TAB}")`,
+    'while IFS="$tab" read -r rel from at; do',
+    '  dest="$home/$rel"',
+    '  [ -f "$dest" ] || continue',
+    '  d=$(sha256sum "$dest" | cut -d" " -f1)',
+    `  [ "$d" = "$at" ] && printf '${OWN_MARK}${TAB}%s${NL}' "$rel"`,
+    'done < "$ledger"',
+    "exit 0",
+  ].join("\n");
+}
+
 /** The run that closes the job on that computer: the markers the job's own log is appended behind, then every path
  * this round landed, with the bytes that travelled for it and the bytes standing there now, then every key the
  * servers step wrote as it wrote it, then the lines from before for what this round did not touch, since what wsp
@@ -303,6 +329,18 @@ export async function landedServers(machine: Machine, home: string): Promise<Map
       return words[0] === SERVER_MARK && words.length > 2 ? [[words.slice(2).join("\t"), words[1]!] as const] : [];
     }),
   );
+}
+
+/** The paths the ownership read answered with, home-relative and in the order the list named them. A line that is
+ * not the mark's is not an answer: a path of the person's holding a newline prints lines this never reads as its
+ * own, and a path that is not plainly under the home is no path of wsp's, whatever a list says. */
+export function ownMarks(stdout: string): string[] {
+  return stdout.split("\n").flatMap(line => {
+    const words = line.split("\t");
+    const rel = words.slice(1).join("\t");
+    if (words[0] !== OWN_MARK || rel === "" || rel.startsWith("/") || rel.split("/").includes("..")) return [];
+    return [rel];
+  });
 }
 
 /** Writes what the servers step put in the agents' own files into the list this round is building, one line per

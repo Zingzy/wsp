@@ -5236,21 +5236,17 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return withDaemon(entry, async ask => {
         const push = GitPushReply.parse(await ask({ op: "git.push", cwd, ...against }));
         const asked = { op: "git.pr", cwd, ...against, ...(title !== undefined ? { title } : {}), ...(body !== undefined ? { body } : {}) };
-        // The push has landed by here, so a machine with no command line for the host is not a failed bring back:
-        // the branch is on the remote and the sentence rides back as the note beside it.
+        // The push has landed by here, so nothing the pull request half says makes this a failed bring back: the
+        // branch is on the remote either way and the two halves are answered apart. A machine with no signed-in
+        // command line for the host is the note it always was; any other refusal rides beside the push as its own,
+        // which the verb above prints under the push lines and then exits on.
         const opened = await ask(asked).catch((e: unknown) => {
-          if (isNoHostCli(e)) return { note: (e as Error).message };
-          throw e;
+          const said = e instanceof Error ? e.message : String(e);
+          return isNoHostCli(e) ? { note: said } : { refused: said };
         });
-        const note = (opened as { note?: string }).note;
-        return {
-          branch: push.branch,
-          base: push.base,
-          ahead: push.ahead,
-          uncommitted: push.uncommitted,
-          stat: push.stat,
-          ...(note === undefined ? { pr: GitPrReply.parse(opened).pr } : { note }),
-        };
+        const half = opened as { note?: string; refused?: string };
+        const apart = half.note !== undefined ? { note: half.note } : half.refused !== undefined ? { refused: half.refused } : { pr: GitPrReply.parse(opened).pr };
+        return { branch: push.branch, base: push.base, ahead: push.ahead, uncommitted: push.uncommitted, stat: push.stat, ...apart };
       });
     },
 

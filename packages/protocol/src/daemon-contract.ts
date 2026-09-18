@@ -145,3 +145,9 @@ export const NO_REMOTE = "this project has no remote to push to";
 /** What the pull request is answered with where the git host's own command line is not on the machine: the push
  * stands, so the bring back carries this beside it as a note rather than failing. */
 export const noHostCliLine = (host: string): string => `no signed-in command line for ${host} is on this computer; the branch is pushed and the pull request waits for one`;
+/** What a push git refused for want of an https credential is refused with: nothing reached the remote, so this is
+ * the bring back's own refusal and not a note beside a landed push. The fix is the git host's own to name, since
+ * only that host's module knows which command signs its command line in, and a host wsp knows no module for gets
+ * the sentence with no fix in it rather than a command that would do nothing there. */
+export const noGitCredentialLine = (host: string, fix?: string): string =>
+  `this computer has no git credential for ${host}, so nothing was pushed${fix === undefined ? "" : `; ${fix}, then bring back again`}`;

@@ -56,7 +56,23 @@ impl PullRequests for GitHub {
         let read: GhPullRequest = serde_json::from_str(stdout.trim()).ok()?;
         Some(PullRequest { number: read.number, url: read.url, state: state_of(&read.state)?, host: self.host().to_owned() })
     }
+
+    fn sign_in_exit(&self) -> Option<i32> {
+        Some(AUTH_REQUIRED)
+    }
+
+    fn credential_fix(&self) -> &'static str {
+        CREDENTIAL_FIX
+    }
 }
+
+/// gh's own code for authentication required, which it has printed since its 2.0 line and which every one of its
+/// lines answers with on a computer nobody has signed it in on.
+const AUTH_REQUIRED: i32 = 4;
+
+/// The two lines only the person at that computer can run: the sign-in, and the one that hands git the credential
+/// gh holds, which is what a push over https reads.
+const CREDENTIAL_FIX: &str = "sign gh in on it with gh auth login, then gh auth setup-git";
 
 #[cfg(test)]
 mod tests {
@@ -75,6 +91,12 @@ mod tests {
             GitHub.create_argv("main", "work", None, Some("a body")),
             ["pr", "create", "--base", "main", "--head", "work", "--fill"]
         );
+    }
+
+    #[test]
+    fn the_sign_in_code_is_ghs_own_and_the_fix_names_the_two_commands_only_the_person_can_run() {
+        assert_eq!(GitHub.sign_in_exit(), Some(4));
+        assert_eq!(GitHub.credential_fix(), "sign gh in on it with gh auth login, then gh auth setup-git");
     }
 
     #[test]

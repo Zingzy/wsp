@@ -103,6 +103,25 @@ async fn stat_over<R: Runs>(runner: &R, cwd: &Path, from: Option<&str>) -> Resul
     Ok(stdout_text(&diffed).lines().map(|l| l.trim_end().to_owned()).filter(|l| !l.is_empty()).collect())
 }
 
+/// What git says when it wanted an https credential and had none: the prompt it was refused by GIT_TERMINAL_PROMPT
+/// and the two answers a host gives a request with no credential on it. A key an ssh remote wants is not here: it
+/// wants a key on this computer and not a signed-in command line, so git's own line rides as it always has.
+const NO_CREDENTIAL_SAID: [&str; 3] = ["could not read Username", "terminal prompts disabled", "Authentication failed for"];
+
+/// The sentence a push refused for want of a credential is refused with, or nothing where git refused it for some
+/// other reason. The remote's host names itself and its own module names the fix, so a host wsp knows no command
+/// line for is not told to run gh; a remote that is a folder beside the checkout has no host and no credential to
+/// want, whatever it said.
+async fn no_credential<R: Runs>(runner: &R, cwd: &Path, remote: &str, said: &str) -> Result<Option<String>, OpError> {
+    if !NO_CREDENTIAL_SAID.iter().any(|mark| said.contains(mark)) {
+        return Ok(None);
+    }
+    let url = run_git(runner, cwd, &["remote", "get-url", remote], None, None).await?;
+    let Some(host) = crate::hosts::host_name(stdout_text(&url).trim()) else { return Ok(None) };
+    let fix = crate::hosts::host_for(stdout_text(&url).trim()).map(|module| module.credential_fix());
+    Ok(Some(words::no_git_credential(&host, fix)))
+}
+
 /// Pushes the branch this checkout is on, with the base guard ahead of it and the counts a person reads beside it.
 pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -> Result<GitPushReply, OpError> {
     let remote = remote_name(runner, cwd).await?;
@@ -117,6 +136,9 @@ pub(crate) async fn push<R: Runs>(runner: &R, cwd: &Path, named: Option<&str>) -
     let stat = stat_over(runner, cwd, from.as_deref()).await?;
     let pushed = run_git(runner, cwd, &["push", "-u", &remote, &branch], None, None).await?;
     if pushed.code != Some(0) {
+        if let Some(refusal) = no_credential(runner, cwd, &remote, &pushed.stderr).await? {
+            return Err(OpError::plain(refusal));
+        }
         let said = pushed.stderr.trim();
         return Err(OpError::plain(format!("git push failed: {}", if said.is_empty() { stdout_text(&pushed) } else { said.to_owned() })));
     }
@@ -291,6 +313,76 @@ mod tests {
         // And nothing was fed on stdin: a push carries its words and reads nothing from this end.
         assert!(calls.iter().all(|call| call.stdin.is_none()), "a git call was fed stdin");
         assert_eq!(calls.len(), 8);
+    }
+
+    /// The eight answers a push reads before it pushes, in order, with the push's own answer and whatever comes
+    /// after it handed in: the remote, the base, the branch, the base ref, the count ahead, the status, the
+    /// diffstat, then the push.
+    fn push_answering(after: Vec<(i32, &str, &str)>) -> Recorded {
+        let mut answers = vec![
+            (0, "origin\n", ""),
+            (0, "main\n", ""),
+            (0, "work\n", ""),
+            (0, "0123456789abcdef\n", ""),
+            (0, "2\n", ""),
+            (0, "# branch.head work\0", ""),
+            (0, " README.md | 2 +-\n", ""),
+        ];
+        answers.extend(after);
+        Recorded::new(&[]).answering_said(answers)
+    }
+
+    /// What git printed on a box with no git credential, measured on spoo on 2026-09-18.
+    const NO_USERNAME: &str = "fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+
+    #[tokio::test]
+    async fn a_push_git_refused_for_want_of_a_credential_says_so_in_the_persons_words_with_the_hosts_own_fix() {
+        let runner = push_answering(vec![(128, "", NO_USERNAME), (0, "https://github.com/o/r.git\n", "")]);
+        let refused = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
+        let fix = crate::hosts::host_for("https://github.com/o/r.git").unwrap().credential_fix();
+        assert_eq!(refused.message, words::no_git_credential("github.com", Some(fix)));
+        // The words a person reads name the host and the commands only they can run, and say nothing landed.
+        assert!(refused.message.contains("gh auth login"), "{}", refused.message);
+        assert!(refused.message.contains("nothing was pushed"), "{}", refused.message);
+        // The remote's url is read only where the push was refused for a credential: the happy road runs eight.
+        assert_eq!(runner.asked().len(), 9);
+        assert_eq!(runner.asked()[8].args, ["remote", "get-url", "origin"]);
+
+        // The other two sentences a host with no credential on the request answers with read the same way.
+        for said in [
+            "remote: HTTP Basic: Access denied\nfatal: Authentication failed for 'https://github.com/o/r.git/'",
+            "fatal: terminal prompts disabled",
+        ] {
+            let runner = push_answering(vec![(128, "", said), (0, "https://github.com/o/r.git\n", "")]);
+            assert_eq!(
+                push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err().message,
+                words::no_git_credential("github.com", Some(fix))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_host_wsp_knows_no_command_line_for_is_told_no_command_to_run_and_a_folder_remote_reads_as_git_did() {
+        // A host with no module here: the sentence names the host and stops, rather than naming gh's commands.
+        let runner = push_answering(vec![(128, "", NO_USERNAME), (0, "https://gitlab.example.com/o/r.git\n", "")]);
+        let refused = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
+        assert_eq!(refused.message, words::no_git_credential("gitlab.example.com", None));
+        assert!(!refused.message.contains("gh"), "{}", refused.message);
+        // A remote that is a folder beside the checkout has no host and no credential to want.
+        let folder = push_answering(vec![(128, "", NO_USERNAME), (0, "/srv/mirrors/r.git\n", "")]);
+        assert!(push(&folder, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err().message.starts_with("git push failed: "));
+    }
+
+    #[tokio::test]
+    async fn a_key_an_ssh_remote_wants_and_every_other_refusal_ride_gits_own_line() {
+        // A key on the box is not a signed-in command line, so this one is not in the matcher at all.
+        for said in ["git@github.com: Permission denied (publickey).", "error: failed to push some refs to 'origin'"] {
+            let runner = push_answering(vec![(128, "", said)]);
+            let refused = push(&runner, Path::new("/private/tmp/proof/repo"), None).await.unwrap_err();
+            assert_eq!(refused.message, format!("git push failed: {said}"));
+            // Nothing beyond the push was asked: the url is read for the credential sentence alone.
+            assert_eq!(runner.asked().len(), 8);
+        }
     }
 
     #[tokio::test]

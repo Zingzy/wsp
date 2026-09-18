@@ -3,7 +3,7 @@
 // daemon channel, which base each carries, and what a machine with no
 // signed-in command line for the git host answers with.
 import { describe, expect, it, afterEach } from "vitest";
-import { branchUnreadRefusal, noHostCliLine, noParentWorkspaceLine, onBaseRefusal, type DaemonFrame, type DaemonResponse } from "@wsp/protocol";
+import { branchUnreadRefusal, noGitCredentialLine, noHostCliLine, noParentWorkspaceLine, onBaseRefusal, type DaemonFrame, type DaemonResponse } from "@wsp/protocol";
 import { createRuntime, type RuntimeDaemonChannel, type Runtime } from "../src/runtime.js";
 import { memoryStore } from "../src/store.js";
 import { createOn, projectOn, stubBackend, tokenGuest, type StubBackend } from "./stub-backend.js";
@@ -194,9 +194,29 @@ describe("workspaces.bringBack", () => {
     expect(back.ahead).toBe(2);
   });
 
-  it("any other refusal of the pull request is an error, not a note", async () => {
-    const daemon = fakeDaemon({ "git.pr": () => ({ id: 1, ok: false, error: "gh said: could not create pull request" }) });
+  it("any other refusal of the pull request comes back beside the push, since the branch has landed by then", async () => {
+    const said = "gh said: could not create pull request";
+    const daemon = fakeDaemon({ "git.pr": () => ({ id: 1, ok: false, error: said }) });
     const { id } = await withWorkspace(daemon, "main");
-    await expect(rt!.workspaces.bringBack({ workspaceId: id })).rejects.toThrow("gh said: could not create pull request");
+    const back = await rt!.workspaces.bringBack({ workspaceId: id });
+    expect(back.refused).toBe(said);
+    expect(back.note).toBeUndefined();
+    expect(back.pr).toBeUndefined();
+    // The push's own fields are the answer's first half, whatever the pull request half then said.
+    expect({ branch: back.branch, base: back.base, ahead: back.ahead, uncommitted: back.uncommitted, stat: back.stat }).toEqual({
+      branch: "pricing-page",
+      base: "main",
+      ahead: 2,
+      uncommitted: 1,
+      stat: [" src/page.tsx | 4 ++--"],
+    });
+  });
+
+  it("a push refused for want of a credential is the whole verb's refusal, since nothing landed", async () => {
+    const said = noGitCredentialLine("github.com", "sign gh in on it with gh auth login, then gh auth setup-git");
+    const daemon = fakeDaemon({ "git.push": () => ({ id: 1, ok: false, error: said }) });
+    const { id } = await withWorkspace(daemon, "main");
+    await expect(rt!.workspaces.bringBack({ workspaceId: id })).rejects.toThrow(said);
+    expect(daemon.frames.map(f => f["op"])).toEqual(["git.push"]);
   });
 });

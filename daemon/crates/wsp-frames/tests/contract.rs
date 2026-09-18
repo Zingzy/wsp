@@ -11,10 +11,10 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::Value;
 use wsp_frames::{
-    numbers, words, BackendFacts, CopyReport, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent, DaemonRequest, GitPrReply,
-    GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply, MachineAnswersReply, MachineExecReply, MachineHandleReply,
-    MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply, PlaceAuthRequest,
-    PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
+    landed_files_script, numbers, place_owned_paths, words, BackendFacts, CopyReport, DaemonAuthRequest, DaemonErrorResponse, DaemonEvent,
+    DaemonRequest, GitPrReply, GitPrStateReply, GitPushReply, GuestCliMessage, GuestOpenReply, MachineAnswersReply, MachineExecReply,
+    MachineHandleReply, MachineLinkRequest, MachineListReply, MachineReachReply, MachineReadingReply, MachineShapeReply, MachineStateReply,
+    PlaceAuthRequest, PlaceCapacity, PlaceProveRequest, DAEMON_OPS, MACHINE_OPS,
 };
 
 fn fixtures() -> PathBuf {
@@ -273,6 +273,8 @@ fn rendered_words() -> BTreeMap<&'static str, String> {
     m.insert("nothingAhead", words::nothing_ahead("{branch}", "{base}"));
     m.insert("noRemote", words::NO_REMOTE.to_owned());
     m.insert("noHostCli", words::no_host_cli("{host}"));
+    m.insert("noGitCredential", words::no_git_credential("{host}", Some("{fix}")));
+    m.insert("noGitCredentialNoFix", words::no_git_credential("{host}", None));
     m.insert("hostKeyRefusal", words::host_key_refusal("{url}"));
     m.insert("listening", words::listening_line("{host}", "{port}"));
     m.insert("sysSamplerStarted", words::SYS_SAMPLER_STARTED.to_owned());
@@ -350,6 +352,13 @@ fn committed<T: DeserializeOwned>(file: &str) -> BTreeMap<String, T> {
         .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
+/// One committed fixture read as whatever shape it holds, for the ones that are not a map of names to sentences.
+fn committed_value<T: DeserializeOwned>(file: &str) -> T {
+    let path = fixtures().join(file);
+    serde_json::from_str(&fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
 #[test]
 fn every_word_matches_the_committed_fixture() {
     let ours = rendered_words();
@@ -360,6 +369,32 @@ fn every_word_matches_the_committed_fixture() {
     for (key, sentence) in &ours {
         assert_eq!(&theirs[*key], sentence, "words.json[{key}]");
     }
+}
+
+/// The home the owned-paths fixture is rendered for, as the protocol's own test renders it: one letter, so the
+/// list reads as the shape of the paths rather than as somebody's login.
+const FIXTURE_HOME: &str = "/h";
+
+/// The home the ownership read's fixture is rendered for: the hole its one substitution goes in, as a word with a
+/// value in it is kept as its template everywhere else in this set.
+const SCRIPT_HOME: &str = "{home}";
+
+#[test]
+fn the_leaves_own_list_matches_the_committed_fixture() {
+    let theirs: Vec<String> = committed_value("place-paths.json");
+    let ours: Vec<String> = place_owned_paths(Path::new(FIXTURE_HOME)).iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    assert_eq!(ours, theirs, "place-paths.json and place_owned_paths name the same paths in the same order");
+}
+
+#[test]
+fn the_ownership_read_matches_the_committed_fixture_byte_for_byte() {
+    let path = fixtures().join("landed-files.sh");
+    let theirs = fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    assert_eq!(
+        format!("{}\n", landed_files_script(Path::new(SCRIPT_HOME))),
+        theirs,
+        "landed-files.sh and landed_files_script are one script"
+    );
 }
 
 #[test]
