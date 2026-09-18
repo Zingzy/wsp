@@ -4,11 +4,13 @@
 // it is for is deciding whether a file there is theirs or wsp's own copy, and
 // only a shell reading the bytes decides that.
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { MCP_ID_PREFIX, placeProvisionPaths } from "@wsp/protocol";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedServers, oncePathsOf, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
+import { agentStateFile, appendLanding, closeAgentFiles, filesRows, landAgentFiles, landedFilesScript, landedServers, oncePathsOf, parseLanded, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
 import type { McpPlan } from "../src/golden-mcp.js";
 import type { PackedFiles } from "../src/golden.js";
 import { noCopyLine, provisionMcp } from "../src/provision-mcp.js";
@@ -350,5 +352,23 @@ describe("the landing on the computer itself", { timeout: 60_000 }, () => {
     await landAgentFiles(machine, { home: root, tar: TAR(), lands: LANDS });
     expect(landed.length).toBeGreaterThan(0);
     for (const path of landed) expect(path.startsWith(`${placeProvisionPaths(root).dir}/`)).toBe(true);
+  });
+});
+
+describe("the ownership read as the daemon on that computer renders it", () => {
+  // The daemon runs this same script text through sh when the host asks it to leave, so a leave over the link and
+  // a leave at that computer's own terminal read ownership by one script. Its Rust twin is held to this fixture by
+  // the daemon's contract test, the way the sentences a person reads are.
+  const CONTRACT = fileURLToPath(new URL("../../../daemon/fixtures/contract/", import.meta.url));
+  // The one hole the script has, kept as its template: what the daemon fills in is the home it was pointed at.
+  const SCRIPT_HOME = "{home}";
+
+  it("landed-files.sh equals its regeneration, so the twin the daemon carries is this script", () => {
+    const text = `${landedFilesScript(SCRIPT_HOME)}\n`;
+    const regenerated = join(tmpdir(), "wsp-contract-landed-files.sh");
+    writeFileSync(regenerated, text);
+    const path = join(CONTRACT, "landed-files.sh");
+    expect(existsSync(path), `daemon/fixtures/contract/landed-files.sh is missing. The regenerated file is at ${regenerated}: copy it there and commit it`).toBe(true);
+    expect(readFileSync(path, "utf8"), `daemon/fixtures/contract/landed-files.sh is behind the engine. The regenerated file is at ${regenerated}: copy it over and commit it`).toBe(text);
   });
 });

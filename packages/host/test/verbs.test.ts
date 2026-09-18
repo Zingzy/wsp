@@ -560,6 +560,19 @@ describe("wsp verbs over the host", () => {
     const noCli = await run("bring", "back", "alpha");
     expect(noCli.code).toBe(0);
     expect(noCli.io.lines.join("\n").split("\n").at(-2)).toBe(noHostCliLine("github.com"));
+    // Any other refusal of the pull request half prints under the same push lines and is what the verb exits on:
+    // the branch is on the remote, and a person reading this has both halves.
+    daemon.pr.refuse = { error: "gh said: could not create pull request" };
+    const refused = await run("bring", "back", "alpha");
+    expect(refused.code).toBe(1);
+    expect(refused.io.lines.join("\n").split("\n")).toEqual([
+      `${alpha!.name}: pricing-page pushed, 2 commits over main`,
+      " src/page.tsx | 4 ++--",
+      " 1 file changed, 2 insertions(+), 2 deletions(-)",
+      "gh said: could not create pull request",
+      "1 change left in the workspace; nothing uncommitted travels",
+    ]);
+    expect(refused.io.errors.join("|")).toBe("");
     // And a refusal of the push itself is the verb's refusal, in the daemon's own words.
     daemon.pr.refuse = undefined;
   });

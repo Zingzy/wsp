@@ -162,3 +162,15 @@ pub const NO_REMOTE: &str = "this project has no remote to push to";
 pub fn no_host_cli(host: &str) -> String {
     format!("no signed-in command line for {host} is on this computer; the branch is pushed and the pull request waits for one")
 }
+
+/// What a push git refused for want of an https credential is refused with: nothing reached the remote, so this is
+/// the bring back's own refusal and not a note beside a landed push. The fix is the git host's own module to name,
+/// since only it knows which command signs its command line in; a host wsp knows no module for gets the sentence
+/// with no fix in it rather than a command that would do nothing there.
+pub fn no_git_credential(host: &str, fix: Option<&str>) -> String {
+    let said = match fix {
+        Some(fix) => format!("; {fix}, then bring back again"),
+        None => String::new(),
+    };
+    format!("this computer has no git credential for {host}, so nothing was pushed{said}")
+}

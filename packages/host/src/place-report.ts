@@ -6,13 +6,13 @@
 // computer's own row.
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, rmdirSync, statfsSync, writeFileSync } from "node:fs";
 import { homedir, arch as osArch, platform, release, type as osType, uptime as upSeconds, userInfo } from "node:os";
 import { PLACE_FILE_MODE, engineWord, parsePlaceFile, placeFileText, workspacesBlockedBy, type PlaceEngine, type PlaceFile, type PlaceReport } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { LOGIN_READ, SSH_STORE_VARS, localShape, plainPath, readValues } from "@wsp/engine";
+import { LOGIN_READ, SSH_STORE_VARS, landedFilesScript, localShape, ownMarks, plainPath, readValues } from "@wsp/engine";
 import { DAEMON_VERSION, isPlainPath, placeDaemonPaths, placeOwnedPaths, workFolderIn } from "@wsp/protocol";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { profileSourceLine, sshDaemonPlace, type DaemonPlace } from "./doctor.js";
 import { mcpServerCommand, onPath, runningWsp, type RunningWsp } from "./mcp-install.js";
 import { runAll, runFailureLine, serviceManagerFor, STOP_WAIT_MS, systemRunner, type ServiceAddress, type ServiceManager, type ServiceRunner } from "./service.js";
@@ -199,6 +199,8 @@ export const sweptSaid = (said: string): string[] =>
 
 export interface PlaceSweepOptions {
   home?: string;
+  /** How the ownership read is run; this computer's own sh unless a caller hands another way of running one. */
+  sh?: (script: string) => string;
   /** Which manager holds the place's unit; this computer's own unless a caller hands another, and a caller that
    * means none (a computer wsp writes no unit for) hands undefined on purpose. */
   manager?: ServiceManager | undefined;
@@ -210,9 +212,15 @@ export interface PlaceSweepOptions {
  * names that unit from the host, and a second spelling of it there would be a second copy of the rule. */
 export const placeService = (home: string, uid?: number): ServiceAddress => ({ role: "place", statePath: placeFilePath(home), home, uid: uid ?? process.getuid?.() ?? 0 });
 
-/** Takes wsp off this computer: every file that holds the agent up, the place file and the key, and every path the
- * daemon and the installer put under wsp's own folder here, read off the one list the ssh road's removal reads so
- * nothing is named twice and nothing is guessed. The work folder stays, and the line says so.
+/** Takes wsp off this computer: every file wsp itself landed in the agents' homes here, every file that holds the
+ * agent up, the place file and the key, and every path the daemon, the installer and the recipe's job put under
+ * wsp's own folder here, read off the one list the ssh road's removal reads so nothing is named twice and nothing
+ * is guessed. The work folder stays, and the line says so.
+ *
+ * What wsp landed is read before anything goes, by the one ownership script the run that lands those files reads
+ * its own copies by: a path on the list beside that job whose bytes there are still the ones wsp left is wsp's to
+ * take, and a file the person has written since is not on that read at all. The list sits inside the folder the
+ * walk below takes, which is why the read comes first.
  *
  * Every scope the manager could be holding a unit in, not only the one a join writes today: a computer joined
  * before the place's unit became the machine's own has its file under that login's systemd, and a sweep that read
@@ -230,6 +238,9 @@ export const placeService = (home: string, uid?: number): ServiceAddress => ({ r
  * decided this computer is out of that wsp. */
 export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSweep> {
   const home = opts.home ?? homedir();
+  // Before a single path of the list below goes: the list this read reads sits inside the provision folder that
+  // walk takes, and what it says is which files in the agents' homes here are still wsp's own copies.
+  const own = ownMarks((opts.sh ?? shStdout)(landedFilesScript(home)));
   const manager = opts.manager === undefined ? serviceManagerFor(platform()) : opts.manager;
   const removed: string[] = [];
   if (manager !== undefined) {
@@ -252,9 +263,18 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
       removed.push(`${held.words} ${held.unit.name} (${refused === undefined ? "stopped" : runFailureLine(refused)})`);
     }
   }
+  // Every file wsp itself landed in an agent's home here whose bytes are still the ones wsp left. A file the
+  // person has written since hashes differently, so the read never named it and it stays where it is.
+  for (const rel of own) {
+    const path = join(home, rel);
+    if (!there(path)) continue;
+    rmSync(path, { force: true });
+    removed.push(path);
+    prunedEmpty(home, dirname(path));
+  }
   // The daemon on this computer is this process, so there is no second unit of its own; the paths are the ones
-  // the daemon writes and the ones an installer over ssh put there, which on a computer that was joined by hand
-  // simply are not present.
+  // the daemon writes, the ones an installer over ssh put there and the recipe's own folder, which on a computer
+  // that was joined by hand simply are not present.
   for (const path of placeOwnedPaths(home)) {
     // lstat, not exists: the browser name is a symlink to the shim beside it, and once the shim has gone the link
     // is dangling, which every following-the-link read calls absent while the person is still left holding it.
@@ -265,6 +285,38 @@ export async function sweepPlace(opts: PlaceSweepOptions = {}): Promise<PlaceSwe
   const said = unsourced(sshDaemonPlace({ home, path: "" }));
   if (said !== undefined) removed.push(said);
   return { removed, kept: [placeKeptLine(workFolderIn(home))] };
+}
+
+/** The ownership read as this computer runs it: the one script the engine renders for the home, through a plain sh
+ * by its own path, since a daemon under a service unit holds almost no PATH to find one on. A read that would not
+ * run answers nothing, which keeps every file of the person's where it is. */
+const shStdout = (script: string): string => {
+  try {
+    return execFileSync(SH, ["-c", script], { encoding: "utf8", timeout: OWN_READ_MS });
+  } catch {
+    return "";
+  }
+};
+
+const SH = "/bin/sh";
+
+/** How long the read of what wsp owns here gets; it hashes one file per line of the list. */
+const OWN_READ_MS = 60_000;
+
+/** The folders wsp's own files left empty, taken from the file's own upwards. Never the first folder under the
+ * home: ~/.claude-cfg and ~/.codex are the agents' own to make and to keep, whatever wsp put inside them. */
+function prunedEmpty(home: string, from: string): void {
+  let at = from;
+  while (at !== home && at.startsWith(`${home}/`) && dirname(at) !== home) {
+    try {
+      // rmdir and not a recursive remove: a folder that is not empty is one holding something of the person's,
+      // and this walk stops at the first of those rather than reading what is in it.
+      rmdirSync(at);
+    } catch {
+      return;
+    }
+    at = dirname(at);
+  }
 }
 
 /** Whether a path is there at all, link or file. */

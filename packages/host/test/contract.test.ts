@@ -55,8 +55,11 @@ describe("the agent contract on the command line and the tool door", () => {
   let store: Store;
   let rt: Runtime;
   let handle: HostHandle | undefined;
+  /** What the workspace's daemon refuses a pull request with, where a case wants the pull request half refused. */
+  let prRefusal: string | undefined;
 
   beforeEach(async () => {
+    prRefusal = undefined;
     dir = mkdtempSync(join(tmpdir(), "wsp-contract-"));
     const webDir = join(dir, "web");
     mkdirSync(join(webDir, "assets"), { recursive: true });
@@ -77,12 +80,15 @@ describe("the agent contract on the command line and the tool door", () => {
       store,
       adapters: { claude: claude.adapter, codex: bornDeadAgent(prompt => `re: ${prompt}`).adapter },
       goneConfirmMs: 0,
-      // The daemon inside a workspace, as far as the one verb that asks it anything is concerned.
+      // The daemon inside a workspace, as far as the one verb that asks it anything is concerned. Its pull request
+      // half refuses where a case sets that, since the two halves of a bring back are answered apart.
       daemonChannel: async () => ({
         send: async frame =>
           frame.op === "git.push"
             ? { id: 1, ok: true, branch: "work", base: "main", remote: "origin", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"] }
-            : { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" }, created: true },
+            : prRefusal === undefined
+              ? { id: 1, ok: true, pr: { number: 3, url: "https://github.com/dev/alpha/pull/3", state: "open", host: "github.com" }, created: true }
+              : { id: 1, ok: false as const, error: prRefusal },
         close: () => {},
       }),
       placeLinks: placeWiring(statePath, {}),
@@ -348,6 +354,49 @@ describe("the agent contract on the command line and the tool door", () => {
     const gone = captured();
     expect(await cli(["threads", "--json", "--state", statePath], gone, undefined, process.env, false)).toBe(1);
     expect(failure(gone)).toEqual({ error: noHostServingLine(statePath), class: "provider", exit: 1 });
+  });
+
+  it("a bring back whose pull request half refused carries both halves on the JSON and exits 1, the push's fields with it", async () => {
+    await run("new", "alpha");
+    const machine = backend.machines[0]!;
+    const guestSoFar = backend.execImpl;
+    machine.previewUrl = async () => ({ url: "http://127.0.0.1:7070", token: "e", expiresAt: Date.now() + 3_600_000 });
+    backend.execImpl = (m, cmd) => (cmd.includes(DAEMON_TOKEN_PATH) ? { exitCode: 0, stdout: `${DAEMON_TOKEN_SET}\n`, stderr: "" } : guestSoFar(m, cmd));
+    prRefusal = "gh said: could not create pull request";
+    const { code, io } = await run("bring", "back", "alpha", "--json");
+    // The push landed, so its own fields are on the object beside the refusal and the verb still exits 1.
+    expect(objects(io).at(-1)).toEqual({
+      branch: "work",
+      base: "main",
+      ahead: 1,
+      uncommitted: 0,
+      stat: [" a.ts | 2 +-"],
+      refused: prRefusal,
+    });
+    expect(code).toBe(1);
+    expect(io.errors).toEqual([]);
+
+    // The tool door carries the same answer with isError on it: a caller reading the structured content gets the
+    // push's own fields, not a failure object, since the branch is on the remote whatever the other half said.
+    const server = mcpServer(statePath, { env: {} });
+    const [toClient, toServer] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "contract-bring-back", version: "0" });
+    await server.connect(toServer);
+    await client.connect(toClient);
+    try {
+      const answer = await client.callTool({ name: "bring_back", arguments: { workspace: "alpha" } });
+      expect(answer.isError).toBe(true);
+      expect(answer.structuredContent).toEqual({ branch: "work", base: "main", ahead: 1, uncommitted: 0, stat: [" a.ts | 2 +-"], refused: prRefusal });
+      expect((answer.content as { text?: string }[]).map(part => part.text ?? "").join("")).toContain(prRefusal!);
+      // The note is the other half's other answer and is no error: the pull request waits and nothing failed.
+      prRefusal = undefined;
+      const noted = await client.callTool({ name: "bring_back", arguments: { workspace: "alpha" } });
+      expect(noted.isError).not.toBe(true);
+      expect(noted.structuredContent).toMatchObject({ branch: "work", pr: { number: 3 } });
+    } finally {
+      await client.close();
+      await server.close();
+    }
   });
 
   it("the shared parse and the commands answer under the same classes: a bad flag, an unknown command, --json on a prose command and a word wsp doctor cannot read are usage", async () => {

@@ -7,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use wsp_frames::{numbers, ManifestEntry};
+use wsp_frames::{numbers, shell_quote, ManifestEntry};
 
 use crate::clock;
 
@@ -32,11 +32,6 @@ pub(crate) struct ProcessManifest {
     path: Option<PathBuf>,
     run_dir: String,
     log_dir: String,
-}
-
-/// A value as sh reads it back unchanged: single quotes, with each quote inside closed, escaped and reopened.
-pub(crate) fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn key_of(cwd: &str, cmd: &str) -> String {
