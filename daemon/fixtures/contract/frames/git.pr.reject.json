@@ -13,7 +13,7 @@
   {
     "id": 1,
     "op": "git.pr",
-    "cwd": "repo",
+    "cwd": "/root/repo",
     "machineId": 1
   }
 ]

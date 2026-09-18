@@ -11,7 +11,7 @@
   {
     "id": 1,
     "op": "git.status",
-    "cwd": "repo",
+    "cwd": "/root/repo",
     "machineId": 1
   }
 ]

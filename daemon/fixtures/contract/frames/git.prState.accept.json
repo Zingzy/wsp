@@ -7,7 +7,7 @@
   {
     "id": 1,
     "op": "git.prState",
-    "cwd": "repo",
+    "cwd": "/root/repo",
     "machineId": "wsp-a"
   }
 ]

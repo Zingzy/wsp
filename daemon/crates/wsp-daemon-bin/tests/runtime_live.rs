@@ -617,10 +617,11 @@ async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_b
     let roots = wsp_runtime::bundle::tool_roots_present(&wsp_frames::numbers::SHARED_TOOL_ROOTS);
     let mut w = World::open().await;
     let id = w.create(spec(json!({}))).await;
-    // The PATH the boot hands its first process and every exec under it, which is the one every thread on this
-    // workspace carries: one order of directories for the whole workspace.
-    let (code, path, err) = w.exec(&id, "echo $PATH").await;
-    show("the PATH inside a workspace", code, &path, &err);
+    // The PATH the boot hands its first process, read off that process's own environment rather than off a shell
+    // this case started: it is the one every process in the workspace inherits, and the one order of directories
+    // a person's thread on this workspace carries too.
+    let (code, path, err) = w.exec(&id, "tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^PATH=//p'").await;
+    show("the PATH the workspace booted with", code, &path, &err);
     assert_eq!((code, path.trim()), (0, wsp_frames::numbers::TOOLS_PATH));
     for root in &roots {
         // What the box keeps under the root, read from the box before the workspace is asked: the case says
@@ -640,10 +641,11 @@ async fn the_recipes_tools_outside_the_overlaid_trees_answer_inside_and_cannot_b
         assert!(!Path::new(root).join("wsp-probe").exists(), "a write inside reached {root} on the box");
         assert_eq!(fs::read_dir(root).map(|d| d.count() as u64).unwrap_or(0), own, "{root} on the box changed");
     }
-    // And the command the bring back's pull request half needs, where this box has it: the gh a road installed
-    // under one of those roots answers inside, at the path the box has it.
-    let (code, found, err) = w.exec(&id, "command -v gh || true").await;
-    show("gh inside a workspace", code, &found, &err);
+    // And the command the bring back's pull request half needs, where this box has it: gh answers on the PATH the
+    // workspace booted with, at the path the box has it. Asked on that PATH rather than on whatever a shell this
+    // case started inherits, since the boot's PATH is what #924 changed.
+    let (code, found, err) = w.exec(&id, &format!("PATH={} command -v gh || true", wsp_frames::numbers::TOOLS_PATH)).await;
+    show("gh inside a workspace, on the PATH the boot set", code, &found, &err);
     assert_eq!(code, 0);
     let on_the_box = std::process::Command::new("sh")
         .arg("-c")
@@ -2175,6 +2177,11 @@ async fn a_btrfs_subvolume_is_snapshotted_rather_than_walked_at_all() {
     assert!(!to.exists(), "the snapshot's own directory stayed after the remove");
 }
 
+/// The bare repository a checkout of these cases pushes to, inside the checkout itself: the copy a workspace is
+/// made with carries it in, so a push run inside the workspace has a remote it can reach. Nothing of the runtime
+/// root is inside a workspace, and /tmp there is the skeleton's own emptied directory.
+const BARE_ORIGIN: &str = ".origin.git";
+
 /// git on the box for the cases that build a repo there: the identity every commit here carries, since a box may
 /// have none of its own.
 fn git_at(cwd: impl AsRef<Path>, args: &[&str]) -> String {
@@ -2265,26 +2272,37 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
         return;
     }
     let key = checkout_key();
-    // A checkout with a bare origin beside it, both on the box, so the push has somewhere to land with no network
-    // and no credential. The pre-push hook is what says where git ran: it writes a file, and that file may exist
-    // in the workspace's own upper and nowhere on the box.
+    // A checkout with its own bare origin inside it, at a relative remote url, so the copy carries the origin into
+    // the workspace and the push inside has somewhere to land with no network and no credential. The runtime root
+    // itself is no road: inside a workspace /tmp is the skeleton's own directory, emptied at every boot, and the
+    // only thing of this computer's the workspace reads at the project's path is the copy.
+    //
+    // The pre-push hook is what says where git ran: it writes a file, and that file may exist in the workspace's
+    // own upper and nowhere on the box.
     let from = root().join("projects").join(format!("live-frames-{key}"));
-    let origin = root().join("projects").join(format!("live-frames-origin-{key}.git"));
-    for at in [&from, &origin] {
-        let _ = fs::remove_dir_all(at);
-    }
+    let _ = fs::remove_dir_all(&from);
     fs::create_dir_all(&from).unwrap();
-    git_at(root(), &["init", "-q", "--bare", "-b", "main", &origin.to_string_lossy()]);
+    let origin = from.join(BARE_ORIGIN);
     git_at(&from, &["init", "-q", "-b", "main"]);
     fs::write(from.join("README.md"), b"the checkout\n").unwrap();
-    git_at(&from, &["add", "-A"]);
+    git_at(&from, &["add", "README.md"]);
     git_at(&from, &["commit", "-q", "-m", "first"]);
-    git_at(&from, &["remote", "add", "origin", &origin.to_string_lossy()]);
+    // The bare repository is made after that commit and excluded by the checkout's own exclude file, which travels
+    // with the copy: a bare repository is not told from a folder of files by anything git reads, so a status or an
+    // add that took it in would carry its objects as the checkout's own.
+    fs::write(from.join(".git/info/exclude"), format!("/{BARE_ORIGIN}/\n")).unwrap();
+    git_at(&from, &["init", "-q", "--bare", "-b", "main", BARE_ORIGIN]);
+    // Relative, so the one url is the origin beside the checkout on the box and the origin beside the copy inside.
+    git_at(&from, &["remote", "add", "origin", &format!("./{BARE_ORIGIN}")]);
     git_at(&from, &["push", "-q", "-u", "origin", "main"]);
     git_at(&from, &["switch", "-q", "-c", "work"]);
     fs::write(from.join("one.txt"), b"one\n").unwrap();
     git_at(&from, &["add", "one.txt"]);
     git_at(&from, &["commit", "-q", "-m", "one"]);
+    // Nothing of the bare repository is in the checkout's own history or its status, which is what the exclude is for.
+    assert_eq!(git_at(&from, &["status", "--porcelain"]).trim(), "");
+    assert!(!git_at(&from, &["ls-files"]).contains(BARE_ORIGIN));
+    let pushing = git_at(&from, &["rev-parse", "work"]).trim().to_owned();
     let hook = from.join(".git/hooks/pre-push");
     fs::write(&hook, "#!/bin/sh\nhostname > /var/tmp/wsp-pre-push-ran\n").unwrap();
     fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
@@ -2316,12 +2334,18 @@ async fn the_computers_daemon_answers_a_workspaces_files_and_git_for_the_workspa
     let nowhere = client.request("git.status", json!({ "cwd": at, "machineId": "wsp-nobody" })).await;
     assert_eq!((nowhere["ok"].as_bool(), nowhere["error"].as_str()), (Some(false), Some("no such workspace: wsp-nobody")), "{nowhere}");
 
-    // The push: the branch lands on the bare origin on the box, and the hook ran inside the workspace, which is
-    // the whole reason git runs there. Its marker is in the workspace's own upper and on no path of the box's.
+    // The push: the branch lands on the origin the workspace carries, and the hook ran inside the workspace, which
+    // is the whole reason git runs there. Its marker is in the workspace's own upper and on no path of the box's.
     let pushed = client.request("git.push", json!({ "cwd": at, "base": "main", "machineId": &id })).await;
     assert_eq!(pushed["ok"], true, "{pushed}");
     assert_eq!((pushed["branch"].as_str(), pushed["base"].as_str(), pushed["ahead"].as_u64()), (Some("work"), Some("main"), Some(1)));
-    assert_eq!(git_at(&origin, &["rev-parse", "work"]).trim(), git_at(&from, &["rev-parse", "work"]).trim());
+    // The copy's own origin, which the box reads under the copies folder: the branch is there at the commit the
+    // checkout made. And the checkout's own origin on the box has main alone, so nothing of this push ran there.
+    let copy_origin = root().join("copies").join(&id).join(BARE_ORIGIN);
+    assert_eq!(git_at(&copy_origin, &["rev-parse", "work"]).trim(), pushing, "the push did not land in the copy's own origin");
+    let on_the_box = git_at(&origin, &["for-each-ref", "--format=%(refname)"]);
+    assert!(on_the_box.contains("refs/heads/main"), "{on_the_box}");
+    assert!(!on_the_box.contains("refs/heads/work"), "the push reached the checkout's own origin on the box: {on_the_box}");
     let (code, ran, _) = w.exec(&id, &format!("cat {marker}")).await;
     assert_eq!(code, 0, "the pre-push hook did not run inside the workspace");
     assert!(!ran.trim().is_empty(), "the hook wrote nothing inside");

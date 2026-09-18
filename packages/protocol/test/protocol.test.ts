@@ -1063,14 +1063,16 @@ describe("daemon files and diff ops", () => {
   it("takes the workspace a files or git frame is for on those seven ops and refuses one that is not a word", () => {
     // A workspace on a computer somebody owns runs no daemon of its own, so the daemon of the computer holding it
     // answers these seven for the workspace the frame names; the path is then the one that workspace sees.
+    // The path is the checkout's own, absolute: the daemon answering for a workspace has no working directory
+    // inside it, and it refuses a relative path rather than reading one against its own.
     const named = [
-      { id: 1, op: "fs.list", path: "repo", machineId: "wsp-a" },
-      { id: 2, op: "fs.read", path: "repo/README.md", machineId: "wsp-a" },
-      { id: 3, op: "git.status", cwd: "repo", machineId: "wsp-a" },
-      { id: 4, op: "git.diff", cwd: "repo", scope: "branch", machineId: "wsp-a" },
-      { id: 5, op: "git.push", cwd: "repo", base: "main", machineId: "wsp-a" },
-      { id: 6, op: "git.pr", cwd: "repo", base: "main", machineId: "wsp-a" },
-      { id: 7, op: "git.prState", cwd: "repo", machineId: "wsp-a" },
+      { id: 1, op: "fs.list", path: "/root/repo", machineId: "wsp-a" },
+      { id: 2, op: "fs.read", path: "/root/repo/README.md", machineId: "wsp-a" },
+      { id: 3, op: "git.status", cwd: "/root/repo", machineId: "wsp-a" },
+      { id: 4, op: "git.diff", cwd: "/root/repo", scope: "branch", machineId: "wsp-a" },
+      { id: 5, op: "git.push", cwd: "/root/repo", base: "main", machineId: "wsp-a" },
+      { id: 6, op: "git.pr", cwd: "/root/repo", base: "main", machineId: "wsp-a" },
+      { id: 7, op: "git.prState", cwd: "/root/repo", machineId: "wsp-a" },
     ];
     for (const r of named) expect(DaemonRequest.parse(r)).toEqual(r);
     for (const r of named) expect(() => DaemonRequest.parse({ ...r, machineId: 1 })).toThrow();

@@ -130,6 +130,11 @@ export function asLinuxbrew(cmd: string): string {
  * update, and a caller that wants otherwise exports it, which su carries through. */
 export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; then exec ${BREW_REAL} "$@"; fi`, `exec su -s /bin/bash linuxbrew -c ${shellQuote(`${FROM_A_READABLE_DIR}\nexec "$0" "$@"`)} -- ${BREW_REAL} "$@"`].join("\n");
 
+/** The command a formula puts on PATH: the formula's own name, and for a tap formula the name after the tap. Read
+ * by the road that takes a tap formula's binary off again and by the doctor, which asks a workspace whether every
+ * formula the recipe ticked answers inside it. */
+export const formulaCommand = (formula: string): string => formula.slice(formula.lastIndexOf("/") + 1);
+
 const brew: RoadModule<Road<"brew">> = {
   words: "with Homebrew",
   // A formula lands in the prefix; a tap formula with no Linux bottle takes the road to /usr/local/bin.
@@ -141,7 +146,7 @@ const brew: RoadModule<Road<"brew">> = {
   uninstall: r => {
     if (!r.formula.includes("/")) return { cmd: asLinuxbrew(`uninstall ${r.formula}`) };
     // A tap formula with no Linux bottle took the road to /usr/local/bin under the formula's name, not to the cellar.
-    const bin = r.formula.slice(r.formula.lastIndexOf("/") + 1);
+    const bin = formulaCommand(r.formula);
     return { cmd: `if [ -x ${BREW} ] && ${asLinuxbrew(`list --formula ${r.formula}`)} >/dev/null 2>&1; then ${asLinuxbrew(`uninstall ${r.formula}`)}; else rm -f /usr/local/bin/${shellQuote(bin)}; fi` };
   },
   names: r => [r.formula],
@@ -336,7 +341,7 @@ const script: RoadModule<Road<"script">> = {
   words: "by its own installer",
   // A vendor's own installer: every script the catalogue carries unpacks under /usr/local or /opt, installs by apt,
   // or writes under the machine's home, which is the /root every workspace on a computer somebody owns shares.
-  roots: ["/usr", "/usr/local", "/opt", "/root"],
+  roots: ["/usr", "/opt", "/root"],
   install: r => r.script,
   uninstall: (_r, bin) => ({ note: `${bin} has no uninstaller; left on the machine` }),
   names: () => [],

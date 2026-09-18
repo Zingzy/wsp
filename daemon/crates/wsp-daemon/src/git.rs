@@ -265,8 +265,6 @@ pub(crate) mod recorded {
     use super::{GitResult, Runs};
     use crate::paths::OpError;
 
-    /// A way of running that records what it was asked and answers what a case told it to: what the halves above
-    /// hand a runner is read here without a git, a gh or a workspace.
     /// One call a way of running was asked to make: where it was to run, the program, its arguments and its stdin.
     #[derive(Clone)]
     pub(crate) struct Call {

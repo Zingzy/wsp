@@ -416,15 +416,25 @@ pub(crate) fn from_runtime(e: wsp_runtime::ops::OpError) -> OpError {
 }
 
 /// Where a path a frame names is read, and how a program for it is run: on this computer as ever, or under one
-/// workspace's rootfs with git run inside that workspace. A path inside is held to the wire's own plain-path rule
-/// and then resolved against the rootfs, so `..` and a symlink that leaves the workspace are refused exactly as a
-/// path that leaves a root is.
-#[cfg(target_os = "linux")]
+/// workspace's rootfs with git run inside that workspace. A path for a workspace is absolute, since the daemon
+/// reading it has no working directory inside that workspace and a git run there starts in the folder the frame
+/// names; then it is held to the wire's own plain-path rule and resolved against the rootfs, so `..` and a symlink
+/// that leaves the workspace are refused exactly as a path that leaves a root is.
 async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
     let Some(machine) = machine else {
         let at = locate(ctx, requested).await?;
         return Ok((Runner::Here(git::here::Here::new()), at.clone(), at));
     };
+    if !Path::new(requested).is_absolute() {
+        return Err(OpError::coded(DaemonErrorCode::BadRequest, format!("{requested} is not an absolute path inside {machine}")));
+    }
+    workspace_road(ctx, machine, requested).await
+}
+
+/// The same for one workspace this computer runs: the path under its rootfs, read on this side, and the runner
+/// that runs a program inside it.
+#[cfg(target_os = "linux")]
+async fn workspace_road(ctx: &Ctx, machine: &str, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
     let ops = workspaces_of(ctx, machine)?;
     let rootfs = ops.rootfs_of_running(machine).map_err(from_runtime)?;
     let joined =
@@ -433,17 +443,11 @@ async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runn
     Ok((Runner::Inside(git::inside::Inside::new(ops, machine)), under, PathBuf::from(requested)))
 }
 
-/// The same on a computer whose daemon runs no workspace at all: every path is its own, and a frame that names a
-/// workspace is the missing refusal.
+/// And on a computer whose daemon runs no workspace at all, which is every machine this daemon is inside: the
+/// missing refusal, the same one a workspace that is gone answers.
 #[cfg(not(target_os = "linux"))]
-async fn road(ctx: &Ctx, machine: Option<&str>, requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
-    match machine {
-        Some(machine) => Err(no_such_workspace(machine)),
-        None => {
-            let at = locate(ctx, requested).await?;
-            Ok((Runner::Here(git::here::Here::new()), at.clone(), at))
-        }
-    }
+async fn workspace_road(_ctx: &Ctx, machine: &str, _requested: &str) -> Result<(Runner, PathBuf, PathBuf), OpError> {
+    Err(no_such_workspace(machine))
 }
 
 async fn serve(conn: &Arc<Conn>, ctx: &Arc<Ctx>, id: Option<RequestId>, name: &str, op: DaemonOp) -> String {
@@ -1036,18 +1040,29 @@ mod tests {
         let b = bench();
         let (sock, _rx) = conn(None);
         for op in ["fs.list", "fs.read"] {
-            let reply = reply(&b, &sock, json!({"id": 1, "op": op, "path": "repo", "machineId": "wsp-x"})).await;
+            let reply = reply(&b, &sock, json!({"id": 1, "op": op, "path": "/root/repo", "machineId": "wsp-x"})).await;
             assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
         }
         for op in ["git.status", "git.push", "git.pr", "git.prState"] {
-            let reply = reply(&b, &sock, json!({"id": 1, "op": op, "cwd": "repo", "machineId": "wsp-x"})).await;
+            let reply = reply(&b, &sock, json!({"id": 1, "op": op, "cwd": "/root/repo", "machineId": "wsp-x"})).await;
             assert_eq!(reply, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}), "{op}");
         }
-        let diff = reply(&b, &sock, json!({"id": 1, "op": "git.diff", "cwd": "repo", "scope": "branch", "machineId": "wsp-x"})).await;
+        let diff = reply(&b, &sock, json!({"id": 1, "op": "git.diff", "cwd": "/root/repo", "scope": "branch", "machineId": "wsp-x"})).await;
         assert_eq!(diff, json!({"id": 1, "ok": false, "code": "not-found", "error": "no such workspace: wsp-x"}));
         // The same refusal a machine op on the link answers for a workspace this computer does not run, so a
         // workspace that is gone and a computer that runs none read as one thing.
         assert_eq!(wsp_runtime::no_such_workspace("wsp-x"), "no such workspace: wsp-x");
+        // A relative path for a workspace is refused before anything is read: this daemon has no working directory
+        // inside that workspace, and a git run there starts in the folder the frame names. The host sends the
+        // checkout's own absolute path.
+        for (op, key) in [("fs.list", "path"), ("git.status", "cwd")] {
+            let reply = reply(&b, &sock, json!({"id": 1, "op": op, key: "repo", "machineId": "wsp-x"})).await;
+            assert_eq!(
+                reply,
+                json!({"id": 1, "ok": false, "code": "bad-request", "error": "repo is not an absolute path inside wsp-x"}),
+                "{op}"
+            );
+        }
         // And with no workspace named, the path is this daemon's own: a folder outside every root is refused as it
         // always was, and nothing here reads a workspace at all.
         let outside = reply(&b, &sock, json!({"id": 2, "op": "git.status", "cwd": "/etc"})).await;

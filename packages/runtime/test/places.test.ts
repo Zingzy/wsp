@@ -2013,8 +2013,12 @@ describe("a fork on a computer you joined", () => {
     const back = await runtime.workspaces.bringBack({ workspaceId: made.id, title: "bring back proof" });
     expect(place.frames.map(f => f["op"])).toEqual(["git.push", "git.pr"]);
     for (const frame of place.frames) expect(frame["machineId"]).toBe(made.machineId);
-    // The checkout as the workspace sees it, which is the project's own path on that computer.
-    expect(place.frames[0]).toMatchObject({ op: "git.push", cwd: (await runtime.workspaces.get(made.id)).project.path });
+    // The checkout as the workspace sees it, which is the project's own path on that computer, and absolute: the
+    // daemon answering for a workspace has no working directory inside it and refuses a relative path.
+    const cwd = (await runtime.workspaces.get(made.id)).project.path;
+    expect(cwd.startsWith("/")).toBe(true);
+    expect(place.frames[0]).toMatchObject({ op: "git.push", cwd });
+    expect(place.frames[1]).toMatchObject({ op: "git.pr", cwd });
     expect(back).toMatchObject({ branch: "work", ahead: 1, pr: { number: 7, url: "https://github.com/o/r/pull/7" } });
     // The road to a daemon inside is refused in one sentence rather than minting a route to a port nothing listens
     // on, and so is the update that would deploy one.

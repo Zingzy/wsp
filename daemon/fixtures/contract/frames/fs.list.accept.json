@@ -13,7 +13,7 @@
   {
     "id": 1,
     "op": "fs.list",
-    "path": "repo",
+    "path": "/root/repo",
     "machineId": "wsp-a"
   }
 ]

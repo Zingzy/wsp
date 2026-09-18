@@ -20,7 +20,7 @@
   {
     "id": 1,
     "op": "git.diff",
-    "cwd": "repo",
+    "cwd": "/root/repo",
     "scope": "branch",
     "machineId": 1
   }

@@ -12,7 +12,7 @@
   {
     "id": 1,
     "op": "fs.read",
-    "path": "repo/README.md",
+    "path": "/root/repo/README.md",
     "machineId": 1
   }
 ]

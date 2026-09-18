@@ -545,9 +545,27 @@ describe("the recipe's tools read from inside the workspace", () => {
     );
   });
 
-  it("passes with nothing to read where the recipe ticks no catalogue tool, and reads no row the catalogue does not carry", async () => {
-    const said = "the recipe ticks no catalogue tool, so there is nothing to read inside";
-    expect(await recipeToolsInside(machineWith([]), ticks("agents/claude", "tools/brew/bat", "mcp/notion"))).toBe(said);
+  it("reads the formula rows too, by the command a formula puts on PATH, since those are the rows a box installs outside the overlaid trees", async () => {
+    // The rows this step exists for: on the box the proof ran on, go, cloudflared, shellcheck, bat and eza are
+    // Homebrew rows, and gh itself is a Homebrew link. A step that read the catalogue rows alone would pass on
+    // that recipe while every one of those was out of the workspace's sight.
+    const machine = machineWith(["go", "shellcheck", "sketchybar"]);
+    const said = await recipeToolsInside(machine, ticks("tools/brew/go", "tools/brew/shellcheck", "tools/brew/felixkratz/formulae/sketchybar"));
+    expect(said).toBe("3 answered on the PATH inside: go, shellcheck, sketchybar");
+    // A tap formula answers by the name after the tap, which is the name its road puts on PATH.
+    expect(machine.asked[0]).toContain("'sketchybar'");
+    await expect(recipeToolsInside(machineWith(["go"]), ticks("tools/brew/go", "tools/brew/cloudflared"))).rejects.toThrow(
+      "cloudflared is not on the PATH inside the workspace",
+    );
+    // One command is read once, whichever rows named it: the catalogue's gh row and a formula of the same name.
+    expect(await recipeToolsInside(machineWith(["gh"]), ticks("tools/catalog/gh", "tools/brew/gh"))).toBe("1 answered on the PATH inside: gh");
+  });
+
+  it("passes with nothing to read where the recipe ticks no row this can name a command for, and reads no manager row whose package is not its command", async () => {
+    const said = "the recipe ticks no tool this can name a command for, so there is nothing to read inside";
+    // An npm or pnpm row's package name is not the command it installs (`@openai/codex` is `codex`), so a guess
+    // there would fail a workspace for a name nothing put on it.
+    expect(await recipeToolsInside(machineWith([]), ticks("agents/claude", "tools/npm/@openai/codex", "mcp/notion"))).toBe(said);
     expect(await recipeToolsInside(machineWith([]), undefined)).toBe(said);
     const machine = machineWith([]);
     expect(machine.asked).toEqual([]);

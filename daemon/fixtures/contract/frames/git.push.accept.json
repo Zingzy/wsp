@@ -13,7 +13,7 @@
   {
     "id": 1,
     "op": "git.push",
-    "cwd": "repo",
+    "cwd": "/root/repo",
     "base": "main",
     "machineId": "wsp-a"
   }

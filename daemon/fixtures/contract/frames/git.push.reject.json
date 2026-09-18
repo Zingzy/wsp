@@ -12,7 +12,7 @@
   {
     "id": 1,
     "op": "git.push",
-    "cwd": "repo",
+    "cwd": "/root/repo",
     "machineId": 1
   }
 ]
