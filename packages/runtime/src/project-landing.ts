@@ -7,7 +7,7 @@
 // module and its row.
 import { CLAUDE_CONFIG_DIR } from "@wsp/catalog";
 import { INSTALL_MS, installScript, projectInstalls, type Machine } from "@wsp/engine";
-import { claudeMemoryDir, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, shellQuote, type MachineBind, type ProjectAddStage, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
+import { claudeMemoryDir, NO_IMAGE_FOR_SEED, projectNeedsReaddLine, projectPathOn, projectRemovedAtProviderLine, projectRemovedHereLine, projectRemovedOnComputerLine, seedCommitsLostLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, shellLine, shellQuote, type ExecResult, type MachineBind, type ProjectAddStage, type ProjectSource, type ProjectView, type SeedChoice, type SeedPlan } from "@wsp/protocol";
 import type { ProjectSourceModule } from "./project-sources.js";
 
 /** How far the add has got, as the door turns each one into an event. */
@@ -25,12 +25,7 @@ export interface ProjectPlaces {
  * archive where the source was a folder on this computer, and where to say how far it has got. */
 export interface LandRequest {
   project: ProjectView;
-  /** The image the computer forks to do this work in: the head of this host's own, read once by the add, and
-   * empty on a computer that keeps no image and works in a copy of its own directories instead. */
-  image: string;
   source: ProjectSourceModule;
-  /** What the computer is called, for the one sentence a computer whose image lacks the clone's command gets. */
-  computerName: string;
   seed?: { tar: Buffer; choice: SeedChoice; plan: SeedPlan };
   report: LandingReport;
 }
@@ -42,6 +37,9 @@ export interface Landed {
   seeded?: ProjectView["seeded"];
   installed?: ProjectView["installed"];
   image?: ProjectView["image"];
+  /** One sentence about a step of the landing that failed on its own without failing the add: the commits the
+   * remote has never seen, which stay on the person's own computer when git refuses them. */
+  notice?: string;
 }
 
 /** What a landing road may ask of the runtime: a short-lived machine of the computer's own image to work in, the
@@ -61,6 +59,15 @@ export interface LandingDeps {
   projectsDir?: string;
   /** Where Claude Code keeps its projects on this Mac, for the road whose project is a folder here. */
   macStateHome: string;
+  /** What this computer is called, since a record names it by its id and no sentence a person reads may. */
+  computerName: string;
+  /** The head of this host's own image, or nothing where it has sealed none: read by the road that forks one to
+   * work in, and by no other, so a computer that forks nothing is never refused for want of an image. */
+  imageHead(): Promise<string | undefined>;
+  /** One command on the computer holding the project, outside every workspace of it: how the folder wsp keeps
+   * there is taken away again. Absent on a computer that runs nothing of wsp's outside a workspace, which is this
+   * Mac and every provider. */
+  onComputer?(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
   now(): number;
 }
 
@@ -68,11 +75,39 @@ export interface ProjectLanding {
   /** What the computer is: a computer the person owns whose daemon holds the disk, a provider that keeps the
    * project in an image, or the computer the app runs on. */
   kind: "box" | "provider" | "mac";
+  /** Where the checkout sits inside a workspace of this project: the folder rule is one for every computer and
+   * the folder a cloned checkout sits under is this road's own, since it is the road that knows which folders a
+   * workspace there can hold a copy at. */
+  path(o: { name: string; source: ProjectSource }): string;
   places(o: { project: Pick<ProjectView, "id" | "name" | "path" | "source">; memoryKey: string; deps: LandingDeps }): ProjectPlaces;
+  /** Whether the add itself does the work on this computer, or the record stands alone and the first workspace of
+   * it clones inside its own copy. A seed is always the add's: it carries the person's own files, which only the
+   * add has in hand. */
+  landsAtAdd(o: { seeding: boolean }): boolean;
   land(o: LandRequest, deps: LandingDeps): Promise<Landed>;
+  /** Why no workspace of this project can be made on this computer, or nothing where one can. Read before a
+   * machine is asked for or a record written, so a project nothing can be made of leaves neither behind. */
+  refusal(project: ProjectView, deps: LandingDeps): string | undefined;
+  /** What dropping the record takes on this computer, and the one sentence the person reads for it. Only what the
+   * add itself made there ever goes; nothing of the code is asked of a remote and nothing else on the computer is
+   * touched. Run before the record goes, so a computer that cannot be reached keeps both. */
+  remove(project: ProjectView, deps: LandingDeps): Promise<string>;
   /** The folders of the computer's own every workspace of this project mounts. */
   workspaceBinds(project: ProjectView): MachineBind[];
 }
+
+/** The folder a workspace on a computer the person owns holds a cloned checkout under. /srv is one of the five
+ * trees such a workspace reads through an overlay of its own, so the mount point the copy is bound at lands in
+ * that workspace's upper and goes when it goes; /root is the computer's own home, bound into every workspace of
+ * it, where a bind would leave its mount point on the computer itself. */
+const BOX_CHECKOUT_HOME = "/srv";
+/** The folder a fork of an image holds its checkout under: its own login's home, shared with nothing. */
+const FORK_CHECKOUT_HOME = "/root";
+/** How every git line of the patch step is run on a computer that has no git identity of its own: wsp's own, since
+ * git refuses to write a commit or a reflog entry without one. Not only the `git am`: the `git am --abort` that
+ * puts a refused patch back needs one too, and a box where it failed for want of one left the checkout with a
+ * patch half applied in it. The author every commit already carries is the person's and is never touched. */
+const AS_WSP = ["-c", "user.name=wsp", "-c", "user.email=wsp@localhost"];
 
 /** How long the clone gets on the computer. A repo of a few hundred megabytes over a box's own link is minutes. */
 const CLONE_MS = 600_000;
@@ -95,60 +130,114 @@ export function cloneLines(o: { source: ProjectSourceModule; remote: string; che
   ];
 }
 
-/** The clone with the seed on top of it, which is the add's own road. */
-export function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string; seed?: { plan: SeedPlan; choice: SeedChoice }; memoryDir: string }): string {
-  const at = shellQuote(o.checkout);
+/** The clone with the person's ticked files unpacked on top of it, which is the add's own road. The commits and
+ * the memory folder the seed carries are steps of their own, so a step git refuses fails what it was for and not
+ * the add. */
+export function cloneScript(o: { source: ProjectSourceModule; remote: string; checkout: string; computer: string; branch?: string; seedTar?: string }): string {
   const lines = cloneLines(o);
-  if (o.seedTar !== undefined) lines.push(`tar -xzf ${shellQuote(o.seedTar)} -C ${at}`);
-  const unpushed = o.seed?.plan.unpushed;
-  if (o.seed?.choice.commits === true && unpushed != null) {
-    // The person's own branch, made where their work started and with their commits on top, then the branch the
-    // clone came up on again. `-B` and not `-b`: the branch they were working on may be one the remote has, in
-    // which case the clone already made it and creating it a second time would end the script.
-    const branch = shellQuote(o.seed.plan.branch);
-    const back = shellQuote(o.branch ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch);
-    lines.push(
-      `cd ${at} && git checkout -B ${branch} ${shellQuote(unpushed.base)} && git am --3way ${shellQuote(`${o.checkout}/${SEED_PATCH}`)} && git checkout ${back}`,
-    );
-  }
-  if (o.seed?.choice.memory === true && o.seed.plan.memory !== null) {
+  if (o.seedTar !== undefined) lines.push(`tar -xzf ${shellQuote(o.seedTar)} -C ${shellQuote(o.checkout)}`);
+  return lines.join("\n");
+}
+
+/** Which branch the seed's commits go on, where they started, and which branch the checkout is left on: the
+ * person's own branch, made where their work started; `-B` and not `-b` since the branch may be one the remote
+ * has, which the clone already made. */
+export interface PatchStep {
+  branch: string;
+  base: string;
+  back: string;
+}
+
+/** The step that puts the commits the remote has never seen on the checkout, with the count read back off git
+ * itself as its last line.
+ *
+ * One command per line under `set -e`, never an `&&` chain: `-e` is exempt for every command of an AND list but
+ * its last, so a chain whose `git am` failed stopped without ending the script and left the add saying the
+ * commits had landed. */
+export function patchScript(o: PatchStep & { checkout: string }): string {
+  const at = ["git", "-C", o.checkout, ...AS_WSP];
+  return [
+    "set -e",
+    shellLine([...at, "checkout", "-B", o.branch, o.base]),
+    shellLine([...at, "am", "--3way", `${o.checkout}/${SEED_PATCH}`]),
+    shellLine([...at, "checkout", o.back]),
+    shellLine([...at, "rev-list", "--count", `${o.base}..${o.branch}`]),
+  ].join("\n");
+}
+
+/** What runs when git refused the patch: the half-applied am put back, the branch the step made dropped, and the
+ * branch the clone came up on set to the remote's own tip again, since the step moved it where the person's work
+ * started. Every copy of this checkout then starts on the clone as it was.
+ *
+ * No `set -e` here and nothing read back: an abort with nothing in progress and a branch the step never made both
+ * exit non-zero, and neither is a reason to fail an add that otherwise landed. */
+export function patchCleanupScript(o: PatchStep & { checkout: string }): string {
+  const at = ["git", "-C", o.checkout, ...AS_WSP];
+  return [
+    shellLine([...at, "am", "--abort"]),
+    shellLine([...at, "checkout", "-f", o.back]),
+    shellLine([...at, "reset", "--hard", `origin/${o.back}`]),
+    ...(o.branch === o.back ? [] : [shellLine([...at, "branch", "-D", o.branch])]),
+  ].join("\n");
+}
+
+/** The last of the seed: the memory folder moved out of the checkout onto the computer, where every workspace of
+ * the project reads it, and wsp's own folder and the archive gone from the checkout every copy is taken of. */
+export function seedRestScript(o: { checkout: string; memoryDir: string; seedTar: string; memory: boolean }): string {
+  const lines = ["set -e"];
+  if (o.memory) {
     lines.push(`mkdir -p ${shellQuote(o.memoryDir.replace(/\/[^/]+$/, ""))}`, `rm -rf ${shellQuote(o.memoryDir)}`, `mv ${shellQuote(`${o.checkout}/${SEED_MEMORY_DIR}`)} ${shellQuote(o.memoryDir)}`);
   }
-  if (o.seedTar !== undefined) lines.push(`rm -rf ${shellQuote(`${o.checkout}/${SEED_DIR}`)} ${shellQuote(o.seedTar)}`);
+  lines.push(`rm -rf ${shellQuote(`${o.checkout}/${SEED_DIR}`)} ${shellQuote(o.seedTar)}`);
   return lines.join("\n");
 }
 
 /** The clone, the seed and the install on one machine, the half both roads that clone share. The install is read
  * off the checkout's own root: one listing, then the command the catalog's row for that lockfile names, once. */
-async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Machine, places: { checkout: string; memoryDir: string; log: string }): Promise<Landed> {
+async function cloneSeedInstall(
+  o: LandRequest,
+  deps: LandingDeps,
+  machine: Machine,
+  /** `checkout` is where the work runs inside the machine, which is the path the project has inside every
+   * workspace of it; `holds` is where that folder sits on the computer once the machine is gone, which is what the
+   * cloning line names, since a person watching an add is being told where their code landed on their computer. */
+  places: { checkout: string; holds: string; memoryDir: string; log: string },
+): Promise<Landed> {
   const { project, report } = o;
-  const seedTar = o.seed === undefined ? undefined : `${deps.scratch(machine)}/seed-${project.id}.tgz`;
-  if (o.seed !== undefined && seedTar !== undefined) await deps.land(machine, seedTar, o.seed.tar);
-  report("cloning", `Cloning ${project.remote} into ${places.checkout}.`);
+  const seed = o.seed;
+  const seedTar = seed === undefined ? undefined : `${deps.scratch(machine)}/seed-${project.id}.tgz`;
+  if (seed !== undefined && seedTar !== undefined) await deps.land(machine, seedTar, seed.tar);
+  report("cloning", `Cloning ${project.remote} into ${places.holds}.`);
   const script = cloneScript({
     source: o.source,
     remote: project.remote,
     checkout: places.checkout,
-    computer: o.computerName,
+    computer: deps.computerName,
     ...(project.base !== undefined ? { branch: project.base } : {}),
     ...(seedTar !== undefined ? { seedTar } : {}),
-    ...(o.seed !== undefined ? { seed: { plan: o.seed.plan, choice: o.seed.choice } } : {}),
-    memoryDir: places.memoryDir,
   });
-  if (o.seed !== undefined) report("seeding", `Landing ${o.seed.choice.files.length} file${o.seed.choice.files.length === 1 ? "" : "s"} from ${o.seed.plan.source}.`);
+  if (seed !== undefined) report("seeding", `Landing ${seed.choice.files.length} file${seed.choice.files.length === 1 ? "" : "s"} from ${seed.plan.source}.`);
   const ran = await machine.exec(script, { timeoutMs: CLONE_MS });
   if (ran.exitCode !== 0) throw new Error(lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `the clone exited ${ran.exitCode}`);
+  const patched = seed === undefined ? undefined : await patchSeed({ seed, report, computerName: deps.computerName, checkout: places.checkout, base: project.base }, machine);
+  if (seed !== undefined && seedTar !== undefined) {
+    const rest = await machine.exec(seedRestScript({ checkout: places.checkout, memoryDir: places.memoryDir, seedTar, memory: seed.choice.memory && seed.plan.memory !== null }), { timeoutMs: STEP_MS });
+    if (rest.exitCode !== 0) throw new Error(lastLine(rest.stderr) ?? lastLine(rest.stdout) ?? `landing the seed exited ${rest.exitCode}`);
+  }
   const landed: Landed = {
-    ...(o.seed === undefined
+    ...(seed === undefined
       ? {}
       : {
           seeded: {
-            files: o.seed.choice.files.length,
-            bytes: o.seed.tar.length,
-            memory: o.seed.choice.memory && o.seed.plan.memory !== null,
-            commits: o.seed.choice.commits && o.seed.plan.unpushed !== null ? o.seed.plan.unpushed.commits : 0,
+            files: seed.choice.files.length,
+            bytes: seed.tar.length,
+            memory: seed.choice.memory && seed.plan.memory !== null,
+            // What the checkout itself has, read back off git rather than taken off the plan: a patch git refused
+            // is nought commits on that computer whatever the person's own folder held.
+            commits: patched?.commits ?? 0,
             at: new Date(deps.now()).toISOString(),
           },
+          ...(patched?.notice !== undefined ? { notice: patched.notice } : {}),
         }),
   };
   const root = await machine.exec(`ls -A ${shellQuote(places.checkout)}`, { timeoutMs: STEP_MS });
@@ -176,6 +265,44 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
   };
 }
 
+/** The seed's commits put on the checkout, as its own step: the count git read back where they landed, and the
+ * one sentence the person reads where git refused them. A refusal is not the add's failure; the commits are still
+ * on their own computer, the checkout is put back to the clone as it was and the record says nought commits, so
+ * what they are told and what is on the computer are the same thing. */
+async function patchSeed(
+  o: { seed: { choice: SeedChoice; plan: SeedPlan }; report: LandingReport; computerName: string; checkout: string; base?: string },
+  machine: Machine,
+): Promise<{ commits: number; notice?: string }> {
+  const unpushed = o.seed.plan.unpushed;
+  if (o.seed.choice.commits !== true || unpushed === null) return { commits: 0 };
+  const step: PatchStep = { branch: o.seed.plan.branch, base: unpushed.base, back: await cloneBranch(o, machine) };
+  const ran = await machine.exec(patchScript({ ...step, checkout: o.checkout }), { timeoutMs: STEP_MS });
+  if (ran.exitCode === 0) {
+    const counted = Number(lastLine(ran.stdout));
+    if (Number.isInteger(counted)) return { commits: counted };
+  }
+  // The cleanup's own exit is not read: what it could not do (an abort with nothing in progress, a branch the
+  // step never made) is no reason to fail an add whose clone and install landed.
+  await machine.exec(patchCleanupScript({ ...step, checkout: o.checkout }), { timeoutMs: STEP_MS });
+  const said = lastLine(ran.stderr) ?? lastLine(ran.stdout) ?? `git exited ${ran.exitCode}`;
+  const notice = seedCommitsLostLine(unpushed.commits, step.branch, o.computerName, said, step.back);
+  o.report("seeding", notice);
+  return { commits: 0, notice };
+}
+
+/** The branch the clone came up on, read off the checkout itself: what the patch step leaves the checkout on and
+ * what its failure road resets to the remote's tip. Read rather than taken off the plan, because the plan's own
+ * branch is the person's, which the remote may never have seen: `origin/<that>` is then no ref at all and the
+ * reset would be a silent no-op leaving the checkout where the step moved it. The clone is always on a branch the
+ * remote has. `symbolic-ref` and not `rev-parse --abbrev-ref`: it says the branch in one line and exits non-zero
+ * on a detached head rather than answering the word HEAD. The plan's words are the fallback for a checkout that
+ * answers neither. */
+async function cloneBranch(o: { seed: { plan: SeedPlan }; checkout: string; base?: string }, machine: Machine): Promise<string> {
+  const read = await machine.exec(shellLine(["git", "-C", o.checkout, "symbolic-ref", "--short", "HEAD"]), { timeoutMs: STEP_MS });
+  const on = read.exitCode === 0 ? lastLine(read.stdout) : undefined;
+  return on ?? o.base ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch;
+}
+
 /** A computer the person owns: its daemon holds the disk, so the checkout and the memory folder sit on that disk
  * beside each other under wsp's own folder for the project, and every workspace of the project binds the memory
  * folder read-write. The clone, the seed and the install run inside one short-lived workspace of that computer,
@@ -183,9 +310,19 @@ async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Mach
  * wsp's is installed on the computer itself. */
 const boxLanding: ProjectLanding = {
   kind: "box",
+  path: ({ source, name }) => projectPathOn(source, name, BOX_CHECKOUT_HOME),
   places({ project, deps }) {
     const dir = projectDir(deps, project.id);
     return { checkout: `${dir}/checkout`, memoryDir: `${dir}/memory` };
+  },
+  // Every project here is cloned once by the add, however it was named: a repo the computer could clone at each
+  // create would be cloned into the same folder twice and would leave that folder behind when the project goes.
+  landsAtAdd: () => true,
+  refusal: (project, deps) => (project.checkout === undefined ? projectNeedsReaddLine(project.name, deps.computerName, project.source) : undefined),
+  async remove(project, deps) {
+    const dir = removableProjectDir(deps, project.id);
+    await onComputer(deps)(`rm -rf ${shellQuote(dir)}`, { timeoutMs: STEP_MS });
+    return projectRemovedOnComputerLine(project.name, deps.computerName, dir);
   },
   async land(o, deps) {
     const dir = projectDir(deps, o.project.id);
@@ -200,13 +337,29 @@ const boxLanding: ProjectLanding = {
       { source: dir, target: dir },
       { source: checkout, target: o.project.path },
     ];
-    const machine = await deps.worker({ binds, image: false, from: o.image });
+    // A computer that keeps no image is worked in a copy of its own directories: nothing of this host's is forked
+    // here, which is why no image is read on this road at all.
+    const machine = await deps.worker({ binds, image: false, from: "" });
+    let failed: unknown;
     try {
       // The checkout stays on the computer once the machine is gone: every workspace of this project takes its own
       // copy of it, so the seed and the install are paid for once.
-      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
+      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
+    } catch (e) {
+      failed = e;
+      throw e;
     } finally {
       await machine.kill().catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
+      // Nothing of a project that was not recorded is left on the computer: the folder the bind made goes, so the
+      // add can be run again under the same name and nothing of it sits on that disk unowned. After the machine is
+      // stopped and never before: those folders are its binds' own sources while it runs, and what Linux makes of
+      // a source removed under a live container is not a question to open for a sweep that can wait a second.
+      if (failed !== undefined) {
+        const swept = removableProjectDir(deps, o.project.id);
+        await onComputer(deps)(`rm -rf ${shellQuote(swept)}`, { timeoutMs: STEP_MS }).catch((swallow: unknown) =>
+          console.warn(`${swept} on ${deps.computerName} was not swept after the add of ${o.project.name} failed: ${swallow instanceof Error ? swallow.message : String(swallow)}`),
+        );
+      }
     }
   },
   workspaceBinds: project => [{ source: project.memoryDir, target: guestMemoryDir(project.memoryKey) }],
@@ -218,14 +371,26 @@ const boxLanding: ProjectLanding = {
  * there; there is nothing to bind. */
 const providerLanding: ProjectLanding = {
   kind: "provider",
+  path: ({ source, name }) => projectPathOn(source, name, FORK_CHECKOUT_HOME),
   places({ memoryKey }) {
     return { memoryDir: guestMemoryDir(memoryKey) };
   },
+  // Only a seed lands here: it carries the person's own files, which only the add has. A repo this computer can
+  // clone by itself is recorded and cloned inside the workspace's own copy, where the clone leaves nothing behind
+  // because the copy is the machine.
+  landsAtAdd: ({ seeding }) => seeding,
+  refusal: () => undefined,
+  async remove(project, deps) {
+    return projectRemovedAtProviderLine(project.name, deps.computerName, project.image?.snapshotId);
+  },
   async land(o, deps) {
+    // The seed lands inside a copy of this host's own image, so a host that has sealed none has nowhere to put it.
+    const from = await deps.imageHead();
+    if (from === undefined) throw Object.assign(new Error(NO_IMAGE_FOR_SEED), { kind: "invalid" });
     // A builder: its disk becomes an image, and a sign-in never sits in one.
-    const machine = await deps.worker({ binds: [], image: true, from: o.image });
+    const machine = await deps.worker({ binds: [], image: true, from });
     try {
-      const landed = await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, memoryDir: guestMemoryDir(o.project.memoryKey), log: `${deps.scratch(machine)}/install-${o.project.id}.log` });
+      const landed = await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: o.project.path, memoryDir: guestMemoryDir(o.project.memoryKey), log: `${deps.scratch(machine)}/install-${o.project.id}.log` });
       o.report("imaging", `Sealing ${o.project.name} as the image every workspace of it forks.`);
       const snapshotId = await deps.checkpoint(machine, `${o.project.name}-${o.project.id}`);
       return { ...landed, image: { snapshotId, builtAt: new Date(deps.now()).toISOString() } };
@@ -240,8 +405,16 @@ const providerLanding: ProjectLanding = {
  * installed, and the memory folder is the one Claude Code already keeps for that folder here. */
 const macLanding: ProjectLanding = {
   kind: "mac",
+  // A repo is refused on this computer before a road is asked for it, so the folder rule is the whole rule here
+  // and this road names no folder for a checkout it would never hold.
+  path: ({ source, name }) => projectPathOn(source, name),
   places({ project, memoryKey, deps }) {
     return { checkout: project.source.kind === "folder" ? project.source.path : project.path, memoryDir: claudeMemoryDir(deps.macStateHome, memoryKey) };
+  },
+  landsAtAdd: () => false,
+  refusal: () => undefined,
+  async remove(project) {
+    return projectRemovedHereLine(project.name);
   },
   async land() {
     return {};
@@ -270,6 +443,24 @@ export const guestMemoryDir = (memoryKey: string): string => claudeMemoryDir(CLA
  * computer that names none cannot hold a project this way, which is a wiring fault rather than a person's road. */
 function projectDir(deps: LandingDeps, projectId: string): string {
   return `${projectsDir(deps)}/${projectId}`;
+}
+
+/** The one folder a remove or a failed add takes on the computer, read before it is ever spelled into an
+ * `rm -rf`: wsp's own folder for that project, one segment under the projects directory the computer's daemon
+ * named, named by an id wsp minted itself. No word a person typed is ever part of it, and a path of any other
+ * shape is a wiring fault that removes nothing. */
+function removableProjectDir(deps: LandingDeps, projectId: string): string {
+  const under = projectsDir(deps);
+  const dir = `${under}/${projectId}`;
+  if (!under.startsWith("/") || !/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error(`${dir} is not wsp's own folder for a project under ${under}, so nothing was removed`);
+  return dir;
+}
+
+/** The road one command on the computer itself takes, or the wiring fault of a computer that holds a project's
+ * folder and runs nothing outside its workspaces. */
+function onComputer(deps: LandingDeps): NonNullable<LandingDeps["onComputer"]> {
+  if (deps.onComputer === undefined) throw new Error("that computer runs nothing of wsp's outside its workspaces, so the folder wsp keeps for a project there cannot be taken away");
+  return deps.onComputer;
 }
 
 function projectsDir(deps: LandingDeps): string {

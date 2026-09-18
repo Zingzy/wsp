@@ -116,6 +116,12 @@ export function seedConsentLines(plan: SeedPlan, computer: string, addLine: (fla
 export const leftBehindLine = (paths: readonly string[]): string =>
   `${plural(paths.length, "login")} inside the folders you ticked stayed on this computer: ${paths.join(", ")}`;
 
+/** What the add says when git refused the commits the remote has never seen: the person's own count and branch,
+ * git's own last line for why, and where the checkout every copy of it takes now stands. The commits stay on the
+ * person's computer, so this is a notice on an add that landed rather than a refusal. */
+export const seedCommitsLostLine = (commits: number, branch: string, computer: string, said: string, back: string): string =>
+  `the ${plural(commits, "commit")} on ${branch} did not land on ${computer}: ${said}; the checkout is on ${back}`;
+
 /** Why a folder with no remote records nothing: the computer clones the repo, and a folder git has no remote for
  * gives it nothing to clone. */
 export const noRemoteLine = (folder: string): string =>
