@@ -1610,6 +1610,10 @@ fn the_container_id_is_read_off_stdout_whatever_a_pull_printed_around_it() {
     assert_eq!(container_id(""), None);
 }
 
+/// How long a case gives a service in a compose stack to start listening after its engine has returned: the
+/// entrypoints of the two images take one to two seconds on a box, and a busier box is slower still.
+const SERVICE_READY: Duration = Duration::from_secs(10);
+
 fn show(title: &str, code: i64, out: &str, err: &str) {
     eprintln!("== {title} (exit {code})\n{}{}", out, if err.is_empty() { String::new() } else { format!("[stderr] {err}") });
 }
@@ -1687,10 +1691,25 @@ async fn a_workspace_with_an_engine_runs_a_projects_compose_and_sees_its_own_con
         out.contains("a bind mount's source must sit under a project folder of this workspace (/var/tmp/demo), and / does not"),
         "{out}"
     );
-    let (code, out, err) =
-        w.exec(&id, "exec 3<>/dev/tcp/127.0.0.1/18080; printf 'GET / HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n' >&3; timeout 5 cat <&3").await;
+    // The page is asked for once the service listens, not once `up -d` has returned. Measured on a box: nginx
+    // answers 1.2 to 2.0 s after its container starts, and until it does the engine's published port on the
+    // box's loopback accepts the connection and closes it with no byte, which reads exactly like a forward that
+    // dialled nothing. So this waits for a byte, and says what it waited for where none comes.
+    let get = "exec 3<>/dev/tcp/127.0.0.1/18080; printf 'GET / HTTP/1.0\\r\\nHost: x\\r\\n\\r\\n' >&3; timeout 5 cat <&3";
+    let waited = Instant::now();
+    let mut answer = w.exec(&id, get).await;
+    while answer.1.is_empty() && waited.elapsed() < SERVICE_READY {
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        answer = w.exec(&id, get).await;
+    }
+    let (code, out, err) = answer;
     show("GET 127.0.0.1:18080 from inside (the published port)", code, &out, &err);
-    assert!(out.contains("hello-from-workspace"), "{out}");
+    eprintln!("the service answered its first byte {} ms after compose up returned", waited.elapsed().as_millis());
+    assert!(
+        out.contains("hello-from-workspace"),
+        "the published port sent no page in the {} s this case waits for the service inside to start listening: {out:?}",
+        SERVICE_READY.as_secs()
+    );
     let (code, out, err) = w
         .exec(&id, &format!("docker inspect --type container --format '{{{{.Name}}}}' {outside_id} 2>&1; docker stop {outside} 2>&1"))
         .await;
@@ -2032,6 +2051,60 @@ async fn a_create_whose_project_is_not_there_is_refused_by_name_and_leaves_nothi
     // Nothing of a workspace that never came up: no run directory, no copy, no cgroup.
     assert!(!root().join("run").join(&id).exists() && !root().join("copies").join(&id).exists());
     assert!(!Path::new(CGROUPS).join(&id).exists());
+}
+
+/// The computer's own directories are not a place for a workspace's mounts: a workspace whose copy lands at a
+/// path of its own leaves the box's home exactly as it found it, and a copy asking for a path under that home is
+/// refused before anything is made at it.
+#[tokio::test]
+async fn a_copy_at_a_path_of_the_workspaces_own_leaves_the_boxs_home_alone_and_one_under_it_is_refused() {
+    if !live() {
+        return;
+    }
+    let mut w = World::open().await;
+    let key = checkout_key();
+    let from = root().join("projects").join(format!("live-trees-{key}"));
+    let _ = fs::remove_dir_all(&from);
+    checkout(&from);
+    let home = Path::new("/root");
+    let listing = |at: &Path| -> Vec<String> {
+        let mut names: Vec<String> =
+            fs::read_dir(at).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    };
+    let before = listing(home);
+    // A path of the workspace's own: its mount point is made under the rootfs the daemon holds, so the box's
+    // home never sees it.
+    let at = "/live-trees";
+    let id = w
+        .create(spec(json!({
+            "copy": { "from": from.display().to_string(), "at": at },
+            "idempotencyKey": format!("live-trees-{key}"),
+        })))
+        .await;
+    let (code, out, err) = w.exec(&id, &format!("cat {at}/README.md")).await;
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "the checkout\n", ""));
+    w.ok("machine.kill", json!({ "machineId": &id })).await;
+    assert_eq!(listing(home), before, "a workspace's copy left something on the box's own home");
+
+    // And a copy under that home: one sentence, and no mount point of a workspace's made on the computer.
+    let under = "/root/live-trees";
+    let reply = w
+        .ask(
+            "machine.create",
+            json!({ "spec": spec(json!({
+                "copy": { "from": from.display().to_string(), "at": under },
+                "idempotencyKey": format!("live-trees-under-{key}"),
+            })) }),
+        )
+        .await;
+    assert_eq!(reply["ok"], false, "{reply}");
+    assert_eq!(reply["error"], wsp_runtime::bundle::computer_tree_refusal(under, "/root"), "{reply}");
+    assert!(!Path::new(under).exists(), "the refused create made a folder on the box's own home");
+    assert_eq!(listing(home), before);
+    let _ = fs::remove_dir_all(&from);
+    w.close().await;
 }
 
 /// A throwaway volume of its own filesystem, made as a file and mounted on a loop device, so a box whose root
