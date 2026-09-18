@@ -136,14 +136,17 @@ export const LINUXBREW_SHIM = ["#!/bin/sh", `if [ "$(id -un)" = linuxbrew ]; the
  * gnupg puts gpg, c-ares puts adig and ahost); nothing a recipe carries names those. */
 export const formulaShortName = (formula: string): string => formula.slice(formula.lastIndexOf("/") + 1);
 
-/** Whether a formula is on a machine, as one shell test a workspace can answer: the prefix keeps an `opt/<short
- * name>` link per formula it installed, whatever binaries that formula puts on PATH, and a tap formula with no
- * Linux bottle took the road to /usr/local/bin under that same name instead. Two roads, one test, and neither
- * needs brew, which cannot run inside a workspace: the prefix is bound in read-only and `brew` wants a user and a
- * writable cellar. */
+/** Whether a formula is on a machine, as one shell test a workspace can answer, and neither half runs brew, which
+ * cannot run inside a workspace at all: the prefix keeps an `opt/<short name>` link per formula it installed,
+ * whatever binaries that formula puts on PATH, and that link alone is the answer for a core formula. A tap formula
+ * falls back to a command of that name, since a tap formula with no Linux bottle took the road to /usr/local/bin
+ * under it, which is the same split the uninstall above reads. A core formula is never read by its name: the base
+ * stage's node and the release road's gh are on the PATH under theirs, and a formula Homebrew never installed
+ * would read present off another road's work. */
 export const formulaPresent = (formula: string): string => {
   const short = formulaShortName(formula);
-  return `test -e ${BREW_PREFIX}/opt/${short} || command -v ${shellQuote(short)} >/dev/null 2>&1`;
+  const linked = `test -e ${BREW_PREFIX}/opt/${short}`;
+  return formula.includes("/") ? `${linked} || command -v ${shellQuote(short)} >/dev/null 2>&1` : linked;
 };
 
 const brew: RoadModule<Road<"brew">> = {

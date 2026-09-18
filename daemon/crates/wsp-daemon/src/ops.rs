@@ -439,8 +439,7 @@ async fn workspace_road(ctx: &Ctx, machine: &str, requested: &str) -> Result<(Ru
     let rootfs = ops.rootfs_of_running(machine).map_err(from_runtime)?;
     // The refusals name the path as the frame gave it: a person reads the folder as the workspace sees it, and
     // where this computer keeps that workspace's files is no part of the answer.
-    let joined = wsp_runtime::bundle::inside(&rootfs, requested)
-        .map_err(|_| OpError::coded(DaemonErrorCode::OutsideRoot, format!("{requested} resolves outside the workspace root")))?;
+    let joined = wsp_runtime::bundle::inside(&rootfs, requested).map_err(|_| paths::outside_root(requested))?;
     let asked = requested.to_owned();
     let under = fs::blocking(move || paths::resolve_inside_named(&[rootfs], &joined.to_string_lossy(), &asked)).await?;
     Ok((Runner::Inside(git::inside::Inside::new(ops, machine)), under, PathBuf::from(requested)))

@@ -1356,7 +1356,7 @@ function tickedFormulas(recipe: Pick<RecipeDigest, "ticks"> | undefined): string
 /** Which of those formulas a workspace cannot answer for, read with `formulaPresent`, one test per row on the one
  * PATH a machine's tools sit on; `failed` says why the read itself could not run. */
 async function missingFormulas(machine: Pick<Machine, "exec">, formulas: readonly string[]): Promise<{ missing: Set<string>; failed?: string }> {
-  const reads = formulas.map(formula => `if ! ( ${formulaPresent(formula)} ); then printf '%s\n' ${shellQuote(`missing ${formula}`)}; fi`);
+  const reads = formulas.map(formula => `if ! ( ${formulaPresent(formula)} ); then printf '%s\\n' ${shellQuote(`missing ${formula}`)}; fi`);
   const res = await machine.exec([`export PATH=${TOOLS_PATH}`, ...reads].join("\n"), { timeoutMs: INLINE_EXEC_MS });
   const missing = new Set(res.stdout.split("\n").flatMap(line => (line.startsWith("missing ") ? [line.slice("missing ".length).trim()] : [])));
   return res.exitCode === 0 ? { missing } : { missing, failed: `the read exited ${res.exitCode}${res.stderr.trim() === "" ? "" : `: ${res.stderr.trim().slice(-200)}`}` };
@@ -1381,7 +1381,7 @@ export async function recipeToolsInside(machine: Pick<Machine, "exec">, recipe: 
   if (failed !== undefined) throw new Error(`the tools inside could not be read (${failed}): ${asked.join(", ")}`);
   const missing = [...commands.missing, ...brewed.missing].sort();
   if (missing.length > 0) {
-    throw new Error(`${missing.join(", ")} ${missing.length === 1 ? "did" : "did"} not answer inside the workspace, though the recipe installed ${missing.length === 1 ? "it" : "them"} on the machine`);
+    throw new Error(`${missing.join(", ")} did not answer inside the workspace, though the recipe installed ${missing.length === 1 ? "it" : "them"} on the machine`);
   }
   return `${asked.length} answered inside: ${asked.sort().join(", ")}`;
 }

@@ -146,6 +146,8 @@ impl Flags {
             link_refused_retry_ms: self.link_refused_retry_ms,
             link_backoff_ms: self.link_backoff_ms,
             runtime_root: self.runtime_root,
+            // This binary is the helper the workspace runtime runs, which is what current_exe answers for it.
+            runtime_helper: None,
         }
     }
 }
@@ -249,6 +251,9 @@ mod tests {
         assert_eq!((o.link_connect_ms, o.link_quiet_ms, o.link_refused_retry_ms, o.link_backoff_ms), (Some(6), Some(7), Some(8), Some(9)));
         assert_eq!(o.open_socket_path, Some(PathBuf::from("/o.sock")));
         assert_eq!(o.runtime_root, Some(PathBuf::from("/var/lib/wsp-test")));
+        // No flag names the helper the workspace runtime runs, so a daemon on a machine runs this binary as it
+        // always has: what names one is a test that opened a daemon inside its own process.
+        assert_eq!(o.runtime_helper, None);
     }
 
     #[test]

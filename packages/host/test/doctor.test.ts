@@ -518,9 +518,10 @@ describe("stageDaemonBundle", () => {
 
 describe("the recipe's tools read from inside the workspace", () => {
   /** A workspace as this step can ask it: the commands on its PATH, and the formulas the prefix inside it keeps a
-   * link for. Both reads are answered the way a shell inside would: a `command -v` read prints a line per command
-   * it cannot find, and the formula read prints a line per formula whose link is not there and whose name is on no
-   * command either, which is the fallback the bottle-less tap road leaves. */
+   * link for. Each read is answered by running its own test against those two, the way a shell inside would: a
+   * `command -v` read prints a line per command it cannot find, and a formula's row prints its line unless the
+   * row's own test passes, which for a core formula is the link alone and for a tap formula is the link or a
+   * command of that name. */
   const workspaceWith = (
     has: { commands?: readonly string[]; formulas?: readonly string[] },
   ): { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string; stderr: string }>; asked: string[] } => {
@@ -532,8 +533,14 @@ describe("the recipe's tools read from inside the workspace", () => {
       exec: async cmd => {
         asked.push(cmd);
         if (cmd.includes("test -e ")) {
-          const read = [...cmd.matchAll(/test -e \S+\/opt\/(\S+) \|\| command -v '([^']+)'/g)].map(m => ({ formula: m[1]!, name: m[2]! }));
-          const gone = read.filter(row => !formulas.includes(row.formula) && !commands.includes(row.name));
+          const rows = [...cmd.matchAll(/if ! \( (.+?) \); then printf '%s\\n' '([^']+)'; fi/g)].map(m => ({ test: m[1]!, formula: m[2]! }));
+          const passes = (row: { test: string; formula: string }): boolean => {
+            const linked = /test -e \S+\/opt\/(\S+)/.exec(row.test)?.[1];
+            if (linked !== undefined && formulas.includes(linked)) return true;
+            const named = /command -v '([^']+)'/.exec(row.test)?.[1];
+            return named !== undefined && commands.includes(named);
+          };
+          const gone = rows.filter(row => !passes(row));
           return { exitCode: 0, stdout: gone.map(row => `missing ${row.formula}\n`).join(""), stderr: "" };
         }
         const bins = [...cmd.matchAll(/'([^']+)'/g)].map(m => m[1]!);
@@ -565,9 +572,10 @@ describe("the recipe's tools read from inside the workspace", () => {
     const machine = workspaceWith({ formulas: ["git-delta", "go", "sketchybar"], commands: ["delta", "go"] });
     const said = await recipeToolsInside(machine, ticks("tools/brew/git-delta", "tools/brew/go", "tools/brew/felixkratz/formulae/sketchybar"));
     expect(said).toBe("3 answered inside: felixkratz/formulae/sketchybar, git-delta, go");
-    // One test per row, and neither half of it runs brew, which cannot run inside a workspace at all.
-    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/git-delta || command -v 'git-delta'`);
-    // A tap formula is linked and installed under the name after the tap, which is the name both halves read.
+    // A core formula is the prefix's link and nothing else, which is the road that installed it.
+    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/git-delta );`);
+    // A tap formula is linked under the name after the tap, and the bottle-less road installs a command under that
+    // same name, so its row reads either: the split the uninstall takes.
     expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/sketchybar || command -v 'sketchybar'`);
     // Neither half runs brew itself: the one brew on a machine is the shim in the prefix, and inside a workspace
     // that prefix is read-only and its user cannot read the folder it would start in.
@@ -579,10 +587,26 @@ describe("the recipe's tools read from inside the workspace", () => {
       "cloudflared did not answer inside the workspace, though the recipe installed it on the machine",
     );
     // The bottle-less tap road installs the binary under that same name in /usr/local/bin, so a command of that
-    // name answers for the formula where the prefix keeps no link.
+    // name answers for a tap formula where the prefix keeps no link.
     expect(await recipeToolsInside(workspaceWith({ commands: ["sketchybar"] }), ticks("tools/brew/felixkratz/formulae/sketchybar"))).toBe(
       "1 answered inside: felixkratz/formulae/sketchybar",
     );
+  });
+
+  it("does not read a core formula by its name: another road's command of that name is not the formula", async () => {
+    // node comes from the base stage's own installer into /usr/local/bin and gh from the release road, both under
+    // the name a formula of the same name would carry. A read that took a command for the formula would call a
+    // workspace green for a Homebrew row Homebrew never installed, which is the bug this step exists to catch.
+    const machine = workspaceWith({ commands: ["node", "gh"] });
+    await expect(recipeToolsInside(machine, ticks("tools/brew/node"))).rejects.toThrow(
+      "node did not answer inside the workspace, though the recipe installed it on the machine",
+    );
+    expect(machine.asked[0]).toContain(`test -e ${HOMEBREW_PREFIX}/opt/node );`);
+    expect(machine.asked[0]).not.toContain("command -v");
+    // The same row reads present once the prefix holds the link, which is what the formula road leaves.
+    expect(await recipeToolsInside(workspaceWith({ formulas: ["node"] }), ticks("tools/brew/node"))).toBe("1 answered inside: node");
+    // And the catalogue's own gh row is a command read, which is right: that row's entry names the command.
+    expect(await recipeToolsInside(workspaceWith({ commands: ["gh"] }), ticks("tools/catalog/gh"))).toBe("1 answered inside: gh");
   });
 
   it("reads both kinds of row in one step, each by its own read", async () => {

@@ -2226,6 +2226,10 @@ async fn frames_daemon() -> FramesDaemon {
     // still its own to answer for.
     options.home = Some(root().join("frames-home"));
     options.place_file = Some(root().join("frames-home").join("place.json"));
+    // The helper every create and exec inside a workspace runs: the daemon binary this suite drives the ops
+    // through. A daemon opened inside this process would otherwise run this test executable as its helper, and a
+    // test binary answers an exec line by refusing its first flag.
+    options.runtime_helper = Some(bin());
     let daemon = wsp_daemon::Daemon::bind(options).await.unwrap();
     let addr = daemon.local_addr();
     tokio::spawn(daemon.run());
