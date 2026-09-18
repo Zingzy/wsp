@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// What the Where agents run section computes beyond the cells the protocol
+// What the Computers section computes beyond the cells the protocol
 // already words: the name a person reads a row as, and the sentence the Remove
 // dialog computes from what the computer holds. The four cells of a row, the
 // state word after a name, how long a computer has been away and an hourly
@@ -8,8 +8,10 @@
 //
 // The New workspace dialog's Where control reads its rows and its caption from
 // the bottom of this file rather than wording a second set of place facts.
-import { FREE_WORD, JOINED_COMPUTER, absentComputer, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type PlaceKind, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { PROVIDER_ROWS } from "./providers.js";
+import { FREE_WORD, JOINED_COMPUTER, absentComputer, agentOfRow, placeDaemonBehind, awayMsOf, chargesNothing, daemonSilent, fmtBytes, fmtRate, hereWord, imageCopyStaysLine, isLocalWorkspace, namesPlace, ownDaemonDown, plural, provisionWord, thisComputer, workspacePlaceId, type AbsentComputer, type CpuWord, type InitSetup, type PlaceKind, type PlaceProvisionKind, type PlaceProvisionRow, type PlaceView, type SealedImageCopy, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { agentName } from "@wsp/catalog";
+import { AGENTS_WORDS, PROVISION_OUTCOME_WORDS, WHERE_WORDS } from "./format.js";
+import { CLOUD_NAMES, keyHeld } from "./providers.js";
 
 /** What a person reads a row as. The first row is the computer the host runs on, which says so rather than giving
  * its hostname; a provider carries the name its own row in the provider table gives it, since the host words it by
@@ -17,7 +19,7 @@ import { PROVIDER_ROWS } from "./providers.js";
 export function placeName(place: PlaceView, here = false): string {
   if (here) return hereWord(true);
   if (!isProviderPlace(place)) return place.name;
-  return PROVIDER_ROWS.find(row => row.id === place.name)?.name ?? place.name;
+  return CLOUD_NAMES.find(row => row.id === place.name)?.name ?? place.name;
 }
 
 /** Whether this row is the provider this host forks on rather than a computer somebody owns. The one reading, so a
@@ -91,7 +93,7 @@ export const THIS_COMPUTER_WORD = thisComputer(APP_PLATFORM);
 /** What one row of the places list is, in the words the pane's Where row says after its name. One entry per kind
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own
  * phrase for a joined computer, the one both the row and every sentence about it read. */
-export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_COMPUTER, provider: "a provider" };
+export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_COMPUTER, provider: "cloud" };
 
 /** What the computer a landing names is called on a screen: the row this host holds for it, named the one way every
  * surface names a computer, else the word the landing itself carried. The runtime answers the id of the computer
@@ -160,7 +162,7 @@ export function absentOf(place: PlaceView, now: number | null, here = false): Ab
  * older daemon than this wsp deploys says so in the protocol's own word, the same one `wsp places` prints in its
  * BEHIND column, so the app and the command line cannot word it twice. */
 export function placeStateWord(place: PlaceView, absent: AbsentComputer | null): string {
-  return absent?.away ?? placeDaemonBehind(place) ?? "";
+  return absent?.away ?? (provisionWord(place.provision) || undefined) ?? placeDaemonBehind(place) ?? "";
 }
 
 /** How many workspaces stand on each row, by the id of the row: every workspace the app holds goes to exactly one
@@ -189,3 +191,73 @@ export const PROJECT_PICK_WORDS = {
   addOne: "Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.",
 } as const;
 
+
+/** Which rows the Computers table draws: this computer and every computer joined to it, always, and a cloud
+ * account only once this host holds its key or a workspace stands on it. A fresh state is this computer's row
+ * alone, with no cloud row and no hourly rate on any screen: a table that listed what a person had not bought
+ * read as a bill. */
+export function computerRows(places: readonly PlaceView[], setup: Pick<InitSetup, "keys"> | null, counts: Record<string, number>): PlaceView[] {
+  return places.filter(place => !isProviderPlace(place) || keyHeld(place.name, setup) || (counts[place.id] ?? 0) > 0);
+}
+
+/** How a workspace's copy of a project is made on this computer, as that computer last reported it: the
+ * protocol's own word (snapshot, reflink, plain), and the sentence for a computer that makes no copy at all.
+ * Nothing for a computer that has not said, and nothing for the computer the app runs on, whose copies are its
+ * own local mode and whose word the row's Ports line carries instead. */
+export function copiesWord(place: PlaceView, here: boolean): string {
+  if (place.copies !== undefined) return place.copies;
+  return !here && place.takesForks === false ? WHERE_WORDS.copiesNothing : "";
+}
+
+/** One line of a computer's agents block: the agent by its catalog name, the word for what it is there, and the
+ * line a held Sign in says on hover. */
+export interface AgentLine {
+  id: string;
+  name: string;
+  state: string;
+  /** Why the sign-in is held here: the command line that runs it, built from this row's own two names. Absent on
+   * this computer, whose agents are signed in where they are installed. */
+  held?: string;
+  /** Whether the wsp tools can be handed to this agent, for the one action this computer's own rows carry. */
+  takesTools?: boolean;
+}
+
+/** The agents on the computer the app runs on, off the one reading every surface makes of which agents are here:
+ * each with the word for whether its own config names the wsp tools. The whole of what the Agents section said
+ * before it moved under this computer's row. */
+export function hereAgentLines(setup: Pick<InitSetup, "agents"> | null): AgentLine[] {
+  return (setup?.agents ?? []).map(agent => ({
+    id: agent.id,
+    name: agent.name,
+    state: agent.configured ? AGENTS_WORDS.added : agent.takesTools ? "" : AGENTS_WORDS.noTools,
+    takesTools: agent.takesTools,
+  }));
+}
+
+/** The agents a joined computer reported, named through the catalog, each with what the recipe job came to for it
+ * where one has run and the bare word found where none has. The sign-in beside each is held: nothing on the wire
+ * runs one on a computer from here, so the line names the command that does. */
+export function placeAgentLines(place: PlaceView): AgentLine[] {
+  return (place.agents ?? []).map(id => ({
+    id,
+    name: agentName(id),
+    state: outcomeWord(place.provision?.rows.find(row => agentOfRow(row) === id)) ?? AGENTS_WORDS.found,
+    held: AGENTS_WORDS.signInHeld(place.name, id),
+  }));
+}
+
+/** What the recipe put on a computer beside its agents: the person's own files in their agents' homes there and
+ * the MCP servers written into those configs, each by the label the job carried and the word for what it came to.
+ * Empty on a computer no job has run on. */
+export function recipeLines(place: PlaceView): { id: string; kind: PlaceProvisionKind; label: string; state: string }[] {
+  return (place.provision?.rows ?? [])
+    .filter(row => row.kind === "file" || row.kind === "server")
+    .map(row => ({ id: row.id, kind: row.kind!, label: row.label, state: outcomeWord(row) ?? "" }));
+}
+
+/** The word for what one row of the recipe came to, or nothing for a row no job carried. */
+function outcomeWord(row: PlaceProvisionRow | undefined): string | undefined {
+  if (row === undefined) return undefined;
+  const said = PROVISION_OUTCOME_WORDS[row.outcome];
+  return row.note === undefined || row.outcome === "installed" || row.outcome === "present" ? said : `${said}: ${row.note}`;
+}

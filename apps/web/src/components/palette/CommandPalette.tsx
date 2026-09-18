@@ -9,10 +9,10 @@ import { useWorkspaceVerbs } from "../../actions/verbs.js";
 import { isCommandPaletteOpen, onOpenCommandPalette } from "../../commandPaletteBus.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../../keybindingDefaults.js";
 import type { ResolvedKeybindingsConfig } from "../../keybindingTypes.js";
-import { useLabs, useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
+import { useSelectedWorkspaceId, useSidebarProjects, useStore } from "../../protocol/store.js";
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
-import { requestNewWorkspace } from "../../shell/shellRequests.js";
+import { requestAddProject, requestNewWorkspace } from "../../shell/shellRequests.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
 import {
@@ -40,10 +40,8 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const select = useStore(s => s.select);
   const openSettings = useStore(s => s.openSettings);
   const openAddComputer = useStore(s => s.openAddComputer);
-  const openConnectProvider = useStore(s => s.openConnectProvider);
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
-  const labs = useLabs();
   const verbs = useWorkspaceVerbs();
 
   useEffect(
@@ -73,14 +71,14 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       nextThread: () => cycleThreadInSpace(1),
       previousThread: () => cycleThreadInSpace(-1),
       openSettings,
+      addProject: requestAddProject,
       openAddComputer,
-      openConnectProvider,
     }),
-    [openAddComputer, openConnectProvider, openSettings, select, toggleRightPanel, toggleSidebar],
+    [openAddComputer, openSettings, select, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, labs, handlers, verbs, places }),
-    [api, handlers, labs, places, projects, query, selectedId, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, handlers, verbs, places }),
+    [api, handlers, places, projects, query, selectedId, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {

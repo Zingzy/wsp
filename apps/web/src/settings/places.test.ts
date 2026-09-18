@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from "vitest";
-import { DAEMON_VERSION, absentComputer, placeDaemonBehind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
+import { DAEMON_VERSION, JOINED_COMPUTER, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PROJECT_PICK_WORDS, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, computerRows, copiesWord, hereAgentLines, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -158,5 +158,98 @@ describe("the one word the slot beside a row's name carries", () => {
     expect(placeStateWord({ ...hetzner, daemonVersion: DAEMON_VERSION }, null)).toBe("");
     expect(placeStateWord(hetzner, null)).toBe("");
     expect(placeStateWord(ascii, null)).toBe("");
+  });
+});
+
+describe("which rows the Computers table draws", () => {
+  const setup = (keys: Record<string, boolean>): { keys: Record<string, boolean> } => ({ keys });
+
+  it("draws every computer and a cloud only once its key is held or a workspace stands on it", () => {
+    const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
+    const rows = (keys: Record<string, boolean>, counts: Record<string, number> = {}): string[] =>
+      computerRows([here, hetzner, ascii, solari], setup(keys), counts).map(place => place.id);
+    // A fresh state: this computer and the ones joined to it, and no cloud at all. A table that listed an account
+    // nobody had bought, with an hourly rate beside it, read as a bill.
+    expect(rows({})).toEqual(["here", "p_1"]);
+    expect(rows({ solari: true })).toEqual(["here", "p_1", "solari"]);
+    expect(rows({ box: true, solari: true })).toEqual(["here", "p_1", "box", "solari"]);
+    // A cloud a workspace stands on is drawn whatever the keys say, so a machine is never orphaned off the table.
+    expect(rows({}, { solari: 1 })).toEqual(["here", "p_1", "solari"]);
+    // A host that says nothing about its keys is read as holding none.
+    expect(computerRows([here, ascii], null, {}).map(place => place.id)).toEqual(["here"]);
+  });
+
+  it("names a cloud row cloud where a row's kind is read in a sentence, and a computer of the person's own by what it is", () => {
+    expect(PLACE_KIND_WORDS.provider).toBe("cloud");
+    expect(PLACE_KIND_WORDS.computer).toBe(JOINED_COMPUTER);
+  });
+
+  it("says how a computer makes a copy in the word it reported, and says so when it makes none", () => {
+    expect(copiesWord({ ...hetzner, copies: "reflink" }, false)).toBe("reflink");
+    expect(copiesWord({ ...hetzner, copies: "snapshot" }, false)).toBe("snapshot");
+    // A computer that has not said carries no word rather than a guess, and neither does the computer the app runs
+    // on, whose own row says what its copies share instead.
+    expect(copiesWord(hetzner, false)).toBe("");
+    expect(copiesWord(here, true)).toBe("");
+    expect(copiesWord({ ...hetzner, takesForks: false }, false)).toBe("copies nothing");
+  });
+
+  it("reads the recipe on a computer into the agents there and the files and servers beside them", () => {
+    const provision: PlaceProvision = {
+      state: "done",
+      addId: "a_1",
+      recipeAt: "2026-09-12T11:00:00.000Z",
+      startedAt: "2026-09-12T11:00:00.000Z",
+      rows: [
+        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
+        { id: "agents/codex", label: "Codex", outcome: "present" },
+        { id: "tools/gh", label: "GitHub CLI", outcome: "failed", note: "no release for this chip" },
+        { id: "agents/files/skills", label: "code-review", outcome: "installed", kind: "file" },
+        { id: "agents/mcp/linear", label: "linear", outcome: "skipped", kind: "server", note: "the config never landed" },
+      ],
+    };
+    const place: PlaceView = { ...hetzner, name: "spoo", agents: ["claude", "codex", "cursor"], provision };
+    expect(placeAgentLines(place)).toEqual([
+      { id: "claude", name: "Claude Code", state: "installed", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude" },
+      { id: "codex", name: "Codex", state: "already there", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
+      // An agent the job carried no row for is what the computer said it found, and no more.
+      { id: "cursor", name: "cursor", state: "found", held: "Sign in from a terminal for now: wsp add spoo --sign-in cursor" },
+    ]);
+    // The tool rows are counted in the row's own state slot, not listed here; the person's own files and the
+    // servers written into their agents' configs are.
+    expect(recipeLines(place)).toEqual([
+      { id: "agents/files/skills", kind: "file", label: "code-review", state: "installed" },
+      { id: "agents/mcp/linear", kind: "server", label: "linear", state: "set aside: the config never landed" },
+    ]);
+    expect(recipeLines(hetzner)).toEqual([]);
+  });
+
+  it("reads the agents on this computer off the one reading of which agents are here", () => {
+    expect(
+      hereAgentLines({
+        agents: [
+          { id: "claude", name: "Claude Code", configured: true, takesTools: true },
+          { id: "codex", name: "Codex", configured: false, takesTools: true },
+          { id: "cursor", name: "Cursor", configured: false, takesTools: false },
+        ],
+      }),
+    ).toEqual([
+      { id: "claude", name: "Claude Code", state: "wsp tools added", takesTools: true },
+      // The one row that carries an action: nothing stands in the state slot until the tools are there.
+      { id: "codex", name: "Codex", state: "", takesTools: true },
+      { id: "cursor", name: "Cursor", state: "no wsp tools yet", takesTools: false },
+    ]);
+    expect(hereAgentLines(null)).toEqual([]);
+  });
+
+  it("reads the recipe's word in the state slot after the computer's silence and before the daemon behind", () => {
+    const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: "x", startedAt: "x", rows: [], at: { label: "uv", index: 3, of: 7 } };
+    const behind = { ...hetzner, daemonVersion: 1 };
+    expect(placeStateWord({ ...hetzner, provision: running }, null)).toBe("setting up 3/7: uv");
+    // A computer that is not answering says that first: nothing can be put on a computer that is off.
+    expect(placeStateWord({ ...laptop, provision: running }, absentComputer("old-macbook", null))).toBe("no answer");
+    // With no job on it, the slot reads what it always did.
+    expect(placeStateWord(behind, null)).toBe(placeDaemonBehind(behind));
+    expect(placeStateWord(hetzner, null)).toBe("");
   });
 });
