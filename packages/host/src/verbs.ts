@@ -2557,24 +2557,27 @@ export const VERBS: readonly Verb[] = [
         name: z.string().optional().describe("what to call the project here; the folder's or the repo's own last word without it"),
         base: z.string().optional().describe("the branch a workspace of the project starts on; the remote's own default branch at the clone without it"),
       },
-      output: { project: ProjectView },
+      output: { project: ProjectView, notice: z.string().optional() },
       call: async (args, deps) => {
         const client = await deps.client();
-        const { project } = await client.request<{ project: ProjectView }>("projects.add", {
+        const { project, notice } = await client.request<{ project: ProjectView; notice?: string }>("projects.add", {
           source: args.source,
           ...(args.on !== undefined ? { on: args.on } : {}),
           ...(args.name !== undefined ? { name: args.name } : {}),
           ...(args.base !== undefined ? { base: args.base } : {}),
         });
         const named = await placeNames(client).catch(() => new Map<string, string>());
-        return asText(addedProjectLine(project, named, hostPlatform()), { project });
+        // What landed and is not what was asked for rides the answer: an add that stands with the commits left
+        // behind reads as an add that stands, and the caller has to be told which.
+        const said = addedProjectLine(project, named, hostPlatform());
+        return asText(notice === undefined ? said : `${said}\n${notice}`, { project, ...(notice !== undefined ? { notice } : {}) });
       },
     }),
   },
   {
     name: "projects remove",
     usage: "wsp projects remove <project>",
-    about: "takes a project out of this wsp; the code is left where it is, and a project with a workspace standing on it is refused naming them",
+    about: "takes a project out of this wsp, with the folder wsp itself made for it on the computer holding it; a folder of yours on this computer is left where it is, and a project with a workspace standing on it is refused naming them",
     page: "agent",
     options: {},
     run: async ctx => {
@@ -2582,19 +2585,21 @@ export const VERBS: readonly Verb[] = [
       if (ref === undefined || ctx.args.length !== 1) throw usageRefusal("wsp projects remove takes one project.", usageIs(ctx));
       const client = await ctx.client();
       const project = await projectOf(client, ref);
-      await client.request("projects.remove", { projectId: project.id });
-      ctx.out.emit({ project }, `${project.name} is no longer a project here; its code is where it was`);
+      // The sentence comes off the wire: what a remove took is true differently on a computer of the person's, at
+      // a provider and on this computer, and the runtime's own road for that computer is what says which.
+      const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id });
+      ctx.out.emit({ project, said }, said);
       return 0;
     },
     tool: tool({
-      description: "Takes a project's record out of this wsp. Nothing of the code is touched: a folder on this computer stays where it is and a repo is never asked for anything. Refused in one line while a workspace of it stands, naming the workspaces; delete those first.",
+      description: "Takes a project's record out of this wsp, and with it the folder wsp itself made for the project on the computer holding it: its checkout there and the memory its threads kept. A folder of yours on this computer stays exactly where it is, and no repo is ever asked for anything. Refused in one line while a workspace of it stands, naming the workspaces; delete those first.",
       input: { project: z.string().describe("the project's name, or its id when two share a name") },
-      output: { project: ProjectView },
+      output: { project: ProjectView, said: z.string() },
       call: async ({ project: ref }, deps) => {
         const client = await deps.client();
         const project = await projectOf(client, ref);
-        await client.request("projects.remove", { projectId: project.id });
-        return asText(`${project.name} is no longer a project here; its code is where it was`, { project });
+        const { said } = await client.request<{ said: string }>("projects.remove", { projectId: project.id });
+        return asText(said, { project, said });
       },
     }),
   },

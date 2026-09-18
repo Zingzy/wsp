@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
+import { HERE_PLACE_ID, seedMemoryKeptLine, type AdapterEvent, type EventUnion, type MachineSpec, type ProjectAddEvent, type SeedChoice, type SeedPlan, type TurnResult } from "@wsp/protocol";
 import { copyKey, createRuntime, type HarnessAdapterFactory, type Runtime, type SeedWiring } from "../src/runtime.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { fakeLocal, stubBackend, type StubBackend } from "./stub-backend.js";
@@ -397,5 +397,201 @@ describe("the menu a folder's add reads", () => {
     await rt.projects.add({ source: folder, on: "default", seed: { files: [".git-credentials"], memory: false, commits: false, remember: true } });
     const again = await rt.projects.seedPlan(folder);
     expect(again.files.every(f => !f.ticked)).toBe(true);
+  });
+});
+
+describe("a repo added by url on a computer the person owns", () => {
+  /** That computer as the stub stands for one: it keeps project checkouts on a disk of its own and no image. */
+  const box = async (): Promise<Awaited<ReturnType<typeof withImage>>> => withImage({ plan: plan("/x"), projects: "/wsp/projects", keepsImages: false });
+
+  it("is cloned once by the add into the folder wsp keeps for it there, with nothing of it under the computer's own home", async () => {
+    const { rt, backend } = await box();
+    answering(backend, cmd => (cmd.startsWith("ls -A") ? { exitCode: 0, stdout: "package.json\npackage-lock.json\n", stderr: "" } : undefined));
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
+    // The same stages a seeded project's add prints, without the one for a seed there was none of.
+    expect(stages(events).map(e => e.stage)).toEqual(["planned", "cloning", "installing", "done"]);
+    expect(stages(events)[0]?.message).toBe("landing-906 from https://github.com/spoo-me/spoo-ts, nothing seeded.");
+    // The checkout is wsp's own folder on that computer, and the path inside a workspace of it is not under the
+    // computer's home: a copy bound there would leave its mount point on the computer itself.
+    expect(project.checkout).toBe(`/wsp/projects/${project.id}/checkout`);
+    expect(project.path).toBe("/srv/landing-906");
+    // The memory is where the agent on that computer reads it, under the computer's own home, which every
+    // workspace of the project sees from the computer itself.
+    expect(project.memoryDir).toBe("/root/.claude-cfg/projects/-srv-landing-906/memory");
+    expect(project.memoryKey).toBe("-srv-landing-906");
+    const ran = commands(backend);
+    expect(ran).toContain("git clone https://github.com/spoo-me/spoo-ts /srv/landing-906");
+    expect(ran).not.toContain("/root/landing-906");
+    // The worker the work ran in binds wsp's folder at its own path and the checkout where the workspaces read it.
+    expect(specs(backend)[0]?.binds).toEqual([
+      { source: `/wsp/projects/${project.id}`, target: `/wsp/projects/${project.id}` },
+      { source: project.checkout, target: "/srv/landing-906" },
+    ]);
+    expect(project.installed).toMatchObject({ row: "node", command: "npm ci" });
+    // Nothing of the add is left running, and nothing was seeded: no archive travelled.
+    expect(stopped(backend)).toBe(1);
+    expect(backend.puts).toEqual([]);
+    expect(project.seeded).toBeUndefined();
+  });
+
+  it("is copied into every workspace of it, two in a row, and neither of them clones anything", async () => {
+    const { rt, backend } = await box();
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
+    const cloned = (): number => backend.machines.flatMap(m => m.execLog).filter(cmd => cmd.includes("git clone")).length;
+    expect(cloned()).toBe(1);
+    for (const name of ["proof one", "proof two"]) {
+      const before = backend.machines.length;
+      await rt.workspaces.create({ project: project.id, name });
+      expect(specs(backend)[before]?.copy).toEqual({ from: project.checkout, at: "/srv/landing-906" });
+      expect(backend.machines[before]?.execLog.join("\n")).not.toContain("git clone");
+    }
+    // The clone the add ran is still the only one: the second workspace is a copy of the same checkout.
+    expect(cloned()).toBe(1);
+  });
+
+  it("an add that failed on the computer leaves nothing of the project there and records nothing", async () => {
+    const { rt, backend } = await box();
+    answering(backend, cmd => {
+      if (cmd.startsWith("ls -A")) return { exitCode: 0, stdout: "package-lock.json\n", stderr: "" };
+      if (cmd.includes("npm ci")) return { exitCode: 1, stdout: "", stderr: "npm error code ENOSPC\nnpm error nospc ENOSPC: no space left on device\n" };
+      return undefined;
+    });
+    // Whether the worker was already stopped when the sweep ran: those folders are its binds' own sources while
+    // it lives, so the sweep waits for it.
+    const workerStopped: boolean[] = [];
+    const own = backend.onComputer!.bind(backend);
+    backend.onComputer = async (cmd, opts) => {
+      workerStopped.push(backend.machines.every(m => m.killed));
+      return own(cmd, opts);
+    };
+    await expect(rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" })).rejects.toThrow(/no space left on device/);
+    expect(await rt.projects.list()).toEqual([]);
+    // The folder the bind made on that computer goes with it, so the same name can be added again.
+    expect(backend.computerLog).toEqual([expect.stringMatching(/^rm -rf '\/wsp\/projects\/pr_[0-9a-f]{8}'$/)]);
+    expect(stopped(backend)).toBe(1);
+    expect(workerStopped).toEqual([true]);
+  });
+
+  it("is taken away with the folder wsp made for it, in one sentence naming that folder", async () => {
+    const { rt, backend } = await box();
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    const project = await rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" });
+    const { said } = await rt.projects.remove(project.id);
+    expect(backend.computerLog).toEqual([`rm -rf '/wsp/projects/${project.id}'`]);
+    expect(said).toBe(`landing-906 is no longer a project on default; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout and its memory`);
+    expect(await rt.projects.list()).toEqual([]);
+  });
+
+  it("a record from before the add cloned it refuses a workspace, before a machine is asked for", async () => {
+    const backend = stubBackend();
+    (backend as { projects?: string }).projects = "/wsp/projects";
+    backend.capabilities.images = false;
+    const store = memoryStore();
+    // The shape the first road left on a box: a repo recorded with no checkout, whose path is under the
+    // computer's own home.
+    await store.put("projects", "pr_old", { id: "pr_old", name: "spoo-landing", computer: "default", source: { kind: "git", url: "https://github.com/spoo-me/frontend" }, path: "/root/spoo-landing", createdAt: "2026-09-17T00:00:00.000Z" });
+    const root = mkdtempSync(join(tmpdir(), "wsp-add-old-"));
+    roots.push(root);
+    const rt = createRuntime({ backend, store, adapters: {}, local: fakeLocal(root) });
+    const before = backend.machines.length;
+    await expect(rt.workspaces.create({ project: "pr_old", name: "work" })).rejects.toThrow(
+      "spoo-landing was recorded before a project was cloned once on its computer, so default holds no checkout for a workspace to copy; wsp projects remove spoo-landing, then wsp add https://github.com/spoo-me/frontend --on default",
+    );
+    // No machine was asked for and no workspace was written: a refusal after either leaves a record for a fork
+    // that never happened.
+    expect(backend.machines.length).toBe(before);
+    expect(await rt.workspaces.list()).toEqual([]);
+    // And the remove it names takes the folder wsp had made for it there, whatever the record is missing.
+    const { said } = await rt.projects.remove("pr_old");
+    expect(backend.computerLog).toEqual(["rm -rf '/wsp/projects/pr_old'"]);
+    expect(said).toContain("no longer a project on default");
+  });
+});
+
+describe("a project taken away from this computer or from a provider", () => {
+  it("runs nothing on any computer, and each says what is true of it", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: plan(folder) });
+    answering(backend, () => ({ exitCode: 0, stdout: "", stderr: "" }));
+    // A project at the provider whose add sealed an image of it: the image stays, since no verb deletes one yet.
+    const at = await rt.projects.add({ source: folder, on: "default", seed: TICKED });
+    const there = await rt.projects.remove(at.id);
+    expect(there.said).toBe(`${at.name} is no longer a project on default; its project image ${at.image?.snapshotId} stays at the provider`);
+    // And a folder of the person's own here, which is where it was.
+    const here = await rt.projects.add({ source: repo() });
+    const said = (await rt.projects.remove(here.id)).said;
+    expect(said).toBe(`${here.name} is no longer a project here; its code is where it was`);
+    expect(backend.computerLog).toEqual([]);
+  });
+
+  it("a folder here is recorded on a host that has sealed no image, since nothing of it is forked anywhere", async () => {
+    const backend = stubBackend();
+    const root = mkdtempSync(join(tmpdir(), "wsp-add-noimage-"));
+    roots.push(root);
+    // No goldens document at all: this host has sealed nothing.
+    const rt = createRuntime({ backend, store: memoryStore(), adapters: {}, local: fakeLocal(root) });
+    // The folder as this host resolved it, which on a Mac is the real path under /private.
+    const recorded = await rt.projects.add({ source: repo() });
+    expect(recorded).toMatchObject({ computer: HERE_PLACE_ID, source: { kind: "folder" } });
+    expect(recorded.path).toMatch(/wsp-seed-add-/);
+    expect(backend.machines).toEqual([]);
+  });
+});
+
+describe("the commits a seed carries onto a computer whose git refuses them", () => {
+  const withCommits = (folder: string): SeedPlan => plan(folder, { unpushed: { commits: 2, base: "abc123" }, branch: "main", defaultBranch: "main" });
+  const KEEPING: SeedChoice = { files: [".env.local"], memory: true, commits: true };
+
+  it("are nought on the record, with git's own last line in the notice and the checkout put back", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: withCommits(folder), projects: "/wsp/projects", keepsImages: false });
+    answering(backend, cmd => (cmd.includes("am --3way") ? { exitCode: 128, stdout: "", stderr: "Committer identity unknown\nfatal: empty ident name (for <>) not allowed\n" } : undefined));
+    const events: EventUnion[] = [];
+    rt.events.on("*", e => events.push(e));
+    const project = await rt.projects.add({ source: folder, on: "default", name: "seeded-919", seed: KEEPING });
+    const lost = "the 2 commits on main did not land on default: fatal: empty ident name (for <>) not allowed; the checkout is on main";
+    // The add stands, the record is honest about what is on that computer, and the person is told which.
+    expect(project.seeded).toMatchObject({ commits: 0, files: 1 });
+    expect(project.notice).toBe(lost);
+    // The notice is what the person is told, not a field of the project: the record holds the schema's fields.
+    expect((await rt.projects.list())[0]).not.toHaveProperty("notice");
+    expect(stages(events).filter(e => e.stage === "seeding").map(e => e.message).at(-1)).toBe(lost);
+    // The half applied patch is put back, so every copy of the checkout starts on the clone as it was.
+    expect(commands(backend)).toContain("am --abort");
+    expect(commands(backend)).toContain("reset --hard origin/main");
+  });
+
+  it("are put back on the branch the checkout says it is on, not the branch the plan carried", async () => {
+    const folder = repo();
+    // The person's own branch, which the remote has never seen, and a plan that names no default branch: the
+    // branch to put back cannot be read off either without naming a ref the remote has not got.
+    const { rt, backend } = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "refactor/dashboard-polish", defaultBranch: null }), projects: "/wsp/projects", keepsImages: false });
+    answering(backend, cmd => {
+      if (cmd.includes("symbolic-ref --short HEAD")) return { exitCode: 0, stdout: "main\n", stderr: "" };
+      if (cmd.includes("am --3way")) return { exitCode: 128, stdout: "", stderr: "error: could not build fake ancestor\n" };
+      return undefined;
+    });
+    const project = await rt.projects.add({ source: folder, on: "default", name: "seeded-919", seed: KEEPING });
+    const ran = commands(backend);
+    // The clone came up on main, so that is what the failure road puts back and what the person is told.
+    expect(ran).toContain("reset --hard origin/main");
+    expect(ran).not.toContain("origin/refactor/dashboard-polish");
+    expect(ran).toContain("branch -D refactor/dashboard-polish");
+    expect(project.notice).toContain("the checkout is on main");
+    expect(project.seeded?.commits).toBe(0);
+  });
+
+  it("are the count git read off the checkout, never the number the plan carried", async () => {
+    const folder = repo();
+    const { rt, backend } = await withImage({ plan: withCommits(folder), projects: "/wsp/projects", keepsImages: false });
+    // The plan said two; the checkout has one, which is what git answers and what the record keeps.
+    answering(backend, cmd => (cmd.includes("am --3way") ? { exitCode: 0, stdout: "1\n", stderr: "" } : undefined));
+    const project = await rt.projects.add({ source: folder, on: "default", name: "seeded-919", seed: KEEPING });
+    expect(project.seeded?.commits).toBe(1);
+    expect(project.notice).toBeUndefined();
+    expect(commands(backend)).not.toContain("am --abort");
   });
 });
