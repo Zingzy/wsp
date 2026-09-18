@@ -197,8 +197,10 @@ describe("a folder seeding a project on a computer that clones", () => {
     const before = backend.machines.length;
     await rt.workspaces.create({ project: project.id, name: "work" });
     expect(specs(backend)[before]?.binds).toBeUndefined();
-    // The seed's memory is moved where nothing stands, and nothing standing there is ever removed.
+    // The seed's memory is moved where no memory stands, and no memory is ever removed: an empty folder there is
+    // taken by an rmdir, which can never take a byte of what the agent wrote.
     const ran = commands(backend);
+    expect(ran).toContain(`rmdir '${project.memoryDir}' 2>/dev/null || true`);
     expect(ran).toContain(`if [ -e '${project.memoryDir}' ]`);
     expect(ran).not.toContain(`rm -rf '${project.memoryDir}'`);
   });

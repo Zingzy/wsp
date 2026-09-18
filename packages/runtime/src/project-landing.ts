@@ -188,15 +188,27 @@ export const MEMORY_KEPT_MARK = "wsp-memory-kept";
 /** The last of the seed: the memory folder moved out of the checkout onto the computer, where every workspace of
  * the project reads it, and wsp's own folder and the archive gone from the checkout every copy is taken of.
  *
- * Nothing standing at the memory path is removed. On a computer that keeps the memory where its own agent reads
- * it, what is there is the agent's own work for this project, so the seed's memory lands only where nothing
- * stands and the mark says which happened. */
+ * What is kept at the memory path is memory, and no memory is ever removed. An empty folder there is nothing
+ * kept: it is the mount point an older bind left on the computer, or the folder the agent makes before it writes
+ * a line in it, so `rmdir` takes it and the seed's memory lands in its place. `rmdir` removes an empty directory
+ * and nothing else, so it can never take a byte of what the agent wrote; whatever stands after it stays, and the
+ * mark then says the seed's memory was not landed.
+ *
+ * One command per line, as `patchScript` is and for the same reason: `-e` is exempt for every command of an AND
+ * list but its last, so a `mkdir` chained to the `mv` would skip the move and let the script run on to the sweep
+ * below, which would take the seed's memory with the folder it came in. */
 export function seedRestScript(o: { checkout: string; memoryDir: string; seedTar: string; memory: boolean }): string {
   const lines = ["set -e"];
   if (o.memory) {
     const memory = shellQuote(o.memoryDir);
     lines.push(
-      `if [ -e ${memory} ]; then echo ${shellQuote(MEMORY_KEPT_MARK)}; else mkdir -p ${shellQuote(o.memoryDir.replace(/\/[^/]+$/, ""))} && mv ${shellQuote(`${o.checkout}/${SEED_MEMORY_DIR}`)} ${memory}; fi`,
+      `rmdir ${memory} 2>/dev/null || true`,
+      `if [ -e ${memory} ]; then`,
+      `  echo ${shellQuote(MEMORY_KEPT_MARK)}`,
+      "else",
+      `  mkdir -p ${shellQuote(o.memoryDir.replace(/\/[^/]+$/, ""))}`,
+      `  mv ${shellQuote(`${o.checkout}/${SEED_MEMORY_DIR}`)} ${memory}`,
+      "fi",
     );
   }
   lines.push(`rm -rf ${shellQuote(`${o.checkout}/${SEED_DIR}`)} ${shellQuote(o.seedTar)}`);
