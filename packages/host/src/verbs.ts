@@ -991,14 +991,15 @@ async function broughtBack(client: HostClient, workspaceId: string, title?: stri
 }
 
 /** What a bring back reads as: where the branch went and how far it is over the base, git's own diffstat under it,
- * then the pull request or why there is none, and last what stayed behind in the workspace. */
+ * then the pull request or why there is none, and last what stayed behind in the workspace. The push's lines come
+ * first whatever the pull request half said, since that half runs after the branch has landed on the remote. */
 function broughtBackLine(name: string, back: BringBackResult): string {
   const commits = `${back.ahead} commit${back.ahead === 1 ? "" : "s"}`;
   const left = `${back.uncommitted} change${back.uncommitted === 1 ? "" : "s"}`;
   return [
     `${name}: ${back.branch} pushed, ${commits} over ${back.base}`,
     ...back.stat,
-    back.pr === undefined ? back.note : `${back.pr.url} (${back.pr.state})`,
+    back.pr === undefined ? (back.note ?? back.refused) : `${back.pr.url} (${back.pr.state})`,
     back.uncommitted === 0 ? undefined : `${left} left in the workspace; nothing uncommitted travels`,
   ]
     .filter((line): line is string => line !== undefined)
@@ -2937,11 +2938,12 @@ export const VERBS: readonly Verb[] = [
       const { workspace: awoken } = await awake(client, workspace, "bring back", line => ctx.io.error(line));
       const back = await broughtBack(client, awoken.id, flag(ctx.flags, "title"), flag(ctx.flags, "body"));
       ctx.out.emit({ ...back }, broughtBackLine(awoken.name, back));
-      return 0;
+      // The push is reported either way; the exit is the pull request half's, which refused where this is set.
+      return back.refused === undefined ? 0 : 1;
     },
     tool: tool({
       description:
-        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. A machine with no signed-in command line for the git host still pushes, and the note says why the pull request waits.",
+        "Pushes the branch the workspace's copy is on to the project's remote and opens its pull request against the base, or answers with the one already open. The base is the branch its parent was on at the fork for a workspace forked out of another, whatever that parent does after, and the project's own base otherwise. Refused in one line on the base branch itself, since work leaves a workspace as a branch of its own, and on a branch with nothing the base lacks. The two halves are answered apart: the branch, the count over the base and the diffstat are there whenever the push landed, then either the pull request, the note saying why it waits where the machine has no signed-in command line for the git host, or the pull request half's own refusal.",
       input: {
         workspace: WorkspaceIn,
         title: z.string().optional().describe("the pull request's title; without one the host fills the title and the body from the commits"),
@@ -2953,7 +2955,8 @@ export const VERBS: readonly Verb[] = [
         const workspace = await workspaceOf(client, ref);
         const { workspace: awoken } = await awake(client, workspace, "bring back", QUIET_LINE);
         const back = await broughtBack(client, awoken.id, title, body);
-        return asText(broughtBackLine(awoken.name, back), { ...back });
+        const said = asText(broughtBackLine(awoken.name, back), { ...back });
+        return back.refused === undefined ? said : { ...said, isError: true };
       },
     }),
   },

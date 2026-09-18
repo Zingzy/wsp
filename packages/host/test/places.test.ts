@@ -3,16 +3,18 @@
 // real ws server holding a real ed25519 pair, so the handshake typed on a
 // computer is the one a host answers; the service manager is a fake runner,
 // since installing a launchd agent is not this test's business.
+import { execFileSync } from "node:child_process";
 import { createHash, createPrivateKey, generateKeyPairSync, sign } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocketServer } from "ws";
 import WebSocket from "ws";
-import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
+import { ALREADY_JOINED_LINE, DAEMON_VERSION, placeCurrentLine, placeNoRecipeLine, placeProvisioningLine, provisionWord, type PlaceProvision, JOIN_NO_KEY_REFUSAL, PLACE_LEAVE_VERB, PLACE_ADD_WORDS, PLACE_CODE_REFUSAL, PLACE_DOOR_UNSERVED, PLACE_NEEDS_ROOT_LINE, PlaceReport, doorPortHeldLine, joinKeyRefusal, joinToken, MCP_ID_PREFIX, placeDaemonBehind, placeDaemonPaths, placeLinkTranscript, placeNoChipLine, placeOwnedPaths, placeProvisionPaths, placeUpdateLine, shellQuote, workFolderIn, wsUrlOf, type PlaceDoorView, type PlaceView } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { PlaceLoginRefusedError, type PlaceStaging, type PlaceUpdateRequest } from "@wsp/runtime";
 import { SshBackend, SSH_READ_SCRIPT, keyFingerprint, type SshReach, type SshTransport } from "@wsp/engine";
@@ -71,6 +73,7 @@ import { placeFilePath, placeKeyPath, placeLogPath, placeReport, placeService, r
 import { captured } from "./verbs-fixture.js";
 import { SERVICE_MANAGERS, type RunResult, type ServiceAddress, type ServiceManager, type ServiceRunner, type ServiceUnit } from "../src/service.js";
 import { addedBy, addedProviders } from "../src/providers.js";
+import { sha256sumBin } from "../../engine/test/sha256sum-bin.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
 
 runsFromItsOwnFolder();
@@ -88,6 +91,56 @@ const tmp = (name: string): string => {
   dirs.push(dir);
   return dir;
 };
+
+/** The list the recipe's job leaves beside itself, as the contract fixture holds it: one line per path wsp landed
+ * in an agent's home on that computer, the bytes that travelled and the bytes standing after the round. The
+ * daemon's own case builds its fake home from the same file. */
+const LEDGER_FIXTURE = fileURLToPath(new URL("../../../daemon/fixtures/contract/landed.tsv", import.meta.url));
+
+/** The bytes of the three files that ledger names, in its order: what the run that landed them put there, so the
+ * read that hashes a file against the ledger's third column answers for the ones nothing has rewritten. */
+const LANDED_BYTES = ["the skill wsp landed\n", '{"wsp":true}\n', "wsp = true\n"];
+
+/** That ledger as rows of a path and the bytes wsp left at it, with each hash it holds read against the bytes
+ * written here, so a fixture and a case cannot drift apart quietly. */
+function ledgerRows(): { rel: string; bytes: string }[] {
+  const lines = readFileSync(LEDGER_FIXTURE, "utf8").split("\n").filter(line => line.trim() !== "");
+  expect(lines.length, "landed.tsv holds a line per set of bytes here").toBe(LANDED_BYTES.length);
+  return lines.map((line, index) => {
+    const fields = line.split("\t");
+    const bytes = LANDED_BYTES[index]!;
+    expect(fields[2], `landed.tsv names bytes for ${fields[0]} that this file does not write`).toBe(createHash("sha256").update(bytes).digest("hex"));
+    return { rel: fields[0]!, bytes };
+  });
+}
+
+/** A home with that ledger and what it names: every file but the last as wsp left it, the last one rewritten by
+ * the person since, and one file of theirs beside them that no line names. */
+function homeWithLandedFiles(name: string): { home: string; rows: { rel: string; bytes: string }[] } {
+  const home = tmp(name);
+  const rows = ledgerRows();
+  const at = placeProvisionPaths(home);
+  mkdirSync(at.dir, { recursive: true });
+  writeFileSync(at.landed, readFileSync(LEDGER_FIXTURE));
+  for (const [index, row] of rows.entries()) {
+    const path = join(home, row.rel);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, index + 1 === rows.length ? "the person wrote this\n" : row.bytes);
+  }
+  writeFileSync(join(home, ".claude", "theirs.md"), "mine\n");
+  // A line the servers step wrote: a key in an agent's own file, no path under the home, and the digest of the
+  // entry wsp left under that name. Nothing on the disk stands at it and nothing is taken for it.
+  appendFileSync(at.landed, `${MCP_ID_PREFIX}claude/context7\tdeadbeef\tdeadbeef\n`);
+  return { home, rows };
+}
+
+/** sh with a sha256sum to find: the script the leave runs is the engine's own and hashes the bytes with it, and a
+ * Mac carries no coreutils one on every release. */
+function shWithSha256sum(): (script: string) => string {
+  const bin = sha256sumBin();
+  dirs.push(bin);
+  return script => execFileSync("/bin/sh", ["-c", script], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` } });
+}
 
 /** Every manager command answered as if it worked, with what was asked kept. */
 function fakeRunner(): { run: ServiceRunner; ran: string[][]; holds: boolean } {
@@ -648,6 +701,67 @@ describe("taking wsp off the computer it is typed on", () => {
     // The manager was asked to stop the agent and to forget it, which is what a person running this wants to see.
     expect(runner.ran.some(argv => argv.includes("stop"))).toBe(true);
     expect(runner.ran.some(argv => argv.includes("disable"))).toBe(true);
+  });
+
+  it("takes every file wsp landed in an agent's home here whose bytes are still wsp's, and keeps the one the person wrote", async () => {
+    const { home, rows } = homeWithLandedFiles("leave-landed");
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: shWithSha256sum() });
+    for (const row of rows.slice(0, -1)) {
+      expect(existsSync(join(home, row.rel)), row.rel).toBe(false);
+      expect(swept.removed).toContain(join(home, row.rel));
+    }
+    // The person's own copy of a file wsp once landed hashes differently, so the read never named it.
+    const kept = rows.at(-1)!;
+    expect(readFileSync(join(home, kept.rel), "utf8")).toBe("the person wrote this\n");
+    expect(swept.removed).not.toContain(join(home, kept.rel));
+    // A folder wsp's own files left empty goes with them, up to but never into the folder the agent itself owns.
+    expect(existsSync(join(home, ".claude", "skills"))).toBe(false);
+    expect(existsSync(join(home, ".claude"))).toBe(true);
+    expect(existsSync(join(home, ".codex"))).toBe(true);
+    expect(readFileSync(join(home, ".claude", "theirs.md"), "utf8")).toBe("mine\n");
+    // The list's server line named no path, so the leave took nothing for it and made nothing at its name.
+    expect(existsSync(join(home, "agents"))).toBe(false);
+    expect(swept.removed.filter(took => took.includes("agents/mcp"))).toEqual([]);
+    // And wsp's own folder is gone whole, the provision folder and the ledger inside it with it.
+    expect(existsSync(placeDaemonPaths(home).wsp)).toBe(false);
+    expect(swept.removed.at(-1)).toBe(placeDaemonPaths(home).wsp);
+  });
+
+  it("reads what wsp owns before the folder that holds the list goes", async () => {
+    const { home, rows } = homeWithLandedFiles("leave-landed-order");
+    const ledger = placeProvisionPaths(home).landed;
+    const sh = shWithSha256sum();
+    let read = 0;
+    const watched = (script: string): string => {
+      read += 1;
+      // The one thing the order buys: at the moment the read runs, the list it reads is still there to read.
+      expect(existsSync(ledger), "the ownership read ran after the folder holding the ledger had gone").toBe(true);
+      return sh(script);
+    };
+    await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: watched });
+    expect(read).toBe(1);
+    expect(existsSync(ledger)).toBe(false);
+    expect(existsSync(join(home, rows[0]!.rel))).toBe(false);
+  });
+
+  it("takes wsp's own folder whole, so nothing under it is left on a computer the person joined", async () => {
+    const home = tmp("leave-whole");
+    const at = placeDaemonPaths(home);
+    mkdirSync(at.putDir, { recursive: true });
+    writeFileSync(join(at.putDir, "797"), "half an update");
+    writeFileSync(join(at.wsp, "place.json.bak-747"), "old");
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: () => "" });
+    expect(existsSync(at.wsp)).toBe(false);
+    expect(swept.removed).toEqual([at.wsp]);
+  });
+
+  it("keeps every file of the person's on a computer the recipe never ran on", async () => {
+    const home = tmp("leave-no-ledger");
+    mkdirSync(join(home, ".claude", "skills", "wsp"), { recursive: true });
+    writeFileSync(join(home, ".claude", "skills", "wsp", "SKILL.md"), "theirs\n");
+    const swept = await sweepPlace({ home, manager: undefined, run: fakeRunner().run, sh: shWithSha256sum() });
+    expect(swept.removed.filter(line => line.startsWith("/"))).toEqual([]);
+    expect(existsSync(join(home, ".claude", "skills", "wsp", "SKILL.md"))).toBe(true);
   });
 
   it("says this computer is no place when there is nothing to leave", async () => {

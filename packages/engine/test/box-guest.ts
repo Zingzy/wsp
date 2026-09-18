@@ -5,23 +5,16 @@
 // files it ends with are what a test reads. sha256sum rides on the PATH as a
 // script of node's, so one script runs the same on a Mac and on Linux.
 import { execFile } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { FREE_KB_CMD } from "../src/golden-tools.js";
 import type { ExecResult, Machine } from "../src/machine.js";
+import { sha256sumBin } from "./sha256sum-bin.js";
 
 const execFileAsync = promisify(execFile);
 const FREE_KB = String(3000 * 1024);
-
-/** The one reading of a file's bytes both platforms answer the same way: BSD has no sha256sum and GNU has no
- * shasum everywhere, and node is what is running the test. */
-const SHA256SUM = [
-  "#!/bin/sh",
-  `exec ${JSON.stringify(process.execPath)} -e 'const {createHash}=require("crypto");const fs=require("fs");const hash=b=>createHash("sha256").update(b).digest("hex");const files=process.argv.slice(1);if(files.length===0){process.stdout.write(hash(fs.readFileSync(0))+"  -\\n")}else{for(const f of files){process.stdout.write(hash(fs.readFileSync(f))+"  "+f+"\\n")}}' "$@"`,
-  "",
-].join("\n");
 
 export interface BoxGuest {
   /** The computer's home directory on this machine. */
@@ -37,9 +30,7 @@ export interface BoxGuest {
 
 export function boxGuest(present: string[] = [], canned: Record<string, ExecResult> = {}): BoxGuest {
   const root = mkdtempSync(join(tmpdir(), "wsp-box-guest-"));
-  const bin = mkdtempSync(join(tmpdir(), "wsp-box-bin-"));
-  writeFileSync(join(bin, "sha256sum"), SHA256SUM);
-  chmodSync(join(bin, "sha256sum"), 0o755);
+  const bin = sha256sumBin();
   const cmds: string[] = [];
   const runs: string[] = [];
   const exec = async (cmd: string): Promise<ExecResult> => {

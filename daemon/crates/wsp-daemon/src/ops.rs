@@ -191,7 +191,8 @@ pub(crate) async fn handle(conn: &Arc<Conn>, ctx: &Arc<Ctx>, raw: &str) -> Outgo
         match op {
             Some("place.leave") => {
                 let home = crate::place::place_home(ctx.options.home.as_deref());
-                let swept = fs::blocking(move || Ok(crate::place::sweep_place_home(&home))).await.unwrap_or_default();
+                let swept =
+                    fs::blocking(move || Ok(crate::place::sweep_place_home(&home, &crate::place::sh_stdout))).await.unwrap_or_default();
                 return Outgoing::Leave(text(&Reply::new(id, PlaceLeaveReply { swept })));
             }
             Some("place.update") => return place_update(ctx, id, &frame).await,
@@ -915,9 +916,11 @@ mod tests {
         let ctx = Arc::new(Ctx::new(options, Box::new(|_| {})).unwrap());
         let out = handle(&link, &ctx, &json!({"id": 21, "op": "place.leave"}).to_string()).await;
         let Outgoing::Leave(text) = &out else { panic!("a leave stops the daemon after its reply") };
-        let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy()]);
+        // Each part of wsp's own folder is named for the line it puts in front of a person, and the folder itself
+        // goes last, so nothing under it is left on a computer the person joined.
+        let swept = json!([at.place_file.to_string_lossy(), at.token_path.to_string_lossy(), at.wsp.to_string_lossy()]);
         assert_eq!(serde_json::from_str::<Value>(text).unwrap(), json!({"id": 21, "ok": true, "swept": swept}));
-        assert!(!at.place_file.exists() && !at.token_path.exists());
+        assert!(!at.place_file.exists() && !at.token_path.exists() && !at.wsp.exists());
     }
 
     #[tokio::test]

@@ -40,7 +40,9 @@ export const GitPrStateReply = z.object({ pr: PullRequest.optional() });
 export type GitPrStateReply = z.infer<typeof GitPrStateReply>;
 
 /** What a bring back answers: the push, then the pull request where a host command line was there to open one. The
- * note is why there is no pull request beside a push that landed, which is not a failure. */
+ * two halves are reported apart, since the push has landed by the time the pull request half runs: the note is why
+ * there is no pull request beside a push that landed and no failure, and the refusal is the pull request half's own
+ * failure, which the push above it still stands under. */
 export const BringBackResult = z.object({
   branch: z.string(),
   base: z.string(),
@@ -49,5 +51,6 @@ export const BringBackResult = z.object({
   stat: z.array(z.string()),
   pr: PullRequest.optional(),
   note: z.string().optional(),
+  refused: z.string().optional(),
 });
 export type BringBackResult = z.infer<typeof BringBackResult>;

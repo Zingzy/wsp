@@ -3644,6 +3644,7 @@ const DAEMON_CONTENTS = [
   "4605e734f4735405ddefd0478583032757ca8ad0b2dc8ce9a14e92789c2800a0",
   "52dc451ba47d583759687b0d9c8b5f3dc1d9f820ca25dc1e030e1268cc2b5157",
   "eb6eb2701b4edafd3f62e17ab032313660bafbfe80ce973bd56a56c86662aff8",
+  "2b992e451cd69dbf08eac12f8c1208a1b01cf1a5a36319bc4875a08e387ae05f",
 ];
 
 /** The daemon's protocol version, carried in its hello, so a client can tell what a machine's daemon answers
@@ -3792,7 +3793,12 @@ const DAEMON_CONTENTS = [
  * so nothing runs a daemon inside a workspace and the init's supervisor lookup is gone.
  * Version 52 refuses a bind whose destination is one of the trees the rootfs takes from the computer, the box's /root
  * and every shared tool root whether present on the computer yet or not, or sits under one, at the create, so a
- * workspace's copy or folder bind can never leave its mount point on the computer's own home. */
+ * workspace's copy or folder bind can never leave its mount point on the computer's own home.
+ * Version 53 puts the provision folder and wsp's own folder whole on the list a leave sweeps, in the daemon and in the
+ * protocol with a fixture that holds the two equal, and reads the landed list before the folder goes so wsp's own landed
+ * files leave with it and the folders they emptied are pruned; a bring back reports its push half first, the branch, the
+ * ahead count and the diffstat, and a gh that is present but not signed in reads as the note beside the landed push,
+ * while a push refused for want of a credential says so in the person's words with the command only the person can run. */
 export const DAEMON_VERSION = DAEMON_CONTENTS.length;
 
 /** sha256 of what a deploy installs on a guest and this record can hold: the Rust sources and manifests the binary

@@ -69,6 +69,7 @@ import {
   HTTP_URL_MAX,
   NOT_ON_A_BRANCH,
   NO_REMOTE,
+  noGitCredentialLine,
   noHostCliLine,
   nothingAheadLine,
   onBaseRefusal,
@@ -116,6 +117,7 @@ import {
   linkedLine,
   notAFrameLine,
   placeDaemonPaths,
+  placeOwnedPaths,
   portScopeRefusal,
   unknownOpLine,
   workScoreLine,
@@ -220,6 +222,8 @@ const words = (): Record<string, string> => ({
   nothingAhead: nothingAheadLine("{branch}", "{base}"),
   noRemote: NO_REMOTE,
   noHostCli: noHostCliLine("{host}"),
+  noGitCredential: noGitCredentialLine("{host}", "{fix}"),
+  noGitCredentialNoFix: noGitCredentialLine("{host}"),
   hostKeyRefusal: hostKeyRefusal("{url}"),
   listening: daemonListeningLine("{host}", "{port}"),
   sysSamplerStarted: SYS_SAMPLER_STARTED,
@@ -236,6 +240,10 @@ const words = (): Record<string, string> => ({
   authUnreadable: authUnreadableLine("{url}", "{error}"),
   hostRefused: hostRefusedLine("{url}", "{refusal}"),
 });
+
+/** The home the owned-paths fixture is rendered for: one letter, so the list reads as the shape of the paths
+ * rather than as somebody's login, and the daemon's twin renders the same one. */
+const FIXTURE_HOME = "/h";
 
 const numbers = (): Record<string, number | string | readonly string[]> => ({
   daemonVersion: DAEMON_VERSION,
@@ -511,6 +519,9 @@ describe("the words and numbers are what this package exports", () => {
   for (const [name, regenerate] of [
     ["words.json", words],
     ["numbers.json", numbers],
+    // The order a leave walks, which the daemon's own list is held to: the provision folder after the daemon's
+    // and wsp's own folder last, so nothing under it is left on a computer the person joined.
+    ["place-paths.json", () => placeOwnedPaths(FIXTURE_HOME)],
   ] as const) {
     it(`${name} equals its regeneration`, () => {
       const fresh = regenerate();
