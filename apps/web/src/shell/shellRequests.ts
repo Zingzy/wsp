@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Requests the palette, the shortcuts and the action registries raise for
 // another region to fulfil, as window events so the raiser does not own that
-// region's state. The sidebar answers new-workspace, forget-workspace and the
-// project trips with its dialogs and rename-workspace with the name box on
+// region's state. The sidebar answers new-workspace, add-project, forget-
+// workspace and the project trips with its dialogs and sheets, and
+// rename-workspace with the name box on
 // that row; new-thread waits for a chat container to subscribe. Composer
 // focus is held rather than broadcast: the workspace switch selects and asks
 // in one handler, and the composer it names remounts after that handler
@@ -11,6 +12,7 @@ import type { LookPart } from "@wsp/protocol";
 
 const NEW_WORKSPACE_EVENT = "wsp:new-workspace";
 const NEW_THREAD_EVENT = "wsp:new-thread";
+const ADD_PROJECT_EVENT = "wsp:add-project";
 
 export interface NewThreadRequest {
   readonly workspaceId: string;
@@ -23,6 +25,16 @@ export function requestNewWorkspace(): void {
 export function onNewWorkspaceRequest(listener: () => void): () => void {
   window.addEventListener(NEW_WORKSPACE_EVENT, listener);
   return () => window.removeEventListener(NEW_WORKSPACE_EVENT, listener);
+}
+
+/** Asks for the sheet that records a project; the sidebar answers, since the row it appears in is its own. */
+export function requestAddProject(): void {
+  window.dispatchEvent(new CustomEvent(ADD_PROJECT_EVENT));
+}
+
+export function onAddProjectRequest(listener: () => void): () => void {
+  window.addEventListener(ADD_PROJECT_EVENT, listener);
+  return () => window.removeEventListener(ADD_PROJECT_EVENT, listener);
 }
 
 export function requestNewThread(detail: NewThreadRequest): void {

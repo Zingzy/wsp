@@ -177,7 +177,9 @@ describe("app shell", () => {
     await waitFor(() => expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2));
     await act(async () => answer!({ ...DEFAULT_PREFERENCES, labs: true }));
     await waitFor(() => expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${SIDEBAR_DEFAULT_WIDTH}px`));
-    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list", labs: true });
+    // The width and the side, and nothing the page no longer picks: the sidebar's body and the labs flag are off
+    // what this browser keeps.
+    expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system" });
   });
 
   it("the sidebar opens at the width the host's record holds, follows a change to it, a cleared width puts the default back, and beside the inline panel a narrow window holds it to the shell's rule without touching the record", async () => {

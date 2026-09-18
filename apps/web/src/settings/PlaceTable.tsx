@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The computers table, drawn once and read in two places: the Where agents run
+// The computers table, drawn once and read in two places: the Computers
 // section, and the Add a computer sheet's joined screen, where the computer
 // that just joined is the one row. Four columns and, where the caller has one,
 // a last cell for the row's menu. A cell whose fact the computer has not
@@ -92,13 +92,21 @@ export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, a
     >
       <TableCell className={cn(NAME_COLUMN, "overflow-hidden")}>
         <span className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate text-[13px] text-foreground">{name}</span>
+          {/* A floor under the name, so the word beside it is the slot that gives way: eight characters of the
+              computer a person is reading about stand whatever else the row has to say. Not on a phone's width,
+              where the three fact columns and that floor together are six pixels wider than the card and the
+              table scrolled sideways: there the name gives way as it always did. */}
+          <span className="truncate text-[13px] text-foreground sm:min-w-[8ch]">{name}</span>
           {place.default ? (
             <span className={cn(FACT, "shrink-0")} data-k="place-default">
               {WHERE_WORDS.default}
             </span>
           ) : null}
-          <span className={cn(FACT, "shrink-0")} data-k="place-state">
+          {/* The slot that gives way, not the name: a recipe's own word runs to `7 tools, 1 file, 1 MCP server
+              ready`, and a state word that could not shrink cut the computer's name to one character. Both are cut
+              in proportion to what they hold, so a short name keeps its whole self, and the word this one loses is
+              on its own hover text. */}
+          <span className={cn(FACT, "min-w-0 truncate")} data-k="place-state" title={placeStateWord(place, absent)}>
             {placeStateWord(place, absent)}
           </span>
           {trail}

@@ -4,7 +4,7 @@
 // one row per workspace to switch to, recent threads at rest and every thread
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, CloudIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, FolderPlusIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
@@ -18,6 +18,7 @@ import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
 import { currentWorkspaceId } from "../../adapt/workspaces.js";
 import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
 import { compactTimeLabel, dotClassForTone, whereWord } from "../../sidebar/workspaceRows.js";
+import { NEW_WORKSPACE, PROJECT_WORDS } from "../../sidebar/words.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
 
 export interface PaletteHandlers {
@@ -33,8 +34,8 @@ export interface PaletteHandlers {
   readonly nextThread: () => void;
   readonly previousThread: () => void;
   readonly openSettings: () => void;
+  readonly addProject: () => void;
   readonly openAddComputer: () => void;
-  readonly openConnectProvider: () => void;
 }
 
 export interface PaletteItemsInput {
@@ -43,8 +44,6 @@ export interface PaletteItemsInput {
   /** What the person typed; the thread search runs over it, the at-rest list ignores it. */
   readonly query: string;
   readonly canCreate: boolean;
-  /** Whether this host offers the surfaces still being worked on; the registries' labs rows and the Settings row read it. */
-  readonly labs: boolean;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
   /** The computers and providers this host holds, for the one reading of a workspace whose computer is not
@@ -89,10 +88,19 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       value: "action:new-workspace",
       searchTerms: ["new workspace", "create workspace"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
-      title: "New workspace",
+      title: NEW_WORKSPACE,
       description: input.canCreate ? "One piece of work on one project" : "Not connected to the runtime",
       disabled: !input.canCreate,
       run: sync(handlers.newWorkspace),
+    },
+    {
+      kind: "action",
+      value: "action:add-project",
+      searchTerms: ["add a project", "project", "folder", "repository", "clone", "record a project"],
+      icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
+      title: PROJECT_WORDS.add,
+      description: "One folder or repository address on one computer",
+      run: sync(handlers.addProject),
     },
   ];
   if (selected !== null) {
@@ -162,7 +170,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     {
       kind: "action",
       value: "action:add-computer",
-      searchTerms: ["add a computer", "join", "place", "another mac", "laptop", "where agents run"],
+      searchTerms: ["add a computer", "join", "box", "another mac", "laptop", "linux", "ssh"],
       icon: <MonitorIcon className={ITEM_ICON_CLASS} />,
       title: PLACES_WORDS.addComputer,
       description: `${SETTINGS_WORDS.title} · ${PLACES_WORDS.section}`,
@@ -170,28 +178,14 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
     },
     {
       kind: "action",
-      value: "action:connect-provider",
-      // What a person hunts this row down by is what it costs them and what it is for, not the word provider.
-      searchTerms: ["connect a provider", "provider", "cloud", "api key", "cost", "price", "billing", "image", "where agents run"],
-      icon: <CloudIcon className={ITEM_ICON_CLASS} />,
-      title: PLACES_WORDS.connectProvider,
-      description: `${SETTINGS_WORDS.title} · ${PLACES_WORDS.section}`,
-      run: sync(handlers.openConnectProvider),
+      value: "action:settings",
+      searchTerms: ["settings", "preferences", "computers", "agents", "appearance", "sidebar width", "terminal size"],
+      icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
+      title: SETTINGS_WORDS.title,
+      description: SETTINGS_WORDS.hint,
+      shortcutCommand: "settings.toggle",
+      run: sync(handlers.openSettings),
     },
-    ...(input.labs
-      ? [
-          {
-            kind: "action" as const,
-            value: "action:settings",
-            searchTerms: ["settings", "preferences", "theme", "appearance", "light mode", "dark mode", "terminal size"],
-            icon: <SettingsIcon className={ITEM_ICON_CLASS} />,
-            title: SETTINGS_WORDS.title,
-            description: SETTINGS_WORDS.hint,
-            shortcutCommand: "settings.toggle" as const,
-            run: sync(handlers.openSettings),
-          },
-        ]
-      : []),
     {
       kind: "action",
       value: "action:toggle-right-panel",

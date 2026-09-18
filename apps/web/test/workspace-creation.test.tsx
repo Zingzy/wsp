@@ -3,9 +3,11 @@
 // log in a box of fixed height that keeps its size from two lines to twenty,
 // and the newest line last. Geometry that needs a layout engine is measured in
 // creation-layout.browser.test.ts; this file checks the structure jsdom can see.
+// Under the log, the view's own last line: the word table's reading of the
+// record the create answered with, in the words the row it becomes carries.
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { HOSTNAME_KEPT } from "@wsp/protocol";
+import { HOSTNAME_KEPT, type WorkspaceView } from "@wsp/protocol";
 import { localZoneLabel } from "../src/lib/timestampFormat.js";
 import { useStore, type Creation, type CreationLine } from "../src/protocol/store.js";
 import { WorkspaceCreation } from "../src/shell/WorkspaceCreation.js";
@@ -178,5 +180,53 @@ describe("workspace creation layout", () => {
     expect(within(view).getByTestId("creation-log").textContent).toContain("Asking wsp to start it.");
     expect(within(view).getByRole("progressbar", { name: "Creating" })).toBeDefined();
     expect(within(view).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+});
+
+describe("the view's own last line", () => {
+  /** A create that has been answered: the record the runtime handed back is in the store under the id the
+   * creation row already carried. */
+  const answered = (over: Partial<WorkspaceView> = {}): Creation => {
+    const workspace: WorkspaceView = {
+      id: "ws_new",
+      name: "add a LICENSE file",
+      kind: "local",
+      machineId: "local",
+      project: { id: "pr_1", name: "spoo", path: "/Users/dev/spoo", computer: "here" },
+      phase: "running",
+      golden: "",
+      createdAt: "2026-09-18T00:00:00.000Z",
+      copy: { road: "clonefile", path: "/Users/dev/spoo-ws_new", source: "/Users/dev/spoo", base: "abc", branch: "", carried: "deps-and-config" },
+      portBase: 3100,
+      ...over,
+    };
+    useStore.setState({
+      places: [{ id: "here", kind: "computer", name: "zingzy-mbp", default: false, present: true, takesForks: false }] as never,
+      workspaces: [workspace],
+      landings: { pr_1: { name: "here", capabilities: { copies: true, ownNetwork: false } as never } },
+    } as never);
+    return { key: "creating:1", name: workspace.name, askedAt: Date.now(), project: "pr_1", workspaceId: workspace.id, lines: [], failed: null };
+  };
+
+  it("reads what the workspace is made of and what its copy has for a network off the record, in the row's own words", async () => {
+    const view = await mount(answered());
+    // The protocol's word table, the same one the row it becomes reads: this screen writes no road of its own and
+    // the runtime's stage words end on ready with nothing about the copy.
+    expect(within(view).getByText("a copy · shares this Mac's ports, PORT 3100")).toBeTruthy();
+  });
+
+  it("says the folder worked in place as that, and names the computer only where the work did not land here", async () => {
+    const view = await mount(answered({ copy: { road: "in-place", path: "/Users/dev/spoo", source: "/Users/dev/spoo", base: "", branch: "", carried: "nothing" }, portBase: undefined }));
+    expect(within(view).getByText("in this folder · shares this Mac's ports")).toBeTruthy();
+    expect(view.textContent).not.toContain("zingzy-mbp");
+  });
+
+  it("holds the slot empty until the record lands, so nothing under it moves when it does", async () => {
+    useStore.setState({ places: [], workspaces: [], landings: {} } as never);
+    const view = await mount({ key: "creating:1", name: "add a LICENSE file", askedAt: Date.now(), project: "pr_1", workspaceId: null, lines: [], failed: null });
+    const slot = view.querySelector("[data-k='made-of']")!;
+    expect(slot.textContent).toBe("");
+    // The height is a line's whatever it holds: a slot that grew when the word arrived moved the log above it.
+    expect(slot.className).toContain("min-h-4");
   });
 });

@@ -1,23 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The Settings section that lists where a person's agents run, and the sheet
-// that adds a computer to it: the table off the host's own list, the door and
-// the code the sheet opens with, and the join it follows on the runtime's
-// event stream.
+// Settings > Computers: the table off the host's own list, which rows it draws
+// and which it leaves out, each row's detail with the agents on that computer
+// and what the recipe put there beside them, and the one-field sheet that adds
+// another.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CODE_EXPIRED_LINE, CODE_GOOD_LINE, DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PlaceAddStep, doorPortHeldLine, imageCopyStaysLine, joinToken, placeAddSheetWord, placeNoDialLine, readJoinToken, type EventUnion, type PlaceDoorView, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_PREFERENCES, PLACES_TICKET_REFUSAL, PLACES_WORDS, PLACE_CONNECTS, PlaceAddStep, imageCopyStaysLine, placeAddSheetWord, placeDaemonBehind, placeNoDialLine, provisionWord, type EventUnion, type InitSetup, type PlaceProvision, type PlaceSpend, type PlaceView, type WorkspaceStatus, type WorkspaceView, PLACE_INSTALL, absentRoad } from "@wsp/protocol";
 import { makeApi, ProtocolClient, type Api, type InstallStage, type SshLogin } from "../src/protocol/client.js";
 import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
-import { ADD_COMPUTER_WORDS, CONNECT_PROVIDER_WORDS } from "../src/settings/format.js";
+import { Computers } from "../src/settings/Computers.js";
+import { ADD_COMPUTER_WORDS, AGENTS_WORDS, SETTINGS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
-import { WhereAgentsRun } from "../src/settings/WhereAgentsRun.js";
 import { SettingsRow } from "../src/sidebar/SettingsRow.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
-const HOST_KEY = `SHA256:${"k".repeat(43)}`;
-const DOOR: PlaceDoorView = { port: 4420, addresses: ["http://192.168.1.20:4420"], hostKey: HOST_KEY };
+
+/** What the host says about its own setup: which keys it holds, which is the rule a cloud row stands under, and
+ * the agents on this computer, which are this computer's own block. */
+const setupOf = (over: Partial<InitSetup> = {}): InitSetup =>
+  ({ keys: { solari: false }, home: "/Users/dev", agents: [], pricing: null, job: null, ...over }) as InitSetup;
 
 /** A Linux box the ssh installer hands back: it runs Docker, so it can hold copies of the image. */
 const box: PlaceView = {
@@ -60,11 +63,7 @@ function fakeApi(over: Partial<Api> = {}): { api: Api; push(event: EventUnion): 
       listeners.push(fn);
       return () => {};
     },
-    placesDoor: async () => DOOR,
-    pairIssue: async () => {
-      state.issued += 1;
-      return { code: `QW4K7PZ${state.issued}`, expiresAt: NOW + 600_000 };
-    },
+    initGet: async () => setupOf(),
     ...over,
   } as unknown as Api;
   return {
@@ -79,9 +78,7 @@ function fakeApi(over: Partial<Api> = {}): { api: Api; push(event: EventUnion): 
 }
 
 beforeEach(() => {
-  // The provider sheet is drawn by the section itself, and a test that opened one leaves the rest of the document
-  // inert for the next: a row inside an aria-hidden container is a row no role query finds.
-  useStore.setState({ api: null, places: [], workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, connectProviderOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
+  useStore.setState({ api: null, places: [], projects: [], landings: {}, workspaces: [], statuses: {}, sessions: {}, addComputerOpen: false, settingsOpen: false, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
 });
 
 /** The client a test built the app's own api from. Closed here however that test ended: one left behind redials
@@ -95,6 +92,16 @@ afterEach(() => {
 });
 
 const ascii: PlaceView = { id: "box", kind: "provider", name: "box", default: false, shape: { cpu: 2, memMb: 4096 }, diskFreeBytes: 40 * 1024 ** 3, rateUsdPerHour: 0.018, takesForks: true };
+const solari: PlaceView = { id: "solari", kind: "provider", name: "solari", default: false, rateUsdPerHour: 0.11, takesForks: true };
+
+const AT = "2026-09-12T11:00:00.000Z";
+
+/** The reads the section makes after it is drawn, let through: the keys the host holds, the money and the image. */
+const settle = async (): Promise<void> => {
+  await act(async () => {
+    for (let i = 0; i < 6; i++) await new Promise(r => setTimeout(r, 0));
+  });
+};
 
 /** The workspaces the app holds, as the sidebar lists them: this computer's own, and the forks, whether they stand
  * at a provider or on a computer somebody joined. */
@@ -102,14 +109,16 @@ const workspace = (id: string, kind: WorkspaceView["kind"], machineId: string): 
 const mine = workspace("ws_a", "local", "local");
 const onLaptop: WorkspaceView = { ...workspace("ws_b", "cloud", "ctr_9f"), place: "p_1" };
 const fork = (id: string): WorkspaceView => workspace(id, "cloud", `fk_${id}`);
+/** A fork stamped with the cloud it was made at, which is what stands its row on that cloud's row. */
+const atSolari = (id: string): WorkspaceView => ({ ...fork(id), provider: "solari" });
 
 /** The four facts of a row; a row that can be acted on carries a fifth cell for its menu. */
 const cells = (row: HTMLElement): string[] => within(row).getAllByRole("cell").slice(0, 4).map(c => c.textContent ?? "");
 
-describe("Where agents run", () => {
+describe("the Computers table", () => {
   it("lists this computer first with its size and disk, and says how long a computer that is not answering has been away, once", () => {
     useStore.setState({ places: [here, laptop], workspaces: [mine, onLaptop] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const rows = screen.getAllByRole("row").slice(1);
     expect(cells(rows[0]!)[0]).toContain("This Mac");
     expect(cells(rows[0]!)[0]).not.toContain("zingzy-mbp");
@@ -130,7 +139,7 @@ describe("Where agents run", () => {
     // said unreachable: the app was telling a person two different things in two rooms.
     const silent = { id: mine.id, phase: "running", machineState: "running", reach: { state: "unreachable" }, machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, kind: "local", size: { cpu: 8, memMb: 16384 }, name: mine.name, golden: "", createdAt: mine.createdAt } as unknown as WorkspaceStatus;
     useStore.setState({ places: [here], workspaces: [mine], statuses: { [mine.id]: silent } });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const row = screen.getAllByRole("row")[1]!;
     expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("no daemon");
     expect(row.getAttribute("title")).toContain("this Mac's daemon is not running");
@@ -141,24 +150,26 @@ describe("Where agents run", () => {
     // This Mac's own workspace and the forks at a provider are recorded on no row at all, so a cell read off the
     // row said 0 under Workspaces while the sidebar showed three.
     useStore.setState({ places: [here, ascii], workspaces: [mine, fork("ws_x"), fork("ws_y")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const rows = screen.getAllByRole("row").slice(1);
     expect(cells(rows[0]!)[3]).toBe("1");
     expect(cells(rows[1]!)[3]).toBe("2");
   });
 
   it("keeps the default mark beside the name and the state word in the slot, so a default that is away says both", () => {
+    // Read by the id the wire keys this computer by, never by the row's place in the list: a list that did not
+    // hold this computer called its first row This Mac.
     useStore.setState({ places: [{ ...laptop, default: true }] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const row = screen.getAllByRole("row")[1]!;
     expect(row.querySelector("[data-k='place-default']")?.textContent).toBe("default");
     expect(row.querySelector("[data-k='place-state']")?.textContent).toBe("no answer");
-    expect(row.getAttribute("title")).toBe("This Mac is not answering; it connects on its own when it is on default");
+    expect(row.getAttribute("title")).toBe("old-macbook is not answering; it connects on its own when it is on default");
   });
 
   it("gives the name column what the fact columns leave and cuts the name there, so the table never scrolls sideways", () => {
     useStore.setState({ places: [here, laptop] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const head = screen.getAllByRole("columnheader");
     const classes = (el: Element): string[] => el.className.split(" ");
     expect(classes(head[0]!)).toEqual(expect.arrayContaining(["w-full", "max-w-0"]));
@@ -173,133 +184,93 @@ describe("Where agents run", () => {
 
   it("stands a bar in each cell a computer has not reported yet, so nothing moves when it does", () => {
     useStore.setState({ places: [{ id: "p_2", kind: "computer", name: "attic", default: false, present: true }] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const row = screen.getAllByRole("row")[1]!;
     expect(cells(row).slice(1).every(cell => cell === "")).toBe(true);
   });
 
-  it("opens each sheet from its own button", () => {
+  it("opens the sheet from the one button under the table, and offers no cloud to connect", () => {
     useStore.setState({ places: [here] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(screen.getByRole("button", { name: PLACES_WORDS.addComputer }));
     expect(useStore.getState().addComputerOpen).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: PLACES_WORDS.connectProvider }));
-    expect(screen.getByText(CONNECT_PROVIDER_WORDS.description)).toBeTruthy();
-  });
-});
-
-describe("the Add a computer sheet", () => {
-  it("opens the door, mints a code, shows the first address and the code, and names both in the terminal road", async () => {
-    const fake = fakeApi();
-    useStore.setState({ api: fake.api, places: [here] });
-    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(document.querySelector("[data-k='copy-address']")?.textContent).toBe("192.168.1.20:4420"));
-    expect(document.querySelector("[data-k='copy-code']")?.textContent).toBe(joinToken("QW4K7PZ1", HOST_KEY));
-    expect(screen.getByText(CODE_GOOD_LINE)).toBeTruthy();
-    fireEvent.click(screen.getByText(PLACES_WORDS.sheet.noApp));
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.install)).toBeTruthy());
-    // The terminal line carries one token: the code and the fingerprint of the key this host proves at the join,
-    // so the computer typing it can tell this host from anything else answering at that address.
-    expect(screen.getByText(`wsp join 192.168.1.20:4420 --code ${joinToken("QW4K7PZ1", HOST_KEY)}`)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: PLACES_WORDS.connectProvider })).toBeNull();
+    expect(document.querySelector("[data-k='connect-provider']")).toBeNull();
   });
 
-  it("moves to the lines the join writes, then to the joined title and the row, and opens the workspace it made", async () => {
-    const fake = fakeApi();
-    const opened: string[] = [];
-    useStore.setState({ api: fake.api, places: [here], select: (id: string | null) => opened.push(String(id)) } as never);
-    let closed = false;
-    render(<AddComputerSheet onClose={() => (closed = true)} now={() => NOW} />);
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.waiting)).toBeTruthy());
-    const joining: PlaceView = { ...laptop, present: false };
-    fake.push({ type: "place.joined", place: joining, from: "192.168.1.34" });
-    useStore.setState({ places: [here, joining] });
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.connected("192.168.1.34"))).toBeTruthy());
-    expect(screen.getByText(PLACES_WORDS.sheet.reading)).toBeTruthy();
-    useStore.setState({ places: [here, { ...laptop, present: true }] });
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.joinedTitle("old-macbook"))).toBeTruthy());
-    expect(screen.getByText(PLACES_WORDS.sheet.joined("Ubuntu 24.04", ["claude", "codex"]))).toBeTruthy();
-    // The card says the box joined and what it carries; there is no workspace of its own to open, and nothing on
-    // the card offers one.
-    expect(screen.queryByRole("button", { name: /^Open / })).toBeNull();
-    expect(opened).toEqual([]);
-  });
-
-  it("stands at the top right, 448 px wide, as tall as what it holds and capped at the window less its inset", async () => {
-    const fake = fakeApi();
-    useStore.setState({ api: fake.api, places: [here] });
-    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(document.querySelector("[data-k='add-computer']")).toBeTruthy());
-    const popup = document.querySelector("[data-k='add-computer']")!;
-    // self-start is what stops the popup stretching to the window's height; max-h-full is the cap it grows to.
-    expect(popup.className.split(" ")).toEqual(expect.arrayContaining(["self-start", "max-h-full", "max-w-md", "flex-col"]));
-    // The 16 px inset comes from the viewport's own padding, which is also what makes the cap the window less 32 px.
-    expect(popup.closest("[data-slot='sheet-viewport']")?.className.split(" ")).toEqual(expect.arrayContaining(["sm:p-4"]));
-    // The body scrolls inside that cap, and the footer sits directly under it with no spacer between.
-    const panel = popup.querySelector("[data-slot='sheet-panel']")!;
-    const scroller = panel.closest("[data-slot='scroll-area-viewport']")!.parentElement!;
-    expect(scroller.nextElementSibling).toBe(popup.querySelector("[data-slot='sheet-footer']"));
-  });
-
-  it("copies the same token off the Code row as the terminal line prints, and the join screen reads both halves back out of it", async () => {
-    const writeText = vi.fn(async (_text: string) => {});
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    const fake = fakeApi();
-    useStore.setState({ api: fake.api, places: [here] });
-    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(document.querySelector("[data-k='copy-code']")?.textContent).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: `Copy the ${PLACES_WORDS.sheet.code.toLowerCase()}` }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-    const copied = writeText.mock.calls[0]![0];
-    // One word, whichever road the person takes it by: the row a person copies and the line they paste into a
-    // terminal carry the same string.
-    fireEvent.click(screen.getByText(PLACES_WORDS.sheet.noApp));
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.joinLine("192.168.1.20:4420", copied))).toBeTruthy());
-    // And what the first-run join screen does with that field: the code the other host spends and the key it must
-    // prove, both read back out of the one thing that was copied.
-    expect(readJoinToken(copied)).toEqual({ code: "QW4K7PZ1", hostKey: HOST_KEY });
-    // Read whole, not ended in an ellipsis: a fingerprint a person cannot read is decoration.
-    expect(document.querySelector("[data-k='copy-code']")?.className).toContain("break-all");
-    expect(document.querySelector("[data-k='copy-code']")?.className).not.toContain("truncate");
-  });
-
-  it("says the code expired at its own moment and mints another, and moves nothing else", async () => {
-    const fake = fakeApi();
-    useStore.setState({ api: fake.api, places: [here] });
-    render(<AddComputerSheet onClose={() => {}} now={() => NOW + 700_000} />);
-    await waitFor(() => expect(screen.getByText(CODE_EXPIRED_LINE)).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: PLACES_WORDS.sheet.newCode }));
-    await waitFor(() => expect(document.querySelector("[data-k='copy-code']")?.textContent).toBe(joinToken("QW4K7PZ2", HOST_KEY)));
-  });
-
-  it("lands a door this host could not open in the slot, and asks for no code behind it", async () => {
-    const fake = fakeApi({ placesDoor: async () => Promise.reject(new Error(doorPortHeldLine(4420))) });
-    useStore.setState({ api: fake.api, places: [here] });
-    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(screen.getByText(doorPortHeldLine(4420))).toBeTruthy());
-    expect(fake.issued).toBe(0);
-  });
-
-  it("says on both roads how a computer that is nowhere near this network reaches it, and what a closed lid does", async () => {
-    const fake = fakeApi();
-    useStore.setState({ api: fake.api, places: [here] });
-    render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.waiting)).toBeTruthy());
-    const said = (): string => document.querySelector("[data-k='description']")?.textContent ?? "";
-    // The app road: the network first, then the half a box somewhere else needs, with the sign-in named.
-    expect(said()).toBe(`${PLACES_WORDS.sheet.description} ${PLACES_WORDS.sheet.whileAsleep}`);
-    expect(said()).toContain(PLACE_CONNECTS);
-    // The one line the whole sheet is opened for, said on this road before the road is even chosen, and in the
-    // sentence the sheet hands a screen reader rather than a second paragraph that would take its place.
-    expect(said()).toContain(PLACES_WORDS.sheet.whileAsleep);
-    fireEvent.keyDown(document.querySelector("[data-segment='app']")!, { key: "ArrowRight" });
-    await waitFor(() => expect(document.querySelector("[data-k='login-field']")).toBeTruthy());
-    // The ssh road: a box in somebody else's rack reaches this Mac the same two ways, in its own sentence.
-    expect(said()).toBe(
-      `The app logs in over ssh as your terminal would, installs wsp on the box, and the box connects to this Mac over your network, or from outside it once you sign in. ${PLACES_WORDS.sheet.whileAsleep}`,
+  it("is titled Computers, and a fresh state is this computer's row alone with no cloud row and no price", async () => {
+    // A fresh state listed every cloud this wsp can hold, each with an hourly rate, under a heading about where
+    // agents run: a table of what a person had not bought, which read as a bill.
+    useStore.setState({ api: fakeApi().api, places: [here, ascii, solari] });
+    render(
+      <>
+        <h2>{PLACES_WORDS.section}</h2>
+        <Computers now={NOW} />
+      </>,
     );
-    expect(said()).toContain(PLACE_CONNECTS);
-    // One description on this road too, and the only one the popup is described by.
-    expect(document.querySelectorAll("[data-slot='sheet-description']").length).toBe(1);
+    await settle();
+    expect(screen.getByText("Computers")).toBeTruthy();
+    expect(screen.queryByText("Where agents run")).toBeNull();
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(1);
+    expect(cells(rows[0]!)[0]).toContain("This Mac");
+    expect(document.body.textContent).not.toContain("ASCII");
+    expect(document.body.textContent).not.toContain("Solari");
+    expect(document.body.textContent).not.toContain("$");
+  });
+
+  it("draws a cloud row once this host holds its key, named as a person reads it, with what it took this month in the Workspaces cell", async () => {
+    const api = fakeApi({ initGet: async () => setupOf({ keys: { solari: true } }), spend: async () => [{ place: "solari", monthUsd: 1.23, rateUsdPerHour: 0.11 }] } as Partial<Api>).api;
+    useStore.setState({ api, places: [here, ascii, solari], workspaces: [atSolari("ws_s")] });
+    render(<Computers now={NOW} />);
+    await settle();
+    const names = screen.getAllByRole("row").slice(1).map(row => cells(row)[0] ?? "");
+    // The one whose key is held, and the one a workspace stands on; the third cloud is not on the table at all.
+    expect(names).toHaveLength(2);
+    expect(names[1]).toContain("Solari");
+    expect(names.join(" ")).not.toContain("ASCII");
+    const row = document.querySelector("[data-place-row='solari']")!;
+    // What that account has taken this month rides the Workspaces cell, in the protocol's own clause.
+    expect(cells(row as HTMLElement)[3]).toBe("1 · $1.23 this month");
+  });
+
+  it("draws a cloud row for an account a workspace stands on even with no key held, so a machine is never orphaned", async () => {
+    useStore.setState({ api: fakeApi().api, places: [here, solari], workspaces: [atSolari("ws_s")] });
+    render(<Computers now={NOW} />);
+    await settle();
+    expect(document.querySelector("[data-place-row='solari']")).toBeTruthy();
+  });
+
+  it("reads the state slot in one order: the computer that is not answering, then the recipe on it, then the daemon behind", async () => {
+    const running: PlaceProvision = { state: "running", addId: "a_1", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
+    const failed: PlaceProvision = {
+      state: "done",
+      addId: "a_1",
+      recipeAt: AT,
+      startedAt: AT,
+      finishedAt: AT,
+      rows: [
+        { id: "tools/gh", label: "GitHub CLI", outcome: "failed", note: "no release for this chip" },
+        { id: "tools/uv", label: "uv", outcome: "failed", note: "the script exited 1" },
+        ...Array.from({ length: 5 }, (_, at) => ({ id: `tools/t${at}`, label: `t${at}`, outcome: "installed" as const })),
+      ],
+    };
+    const state = (place: PlaceView): string | undefined => document.querySelector(`[data-place-row='${place.id}'] [data-k='place-state']`)?.textContent ?? undefined;
+    const busy = { ...box, id: "p_busy", name: "busy", provision: running };
+    const broke = { ...box, id: "p_broke", name: "broke", provision: failed };
+    // A computer that is not answering says that first, whatever the recipe on it was doing: nothing can be put on
+    // a computer that is off.
+    const gone = { ...laptop, id: "p_gone", name: "gone", provision: running };
+    const behind = { ...box, id: "p_old", name: "old", daemonVersion: 1 };
+    useStore.setState({ api: fakeApi().api, places: [here, busy, broke, gone, behind] });
+    render(<Computers now={NOW} />);
+    await settle();
+    expect(state(busy)).toBe("setting up 3/7: uv");
+    expect(state(busy)).toBe(provisionWord(running));
+    // The failed rows by name, which is what a person can act on.
+    expect(state(broke)).toBe("2 of 7 failed: GitHub CLI, uv");
+    expect(state(gone)).toBe("no answer");
+    expect(state(behind)).toBe(placeDaemonBehind(behind));
   });
 });
 
@@ -324,7 +295,7 @@ describe("what the places cost this month", () => {
   it("puts what a provider took this month in its Workspaces cell, and leaves a computer of the person's own alone", async () => {
     const { api } = withSpend([{ place: "box", monthUsd: 0.41, rateUsdPerHour: 0.16 }]);
     useStore.setState({ api, places: [here, laptop, ascii], workspaces: [mine, onLaptop, fork("ws_x"), fork("ws_y")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     const rows = () => screen.getAllByRole("row").slice(1);
     await waitFor(() => expect(cells(rows()[2]!)[3]).toBe("2 · $0.41 this month"));
     expect(cells(rows()[0]!)[3]).toBe("1");
@@ -337,7 +308,7 @@ describe("what the places cost this month", () => {
       { place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 },
     ]);
     useStore.setState({ api, places: [here, ascii, solari], workspaces: [atProvider("ws_x", "box"), atProvider("ws_y", "solari"), atProvider("ws_z", "solari")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(cells(screen.getAllByRole("row")[2]!)[3]).toBe("1 · $0.41 this month"));
     expect(cells(screen.getAllByRole("row")[3]!)[3]).toBe("2 · $4.12 this month");
     // The foot adds up every provider on the list and says how many that is.
@@ -347,7 +318,7 @@ describe("what the places cost this month", () => {
   it("says the month, the burn now and how many workspaces that is in the row's own detail", async () => {
     const { api } = withSpend([{ place: "solari", monthUsd: 4.12, rateUsdPerHour: 0.16 }]);
     useStore.setState({ api, places: [here, solari], workspaces: [atProvider("ws_y", "solari"), atProvider("ws_z", "solari")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(document.querySelector("[data-place-row='solari']")).toBeTruthy());
     fireEvent.click(document.querySelector("[data-place-row='solari']")!);
     expect(document.querySelector("[data-k='place-detail'] [data-k='spend']")?.textContent).toBe("Spend$4.12 this month · $0.16/hr now across 2 workspaces");
@@ -356,7 +327,7 @@ describe("what the places cost this month", () => {
   it("leaves a computer of the person's own without a Spend row, and says nothing at the foot with no provider on the list", async () => {
     const { api } = withSpend([{ place: "p_1", monthUsd: 0.41, rateUsdPerHour: 0 }]);
     useStore.setState({ api, places: [here, laptop], workspaces: [mine, onLaptop] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     await waitFor(() => expect(document.querySelector("[data-k='place-detail']")).toBeTruthy());
     expect(document.querySelector("[data-k='place-detail'] [data-k='spend']")).toBeNull();
@@ -366,7 +337,7 @@ describe("what the places cost this month", () => {
   it("follows the meter: every cost tick reads the month again, and a read in flight is not asked twice", async () => {
     const { api, asks, push } = withSpend([{ place: "box", monthUsd: 0.41, rateUsdPerHour: 0.16 }]);
     useStore.setState({ api, places: [here, ascii], workspaces: [fork("ws_x")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(asks()).toBe(1));
     act(() => {
       push(COST_TICK);
@@ -386,7 +357,7 @@ describe("what the places cost this month", () => {
       },
     });
     useStore.setState({ api: fake.api, places: [here, ascii], workspaces: [fork("ws_x")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(cells(screen.getAllByRole("row")[2]!)[3]).toBe("1"));
     expect(document.querySelector("[data-k='places-spend']")).toBeNull();
     await waitFor(() => expect(asks).toBe(1));
@@ -403,7 +374,7 @@ describe("what the places cost this month", () => {
       },
     });
     useStore.setState({ api: fake.api, places: [here, ascii], workspaces: [fork("ws_x")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(asks).toBe(1));
     act(() => fake.push(COST_TICK));
     await waitFor(() => expect(cells(screen.getAllByRole("row")[2]!)[3]).toBe("1 · $0.41 this month"));
@@ -417,7 +388,7 @@ describe("what the places cost this month", () => {
       { place: "solari", monthUsd: 0, rateUsdPerHour: 0 },
     ]);
     useStore.setState({ api, places: [here, ascii, solariRow], workspaces: [atProvider("ws_x", "box"), atProvider("ws_y", "solari")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(document.querySelector("[data-k='places-spend']")?.textContent).toBe("$0.41 this month across 1 provider"));
     // The row that took nothing still says so in its own cell; it is the count of who charged that leaves it out.
     expect(cells(screen.getAllByRole("row")[3]!)[3]).toBe("1 · $0.00 this month");
@@ -431,7 +402,7 @@ describe("what the places cost this month", () => {
       { place: "box", monthUsd: 0.41, rateUsdPerHour: 0.018 },
     ]);
     useStore.setState({ api, places: [runsDocker, ascii, docker], workspaces: [mine, atProvider("ws_x", "box")] });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     await waitFor(() => expect(document.querySelector("[data-k='places-spend']")?.textContent).toBe("$0.41 this month across 1 provider"));
     // This Mac runs Docker and still charges its owner nothing, so its cell says what may go there and no money.
     expect(cells(screen.getAllByRole("row")[1]!)[3]).toBe("1");
@@ -447,19 +418,158 @@ describe("a computer's own row", () => {
     });
   };
 
-  it("opens its detail under it, and leaves this computer without one", () => {
+  it("opens its detail under it, this computer's own included, since the agents here are read there", () => {
     withWorkspaces();
-    render(<WhereAgentsRun now={NOW} />);
-    expect(document.querySelector("[data-k='place-detail']")).toBeNull();
-    fireEvent.click(document.querySelector("[data-place-row='here']")!);
+    render(<Computers now={NOW} />);
     expect(document.querySelector("[data-k='place-detail']")).toBeNull();
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     const detail = document.querySelector("[data-k='place-detail']")!;
     expect(detail.getAttribute("data-place")).toBe("p_1");
     expect(detail.textContent).toContain("Ubuntu 24.04");
-    expect(detail.textContent).toContain("claude, codex");
     expect(detail.textContent).toContain("spoo-fix · Running · 2 threads");
     expect(document.querySelector("[data-place-row='p_1']")?.getAttribute("aria-expanded")).toBe("true");
+    // This computer's own row opens too, and carries nothing that could be done to the computer the host runs on.
+    fireEvent.click(document.querySelector("[data-place-row='here']")!);
+    const own = document.querySelector("[data-k='place-detail']")!;
+    expect(own.getAttribute("data-place")).toBe("here");
+    expect(own.querySelector("[data-k='agents-block']")).toBeTruthy();
+    for (const k of ["remove", "update", "rename", "dial", "address", "answered"]) expect(own.querySelector(`[data-k='${k}']`)).toBeNull();
+  });
+
+  it("says how a copy is made there and what it has for a network, off the row and off the landing's own flags", async () => {
+    const project = { id: "pr_box", name: "spoo", computer: "p_1", source: { kind: "folder", path: "/root/spoo" }, path: "/root/spoo", createdAt: AT } as never;
+    const mac = { id: "pr_here", name: "wsp", computer: "here", source: { kind: "folder", path: "/Users/dev/wsp" }, path: "/Users/dev/wsp", createdAt: AT } as never;
+    useStore.setState({
+      api: fakeApi().api,
+      places: [here, { ...laptop, present: true, copies: "reflink" }],
+      projects: [mac, project],
+      landings: {
+        pr_here: { name: "here", capabilities: { copies: true, ownNetwork: false } as never },
+        pr_box: { place: "p_1", name: "old-macbook", capabilities: { copies: true, ownNetwork: true } as never },
+      },
+      workspaces: [],
+      sessions: {},
+    });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    // The word the computer itself reported, and the network word off the two flags a create there is answered
+    // with: one home for both, so this row and a workspace row cannot say two things.
+    expect(detailValue("copies")).toBe("reflink");
+    expect(detailValue("ports")).toBe("own network");
+    fireEvent.click(document.querySelector("[data-place-row='here']")!);
+    expect(detailValue("ports")).toBe("shares this Mac's ports");
+  });
+
+  it("says a computer that copies nothing does, rather than leaving the row blank", () => {
+    useStore.setState({ api: fakeApi().api, places: [here, { ...laptop, present: true, takesForks: false }] });
+    render(<Computers now={NOW} />);
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    expect(detailValue("copies")).toBe(WHERE_WORDS.copiesNothing);
+  });
+
+  it("lists the agents on this computer by their own names, with the tools word and the one held action", async () => {
+    const agents = [
+      { id: "claude", name: "Claude Code", configured: true, takesTools: true },
+      { id: "codex", name: "Codex", configured: false, takesTools: true },
+      { id: "cursor", name: "Cursor", configured: false, takesTools: false },
+    ];
+    useStore.setState({ api: fakeApi({ initGet: async () => setupOf({ agents }) } as Partial<Api>).api, places: [here] });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='here']")!);
+    expect(agentRows()).toEqual([
+      { agent: "claude", name: "Claude Code", state: AGENTS_WORDS.added, action: undefined },
+      // The one action this computer's rows carry, held: handing an agent the wsp tools has no road from the app.
+      { agent: "codex", name: "Codex", state: "", action: AGENTS_WORDS.add },
+      { agent: "cursor", name: "Cursor", state: AGENTS_WORDS.noTools, action: undefined },
+    ]);
+    // No sign-in here: an agent on the computer the app runs on is signed in where it is installed.
+    expect(document.querySelector("[data-k='agent-sign-in']")).toBeNull();
+  });
+
+  it("says so when a computer reported no agent at all, naming that computer", async () => {
+    useStore.setState({ api: fakeApi().api, places: [here, { ...laptop, present: true, agents: [] }] });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='here']")!);
+    expect(document.querySelector("[data-k='no-agents']")?.textContent).toBe("No agents found on this Mac.");
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    expect(document.querySelector("[data-k='no-agents']")?.textContent).toBe("No agents found on old-macbook.");
+  });
+
+  it("lists a joined computer's agents by catalog name with what the recipe came to, the skills and servers beside them, and a held sign-in naming the line that runs one", async () => {
+    const provision: PlaceProvision = {
+      state: "done",
+      addId: "a_1",
+      recipeAt: AT,
+      startedAt: AT,
+      finishedAt: AT,
+      rows: [
+        { id: "agents/claude", label: "Claude Code", outcome: "installed" },
+        { id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" },
+        { id: "tools/gh", label: "GitHub CLI", outcome: "present" },
+        { id: "agents/files/skills", label: "code-review", outcome: "installed", kind: "file" },
+        { id: "agents/mcp/linear", label: "linear", outcome: "installed", kind: "server" },
+      ],
+    };
+    useStore.setState({ api: fakeApi().api, places: [here, { ...laptop, present: true, name: "spoo", provision }] });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    // The catalog's own names, never the ids the wire carries, and the word for what the job came to for each.
+    expect(agentRows()).toEqual([
+      { agent: "claude", name: "Claude Code", state: "installed", action: AGENTS_WORDS.signIn },
+      { agent: "codex", name: "Codex", state: "failed: npm exited 1", action: AGENTS_WORDS.signIn },
+    ]);
+    // The sign-in is held with the command line that runs one, built from this row's own two names.
+    expect(document.querySelector("[data-agent='codex'] [data-k='agent-sign-in']")?.getAttribute("title")).toBe("Sign in from a terminal for now: wsp add spoo --sign-in codex");
+    expect(document.querySelector("[data-agent='codex'] [data-k='agent-sign-in']")?.hasAttribute("data-held")).toBe(true);
+    // What the recipe put there beside the agents: the person's own files in their agents' homes, and the servers
+    // written into those configs. A tool row is not one of them; the row's own state slot counts those.
+    expect([...document.querySelectorAll("[data-k='recipe-row']")].map(row => [row.getAttribute("data-kind"), row.firstElementChild?.textContent, row.querySelector("[data-k='recipe-state']")?.textContent])).toEqual([
+      ["file", "code-review", "file · installed"],
+      ["server", "linear", "MCP server · installed"],
+    ]);
+    expect(document.querySelector("[data-k='agents-block']")?.textContent).not.toContain("GitHub CLI");
+  });
+
+  it("reads found on a joined computer no recipe has run on, since that is all the computer said", async () => {
+    useStore.setState({ api: fakeApi().api, places: [here, { ...laptop, present: true }] });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    expect(agentRows().map(row => row.state)).toEqual([AGENTS_WORDS.found, AGENTS_WORDS.found]);
+  });
+
+  it("puts this wsp's daemon and the recipe on a computer from Update, and reads the job it answers with in the row's state slot", async () => {
+    const asked: string[] = [];
+    const provision: PlaceProvision = { state: "running", addId: "a_2", recipeAt: AT, startedAt: AT, rows: [], at: { label: "uv", index: 3, of: 7 } };
+    const api = fakeApi({
+      placesUpdate: async (placeId: string) => {
+        asked.push(placeId);
+        return { name: "old-macbook", provision };
+      },
+    } as unknown as Partial<Api>).api;
+    useStore.setState({ api, places: [here, { ...laptop, present: true }] });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='update']")!);
+    await waitFor(() => expect(asked).toEqual(["p_1"]));
+    // The job the reply carried, on the row the word is read off.
+    await waitFor(() => expect(document.querySelector("[data-place-row='p_1'] [data-k='place-state']")?.textContent).toBe("setting up 3/7: uv"));
+    expect(useStore.getState().places.find(place => place.id === "p_1")?.provision).toEqual(provision);
+  });
+
+  it("holds Update on a wsp whose client cannot ask for one", async () => {
+    useStore.setState({ api: fakeApi().api, places: [here, { ...laptop, present: true }] });
+    render(<Computers now={NOW} />);
+    await settle();
+    fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
+    const update = document.querySelector("[data-k='place-detail'] [data-k='update']")!;
+    expect(update.hasAttribute("disabled")).toBe(true);
+    expect(update.getAttribute("title")).toBe(WHERE_WORDS.notYet);
   });
 
   /** A client that can dial, so a button drawn beside a row is held for the row's own reason and never the app's. */
@@ -469,10 +579,20 @@ describe("a computer's own row", () => {
   /** One row of the open detail, its value alone: the row's own element holds the label first. */
   const detailValue = (k: string): string | undefined => document.querySelector(`[data-k='place-detail'] [data-k='${k}']`)?.lastElementChild?.textContent ?? undefined;
 
+  /** Every line of the open row's agents block: which agent it is, the name a person reads, the word for what
+   * stands there and the one action beside it. */
+  const agentRows = (): { agent: string | null; name: string | undefined; state: string | undefined; action: string | undefined }[] =>
+    [...document.querySelectorAll("[data-k='agents-block'] [data-k='agent']")].map(row => ({
+      agent: row.getAttribute("data-agent"),
+      name: row.firstElementChild?.textContent ?? undefined,
+      state: row.querySelector("[data-k='agent-state']")?.textContent ?? undefined,
+      action: row.querySelector("[data-k='agent-add'], [data-k='agent-sign-in']")?.textContent ?? undefined,
+    }));
+
   it("names the login the host dials and how long the last dial took, so a row says which machine it is", () => {
     const vps: PlaceView = { ...laptop, id: "p_3", name: "vps", road: { ssh: "root@65.21.4.12" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: true, roundTripMs: 14 } };
     useStore.setState({ places: [here, vps], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
     const detail = document.querySelector("[data-k='place-detail']")!;
     expect(detailValue("address")).toBe("root@65.21.4.12 · ssh");
@@ -484,14 +604,15 @@ describe("a computer's own row", () => {
     expect(detailValue("system")).toBe("Ubuntu 24.04 · last seen 2 h ago");
   });
 
-  it("says nothing about reaching a provider, which is a key and not a computer this host dials", () => {
-    useStore.setState({ places: [here, ascii], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+  it("says nothing about reaching a cloud, which is a key and not a computer this host dials", async () => {
+    useStore.setState({ api: fakeApi({ initGet: async () => setupOf({ keys: { box: true } }) } as Partial<Api>).api, places: [here, ascii], workspaces: [], sessions: {} });
+    render(<Computers now={NOW} />);
+    await settle();
     fireEvent.click(document.querySelector("[data-place-row='box']")!);
     const detail = document.querySelector("[data-k='place-detail']")!;
     expect(detail).toBeTruthy();
-    // A provider's machines are at the other end of a key: there is no address to name, nothing that last
-    // answered, no dial to report and no button to press.
+    // A cloud's machines are at the other end of a key: there is no address to name, nothing that last answered,
+    // no dial to report and no button to press.
     expect(detailValue("answered")).toBeUndefined();
     expect(detailValue("address")).toBeUndefined();
     expect(detail.querySelector("[data-k='dialled']")).toBeNull();
@@ -503,7 +624,7 @@ describe("a computer's own row", () => {
   it("says a computer that never answered so, rather than leaving the row out", () => {
     const fresh: PlaceView = { ...laptop, id: "p_4", name: "vps", lastSeenAt: undefined };
     useStore.setState({ places: [here, fresh], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_4']")!);
     expect(detailValue("answered")).toBe("not since it joined");
   });
@@ -511,7 +632,7 @@ describe("a computer's own row", () => {
   it("reads a computer that is answering plain, with nothing marked as stale", () => {
     const live: PlaceView = { ...laptop, id: "p_5", name: "vps", present: true, lastSeenAt: "2026-09-12T11:59:00.000Z" };
     useStore.setState({ places: [here, live], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_5']")!);
     expect(detailValue("system")).toBe("Ubuntu 24.04");
   });
@@ -522,7 +643,7 @@ describe("a computer's own row", () => {
     const line = "root@65.21.4.12 answered over ssh in 412 ms, so the computer is on; the agent on it is not dialling this host.";
     const fake = fakeApi({ dialPlace: async (placeId: string) => ({ dialled: { at: "2026-09-12T12:00:00.000Z", answered: true, roundTripMs: 412 }, line, place: { ...vps, id: placeId } }) } as Partial<Api>);
     useStore.setState({ api: fake.api, places: [here, vps], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_3']")!);
     expect(document.querySelector("[data-k='place-detail'] [data-k='dialled']")?.textContent).toBe(said);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='dial']")!);
@@ -531,7 +652,7 @@ describe("a computer's own row", () => {
 
   it("computes the Remove sentence from what that computer holds", () => {
     withWorkspaces();
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
@@ -540,7 +661,7 @@ describe("a computer's own row", () => {
 
   it("hands a computer that is offline the one line to run on it by hand, and names what that line takes off", () => {
     withWorkspaces();
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     expect(document.querySelector("[data-k='leave-line']")?.textContent).toBe(PLACES_WORDS.remove.leaveLine);
@@ -549,7 +670,7 @@ describe("a computer's own row", () => {
 
   it("gives a computer that is answering no line to run by hand: the host sweeps it over the link", () => {
     useStore.setState({ places: [here, { ...laptop, present: true }], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     expect(screen.getByText("Remove old-macbook?")).toBeTruthy();
@@ -562,7 +683,7 @@ describe("a computer's own row", () => {
     const said = placeNoDialLine("old-macbook");
     const byCode: PlaceView = { ...laptop, road: { from: "192.168.1.34" }, dialled: { at: "2026-09-12T11:59:00.000Z", answered: false, said } };
     useStore.setState({ api: dialling().api, places: [here, byCode, vps], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     // It joined by typing a code and is not answering: the sentence is the whole answer, and a button whose only
     // reply is that same sentence is not drawn beside it.
@@ -575,7 +696,7 @@ describe("a computer's own row", () => {
 
   it("dials a computer that is holding its link over the link, and says so on the button", () => {
     useStore.setState({ api: dialling().api, places: [here, { ...laptop, present: true }], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     expect(document.querySelector("[data-k='place-detail'] [data-k='dial']")?.textContent).toBe("Try now");
   });
@@ -583,7 +704,7 @@ describe("a computer's own row", () => {
   it("says the same thing about the copy of the image as the sheet that added the computer said", () => {
     const holding: PlaceView = { ...laptop, engine: "docker" };
     useStore.setState({ places: [here, holding], workspaces: [], sessions: {} });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     // Both sentences of the dialog, against the note the Add sheet shows before any of this: the copy stays, and
@@ -598,7 +719,7 @@ describe("a computer's own row", () => {
   it("says nothing of a record leaving for a computer that holds none, and takes it out on the host's own road", async () => {
     const removed: string[] = [];
     useStore.setState({ places: [here, laptop], workspaces: [], sessions: {}, api: { subscribe: () => () => {}, removePlace: async (id: string) => (removed.push(id), { removed: true, swept: [] }) } as unknown as Api });
-    render(<WhereAgentsRun now={NOW} />);
+    render(<Computers now={NOW} />);
     fireEvent.click(document.querySelector("[data-place-row='p_1']")!);
     fireEvent.click(document.querySelector("[data-k='place-detail'] [data-k='remove']")!);
     expect(screen.getByText("wsp comes off old-macbook, which is otherwise left as it is, and the copy of your image stays where it is. It is offline; what is on it is swept the next time it connects.")).toBeTruthy();
@@ -607,29 +728,65 @@ describe("a computer's own row", () => {
   });
 });
 
-describe("the ssh road of the sheet", () => {
-  // The road is moved with the arrow the radio group answers to: jsdom builds no PointerEvent, so a click on a
-  // segment never reaches base-ui's own handler.
-  const toSsh = async (): Promise<void> => {
-    fireEvent.keyDown(document.querySelector("[data-segment='app']")!, { key: "ArrowRight" });
-    await waitFor(() => expect(document.querySelector("[data-k='login-field']")).toBeTruthy());
-  };
-
+describe("the Add a computer sheet", () => {
   const openSheet = async (over: Partial<Api> = {}) => {
     const fake = fakeApi(over);
     useStore.setState({ api: fake.api, places: [here] });
     render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.waiting)).toBeTruthy());
-    await toSsh();
+    await waitFor(() => expect(document.querySelector("[data-k='login-field']")).toBeTruthy());
     return fake;
   };
+
+  it("asks one thing: an ssh login, focused, with no second road, no code and no address to type anywhere", async () => {
+    await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    const field = document.querySelector<HTMLInputElement>("#add-computer-login")!;
+    expect(field.getAttribute("placeholder")).toBe("root@host");
+    expect(document.querySelector("[data-k='login-field'] label")?.textContent).toBe(ADD_COMPUTER_WORDS.login);
+    // The hand lands in the field: the sheet is opened to type a login and nothing else.
+    expect(document.activeElement).toBe(field);
+    // One field, and one road to a computer: no port, no pick of roads, no code and no address for somebody to
+    // type on the other computer, and nothing about a box to buy.
+    expect(document.querySelectorAll("[data-k='add-computer'] input")).toHaveLength(1);
+    expect(document.querySelector("[data-k='port-field']")).toBeNull();
+    expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
+    expect(document.querySelector("[data-k='copy-code']")).toBeNull();
+    expect(document.querySelector("[data-k='copy-address']")).toBeNull();
+    expect(document.querySelector("[data-k='no-app']")).toBeNull();
+    for (const said of [PLACES_WORDS.sheet.code, PLACES_WORDS.sheet.address, PLACES_WORDS.sheet.appRoad, "Get a box"]) {
+      expect(document.body.textContent).not.toContain(said);
+    }
+  });
+
+  it("says what a computer you own runs and what a closed lid does to the work already on it", async () => {
+    await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
+    const said = document.querySelector("[data-k='description']")?.textContent ?? "";
+    expect(said).toBe(`${PLACES_WORDS.sheet.description} ${PLACES_WORDS.sheet.whileAsleep}`);
+    // The noun on this sheet is the workspace, which is what a computer you own is added to run.
+    expect(said).toContain("runs workspaces for your wsp");
+    expect(said).toContain(PLACE_CONNECTS);
+    // One description, and the only one the popup is described by.
+    expect(document.querySelectorAll("[data-slot='sheet-description']").length).toBe(1);
+  });
+
+  it("stands at the top right, 448 px wide, as tall as what it holds and capped at the window less its inset", async () => {
+    await openSheet();
+    const popup = document.querySelector("[data-k='add-computer']")!;
+    // self-start is what stops the popup stretching to the window's height; max-h-full is the cap it grows to.
+    expect(popup.className.split(" ")).toEqual(expect.arrayContaining(["self-start", "max-h-full", "max-w-md", "flex-col"]));
+    // The 16 px inset comes from the viewport's own padding, which is also what makes the cap the window less 32 px.
+    expect(popup.closest("[data-slot='sheet-viewport']")?.className.split(" ")).toEqual(expect.arrayContaining(["sm:p-4"]));
+    // The body scrolls inside that cap, and the footer sits directly under it with no spacer between.
+    const panel = popup.querySelector("[data-slot='sheet-panel']")!;
+    const scroller = panel.closest("[data-slot='scroll-area-viewport']")!.parentElement!;
+    expect(scroller.nextElementSibling).toBe(popup.querySelector("[data-slot='sheet-footer']"));
+  });
 
   it("holds Add until a login is typed, drawn as the outline with its reason in the field's own slot", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
     const add = (): Element => document.querySelector("[data-k='ssh-add']")!;
     expect(add().hasAttribute("disabled")).toBe(true);
     expect(add().hasAttribute("data-held")).toBe(true);
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.loginFirst);
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.loginFirst);
     // Nothing hovers in a driven browser, so no reason rides a tooltip.
     expect(document.querySelector("[data-slot='tooltip-trigger']")).toBeNull();
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
@@ -643,7 +800,7 @@ describe("the ssh road of the sheet", () => {
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("disabled")).toBe(true);
     expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("data-held")).toBe(true);
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.noRoad);
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toBe(ADD_COMPUTER_WORDS.noRoad);
   });
 
   /** The lines of the plan, as they read at this moment: the words with the fact slot after them, and the state
@@ -659,30 +816,17 @@ describe("the ssh road of the sheet", () => {
     [placeAddSheetWord("provision", "running"), "waiting"],
   ];
 
-  it("stands the plan under the note before Add is pressed, in the sheet's own words with the weight in its slot", async () => {
+  it("stands the plan under the field before Add is pressed, in the sheet's own words with the weight in its slot", async () => {
     await openSheet({ addComputerOverSsh: async () => box } as unknown as Partial<Api>);
     expect(plan()).toEqual(WAITING);
-    // The note the plan stands under, and nothing between them.
-    expect(document.querySelector("[data-k='plan']")?.previousElementSibling?.textContent).toBe(ADD_COMPUTER_WORDS.ssh.note);
-  });
-
-  it("names everything Remove names, before Add is pressed: the folder, the weight, whose service it is, the image and the opener", async () => {
-    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: { usedBytes: 4.2 * 1024 ** 3 }, copies: [], project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }) } as unknown as Partial<Api>);
     const lines = plan().map(([word]) => word ?? "");
     // The one line that is about this computer rather than the box, in the file's own name.
     expect(lines[1]).toBe("keeps the box's host key in ~/.ssh/known_hosts here");
     expect(lines[2]).toBe(`installing wsp under ~/.wsp${PLACE_INSTALL.weight}`);
     expect(lines[3]).toBe("starting the agent as a user service");
-    await waitFor(() => expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image (4.2 GB) is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is."));
-    expect(document.querySelector("[data-k='opener-note']")?.textContent).toBe(PLACE_INSTALL.openerLine);
-    // The one word Lena could not read on the way out is on neither screen now.
+    // The one word Lena could not read on the way out is on neither screen.
     expect(document.body.textContent).not.toContain("shim");
     expect(document.body.textContent).not.toContain("systemd");
-  });
-
-  it("says the image sentence without a figure on a wsp that has built no image yet, rather than one it guessed", async () => {
-    await openSheet({ addComputerOverSsh: async () => box, image: async () => ({ image: null, copies: [], project: { id: "pr_api", name: "the-project", path: "/root", computer: "default" } }) } as unknown as Partial<Api>);
-    expect(document.querySelector("[data-k='image-note']")?.textContent).toBe("Your image is built there the first time a workspace is created on it. When wsp comes off, the copy of your image stays where it is.");
   });
 
   it("fills the same lines in as the installer reports them, and the ones it has not reached stand waiting", async () => {
@@ -693,7 +837,7 @@ describe("the ssh road of the sheet", () => {
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
     await waitFor(() => expect(document.querySelector("[data-k='ssh-login']")).toBeTruthy());
-    // The press takes the fields away and leaves the list standing: the same element, the same lines.
+    // The press takes the field away and leaves the list standing: the same element, the same lines.
     expect(list()).toBe(before);
     expect(plan()).toEqual(WAITING);
     act(() => {
@@ -701,7 +845,6 @@ describe("the ssh road of the sheet", () => {
       report?.({ step: "host-key", word: placeAddSheetWord("host-key", "done"), state: "done", fact: "ssh-ed25519 SHA256:abc" });
       report?.({ step: "wsp", word: "installing wsp 0.2.0", state: "running" });
     });
-    expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
     expect(plan()).toEqual([
       ["connected · Ubuntu 24.04", "done"],
@@ -732,22 +875,22 @@ describe("the ssh road of the sheet", () => {
 
   it("runs the whole road on the client this app builds: Add sends places.add and the stages that ride it draw, ending on the line that says the box is in", async () => {
     ScriptedSocket.instances.length = 0;
-    ScriptedSocket.reply = (f: Frame) =>
-      f["op"] === "places.door" ? { id: f["id"], ok: true, door: DOOR } : f["op"] === "pair.issue" ? { id: f["id"], ok: true, code: "QW4K7PZ1", expiresAt: NOW + 600_000 } : f["op"] === "places.add" ? undefined : { id: f["id"], ok: true };
+    ScriptedSocket.reply = (f: Frame) => (f["op"] === "places.add" ? undefined : { id: f["id"], ok: true });
     const client = (live = new ProtocolClient({ url: "ws://test", token: "tok", WebSocketCtor: ScriptedSocket as unknown as typeof WebSocket }));
     await client.connect();
     const sock = ScriptedSocket.instances[0]!;
     useStore.setState({ api: makeApi(client), places: [here] });
     render(<AddComputerSheet onClose={() => {}} now={() => NOW} />);
-    await waitFor(() => expect(screen.getByText(PLACES_WORDS.sheet.waiting)).toBeTruthy());
-    await toSsh();
+    await waitFor(() => expect(document.querySelector("[data-k='login-field']")).toBeTruthy());
     fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
     expect(document.querySelector("[data-k='ssh-add']")?.hasAttribute("disabled")).toBe(false);
     fireEvent.keyDown(document.querySelector("#add-computer-login")!, { key: "Enter" });
 
     await waitFor(() => expect(sock.frames("places.add").length).toBe(1));
     const asked = sock.frames("places.add")[0]!;
+    // One field, so one thing is sent: the login, with no port beside it.
     expect(asked).toMatchObject({ address: "root@65.21.4.12", addId: expect.any(String) });
+    expect(asked["sshPort"]).toBeUndefined();
     const addId = String(asked["addId"]);
     const stage = (step: string, state: string, note?: string): void => {
       sock.onmessage?.({ data: JSON.stringify({ type: "place.stage", addId, step, state, ...(note === undefined ? {} : { note }) }) });
@@ -760,10 +903,9 @@ describe("the ssh road of the sheet", () => {
       stage("join", "running");
       await Promise.resolve();
     });
-    expect(document.querySelector("[data-slot='segmented-control']")).toBeNull();
     expect(document.querySelector("[data-k='ssh-login']")?.textContent).toBe("root@65.21.4.12");
     // The plan's own lines, the ones the installer has reached filled in and the one it has not standing.
-    expect([...document.querySelectorAll("[data-k='plan'] [data-k='line']")].map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
+    expect(plan()).toEqual([
       [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
       [`${placeAddSheetWord("host-key", "done")}ssh-ed25519 SHA256:abc`, "done"],
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
@@ -780,10 +922,9 @@ describe("the ssh road of the sheet", () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(document.querySelector("[data-k='title']")?.textContent).toBe(PLACES_WORDS.sheet.joinedTitle("hetzner")));
-    const drawn = [...document.querySelectorAll("[data-k='plan'] [data-k='line']")];
-    // Still the lines the plan stands at: the join step wears different words once it is over, and the line it was
-    // already on is the one that moves on rather than a second line arriving under it.
-    expect(drawn.map(l => [l.textContent, l.getAttribute("data-state")])).toEqual([
+    // Still the lines the plan stands at: the join step wears different words once it is over, and the line it
+    // was already on is the one that moves on rather than a second line arriving under it.
+    expect(plan()).toEqual([
       [`${placeAddSheetWord("connect", "done")}Ubuntu 24.04`, "done"],
       [`${placeAddSheetWord("host-key", "done")}ssh-ed25519 SHA256:abc`, "done"],
       [`${placeAddSheetWord("wsp", "done")}0.2.0`, "done"],
@@ -794,7 +935,7 @@ describe("the ssh road of the sheet", () => {
     expect(document.querySelector("[data-k='joined-table']")?.textContent).toContain("38 GB");
   });
 
-  it("puts what ssh refused under both fields and leaves the fields as they were", async () => {
+  it("puts what ssh refused under the field and leaves it as it was", async () => {
     // The refusal settles after the click, so the press and what it settles are one act: the slot is read only
     // once React has drawn what the rejection put in it.
     let refuse: ((e: Error) => void) | undefined;
@@ -806,15 +947,14 @@ describe("the ssh road of the sheet", () => {
       await Promise.resolve();
     });
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain("ssh refused the login (publickey).");
-    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(ADD_COMPUTER_WORDS.ssh.refusedFix);
-    expect(document.querySelector("[data-k='pick-key']")).toBeNull();
+    expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(ADD_COMPUTER_WORDS.refusedFix);
     expect((document.querySelector("#add-computer-login") as HTMLInputElement).value).toBe("root@65.21.4.12");
   });
 
   it("keeps what ssh said and the fix under it inside the slot's two lines, so the note under them does not move", () => {
     // Two lines of 51 characters at 12 px mono, which is what the 448 px sheet holds; the slot stands 36 px empty
     // and a third line pushes everything under it down.
-    expect(`ssh refused the login (publickey). ${ADD_COMPUTER_WORDS.ssh.refusedFix}`.length).toBeLessThanOrEqual(102);
+    expect(`ssh refused the login (publickey). ${ADD_COMPUTER_WORDS.refusedFix}`.length).toBeLessThanOrEqual(102);
   });
 });
 
@@ -834,16 +974,38 @@ describe("the list the four place events keep", () => {
 });
 
 describe("the road to the page", () => {
-  it("opens for a person with no labs flag, and draws the theme picks only behind it", () => {
+  it("opens whole for a person with no labs flag: every section drawn, and no side of the stylesheet to pick", async () => {
+    useStore.setState({ api: fakeApi().api, preferences: { ...DEFAULT_PREFERENCES, labs: false } });
     useStore.getState().openSettings();
     expect(useStore.getState().settingsOpen).toBe(true);
     render(<SettingsPage />);
-    expect(screen.queryByText("Appearance")).toBeNull();
-    expect(screen.getByText(PLACES_WORDS.section)).toBeTruthy();
-    cleanup();
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
+    await settle();
+    for (const said of [SETTINGS_WORDS.appearance, SETTINGS_WORDS.terminal, PLACES_WORDS.section, SETTINGS_WORDS.about]) {
+      expect(screen.getByText(said)).toBeTruthy();
+    }
+    // The width and the text size are the two picks left: the app draws the side the computer is set to, and the
+    // sidebar has one body.
+    expect(screen.getByText(SETTINGS_WORDS.sidebarWidth)).toBeTruthy();
+    expect(screen.getByText(SETTINGS_WORDS.textSize)).toBeTruthy();
+    expect(screen.queryByText("Theme")).toBeNull();
+    expect(screen.queryByText("Sidebar", { exact: true })).toBeNull();
+    for (const said of ["System", "Light", "Dark"]) expect(screen.queryByText(said)).toBeNull();
+    // The agents on this computer are read under that computer's own row now, so the page has no second list.
+    expect(screen.queryByText(AGENTS_WORDS.title, { selector: "h2" })).toBeNull();
+  });
+
+  it("draws the section about one cloud only while this host holds that cloud's key, the rule its row stands under", async () => {
+    useStore.setState({ api: fakeApi().api });
     render(<SettingsPage />);
-    expect(screen.getByText("Appearance")).toBeTruthy();
+    await settle();
+    expect(screen.queryByText("Solari")).toBeNull();
+    expect(screen.queryByText("Image")).toBeNull();
+    cleanup();
+    useStore.setState({ api: fakeApi({ initGet: async () => setupOf({ keys: { solari: true } }) } as Partial<Api>).api });
+    render(<SettingsPage />);
+    await settle();
+    // Titled by the cloud it belongs to: image is not a word a person meets by the four nouns.
+    expect(screen.getByText("Solari", { selector: "h2" })).toBeTruthy();
   });
 
   it("stands in the sidebar's foot with its chord, so Settings is never reachable only by a chord", () => {

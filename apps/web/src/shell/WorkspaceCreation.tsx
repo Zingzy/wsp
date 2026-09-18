@@ -3,6 +3,13 @@
 // wavy bar and the runtime's stage log, one line per stage as it arrives.
 // A failure keeps the log with the failing line and offers a retry; success
 // is the store swapping this for the thread.
+//
+// Under the log, the view's own last line: what this workspace is made of and
+// what its copy has for a network, read off the record the create answered
+// with through the protocol's word table, in the same words the row it becomes
+// carries. The runtime's own stage words end on ready and say nothing about the
+// copy, and this screen writes no road of its own. The slot stands from the
+// first paint and is empty until that record lands, so nothing moves under it.
 import { useEffect, useRef } from "react";
 import { CREATION_ASKED } from "../actions/format.js";
 import { Button } from "../components/ui/button.js";
@@ -10,6 +17,9 @@ import { ScrollArea } from "../components/ui/scroll-area.js";
 import { APP_LOCALE, localZoneLabel } from "../lib/timestampFormat.js";
 import { cn } from "../lib/utils.js";
 import { useStore, type Creation, type CreationLine } from "../protocol/store.js";
+import { FACT } from "../settings/format.js";
+import { placeName, placeOf } from "../settings/places.js";
+import { madeOfLine } from "../sidebar/workspaceRows.js";
 
 const WAVE_PERIOD = 24;
 
@@ -39,6 +49,7 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
           </ScrollArea>
         </div>
         <p data-testid="creation-clock" className="mt-1.5 w-full text-right font-mono text-[11px] text-muted-foreground">{`clock in ${localZoneLabel()}`}</p>
+        <MadeOf creation={creation} />
         {creation.failed ? (
           <div className="mt-6 flex flex-col items-center gap-3 text-sm">
             <p>
@@ -57,6 +68,24 @@ export function WorkspaceCreation({ creation }: { creation: Creation }) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/** The one line this view says in its own voice: the word table's reading of the record the create answered with.
+ * Empty until that record is here, in a slot that was already there. */
+function MadeOf({ creation }: { creation: Creation }) {
+  const places = useStore(s => s.places);
+  const landing = useStore(s => (creation.project === undefined ? null : s.landings[creation.project] ?? null));
+  const workspace = useStore(s => (creation.workspaceId === null ? undefined : s.workspaces.find(w => w.id === creation.workspaceId)));
+  // The computer's name where the work did not land on the computer the app runs on, which is the row's own rule
+  // for the same line: this computer is not named on a screen that is already on it.
+  const at = workspace === undefined ? undefined : placeOf(places, workspace);
+  const computer = at === undefined || at === places[0] ? null : placeName(at);
+  const said = workspace === undefined ? "" : madeOfLine({ project: { workspace }, landing: landing === null ? null : landing.capabilities, computer });
+  return (
+    <p data-k="made-of" className={cn(FACT, "mt-1.5 min-h-4 w-full text-left")} title={said}>
+      {said}
+    </p>
   );
 }
 
