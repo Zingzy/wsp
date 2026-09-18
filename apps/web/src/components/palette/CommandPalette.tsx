@@ -13,7 +13,6 @@ import { useLabs, useSelectedWorkspaceId, useSidebarProjects, useStore } from ".
 import { useRightPanelStore } from "../../rightPanelStore.js";
 import { cycleThreadInSpace, goToAdjacentWorkspace, goToWorkspace } from "../../shell/shellCommands.js";
 import { requestNewWorkspace } from "../../shell/shellRequests.js";
-import { useSidebarMode } from "../../sidebar/sidebarMode.js";
 import { CommandDialog, CommandDialogPopup } from "../ui/command.js";
 import { useSidebar } from "../ui/sidebar.js";
 import {
@@ -44,7 +43,6 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
   const openConnectProvider = useStore(s => s.openConnectProvider);
   const selectedId = useSelectedWorkspaceId();
   const toggleRightPanel = useRightPanelStore(s => s.toggleVisibility);
-  const [sidebarMode, setSidebarMode] = useSidebarMode();
   const labs = useLabs();
   const verbs = useWorkspaceVerbs();
 
@@ -74,16 +72,15 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
       previousWorkspace: () => goToAdjacentWorkspace(-1),
       nextThread: () => cycleThreadInSpace(1),
       previousThread: () => cycleThreadInSpace(-1),
-      setSidebarMode,
       openSettings,
       openAddComputer,
       openConnectProvider,
     }),
-    [openAddComputer, openConnectProvider, openSettings, select, setSidebarMode, toggleRightPanel, toggleSidebar],
+    [openAddComputer, openConnectProvider, openSettings, select, toggleRightPanel, toggleSidebar],
   );
   const items = useMemo(
-    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, labs, sidebarMode, handlers, verbs, places }),
-    [api, handlers, labs, places, projects, query, selectedId, sidebarMode, verbs],
+    () => buildPaletteItems({ projects, selectedId, query, canCreate: api !== null, labs, handlers, verbs, places }),
+    [api, handlers, labs, places, projects, query, selectedId, verbs],
   );
 
   const groups = useMemo<CommandPaletteGroup[]>(() => {
@@ -148,7 +145,6 @@ export function CommandPalette({ keybindings = DEFAULT_RESOLVED_KEYBINDINGS }: {
             highlightedItemValue={highlightedItemValue}
             isActionsOnly={query.startsWith(">")}
             keybindings={keybindings}
-            shortcuts={{ context: { spacesMode: sidebarMode === "spaces" } }}
             onExecuteItem={executeItem}
           />
         </CommandPaletteContent>

@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, absentComputer, placeDaemonBehind, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PROJECT_PICK_WORDS, WHERE_PICK_WORDS, placeIsFull, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereCaption, whereSegments } from "./places.js";
+import { NOTHING_HELD, PROJECT_PICK_WORDS, placeName, placeOf, placeStateWord, placeWorkspaceCounts, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -88,32 +88,6 @@ describe("the rows the New workspace dialog offers, and what each says", () => {
 
   it("offers nothing at all where this computer is the only row there is", () => {
     expect(whereSegments([{ ...here, engine: "docker" }])).toEqual([]);
-  });
-
-  it("says a box costs nothing, how much room it has, and that the image is built there first", () => {
-    expect(whereCaption({ ...hetzner, forks: { running: 0, room: 3 } }, undefined)).toBe("free · room for 3 workspaces · builds your image there first, about 4 min");
-  });
-
-  it("drops the build clause once a copy stands there, and counts the room that copy left", () => {
-    expect(whereCaption({ ...hetzner, forks: { running: 1, room: 2 } }, copy("hetzner", 1))).toBe("free · room for 2 workspaces · your image is there, v1");
-  });
-
-  it("says a full computer is full and what to do about it, and holds the pick", () => {
-    const full = { ...hetzner, forks: { running: 3, room: 0 } };
-    expect(whereCaption(full, copy("hetzner", 1))).toBe("free · 3 of 3 workspaces · pause or delete one there");
-    expect(placeIsFull(full)).toBe(true);
-    expect(placeIsFull({ ...hetzner, forks: { running: 1, room: 2 } })).toBe(false);
-    expect(placeIsFull(hetzner)).toBe(false);
-  });
-
-  it("says a provider's rate, that it naps to nothing, and which image is there", () => {
-    expect(whereCaption(ascii, copy("box", 1))).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
-    expect(whereCaption(ascii, undefined)).toBe("$0.018/hr while awake · naps to $0 · builds your image there first, about 4 min");
-  });
-
-  it("quotes the rate it is given, which is the picked size's, and the row's own when it is given none", () => {
-    expect(whereCaption(ascii, copy("box", 1), 0.08)).toBe("$0.08/hr while awake · naps to $0 · your image is there, v1");
-    expect(whereCaption(ascii, copy("box", 1), undefined)).toBe("$0.018/hr while awake · naps to $0 · your image is there, v1");
   });
 
   it("says there is no project to make a workspace of yet, and the line that records one", () => {

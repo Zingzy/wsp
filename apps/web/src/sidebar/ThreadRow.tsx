@@ -3,12 +3,12 @@
 // the row a send in flight stands as until the runtime writes its own. Every
 // row in the list is a thread, so no glyph leads it: the title takes the line
 // from the row's inset up to a fixed mono time column at the right edge; under
-// it the status dot, the agent's mark, and the words workspaceRows gives the
-// row, which are the project and who opened the thread on a row a person or
-// the command line opened, and the workspace with where it runs on one another
-// thread's agent opened. A spawned row that works stands on its dot alone, the
-// rule a workspace row already follows, since its indent and the row above say
-// the rest; every other state keeps its word. Renaming turns the title into the
+// it the state as one muted mono word, the agent's mark, and the words
+// workspaceRows gives the row, which are the project and who opened the thread
+// on a row a person or the command line opened, and the workspace with where it
+// runs on one another thread's agent opened. No dot for any state: the state is
+// the word. A spawned row that works says no word at all, since its indent and
+// the row above say it; every other state keeps its word. Renaming turns the title into the
 // sidebar's one name box in the same slot, opened from the menu or by a
 // double-click on the title, so the row keeps its height and its grammar while
 // a name is typed.
@@ -24,8 +24,7 @@ import { cn } from "../lib/utils.js";
 import { RowNameInput } from "./RowNameInput.js";
 import { ROW_META_CLASS, TWO_LINE_ROW_CLASS, threadRowId } from "./rowGrammar.js";
 import { isThreadWorking } from "./Sidebar.logic.js";
-import { ThreadRowLeadingStatus } from "./ThreadStatusIndicators.js";
-import { provenanceLabel, threadMetaWords, threadPill } from "./workspaceRows.js";
+import { provenanceLabel, threadMetaWords, threadStateWord } from "./workspaceRows.js";
 
 export function ThreadRow({
   thread,
@@ -59,14 +58,14 @@ export function ThreadRow({
   /** Opens the box on this row, as the menu's Rename does; absent where the rename is refused, so the title is text alone. */
   onRenameOpen?: (() => void) | undefined;
 }) {
-  const pill = threadPill(thread);
+  const state = threadStateWord(thread);
   // The Idle header can be shut, so the row carries the difference itself, in the title's colour.
   const idle = !isThreadWorking(thread);
   const words = threadMetaWords(thread, runs, under);
   const label = provenanceLabel(thread, words);
-  // A spawned row at work says it with the dot alone: the indent already says an agent opened it, and the word
-  // would push where it runs out of the 256 px sidebar.
-  const saysState = thread.parentThreadId === null || idle;
+  // A spawned row at work says nothing: the indent already says an agent opened it, and the word would push where
+  // it runs out of the 256 px sidebar.
+  const stateWord = thread.parentThreadId === null || idle ? state : null;
   return (
     <SidebarMenuSubItem data-thread-item>
       <SidebarMenuSubButton
@@ -99,8 +98,14 @@ export function ThreadRow({
             <span className={cn(ROW_META_CLASS, "w-[3ch] shrink-0 text-right")}>{time}</span>
           </span>
           <span data-thread-meta className={cn(ROW_META_CLASS, "flex min-w-0 items-center gap-1.5")}>
-            <ThreadRowLeadingStatus status={pill} word={saysState} />
-            {pill ? <span aria-hidden>·</span> : null}
+            {stateWord === null ? null : (
+              <>
+                <span data-thread-state className="shrink-0">
+                  {stateWord}
+                </span>
+                <span aria-hidden>·</span>
+              </>
+            )}
             <Tooltip>
               <TooltipTrigger render={<span data-thread-provenance aria-label={label} className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground" />}>
                 <HarnessMark harness={thread.harness} label={agentName(thread.harness)} className="size-[13px]" />
@@ -120,9 +125,9 @@ export function ThreadRow({
   );
 }
 
-/** What a send in flight wears: it is working by the fact of having been sent, read through the tables the
+/** The word a send in flight wears: it is working by the fact of having been sent, read through the tables the
  * runtime's own rows are read through, so the two rows cannot say different things about the same thread. */
-const LAUNCH_PILL = threadPill({ status: "running", asking: null, indicator: threadIndicator({ status: "running" }) });
+const LAUNCH_WORD = threadStateWord({ status: "running", asking: null, indicator: threadIndicator({ status: "running" }) });
 
 /** The send the runtime has written no row for yet, in the thread row's own grammar: the message as the title, the
  * working dot with its word, the agent's mark, and nothing in the time slot, since no turn has started to count.
@@ -140,7 +145,9 @@ export function ThreadLaunchRow({ launch }: { launch: Launch }) {
             <span className={cn(ROW_META_CLASS, "w-[3ch] shrink-0 text-right")} />
           </span>
           <span data-thread-meta className={cn(ROW_META_CLASS, "flex min-w-0 items-center gap-1.5")}>
-            <ThreadRowLeadingStatus status={LAUNCH_PILL} />
+            <span data-thread-state className="shrink-0">
+              {LAUNCH_WORD}
+            </span>
             <span aria-hidden>·</span>
             <span className="inline-flex min-w-0 items-center gap-1 text-sidebar-foreground">
               <HarnessMark harness={launch.harness} label={agentName(launch.harness)} className="size-[13px]" />

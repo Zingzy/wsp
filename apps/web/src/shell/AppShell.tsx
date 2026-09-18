@@ -9,7 +9,6 @@ import { WorkspaceSwitcher } from "../components/switcher/WorkspaceSwitcher.js";
 import { PanelLayoutControls } from "../components/chat/PanelLayoutControls.js";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail, type SidebarWidthStore } from "../components/ui/sidebar.js";
 import { WorkspacePageHeader } from "../components/WorkspacePageHeader.js";
-import { themeAttrs } from "../components/workspaceLook.js";
 import { useMediaQuery } from "../hooks/useMediaQuery.js";
 import { useViewportWidth } from "../hooks/useViewportWidth.js";
 import { DEFAULT_RESOLVED_KEYBINDINGS } from "../keybindingDefaults.js";
@@ -21,8 +20,6 @@ import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, sidebarMaxWidthBeside } from "..
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "./sidebarWidth.js";
 import { trackThreadHistory } from "./threadHistory.js";
 import { selectWorkspaceRightPanelState, useRightPanelStore } from "../rightPanelStore.js";
-import { useAppDark } from "../settings/theme.js";
-import { useSpaceTheme } from "../sidebar/sidebarMode.js";
 import { WorkspaceSidebar } from "../sidebar/WorkspaceSidebar.js";
 import { selectTerminalUiState, useTerminalDrawerStore } from "../terminal/drawerStore.js";
 import { hostAsleep } from "../boot.js";
@@ -59,12 +56,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const settingsOpen = useSettingsOpen();
   const useSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const viewportWidth = useViewportWidth();
-  // The current space's theme rides the sidebar element, so the glass recipe and the macOS material both take it.
-  const spaceTheme = useSpaceTheme();
-  const appDark = useAppDark();
   const rightPanelOpen = workspaceId !== null && panel.isOpen && !settingsOpen;
   const panelInline = rightPanelOpen && !useSheet;
-  // The switch chord in Spaces walks the threads last opened, so every selection is remembered from here on.
+  // The switch chord walks the threads last opened, so every selection is remembered from here on.
   useEffect(() => trackThreadHistory(), []);
 
   const layoutControls = (
@@ -96,7 +90,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         side="left"
         collapsible="offcanvas"
         data-app-sidebar=""
-        {...themeAttrs(spaceTheme, appDark)}
         className={cn(isDesktopMac() ? "sidebar-vibrancy" : "sidebar-glass", "border-r border-sidebar-border text-sidebar-foreground")}
         resizable={{ minWidth: SIDEBAR_MIN_WIDTH, maxWidth: sidebarMaxWidthBeside(viewportWidth, panelInline), width: sidebarWidthStore }}
       >

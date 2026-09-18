@@ -5,9 +5,8 @@
 // whose title holds the typed query. Pure apart from the callbacks it is
 // handed, so the list is testable without the dialog.
 import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ChevronUpIcon, CloudIcon, MessageSquareIcon, MonitorIcon, PanelLeftIcon, PanelRightIcon, PlusIcon, SettingsIcon } from "lucide-react";
-import { PLACES_WORDS, type PlaceView, type SidebarMode } from "@wsp/protocol";
+import { PLACES_WORDS, type PlaceView } from "@wsp/protocol";
 import { resolveActions, type ResolvedAction } from "../../actions/registry.js";
-import { sidebarActions } from "../../actions/sidebarActions.js";
 import { workspaceActions, workspaceTarget, type WorkspaceVerbs } from "../../actions/workspaceActions.js";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot } from "../../adapt/index.js";
 import { WORKSPACE_SELECT_SLOTS, workspaceSelectCommand } from "../../keybindingTypes.js";
@@ -16,7 +15,7 @@ import { SETTINGS_WORDS } from "../../settings/format.js";
 import { absenceOf } from "../../settings/places.js";
 import { threadWalk } from "../../shell/shellCommands.js";
 import { searchSidebarThreadsByTitle } from "../../sidebar/Sidebar.logic.js";
-import { spaceWorkspaceId } from "../../sidebar/sidebarMode.js";
+import { currentWorkspaceId } from "../../adapt/workspaces.js";
 import { threadTree, workspaceOf } from "../../sidebar/threadTree.js";
 import { compactTimeLabel, dotClassForTone, whereWord } from "../../sidebar/workspaceRows.js";
 import { type CommandPaletteActionItem, ITEM_ICON_CLASS, RECENT_THREAD_LIMIT } from "./CommandPalette.logic.js";
@@ -30,11 +29,9 @@ export interface PaletteHandlers {
   /** One step down the sidebar's workspaces, and back up; both wrap. */
   readonly nextWorkspace: () => void;
   readonly previousWorkspace: () => void;
-  /** The same step one level down, over the threads of the workspace Spaces has on screen. */
+  /** The same step one level down, over the threads of the workspace on screen. */
   readonly nextThread: () => void;
   readonly previousThread: () => void;
-  /** Which body the sidebar draws; the row that runs this comes from the sidebar registry, as the section menu's does. */
-  readonly setSidebarMode: (mode: SidebarMode) => void;
   readonly openSettings: () => void;
   readonly openAddComputer: () => void;
   readonly openConnectProvider: () => void;
@@ -48,7 +45,6 @@ export interface PaletteItemsInput {
   readonly canCreate: boolean;
   /** Whether this host offers the surfaces still being worked on; the registries' labs rows and the Settings row read it. */
   readonly labs: boolean;
-  readonly sidebarMode: SidebarMode;
   readonly handlers: PaletteHandlers;
   readonly verbs: WorkspaceVerbs;
   /** The computers and providers this host holds, for the one reading of a workspace whose computer is not
@@ -94,23 +90,14 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
       searchTerms: ["new workspace", "create workspace"],
       icon: <PlusIcon className={ITEM_ICON_CLASS} />,
       title: "New workspace",
-      description: input.canCreate ? "A copy of your image where you pick" : "Not connected to the runtime",
+      description: input.canCreate ? "One piece of work on one project" : "Not connected to the runtime",
       disabled: !input.canCreate,
       run: sync(handlers.newWorkspace),
     },
   ];
   if (selected !== null) {
-    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs, input.labs).map(action => actionItem(action, selected.displayName)));
+    items.push(...resolveActions(workspaceActions, workspaceTarget(selected.workspace, selected.status, input.places), input.verbs).map(action => actionItem(action, selected.displayName)));
   }
-
-  items.push(
-    ...resolveActions(
-      sidebarActions,
-      { mode: input.sidebarMode },
-      { setMode: handlers.setSidebarMode },
-      input.labs,
-    ).map(action => actionItem(action, action.hint ?? "")),
-  );
 
   const oneWorkspace = input.projects.length < 2;
   const walk = threadWalk(input.projects, selectedId);
@@ -226,7 +213,7 @@ function actionItems(input: PaletteItemsInput): CommandPaletteActionItem[] {
  * has no workspace on screen, where there is no walk to explain. The same rule the walk itself takes its threads
  * from, so the name and the list can never name two workspaces. */
 function walkedWorkspace(input: PaletteItemsInput): string | null {
-  const id = spaceWorkspaceId(input.projects.map(project => project.id), input.selectedId);
+  const id = currentWorkspaceId(input.projects.map(project => project.id), input.selectedId);
   return input.projects.find(project => project.id === id)?.displayName ?? null;
 }
 

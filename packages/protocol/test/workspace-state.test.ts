@@ -42,9 +42,20 @@ describe("workspaceState", () => {
     expect(workspaceStateOf({ phase: "napping" }, null)).toBe("paused");
   });
 
-  it("every state has a capitalised word", () => {
-    const words: Record<WorkspaceState, string> = { running: "Running", pausing: "Pausing", paused: "Paused", waking: "Waking", unreachable: "Unreachable", gone: "Gone" };
+  it("every state has a capitalised word, and a caller holding no pause mode reads the stopping words", () => {
+    const words: Record<WorkspaceState, string> = { running: "Running", pausing: "Stopping", paused: "Stopped", waking: "Waking", unreachable: "Unreachable", gone: "Gone" };
     for (const [state, word] of Object.entries(words)) expect(workspaceWord(state as WorkspaceState)).toBe(word);
+  });
+
+  it("says paused only on a computer whose pause keeps the machine's memory, and stopped on every other", () => {
+    expect(workspaceWord("paused", "memory")).toBe("Paused");
+    expect(workspaceWord("pausing", "memory")).toBe("Pausing");
+    expect(workspaceWord("paused", "disk")).toBe("Stopped");
+    expect(workspaceWord("pausing", "disk")).toBe("Stopping");
+    // Only the two words a nap has differ by mode; the rest are the machine's own state either way.
+    for (const mode of ["memory", "disk"] as const) {
+      for (const state of ["running", "waking", "unreachable", "gone"] as const) expect(workspaceWord(state, mode)).toBe(workspaceWord(state));
+    }
   });
 
   it("sendRefusal names the state in the sentence the composer and the host both use, and is null while running", () => {
@@ -83,7 +94,7 @@ describe("workspaceState", () => {
     // The app's row and the command line both refuse through this, so a workspace cannot read as answering in the
     // terminal while every pane on it reads that it is not.
     expect(goneRoadRefusal("running", "rebuild")).toBe("This one is running, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
-    expect(goneRoadRefusal("paused", "rebuild")).toBe("This one is paused, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
+    expect(goneRoadRefusal("paused", "rebuild")).toBe("This one is stopped, so nothing needs rebuilding; the rebuild is offered once a workspace is gone");
     expect(goneRoadRefusal("unreachable", "rebuild")).toBe("This one is not answering yet; the rebuild is offered once it is gone");
     expect(goneRoadRefusal("unreachable", "forget")).toBe("This one is not answering yet; the forget is offered once it is gone");
     expect(goneRoadRefusal("waking", "forget")).toBe("Only a workspace whose computer is gone can be forgotten; this one is waking");
@@ -347,7 +358,7 @@ describe("where a workspace runs, in the person's words", () => {
 describe("the line a verb that moved a workspace prints", () => {
   it("prints the word the next listing will print, in the lowercase a line of work reads", () => {
     expect(workspaceStateLine("web", "running")).toBe("web running");
-    expect(workspaceStateLine("web", "paused")).toBe("web paused");
+    expect(workspaceStateLine("web", "paused")).toBe("web stopped");
     expect(workspaceStateLine("web", "waking")).toBe("web waking");
     expect(workspaceStateLine("web", "gone")).toBe("web gone");
   });

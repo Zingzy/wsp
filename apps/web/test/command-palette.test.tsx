@@ -6,7 +6,7 @@ import { act, configure, fireEvent, render, screen, waitFor, within } from "@tes
 import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PREFERENCES, PLACES_WORDS, type SessionView, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
-import { NO_DAEMON_TO_START, SIDEBAR_MODE_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { NO_DAEMON_TO_START, WORKSPACE_WORDS } from "../src/actions/format.js";
 import { RECENT_THREAD_LIMIT } from "../src/components/palette/CommandPalette.logic.js";
 import { SidebarProvider, useSidebar } from "../src/components/ui/sidebar.js";
 import { compileResolvedKeybindingsConfig } from "../src/keybindingDefaults.js";
@@ -15,7 +15,7 @@ import { useStore } from "../src/protocol/store.js";
 import { useRightPanelStore } from "../src/rightPanelStore.js";
 import { AppShell } from "../src/shell/AppShell.js";
 import { KeybindingDispatcher } from "../src/shell/KeybindingDispatcher.js";
-import { stepInOrder } from "../src/shell/shellCommands.js";
+import { cancelWorkspaceSwitch, stepInOrder } from "../src/shell/shellCommands.js";
 import { onComposerFocusRequest, onNewThreadRequest } from "../src/shell/shellRequests.js";
 import { useTerminalDrawerStore } from "../src/terminal/drawerStore.js";
 import { provideTerminals, WorkspaceTerminals } from "../src/terminal/link.js";
@@ -151,6 +151,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   provideTerminals("ws_a", null);
   provideTerminals("ws_b", null);
+  // The switcher's hold outlives a render: a test that left the overlay up ate the next one's chord.
+  cancelWorkspaceSwitch();
 });
 
 async function mountShell(sessions: SessionView[] = []) {
@@ -193,7 +195,7 @@ describe("command palette", () => {
     // The provider its own record names, and, on a record that names none, what the machine is: a person picks a
     // workspace by its state and where it runs, and the id the provider minted for the machine names neither.
     expect(metaOn("api")).toBe("Running · solari · Current workspace");
-    expect(metaOn("worker")).toBe("Paused · a provider");
+    expect(metaOn("worker")).toBe("Stopped · a provider");
     for (const title of ["api", "worker"]) expect(metaOn(title)).not.toMatch(/m_ws_/);
   });
 
@@ -304,25 +306,6 @@ describe("command palette", () => {
     expect(palette()).toBeNull();
   });
 
-  it("the Spaces row swaps the sidebar's body, remembers the pick, and then offers the way back to the list", async () => {
-    await mountShell();
-    mod("k");
-    await waitFor(() => expect(palette()).not.toBeNull());
-    fireEvent.click(screen.getByText(SIDEBAR_MODE_WORDS.spaces.title, { selector: "[data-slot=command-item] span" }));
-    await waitFor(() => expect(palette()).toBeNull());
-    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    // No workspace row: the one id under ws: is the header's, which wears it so the arrow walk stops there.
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
-    expect(document.querySelectorAll("[data-space-icon]")).toHaveLength(2);
-    expect(useStore.getState().preferences.sidebarMode).toBe("spaces");
-    mod("k");
-    await waitFor(() => expect(palette()).not.toBeNull());
-    expect(inPalette().queryByText(SIDEBAR_MODE_WORDS.spaces.title)).toBeNull();
-    fireEvent.click(screen.getByText(SIDEBAR_MODE_WORDS.list.title, { selector: "[data-slot=command-item] span" }));
-    await waitFor(() => expect(document.querySelector("[data-space-header]")).toBeNull());
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2);
-    expect(useStore.getState().preferences.sidebarMode).toBe("list");
-  });
 
   it("the Settings row and its chord open the settings page, whose row names the chord; a workspace row closes it again", async () => {
     useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true } });
@@ -681,41 +664,6 @@ describe("default shortcuts", () => {
     expect(useStore.getState().selectedId).toBe("ws_b");
   });
 
-  it("in Spaces the Tab pair walks the threads of the workspace on screen, last opened first, on the hold's release, and lands the caret", async () => {
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
-    await mountShell([
-      session("s1", "ws_a", "fix the port list", { threadId: "thr_1", status: "running" }),
-      session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" }),
-      session("s3", "ws_b", "somewhere else", { threadId: "thr_3" }),
-    ]);
-    const restore = asDesktopShell();
-    const { asks, off } = watchComposerFocus("ws_a");
-    try {
-      useStore.getState().select("ws_a", "thr_1");
-      ctrlTab();
-      // Nothing is selected until the hold is let go, for a thread walk as for a workspace walk.
-      await settle();
-      expect(useStore.getState().selectedThreadId).toBe("thr_1");
-      ctrlUp();
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
-      expect(useStore.getState().selectedId).toBe("ws_a");
-      expect(asks).toEqual(["ws_a"]);
-      // A tap is the thread before this one, so two taps come back; the threads never opened follow in the
-      // sidebar's order, and Shift walks the other way round the five.
-      ctrlTab();
-      ctrlUp();
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_1"));
-      ctrlTab({ shiftKey: true });
-      ctrlUp();
-      // Two threads in this space, so Shift lands on the same other one; the walk stays inside the workspace on
-      // screen and the other workspace's thread is never landed on.
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("thr_2"));
-      expect(useStore.getState().selectedId).toBe("ws_a");
-    } finally {
-      off();
-      restore();
-    }
-  });
 
   it("in the list the Tab pair is still the workspace switch, and it never moves a thread", async () => {
     await mountShell([session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })]);
@@ -750,7 +698,6 @@ describe("default shortcuts", () => {
   });
 
   it("a held Next thread over a list of threads names the workspace its walk is in and says the listed ones are not in it", async () => {
-    act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
     const onWorker = [1, 2, 3, 4].map(n => session(`s${n}`, "ws_b", `worker job ${n}`, { threadId: `thr_${n}` }));
     await mountShell(onWorker);
     const restore = asDesktopShell();
@@ -773,13 +720,14 @@ describe("default shortcuts", () => {
       mod("k");
       await waitFor(() => expect(palette()).not.toBeNull());
       expect(inPalette().queryByText(/Nothing to step to/)).toBeNull();
-      expect(chordOn("Next thread")).toBe("⌃Tab");
+      // The mod arrows walk the threads of the workspace on screen, as left and right walk the workspaces.
+      expect(chordOn("Next thread")).toBe("⌥⌘Down");
     } finally {
       restore();
     }
   });
 
-  it("lists the thread walk with the chord of the body it is in: the Tab pair in Spaces, no chord in the list", async () => {
+  it("lists the workspace walk with the Tab pair and the thread walk with the arrows under it", async () => {
     const sessions = [session("s1", "ws_a", "fix the port list", { threadId: "thr_1" }), session("s2", "ws_a", "bump the lockfile", { threadId: "thr_2" })];
     await mountShell(sessions);
     const restore = asDesktopShell();
@@ -787,16 +735,10 @@ describe("default shortcuts", () => {
       useStore.getState().select("ws_a");
       mod("k");
       await waitFor(() => expect(palette()).not.toBeNull());
-      expect(chordOn("Next thread")).toBeNull();
+      expect(chordOn("Next thread")).toBe("⌥⌘Down");
+      expect(chordOn("Previous thread")).toBe("⌥⌘Up");
       expect(chordOn("Next workspace")).toBe("⌃Tab");
-      mod("k");
-      await waitFor(() => expect(palette()).toBeNull());
-      act(() => useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } }));
-      mod("k");
-      await waitFor(() => expect(palette()).not.toBeNull());
-      expect(chordOn("Next thread")).toBe("⌃Tab");
-      expect(chordOn("Previous thread")).toBe("⌃⇧Tab");
-      expect(chordOn("Next workspace")).toBe("⌥⌘Right");
+      expect(chordOn("Previous workspace")).toBe("⌃⇧Tab");
     } finally {
       restore();
     }
@@ -893,6 +835,10 @@ describe("typing contexts", () => {
     document.body.appendChild(box);
     box.focus();
     try {
+      // The row this walk starts from is named rather than inherited: the workspace a load opens on is the one this
+      // browser had open last, so a test that assumed the first row read the row another test left behind.
+      useStore.getState().select("ws_a");
+      await settle();
       // The composer takes the caret after every switch, so the second press of the chord is the one that proves it.
       spaceArrow("ArrowRight", box);
       spaceArrowUp();

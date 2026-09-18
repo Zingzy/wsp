@@ -16,9 +16,7 @@ import { CLOSE_TOAST_LABEL, TOAST_MS } from "../src/sidebar/toastLife.js";
 import { SETTINGS_WORDS } from "../src/settings/format.js";
 import { statusOf } from "./workspace-status.js";
 import { onNewThreadRequest, requestProjectTrip, requestRenameWorkspace } from "../src/shell/shellRequests.js";
-import { useSpaceTheme } from "../src/sidebar/sidebarMode.js";
-import { SWIPE_GAP_MS } from "../src/sidebar/spaceSwipe.js";
-import { glyphStateClass, leadDimClass } from "../src/sidebar/workspaceRows.js";
+import { glyphStateClass } from "../src/sidebar/workspaceRows.js";
 import { WorkspaceSidebar } from "../src/sidebar/WorkspaceSidebar.js";
 import { caps } from "./caps.js";
 import { noDaemonApi } from "./fake-daemon-api.js";
@@ -136,6 +134,8 @@ async function mount(api: FakeApi, firstName: string) {
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 const rowIds = () => Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]")).map(r => r.dataset["rowId"]);
 const stateSlot = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-workspace-state]")!;
+/** A thread row's state, which is one muted mono word and never a dot; null on a row that carries none. */
+const threadState = (row: HTMLElement): string | null => row.querySelector<HTMLElement>("[data-thread-state]")?.textContent ?? null;
 const metaOf = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>("[data-workspace-meta]")!;
 const spaceHeader = (): HTMLElement | null => document.querySelector<HTMLElement>("[data-space-header]");
 const headerLines = (): string[] => Array.from(document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")).map(l => l.textContent ?? "");
@@ -207,8 +207,8 @@ describe("rows from the fixture wire", () => {
     // a session without a prompt falls back to the harness session id
     expect(rowOf("59094224-bb3d").textContent).toContain("2d");
     // status pills: the running one works, the one that never settled failed, the idle one is plain
-    expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined();
-    expect(within(rowOf("59094224-bb3d")).getByLabelText("Failed")).toBeDefined();
+    expect(threadState(rowOf("fix the port list"))).toBe("Working");
+    expect(threadState(rowOf("59094224-bb3d"))).toBe("Failed");
     expect(within(rowOf("upgrade node")).queryByLabelText(/Idle|Completed/)).toBeNull();
     // Both workspaces head their shelf, whether or not one of their threads is working: ws_b's holds nothing but
     // the nested archive, and a shelf that holds only that is still a shelf.
@@ -220,12 +220,12 @@ describe("rows from the fixture wire", () => {
     const asking = "Permission for Bash: Check wsp version";
     await mount(fakeApi([API], [status(API)], [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000), asking })]), "api");
     await waitFor(() => expect(screen.getByText("fix the port list")).toBeDefined());
-    expect(within(rowOf("fix the port list")).getByLabelText("Needs you")).toBeDefined();
-    expect(within(rowOf("fix the port list")).queryByLabelText("Working")).toBeNull();
+    expect(threadState(rowOf("fix the port list"))).toBe("Needs you");
+    expect(threadState(rowOf("fix the port list"))).not.toBe("Working");
     // The workspace's own row carries the sentence a person is waiting on, cut at the row's cap.
     expect(rowOf("api").textContent).toContain("Permission for Bash: Check");
     act(() => useStore.setState({ sessions: { ws_a: [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })] } }));
-    await waitFor(() => expect(within(rowOf("fix the port list")).getByLabelText("Working")).toBeDefined());
+    await waitFor(() => expect(threadState(rowOf("fix the port list"))).toBe("Working"));
     expect(rowOf("api").textContent).not.toContain("Permission for Bash");
   });
 
@@ -238,7 +238,7 @@ describe("rows from the fixture wire", () => {
     // The state slot: the running row says nothing in words (the dot says it); every other state's word sits in it.
     expect(rowOf("dev").textContent).not.toContain("Running");
     expect(stateSlot(rowOf("dev")).textContent).toBe("");
-    expect(stateSlot(rowOf("spike")).textContent).toBe("Paused");
+    expect(stateSlot(rowOf("spike")).textContent).toBe("Stopped");
     expect(stateSlot(rowOf("scratch")).textContent).toBe("Gone");
     for (const name of ["dev", "spike", "scratch"]) {
       const slot = stateSlot(rowOf(name));
@@ -529,33 +529,26 @@ describe("rows from the fixture wire", () => {
     expect(title("fix the port list").className).not.toContain("text-sidebar-muted-foreground");
   });
 
-  it("a workspace row's meta line is one mono line in a fixed order: cost today, the edge note, the nap countdown last, cut at the row's cap with the whole of it in its title", async () => {
+  it("a workspace row's third line is the branch its copy stands on, cut at the row's cap with the whole of it in its title, and no figure of any kind", async () => {
+    const copied = { ...API, copy: { road: "clonefile" as const, path: "/Users/dev/spoo-api", source: "/Users/dev/spoo", base: "abc", branch: "agent/api-port-list", carried: "deps-and-config" as const }, portBase: 3100 };
     await mount(
-      fakeApi(
-        [API, WEB],
-        [status(API, { idleAt: iso(14.5 * 60_000), reach: { state: "slow" } }), status(WEB)],
-      ),
+      fakeApi([copied, WEB], [status(copied, { idleAt: iso(14.5 * 60_000), reach: { state: "slow" } }), status(WEB)]),
       "api",
     );
-    // Before the meter's first tick the line says nothing about spend: a $0.00 that becomes a real figure a
-    // second later told the person something that was never true.
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("edge slow · naps in 14m"));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("agent/api-port-list"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
-    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Stopped");
+    // A fork carries no copy of a folder, so its third line is empty rather than a figure.
     expect(metaOf(rowOf("web")).textContent).toBe("");
+    const meta = metaOf(rowOf("api"));
+    expect(meta.className).toContain("font-mono");
+    expect(meta.className).toContain("truncate");
+    // The meter ticks and nothing on the row moves: spend belongs to the computer's row in Settings.
     act(() =>
       useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
     );
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · edge slow…"));
-    const meta = metaOf(rowOf("api"));
-    // What was cut is on the row's hover text whole, so nothing a person needs is only half said.
-    expect(meta.getAttribute("title")).toBe("$0.29 today · edge slow · naps in 14m");
-    expect(meta.className).toContain("font-mono");
-    expect(meta.className).toContain("truncate");
-    // The whole line is one span: the width cuts it from the right, nothing decides what to leave out.
-    expect(meta.children).toHaveLength(0);
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("$0.29 today · active"));
+    expect(metaOf(rowOf("api")).textContent).toBe("agent/api-port-list");
+    expect(rowOf("api").textContent).not.toContain("$");
   });
 
   it("this computer's own daemon down: the row says No daemon, and the glyph beside it is the start its line names", async () => {
@@ -578,58 +571,6 @@ describe("rows from the fixture wire", () => {
     expect(screen.queryByRole("button", { name: "Start the daemon of zingzy-mac" })).toBeNull();
   });
 
-  it("every row leads with its kind's glyph and no state dot: the laptop for this computer, the cloud for a fork, green while the machine runs and muted otherwise; line two says what the machine is, line three what it costs, and the state is a word on the right", async () => {
-    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
-    const OLD = view("ws_c", "old", "gone");
-    await mount(fakeApi([API, WEB, MAC, OLD], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }, status(OLD, { machineState: "gone", reach: { state: "gone" } })]), "api");
-    await waitFor(() => expect(rowOf("zingzy-mac")).toBeDefined());
-    await waitFor(() => expect(rowOf("old")).toBeDefined());
-    const lead = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-lead]")!;
-    const glyphClass = (row: HTMLElement) => lead(row).querySelector("svg")!.getAttribute("class") ?? "";
-    const glyphClasses = (row: HTMLElement) => glyphClass(row).split(" ");
-    expect(glyphClass(rowOf("zingzy-mac"))).toContain("lucide-laptop");
-    expect(glyphClass(rowOf("api"))).toContain("lucide-cloud");
-    expect(glyphClass(rowOf("web"))).toContain("lucide-cloud");
-    for (const name of ["zingzy-mac", "api", "web", "old"]) {
-      expect(lead(rowOf(name)).querySelector(".rounded-full")).toBeNull();
-      expect(glyphClass(rowOf(name))).not.toMatch(/destructive|warning|info/);
-    }
-    // The glyph's hue is the machine's state and only that: the success green while it runs, on a fork and on this
-    // computer alike, in place of the muted ink; paused dims the muted ink to half; gone keeps it whole. One rule.
-    for (const name of ["api", "zingzy-mac"]) {
-      expect(glyphClasses(rowOf(name))).toContain(glyphStateClass({ state: "running" }));
-      expect(glyphClasses(rowOf(name))).not.toContain("text-muted-foreground/60");
-      expect(glyphClasses(rowOf(name))).not.toContain("opacity-50");
-    }
-    for (const name of ["web", "old"]) {
-      expect(glyphClasses(rowOf(name))).toContain("text-muted-foreground/60");
-      expect(glyphClasses(rowOf(name))).not.toContain(glyphStateClass({ state: "running" }));
-    }
-    expect(glyphClasses(rowOf("web"))).toContain("opacity-50");
-    expect(glyphClasses(rowOf("old"))).not.toContain("opacity-50");
-    // The class the glyph wears is the only thing that changes with the state: the box it sits in is one for every row.
-    const glyphBox = (row: HTMLElement) => glyphClasses(row).filter(c => /^(size-|mt-)/.test(c)).sort();
-    for (const name of ["zingzy-mac", "web", "old"]) expect(glyphBox(rowOf(name))).toEqual(glyphBox(rowOf("api")));
-    const machineOf = (row: HTMLElement) => row.querySelector<HTMLElement>("[data-workspace-machine]")!;
-    // This computer's second line is its cores and memory, in the grammar a fork's row reads its size in.
-    expect(machineOf(rowOf("zingzy-mac")).textContent).toBe("10 cores · 16 GB");
-    expect(machineOf(rowOf("api")).textContent).toBe("2 vCPU · 4 GB");
-    expect(metaOf(rowOf("zingzy-mac")).textContent).toBe(FREE_WORD);
-    expect(stateSlot(rowOf("zingzy-mac")).textContent).toBe("");
-    // The cloud rows beside it: the spend, the countdown and the paused word all read in their own slots.
-    expect(metaOf(rowOf("api")).textContent).toBe("naps in 14m");
-    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
-    for (const name of ["zingzy-mac", "api", "web", "old"]) {
-      expect(machineOf(rowOf(name)).className).toContain("font-mono");
-      expect(machineOf(rowOf(name)).getAttribute("title")).toBe(machineOf(rowOf(name)).textContent);
-    }
-    // One row grammar for both kinds: the same lead slot and the same height.
-    const boxOf = (row: HTMLElement) => [...row.firstElementChild!.classList].filter(c => /^(size-|mt-)/.test(c)).sort();
-    expect(boxOf(rowOf("zingzy-mac"))).toEqual(boxOf(rowOf("api")));
-    const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|py-)/.test(c)).sort();
-    expect(heightOf(rowOf("zingzy-mac"))).toEqual(heightOf(rowOf("api")));
-  });
-
   it("every workspace row is one three-line height, every thread row one two-line height with no glyph before its title, and the Idle row is the kit row", async () => {
     await mount(
       fakeApi(
@@ -644,7 +585,8 @@ describe("rows from the fixture wire", () => {
     );
     await waitFor(() => expect(screen.getByText("upgrade node")).toBeDefined());
     const heightOf = (row: HTMLElement) => [...row.classList].filter(c => /^(h-|min-h-|py-)/.test(c)).sort();
-    expect(heightOf(rowOf("api"))).toEqual(["h-15", "py-1.5"]);
+    // Four lines of room for the row's three slots: the made-of line takes two of them at the sidebar's width.
+    expect(heightOf(rowOf("api"))).toEqual(["h-20", "py-1.5"]);
     expect(heightOf(rowOf("fix the port list"))).toEqual(["h-11", "py-1.5"]);
     expect(heightOf(rowOf("upgrade node"))).toEqual(["h-11", "py-1.5"]);
     // A button centres its text unless told otherwise; a short title starts where a long one does.
@@ -669,26 +611,25 @@ describe("rows from the fixture wire", () => {
     expect(rowOf("api").firstElementChild!.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("while the runtime replaces the machine's helper the row says only that, and clears when it lands", async () => {
-    await mount(fakeApi([API, WEB], [status(API, { idleAt: iso(14.5 * 60_000) }), status(WEB)]), "api");
-    await waitFor(() => expect(rowOf("api").textContent).toContain("naps in 14m"));
+  it("while the runtime replaces the machine's helper the row says only that, and goes back to the branch when it lands", async () => {
+    const copied = { ...API, copy: { road: "clonefile" as const, path: "/Users/dev/spoo-api", source: "/Users/dev/spoo", base: "abc", branch: "agent/api-port-list", carried: "deps-and-config" as const } };
+    await mount(fakeApi([copied, WEB], [status(copied), status(WEB)]), "api");
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("agent/api-port-list"));
 
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(14.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
-    await waitFor(() => expect(rowOf("api").textContent).toContain(DAEMON_UPDATING));
-    // The one thing on the row worth waiting for takes the line; the rate and the countdown wait their turn.
-    expect(rowOf("api").textContent).not.toContain("naps in 14m");
-    expect(rowOf("api").textContent).not.toContain("$0.110/hr");
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(copied), daemonNote: DAEMON_UPDATING } }));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe(DAEMON_UPDATING));
+    // The one thing on the row worth waiting for takes the line; the branch waits its turn.
+    expect(rowOf("api").textContent).not.toContain("agent/api-port-list");
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(rowOf("web").textContent).not.toContain(DAEMON_UPDATING);
 
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(14.5 * 60_000) }), daemonNote: DAEMON_UPDATE_FAILED } }));
-    await waitFor(() => expect(rowOf("api").textContent).toContain(DAEMON_UPDATE_FAILED));
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(copied), daemonNote: DAEMON_UPDATE_FAILED } }));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe(DAEMON_UPDATE_FAILED));
     // The reason a deploy gave is in the host's log, never on the row: it names the daemon and runs to hundreds of characters.
     expect(rowOf("api").textContent).not.toContain("NPM_FAIL");
 
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(14.5 * 60_000) }) }));
-    await waitFor(() => expect(rowOf("api").textContent).toContain("naps in 14m"));
-    expect(rowOf("api").textContent).not.toContain("helper");
+    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(copied) }));
+    await waitFor(() => expect(metaOf(rowOf("api")).textContent).toBe("agent/api-port-list"));
   });
 
   it("clicking a thread selects it under its workspace; clicking a workspace selects it with no thread pinned", async () => {
@@ -892,68 +833,23 @@ describe("search", () => {
   });
 });
 
-describe("the Workspaces section row", () => {
-  it("collapses every workspace behind its chevron and shows how many it hides", async () => {
-    await mount(fakeApi([API, WEB], [status(API), status(WEB)], [session("s1", "ws_a", { prompt: "hello" })]), "api");
-    const row = screen.getByRole("button", { name: "Workspaces" });
-    expect(row.getAttribute("aria-expanded")).toBe("true");
-    expect(row.querySelector("svg.lucide-chevron-down")).not.toBeNull();
-    expect(row.className).toContain("h-8");
-    expect(row.className).toContain("hover:bg-sidebar-row-hover");
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "ws:ws_b"]);
-    fireEvent.click(row);
-    expect(rowIds()).toEqual([]);
-    expect(row.getAttribute("aria-expanded")).toBe("false");
-    expect(row.textContent).toBe("Workspaces2");
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
-    fireEvent.click(row);
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "ws:ws_b"]);
-    expect(row.textContent).toBe("Workspaces");
-  });
-
-  it("the label is a caps mono zone label, not row type", async () => {
-    await mount(fakeApi([API], [status(API)]), "api");
-    const label = screen.getByText("Workspaces");
-    expect(label.className).toContain("font-mono");
-    expect(label.className).toContain("uppercase");
-    expect(label.className).toMatch(/tracking-/);
-    expect(label.className).not.toContain("text-sm");
-  });
-
-  it("the new-workspace glyph sits at the row's right edge and opens the dialog; the footer holds the Settings row and no New workspace one", async () => {
-    await mount(fakeApi([API], [status(API)]), "api");
-    const buttons = screen.getAllByRole("button", { name: "New workspace" });
-    expect(buttons).toHaveLength(1);
-    const glyph = buttons[0]!;
-    expect(glyph.closest("[data-slot=sidebar-footer]")).toBeNull();
-    expect(glyph.closest("[data-slot=sidebar-group]")).not.toBeNull();
-    expect(glyph.querySelector("svg.lucide-plus")).not.toBeNull();
-    expect(glyph.textContent).toBe("");
-    // Quiet at rest like the rows' own glyphs; the hover brings it up.
-    expect(glyph.className).toContain("text-sidebar-muted-foreground");
-    // The footer is the Settings row's home and nothing else's here: the door a person finds without the chord.
-    expect(document.querySelector("[data-slot=sidebar-footer]")!.textContent).toBe(`${SETTINGS_WORDS.title}⌘,`);
-    expect(document.querySelector("[data-slot=sidebar-footer] [data-k=settings-row]")).not.toBeNull();
-    fireEvent.click(glyph);
-    expect(await screen.findByRole("dialog", { name: "New workspace" })).toBeDefined();
-  });
-});
 
 describe("the group before the first list has arrived", () => {
-  it("says nothing at all while the store is not ready: no empty state, no rows, no bars", () => {
+  it("says nothing at all while the store is not ready: no rows, no bars, not even the road to a project", () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
     expect(screen.queryByText(/No workspaces yet/)).toBeNull();
     expect(rowIds()).toEqual([]);
     expect(document.querySelectorAll("[data-slot=skeleton]").length).toBe(0);
-    expect(document.querySelector("[data-slot=sidebar-group-content]")!.textContent).toBe("");
+    expect(screen.queryByLabelText("Add a project")).toBeNull();
   });
 
-  it("says the fleet is empty once the list has arrived and holds nothing", async () => {
+  it("holds one row once the list has arrived and holds nothing: the road to a project, with no empty state of its own", async () => {
     render(<SidebarProvider defaultOpen><WorkspaceSidebar /></SidebarProvider>);
-    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
     act(() => useStore.setState({ ready: true }));
-    expect(await screen.findByText(/No workspaces yet/)).toBeDefined();
-    expect(screen.getByText("Add a computer or connect a provider, then create one.")).toBeDefined();
+    expect(await screen.findByLabelText("Add a project")).toBeDefined();
+    // The empty line belongs to a project with no workspace; with no project at all the centre is the first run.
+    expect(screen.queryByText(/No workspaces yet/)).toBeNull();
+    expect(rowIds()).toEqual([]);
   });
 
   it("a creation on its way holds the empty state off while the list is still coming", () => {
@@ -989,164 +885,6 @@ describe("keyboard navigation", () => {
   });
 });
 
-describe("new workspace dialog", () => {
-  const openDialog = async () => {
-    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
-    const dialog = await screen.findByRole("dialog");
-    return { dialog, input: within(dialog).getByLabelText("Name") as HTMLInputElement };
-  };
-
-  it("a create that made room shows the notice as a toast, the way a failure shows its line", async () => {
-    const api = fakeApi([API], [status(API)]);
-    api.createWorkspace = vi.fn(async (_project: string, name: string) => ({ ...view("ws_new", name), notice: "Stopped the builder kept from image v1 to make room at the machine cap." }));
-    await mount(api, "api");
-    const { input } = await openDialog();
-    fireEvent.keyDown(input, { key: "Enter" });
-    await screen.findByRole("status", { name: /Stopped the builder kept from image v1/ });
-    expect(useStore.getState().toast).toBe("Stopped the builder kept from image v1 to make room at the machine cap.");
-  });
-
-  it("offers the picked place's own sizes with the image's checked, and a picked size reaches the create; left alone, none does", async () => {
-    vi.stubGlobal("PointerEvent", class extends MouseEvent {});
-    // The sizes ride the place's own row: one list for every row priced a workspace at another provider's rates.
-    const sized: PlaceView[] = [PLACES[0]!, { ...PLACES[1]!, sizes: [{ cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 }, { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 }] }];
-    const api = fakeApi([API], [status(API)]);
-    api.placesList = vi.fn(async () => sized);
-    api.getGolden = async () => ({ head: 1, versions: [{ version: 1, snapshotId: "snap_g", baseTemplate: "t", setupSha: "s", createdAt: "c", smoke: { cmd: "true", exitCode: 0 }, size: { cpu: 2, memMb: 4096 } }] });
-    api.createWorkspace = vi.fn(async (_project: string, name: string) => view("ws_new", name));
-    await mount(api, "api");
-    const { dialog, input } = await openDialog();
-    const group = within(dialog).getByRole("radiogroup", { name: "Size" });
-    await waitFor(() => expect(within(group).getAllByRole("radio").map(r => r.getAttribute("aria-checked"))).toEqual(["true", "false"]));
-    fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.click(within(group).getByRole("radio", { name: /8\u00a0GB/ }));
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", { size: { cpu: 2, memMb: 8192 } }));
-
-    const again = await openDialog();
-    fireEvent.change(again.input, { target: { value: "gamma" } });
-    fireEvent.keyDown(again.input, { key: "Enter" });
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "gamma", undefined));
-    vi.unstubAllGlobals();
-  });
-
-  it("offers a default name, creates on Enter, selects the creating row, shows its current stage whole, and swaps to the workspace on workspace.created", async () => {
-    let finish!: (w: WorkspaceView) => void;
-    const api = fakeApi([API], [status(API)]);
-    api.createWorkspace = vi.fn(() => new Promise<WorkspaceView>(resolve => { finish = resolve; }));
-    await mount(api, "api");
-    const { input } = await openDialog();
-    expect(input.value).toBe("workspace-1");
-    fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", undefined);
-    const pending = await screen.findByText("beta");
-    const row = pending.closest<HTMLElement>("[data-sidebar-row]")!;
-    expect(row.getAttribute("aria-busy")).toBe("true");
-    expect(row.getAttribute("data-active")).toBe("true");
-    expect(useStore.getState().selectedId).toMatch(/^creating:/);
-    const stage = { type: "workspace.creating" as const, workspaceId: "ws_beta", name: "beta", elapsedMs: 0 };
-    act(() => useStore.getState().applyEvent({ ...stage, stage: "fork-requested", message: "starting beta on ascii" }));
-    const line = within(rowOf("beta")).getByText("starting beta on ascii");
-    expect(line.className).toContain("whitespace-normal");
-    expect(line.className).not.toContain("truncate");
-    // A verdict on a step already taken belongs to the log: the row holds the step the create is waiting on, which
-    // is the starting line for the whole boot.
-    act(() => useStore.getState().applyEvent({ ...stage, stage: "hostname-set", message: HOSTNAME_KEPT, elapsedMs: 5_000, detail: "hostname beta on m7 failed: hostname: sethostname: Operation not permitted" }));
-    expect(within(rowOf("beta")).getByText("starting beta on ascii")).toBeDefined();
-    expect(rowOf("beta").textContent).not.toContain(HOSTNAME_KEPT);
-    expect(rowOf("beta").textContent).not.toContain("sethostname");
-    // The next step the create waits on takes the line, and the one before it goes.
-    act(() => useStore.getState().applyEvent({ ...stage, stage: "preview-route", message: "Preview route to the daemon minted.", elapsedMs: 6_100 }));
-    expect(within(rowOf("beta")).getByText("Preview route to the daemon minted.")).toBeDefined();
-    expect(within(rowOf("beta")).queryByText("starting beta on ascii")).toBeNull();
-    const created = view("ws_beta", "beta");
-    act(() => useStore.getState().applyEvent({ type: "workspace.created", workspace: created }));
-    await waitFor(() => expect(rowOf("beta").getAttribute("aria-busy")).toBeNull());
-    expect(rowOf("beta").getAttribute("data-active")).toBe("true");
-    expect(useStore.getState().selectedId).toBe("ws_beta");
-    expect(useStore.getState().creations).toEqual([]);
-    await act(async () => { finish(created); });
-    expect(screen.getAllByText("beta").length).toBe(1);
-    expect(useStore.getState().workspaces.filter(w => w.id === "ws_beta")).toHaveLength(1);
-  });
-
-  it("while the image is still building the Create keycap is held, so Enter forks nothing and no row is written", async () => {
-    const api = fakeApi([API], [status(API)]);
-    api.getGolden = async () => undefined;
-    api.createWorkspace = vi.fn(async (_project: string, name: string) => view("ws_new", name));
-    await mount(api, "api");
-    await waitFor(() => expect(useStore.getState().hasGolden).toBe(false));
-    act(() =>
-      useStore.getState().applyEvent({
-        type: "init.job",
-        job: { id: "init_1", road: "manual", phase: "building", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" }, { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "running" }], progress: { done: 1, total: 2 }, log: [] },
-      }),
-    );
-    const { dialog, input } = await openDialog();
-    const create = within(dialog).getByRole("button", { name: "Create" });
-    await waitFor(() => expect(create.hasAttribute("disabled")).toBe(true));
-    fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.click(create);
-    expect(api.createWorkspace).not.toHaveBeenCalled();
-    expect(useStore.getState().creations).toEqual([]);
-    expect(useStore.getState().toast).toBeNull();
-    expect(screen.queryByText(/wspx|golden build/)).toBeNull();
-    // The seal frees the keycap under the open dialog: the person presses Create where they already are.
-    act(() => useStore.getState().applyEvent({ type: "init.job", job: { id: "init_1", road: "manual", phase: "done", keys: { solari: true }, step: 0, stoppable: false, screens: [], rows: [], progress: { done: 2, total: 2 }, log: [] } }));
-    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Create" }).hasAttribute("disabled")).toBe(false));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", undefined));
-  });
-
-  it("a refusal keeps the row, names the refusal on it, and reopens no dialog", async () => {
-    const api = fakeApi([API], [status(API)]);
-    api.createWorkspace = vi.fn(async () => { throw new RequestError("Sandbox limit reached", "concurrency"); });
-    await mount(api, "api");
-    const { input } = await openDialog();
-    fireEvent.change(input, { target: { value: "gamma" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(rowOf("gamma").textContent).toMatch(/no more workspaces/i));
-    expect(rowOf("gamma").getAttribute("aria-busy")).toBeNull();
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(useStore.getState().toast).toBeNull();
-    // The next default name skips the row that is still there.
-    fireEvent.click(screen.getByRole("button", { name: "New workspace" }));
-    const again = within(await screen.findByRole("dialog")).getByLabelText("Name") as HTMLInputElement;
-    expect(again.value).toBe("workspace-1");
-    fireEvent.change(again, { target: { value: "gamma" } });
-    fireEvent.keyDown(again, { key: "Enter" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(useStore.getState().creations.map(c => c.name)).toEqual(["gamma", "gamma"]);
-  });
-
-  it("the Project control offers the projects this wsp holds and the create names the checked one, whose computer comes with it", async () => {
-    const api = fakeApi([API], [status(API)]);
-    api.createWorkspace = vi.fn(async (_project: string, name: string) => view("ws_beta", name));
-    await mount(api, "api");
-    const { dialog, input } = await openDialog();
-    // One project: it reads as its own name and asks nothing, and the create is on it.
-    await waitFor(() => expect(dialog.querySelector<HTMLElement>("[data-project=pr_1]")?.textContent).toBe("spoo-landing"));
-    expect(within(dialog).queryByRole("radiogroup", { name: "Project" })).toBeNull();
-    fireEvent.change(input, { target: { value: "beta" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.createWorkspace).toHaveBeenCalledWith("pr_1", "beta", undefined));
-  });
-
-  it("Escape cancels without creating; a blank name cannot be submitted", async () => {
-    const api = await mount(fakeApi([API], [status(API)]), "api");
-    const { input } = await openDialog();
-    fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(api.createWorkspace).not.toHaveBeenCalled();
-    expect(screen.getByRole("dialog")).toBeDefined();
-    fireEvent.keyDown(input, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(api.createWorkspace).not.toHaveBeenCalled();
-  });
-});
 
 describe("gone machines", () => {
   const OLD: WorkspaceView = { ...view("ws_c", "old", "gone"), gone: "machine m_ws_c is gone at the provider: Not found" };
@@ -1162,7 +900,7 @@ describe("gone machines", () => {
     expect(screen.queryByRole("button", { name: "New thread in old" })).toBeNull();
   });
 
-  it("a record still saying running whose status found the machine gone reads Gone with no rate and no countdown, even while the status carries both", async () => {
+  it("a record still saying running whose status found the machine gone reads Gone, and no figure reaches the row whatever the meter says", async () => {
     const gone = status(API, { machineState: "gone", reach: { state: "gone" }, idleAt: NOW + 17 * 60_000, rateUsdPerHour: 0.11, reason: "machine m_ws_a is gone at the provider: the status poll found it gone at 2026-09-06T10:21:04Z" });
     await mount(fakeApi([API], [gone]), "api");
     act(() => useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 60_000, accruedUsd: 0.18, at: new Date(NOW).toISOString() }));
@@ -1171,7 +909,8 @@ describe("gone machines", () => {
     expect(row.textContent).not.toContain("/hr");
     expect(row.textContent).not.toContain("naps");
     expect(row.textContent).not.toContain("active");
-    expect(row.textContent).toContain("$0.18 today");
+    // What a machine costs is its computer's row in Settings; no row here carries a figure.
+    expect(row.textContent).not.toContain("$0.18");
     expect(screen.getByRole("button", { name: "Rebuild api" }).getAttribute("title")).toBe(gone.reason!);
   });
 
@@ -1251,7 +990,7 @@ describe("zombie machines", () => {
 describe("Solari out of reach from this computer", () => {
   it("a status whose probe never left this computer puts one muted mono line under the search row, leaves every row's word alone, and the line goes when a probe gets out again", async () => {
     await mount(fakeApi([API, WEB], [status(API), status(WEB)]), "api");
-    await waitFor(() => expect(stateSlot(rowOf("web")).textContent).toBe("Paused"));
+    await waitFor(() => expect(stateSlot(rowOf("web")).textContent).toBe("Stopped"));
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(screen.queryByText(PROVIDER_UNREACHED_LINE)).toBeNull();
 
@@ -1262,7 +1001,7 @@ describe("Solari out of reach from this computer", () => {
     expect(line.className).not.toMatch(/border|bg-|badge|chip|destructive|warning|success/);
     expect(stateSlot(rowOf("api")).textContent).toBe("");
     expect(rowOf("api").textContent).not.toContain("Unreachable");
-    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Stopped");
     // The line reads once, however many rows carry the flag.
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(WEB, { reach: { state: "napping", offline: true } }) }));
     expect(screen.getAllByText(PROVIDER_UNREACHED_LINE)).toHaveLength(1);
@@ -1294,427 +1033,6 @@ describe("Solari out of reach from this computer", () => {
     act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
   });
 
-  it("a row that was Unreachable stays Unreachable through the computer's offline spell", async () => {
-    await mount(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]), "api");
-    await waitFor(() => expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable"));
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { reach: { state: "unreachable", offline: true } }) }));
-    await screen.findByText(PROVIDER_UNREACHED_LINE);
-    expect(stateSlot(rowOf("api")).textContent).toBe("Unreachable");
-  });
-});
-
-/** What the shell reads to wash its own surface, mounted beside the body so one render answers for both. */
-/** The first dot's angle of the theme the shell would paint, or none. */
-function ThemeProbe() {
-  return <span data-theme-probe>{useSpaceTheme()?.dots[0]?.angle ?? "none"}</span>;
-}
-const themed = (angle: number): WorkspaceTheme => ({ ...DEFAULT_THEME, dots: harmonyDots({ angle, radius: 0.5 }, "complementary"), harmony: "complementary" });
-
-describe("a workspace's own theme and glyph", () => {
-  const THEMED: WorkspaceView = { ...view("ws_a", "api", "running", 3 * 60 * 60_000), theme: themed(200), glyph: "flask" };
-  const PLAIN = view("ws_b", "web", "napping", 2 * 60 * 60_000);
-  const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac", "running", 60 * 60_000), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
-  const all = () => [{ ...THEMED }, { ...PLAIN }, { ...MAC }];
-  const threads = () => [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }), session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-4 * 60_000) })];
-  const leadOf = (el: HTMLElement): HTMLElement => el.querySelector<HTMLElement>("span[aria-hidden]")!;
-
-  async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
-    useStore.getState().bind(api);
-    render(
-      <SidebarProvider defaultOpen>
-        <ThemeProbe />
-        <WorkspaceSidebar />
-      </SidebarProvider>,
-    );
-    await waitFor(() => expect(spaceHeader()).not.toBeNull());
-    return api;
-  }
-
-  it("the space bar is one icon per workspace and a plus: the kind's glyph by default, the picked icon where one is, the current one in the theme's ink, the others muted, a paused one dimmed, no state colour on any glyph, and no name on any of them", async () => {
-    await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }], threads()));
-    await waitFor(() => expect(icons()).toHaveLength(3));
-    // The sidebar's own order, which is the order the three were made; the paused one keeps its place in it.
-    const [api, web, mac] = icons() as [HTMLElement, HTMLElement, HTMLElement];
-    expect(icons().map(i => i.getAttribute("aria-label"))).toEqual(["api", "web", "zingzy-mac"]);
-    expect(icons().map(i => i.textContent)).toEqual(["", "", ""]);
-    expect(api.querySelector("[data-space-glyph='flask']")).not.toBeNull();
-    expect(web.querySelector("[data-space-kind-glyph]")!.getAttribute("class")).toContain("lucide-cloud");
-    expect(mac.querySelector("[data-space-kind-glyph]")!.getAttribute("class")).toContain("lucide-laptop");
-    expect(api.getAttribute("aria-current")).toBe("true");
-    expect(api.className).toContain("--space-tint");
-    expect(web.className).not.toContain("--space-tint");
-    expect(web.className).toContain("text-sidebar-muted-foreground");
-    // The paused fork dims by the one rule its row's lead dims by, and that is all the state does here: the bar's
-    // colour is the space's own, so no glyph in it wears the row's running green.
-    expect(leadDimClass({ state: "paused" })).toBe("opacity-50");
-    expect(leadDimClass({ state: "running" })).toBeUndefined();
-    expect(web.className.split(" ")).toContain(leadDimClass({ state: "paused" }));
-    expect(mac.className.split(" ")).not.toContain("opacity-50");
-    const glyphClasses = (icon: HTMLElement) => icon.querySelector("svg")!.getAttribute("class")!.split(" ");
-    for (const icon of [api, mac, web]) expect(glyphClasses(icon)).not.toContain(glyphStateClass({ state: "running" }));
-    // One row of one height, centred, and the plus at its right end makes a new workspace. The icons sit in a
-    // group of their own that scrolls sideways once they outgrow the footer, and the plus stays outside it, so
-    // neither the first icon nor the plus is ever cut.
-    const bar = document.querySelector<HTMLElement>("[data-space-bar]")!;
-    expect(bar.className).toContain("justify-center");
-    expect(bar.className).toContain("h-7");
-    for (const icon of icons()) expect(icon.className).toContain("size-7");
-    const group = bar.querySelector<HTMLElement>("[data-space-icons]")!;
-    expect(group.className).toContain("overflow-x-auto");
-    expect(Array.from(group.querySelectorAll("[data-space-icon]"))).toEqual(icons());
-    expect(bar.lastElementChild!.hasAttribute("data-space-new")).toBe(true);
-    expect(group.contains(bar.lastElementChild)).toBe(false);
-    expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
-    fireEvent.click(bar.querySelector("[data-space-new]")!);
-    expect(await screen.findByRole("dialog")).toBeDefined();
-  });
-
-  it("the header's lead is the glyph in the theme's ink, and the state dot moves to the state slot so running is still said", async () => {
-    await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN)], threads()));
-    const header = spaceHeader()!;
-    expect(leadOf(header).querySelector("[data-space-glyph='flask']")!.getAttribute("class")).toContain("--space-tint");
-    const state = header.querySelector<HTMLElement>("[data-space-state]")!;
-    expect(state.querySelector(".bg-success-foreground")).not.toBeNull();
-    expect(state.textContent).toBe("");
-  });
-
-  it("a workspace with no glyph keeps the state dot in the lead and nothing in the state slot but its word", async () => {
-    useStore.setState({ selectedId: "ws_b" });
-    await mountSpaces(fakeApi(all(), [status(THEMED), status(PLAIN)], threads()));
-    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    const header = spaceHeader()!;
-    expect(leadOf(header).querySelector("[data-space-glyph]")).toBeNull();
-    expect(leadOf(header).querySelector("span")).not.toBeNull();
-    expect(header.querySelector("[data-space-state]")!.querySelector("span[aria-hidden]")).toBeNull();
-  });
-
-  // The store keeps its workspaces sorted by id; the sidebar draws them oldest first, so a workspace whose id sorts
-  // first but was made later parts the two orders. A creation in flight holds its own key as the selection, which is
-  // in neither order, and both fall back to a first row: the shell's theme has to be the header's workspace even then.
-  it("the theme the shell paints and the header the body draws are the same workspace when the two orders differ", async () => {
-    const napping: WorkspaceView = { ...view("ws_aaa", "old", "napping", 60_000), theme: themed(100) };
-    const running: WorkspaceView = { ...view("ws_zzz", "api", "running", 3 * 60 * 60_000), theme: themed(300) };
-    const api = fakeApi([napping, running], [status(napping), status(running)]);
-    api.createWorkspace.mockImplementation(() => new Promise(() => {}));
-    await mountSpaces(api);
-    await act(async () => void useStore.getState().createWorkspace("pr_1", "fresh"));
-    await waitFor(() => expect(useStore.getState().selectedId).toBe(useStore.getState().creations[0]!.key));
-    expect(useStore.getState().workspaces.map(w => w.id)).toEqual(["ws_aaa", "ws_zzz"]);
-    expect(within(spaceHeader()!).getByText("api")).toBeDefined();
-    expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("300");
-  });
-
-  it("in the list body no workspace's colour reaches the chrome: the shell paints no theme and the rows carry no glyph", async () => {
-    useStore.getState().bind(fakeApi(all(), [status(THEMED), status(PLAIN)], threads()));
-    render(
-      <SidebarProvider defaultOpen>
-        <ThemeProbe />
-        <WorkspaceSidebar />
-      </SidebarProvider>,
-    );
-    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_m"]));
-    expect(document.querySelector("[data-theme-probe]")!.textContent).toBe("none");
-    // The paused row's lead glyph dims by the same rule the bar's icon does, and the running one is green, which the bar's never is.
-    expect(rowOf("web").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(leadDimClass({ state: "paused" }));
-    expect(rowOf("api").querySelector("[data-workspace-lead] svg")!.getAttribute("class")!.split(" ")).toContain(glyphStateClass({ state: "running" }));
-    expect(document.querySelector("[data-space-glyph], [data-space-icon], [data-space-bar]")).toBeNull();
-  });
-});
-
-describe("Spaces mode", () => {
-  const THREE = [API, WEB, view("ws_c", "old", "gone")];
-  const statuses = () => [status(API, { idleAt: iso(15.5 * 60_000) }), status(WEB), status(THREE[2]!, { machineState: "gone" as const, reach: { state: "gone" as const } })];
-
-  // The current workspace's name reads twice on screen, in the header and on its own dot, so the shared mount's
-  // one-name wait cannot be used here; the header arriving is what says the body is up.
-  async function mountSpaces(api: FakeApi): Promise<FakeApi> {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
-    useStore.getState().bind(api);
-    render(
-      <SidebarProvider defaultOpen>
-        <WorkspaceSidebar />
-      </SidebarProvider>,
-    );
-    await waitFor(() => expect(spaceHeader()).not.toBeNull());
-    return api;
-  }
-
-  it("the list is what the sidebar draws with nothing remembered: every workspace's row under the Workspaces header, and no space header or bar", async () => {
-    await mount(fakeApi(THREE, statuses()), "api");
-    await waitFor(() => expect(workspaceRowIds()).toEqual(["ws:ws_a", "ws:ws_b", "ws:ws_c"]));
-    expect(spaceHeader()).toBeNull();
-    expect(icons()).toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Workspaces" })).toBeDefined();
-  });
-
-  it("a remembered Spaces pick draws one workspace's rows under its header with no Workspaces header over it, the others only as icons on the bar", async () => {
-    await mountSpaces(
-      fakeApi(THREE, statuses(), [
-        session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
-        session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) }),
-      ]),
-    );
-    // No workspace row at all: the header stands in for the one on screen, wearing its id, the dots for the rest.
-    expect(workspaceRowIds()).toEqual(["ws:ws_a"]);
-    expect(within(spaceHeader()!).getByText("api")).toBeDefined();
-    // Only that workspace's threads, in the list's own grammar, under the header the walk starts on.
-    expect(rowIds()).toEqual(["ws:ws_a", "thread:s1"]);
-    expect(screen.queryByText("bump the lockfile")).toBeNull();
-    expect(icons().map(d => d.getAttribute("aria-label"))).toEqual(["api", "web", "old"]);
-    // The name is on the header alone; no icon carries one.
-    expect(icons().map(d => d.textContent)).toEqual(["", "", ""]);
-    expect(icons()[0]!.getAttribute("aria-current")).toBe("true");
-    expect(icons()[1]!.getAttribute("aria-current")).toBeNull();
-    // One workspace is on screen, so the collapse header and its chevron are gone; the plus is on the bar.
-    expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
-    expect(document.querySelector("[data-space-bar] [data-space-new]")).not.toBeNull();
-  });
-
-  it("the header's lines are the machine, what it cost today with its rate, and the nap countdown only when one is set", async () => {
-    await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.110/hr", "naps in 15m"]));
-    act(() =>
-      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_a", phase: "running", rateUsdPerHour: 0.11, awakeMs: 120_000, accruedUsd: 0.29, at: new Date(NOW).toISOString() }),
-    );
-    await waitFor(() => expect(headerLines()[1]).toBe("$0.29 today · $0.110/hr"));
-    // Every line is muted mono, cut from the right and whole in its title; the state word takes the name's line, as a row's does.
-    for (const line of document.querySelectorAll<HTMLElement>("[data-space-header] [data-space-meta]")) {
-      expect(line.className).toContain("font-mono");
-      expect(line.className).toContain("truncate");
-      expect(line.className).not.toMatch(/border|bg-|badge|chip|rounded/);
-      expect(line.getAttribute("title")).toBe(line.textContent);
-    }
-    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
-    // With no nap scheduled the line is gone rather than reading "active"; a paused machine bills nothing, so no rate.
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API) }));
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.29 today · $0.110/hr"]));
-  });
-
-  it("a paused workspace's header drops the rate, and its state word takes the name's line", async () => {
-    useStore.setState({ selectedId: "ws_b" });
-    await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(headerLines()).toEqual(["2 vCPU · 4 GB"]);
-    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("Paused");
-  });
-
-  it("a click on another workspace's icon moves the body to it", async () => {
-    await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
-    fireEvent.click(icons()[1]!);
-    await waitFor(() => expect(within(spaceHeader()!).getByText("web")).toBeDefined());
-    expect(useStore.getState().selectedId).toBe("ws_b");
-    expect(screen.getByText("bump the lockfile")).toBeDefined();
-    expect(icons().map(d => d.getAttribute("aria-current"))).toEqual([null, "true", null]);
-  });
-
-  it("this computer's header reads its cores and memory where a fork's size reads, through the one machine line, and free where a fork's spend reads", async () => {
-    const MAC: WorkspaceView = { ...view("ws_m", "zingzy-mac"), kind: "local", machineId: "local", project: { id: "pr_1", name: "the-project", path: "/root", computer: "default" }, golden: "" };
-    useStore.setState({ selectedId: "ws_m" });
-    await mountSpaces(fakeApi([API, MAC], [status(API), { ...status(MAC), kind: "local", size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0 }]));
-    await waitFor(() => expect(within(spaceHeader()!).getByText("zingzy-mac")).toBeDefined());
-    // The machine words and the word free: nothing wsp pays for, so no figure and no rate under them.
-    expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]);
-    expect(spaceHeader()!.querySelector("[data-space-state]")!.textContent).toBe("");
-    // A tick on this computer's meter changes nothing there either.
-    act(() =>
-      useStore.getState().applyEvent({ type: "workspace.cost", workspaceId: "ws_m", phase: "running", rateUsdPerHour: 0, awakeMs: 120_000, accruedUsd: 0, at: new Date(NOW).toISOString() }),
-    );
-    await waitFor(() => expect(headerLines()).toEqual(["10 cores · 16 GB", FREE_WORD]));
-    // The fork beside it keeps every line it had: the size, then the spend with its rate. Both bodies carry a
-    // header while one travels out, so the lines are read once the body asked for is there alone.
-    fireEvent.click(icons()[0]!);
-    await waitFor(() => expect(within(spaceHeader()!).getByText("api")).toBeDefined());
-    await waitFor(() => expect(headerLines()).toEqual(["2 vCPU · 4 GB", "$0.110/hr"]));
-  });
-
-  it("a space asked for while the body is still travelling turns it around and never draws one workspace twice", async () => {
-    const errors: string[] = [];
-    const console_ = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
-      const line = args.map(String).join(" ");
-      if (line.includes(DUPLICATE_KEY)) errors.push(line);
-    });
-    try {
-      await mountSpaces(fakeApi(THREE, statuses()));
-      fireEvent.click(icons()[1]!);
-      expect(paneNames()).toEqual(["api", "web"]);
-      // Straight back while that travel is still running: React says "two children with the same key" if the
-      // workspace now on screen is still the one the travel calls the leaver.
-      fireEvent.click(icons()[0]!);
-      expect(errors).toEqual([]);
-      expect(paneNames()).toEqual(["api", "web"]);
-      expect(document.querySelector<HTMLElement>("[data-space-leaving] [data-space-name]")!.textContent).toBe("web");
-      await waitFor(() => expect(panes()).toHaveLength(1));
-      expect(spaceName()).toBe("api");
-      expect(errors).toEqual([]);
-    } finally {
-      console_.mockRestore();
-    }
-  });
-
-  it("a two-finger swipe across the body moves a space, out one way and back the other", async () => {
-    await mountSpaces(fakeApi(THREE, statuses(), [session("s2", "ws_b", { prompt: "bump the lockfile", startedAt: iso(-30 * 60_000) })]));
-    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
-    fireEvent.wheel(body(), { deltaX: 80, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_b");
-    // The workspace that left is still drawn while the body travels, out of the keyboard's reach and off the
-    // accessibility tree, and it is gone once the travel is over.
-    const leaving = document.querySelector<HTMLElement>("[data-space-leaving]")!;
-    expect(panes()).toHaveLength(2);
-    expect(within(leaving).getByText("api")).toBeDefined();
-    expect(leaving.getAttribute("aria-hidden")).toBe("true");
-    expect(leaving.hasAttribute("inert")).toBe(true);
-    expect(spaceName()).toBe("web");
-    await waitFor(() => expect(panes()).toHaveLength(1));
-    expect(screen.getByText("bump the lockfile")).toBeDefined();
-    expect(icons().map(d => d.getAttribute("aria-current"))).toEqual([null, "true", null]);
-    // The quiet after the fingers lift ends the gesture, so the next swipe is read as its own.
-    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
-    fireEvent.wheel(body(), { deltaX: -80, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_a");
-    await waitFor(() => expect(panes()).toHaveLength(1));
-    expect(spaceName()).toBe("api");
-  });
-
-  it("one swipe moves one space however long the fingers keep going, and a scroll down the sidebar moves nothing", async () => {
-    await mountSpaces(fakeApi(THREE, statuses()));
-    const body = (): HTMLElement => document.querySelector<HTMLElement>("[data-space-slide]")!;
-    for (const deltaX of [80, 80, 80]) fireEvent.wheel(body(), { deltaX, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_b");
-    await waitFor(() => expect(panes()).toHaveLength(1));
-    expect(spaceName()).toBe("web");
-    // A gesture of its own, straight down the rows: nothing moves.
-    await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
-    for (const deltaY of [120, 120]) fireEvent.wheel(body(), { deltaX: 0, deltaY });
-    expect(useStore.getState().selectedId).toBe("ws_b");
-    expect(panes()).toHaveLength(1);
-  });
-
-  it("the whole sidebar carries the swipe: the empty room under the rows, the space bar and the search row all move a space, and the list body never does", async () => {
-    await mountSpaces(fakeApi(THREE, statuses()));
-    const rest = async (): Promise<void> => {
-      await waitFor(() => expect(panes()).toHaveLength(1));
-      await act(async () => new Promise(resolve => setTimeout(resolve, SWIPE_GAP_MS + 10)));
-    };
-    // The scroll area under the rows, where a hand lands when the space has few threads.
-    fireEvent.wheel(document.querySelector<HTMLElement>("[data-slot=sidebar-content]")!, { deltaX: 80, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_b");
-    await rest();
-    fireEvent.wheel(document.querySelector<HTMLElement>("[data-space-bar]")!, { deltaX: 80, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_c");
-    await rest();
-    fireEvent.wheel(document.querySelector<HTMLElement>("[data-sidebar-search]")!, { deltaX: -80, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_b");
-    await rest();
-    // The list body has no spaces to move between, so the same push over it is a scroll and nothing more.
-    await act(async () => {
-      await useStore.getState().setPreferences({ sidebarMode: "list" });
-    });
-    await waitFor(() => expect(workspaceRowIds()).toHaveLength(3));
-    fireEvent.wheel(document.querySelector<HTMLElement>("[data-slot=sidebar-content]")!, { deltaX: 80, deltaY: 0 });
-    expect(useStore.getState().selectedId).toBe("ws_b");
-  });
-
-  it("before the first status the header carries no machine line: nothing draws a size it does not have", async () => {
-    await mountSpaces(fakeApi([API], []));
-    await waitFor(() => expect(headerLines()).toEqual([]));
-  });
-
-  it("the two lines the row gives a whole line to lead the header's, and the rest stay under them", async () => {
-    await mountSpaces(fakeApi(THREE, statuses()));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: { ...status(API, { idleAt: iso(15.5 * 60_000) }), daemonNote: DAEMON_UPDATING } }));
-    await waitFor(() => expect(headerLines()).toEqual([DAEMON_UPDATING, "2 vCPU · 4 GB", "$0.110/hr", "naps in 15m"]));
-    act(() => useStore.getState().applyEvent({ type: "workspace.status", status: status(API, { idleAt: iso(15.5 * 60_000) }) }));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
-  });
-
-  it("a machine that stopped answering with memory near full says so at the top of its header", async () => {
-    const GiB = 1024 ** 3;
-    resetLive();
-    await mountSpaces(fakeApi([API], [status(API, { reach: { state: "unreachable" } })]));
-    act(() => {
-      getLive("ws_a").feedStatus("live");
-      getLive("ws_a").feedSample({ type: "sys.sample", cpu: 99, load1: 6.4, mem: { used: 3.59 * GiB, total: 3.94 * GiB }, disk: { used: 1, total: 10 }, at: 1 });
-      getLive("ws_a").feedStatus("connecting");
-    });
-    await waitFor(() => expect(headerLines()[0]).toBe("out of memory, 3.6 of 3.9 GB"));
-    expect(headerLines()).toContain("2 vCPU · 4 GB");
-    act(() => getLive("ws_a").feedStatus("live"));
-    await waitFor(() => expect(headerLines()[0]).toBe("2 vCPU · 4 GB"));
-  });
-
-  it("the header is a stop in the arrow walk, and the walk carries on into the space's threads", async () => {
-    await mountSpaces(
-      fakeApi(THREE, statuses(), [
-        session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) }),
-        session("s4", "ws_a", { prompt: "read the log", startedAt: iso(-9 * 60_000) }),
-      ]),
-    );
-    await waitFor(() => expect(rowIds()).toEqual(["ws:ws_a", "thread:s1", "thread:s4"]));
-    spaceHeader()!.focus();
-    expect(document.activeElement).toBe(spaceHeader());
-    fireEvent.keyDown(spaceHeader()!, { key: "ArrowDown" });
-    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s1");
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
-    expect(document.activeElement).toBe(spaceHeader());
-    fireEvent.keyDown(spaceHeader()!, { key: "End" });
-    expect((document.activeElement as HTMLElement).dataset["rowId"]).toBe("thread:s4");
-  });
-
-  it("is the rows' own button, so what activates a row activates it, and it opens the workspace as its row does in the list", async () => {
-    const asked: string[] = [];
-    const off = onNewThreadRequest(request => asked.push(request.workspaceId));
-    try {
-      await mountSpaces(fakeApi(THREE, statuses(), [session("s1", "ws_a", { prompt: "fix the port list", startedAt: iso(-3 * 60_000) })]));
-      // A real button is what makes Space and Enter both activate it, which jsdom cannot deliver for itself.
-      expect(spaceHeader()!.tagName).toBe("BUTTON");
-      expect(spaceHeader()!.getAttribute("type")).toBe("button");
-      expect(spaceHeader()!.tabIndex).toBe(0);
-      act(() => useStore.getState().select("ws_a", "s1"));
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBe("s1"));
-      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
-      fireEvent.click(spaceHeader()!);
-      // The list's own row does exactly this on a click, and the same key road reaches both.
-      await waitFor(() => expect(useStore.getState().selectedThreadId).toBeNull());
-      expect(useStore.getState().selectedId).toBe("ws_a");
-      // Selecting leaves it plain: the one workspace on screen has nothing to say by being tinted, and the bar's
-      // current icon is where the sidebar says which workspace this is. The list's rows keep their own tint.
-      expect(spaceHeader()!.getAttribute("data-active")).toBe("false");
-      // Opening a thread stays on its own roads: the menu, the palette and the new-thread chord.
-      expect(asked).toEqual([]);
-    } finally {
-      off();
-    }
-  });
-
-  it("hands the name box a plain box to sit in, since an input may not sit inside a button", async () => {
-    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
-    await mountSpaces(api);
-    act(() => requestRenameWorkspace("ws_a"));
-    await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename });
-    expect(spaceHeader()!.tagName).toBe("DIV");
-  });
-
-  it("the header grows the sidebar's one name box: the palette's ask and a double-click both open it in the name's slot", async () => {
-    const api = { ...fakeApi(THREE, statuses()), renameWorkspace: vi.fn(async (id: string, name: string) => ({ ...view(id, name) })) };
-    await mountSpaces(api);
-    act(() => requestRenameWorkspace("ws_a"));
-    const asked = (await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename })) as HTMLInputElement;
-    expect(asked.value).toBe("api");
-    expect(asked.closest("[data-space-header]")).not.toBeNull();
-    fireEvent.keyDown(asked, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-    fireEvent.doubleClick(document.querySelector("[data-space-name]")!);
-    const typed = (await screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename })) as HTMLInputElement;
-    fireEvent.change(typed, { target: { value: "renamed in spaces" } });
-    fireEvent.keyDown(typed, { key: "Enter" });
-    await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "renamed in spaces"));
-    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-  });
-});
-
-describe("a thread another thread's agent opened", () => {
   it("names where it runs in the meta line's mono, drops the workspace it shares with the row above it, and stands without the word Working while it works", async () => {
     const lead = session("s1", "ws_a", { prompt: "ship the search rewrite", startedBy: "person", threadId: "th_lead" });
     await mount(
@@ -1733,7 +1051,7 @@ describe("a thread another thread's agent opened", () => {
     await waitFor(() => expect(screen.getByText("write the migration")).toBeDefined());
     const meta = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-meta]")!;
     // The workspace it runs in is the one it is drawn under, so the slot holds where that workspace runs and nothing else.
-    expect(meta("write the migration").textContent).toBe("··solari");
+    expect(meta("write the migration").textContent).toBe("·solari");
     expect(meta("write the migration").className).toContain("font-mono");
     // The dot alone says it works, the rule a workspace row already follows; a row that failed keeps its word.
     expect(meta("write the migration").textContent).not.toContain("Working");
@@ -1776,8 +1094,8 @@ describe("a thread an agent opened on another workspace", () => {
     await opened();
     await waitFor(() => expect(screen.getByText("benchmark the new index")).toBeDefined());
     const meta = (title: string): HTMLElement => rowOf(title).querySelector<HTMLElement>("[data-thread-meta]")!;
-    expect(meta("benchmark the new index").textContent).toBe("··spoo-bench·ascii");
-    // The dot alone says it works on a spawned row, and the opener word is dropped: the indent already says it.
+    expect(meta("benchmark the new index").textContent).toBe("·spoo-bench·ascii");
+    // A spawned row at work says no word at all, and the opener word is dropped: the indent already says both.
     expect(meta("benchmark the new index").textContent).not.toContain("Working");
     expect(meta("benchmark the new index").textContent).not.toContain("agent");
     expect(meta("run the migration across the fleet").textContent).toBe("Working··the-project·you");
@@ -1844,7 +1162,7 @@ describe("a window on another computer while the wsp it shows is asleep", () => 
     expect(glyph("this Mac")).not.toContain("text-success-foreground");
     expect(stateSlot(rowOf("this Mac")).textContent).toBe("");
     // A workspace at a provider keeps running while that computer sleeps, so its row is left as it was.
-    expect(stateSlot(rowOf("web")).textContent).toBe("Paused");
+    expect(stateSlot(rowOf("web")).textContent).toBe("Stopped");
     act(() => useStore.getState().setConn("live"));
     await waitFor(() => expect(glyph("this Mac")).toContain("text-success-foreground"));
   });
