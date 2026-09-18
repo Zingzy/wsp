@@ -191,6 +191,10 @@ describe("mcp servers", () => {
       }),
       place: () => ({ text: "", commentsDropped: false }),
       edit: (_lib, _scope, text) => ({ text, results: [] }),
+      // The collector asks a format to read and nothing else: what writes a file is the install helper's and the
+      // machine's, and this row's module is here to be read through.
+      entryOf: () => undefined,
+      merge: (_lib, _scope, own) => ({ text: own ?? "", results: [], commentsDropped: false }),
     };
     const entry: McpAgent = { ...CATALOG_AGENTS.find(a => a.id === "pi")!, id: "lines", name: "Lines", mcp: { format: lines, files: ["~/.lines/servers.txt"], scope: "one file" } };
     const host = fakeHost({ files: { "~/.lines/servers.txt": "alpha npx -y pkg\nbeta /Applications/B.app/b\n", "~/.claude.json": claudeJson() } });

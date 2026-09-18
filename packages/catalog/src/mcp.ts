@@ -42,6 +42,33 @@ export interface McpEditResult {
   command?: string;
 }
 
+/** One config on the machine as a merge gets it: the kept and dropped names as an edit has them, and the names
+ * whose entry in the agent's own file is wsp's by the list beside the job, so it may be replaced or taken out.
+ * Every other name in that file is the agent's own or the person's and stands. */
+export interface McpMergeScope extends McpEditScope {
+  replace: readonly string[];
+}
+
+export interface McpMergeResult {
+  name: string;
+  /** `added`: not in the agent's file, written from the copy that travelled; `replaced`: wsp's own entry, now the
+   * travelled one; `same`: already the travelled entry; `theirs`: another entry under that name, left as it is;
+   * `missing`: not in the copy that travelled; `dropped`: wsp's own entry taken out; `left`: a dropped name that is
+   * not wsp's, untouched. */
+  outcome: "added" | "replaced" | "same" | "theirs" | "missing" | "dropped" | "left";
+  /** The written name's command as the machine will run it. */
+  command?: string;
+}
+
+/** What a merge came to: the file as it should stand on the machine, the text as it was where nothing moved, and
+ * empty where there is no file yet and nothing to put in one. */
+export interface McpMerged {
+  text: string;
+  results: McpMergeResult[];
+  /** The agent's own file held comments the rewrite does not keep, so the person is told. */
+  commentsDropped: boolean;
+}
+
 /** What every editor is handed besides the text. */
 export interface McpEditLib {
   /** A kept definition's string as the machine reads it; `command` marks the program, a bare name when it sits in a bin directory. */
@@ -67,6 +94,17 @@ export interface McpFormat {
   place(text: string | undefined, name: string, server: McpServerSpec): Placed;
   /** The edit the import runs over the text it read off the machine. */
   edit: McpEditor;
+  /** The definition one server has in a file of this format, in the one shape it keeps when the agent rewrites the
+   * file: a JSON entry with its keys sorted at every depth, a TOML table's lines uncommented and trimmed. Whether a
+   * key is wsp's own rests on this, so a field the agent adds to a table wsp wrote makes the entry read as the
+   * agent's and never written over again. Nothing when the text names no server called that; `project` is the
+   * folder whose own servers the name sits under, for a format that keeps servers per folder. */
+  entryOf(text: string, name: string, project?: string): string | undefined;
+  /** The agent's own file on the machine with wsp's servers merged into it: each kept name's definition taken from
+   * the copy that travelled and put under this format's own key of `own`, every other key of `own` untouched.
+   * `own` is undefined when the agent's file is not there yet, and the text is then empty when there was nothing to
+   * put in one. Throws when either text is not the format. */
+  merge(lib: McpEditLib, scope: McpMergeScope, own: string | undefined, travelled: string): McpMerged;
 }
 
 export interface McpConfig {
@@ -113,45 +151,114 @@ function jsonServers(root: Record<string, unknown>, key: string, scope: McpServe
   });
 }
 
+type Tree = Record<string, unknown>;
+const tree = (v: unknown): Tree | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Tree) : undefined);
+
+/** Every string of a definition as the machine reads it: the value under `command` and the first word of a command
+ * array are the program, everything else a plain string. */
+const walkStrings = (lib: McpEditLib, v: unknown, command: boolean): unknown => {
+  if (typeof v === "string") return lib.rewriteString(v, command);
+  if (Array.isArray(v)) return v.map((x, i) => walkStrings(lib, x, command && i === 0));
+  const o = tree(v);
+  return o === undefined ? v : Object.fromEntries(Object.keys(o).map(k => [k, walkStrings(lib, o[k], k === "command")]));
+};
+
+/** The program a JSON definition names, as a string or as the first word of its command array. */
+const jsonCommandOf = (def: unknown): string | undefined => {
+  const c = tree(def)?.command;
+  return typeof c === "string" ? c : Array.isArray(c) && typeof c[0] === "string" ? c[0] : undefined;
+};
+
+/** A JSON value in the one shape it keeps when the agent rewrites the file: every object's keys in sorted order at
+ * every depth, so an entry written back with its keys another way round still reads as the same entry. */
+function jsonCanonical(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(jsonCanonical).join(",")}]`;
+  const o = tree(v);
+  return o === undefined ? (JSON.stringify(v) ?? "null") : `{${Object.keys(o).sort().map(k => `${JSON.stringify(k)}:${jsonCanonical(o[k])}`).join(",")}}`;
+}
+
+/** The merge for a JSON file with its servers under `key`: the agent's own file parsed, wsp's keys put in it, the
+ * whole of it written back, and not one other key of theirs read or moved. Per-folder servers go under
+ * `projects.<folder>.<key>` as the editor puts them, and the folder the definitions travelled from is not made. */
+function jsonMerger(key: string): McpFormat["merge"] {
+  return (lib, scope, own, travelled) => {
+    const held = own === undefined || own.trim() === "" ? undefined : readJsonc(own);
+    const root = tree(held?.value ?? {});
+    if (root === undefined) throw new Error("the file is not a JSON object");
+    const from = tree(readJsonc(travelled).value);
+    if (from === undefined) throw new Error("the copy that travelled is not a JSON object");
+    const project = scope.project;
+    const source = project === undefined ? from : tree(tree(from.projects)?.[project.from]) ?? {};
+    const arrived = tree(source[key]) ?? {};
+    /** The servers standing in the agent's own file under this scope's key, read without making the table. */
+    const standing = (): Tree => (project === undefined ? tree(root[key]) ?? {} : tree(tree(tree(root.projects)?.[project.to])?.[key]) ?? {});
+    /** The same table, made where the file has none, for a name that is about to be written. */
+    const target = (): Tree => {
+      if (project === undefined) return (root[key] = tree(root[key]) ?? {});
+      const projects = (root.projects = tree(root.projects) ?? {});
+      const to = (projects[project.to] = tree(projects[project.to]) ?? {});
+      return (to[key] = tree(to[key]) ?? {});
+    };
+    const replace = new Set(scope.replace);
+    const results: McpMergeResult[] = [];
+    let wrote = false;
+    for (const name of scope.keep) {
+      const def = arrived[name];
+      if (def === undefined) {
+        results.push({ name, outcome: "missing" });
+        continue;
+      }
+      const next = walkStrings(lib, def, false);
+      const said = (outcome: McpMergeResult["outcome"]): void => void results.push({ name, outcome, command: jsonCommandOf(next) });
+      const here = standing()[name];
+      if (here !== undefined && jsonCanonical(here) === jsonCanonical(next)) said("same");
+      else if (here !== undefined && !replace.has(name)) said("theirs");
+      else {
+        target()[name] = next;
+        wrote = true;
+        said(here === undefined ? "added" : "replaced");
+      }
+    }
+    for (const name of scope.drop) {
+      if (standing()[name] === undefined || !replace.has(name)) {
+        results.push({ name, outcome: "left" });
+        continue;
+      }
+      delete target()[name];
+      wrote = true;
+      results.push({ name, outcome: "dropped" });
+    }
+    return { text: wrote ? `${JSON.stringify(root, null, 2)}\n` : own ?? "", results, commentsDropped: wrote && held?.comments === true };
+  };
+}
+
 /** The editor for a JSON file with its servers under `key`, and per-folder servers under
  * `projects.<folder>.<key>` when the scope names a folder. */
 function jsonEditor(key: string): McpEditor {
   return (lib, scope, before) => {
-    type Tree = Record<string, unknown>;
-    const obj = (v: unknown): Tree | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Tree) : undefined);
-    const walk = (v: unknown, command: boolean): unknown => {
-      if (typeof v === "string") return lib.rewriteString(v, command);
-      if (Array.isArray(v)) return v.map((x, i) => walk(x, command && i === 0));
-      const o = obj(v);
-      return o === undefined ? v : Object.fromEntries(Object.keys(o).map(k => [k, walk(o[k], k === "command")]));
-    };
-    const commandOf = (def: unknown): string | undefined => {
-      const c = obj(def)?.command;
-      return typeof c === "string" ? c : Array.isArray(c) && typeof c[0] === "string" ? c[0] : undefined;
-    };
-    const root = obj(readJsonc(before).value);
+    const root = tree(readJsonc(before).value);
     if (root === undefined) throw new Error("the file is not a JSON object");
     const project = scope.project;
-    const source = project === undefined ? root : obj(obj(root.projects)?.[project.from]) ?? {};
-    const servers = obj(source[key]) ?? {};
+    const source = project === undefined ? root : tree(tree(root.projects)?.[project.from]) ?? {};
+    const servers = tree(source[key]) ?? {};
     const target = (): Tree => {
       if (project === undefined) return servers;
-      const projects = (root.projects = obj(root.projects) ?? {});
-      const to = (projects[project.to] = obj(projects[project.to]) ?? {});
-      return (to[key] = obj(to[key]) ?? {});
+      const projects = (root.projects = tree(root.projects) ?? {});
+      const to = (projects[project.to] = tree(projects[project.to]) ?? {});
+      return (to[key] = tree(to[key]) ?? {});
     };
-    const moved = project === undefined ? {} : obj(obj(obj(root.projects)?.[project.to])?.[key]) ?? {};
+    const moved = project === undefined ? {} : tree(tree(tree(root.projects)?.[project.to])?.[key]) ?? {};
     const results: McpEditResult[] = [];
     for (const name of scope.keep) {
       const def = servers[name];
       if (def === undefined) {
-        results.push(moved[name] !== undefined ? { name, outcome: "written", command: commandOf(moved[name]) } : { name, outcome: "missing" });
+        results.push(moved[name] !== undefined ? { name, outcome: "written", command: jsonCommandOf(moved[name]) } : { name, outcome: "missing" });
         continue;
       }
-      const next = walk(def, false);
+      const next = walkStrings(lib, def, false);
       if (project !== undefined) delete servers[name];
       target()[name] = next;
-      results.push({ name, outcome: "written", command: commandOf(next) });
+      results.push({ name, outcome: "written", command: jsonCommandOf(next) });
     }
     for (const name of scope.drop) {
       delete servers[name];
@@ -195,6 +302,19 @@ function jsonFormat(shape: JsonShape): McpFormat {
       return { text: `${JSON.stringify(root, null, 2)}\n`, commentsDropped: comments };
     },
     edit: jsonEditor(shape.key),
+    entryOf: (text, name, project) => {
+      let held: unknown;
+      try {
+        held = readJsonc(text).value;
+      } catch {
+        return undefined;
+      }
+      const root = tree(held);
+      const source = root === undefined ? undefined : project === undefined ? root : tree(tree(root.projects)?.[project]);
+      const def = source === undefined ? undefined : tree(source[shape.key])?.[name];
+      return def === undefined ? undefined : jsonCanonical(def);
+    },
+    merge: jsonMerger(shape.key),
   };
 }
 
@@ -394,10 +514,10 @@ export function rewriteTomlLine(line: string, to: (value: string) => string): st
   return next + line.slice(code.length);
 }
 
-/** The editor: each line belongs to the server whose header came last (its sub-tables included), so a dropped
- * server's lines go and a kept one's strings are rewritten. */
-function codexEditor(lib: McpEditLib, scope: McpEditScope, before: string): McpEdited {
-  const lines = before.split("\n");
+/** Which server each line of the text belongs to: the name of the last `[mcp_servers.<name>]` header, that table's
+ * sub-tables and the blank lines under them included; nothing for a line before any of them or under another
+ * table. */
+function codexOwners(lines: readonly string[]): (string | undefined)[] {
   const owner: (string | undefined)[] = [];
   let current: string | undefined;
   for (const raw of lines) {
@@ -405,10 +525,45 @@ function codexEditor(lib: McpEditLib, scope: McpEditScope, before: string): McpE
     if (t.startsWith("[")) current = tomlHeader(t)?.name;
     owner.push(current);
   }
-  const rewriteLine = (line: string): string => {
-    const isCommand = /^\s*command\s*=/.test(uncommentToml(line));
-    return rewriteTomlLine(line, value => lib.rewriteString(value, isCommand));
-  };
+  return owner;
+}
+
+/** Where one server's tables sit in the text, in file order. `trim` leaves the blank lines at their end out, which
+ * is what keeps the gap in front of whatever follows when the block is written over. */
+function codexBlock(lines: readonly string[], name: string, trim: boolean): number[] {
+  const owner = codexOwners(lines);
+  const at = lines.flatMap((_, i) => (owner[i] === name ? [i] : []));
+  if (trim) while (at.length > 0 && lines[at[at.length - 1]!]!.trim() === "") at.pop();
+  return at;
+}
+
+/** One server's tables in the one shape they keep when Codex writes the file again: every line without its comment
+ * and its spacing, the blank ones left out. */
+const codexEntry = (lines: readonly string[]): string =>
+  lines
+    .map(l => uncommentToml(l).trim())
+    .filter(l => l !== "")
+    .join("\n");
+
+/** The command one server's tables name, as the machine will run it. */
+function codexCommand(lines: readonly string[]): string | undefined {
+  for (const line of lines) {
+    const code = uncommentToml(line);
+    const m = /^\s*command\s*=\s*/.exec(code);
+    if (m !== null) return tomlStrings(code.slice(m[0].length))[0];
+  }
+  return undefined;
+}
+
+/** A kept server's line with every string on it as the machine reads it. */
+const codexRewrite = (lib: McpEditLib, line: string): string =>
+  rewriteTomlLine(line, value => lib.rewriteString(value, /^\s*command\s*=/.test(uncommentToml(line))));
+
+/** The editor: each line belongs to the server whose header came last (its sub-tables included), so a dropped
+ * server's lines go and a kept one's strings are rewritten. */
+function codexEditor(lib: McpEditLib, scope: McpEditScope, before: string): McpEdited {
+  const lines = before.split("\n");
+  const owner = codexOwners(lines);
   const keep = new Set(scope.keep);
   const drop = new Set(scope.drop);
   const out: string[] = [];
@@ -416,7 +571,7 @@ function codexEditor(lib: McpEditLib, scope: McpEditScope, before: string): McpE
   lines.forEach((line, i) => {
     const o = owner[i];
     if (o !== undefined && drop.has(o)) return;
-    out.push(o !== undefined && keep.has(o) ? rewriteLine(line) : line);
+    out.push(o !== undefined && keep.has(o) ? codexRewrite(lib, line) : line);
     outOwner.push(o);
   });
   const results: McpEditResult[] = [];
@@ -425,20 +580,72 @@ function codexEditor(lib: McpEditLib, scope: McpEditScope, before: string): McpE
       results.push({ name, outcome: "missing" });
       continue;
     }
-    let command: string | undefined;
-    out.forEach((l, i) => {
-      const code = uncommentToml(l);
-      const m = /^\s*command\s*=\s*/.exec(code);
-      if (outOwner[i] === name && m !== null) command = tomlStrings(code.slice(m[0].length))[0];
-    });
-    results.push({ name, outcome: "written", command });
+    results.push({ name, outcome: "written", command: codexCommand(out.filter((_, i) => outOwner[i] === name)) });
   }
   for (const name of scope.drop) results.push({ name, outcome: "dropped" });
   return { text: out.join("\n"), results };
+}
+
+/** The merge: wsp's tables spliced into the file Codex keeps for itself. A name it has no table for is appended
+ * after a blank line as `place` appends one; a name whose table is wsp's own is written over in place; every other
+ * line of theirs, the trust tables and the hooks state included, stays byte for byte. */
+function codexMerge(lib: McpEditLib, scope: McpMergeScope, own: string | undefined, travelled: string): McpMerged {
+  const from = travelled.split("\n");
+  const replace = new Set(scope.replace);
+  let lines = own === undefined ? [] : own.split("\n");
+  const results: McpMergeResult[] = [];
+  let wrote = false;
+  const append = (block: readonly string[]): void => {
+    const kept = [...lines];
+    while (kept.length > 0 && kept[kept.length - 1]!.trim() === "") kept.pop();
+    lines = kept.length === 0 ? [...block, ""] : [...kept, "", ...block, ""];
+  };
+  /** The block in place of the lines it stands on, which for an empty block is those lines taken out. */
+  const over = (at: readonly number[], block: readonly string[]): void => {
+    lines = lines.flatMap((line, i) => (i === at[0] ? block : at.includes(i) ? [] : [line]));
+  };
+  for (const name of scope.keep) {
+    const at = codexBlock(from, name, true);
+    if (at.length === 0) {
+      results.push({ name, outcome: "missing" });
+      continue;
+    }
+    const block = at.map(i => codexRewrite(lib, from[i]!));
+    const said = (outcome: McpMergeResult["outcome"]): void => void results.push({ name, outcome, command: codexCommand(block) });
+    const here = codexBlock(lines, name, true);
+    if (here.length === 0) {
+      append(block);
+      wrote = true;
+      said("added");
+    } else if (codexEntry(here.map(i => lines[i]!)) === codexEntry(block)) said("same");
+    else if (!replace.has(name)) said("theirs");
+    else {
+      over(here, block);
+      wrote = true;
+      said("replaced");
+    }
+  }
+  for (const name of scope.drop) {
+    const here = codexBlock(lines, name, false);
+    if (here.length === 0 || !replace.has(name)) {
+      results.push({ name, outcome: "left" });
+      continue;
+    }
+    over(here, []);
+    wrote = true;
+    results.push({ name, outcome: "dropped" });
+  }
+  return { text: wrote ? lines.join("\n") : own ?? "", results, commentsDropped: false };
 }
 
 export const CODEX_TOML: McpFormat = {
   read: readCodex,
   place: (text, name, server) => ({ text: placeCodex(text, name, server), commentsDropped: false }),
   edit: codexEditor,
+  entryOf: (text, name) => {
+    const lines = text.split("\n");
+    const at = codexBlock(lines, name, true);
+    return at.length === 0 ? undefined : codexEntry(at.map(i => lines[i]!));
+  },
+  merge: codexMerge,
 };

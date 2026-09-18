@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The recipe's MCP servers on a computer somebody owns. The guest is a temp
-// directory with real configs in it, so what the run ends with is the file on
-// disk: a config wsp landed is edited, a config of the person's is read by
-// nobody and left byte for byte as it was.
+// directory with real files in it, so what the run ends with is the file on
+// disk: the file an agent keeps its servers in is merged key by key, every
+// other key of its own stands, and a server the agent or the person has under
+// one of the recipe's names is left with its row saying so.
 import { readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_TOML, MCP_SERVERS_JSON } from "@wsp/catalog";
-import { MCP_ID_PREFIX } from "@wsp/protocol";
+import { MCP_ID_PREFIX, placeProvisionPaths } from "@wsp/protocol";
 import type { McpPlan } from "../src/golden-mcp.js";
-import { provisionMcp, theirConfigLine } from "../src/provision-mcp.js";
+import { closeAgentFiles, oncePathsOf, provisionFiles, type ProvisionLanding } from "../src/provision-files.js";
+import { provisionMcp, theirServerLine } from "../src/provision-mcp.js";
+import { tarOf } from "../src/vault.js";
+import type { PackedFiles } from "../src/golden.js";
 import { boxGuest, cleanGuests, type BoxGuest } from "./box-guest.js";
 
 const HOME = "/Users/dev";
@@ -17,31 +21,65 @@ const HOME = "/Users/dev";
 const guests: BoxGuest[] = [];
 afterEach(() => cleanGuests(guests.splice(0)));
 
-function box(): BoxGuest {
-  const g = boxGuest(["npx"]);
+function box(present: string[] = ["npx"]): BoxGuest {
+  const g = boxGuest(present);
   guests.push(g);
   return g;
 }
 
-const CLAUDE = {
-  mcpServers: {
-    github: { type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"] },
-    notes: { command: `${HOME}/Library/Notes/mcp`, args: [] },
+/** What Claude Code writes for itself the first time it runs on that computer, with one server the person added
+ * there by hand under a name the recipe also carries. */
+const CLAUDE_ON_BOX = `${JSON.stringify(
+  {
+    numStartups: 41,
+    oauthAccount: { emailAddress: "he@example.com" },
+    mcpServers: { mine: { command: "/usr/local/bin/mine", args: [] } },
+    projects: { "/root/work": { history: ["his own turn"] } },
   },
-};
+  null,
+  2,
+)}\n`;
 
-const CODEX = ['model = "gpt-5"', "", "[mcp_servers.grafana]", 'command = "npx"', ""].join("\n");
+/** This computer's own copy of each agent's file, which is what travels: the recipe's servers are taken from it. */
+const CLAUDE_TRAVELLED = (gsc: string[] = ["--stdio"], far = false): string =>
+  `${JSON.stringify(
+    {
+      numStartups: 7,
+      mcpServers: {
+        gsc: { command: "npx", args: ["-y", "gsc-mcp", ...gsc] },
+        notes: { command: `${HOME}/Library/Notes/mcp`, args: [] },
+        mine: { command: "npx", args: ["theirs-on-the-mac"] },
+        ...(far ? { far: { command: "/usr/bin/far-mcp", args: [] } } : {}),
+      },
+    },
+    null,
+    2,
+  )}\n`;
 
-function planOn(root: string): McpPlan {
+const CODEX_TRAVELLED = ['model = "gpt-5"', "", "[mcp_servers.context7]", 'command = "npx"', 'args = ["-y", "context7"]', "", "[mcp_servers.grafana]", 'command = "npx"', ""].join("\n");
+
+const LANDS: ProvisionLanding[] = [
+  { id: "agents/claude", label: "Claude Code", dest: ".claude-cfg/.claude.json", once: true },
+  { id: "agents/codex", label: "Codex", dest: ".codex/config.toml", once: true },
+];
+
+function planOn(root: string, far = false): McpPlan {
   return {
     agents: [
       {
         id: "claude",
         label: "Claude Code",
-        scopes: [{ files: [join(root, ".claude-cfg/.claude.json")], format: MCP_SERVERS_JSON, keep: ["github"], drop: [{ name: "notes", reason: "command is macOS-only, will not run" }] }],
+        scopes: [
+          {
+            files: [join(root, ".claude-cfg/.claude.json")],
+            format: MCP_SERVERS_JSON,
+            keep: ["gsc", "mine", ...(far ? ["far"] : [])],
+            drop: [{ name: "notes", reason: "command is macOS-only, will not run" }],
+          },
+        ],
         aside: [],
       },
-      { id: "codex", label: "Codex", scopes: [{ files: [join(root, ".codex/config.toml")], format: CODEX_TOML, keep: ["grafana"], drop: [] }], aside: [] },
+      { id: "codex", label: "Codex", scopes: [{ files: [join(root, ".codex/config.toml")], format: CODEX_TOML, keep: ["context7"], drop: [{ name: "grafana", reason: "unticked" }] }], aside: [] },
     ],
     guestHome: root,
     rewrites: [[`${HOME}/`, `${root}/`]],
@@ -50,53 +88,134 @@ function planOn(root: string): McpPlan {
   };
 }
 
-function seed(root: string): void {
-  mkdirSync(join(root, ".claude-cfg"), { recursive: true });
-  writeFileSync(join(root, ".claude-cfg", ".claude.json"), `${JSON.stringify(CLAUDE, null, 2)}\n`);
-  mkdirSync(join(root, ".codex"), { recursive: true });
-  writeFileSync(join(root, ".codex", "config.toml"), CODEX);
+const packed = (tar: Buffer): PackedFiles => ({ tar, bytes: tar.length, unpacked: tar.length, skipped: [], cut: [], silenced: [], macPaths: [] });
+
+const tarOfConfigs = (claude: string, codex: string): Buffer =>
+  tarOf([
+    { path: ".claude-cfg/.claude.json", mode: 0o600, content: claude },
+    { path: ".codex/config.toml", mode: 0o600, content: codex },
+  ]);
+
+/** One run of the job's files and servers rounds on that computer, in the order the job runs them, with the close
+ * that folds what it wrote into the list beside the job. */
+async function run(g: BoxGuest, o: { claude?: string; codex?: string; far?: boolean } = {}): Promise<{ files: [string, string][]; servers: [string, string, string | undefined][] }> {
+  const landed = await provisionFiles(g.machine, { home: g.root, lands: LANDS, pack: async () => packed(tarOfConfigs(o.claude ?? CLAUDE_TRAVELLED(["--stdio"], o.far === true), o.codex ?? CODEX_TRAVELLED)) });
+  const servers = await provisionMcp(g.machine, planOn(g.root, o.far === true), { home: g.root, landed: landed.owned, tools: [], stage: () => {} });
+  await closeAgentFiles(g.machine, g.root, oncePathsOf(LANDS));
+  return {
+    files: landed.rows.map(r => [r.id, r.outcome]),
+    servers: servers.map(r => [r.id, r.outcome, r.note]),
+  };
 }
 
-describe("the recipe's servers on a computer somebody owns", () => {
-  it("writes them into the config wsp landed and leaves the config the person keeps exactly as it is, naming that on its rows", async () => {
-    const { root, machine, cmds, runs } = box();
-    seed(root);
-    const before = readFileSync(join(root, ".codex", "config.toml"), "utf8");
-    const rows = await provisionMcp(machine, planOn(root), { home: root, owned: new Map([[join(root, ".claude-cfg/.claude.json"), "present" as const]]), tools: [], stage: () => {} });
-    expect(rows.map(r => [r.id, r.outcome, r.kind])).toEqual([
-      [`${MCP_ID_PREFIX}claude/github`, "installed", "server"],
-      [`${MCP_ID_PREFIX}claude/notes`, "skipped", "server"],
-      [`${MCP_ID_PREFIX}codex/grafana`, "skipped", "server"],
-    ]);
-    expect(rows[2]!.note).toBe(theirConfigLine("Codex", join(root, ".codex/config.toml")));
-    expect(rows[0]!.label).toBe("Claude Code github");
-    // The person's own config is not read off the computer, not edited and not written back.
-    expect(readFileSync(join(root, ".codex", "config.toml"), "utf8")).toBe(before);
-    expect(runs.some(r => r.includes(join(root, ".codex/config.toml")))).toBe(false);
-    expect(cmds.some(c => c.includes(".codex/config.toml.wsp-mcp"))).toBe(false);
-    const claude = JSON.parse(readFileSync(join(root, ".claude-cfg", ".claude.json"), "utf8")) as { mcpServers: Record<string, unknown> };
-    expect(Object.keys(claude.mcpServers)).toEqual(["github"]);
-  });
+const list = (root: string): string[] => readFileSync(placeProvisionPaths(root).landed, "utf8").split("\n").filter(l => l !== "");
+const claudeOf = (root: string): { numStartups: number; oauthAccount: unknown; projects: Record<string, unknown>; mcpServers: Record<string, { command: string; args: string[] }> } =>
+  JSON.parse(readFileSync(join(root, ".claude-cfg/.claude.json"), "utf8")) as never;
 
-  it("says installed on the run the config arrived on, and present on the next, when the recipe's servers are already in it", async () => {
-    const { root, machine } = box();
-    seed(root);
-    // The run that landed the config: every server in it arrived with this run, whatever the edit then changed.
-    const landedNow = new Map([[join(root, ".claude-cfg/.claude.json"), "installed" as const]]);
-    const first = await provisionMcp(machine, planOn(root), { home: root, owned: landedNow, tools: [], stage: () => {} });
-    expect(first[0]!.outcome).toBe("installed");
-    const owned = new Map([[join(root, ".claude-cfg/.claude.json"), "present" as const]]);
-    const again = await provisionMcp(machine, planOn(root), { home: root, owned, tools: [], stage: () => {} });
-    expect(again.map(r => [r.id, r.outcome])).toEqual([
-      [`${MCP_ID_PREFIX}claude/github`, "present"],
+describe("the recipe's servers on a computer somebody owns", { timeout: 60_000 }, () => {
+  it("merges them into the file its agent keeps, reads them present on the next run, and writes its own copy again only where this computer's changed", async () => {
+    const g = box();
+    const { root } = g;
+    mkdirSync(join(root, ".claude-cfg"), { recursive: true });
+    writeFileSync(join(root, ".claude-cfg/.claude.json"), CLAUDE_ON_BOX);
+
+    // The first run: Claude Code has already run on that computer, so its file stands and its servers are merged
+    // into it; Codex has not, so its file lands whole and the servers that came in it arrived with this run.
+    const first = await run(g);
+    expect(first.files).toEqual([
+      ["files/.claude-cfg/.claude.json", "present"],
+      ["files/.codex/config.toml", "installed"],
+    ]);
+    expect(first.servers).toEqual([
+      // Both run through npx, which brings the package down at the agent's first use of the server.
+      [`${MCP_ID_PREFIX}claude/gsc`, "installed", "npx fetches the package on first use"],
+      [`${MCP_ID_PREFIX}claude/notes`, "skipped", "command is macOS-only, will not run"],
+      [`${MCP_ID_PREFIX}claude/mine`, "skipped", theirServerLine("Claude Code", "mine", join(root, ".claude-cfg/.claude.json"))],
+      [`${MCP_ID_PREFIX}codex/context7`, "installed", "npx fetches the package on first use"],
+      [`${MCP_ID_PREFIX}codex/grafana`, "skipped", "unticked"],
+    ]);
+    // A file that arrived whole is wsp's own hand for that run, so the server the person unticked comes out of it
+    // again rather than standing there because nobody owns it.
+    expect(readFileSync(join(root, ".codex/config.toml"), "utf8")).not.toContain("grafana");
+    // Every key the agent wrote for itself stands, and the server the person put there is the one they wrote.
+    const after = claudeOf(root);
+    expect(after.numStartups).toBe(41);
+    expect(after.oauthAccount).toEqual({ emailAddress: "he@example.com" });
+    expect(after.projects).toEqual({ "/root/work": { history: ["his own turn"] } });
+    expect(after.mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
+    expect(after.mcpServers["gsc"]).toEqual({ command: "npx", args: ["-y", "gsc-mcp", "--stdio"] });
+    // The list holds one line per key wsp wrote and not one line for either file: what wsp owns in a file its
+    // agent keeps is the keys, never the bytes.
+    expect(list(root)).toHaveLength(2);
+    expect(list(root).map(l => l.split("\t")[0]).sort()).toEqual([`${MCP_ID_PREFIX}claude/gsc`, `${MCP_ID_PREFIX}codex/context7`]);
+
+    // Both agents write their own files again, as they do at every launch and at the first turn in a folder.
+    const rewritten = claudeOf(root);
+    writeFileSync(join(root, ".claude-cfg/.claude.json"), `${JSON.stringify({ ...rewritten, numStartups: 42, projects: { ...rewritten.projects, "/root/again": { history: [] } } }, null, 2)}\n`);
+    writeFileSync(join(root, ".codex/config.toml"), `${readFileSync(join(root, ".codex/config.toml"), "utf8")}\n[projects."/root/repo"]\ntrust_level = "trusted"\n`);
+    const listed = list(root).sort();
+
+    const second = await run(g);
+    expect(second.files).toEqual([
+      ["files/.claude-cfg/.claude.json", "present"],
+      ["files/.codex/config.toml", "present"],
+    ]);
+    expect(second.servers.map(r => [r[0], r[1]])).toEqual([
+      [`${MCP_ID_PREFIX}claude/gsc`, "present"],
       [`${MCP_ID_PREFIX}claude/notes`, "skipped"],
+      [`${MCP_ID_PREFIX}claude/mine`, "skipped"],
+      [`${MCP_ID_PREFIX}codex/context7`, "present"],
       [`${MCP_ID_PREFIX}codex/grafana`, "skipped"],
     ]);
+    expect(list(root).sort()).toEqual(listed);
+    expect(readFileSync(join(root, ".codex/config.toml"), "utf8")).toContain('[projects."/root/repo"]');
+
+    // This computer's copy of one server changed: that key is wsp's own by the list, so it is written again.
+    const third = await run(g, { claude: CLAUDE_TRAVELLED(["--stdio", "--verbose"]) });
+    expect(third.servers.map(r => [r[0], r[1]])).toEqual([
+      [`${MCP_ID_PREFIX}claude/gsc`, "installed"],
+      [`${MCP_ID_PREFIX}claude/notes`, "skipped"],
+      [`${MCP_ID_PREFIX}claude/mine`, "skipped"],
+      [`${MCP_ID_PREFIX}codex/context7`, "present"],
+      [`${MCP_ID_PREFIX}codex/grafana`, "skipped"],
+    ]);
+    const held = claudeOf(root);
+    expect(held.mcpServers["gsc"]!.args).toEqual(["-y", "gsc-mcp", "--stdio", "--verbose"]);
+    expect(held.numStartups).toBe(42);
+    expect(held.projects["/root/again"]).toEqual({ history: [] });
+    expect(held.mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
+    const gsc = list(root).find(l => l.startsWith(`${MCP_ID_PREFIX}claude/gsc\t`))!;
+    expect(gsc).not.toBe(listed.find(l => l.startsWith(`${MCP_ID_PREFIX}claude/gsc\t`)));
+    expect(list(root)).toHaveLength(2);
   });
 
-  it("leaves a config that is on no computer to the edit itself, which skips its servers rather than writing a file nobody has", async () => {
+  it("leaves a server the agent itself rewrote since, names whose it is, and skips one whose command that computer does not have", async () => {
+    const g = box();
+    const { root } = g;
+    mkdirSync(join(root, ".claude-cfg"), { recursive: true });
+    writeFileSync(join(root, ".claude-cfg/.claude.json"), CLAUDE_ON_BOX);
+    const first = await run(g, { far: true });
+    expect(first.servers.find(r => r[0] === `${MCP_ID_PREFIX}claude/far`)).toEqual([`${MCP_ID_PREFIX}claude/far`, "skipped", "command not on the machine"]);
+    expect(claudeOf(root).mcpServers["far"]).toBeUndefined();
+
+    // The agent adds a field of its own to the entry wsp wrote: the entry is no longer the one the list holds, so
+    // it is the agent's from here on and the next run leaves it exactly as it is.
+    const held = claudeOf(root);
+    held.mcpServers["gsc"] = { ...held.mcpServers["gsc"]!, args: ["-y", "gsc-mcp", "--stdio", "--codex-added-this"] };
+    const theirs = `${JSON.stringify(held, null, 2)}\n`;
+    writeFileSync(join(root, ".claude-cfg/.claude.json"), theirs);
+    const again = await run(g, { claude: CLAUDE_TRAVELLED(["--stdio", "--verbose"]) });
+    expect(again.servers.find(r => r[0] === `${MCP_ID_PREFIX}claude/gsc`)).toEqual([
+      `${MCP_ID_PREFIX}claude/gsc`,
+      "skipped",
+      theirServerLine("Claude Code", "gsc", join(root, ".claude-cfg/.claude.json")),
+    ]);
+    expect(readFileSync(join(root, ".claude-cfg/.claude.json"), "utf8")).toBe(theirs);
+  });
+
+  it("leaves a config that is on no computer to the merge itself, which skips its servers rather than writing a file nobody has", async () => {
     const { root, machine } = box();
-    const rows = await provisionMcp(machine, planOn(root), { home: root, owned: new Map(), tools: [], stage: () => {} });
+    const rows = await provisionMcp(machine, planOn(root), { home: root, landed: new Map(), tools: [], stage: () => {} });
     expect(rows.every(r => r.outcome === "skipped")).toBe(true);
     expect(rows[0]!.note).toContain("Claude Code's config is not on the machine");
   });
