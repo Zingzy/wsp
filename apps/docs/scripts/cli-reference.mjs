@@ -25,11 +25,11 @@ const pages = [
   ["wsp host --help", ["host", "--help"]],
   ["wsp --help dev", ["--help", "dev"]],
 ];
-const verbs = ["init", "add", "places", "remove", "new", "import", "run", "pause", "wake", "delete", "workspaces", "threads", "send", "stop", "status", "mcp", "up", "down", "recipe", "fork", "snapshot", "rename", "forget", "thread read", "exec", "folders", "export", "image", "join", "leave", "doctor"];
+const verbs = ["init", "add", "computers", "remove", "new", "run", "pause", "wake", "delete", "workspaces", "threads", "send", "stop", "status", "mcp", "up", "down", "recipe", "fork", "snapshot", "rename", "forget", "thread read", "exec", "folders", "export", "image", "join", "leave", "doctor"];
 
 const sections = [
   ...pages.map(([title, args]) => `## ${title}\n\n\`\`\`text\n${help(args).trimEnd()}\n\`\`\``),
-  ...verbs.map(verb => `## wsp ${verb}\n\n\`\`\`text\n${help([...verb.split(" "), "--help"]).trimEnd()}\n\`\`\``),
+  ...verbs.map(verb => `## wsp ${verb}\n\n\`\`\`text\n${help([...verb.split(" "), "-h"]).trimEnd()}\n\`\`\``),
 ].join("\n\n");
 
 const page = `# Command line

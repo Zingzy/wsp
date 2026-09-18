@@ -255,9 +255,11 @@ export function recipeLines(place: PlaceView): { id: string; kind: PlaceProvisio
     .map(row => ({ id: row.id, kind: row.kind!, label: row.label, state: outcomeWord(row) ?? "" }));
 }
 
-/** The word for what one row of the recipe came to, or nothing for a row no job carried. */
-function outcomeWord(row: PlaceProvisionRow | undefined): string | undefined {
+/** The word for what one row of the recipe came to, or nothing for a row no job carried. A present row's note is
+ * the one thing its read has to say beyond the outcome, which is a command answering from outside the directories
+ * its own road links into; an installed row's note is the road's own and the row already says it installed. */
+export function outcomeWord(row: PlaceProvisionRow | undefined): string | undefined {
   if (row === undefined) return undefined;
   const said = PROVISION_OUTCOME_WORDS[row.outcome];
-  return row.note === undefined || row.outcome === "installed" || row.outcome === "present" ? said : `${said}: ${row.note}`;
+  return row.note === undefined || row.outcome === "installed" ? said : `${said}: ${row.note}`;
 }

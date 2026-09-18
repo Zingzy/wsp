@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeCopier, LocalBackend, projectStateKey } from "@wsp/engine";
 import { PATH_BOUND_DIR_NAMES } from "@wsp/catalog";
-import { copyPathFor, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
+import { copyPathFor, DAEMON_VERSION, HERE_PLACE_ID, PORT_BASE_FIRST, PORT_BASE_STEP, type AdapterEvent, type TurnResult } from "@wsp/protocol";
 import { COPY_SIZE_LINE_BYTES, createRuntime, oneWorkspacePerProject, type HarnessAdapterContext, type HarnessAdapterFactory, type LocalWiring, type Runtime } from "../src/runtime.js";
 import { localExecStream } from "../src/local-exec.js";
 import { memoryStore } from "../src/store.js";
@@ -243,5 +243,67 @@ describe("a second piece of work on a project here", () => {
     expect(copier.removed).toEqual([{ from: folder, to: copyPathFor(folder, "two"), road: "clonefile" }]);
     // And the name is free again: nothing of the create that failed is held.
     expect((await rt.workspaces.list()).map(w => w.name)).toEqual(["one"]);
+  });
+});
+
+describe("the daemon beside this host, before the first copy", () => {
+  /** This computer wired as a host wires it, with the daemon reader a case names: nothing has dialled the daemon,
+   * so the reader is what starts it, which is the road the person who read a usage dump took. */
+  function withDaemon(here: { version: number; started: () => void }): { rt: Runtime; copier: ReturnType<typeof fakeCopier> } {
+    const root = scratch();
+    const copier = fakeCopier();
+    const { adapter } = telling();
+    const local: LocalWiring = {
+      backend: new LocalBackend({ root }),
+      execStream: o => localExecStream({ root, runDir: join(root, "runs"), ...o }),
+      home: () => join(root, ".claude"),
+      homeDir: root,
+      env: () => ({ PATH: process.env["PATH"] ?? "/usr/bin:/bin" }),
+      platform: testPlatform(),
+      copier,
+      hereDaemon: {
+        version: async () => {
+          here.started();
+          return here.version;
+        },
+        fix: "npm i -g @zingzy/wsp",
+      },
+    };
+    return { rt: createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: adapter }, local }), copier };
+  }
+
+  it("refuses the copy in one sentence when the binary beside this host is behind, with no usage text anywhere in it", async () => {
+    let starts = 0;
+    const { rt, copier } = withDaemon({ version: DAEMON_VERSION - 1, started: () => void starts++ });
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    // The first piece of work is the folder in place, which the copier never runs for.
+    await rt.workspaces.create({ project: project.id, name: "one" });
+    // The second is the copy, which is where the persona met the binary's own usage as the refusal.
+    const refused = await rt.workspaces.create({ project: project.id, name: "two" }).catch((e: unknown) => e as Error);
+    expect(refused).toBeInstanceOf(Error);
+    expect((refused as Error).message).toBe(`this computer's wsp daemon is version ${DAEMON_VERSION - 1} and this wsp needs ${DAEMON_VERSION}; npm i -g @zingzy/wsp stages the right one`);
+    expect((refused as Error).message.toLowerCase()).not.toContain("usage:");
+    // The binary was never run: the read is what the copy waits on, and the read is what started the daemon.
+    expect(copier.asks).toEqual([]);
+    expect(starts).toBe(1);
+  });
+
+  it("makes the copy when the binary answers the version this wsp needs, and makes it on a wiring that reads none", async () => {
+    const { rt, copier } = withDaemon({ version: DAEMON_VERSION, started: () => {} });
+    const folder = repo();
+    const project = await rt.projects.add({ source: folder });
+    await rt.workspaces.create({ project: project.id, name: "one" });
+    await rt.workspaces.create({ project: project.id, name: "two" });
+    expect(copier.asks).toHaveLength(1);
+
+    // A harness that wired no daemon reader at all refuses no copy over it: the reading is the host's to wire, and
+    // a test that wires none is not a host running beside a stale binary.
+    const bare = withCopier();
+    const at = repo();
+    const its = await bare.rt.projects.add({ source: at });
+    await bare.rt.workspaces.create({ project: its.id, name: "one" });
+    await bare.rt.workspaces.create({ project: its.id, name: "two" });
+    expect(bare.copier.asks).toHaveLength(1);
   });
 });

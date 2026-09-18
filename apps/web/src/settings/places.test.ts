@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { DAEMON_VERSION, JOINED_COMPUTER, absentComputer, placeDaemonBehind, type PlaceProvision, type PlaceView, type SealedImageCopy, type WorkspaceView } from "@wsp/protocol";
 import { copyOn } from "./image.js";
-import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, computerRows, copiesWord, hereAgentLines, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
+import { NOTHING_HELD, PLACE_KIND_WORDS, PROJECT_PICK_WORDS, computerRows, copiesWord, hereAgentLines, outcomeWord, placeAgentLines, placeName, placeOf, placeStateWord, placeWorkspaceCounts, recipeLines, removeSentence, removeTitle, whereSegments } from "./places.js";
 
 const NOW = Date.parse("2026-09-12T12:00:00.000Z");
 const ago = (ms: number): string => new Date(NOW - ms).toISOString();
@@ -222,6 +222,15 @@ describe("which rows the Computers table draws", () => {
       { id: "agents/mcp/linear", kind: "server", label: "linear", state: "set aside: the config never landed" },
     ]);
     expect(recipeLines(hetzner)).toEqual([]);
+  });
+
+  it("shows a present row's own note, which is where a tool answered from outside the directories its road links into", () => {
+    const note = "node answers from /usr/bin/node, outside where its own installer puts it (/usr/local/bin)";
+    expect(outcomeWord({ id: "tools/brew/node", label: "node", outcome: "present", note })).toBe(`already there: ${note}`);
+    // A present row with nothing to add is the word alone, and an installed row's note is the road's own: the row
+    // already says it installed, so the landing's "already on the machine" never reaches a line here.
+    expect(outcomeWord({ id: "tools/brew/gh", label: "gh", outcome: "present" })).toBe("already there");
+    expect(outcomeWord({ id: "tools/brew/gh", label: "gh", outcome: "installed", note: "already on the machine" })).toBe("installed");
   });
 
   it("reads the agents on this computer off the one reading of which agents are here", () => {

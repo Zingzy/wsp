@@ -146,6 +146,29 @@ export function boxRoomLines(capacity: Pick<PlaceCapacity, "cores" | "memMb" | "
   ];
 }
 
+/** What a row the computer already had says where the command answered from a directory that row's own road never
+ * links into: the path it answered from, and the directories the road puts its commands in. The path is a fact the
+ * read already has; the road that did answer is not named, since several roads link into the same directory and
+ * naming one would be a guess. Read by the computers row, by the app's line for it and by the doctor. */
+export const presentElsewhereLine = (bin: string, path: string, roadWords: string, bins: readonly string[]): string =>
+  `${bin} answers from ${path}, outside where ${roadWords.replace(/^(?:by|with|as|from) /, "")} puts it (${bins.join(", ")})`;
+
+/** What the doctor adds to a tool it found missing inside a workspace that the computer's own row read present:
+ * the two readings disagree, which is either a tool that went off the computer since or one that answers from
+ * somewhere no workspace can see, and the line that reads the computer again settles it. */
+export const doctorComputerRowLine = (name: string, finishedAt: string): string =>
+  `the computers row read it present at ${finishedAt}; wsp add ${name} --update reads it again`;
+
+/** Why a copy on the computer the host runs on was refused: the daemon binary staged beside this wsp is older than
+ * the one this wsp needs, which is what an update that rebuilt the host and not the binary leaves. Read before the
+ * first copy is made, so the binary's own usage text never reaches a person as the refusal. */
+export const hereDaemonBehindLine = (version: number, host: number, fix: string): string =>
+  `this computer's wsp daemon is version ${version} and this wsp needs ${host}; ${fix} stages the right one`;
+
+/** What a child verb's failure that the verb itself never worded comes to: one sentence naming the verb and where
+ * its output is, since a parse error's usage text and a signal say nothing to the person who asked for a copy. */
+export const copyVerbFailedLine = (exitCode: number): string => `the daemon's copy verb failed (exit ${exitCode}); the host log has its output`;
+
 /** What a machine wsp neither forks nor pays for costs, on its row's cost line and the Machine tab's Cost row. */
 export const FREE_WORD = "free";
 

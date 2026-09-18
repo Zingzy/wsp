@@ -643,6 +643,14 @@ export interface ToolInstall {
   bin?: string;
   /** A command that exits 0 once the row is on the machine, run after the install for a row that carries its own. */
   check?: string;
+  /** The road's own reading of whether the row is already there, where the road has one that the command it puts on
+   * PATH cannot answer: a formula is the prefix's link, since a command of that name is another road's work. The
+   * presence read takes this over `check`; the check after an install stays the road's own. */
+  present?: string;
+  /** The directories this step's road links its commands into, off the road's module: what the presence read's
+   * answering path is held against, so a command answering from outside them is said rather than read as this
+   * row. Absent where the road names none. */
+  bins?: readonly string[];
   /** The version the row asks for, off its road, so a presence read can compare; absent where the road installs
    * what its source serves. */
   asks?: string;
@@ -674,6 +682,16 @@ const asksOf = (road: InstallRoad): { asks?: string } => {
   const asks = asksVersion(road);
   return asks === undefined ? {} : { asks };
 };
+
+/** What a step carries off its road for reading it back later: the road's own presence test where it has one, and
+ * the directories that road links its commands into. One reader, so every step planned on a road answers the same
+ * two questions however it was planned. */
+export function roadReads(road: InstallRoad, bin: string): { present?: string; bins?: readonly string[] } {
+  const mod = roadModule(road);
+  const present = mod.present?.(road, bin);
+  const bins = mod.bins(road);
+  return { ...(present !== undefined ? { present } : {}), ...(bins.length > 0 ? { bins } : {}) };
+}
 
 /** The pin read a road gives a step: its module's version line on the command it puts on PATH, whether it fixes one, and its words. */
 export function pinReadOf(road: InstallRoad, bin: string): PinRead {
@@ -1118,7 +1136,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     else if (fromCatalog !== undefined) managers.set(manager, { after: fromCatalog.e.id, row: fromCatalog });
     else if (npmTicked.has(manager)) managers.set(manager, { after: toolRowId("npm", manager) });
     else if (formula !== undefined) {
-      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", ...viaBrew(formula), after: toolchain.last, bin: manager } });
+      managers.set(manager, { after: own, step: { id: own, label: manager, manager: "brew", ...viaBrew(formula), ...roadReads({ road: "brew", formula }, manager), after: toolchain.last, bin: manager } });
       managerFormulae.push(formula);
     } else if (entry !== undefined) {
       const step = viaRoad(entry.installRoad, entry.bin);
@@ -1148,7 +1166,7 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
     // The check reads the dependencies this step installs, not the formulae they belong to: a formula whose own
     // step failed is that row's failure, and this one did its work.
     if (formulae.length > 1) installs.push({ id: "tools/brew-shared", label: "shared Homebrew dependencies", manager: "brew", cmd: withPath(brewSharedDeps(formulae)), shown: `brew install the dependencies ${formulae.join(", ")} share`, after: toolchain.last, check: brewSharedCheck(formulae) });
-    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), after: toolchain.last, check: brewHasCheck(f), pin: pinReadOf({ road: "brew", formula: f }, f) });
+    for (const f of brew.formulae) installs.push({ id: `${BREW_ID_PREFIX}${f}`, label: f, manager: "brew", ...viaBrew(f), ...roadReads({ road: "brew", formula: f }, f), after: toolchain.last, check: brewHasCheck(f), pin: pinReadOf({ road: "brew", formula: f }, f) });
   }
   // What a row waits on: the apt index read once by its own step, Homebrew's toolchain, node for a road that runs on
   // it, the manager's step otherwise; a floor row is there already.
@@ -1187,7 +1205,8 @@ export function toolInstallsFor(entries: readonly RecipeEntry[], table: BrewTabl
       return;
     }
     const after = afterDep(depOf(planned), planned.road.road);
-    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, planned.bin ?? packageOf(e)) });
+    const bin = planned.bin ?? packageOf(e);
+    installs.push({ id: e.id, label: e.label, manager: planned.road.road, ...step, ...roadReads(planned.road, bin), ...(after !== undefined ? { after } : {}), ...(planned.bin !== undefined ? { bin: planned.bin } : {}), ...(planned.note !== undefined ? { note: planned.note } : {}), ...asksOf(planned.road), pin: pinReadOf(planned.road, bin) });
   };
   // A catalog row that is a manager's own toolchain is planned with that manager, not again with the road it takes.
   const asManager = (id: string): boolean => [...managers.values()].some(m => m.row?.e.id === id);
@@ -1507,7 +1526,7 @@ export function agentSteps(plan: AgentsPlan, agents: readonly AgentEntry[] = CAT
       shown: shownOf(a.install.split("\n")),
       check: a.smoke,
       ...waits,
-      ...(entry === undefined ? {} : { bin: entry.bin, ...asksOf(entry.installRoad) }),
+      ...(entry === undefined ? {} : { bin: entry.bin, ...roadReads(entry.installRoad, entry.bin), ...asksOf(entry.installRoad) }),
       ...(a.pin === undefined ? {} : { pin: a.pin }),
     });
   }
