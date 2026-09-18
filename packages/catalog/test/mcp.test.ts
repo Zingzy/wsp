@@ -5,7 +5,7 @@
 // already has, once, on every run, and carries the editor the machine runs.
 import { describe, expect, it } from "vitest";
 import type { McpServerSpec } from "@wsp/protocol";
-import { CATALOG_AGENTS, CODEX_TOML, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpFormat, type McpServer } from "../src/index.js";
+import { CATALOG_AGENTS, CODEX_TOML, MCP_AGENTS, MCP_SERVERS_JSON, OPENCODE_JSON, catalogEntry, type McpEditLib, type McpFormat, type McpServer } from "../src/index.js";
 
 const HOME = "/Users/dev";
 const SERVER: McpServerSpec = { command: "/usr/local/bin/node", args: ["/opt/wsp/bin.js", "mcp", "--state", "/Users/me/.wsp/state.json"] };
@@ -20,8 +20,12 @@ describe("the catalog's MCP configs", () => {
     expect((catalogEntry("pi") as { mcp?: unknown }).mcp).toBeUndefined();
   });
 
-  it("every module carries the edit the import runs over the text it read off the machine", () => {
-    for (const format of new Set<McpFormat>(MCP_AGENTS.map(a => a.mcp.format))) expect(typeof format.edit).toBe("function");
+  it("every module carries the edit the import runs over the text it read off the machine, and the merge a computer somebody owns runs into the file its agent keeps", () => {
+    for (const format of new Set<McpFormat>(MCP_AGENTS.map(a => a.mcp.format))) {
+      expect(typeof format.edit).toBe("function");
+      expect(typeof format.merge).toBe("function");
+      expect(typeof format.entryOf).toBe("function");
+    }
   });
 });
 
@@ -152,5 +156,185 @@ describe("place", () => {
     const rerun = CODEX_TOML.place(spaced, "my server", { command: "/new/node", args: [] }).text;
     expect(rerun.match(/\[mcp_servers\./g)?.length).toBe(1);
     expect(rerun).toContain('command = "/new/node"');
+  });
+});
+
+const CODEX_OWN = [
+  'model = "gpt-5"',
+  "",
+  '[projects."/private/tmp/proof-907/repo"]',
+  'trust_level = "trusted"',
+  "",
+  "[hooks.state]",
+  "enabled = true",
+  "",
+  "[mcp_servers.mine]",
+  'command = "/usr/local/bin/mine"',
+  "",
+  "[mcp_servers.mine.env]",
+  'MINE_KEY = "abc"',
+  "",
+].join("\n");
+
+const CODEX_TRAVELLED = (args: string[] = ["--stdio"]): string =>
+  [
+    "[mcp_servers.context7]",
+    `command = "${HOME}/.local/bin/context7"`,
+    `args = [${args.map(a => `"${a}"`).join(", ")}]`,
+    "",
+    "[mcp_servers.context7.env]",
+    'KEY = "k"',
+    "",
+    "[mcp_servers.mine]",
+    `command = "${HOME}/other"`,
+    "",
+    "[mcp_servers.gone]",
+    'command = "x"',
+    "",
+  ].join("\n");
+
+/** The machine's own words for a string of this computer's: the home moves, and a command right under a bin
+ * directory is on the machine's PATH by name. */
+const LIB: McpEditLib = { rewriteString: (s, command) => (command && s === `${HOME}/.local/bin/bare` ? "bare" : s.startsWith(`${HOME}/`) ? `/root/${s.slice(HOME.length + 1)}` : s) };
+
+const CLAUDE_OWN = `${JSON.stringify(
+  {
+    numStartups: 41,
+    oauthAccount: { emailAddress: "he@example.com" },
+    mcpServers: { mine: { command: "/usr/local/bin/mine", args: [] } },
+    projects: { "/root/work": { history: ["his own turn"] } },
+  },
+  null,
+  2,
+)}\n`;
+
+const CLAUDE_TRAVELLED = (gscArgs: string[] = ["--stdio"]): string =>
+  `${JSON.stringify(
+    {
+      numStartups: 3,
+      mcpServers: { gsc: { command: `${HOME}/.local/bin/bare`, args: gscArgs }, notion: { command: "npx", args: ["-y", "notion-mcp"] }, mine: { command: `${HOME}/other`, args: [] } },
+      projects: { [HOME]: { mcpServers: { zed: { command: `${HOME}/.local/bin/zed`, args: [] } } } },
+    },
+    null,
+    2,
+  )}\n`;
+
+describe("merge", () => {
+  it("mcpServers JSON: the agent's own keys and the server the person has stand, wsp's are added, and a second merge over what it landed writes nothing", () => {
+    const merged = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc", "notion", "mine"], drop: [], replace: [] }, CLAUDE_OWN, CLAUDE_TRAVELLED());
+    expect(merged.results).toEqual([
+      { name: "gsc", outcome: "added", command: "bare" },
+      { name: "notion", outcome: "added", command: "npx" },
+      { name: "mine", outcome: "theirs", command: `/root/other` },
+    ]);
+    const root = JSON.parse(merged.text) as { numStartups: number; oauthAccount: unknown; projects: unknown; mcpServers: Record<string, unknown> };
+    // Every key of the agent's own stands, the number it keeps for itself included, and its servers keep their order.
+    expect(root.numStartups).toBe(41);
+    expect(root.oauthAccount).toEqual({ emailAddress: "he@example.com" });
+    expect(root.projects).toEqual({ "/root/work": { history: ["his own turn"] } });
+    expect(root.mcpServers["mine"]).toEqual({ command: "/usr/local/bin/mine", args: [] });
+    expect(Object.keys(root.mcpServers)).toEqual(["mine", "gsc", "notion"]);
+    expect(root.mcpServers["gsc"]).toEqual({ command: "bare", args: ["--stdio"] });
+    expect(merged.commentsDropped).toBe(false);
+
+    const again = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc", "notion", "mine"], drop: [], replace: ["gsc", "notion"] }, merged.text, CLAUDE_TRAVELLED());
+    expect(again.results.map(r => r.outcome)).toEqual(["same", "same", "theirs"]);
+    expect(again.text).toBe(merged.text);
+  });
+
+  it("mcpServers JSON: wsp's own entry is written over when this computer's copy changed, and an entry the agent has added a field to is the agent's and left", () => {
+    const landed = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc"], drop: [], replace: [] }, CLAUDE_OWN, CLAUDE_TRAVELLED()).text;
+    const changed = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc"], drop: [], replace: ["gsc"] }, landed, CLAUDE_TRAVELLED(["--stdio", "--verbose"]));
+    expect(changed.results.map(r => r.outcome)).toEqual(["replaced"]);
+    expect((JSON.parse(changed.text) as { mcpServers: { gsc: { args: string[] } } }).mcpServers.gsc.args).toEqual(["--stdio", "--verbose"]);
+
+    // The entry as the agent wrote it back, with a field of its own on it: its digest is not the one the list holds,
+    // so it is not in `replace` and the merge leaves it.
+    const theirs = JSON.parse(landed) as { mcpServers: Record<string, Record<string, unknown>> };
+    theirs.mcpServers["gsc"] = { ...theirs.mcpServers["gsc"], disabled: false };
+    const left = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc"], drop: [], replace: [] }, JSON.stringify(theirs, null, 2), CLAUDE_TRAVELLED(["--stdio", "--verbose"]));
+    expect(left.results.map(r => r.outcome)).toEqual(["theirs"]);
+    expect(left.text).toBe(JSON.stringify(theirs, null, 2));
+  });
+
+  it("mcpServers JSON: a key's shape is read whatever order the agent wrote it back in, and the entry the list holds is what a merge compares", () => {
+    const landed = MCP_SERVERS_JSON.merge(LIB, { keep: ["gsc"], drop: [], replace: [] }, CLAUDE_OWN, CLAUDE_TRAVELLED()).text;
+    const rewritten = JSON.stringify({ mcpServers: { gsc: { args: ["--stdio"], command: "bare" } } }, null, 2);
+    expect(MCP_SERVERS_JSON.entryOf(rewritten, "gsc")).toBe(MCP_SERVERS_JSON.entryOf(landed, "gsc"));
+    expect(MCP_SERVERS_JSON.entryOf(landed, "nobody")).toBeUndefined();
+    expect(MCP_SERVERS_JSON.entryOf("{ not json", "gsc")).toBeUndefined();
+  });
+
+  it("mcpServers JSON: a server of the person's home folder lands under the machine's own folder, and the folder it travelled from is not made", () => {
+    const merged = MCP_SERVERS_JSON.merge(LIB, { keep: ["zed"], drop: [], replace: [], project: { from: HOME, to: "/root" } }, CLAUDE_OWN, CLAUDE_TRAVELLED());
+    expect(merged.results.map(r => [r.name, r.outcome])).toEqual([["zed", "added"]]);
+    const root = JSON.parse(merged.text) as { projects: Record<string, { mcpServers?: Record<string, unknown>; history?: unknown }>; mcpServers: Record<string, unknown> };
+    expect(root.projects["/root"]!.mcpServers).toEqual({ zed: { command: "/root/.local/bin/zed", args: [] } });
+    expect(root.projects[HOME]).toBeUndefined();
+    expect(root.projects["/root/work"]).toEqual({ history: ["his own turn"] });
+    expect(Object.keys(root.mcpServers)).toEqual(["mine"]);
+    expect(MCP_SERVERS_JSON.entryOf(merged.text, "zed", "/root")).toBe(MCP_SERVERS_JSON.entryOf(merged.text, "zed", "/root"));
+    expect(MCP_SERVERS_JSON.entryOf(merged.text, "zed")).toBeUndefined();
+  });
+
+  it("mcpServers JSON: a file that is not there yet is made from wsp's servers alone, and one with nothing to put in it is not made at all", () => {
+    const made = MCP_SERVERS_JSON.merge(LIB, { keep: ["notion"], drop: [], replace: [] }, undefined, CLAUDE_TRAVELLED());
+    expect(JSON.parse(made.text)).toEqual({ mcpServers: { notion: { command: "npx", args: ["-y", "notion-mcp"] } } });
+    expect(MCP_SERVERS_JSON.merge(LIB, { keep: ["nobody"], drop: [], replace: [] }, undefined, CLAUDE_TRAVELLED()).text).toBe("");
+    expect(() => MCP_SERVERS_JSON.merge(LIB, { keep: [], drop: [], replace: [] }, "[]", CLAUDE_TRAVELLED())).toThrow("the file is not a JSON object");
+  });
+
+  it("OpenCode's jsonc: the merge says the comments its rewrite does not keep", () => {
+    const own = '{\n  // my servers\n  "theme": "x",\n  "mcp": {}\n}\n';
+    const travelled = '{ "mcp": { "wsp": { "type": "local", "command": ["wsp", "mcp"], "enabled": true } } }';
+    const merged = OPENCODE_JSON.merge(LIB, { keep: ["wsp"], drop: [], replace: [] }, own, travelled);
+    expect(merged.commentsDropped).toBe(true);
+    expect(JSON.parse(merged.text)).toEqual({ theme: "x", mcp: { wsp: { type: "local", command: ["wsp", "mcp"], enabled: true } } });
+    expect(OPENCODE_JSON.merge(LIB, { keep: ["nobody"], drop: [], replace: [] }, own, travelled).commentsDropped).toBe(false);
+  });
+
+  it("Codex's TOML: its trust tables, its hooks state and the person's own server stand line for line, and wsp's tables are appended with their sub-tables", () => {
+    const merged = CODEX_TOML.merge(LIB, { keep: ["context7", "mine"], drop: ["gone"], replace: [] }, CODEX_OWN, CODEX_TRAVELLED());
+    expect(merged.results).toEqual([
+      { name: "context7", outcome: "added", command: "/root/.local/bin/context7" },
+      { name: "mine", outcome: "theirs", command: "/root/other" },
+      { name: "gone", outcome: "left" },
+    ]);
+    // Every line the agent and the person wrote is where it was, the table Codex trusts a folder by included.
+    expect(merged.text.startsWith(CODEX_OWN)).toBe(true);
+    expect(merged.text.slice(CODEX_OWN.length)).toBe(["", "[mcp_servers.context7]", 'command = "/root/.local/bin/context7"', 'args = ["--stdio"]', "", "[mcp_servers.context7.env]", 'KEY = "k"', ""].join("\n"));
+    expect(CODEX_TOML.read(merged.text, "/root").map(s => s.name)).toEqual(["mine", "context7"]);
+
+    const again = CODEX_TOML.merge(LIB, { keep: ["context7", "mine"], drop: [], replace: ["context7"] }, merged.text, CODEX_TRAVELLED());
+    expect(again.results.map(r => r.outcome)).toEqual(["same", "theirs"]);
+    expect(again.text).toBe(merged.text);
+  });
+
+  it("Codex's TOML: wsp's own table is written over where it stands and taken out with its sub-tables when it is dropped, and a table it does not own is left", () => {
+    const landed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: [] }, CODEX_OWN, CODEX_TRAVELLED()).text;
+    const changed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: ["context7"] }, landed, CODEX_TRAVELLED(["--stdio", "--verbose"]));
+    expect(changed.results.map(r => r.outcome)).toEqual(["replaced"]);
+    expect(changed.text).toBe(landed.replace('args = ["--stdio"]', 'args = ["--stdio", "--verbose"]'));
+
+    const dropped = CODEX_TOML.merge(LIB, { keep: [], drop: ["context7", "mine"], replace: ["context7"] }, landed, CODEX_TRAVELLED());
+    expect(dropped.results).toEqual([
+      { name: "context7", outcome: "dropped" },
+      { name: "mine", outcome: "left" },
+    ]);
+    expect(dropped.text).toBe(CODEX_OWN);
+  });
+
+  it("Codex's TOML: a table reads the same however Codex spaced and commented it, and a field of its own makes it the agent's", () => {
+    const landed = CODEX_TOML.merge(LIB, { keep: ["context7"], drop: [], replace: [] }, CODEX_OWN, CODEX_TRAVELLED()).text;
+    const rewritten = landed.replace('command = "/root/.local/bin/context7"', '  command = "/root/.local/bin/context7"   # codex wrote this back');
+    expect(CODEX_TOML.entryOf(rewritten, "context7")).toBe(CODEX_TOML.entryOf(landed, "context7"));
+    expect(CODEX_TOML.entryOf(`${landed}startup_timeout_sec = 30\n`, "context7")).not.toBe(CODEX_TOML.entryOf(landed, "context7"));
+    expect(CODEX_TOML.entryOf(landed, "nobody")).toBeUndefined();
+  });
+
+  it("Codex's TOML: a file that is not there yet is one table with no blank line in front of it", () => {
+    const made = CODEX_TOML.merge(LIB, { keep: ["mine"], drop: [], replace: [] }, undefined, CODEX_TRAVELLED());
+    expect(made.text).toBe('[mcp_servers.mine]\ncommand = "/root/other"\n');
+    expect(CODEX_TOML.merge(LIB, { keep: ["nobody"], drop: [], replace: [] }, undefined, CODEX_TRAVELLED()).text).toBe("");
   });
 });

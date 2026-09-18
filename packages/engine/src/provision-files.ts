@@ -5,8 +5,10 @@
 // is not an image: a file already there with other content is never written
 // over, its row says so, and a run after they remove it lands it. What wsp
 // itself put there it may replace, which is what the list beside the job
-// records; nothing outside an agent's own paths travels at all.
-import { agentOfRow, placeProvisionPaths, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
+// records; nothing outside an agent's own paths travels at all. The file an
+// agent writes for itself is the one thing that lands once and then stands:
+// what wsp owns in it is the server keys the servers step wrote, not its bytes.
+import { MCP_ID_PREFIX, agentOfRow, placeProvisionPaths, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
@@ -22,6 +24,10 @@ export interface ProvisionLanding {
   label: string;
   /** Home-relative on the computer; a directory covers every file under it. */
   dest: string;
+  /** A file an agent writes for itself, or one the recipe marks volatile: it lands where it is missing and stands
+   * where it is there, whoever wrote what is in it, and it never enters the list as a file. What wsp owns in such a
+   * file is the keys the servers step wrote, which are recorded one by one. */
+  once?: true;
 }
 
 /** What one path came to there. `kept` is a file the person already had with other content, which is never
@@ -55,9 +61,20 @@ export const LAND_MARK = "wsp-land";
 
 /** The field the list beside the job is split on and the end of one of its lines, as the text of these runs
  * spells them: a printf escape, never the character itself, so a script reads back on one line wherever it is
- * printed. One spelling for the landing, the ownership read and the close. */
+ * printed. One spelling for the landing, the reads of the list and the close. */
 const TAB = "\\t";
 const NL = "\\n";
+
+/** The shell test for a path that lands once: a case of the destinations themselves, each quoted so a path holding
+ * a glob character or a backslash is read as the path it is, and a folder covering what is under it. One spelling
+ * for the landing and for the close, which drops the lines a path of this kind left in the list before. */
+function onceTest(once: readonly string[]): string[] {
+  const patterns = once.flatMap(dest => [shellQuote(dest), `${shellQuote(dest)}/*`]);
+  return ["wsp_once() {", ...(patterns.length === 0 ? [] : [`  case "$1" in (${patterns.join("|")}) return 0 ;; esac`]), "  return 1", "}"];
+}
+
+/** Which of a plan's landings land once, as the scripts take them. */
+export const oncePathsOf = (lands: readonly ProvisionLanding[]): string[] => lands.filter(l => l.once === true).map(l => l.dest);
 
 /** One line the landing printed: what became of one path under the home on that computer. */
 interface Landed {
@@ -70,11 +87,12 @@ interface Landed {
  * the person's own file differs, unless that file is the one wsp landed last time and has not been touched since.
  * Each path prints its outcome; the ones wsp owns are written down with what travelled for them, and the run that
  * closes the job turns that list into what it left there. */
-export function landFilesScript(home: string): string {
+export function landFilesScript(home: string, once: readonly string[] = []): string {
   const at = placeProvisionPaths(home);
   const q = (s: string): string => shellQuote(s);
   return [
     "set -u",
+    ...onceTest(once),
     `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}`,
     'mkdir -p "$(dirname "$landing")" || exit 1',
     ': > "$landing" || exit 1',
@@ -84,6 +102,9 @@ export function landFilesScript(home: string): string {
     '  src="$stage/$rel"; dest="$home/$rel"',
     '  s=$(sha256sum "$src" | cut -d" " -f1)',
     '  if [ ! -e "$dest" ]; then act=installed',
+    // A file its agent writes for itself stands as it is from its first landing on: the agent rewrites it at every
+    // launch, so its bytes are never wsp's to replace, and what the recipe has to say about it is its server keys.
+    '  elif wsp_once "$rel"; then act=present',
     "  else",
     '    d=$(sha256sum "$dest" 2>/dev/null | cut -d" " -f1)',
     // The path goes to awk through the environment: an assigned variable would have every backslash in it read
@@ -100,46 +121,45 @@ export function landFilesScript(home: string): string {
     '    mkdir -p "$(dirname "$dest")" && cp -p "$src" "$dest" || act=failed',
     "  fi",
     `  printf '${LAND_MARK}${TAB}%s${TAB}%s${TAB}%s${NL}' "$act" "$s" "$rel"`,
-    `  if [ "$act" != kept ] && [ "$act" != failed ]; then printf "%s${TAB}%s${NL}" "$rel" "$s" >> "$landing"; fi`,
+    `  if [ "$act" != kept ] && [ "$act" != failed ] && ! wsp_once "$rel"; then printf "%s${TAB}%s${NL}" "$rel" "$s" >> "$landing"; fi`,
     "done",
     "exit 0",
   ].join("\n");
 }
 
-/** What the ownership read prints for one path of the list, so no path of the person's reads as the run's own words. */
-export const OWN_MARK = "wsp-own";
+/** What the read of the list's server lines prints, so no name of the person's reads as the run's own words. */
+export const SERVER_MARK = "wsp-server";
 
-/** The run that reads what wsp owns in the agents' homes on that computer: every path the list beside the job
- * names whose bytes there are still the ones wsp left. It reads the computer and the list, never this run, so a
- * run whose files never got off this Mac still knows wsp's own copies from the person's. */
-export function landedFilesScript(home: string): string {
+/** The run that reads which servers in the agents' own files on that computer are wsp's own: every line the list
+ * beside the job holds for a key, with the digest of the entry wsp left under that name. No file's bytes are read
+ * here, since the file a key sits in is the agent's own; what the digest is compared with is that entry as it
+ * stands in the file now. */
+export function landedServersScript(home: string): string {
   const at = placeProvisionPaths(home);
   return [
     "set -u",
-    `home=${shellQuote(home)}; ledger=${shellQuote(at.landed)}`,
+    `ledger=${shellQuote(at.landed)}`,
     '[ -f "$ledger" ] || exit 0',
     `tab=$(printf "${TAB}")`,
-    'while IFS="$tab" read -r rel from at; do',
-    '  dest="$home/$rel"',
-    '  [ -f "$dest" ] || continue',
-    '  d=$(sha256sum "$dest" | cut -d" " -f1)',
-    `  [ "$d" = "$at" ] && printf '${OWN_MARK}${TAB}%s${NL}' "$rel"`,
+    'while IFS="$tab" read -r id from at; do',
+    `  case "$id" in (${shellQuote(MCP_ID_PREFIX)}*) printf '${SERVER_MARK}${TAB}%s${TAB}%s${NL}' "$at" "$id" ;; esac`,
     'done < "$ledger"',
     "exit 0",
   ].join("\n");
 }
 
 /** The run that closes the job on that computer: the markers the job's own log is appended behind, then every path
- * this round landed, with the bytes that travelled for it and the bytes standing there now, which the MCP edit may
- * have rewritten since; then the lines from before it for the paths it did not land, since what wsp left at those
- * is still what it left. A round that landed nothing writes no landing, and this run then leaves the list exactly
- * as it was rather than emptying it. The tree that travelled goes with it, so nothing of the person's is left lying
- * in wsp's folder. */
-export function closeFilesScript(home: string): string {
+ * this round landed, with the bytes that travelled for it and the bytes standing there now, then every key the
+ * servers step wrote as it wrote it, then the lines from before for what this round did not touch, since what wsp
+ * left at those is still what it left. A round that landed nothing writes no landing, and this run then leaves the
+ * list exactly as it was rather than emptying it. The tree that travelled goes with it, so nothing of the person's
+ * is left lying in wsp's folder. */
+export function closeFilesScript(home: string, once: readonly string[] = []): string {
   const at = placeProvisionPaths(home);
   const q = (s: string): string => shellQuote(s);
   return [
     "set -u",
+    ...onceTest(once),
     `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}; log=${q(at.log)}`,
     // A path an older road appended to carries one marker per append and nothing swept them: a hundred and
     // seventeen stood beside one job's log on a box after two updates. The sweep is the first thing here, so a
@@ -150,12 +170,19 @@ export function closeFilesScript(home: string): string {
     '[ -f "$landing" ] || exit 0',
     `tab=$(printf "${TAB}")`,
     ': > "$ledger.new" || exit 1',
-    'while IFS="$tab" read -r rel from; do',
+    'while IFS="$tab" read -r rel from at; do',
+    // A line the servers step wrote names a key in an agent's own file and carries the digest of what wsp left
+    // under that name: it goes through as it is, since no file on that computer holds those bytes alone.
+    `  if [ -n "$at" ]; then printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"; continue; fi`,
     '  dest="$home/$rel"',
     '  [ -f "$dest" ] || continue',
     `  printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$(sha256sum "$dest" | cut -d" " -f1)" >> "$ledger.new"`,
     'done < "$landing"',
-    '[ ! -f "$ledger" ] || cat "$ledger" >> "$ledger.new"',
+    // The lines from before, but for a path that lands once: from its first landing on the bytes there are its
+    // agent's, so a line saying wsp left those bytes would be a line saying it owns what it does not.
+    '[ ! -f "$ledger" ] || while IFS="$tab" read -r rel from at; do',
+    `  wsp_once "$rel" || printf "%s${TAB}%s${TAB}%s${NL}" "$rel" "$from" "$at" >> "$ledger.new"`,
+    'done < "$ledger"',
     // One line per path, this round's first: both readers of the list take the first line a path has, so a path
     // this round wrote again keeps one line and a path it did not touch keeps the line it had.
     `awk -F"${TAB}" '!seen[$1]++' "$ledger.new" > "$ledger.keep" || exit 1`,
@@ -231,8 +258,8 @@ export function filesRows(lands: readonly ProvisionLanding[], landed: readonly L
 }
 
 /** The paths under the home on a computer that hold what wsp landed there, each with whether this run put it there
- * or found the same bytes already. The MCP edit reads it twice: to know an agent's config there is wsp's own copy
- * rather than the person's, and to say whether a server in that config arrived with this run. */
+ * or found the same bytes already. The servers step reads it for one thing: a server already in a file this run
+ * landed whole arrived with this run, whatever the merge then had to do to that file. */
 export type OwnedPaths = ReadonlyMap<string, "installed" | "present">;
 
 export interface LandFilesResult {
@@ -247,14 +274,14 @@ const LAND_MS = 300_000;
 
 /** Lands the person's agent files on the computer itself: the archive extracted into wsp's own folder there, then
  * one run that puts each file in its agent's home under the rules above, then the rows. The staging tree stays
- * until the job closes, since the MCP edit reads the configs that just landed. */
+ * until the job closes, since the servers step reads the configs that travelled out of it. */
 export async function landAgentFiles(machine: Machine, o: { home: string; tar: Buffer; lands: readonly ProvisionLanding[] }): Promise<LandFilesResult> {
   const at = placeProvisionPaths(o.home);
   await machine.exec(`rm -rf ${shellQuote(at.staging)}`, { timeoutMs: INLINE_EXEC_MS });
   // Under wsp's own folder there, never the shared temporary one: on a computer somebody owns, another account
   // could be sitting in /tmp first, and what travels is the person's own configuration.
   await importInto(machine, o.tar, at.staging, { overlay: true, timeoutMs: LAND_MS, tmpDir: at.dir });
-  const res = await machine.run(landFilesScript(o.home), { deadlineMs: LAND_MS });
+  const res = await machine.run(landFilesScript(o.home, oncePathsOf(o.lands)), { deadlineMs: LAND_MS });
   if (res.exitCode !== 0) throw new Error(`the agents' files did not land on ${machine.id} (exit ${res.exitCode}): ${res.stderr.slice(-300)}`);
   const landed = parseLanded(res.stdout);
   return {
@@ -264,18 +291,30 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
   };
 }
 
-/** What wsp owns in the agents' homes on that computer, off the list beside the job and the bytes standing there.
- * Nothing this run did is in it: a path is wsp's where the list says wsp left those bytes and they are still
- * there. Empty where the computer has no list yet or would not answer, which keeps every file of the person's. */
-export async function landedFiles(machine: Machine, home: string): Promise<Map<string, "present">> {
-  const res = await machine.run(landedFilesScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
+/** What wsp owns in the agents' own files on that computer, off the list beside the job: one entry per server it
+ * wrote there, with the digest of that entry as it left it. Empty where the computer has no list yet or would not
+ * answer, which reads every server in those files as the agent's own and leaves them. */
+export async function landedServers(machine: Machine, home: string): Promise<Map<string, string>> {
+  const res = await machine.run(landedServersScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
   if (res === undefined || res.exitCode !== 0) return new Map();
   return new Map(
     res.stdout.split("\n").flatMap(line => {
       const words = line.split("\t");
-      return words[0] === OWN_MARK && words.length > 1 ? [[`${home}/${words.slice(1).join("\t")}`, "present"] as const] : [];
+      return words[0] === SERVER_MARK && words.length > 2 ? [[words.slice(2).join("\t"), words[1]!] as const] : [];
     }),
   );
+}
+
+/** Writes what the servers step put in the agents' own files into the list this round is building, one line per
+ * key. Nothing here fails the job: a computer that would not keep a line is one whose servers landed all the same,
+ * and the next run reads that key as its agent's own and leaves it. A line that lands twice is no matter, since the
+ * close keeps the first line each name has. */
+export async function appendLanding(machine: Machine, home: string, lines: readonly string[]): Promise<void> {
+  if (lines.length === 0) return;
+  const at = placeProvisionPaths(home);
+  await machine
+    .exec([`mkdir -p ${shellQuote(at.dir)} || exit 1`, `printf '%s\\n' ${lines.map(shellQuote).join(" ")} >> ${shellQuote(at.landing)}`].join("\n"), { timeoutMs: INLINE_EXEC_MS })
+    .catch(() => undefined);
 }
 
 /** The files round of the job: the archive read off this computer and landed on that one, with a row per planned
@@ -300,6 +339,6 @@ export async function provisionFiles(machine: Machine, o: { home: string; lands:
 /** Writes down what wsp owns on that computer and takes the tree that travelled away again. Nothing here fails
  * the job: a computer that would not keep the list is one whose files landed all the same, and the next run reads
  * its own copies as the person's, which keeps them rather than writing over them. */
-export async function closeAgentFiles(machine: Machine, home: string): Promise<void> {
-  await machine.run(closeFilesScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
+export async function closeAgentFiles(machine: Machine, home: string, once: readonly string[] = []): Promise<void> {
+  await machine.run(closeFilesScript(home, once), { deadlineMs: LAND_MS }).catch(() => undefined);
 }
