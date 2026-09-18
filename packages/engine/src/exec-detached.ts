@@ -127,21 +127,35 @@ export interface PutFilesOptions {
   timeoutMs?: number;
 }
 
+/** The file beside an appended path that says which append landed last, holding that append's own key: exec honours
+ * no idempotency key and a lost answer is retried, so an append runs only where the marker does not already hold its
+ * key. One marker per path, whatever a path is appended to over a machine's life, since a name of its own per append
+ * fills the folder it sits in with a file nothing comes back for. */
+export const appendMarker = (path: string): string => `${path}.appended`;
+
+/** The markers a path carries from a road that named each append at random, which are dead the moment a job that
+ * appends by the marker above runs: a sweep of them is `"$path"` with this glob after it, which the name above
+ * cannot be matched by. */
+export const OLD_APPEND_MARKS = ".a[0-9a-f]*";
+
 /** The execs that put the files on the guest, every body under the cap. The last exec runs `before`, lands each file,
  * then runs `after`, so a caller's launch shares it. A file whose base64 fits that exec goes in it as one printf; a
  * larger one goes up first in numbered pieces, each written whole to its own file so a retried exec lands it once, and
  * the last exec joins them under pipefail so a missing piece fails the write instead of landing a spliced file. An
- * append lands once behind a marker file of its own, since exec honours no idempotency key and a lost answer is
- * retried; the marker, and the pieces of an append that `before` turned away, stay beside the file until the run's
- * cleanup removes them. */
-function uploadSequence(files: GuestWrite[], before: string[], after: string[]): string[] {
+ * append lands once behind the marker above, which its key is written into after it; the marker, and the pieces of an
+ * append that `before` turned away, stay beside the file until the run's cleanup removes them. */
+function uploadSequence(files: GuestWrite[], before: string[], after: string[], upload: string): string[] {
   const head = `mkdir -p ${[...new Set(files.map(f => posix.dirname(f.path)))].map(shellQuote).join(" ")}`;
-  const plan = files.map(f => ({ ...f, b64: Buffer.from(f.text, "utf8").toString("base64"), pieces: 0, mark: `${f.path}.a${randomBytes(6).toString("hex")}` }));
+  // A key per file of the upload, so two appends to one path in one call each land rather than the second reading
+  // the first's marker as its own.
+  const plan = files.map((f, at) => ({ ...f, b64: Buffer.from(f.text, "utf8").toString("base64"), pieces: 0, mark: appendMarker(f.path), key: `${upload}.${at}` }));
   type Planned = (typeof plan)[number];
   const land = (f: Planned): string[] => {
     const names = `${shellQuote(f.path)}.{0..${f.pieces - 1}}`;
     const decode = `${f.pieces === 0 ? `printf %s ${shellQuote(f.b64)}` : `cat ${names}`} | base64 -d ${f.append ? ">>" : ">"} ${shellQuote(f.path)}`;
-    const write = f.append ? `[ -e ${shellQuote(f.mark)} ] || { ${decode} && : > ${shellQuote(f.mark)}; } || exit 1` : `${decode} || exit 1`;
+    const write = f.append
+      ? `[ "$(cat ${shellQuote(f.mark)} 2>/dev/null)" = ${shellQuote(f.key)} ] || { ${decode} && printf %s ${shellQuote(f.key)} > ${shellQuote(f.mark)}; } || exit 1`
+      : `${decode} || exit 1`;
     return f.pieces === 0 ? [write] : [write, `rm -f ${names}`];
   };
   const last = (): string => [head, ...before, "set -o pipefail", ...plan.flatMap(land), ...after].join("\n");
@@ -167,8 +181,8 @@ function uploadSequence(files: GuestWrite[], before: string[], after: string[]):
  * under one sends it again rather than losing the file half written. */
 export async function putFiles(machine: Machine, files: GuestWrite[], opts: PutFilesOptions = {}): Promise<ExecResult> {
   const timeoutMs = opts.timeoutMs ?? INLINE_EXEC_MS;
-  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? []);
   const upload = randomBytes(6).toString("hex");
+  const execs = uploadSequence(files, opts.before ?? [], opts.after ?? [], upload);
   for (const [at, cmd] of execs.slice(0, -1).entries()) {
     const res = await machine.exec(cmd, { timeoutMs, idempotencyKey: `${upload}/${at}` });
     if (res.exitCode !== 0 || !res.stdout.includes(HANDSHAKE.piece)) {

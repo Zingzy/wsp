@@ -8,7 +8,7 @@
 // records; nothing outside an agent's own paths travels at all.
 import { agentOfRow, placeProvisionPaths, shellQuote, type PlaceProvisionRow } from "@wsp/protocol";
 import { CATALOG_AGENTS } from "@wsp/catalog";
-import { INLINE_EXEC_MS } from "./exec-detached.js";
+import { INLINE_EXEC_MS, OLD_APPEND_MARKS } from "./exec-detached.js";
 import type { SkippedPath } from "./golden-import.js";
 import type { PackedFiles } from "./golden.js";
 import { parseMcpId } from "./golden-mcp.js";
@@ -129,17 +129,22 @@ export function landedFilesScript(home: string): string {
   ].join("\n");
 }
 
-/** The run that closes the job on that computer: every path this round landed, with the bytes that travelled for
- * it and the bytes standing there now, which the MCP edit may have rewritten since; then the lines from before it
- * for the paths it did not land, since what wsp left at those is still what it left. A round that landed nothing
- * writes no landing, and this run then leaves the list exactly as it was rather than emptying it. The tree that
- * travelled goes with it, so nothing of the person's is left lying in wsp's folder. */
+/** The run that closes the job on that computer: the markers the job's own log is appended behind, then every path
+ * this round landed, with the bytes that travelled for it and the bytes standing there now, which the MCP edit may
+ * have rewritten since; then the lines from before it for the paths it did not land, since what wsp left at those
+ * is still what it left. A round that landed nothing writes no landing, and this run then leaves the list exactly
+ * as it was rather than emptying it. The tree that travelled goes with it, so nothing of the person's is left lying
+ * in wsp's folder. */
 export function closeFilesScript(home: string): string {
   const at = placeProvisionPaths(home);
   const q = (s: string): string => shellQuote(s);
   return [
     "set -u",
-    `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}`,
+    `home=${q(home)}; stage=${q(at.staging)}; ledger=${q(at.landed)}; landing=${q(at.landing)}; log=${q(at.log)}`,
+    // A path an older road appended to carries one marker per append and nothing swept them: a hundred and
+    // seventeen stood beside one job's log on a box after two updates. The sweep is the first thing here, so a
+    // round that landed nothing still leaves the folder as it should be.
+    `rm -f "$log"${OLD_APPEND_MARKS}`,
     // No landing at all is a round that never reached the computer: the list stands, so the copies wsp left
     // there before are still read as its own.
     '[ -f "$landing" ] || exit 0',

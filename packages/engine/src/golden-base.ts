@@ -51,8 +51,16 @@ interface VersionCheck {
 
 const VERSION_CHECKS: readonly VersionCheck[] = BASE_FLOOR.flatMap(e => [{ name: e.bin, cmd: smokeOf(e), id: e.id }, ...(e.brings ?? []).map(b => ({ name: b.bin, cmd: b.version }))]);
 
-/** One `VERSION <name>: <first line>` echo per floor command, an empty value for one that is not there; the caller puts the tools PATH ahead. */
-export const BASE_VERSION_LINES = VERSION_CHECKS.map(c => `echo "VERSION ${c.name}: $(${c.cmd} 2>/dev/null | head -n 1)"`).join("\n");
+/** The number a version line has to carry to be worth reading, as the read and the parse below each spell it in
+ * their own language: two runs of digits with a dot between them. The read keeps the first line carrying one rather
+ * than the first line, since zip prints its copyright first and `This is Zip 3.0` second, and a floor row whose
+ * version cannot be read installs on every update. */
+const VERSION_NUMBER = /\d+\.\d+(?:\.\d+)?/;
+const FIRST_VERSION_LINE = "grep -m1 -E '[0-9]+\\.[0-9]+'";
+
+/** One `VERSION <name>: <version line>` echo per floor command, an empty value for one that is not there or prints
+ * no version at all; the caller puts the tools PATH ahead. */
+export const BASE_VERSION_LINES = VERSION_CHECKS.map(c => `echo "VERSION ${c.name}: $(${c.cmd} 2>/dev/null | ${FIRST_VERSION_LINE})"`).join("\n");
 
 /** The read as one exec, as the base stage runs it. */
 export const BASE_VERSIONS_CMD = `export PATH=${TOOLS_PATH}:$PATH\n${BASE_VERSION_LINES}`;
@@ -63,7 +71,7 @@ export function parseVersions(stdout: string): GoldenBaseTool[] {
   for (const line of stdout.split("\n")) {
     const m = /^VERSION ([^:]+): (.*)$/.exec(line.trimEnd());
     if (m === null) continue;
-    const version = /\d+\.\d+(?:\.\d+)?/.exec(m[2]!)?.[0];
+    const version = VERSION_NUMBER.exec(m[2]!)?.[0];
     if (version !== undefined) out.push({ name: m[1]!, version });
   }
   return out;

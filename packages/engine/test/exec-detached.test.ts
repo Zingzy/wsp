@@ -33,14 +33,14 @@ interface Call {
 const PIECE = /^printf %s '([A-Za-z0-9+/=]*)' > '([^']*)'\.(\d+) \|\| exit 1$/;
 const SOURCE = String.raw`(?:printf %s '([A-Za-z0-9+/=]*)'|cat '([^']*)'\.\{0\.\.(\d+)\})`;
 const LAND = new RegExp(String.raw`^${SOURCE} \| base64 -d > '([^']*)' \|\| exit 1$`);
-const APPEND = new RegExp(String.raw`^\[ -e '([^']*)' \] \|\| \{ ${SOURCE} \| base64 -d >> '([^']*)' && : > '\1'; \} \|\| exit 1$`);
+const APPEND = new RegExp(String.raw`^\[ "\$\(cat '([^']*)' 2>/dev/null\)" = '([^']*)' \] \|\| \{ ${SOURCE} \| base64 -d >> '([^']*)' && printf %s '\2' > '\1'; \} \|\| exit 1$`);
 
 /** The guest's disk as the upload lines write it: pieces by name, files by path, an append onto what is there once
- * per marker, as the real shell would. */
+ * per key the marker beside it holds, as the real shell would. */
 function guestDisk() {
   const files = new Map<string, string>();
   const pieces = new Map<string, string>();
-  const marks = new Set<string>();
+  const marks = new Map<string, string>();
   const decode = (b64: string | undefined, piecePath: string | undefined, n: string | undefined): string => {
     const joined = b64 ?? Array.from({ length: Number(n) + 1 }, (_, i) => pieces.get(`${piecePath}.${i}`) ?? "").join("");
     return Buffer.from(joined, "base64").toString("utf8");
@@ -56,10 +56,10 @@ function guestDisk() {
       }
       const a = APPEND.exec(line);
       if (a !== null) {
-        if (marks.has(a[1]!)) continue;
-        files.set(a[5]!, (files.get(a[5]!) ?? "") + decode(a[2], a[3], a[4]));
-        marks.add(a[1]!);
-        got.landed.push(a[5]!);
+        if (marks.get(a[1]!) === a[2]!) continue;
+        files.set(a[6]!, (files.get(a[6]!) ?? "") + decode(a[3], a[4], a[5]));
+        marks.set(a[1]!, a[2]!);
+        got.landed.push(a[6]!);
         continue;
       }
       const l = LAND.exec(line);
@@ -339,7 +339,7 @@ describe("putFiles", () => {
     await putFiles(g.machine, [{ path: "/tmp/wsp-run/t2.in", text: `${BIG_INPUT}\n`, append: true }]);
     expect(g.calls.filter(c => c.endsWith("echo WSP_PIECE"))).toHaveLength(2);
     for (const c of g.calls) expect(solariBody(c)).toBeLessThanOrEqual(EXEC_BODY_MAX);
-    expect(g.calls.at(-1)).toMatch(/\n\[ -e '\/tmp\/wsp-run\/t2\.in\.a([0-9a-f]{12})' \] \|\| \{ cat '\/tmp\/wsp-run\/t2\.in'\.\{0\.\.1\} \| base64 -d >> '\/tmp\/wsp-run\/t2\.in' && : > '\/tmp\/wsp-run\/t2\.in\.a\1'; \} \|\| exit 1\nrm -f '\/tmp\/wsp-run\/t2\.in'\.\{0\.\.1\}$/);
+    expect(g.calls.at(-1)).toMatch(/\n\[ "\$\(cat '\/tmp\/wsp-run\/t2\.in\.appended' 2>\/dev\/null\)" = '([0-9a-f]{12}\.0)' \] \|\| \{ cat '\/tmp\/wsp-run\/t2\.in'\.\{0\.\.1\} \| base64 -d >> '\/tmp\/wsp-run\/t2\.in' && printf %s '\1' > '\/tmp\/wsp-run\/t2\.in\.appended'; \} \|\| exit 1\nrm -f '\/tmp\/wsp-run\/t2\.in'\.\{0\.\.1\}$/);
     expect(g.files.get("/tmp/wsp-run/t2.in")).toBe(`first\n${BIG_INPUT}\n`);
   });
 
@@ -347,7 +347,7 @@ describe("putFiles", () => {
     const g = diskGuest({ "/tmp/wsp-run/t3.in": "first\n" });
     await putFiles(g.machine, [{ path: "/tmp/wsp-run/t3.in", text: "second\n", append: true }]);
     expect(g.calls).toHaveLength(1);
-    expect(g.calls[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/t3\.in\.a([0-9a-f]{12})' \] \|\| \{ printf %s 'c2Vjb25kCg==' \| base64 -d >> '\/tmp\/wsp-run\/t3\.in' && : > '\/tmp\/wsp-run\/t3\.in\.a\1'; \} \|\| exit 1$/);
+    expect(g.calls[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\nset -o pipefail\n\[ "\$\(cat '\/tmp\/wsp-run\/t3\.in\.appended' 2>\/dev\/null\)" = '([0-9a-f]{12}\.0)' \] \|\| \{ printf %s 'c2Vjb25kCg==' \| base64 -d >> '\/tmp\/wsp-run\/t3\.in' && printf %s '\1' > '\/tmp\/wsp-run\/t3\.in\.appended'; \} \|\| exit 1$/);
     expect(g.files.get("/tmp/wsp-run/t3.in")).toBe("first\nsecond\n");
   });
 
@@ -366,15 +366,24 @@ describe("putFiles", () => {
     expect(res.exitCode).toBe(0);
     expect(g.calls.filter(c => c.includes("base64 -d >>"))).toHaveLength(2);
     expect(g.files.get("/tmp/wsp-run/t6.in")).toBe(`first\n${BIG_INPUT}\n`);
-    expect([...g.marks]).toEqual([expect.stringMatching(/^\/tmp\/wsp-run\/t6\.in\.a[0-9a-f]{12}$/)]);
+    expect([...g.marks.keys()]).toEqual(["/tmp/wsp-run/t6.in.appended"]);
   });
 
-  it("two appends carry two markers, so the second lands after the first", async () => {
+  it("two appends carry two keys in one marker, so the second lands after the first", async () => {
     const g = diskGuest({ "/tmp/wsp-run/t7.in": "first\n" });
     await putFiles(g.machine, [{ path: "/tmp/wsp-run/t7.in", text: "second\n", append: true }]);
     await putFiles(g.machine, [{ path: "/tmp/wsp-run/t7.in", text: "third\n", append: true }]);
-    expect(g.marks.size).toBe(2);
+    expect([...g.marks.keys()]).toEqual(["/tmp/wsp-run/t7.in.appended"]);
     expect(g.files.get("/tmp/wsp-run/t7.in")).toBe("first\nsecond\nthird\n");
+  });
+
+  it("two appends to one path in one call each land, since the key is the file's own in the upload", async () => {
+    const g = diskGuest({ "/tmp/wsp-run/t8.in": "first\n" });
+    await putFiles(g.machine, [
+      { path: "/tmp/wsp-run/t8.in", text: "second\n", append: true },
+      { path: "/tmp/wsp-run/t8.in", text: "third\n", append: true },
+    ]);
+    expect(g.files.get("/tmp/wsp-run/t8.in")).toBe("first\nsecond\nthird\n");
   });
 
   it("a piece that does not confirm fails before the last exec goes", async () => {
@@ -531,7 +540,20 @@ describe("execDetached over this machine's bash", () => {
     expect(second.exitCode).toBe(0);
     expect(readFileSync(`${runDir}/f.sh`, "utf8")).toBe("echo hi\n");
     expect(readFileSync(`${runDir}/f.in`, "utf8")).toBe(`first\n${BIG_INPUT}\n`);
-    expect(readdirSync(runDir).sort()).toEqual(["f.in", expect.stringMatching(/^f\.in\.a[0-9a-f]{12}$/), "f.sh"]);
+    expect(readdirSync(runDir).sort()).toEqual(["f.in", "f.in.appended", "f.sh"]);
+  });
+
+  it("two appends to one path leave one marker beside it, holding the key of the upload that wrote it", async () => {
+    const { machine, runDir } = localGuest();
+    await putFiles(machine, [{ path: `${runDir}/h.in`, text: "first\n" }]);
+    // The job's log on a computer is appended to in batches all through a run, one upload each: a marker per
+    // append fills that folder with a file per batch and nothing ever sweeps them.
+    const second = await putFiles(twice(machine, "base64 -d >>"), [{ path: `${runDir}/h.in`, text: "second\n", append: true }]);
+    expect(second.exitCode).toBe(0);
+    await putFiles(machine, [{ path: `${runDir}/h.in`, text: "third\n", append: true }]);
+    expect(readFileSync(`${runDir}/h.in`, "utf8")).toBe("first\nsecond\nthird\n");
+    expect(readdirSync(runDir).sort()).toEqual(["h.in", "h.in.appended"]);
+    expect(readFileSync(`${runDir}/h.in.appended`, "utf8")).toMatch(/^[0-9a-f]{12}\.0$/);
   });
 
   it("an append exec and a piece-form join, each run twice through the real shell, land their text once", async () => {
@@ -544,8 +566,7 @@ describe("execDetached over this machine's bash", () => {
     const big = await putFiles(retrying, [{ path: `${runDir}/g.in`, text: `${BIG_INPUT}\n`, append: true }]);
     expect(big.exitCode).toBe(0);
     expect(readFileSync(`${runDir}/g.in`, "utf8")).toBe(`first\nsteer\n${BIG_INPUT}\n`);
-    expect(readdirSync(runDir).filter(f => !/^g\.in\.a[0-9a-f]{12}$/.test(f))).toEqual(["g.in"]);
-    expect(readdirSync(runDir)).toHaveLength(3);
+    expect(readdirSync(runDir).sort()).toEqual(["g.in", "g.in.appended"]);
   });
 
   it("the deadline kill ends the launched session for real", async () => {
