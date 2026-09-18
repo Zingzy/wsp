@@ -230,7 +230,7 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Menu>
             <MenuTrigger
-              className="inline-flex h-6 max-w-full items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-6 max-w-full shrink-0 items-center gap-1 rounded-md bg-accent px-2 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent/80 focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={`Diff scope: ${scopeLabel}`}
             >
               <span className="truncate">{scopeLabel}</span>
@@ -268,12 +268,14 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
             </span>
           )}
           <Tooltip>
+            {/* The pin is about the folder in the crumbs beside it, and goes with them at the narrow width. */}
             <TooltipTrigger
               render={
                 <Button
                   type="button"
                   size="icon-micro"
                   variant="ghost"
+                  className="hidden sm:inline-flex"
                   aria-label={pinned ? "Follow the agent's folder" : "Stay in this folder"}
                   aria-pressed={pinned}
                   onClick={() => (pinned ? unpin(workspaceId) : pin(workspaceId, cwd))}
@@ -315,12 +317,15 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
           </Tooltip>
           {fileKeys.length > 0 ? (
             <Tooltip>
+              {/* Every file's own chevron does this one at a time; the header gives its room back at the narrow
+                  width, where the scope's own words need it. */}
               <TooltipTrigger
                 render={
                   <Button
                     type="button"
                     size="icon-sm"
                     variant="ghost"
+                    className="hidden sm:inline-flex"
                     aria-label={allCollapsed ? "Expand all files" : "Collapse all files"}
                     onClick={() => setCollapsed(toggleAllDiffFiles(fileKeys, collapsed))}
                   />
@@ -331,8 +336,10 @@ export function DiffSurface({ workspaceId, theme }: { workspaceId: string; theme
               <TooltipPopup side="top">{allCollapsed ? "Expand all files" : "Collapse all files"}</TooltipPopup>
             </Tooltip>
           ) : null}
+          {/* One diff at a time below the width a split pair can be read at, which is also the width the header
+              needs back once a comment puts Send to thread on it. */}
           <ToggleGroup
-            className="shrink-0 gap-1"
+            className="hidden shrink-0 gap-1 sm:flex"
             size="sm"
             value={[renderMode]}
             onValueChange={value => {
