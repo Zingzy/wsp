@@ -3438,7 +3438,7 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
  * that computer, the key or token this wsp's vault holds for it, or nothing yet. One home for the three words, so
  * the table, the doctor and the agents block under a computer's row cannot word them three ways. */
 export function agentSignInWord(state: AgentSignInState): string {
-  return state === "signed-in" ? "signed in" : state === "vault-key" ? "key from the vault" : "not signed in";
+  return state === "signed-in" ? "signed in" : state === "vault-key" ? "key from this wsp" : "not signed in";
 }
 
 /** The version number in what an agent's own version flag printed: agents word that line their own way (`2.1.270
@@ -3453,7 +3453,11 @@ export function agentVersionWord(raw: string): string {
  * computer, and a computer that has not said yet. */
 export function agentsCell(place: Pick<PlaceView, "agents" | "agentVersions" | "signIns">): string {
   return (place.agents ?? [])
-    .map(id => [id, place.agentVersions?.[id] === undefined ? undefined : agentVersionWord(place.agentVersions[id]!), place.signIns?.[id] === undefined ? undefined : agentSignInWord(place.signIns[id]!)].filter(w => w !== undefined).join(" "))
+    .map(id => {
+      const version = place.agentVersions?.[id];
+      const state = place.signIns?.[id];
+      return [id, version === undefined ? undefined : agentVersionWord(version), state === undefined ? undefined : agentSignInWord(state)].filter(word => word !== undefined).join(" ");
+    })
     .join(" · ");
 }
 
@@ -3467,7 +3471,7 @@ const REFUSAL_REASON_MAX = 80;
  * printed after the status, empty when it printed nothing; `login` is the catalog's sign-in command for a machine. */
 export function codexKeyRefusedLine(keyEnv: string, reason: string, login: string): string {
   const said = reason.trim().slice(0, REFUSAL_REASON_MAX).trim();
-  return `Codex's provider refused the ${keyEnv} this wsp's vault holds${said === "" ? "" : ` (${said})`}; put a working key in the vault (wsp init, or the .env in the wsp home), or sign Codex in where this workspace runs with ${login}`;
+  return `Codex's provider refused the ${keyEnv} this wsp holds${said === "" ? "" : ` (${said})`}; put a working key in the .env in your wsp home, which wsp init also writes, or sign Codex in where this workspace runs with ${login}`;
 }
 
 /** The verb alone, for the host road that runs that leave on another computer over the line that computer said

@@ -233,7 +233,7 @@ describe("which rows the Computers table draws", () => {
       signIns: { claude: "vault-key", codex: "none" },
     };
     expect(placeAgentLines(place)).toEqual([
-      { id: "claude", name: "Claude Code", state: "2.1.270 · key from the vault", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude", signedIn: true },
+      { id: "claude", name: "Claude Code", state: "2.1.270 · key from this wsp", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude", signedIn: true },
       { id: "codex", name: "Codex", state: "0.153.0 · not signed in", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
     ]);
     // A sign-in on the computer itself reads as one, and a recipe row that installed the agent adds nothing the

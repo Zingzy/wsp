@@ -371,7 +371,7 @@ describe("the table wsp places prints", () => {
     const column = (line: string): string => line.slice(header.indexOf("AGENTS")).trim();
     // The cell is the protocol's own, so this table and the app's row cannot say it two ways.
     expect(column(printed[1]!)).toBe(agentsCell(spoo));
-    expect(column(printed[1]!)).toBe("claude 2.1.270 key from the vault · codex 0.153.0 not signed in");
+    expect(column(printed[1]!)).toBe("claude 2.1.270 key from this wsp · codex 0.153.0 not signed in");
     // This computer reports no agent of its own on this row, and neither does a cloud account.
     expect(column(printed[2]!)).toBe("");
     expect(column(printed[3]!)).toBe("");

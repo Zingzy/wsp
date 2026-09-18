@@ -37,8 +37,9 @@ export function secretsOf(
   const token = mintsToken(signIn) ? vault[signIn.tokenEnv] : undefined;
   if (token !== undefined) return { oauthToken: token };
   const keyEnv = keyEnvOf(signIn);
-  const key = keyEnv === undefined || loginStands ? undefined : vault[keyEnv];
-  return key === undefined ? {} : { apiKey: key, keyEnv: keyEnv! };
+  if (keyEnv === undefined || loginStands) return {};
+  const key = vault[keyEnv];
+  return key === undefined ? {} : { apiKey: key, keyEnv };
 }
 
 export const HARNESS_ADAPTERS: Readonly<Record<ThreadAgent, HarnessAdapterFactory>> = {

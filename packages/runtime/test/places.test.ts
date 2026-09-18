@@ -661,7 +661,7 @@ describe("what stands for each agent on a computer you own", () => {
     const row = (await placesOf()).find(p => p.name === "spoo")!;
     expect(row.agentVersions).toEqual(sent.agentVersions);
     expect(row.signIns).toEqual({ claude: "vault-key", codex: "none" });
-    expect(agentsCell(row)).toBe("claude 2.1.270 key from the vault · codex 0.153.0 not signed in");
+    expect(agentsCell(row)).toBe("claude 2.1.270 key from this wsp · codex 0.153.0 not signed in");
     client.close();
   });
 

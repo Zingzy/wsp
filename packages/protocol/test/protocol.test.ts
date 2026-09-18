@@ -212,7 +212,7 @@ describe("what a computer says about its agents, and what a person reads off it"
 
   it("the agents cell names each agent, its version and its sign-in, and says nothing for a row that reported none", () => {
     const row = { agents: ["claude", "codex"], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" }, signIns: { claude: "vault-key" as const, codex: "none" as const } };
-    expect(wire.agentsCell(row)).toBe("claude 2.1.270 key from the vault · codex 0.153.0 not signed in");
+    expect(wire.agentsCell(row)).toBe("claude 2.1.270 key from this wsp · codex 0.153.0 not signed in");
     expect(wire.agentsCell({ agents: ["codex"], signIns: { codex: "signed-in" } })).toBe("codex signed in");
     expect(wire.agentsCell({})).toBe("");
     expect(wire.agentSignInWord("signed-in")).toBe("signed in");
@@ -221,10 +221,10 @@ describe("what a computer says about its agents, and what a person reads off it"
   it("a key the provider turned down is said as a refused key, with what the provider said about it", () => {
     const login = "codex login --device-auth";
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "invalid_api_key", login)).toBe(
-      `Codex's provider refused the OPENAI_API_KEY this wsp's vault holds (invalid_api_key); put a working key in the vault (wsp init, or the .env in the wsp home), or sign Codex in where this workspace runs with ${login}`,
+      `Codex's provider refused the OPENAI_API_KEY this wsp holds (invalid_api_key); put a working key in the .env in your wsp home, which wsp init also writes, or sign Codex in where this workspace runs with ${login}`,
     );
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "", login)).toBe(
-      `Codex's provider refused the OPENAI_API_KEY this wsp's vault holds; put a working key in the vault (wsp init, or the .env in the wsp home), or sign Codex in where this workspace runs with ${login}`,
+      `Codex's provider refused the OPENAI_API_KEY this wsp holds; put a working key in the .env in your wsp home, which wsp init also writes, or sign Codex in where this workspace runs with ${login}`,
     );
     // The provider's reason is a clause in somebody else's sentence, so it is cut before it becomes a paragraph.
     expect(wire.codexKeyRefusedLine("OPENAI_API_KEY", "x".repeat(200), login)).toContain(`(${"x".repeat(80)})`);
