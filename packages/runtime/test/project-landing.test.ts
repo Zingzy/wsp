@@ -432,11 +432,20 @@ describe("a repo added by url on a computer the person owns", () => {
       if (cmd.includes("npm ci")) return { exitCode: 1, stdout: "", stderr: "npm error code ENOSPC\nnpm error nospc ENOSPC: no space left on device\n" };
       return undefined;
     });
+    // Whether the worker was already stopped when the sweep ran: those folders are its binds' own sources while
+    // it lives, so the sweep waits for it.
+    const workerStopped: boolean[] = [];
+    const own = backend.onComputer!.bind(backend);
+    backend.onComputer = async (cmd, opts) => {
+      workerStopped.push(backend.machines.every(m => m.killed));
+      return own(cmd, opts);
+    };
     await expect(rt.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "default", name: "landing-906" })).rejects.toThrow(/no space left on device/);
     expect(await rt.projects.list()).toEqual([]);
     // The folder the bind made on that computer goes with it, so the same name can be added again.
     expect(backend.computerLog).toEqual([expect.stringMatching(/^rm -rf '\/wsp\/projects\/pr_[0-9a-f]{8}'$/)]);
     expect(stopped(backend)).toBe(1);
+    expect(workerStopped).toEqual([true]);
   });
 
   it("is taken away with the folder wsp made for it, in one sentence naming that folder", async () => {
@@ -520,10 +529,32 @@ describe("the commits a seed carries onto a computer whose git refuses them", ()
     // The add stands, the record is honest about what is on that computer, and the person is told which.
     expect(project.seeded).toMatchObject({ commits: 0, files: 1 });
     expect(project.notice).toBe(lost);
+    // The notice is what the person is told, not a field of the project: the record holds the schema's fields.
+    expect((await rt.projects.list())[0]).not.toHaveProperty("notice");
     expect(stages(events).filter(e => e.stage === "seeding").map(e => e.message).at(-1)).toBe(lost);
     // The half applied patch is put back, so every copy of the checkout starts on the clone as it was.
     expect(commands(backend)).toContain("am --abort");
     expect(commands(backend)).toContain("reset --hard origin/main");
+  });
+
+  it("are put back on the branch the checkout says it is on, not the branch the plan carried", async () => {
+    const folder = repo();
+    // The person's own branch, which the remote has never seen, and a plan that names no default branch: the
+    // branch to put back cannot be read off either without naming a ref the remote has not got.
+    const { rt, backend } = await withImage({ plan: plan(folder, { unpushed: { commits: 1, base: "abc123" }, branch: "refactor/dashboard-polish", defaultBranch: null }), projects: "/wsp/projects", keepsImages: false });
+    answering(backend, cmd => {
+      if (cmd.includes("symbolic-ref --short HEAD")) return { exitCode: 0, stdout: "main\n", stderr: "" };
+      if (cmd.includes("am --3way")) return { exitCode: 128, stdout: "", stderr: "error: could not build fake ancestor\n" };
+      return undefined;
+    });
+    const project = await rt.projects.add({ source: folder, on: "default", name: "seeded-919", seed: KEEPING });
+    const ran = commands(backend);
+    // The clone came up on main, so that is what the failure road puts back and what the person is told.
+    expect(ran).toContain("reset --hard origin/main");
+    expect(ran).not.toContain("origin/refactor/dashboard-polish");
+    expect(ran).toContain("branch -D refactor/dashboard-polish");
+    expect(project.notice).toContain("the checkout is on main");
+    expect(project.seeded?.commits).toBe(0);
   });
 
   it("are the count git read off the checkout, never the number the plan carried", async () => {

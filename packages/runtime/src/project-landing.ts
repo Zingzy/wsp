@@ -194,12 +194,20 @@ export function seedRestScript(o: { checkout: string; memoryDir: string; seedTar
 
 /** The clone, the seed and the install on one machine, the half both roads that clone share. The install is read
  * off the checkout's own root: one listing, then the command the catalog's row for that lockfile names, once. */
-async function cloneSeedInstall(o: LandRequest, deps: LandingDeps, machine: Machine, places: { checkout: string; memoryDir: string; log: string }): Promise<Landed> {
+async function cloneSeedInstall(
+  o: LandRequest,
+  deps: LandingDeps,
+  machine: Machine,
+  /** `checkout` is where the work runs inside the machine, which is the path the project has inside every
+   * workspace of it; `holds` is where that folder sits on the computer once the machine is gone, which is what the
+   * cloning line names, since a person watching an add is being told where their code landed on their computer. */
+  places: { checkout: string; holds: string; memoryDir: string; log: string },
+): Promise<Landed> {
   const { project, report } = o;
   const seed = o.seed;
   const seedTar = seed === undefined ? undefined : `${deps.scratch(machine)}/seed-${project.id}.tgz`;
   if (seed !== undefined && seedTar !== undefined) await deps.land(machine, seedTar, seed.tar);
-  report("cloning", `Cloning ${project.remote} into ${places.checkout}.`);
+  report("cloning", `Cloning ${project.remote} into ${places.holds}.`);
   const script = cloneScript({
     source: o.source,
     remote: project.remote,
@@ -267,7 +275,7 @@ async function patchSeed(
 ): Promise<{ commits: number; notice?: string }> {
   const unpushed = o.seed.plan.unpushed;
   if (o.seed.choice.commits !== true || unpushed === null) return { commits: 0 };
-  const step: PatchStep = { branch: o.seed.plan.branch, base: unpushed.base, back: o.base ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch };
+  const step: PatchStep = { branch: o.seed.plan.branch, base: unpushed.base, back: await cloneBranch(o, machine) };
   const ran = await machine.exec(patchScript({ ...step, checkout: o.checkout }), { timeoutMs: STEP_MS });
   if (ran.exitCode === 0) {
     const counted = Number(lastLine(ran.stdout));
@@ -280,6 +288,19 @@ async function patchSeed(
   const notice = seedCommitsLostLine(unpushed.commits, step.branch, o.computerName, said, step.back);
   o.report("seeding", notice);
   return { commits: 0, notice };
+}
+
+/** The branch the clone came up on, read off the checkout itself: what the patch step leaves the checkout on and
+ * what its failure road resets to the remote's tip. Read rather than taken off the plan, because the plan's own
+ * branch is the person's, which the remote may never have seen: `origin/<that>` is then no ref at all and the
+ * reset would be a silent no-op leaving the checkout where the step moved it. The clone is always on a branch the
+ * remote has. `symbolic-ref` and not `rev-parse --abbrev-ref`: it says the branch in one line and exits non-zero
+ * on a detached head rather than answering the word HEAD. The plan's words are the fallback for a checkout that
+ * answers neither. */
+async function cloneBranch(o: { seed: { plan: SeedPlan }; checkout: string; base?: string }, machine: Machine): Promise<string> {
+  const read = await machine.exec(shellLine(["git", "-C", o.checkout, "symbolic-ref", "--short", "HEAD"]), { timeoutMs: STEP_MS });
+  const on = read.exitCode === 0 ? lastLine(read.stdout) : undefined;
+  return on ?? o.base ?? o.seed.plan.defaultBranch ?? o.seed.plan.branch;
 }
 
 /** A computer the person owns: its daemon holds the disk, so the checkout and the memory folder sit on that disk
@@ -319,20 +340,26 @@ const boxLanding: ProjectLanding = {
     // A computer that keeps no image is worked in a copy of its own directories: nothing of this host's is forked
     // here, which is why no image is read on this road at all.
     const machine = await deps.worker({ binds, image: false, from: "" });
+    let failed: unknown;
     try {
       // The checkout stays on the computer once the machine is gone: every workspace of this project takes its own
       // copy of it, so the seed and the install are paid for once.
-      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
+      return { checkout, ...(await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: checkout, memoryDir: o.project.memoryDir, log: `${dir}/install.log` })) };
     } catch (e) {
-      // Nothing of a project that was not recorded is left on the computer: the folder the bind made goes, so the
-      // add can be run again under the same name and nothing of it sits on that disk unowned.
-      const swept = removableProjectDir(deps, o.project.id);
-      await onComputer(deps)(`rm -rf ${shellQuote(swept)}`, { timeoutMs: STEP_MS }).catch((swallow: unknown) =>
-        console.warn(`${swept} on ${deps.computerName} was not swept after the add of ${o.project.name} failed: ${swallow instanceof Error ? swallow.message : String(swallow)}`),
-      );
+      failed = e;
       throw e;
     } finally {
       await machine.kill().catch((e: unknown) => console.warn(`the machine that added ${o.project.name} was not stopped: ${e instanceof Error ? e.message : String(e)}`));
+      // Nothing of a project that was not recorded is left on the computer: the folder the bind made goes, so the
+      // add can be run again under the same name and nothing of it sits on that disk unowned. After the machine is
+      // stopped and never before: those folders are its binds' own sources while it runs, and what Linux makes of
+      // a source removed under a live container is not a question to open for a sweep that can wait a second.
+      if (failed !== undefined) {
+        const swept = removableProjectDir(deps, o.project.id);
+        await onComputer(deps)(`rm -rf ${shellQuote(swept)}`, { timeoutMs: STEP_MS }).catch((swallow: unknown) =>
+          console.warn(`${swept} on ${deps.computerName} was not swept after the add of ${o.project.name} failed: ${swallow instanceof Error ? swallow.message : String(swallow)}`),
+        );
+      }
     }
   },
   workspaceBinds: project => [{ source: project.memoryDir, target: guestMemoryDir(project.memoryKey) }],
@@ -363,7 +390,7 @@ const providerLanding: ProjectLanding = {
     // A builder: its disk becomes an image, and a sign-in never sits in one.
     const machine = await deps.worker({ binds: [], image: true, from });
     try {
-      const landed = await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, memoryDir: guestMemoryDir(o.project.memoryKey), log: `${deps.scratch(machine)}/install-${o.project.id}.log` });
+      const landed = await cloneSeedInstall(o, deps, machine, { checkout: o.project.path, holds: o.project.path, memoryDir: guestMemoryDir(o.project.memoryKey), log: `${deps.scratch(machine)}/install-${o.project.id}.log` });
       o.report("imaging", `Sealing ${o.project.name} as the image every workspace of it forks.`);
       const snapshotId = await deps.checkpoint(machine, `${o.project.name}-${o.project.id}`);
       return { ...landed, image: { snapshotId, builtAt: new Date(deps.now()).toISOString() } };

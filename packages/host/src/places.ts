@@ -943,10 +943,13 @@ async function addProject(io: CliIO, opts: PlaceOpts, aim: HostAim, source: stri
     const { places } = await client.request<{ places: PlaceView[] }>("places.list").catch(() => ({ places: [] as PlaceView[] }));
     const onId = places.find(p => p.id === onComputer || p.name === onComputer)?.id;
     // The add's own stages as they land on that computer: a clone, a seed and an install take minutes there, and
-    // a person watching a line that says nothing cannot tell a slow clone from a wedged one.
+    // a person watching a line that says nothing cannot tell a slow clone from a wedged one. Only that computer's,
+    // and nothing at all where this line named none: a host serves every session at once, so a filter that let
+    // every computer through would print another session's add into this terminal, and a folder worked where it
+    // sits has no stages of its own anyway.
     const off = client.onFrame(frame => {
       const stage = ProjectAddEvent.safeParse(frame);
-      if (!stage.success || (onId !== undefined && stage.data.computer !== onId)) return;
+      if (!stage.success || onId === undefined || stage.data.computer !== onId) return;
       io.log(stage.data.message);
     });
     await client.events();

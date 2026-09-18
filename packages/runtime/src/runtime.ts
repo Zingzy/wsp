@@ -7788,7 +7788,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // One command on the computer itself, where that computer runs any: how the folder wsp keeps for a project
       // there is taken away again. A provider answers none, and this Mac's own road runs nothing outside a
       // workspace, so both leave it absent and the roads there never ask.
-      ...(at?.onComputer !== undefined ? { onComputer: (cmd: string, o?: { timeoutMs?: number }) => at.onComputer!(cmd, o) } : {}),
+      ...(at?.onComputer === undefined ? {} : { onComputer: at.onComputer.bind(at) }),
       imageHead: () => imageHeadOrNone(),
       // Where Claude Code keeps its projects on this computer, which is the memory folder of a project worked in
       // place here; read the way every other road on this computer reads that store.
@@ -7900,7 +7900,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // forks. A repo the computer can clone by itself is recorded here and cloned by the workspace's own create,
       // which is what it did before this road existed.
       const keep = async (landed: Landed): Promise<ProjectView & { notice?: string }> => {
-        const recorded: ProjectView = { ...project, ...landed };
+        // The notice is what the person is told about this add, not a field of the project: the record is written
+        // once here with the schema's own fields, so it is taken off before anything is stored or emitted.
+        const { notice: _said, ...fields } = landed;
+        const recorded: ProjectView = { ...project, ...fields };
         await rememberProject(recorded);
         // Kept under the folder as this host resolved it, which is the word the next menu is looked up by.
         if (o.seed?.remember === true && source.kind === "folder") await store.put(SEED_CHOICES, source.path, o.seed);

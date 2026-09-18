@@ -2447,4 +2447,14 @@ describe("what wsp add prints while a project lands on a computer", () => {
       "the 1 commit on main did not land on spoo: fatal: empty ident name (for <>) not allowed; the checkout is on main",
     ]);
   });
+
+  it("prints no stage at all where no computer was named, so another session's add never lands in this terminal", async () => {
+    const io = captured();
+    const folder = tmp("add-here-stages");
+    // Another session's add on a computer, arriving on this socket while a folder is recorded here.
+    const dial = staging([stage("p_1", "cloning", "Cloning somebody else's repo."), stage("p_1", "done", "theirs is on spoo.")]);
+    expect(await addCommand(io, opts(tmp("add-here")), [folder], {}, addDeps(dial))).toBe(0);
+    expect(io.lines.filter(line => line.includes("somebody else"))).toEqual([]);
+    expect(io.lines.some(line => line.includes("theirs is on spoo"))).toBe(false);
+  });
 });
