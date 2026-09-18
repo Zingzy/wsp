@@ -55,7 +55,7 @@ import { MCP_SERVERS_JSON } from "@wsp/catalog";
 import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, type PlaceRecord, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -2720,6 +2720,20 @@ describe("the recipe this host holds, put on a computer you own", () => {
     { id: "agents/codex", label: "Codex", outcome: "installed" },
   ];
 
+  /** An image this host has sealed, so the road that keeps a computer's copy of it current gets past its first
+   * read and reaches the computer. The hashes are plainly fake, as every key in these fixtures is. */
+  const IMAGE_RECORD = {
+    name: "default",
+    version: 1,
+    hash: "a".repeat(64),
+    recipeHash: "rh",
+    recipe: { version: 1, at: RECIPE_AT, histories: [], rows: [] },
+    logins: [],
+    sealedAt: RECIPE_AT,
+    sealedFrom: "h1",
+    vault: { sha256: "b".repeat(64), bytes: 10, paths: 1, takenAt: RECIPE_AT },
+  };
+
   /** A provisioner as the host wires one, with what it plans and what its run comes to under this test's hand. */
   function provisioner(o: { rows?: PlaceProvisionRow[]; plan?: ProvisionPlan; throws?: string; noRecipe?: string; hold?: boolean; planThrows?: string; planMs?: number } = {}) {
     let release = (): void => {};
@@ -2918,6 +2932,57 @@ describe("the recipe this host holds, put on a computer you own", () => {
     p.release();
     await until(async () => (await provisionOf(placeId))?.state === "done");
     expect(await runtime!.places!.forkingBackend(placeId)).toBeDefined();
+  });
+
+  it("refuses a fork during the job in a class of its own, keeping the conflict a create there has always answered in", async () => {
+    const p = provisioner({ hold: true });
+    const { placeId } = await joined({ provision: p.wired });
+    await until(async () => (await provisionOf(placeId))?.at !== undefined);
+    const refused = await runtime!.places!.forkingBackend(placeId).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    // The class says which refusal this is to a road that waits for the job; the kind is what the create's own
+    // answer is classed by, and it is the one it always was.
+    expect(refused).toBeInstanceOf(PlaceProvisioningError);
+    expect(refused).toMatchObject({ kind: "conflict", message: placeProvisioningLine("spoo", (await provisionOf(placeId))!.at) });
+    p.release();
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+  });
+
+  it("says which computer every step of the job is on, so a road that acts at its end reads the row off the step", async () => {
+    const p = provisioner({ hold: true });
+    const stages: PlaceStageEvent[] = [];
+    const { placeId } = await joined({ provision: p.wired });
+    runtime!.events.on("place.stage", e => stages.push(e as PlaceStageEvent));
+    await until(async () => (await provisionOf(placeId))?.at !== undefined);
+    p.release();
+    await until(async () => (await provisionOf(placeId))?.state === "done");
+    const provision = stages.filter(s => s.step === "provision");
+    expect(provision.length).toBeGreaterThan(0);
+    expect(provision.every(s => s.placeId === placeId)).toBe(true);
+    expect(provision.filter(s => s.state === "done").map(s => s.placeId)).toEqual([placeId]);
+  });
+
+  it("says nothing about the image while the job runs, and reads the image again once the job ends", async () => {
+    const p = provisioner({ hold: true });
+    const store = memoryStore();
+    await store.put("images", "default", IMAGE_RECORD);
+    const { placeId } = await joined({ provision: p.wired, store });
+    await until(async () => (await provisionOf(placeId))?.at !== undefined);
+    // The link's own read of the image ran inside the join, while the job was already going on. Asked again here
+    // by hand for the same reason: the refusal the road meets is the job's, and no row is written for it.
+    await runtime!.image.keepCurrent(placeId);
+    expect((await placesOf()).find(r => r.id === placeId)?.build).toBeUndefined();
+    const asks: string[] = [];
+    runtime!.image.keepCurrent = async place => {
+      asks.push(place);
+    };
+    p.release();
+    await until(() => asks.length > 0);
+    // Once, at the end of the job, which is the moment the tally beside it is written.
+    expect(asks).toEqual([placeId]);
+    expect((await placesOf()).find(r => r.id === placeId)?.build).toBeUndefined();
   });
 
   it("is refused a second time while the first is still going on, as the op's own refusal so nothing waits on it", async () => {
