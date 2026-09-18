@@ -29,7 +29,7 @@ import { DialButton, useDialPlace } from "./AbsentRoad.js";
 import { FACT, AGENTS_WORDS, WHERE_WORDS } from "./format.js";
 import { copyOn } from "./image.js";
 import { APP_PLATFORM, NOTHING_HELD, THIS_COMPUTER_WORD, absenceOf, computerRows, copiesWord, hereAgentLines, isProviderPlace, placeAgentLines, placeCpuWord, placeName, placeOf, placeWorkspaceCounts, recipeLines, threadWord, type AgentLine, type PlaceHolding } from "./places.js";
-import { PlaceRow, PlaceTable } from "./PlaceTable.js";
+import { NARROW_ONLY, PlaceRow, PlaceTable } from "./PlaceTable.js";
 import { RemoveComputerDialog } from "./RemoveComputerDialog.js";
 
 /** What each row holds, folded from the workspaces the store already has, each workspace going to exactly one row
@@ -279,8 +279,9 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
    * than in a sentence cut from the right. */
   const rows: { k: string; label: string; value: string; lines?: readonly string[]; narrow?: boolean }[] = [
     ...(road === null || road.address === null ? [] : [{ k: "address", label: WHERE_WORDS.address, value: road.address }]),
-    // The two columns a phone does not hold, said here instead, in the table's own words for them. Drawn below
-    // 640 px alone: above it they are the row's own cells and this would say them twice.
+    // The two columns a phone does not hold, said here instead, in the table's own words for them. Which columns
+    // those are and where the breakpoint is are the table's to say: this row wears the class it hands back, so a
+    // column that leaves and the row that stands in for it cannot part ways.
     ...(place.shape === undefined ? [] : [{ k: "size", label: PLACES_WORDS.columns[1]!, value: fmtSize(place.shape, placeCpuWord(place)), narrow: true }]),
     ...(place.diskFreeBytes === undefined ? [] : [{ k: "disk-free", label: PLACES_WORDS.columns[2]!, value: fmtBytes(place.diskFreeBytes), narrow: true }]),
     // Marked while the computer is not answering, the way the pane's OS row is: a person who cannot tell which of
@@ -314,7 +315,7 @@ function PlaceDetail({ place, here, holding, landing, agents, now, workspaces, s
       <TableCell colSpan={5} className="max-w-0 py-3 pr-2 pl-4">
         <div className="flex flex-col gap-2 border-border border-l pl-4">
           {rows.map(row => (
-            <div key={row.k} data-k={row.k} className={cn("flex items-baseline gap-4", row.narrow === true && "sm:hidden")}>
+            <div key={row.k} data-k={row.k} className={cn("flex items-baseline gap-4", row.narrow === true && NARROW_ONLY)}>
               <span className="w-24 shrink-0 text-[13px] text-muted-foreground">{row.label}</span>
               <span className="min-w-0 flex-1 truncate font-mono text-xs tabular-nums text-foreground" title={row.value}>
                 {row.lines === undefined ? row.value : row.lines.map(line => <span key={line} className="block truncate">{line}</span>)}

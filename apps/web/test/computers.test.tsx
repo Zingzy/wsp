@@ -11,6 +11,7 @@ import { useStore } from "../src/protocol/store.js";
 import { AddComputerSheet } from "../src/settings/AddComputerSheet.js";
 import { Computers } from "../src/settings/Computers.js";
 import { ADD_COMPUTER_WORDS, AGENTS_WORDS, SETTINGS_WORDS, WHERE_WORDS } from "../src/settings/format.js";
+import { NARROW_ONLY, columnClass } from "../src/settings/PlaceTable.js";
 import { SettingsPage } from "../src/settings/SettingsPage.js";
 import { SettingsRow } from "../src/sidebar/SettingsRow.js";
 import { ScriptedSocket, type Frame } from "./scripted-socket.js";
@@ -304,12 +305,13 @@ describe("the Computers table", () => {
   });
 
   it("holds the three fact columns to their own widths, so no header moves between a table of one computer and a table of five", async () => {
-    const widths = (): (string | null)[] => screen.getAllByRole("columnheader").map(head => head.className.match(/min-w-\[\d+px\]/)?.[0] ?? null);
+    const widths = (): string[] => screen.getAllByRole("columnheader").map(head => head.className);
     useStore.setState({ api: fakeApi().api, places: [here] });
     render(<Computers setup={SETUP} now={NOW} />);
     await settle();
     const alone = widths();
-    expect(alone.slice(1, 4)).toEqual(["min-w-[132px]", "min-w-[76px]", "min-w-[112px]"]);
+    for (const at of [0, 1, 2, 3]) expect(alone[at]).toContain(columnClass(at));
+    expect(alone.slice(1, 4).map(className => className.match(/min-w-\[\d+px\]/)?.[0])).toEqual(["min-w-[132px]", "min-w-[76px]", "min-w-[112px]"]);
     cleanup();
     useStore.setState({ api: fakeApi().api, places: [here, box, laptop, solari], workspaces: [mine, atSolari("ws_s")] });
     render(<Computers setup={setupOf({ keys: { solari: true } })} now={NOW} />);
@@ -524,21 +526,24 @@ describe("a computer's own row", () => {
     useStore.setState({ api: fakeApi().api, places: [here, box], workspaces: [], sessions: {} });
     render(<Computers setup={SETUP} now={NOW} />);
     await settle();
-    // One rule for both: the header and its cells carry the same narrow-width class, so a column cannot leave in
-    // one row and stay in another.
+    // One source for all three: the header, the cell under it and the row that stands in for the column when it
+    // leaves read the table's own `columnClass` and `NARROW_ONLY`, so a column cannot leave in the head and stay
+    // in a row, and moving the breakpoint moves every reader of it.
     const heads = screen.getAllByRole("columnheader");
-    expect(heads[1]!.className).toContain("hidden sm:table-cell");
-    expect(heads[2]!.className).toContain("hidden sm:table-cell");
-    for (const at of [0, 3]) expect(heads[at]!.className).not.toContain("hidden");
     const row = document.querySelector("[data-place-row='p_2']")!;
     const cellsOf = within(row as HTMLElement).getAllByRole("cell");
-    expect(cellsOf[1]!.className).toContain("hidden sm:table-cell");
-    expect(cellsOf[2]!.className).toContain("hidden sm:table-cell");
+    for (const at of [0, 1, 2, 3]) {
+      expect(heads[at]!.className).toContain(columnClass(at));
+      expect(cellsOf[at]!.className).toContain(columnClass(at));
+    }
+    // The two the list leaves out wear the rule; the two it holds do not.
+    for (const at of [1, 2]) expect(columnClass(at)).toContain("hidden sm:table-cell");
+    for (const at of [0, 3]) expect(columnClass(at)).not.toContain("hidden");
     fireEvent.click(row);
     // The same two facts in the detail, in the table's own words for them, drawn below 640 px alone.
     expect(detailValue("size")).toBe(fmtSize(box.shape!, "cores"));
     expect(detailValue("disk-free")).toBe(fmtBytes(box.diskFreeBytes!));
-    for (const k of ["size", "disk-free"]) expect(document.querySelector(`[data-k='place-detail'] [data-k='${k}']`)?.className).toContain("sm:hidden");
+    for (const k of ["size", "disk-free"]) expect(document.querySelector(`[data-k='place-detail'] [data-k='${k}']`)?.className).toContain(NARROW_ONLY);
   });
 
   it("says a computer that copies nothing does, rather than leaving the row blank", () => {
@@ -1106,6 +1111,21 @@ describe("the Add a computer sheet", () => {
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain("ssh refused the login (publickey).");
     expect(document.querySelector("[data-k='ssh-refusal']")?.textContent).toContain(ADD_COMPUTER_WORDS.refusedFix);
     expect((document.querySelector("#add-computer-login") as HTMLInputElement).value).toBe("root@65.21.4.12");
+  });
+
+  it("says Close on the button beside Add in both states, since that is all the press does in either", async () => {
+    let report: ((stage: InstallStage) => void) | undefined;
+    await openSheet({ addComputerOverSsh: (_login: SshLogin, onStage: (stage: InstallStage) => void) => new Promise<PlaceView>(() => (report = onStage)) } as unknown as Partial<Api>);
+    const beside = (): string => [...document.querySelectorAll("[data-slot='sheet-footer'] button")].map(b => b.textContent ?? "")[0]!;
+    expect(beside()).toBe(PLACES_WORDS.sheet.close);
+    fireEvent.change(document.querySelector("#add-computer-login")!, { target: { value: "root@65.21.4.12" } });
+    fireEvent.click(document.querySelector("[data-k='ssh-add']")!);
+    await waitFor(() => expect(document.querySelector<HTMLInputElement>("#add-computer-login")!.disabled).toBe(true));
+    act(() => report?.({ step: "connect", word: "connected · Ubuntu 24.04", state: "done" }));
+    // One word: an install under way is not cancelled by closing the sheet, and the note at the other end of the
+    // footer is what says so.
+    expect(beside()).toBe(PLACES_WORDS.sheet.close);
+    expect(document.querySelector("[data-slot='sheet-footer']")?.textContent).not.toContain("Cancel");
   });
 
   it("keeps every part it had once Add is pressed: the field with what was typed in it, dimmed, and three parts in the footer", async () => {

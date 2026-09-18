@@ -75,7 +75,6 @@ export const WHERE_WORDS = {
 /** What Add a computer says beyond PLACES_WORDS.sheet: the one field, why Add waits, and the two lines the
  * joined screen says. One road, so no word here names one. */
 export const ADD_COMPUTER_WORDS = {
-  cancel: "Cancel",
   login: "ssh login",
   loginPlaceholder: "root@host",
   add: "Add",

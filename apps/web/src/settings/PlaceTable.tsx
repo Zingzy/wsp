@@ -30,14 +30,24 @@ const NAME_COLUMN = "w-full max-w-0";
  * back to that column: each is the widest thing its cell says, at the 12 px mono the cells wear (`10 cores ·
  * 16 GB`, `313.7 GB`, and a count with the month's figure under it). */
 const FACT_COLUMNS = ["min-w-[132px]", "min-w-[76px]", "min-w-[112px]"];
-/** The two columns a phone does not hold: below 640 px they leave the table so the column that names the computer
- * has its width back, and the open row's detail says them instead. At 390 the four fact columns and the menu took
- * 331 px of a 340 px card, so the name was cut to nothing and the card scrolled sideways. */
-const WIDE_ONLY = "hidden sm:table-cell";
 /** The one column the mock right-aligns, since a disk figure is read against the one above it. */
 const RIGHT = 2;
-/** Which columns are drawn at a phone's width, by their place in the protocol's own list. */
-const NARROW = [0, 3];
+/** Which columns a phone holds, by their place in the protocol's own list. The rest leave the table below 640 px
+ * so the column that names the computer has its width back, and the open row's detail says them instead: at 390
+ * the four fact columns and the menu took 331 px of a 340 px card, so the name was cut to nothing and the card
+ * scrolled sideways. Letting a third column leave is an entry off this list and nothing else. */
+const NARROW_COLUMNS = [0, 3];
+/** What a column that leaves wears, and what the row standing in for it in the detail wears. One pair, read by
+ * the header, by every cell and by that row, so moving the breakpoint moves all three together. */
+const WIDE_ONLY = "hidden sm:table-cell";
+export const NARROW_ONLY = "sm:hidden";
+
+/** Everything the column at this place in the protocol's list wears: the width it holds to, the side its figures
+ * are read from, and the rule that takes it off a phone. The header and every cell read this one function, so a
+ * column cannot leave in the head and stay in a row. */
+export function columnClass(at: number): string {
+  return cn(at === 0 ? NAME_COLUMN : FACT_COLUMNS[at - 1], at === RIGHT && "text-right", !NARROW_COLUMNS.includes(at) && WIDE_ONLY);
+}
 
 /** A cell whose fact the computer has not reported yet: the bar stands where the words will, so nothing moves. */
 const Waiting = ({ right = false }: { right?: boolean }) => <Skeleton className={cn("h-3 w-16", right && "ml-auto")} />;
@@ -54,7 +64,7 @@ export function PlaceTable({ children, menu = true, k = "places-table" }: { chil
         <TableHeader>
           <TableRow className="hover:bg-transparent">
             {PLACES_WORDS.columns.map((column, at) => (
-              <TableHead key={column} className={cn(at === 0 ? NAME_COLUMN : FACT_COLUMNS[at - 1], at === RIGHT && "text-right", !NARROW.includes(at) && WIDE_ONLY)}>
+              <TableHead key={column} className={columnClass(at)}>
                 {column}
               </TableHead>
             ))}
@@ -95,29 +105,28 @@ const NoFact = ({ right = false }: { right?: boolean }) => (
   <span data-k="no-fact" title={WHERE_WORDS.noFactOfACloud} className={cn("inline-block h-px w-3 bg-border align-middle", right && "float-right")} />
 );
 
-/** One computer or provider. The default mark rides beside the name and the state slot is the state's, so a
- * computer that is the default and is also away says both and no column moves when either word arrives.
- * The chevron, where the row opens, comes after them. */
+/** One computer or provider, two lines: the name with the default mark and the chevron on the first, the state
+ * word on its own under them. A computer that is the default and is also away says both, and neither word moves a
+ * column, since the columns hold to their own widths. */
 export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, absent: given, trail, menu, open, onToggle }: { place: PlaceView; now: number; /** How many workspaces stand on this row, counted off the app's own list by placeWorkspaceCounts. */ workspaces?: number; /** What this row has taken since the first of the month, where the host has metered anything on it. */ monthUsd?: number; /** Whether this is the computer the host runs on, which the list puts first. */ here?: boolean; /** The reading for a row whose silence is not its link's: the computer the host runs on holds no link and is read off its own workspace's daemon. */ absent?: AbsentComputer | null; /** The chevron after the state word, where the row opens. */ trail?: ReactNode; menu?: ReactNode; open?: boolean; onToggle?: () => void }) {
   const name = placeName(place, here);
   // The one reading of a computer that is not answering, which the sidebar row, the pane and the composer read
-  // too: the slot beside the name holds the one word.
+  // too: the row's state line says it in one word.
   const absent = given ?? absentOf(place, now, here);
-  // The whole of what the cut cell says, and the sentence the state slot has no room for beside the fact columns.
-  // A computer that is not answering is named by its own sentence, so the row does not say the name twice.
+  // The whole of what a cut name says, and the sentence the state line says in a word. A computer that is not
+  // answering is named by its own sentence, so the row does not say the name twice.
   const title = [absent?.sentence ?? name, place.default ? WHERE_WORDS.default : ""].filter(word => word !== "").join(" ");
   return (
     <TableRow
       data-place-row={place.id}
       title={title}
       {...(open === undefined ? {} : { "aria-expanded": open })}
-      // Every row is the head's own height, whatever it carries: the rows with a menu button stood 6 px taller than
-      // the one without, and a table of three heights is the first thing a person reads as wrong. The cells give up
-      // their own padding to the row's height, so a 24 px button no longer sets it.
+      // One height for every row of one table, whatever a row carries: the name line and the state slot under it
+      // set it, both read off the lines they hold, and every cell takes the same padding so nothing else can.
       className={cn("[&>td]:py-2", onToggle !== undefined && "cursor-pointer")}
       onClick={onToggle}
     >
-      <TableCell className={cn(NAME_COLUMN, "overflow-hidden align-top")}>
+      <TableCell className={cn(columnClass(0), "overflow-hidden align-top")}>
         {/* One line, 20 px of the app's own scale, whatever stands on it: 13 px of name with room for an 11 px
             mono word beside it. Read off the line it holds rather than left to the tallest thing in it, since the
             default mark grew that line by two pixels and with it the whole row: the mark is centred against the
@@ -142,15 +151,15 @@ export function PlaceRow({ place, now, workspaces = 0, monthUsd, here = false, a
           {placeStateWord(place, absent)}
         </span>
       </TableCell>
-      <TableCell className={cn(CELL, FACT_COLUMNS[0], WIDE_ONLY)}>
+      <TableCell className={cn(CELL, columnClass(1))}>
         {place.shape !== undefined ? fmtSize(place.shape, placeCpuWord(place)) : waiting(place) ? <Waiting /> : isProviderPlace(place) ? <NoFact /> : null}
       </TableCell>
-      <TableCell className={cn(CELL, FACT_COLUMNS[1], WIDE_ONLY, "text-right")}>
+      <TableCell className={cn(CELL, columnClass(2))}>
         {place.diskFreeBytes !== undefined ? fmtBytes(place.diskFreeBytes) : waiting(place) ? <Waiting right /> : isProviderPlace(place) ? <NoFact right /> : null}
       </TableCell>
       {/* What this cell says is the caller's count and the host's total, neither of which the row reports, so it
           says them as soon as it has them rather than waiting on facts it does not use. */}
-      <TableCell className={cn(CELL, FACT_COLUMNS[2])}>{waiting(place) ? <Waiting /> : <Workspaces place={place} count={workspaces} monthUsd={monthUsd} />}</TableCell>
+      <TableCell className={cn(CELL, columnClass(3))}>{waiting(place) ? <Waiting /> : <Workspaces place={place} count={workspaces} monthUsd={monthUsd} />}</TableCell>
       {menu === undefined ? null : <TableCell className="min-w-10 text-right align-top">{menu}</TableCell>}
     </TableRow>
   );

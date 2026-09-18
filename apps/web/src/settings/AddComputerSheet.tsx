@@ -139,8 +139,11 @@ export function AddComputerSheet({ onClose, now = () => Date.now() }: { onClose:
               </>
             )}
           </span>
+          {/* One word in every state, and the honest one: this button closes the sheet, which is all it does
+              before Add is pressed too. An install under way keeps going without the sheet, which the note at the
+              other end of the footer says. */}
           <Button variant="outline" onClick={onClose}>
-            {installed === null ? MINE.cancel : WORDS.close}
+            {WORDS.close}
           </Button>
           {installed === null ? (
             // Three parts in the footer in both states, the same three: a footer that swapped Add away while the
