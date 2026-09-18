@@ -4,7 +4,7 @@
 // it. Every client renders these words, and the runtime refuses a send with
 // the same sentence the composer shows, so one screen never says two things.
 import { computerWord, fmtThreads, LIST_PRICE_WORD, MACHINE_WSP_FORKS, offlineFor, OVER_SSH, THIS_COMPUTER, type CpuWord } from "./format.js";
-import type { HarnessCatalog, MachineFacts, MachineState, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
+import type { HarnessCatalog, MachineFacts, MachineState, PauseMode, ProjectSource, ReachState, ScreenCommand, ScreenControl, WorkspaceKind, WorkspacePhase, WorkspaceStatus, WorkspaceView } from "./index.js";
 
 export type WorkspaceState = "running" | "pausing" | "paused" | "waking" | "unreachable" | "gone";
 
@@ -242,15 +242,22 @@ export function workspaceStateOf(workspace: Pick<WorkspaceView, "phase">, status
 
 const WORDS: Record<WorkspaceState, string> = {
   running: "Running",
-  pausing: "Pausing",
-  paused: "Paused",
+  pausing: "Stopping",
+  paused: "Stopped",
   waking: "Waking",
   unreachable: "Unreachable",
   gone: "Gone",
 };
 
-export function workspaceWord(state: WorkspaceState): string {
-  return WORDS[state];
+/** The two words a computer that keeps the processes and the bytes of a paused machine reads instead: a nap there
+ * is a pause, and everywhere else it is a stop, which is what the machine does to every process it was running. */
+const MEMORY_WORDS: Partial<Record<WorkspaceState, string>> = { pausing: "Pausing", paused: "Paused" };
+
+/** The one word for a workspace's state. The computer's pause mode rides where the caller holds it, since the same
+ * state is a pause on a machine that keeps its memory and a stop on one that does not; a caller holding none reads
+ * the stopping words, which is what every computer but a provider with memory pauses does. */
+export function workspaceWord(state: WorkspaceState, pauseMode?: PauseMode): string {
+  return (pauseMode === "memory" ? MEMORY_WORDS[state] : undefined) ?? WORDS[state];
 }
 
 /** What a row this workspace's machine stands on says under WHERE: the name this host has for the computer it runs
@@ -267,11 +274,13 @@ export function whereWord(record: Pick<WorkspaceView, "machineId"> & { kind?: Wo
 
 /** The line a verb that moved a workspace prints once the runtime has answered: the workspace and the word the next
  * listing will show for it, in the lowercase a line of work reads. The one place that word is lowered, so a pause
- * and a wake cannot spell one state two ways. A machine the provider has started and nothing on it answers gets a
+ * and a wake cannot spell one state two ways. The computer's pause mode rides where the caller holds it, as the
+ * state word itself takes it: a nap on a provider that keeps the machine's memory is a pause, and a stop anywhere
+ * else. A machine the provider has started and nothing on it answers gets a
  * sentence of its own, since one word there would say the wake failed when what happened is that the machine is up
  * and its daemon is not talking yet; a caller holding only a phase never reaches it. */
-export function workspaceStateLine(name: string, state: WorkspaceState): string {
-  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state).toLowerCase()}`;
+export function workspaceStateLine(name: string, state: WorkspaceState, pauseMode?: PauseMode): string {
+  return state === "unreachable" ? `${name} is up and not answering yet` : `${name} ${workspaceWord(state, pauseMode).toLowerCase()}`;
 }
 
 /** Every word a slot beside facts can hold for a computer that is not answering, which is what lets a reader of

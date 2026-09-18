@@ -251,6 +251,13 @@ export const Capabilities = z.object({
 });
 export type Capabilities = z.infer<typeof Capabilities>;
 
+/** Where a workspace of one project would land: the row it stands on where that is a computer this host holds, the
+ * computer's name as the runtime words it, and what that computer offers. The reply of workspaces.landing, read
+ * ahead of a create by the command line and by every row of that project in the app, which takes its words about a
+ * copy's ports and its state word's pause mode off these flags. */
+export const WorkspaceLanding = z.object({ place: z.string().optional(), name: z.string(), capabilities: Capabilities });
+export type WorkspaceLanding = z.infer<typeof WorkspaceLanding>;
+
 /** Whether this host forks no machine at all: the provider module a keyless host wires offers no size, so the roads
  * that would fork one answer NO_PROVIDER_LINE instead of sending the person back to an init that seals nothing. The
  * one place that reading is made, so nothing above the provider module asks whether there is a key. */

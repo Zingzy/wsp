@@ -219,49 +219,51 @@ describe("workspace switch", () => {
   });
 });
 
-describe("the switch chords per sidebar body", () => {
+describe("the switch chords over the sidebar's one body", () => {
   const resolve = (event: ShortcutEventLike, platform: string, context: Record<string, boolean> = {}) =>
     resolveShortcutCommand(event, DEFAULT_RESOLVED_KEYBINDINGS, { platform, context });
   const DESKTOP = { desktopShell: true };
-  const SPACES = { desktopShell: true, spacesMode: true };
   const tab = (mods: Partial<ShortcutEventLike> = {}) => key("Tab", { ctrlKey: true, code: "Tab", ...mods });
-  /** The switch between spaces as each platform's mod spells it: Command with Option on macOS, Control with Alt elsewhere. */
-  const arrow = (name: "ArrowLeft" | "ArrowRight", platform: string, mods: Partial<ShortcutEventLike> = {}) =>
+  /** The switch between workspaces as each platform's mod spells it: Command with Option on macOS, Control with Alt elsewhere. */
+  const arrow = (name: "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown", platform: string, mods: Partial<ShortcutEventLike> = {}) =>
     key(name, { altKey: true, code: name, ...(platform === MAC ? { metaKey: true } : { ctrlKey: true }), ...mods });
 
-  it("gives the Tab pair the workspaces in the list and the space's threads in Spaces", () => {
+  it("gives the Tab pair the workspaces, whatever the sidebar is drawing: it draws one body", () => {
     expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
     expect(resolve(tab({ shiftKey: true }), MAC, DESKTOP)).toBe("workspace.previous");
-    expect(resolve(tab(), MAC, SPACES)).toBe("thread.next");
-    expect(resolve(tab({ shiftKey: true }), MAC, SPACES)).toBe("thread.previous");
-    expect(resolve(tab(), LINUX, SPACES)).toBe("thread.next");
+    expect(resolve(tab(), LINUX, DESKTOP)).toBe("workspace.next");
   });
 
-  it("moves between workspaces on the mod arrows in both bodies of the desktop shell", () => {
-    for (const context of [DESKTOP, SPACES]) {
-      expect(resolve(arrow("ArrowRight", MAC), MAC, context)).toBe("workspace.next");
-      expect(resolve(arrow("ArrowLeft", MAC), MAC, context)).toBe("workspace.previous");
-      expect(resolve(arrow("ArrowRight", LINUX), LINUX, context)).toBe("workspace.next");
-      expect(resolve(arrow("ArrowLeft", LINUX), LINUX, context)).toBe("workspace.previous");
-    }
+  it("walks the threads of the workspace on screen on the mod arrows up and down, as left and right walk the workspaces", () => {
+    expect(resolve(arrow("ArrowDown", MAC), MAC, DESKTOP)).toBe("thread.next");
+    expect(resolve(arrow("ArrowUp", MAC), MAC, DESKTOP)).toBe("thread.previous");
+    expect(resolve(arrow("ArrowDown", LINUX), LINUX, DESKTOP)).toBe("thread.next");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBe("⌥⌘Down");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.previous", { platform: MAC, context: DESKTOP })).toBe("⌥⌘Up");
+    // A focused terminal keeps them, as it keeps every arrow of the pair.
+    expect(resolve(arrow("ArrowDown", MAC), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
+  });
+
+  it("moves between workspaces on the mod arrows of the desktop shell", () => {
+    expect(resolve(arrow("ArrowRight", MAC), MAC, DESKTOP)).toBe("workspace.next");
+    expect(resolve(arrow("ArrowLeft", MAC), MAC, DESKTOP)).toBe("workspace.previous");
+    expect(resolve(arrow("ArrowRight", LINUX), LINUX, DESKTOP)).toBe("workspace.next");
+    expect(resolve(arrow("ArrowLeft", LINUX), LINUX, DESKTOP)).toBe("workspace.previous");
   });
 
   it("hands the arrows back in a browser tab on macOS, where they are its own tab switch, and keeps them off it", () => {
-    const tabs: Record<string, boolean>[] = [{}, { spacesMode: true }];
-    for (const context of tabs) {
-      expect(resolve(arrow("ArrowRight", MAC), MAC, context)).toBeNull();
-      expect(resolve(arrow("ArrowLeft", MAC), MAC, context)).toBeNull();
-      expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC, context })).toBeNull();
-      // Off macOS the same chord is Control with Alt, which reaches the page, so the switch stays bound there.
-      expect(resolve(arrow("ArrowRight", LINUX), LINUX, context)).toBe("workspace.next");
-      expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: LINUX, context })).toBe("Ctrl+Alt+Right");
-    }
+    expect(resolve(arrow("ArrowRight", MAC), MAC, {})).toBeNull();
+    expect(resolve(arrow("ArrowLeft", MAC), MAC, {})).toBeNull();
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: MAC, context: {} })).toBeNull();
+    // Off macOS the same chord is Control with Alt, which reaches the page, so the switch stays bound there.
+    expect(resolve(arrow("ArrowRight", LINUX), LINUX, {})).toBe("workspace.next");
+    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: LINUX, context: {} })).toBe("Ctrl+Alt+Right");
   });
 
   it("leaves the arrows to a focused terminal, as it leaves it the Tab pair", () => {
     expect(resolve(arrow("ArrowRight", MAC), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
     expect(resolve(arrow("ArrowLeft", LINUX), LINUX, { ...DESKTOP, terminalFocus: true })).toBeNull();
-    expect(resolve(tab(), MAC, { ...SPACES, terminalFocus: true })).toBeNull();
+    expect(resolve(tab(), MAC, { ...DESKTOP, terminalFocus: true })).toBeNull();
   });
 
   it("takes no arrow short of the whole chord, so an Option arrow is still the text field's word move", () => {
@@ -273,28 +275,10 @@ describe("the switch chords per sidebar body", () => {
     expect(resolve(arrow("ArrowRight", MAC), LINUX, DESKTOP)).toBeNull();
   });
 
-  it("labels each command as the body it is read in means it", () => {
-    const label = (command: "workspace.next" | "workspace.previous" | "thread.next" | "thread.previous", context: Record<string, boolean>) =>
-      shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, command, { platform: MAC, context });
-    expect(label("workspace.next", DESKTOP)).toBe("⌃Tab");
-    expect(label("workspace.previous", DESKTOP)).toBe("⌃⇧Tab");
-    expect(label("thread.next", DESKTOP)).toBeNull();
-    expect(label("workspace.next", SPACES)).toBe("⌥⌘Right");
-    expect(label("workspace.previous", SPACES)).toBe("⌥⌘Left");
-    expect(label("thread.next", SPACES)).toBe("⌃Tab");
-    expect(label("thread.previous", SPACES)).toBe("⌃⇧Tab");
-    expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "workspace.next", { platform: LINUX, context: SPACES })).toBe("Ctrl+Alt+Right");
-  });
-
-  it("reads as the list where a caller names no body, and reads no record of its own to find one", () => {
-    const before = useStore.getState().preferences;
-    useStore.setState({ preferences: { ...before, sidebarMode: "spaces", labs: true } });
-    try {
-      expect(resolve(tab(), MAC, DESKTOP)).toBe("workspace.next");
-      expect(shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "thread.next", { platform: MAC, context: DESKTOP })).toBeNull();
-    } finally {
-      useStore.setState({ preferences: before });
-    }
+  it("labels the workspace walk with the Tab pair and the mod arrows both", () => {
+    const label = (command: "workspace.next" | "workspace.previous") => shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, command, { platform: MAC, context: DESKTOP });
+    expect(label("workspace.next")).toBe("⌃Tab");
+    expect(label("workspace.previous")).toBe("⌃⇧Tab");
   });
 });
 

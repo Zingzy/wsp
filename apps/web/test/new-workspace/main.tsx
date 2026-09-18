@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Served by Vite to a real browser: the new-workspace dialog in either theme
-// (?theme=light) with two projects to pick from, the one on the provider
-// checked so its three sizes are drawn, so a test can lay out and photograph
-// the Project control, its caption and the size rows. With ?refusal=<sentence>
-// the keycap is held and that sentence is its tooltip, which is the dialog
-// while the image is still building; with ?projects=none the dialog has no
-// project to make a workspace of.
+// (?theme=light) with two projects to pick from, the landing of each answered,
+// so a test can lay out and photograph the one question, the Project control
+// and the line under it. With ?projects=none the dialog has no project to make
+// a workspace of, and with ?projects=one the single project reads as a line of
+// text instead of a control.
 import { createRoot } from "react-dom/client";
-import type { PlaceView, ProjectView } from "@wsp/protocol";
+import type { Capabilities, PlaceView, ProjectView , WorkspaceLanding } from "@wsp/protocol";
 import { TooltipProvider } from "../../src/components/ui/tooltip";
 import { NewWorkspaceDialog } from "../../src/sidebar/NewWorkspaceDialog";
 import "../../src/index.css";
@@ -15,15 +14,23 @@ import "../../src/index.css";
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle("dark", params.get("theme") !== "light");
 
-const SIZES = [
-  { cpu: 2, memMb: 4096, rateUsdPerHour: 0.11 },
-  { cpu: 2, memMb: 8192, rateUsdPerHour: 0.15 },
-  { cpu: 4, memMb: 16_384, rateUsdPerHour: 0.29 },
-];
-
-const HERE: PlaceView = { id: "here", kind: "computer", name: "studio.local", default: false, shape: { cpu: 8, memMb: 16384 }, engine: "none", present: true, takesForks: false };
-const HETZNER: PlaceView = { id: "p_1", kind: "computer", name: "hetzner", default: false, shape: { cpu: 2, memMb: 4096 }, engine: "docker", present: true, takesForks: true, forks: { running: 0, room: 3 } };
-const ASCII: PlaceView = { id: "box", kind: "provider", name: "box", default: true, rateUsdPerHour: 0.018, sizes: SIZES, takesForks: true };
+const SHARES: Capabilities = {
+  liveCloneForks: false,
+  replacesMachine: false,
+  previewUrls: false,
+  signedUrls: false,
+  callbackRelay: false,
+  diskSnapshots: false,
+  images: false,
+  snapshotsAnyLife: false,
+  snapshotListing: false,
+  templates: false,
+  sizes: [],
+  kept: true,
+  copies: true,
+  ownNetwork: false,
+};
+const OWN: Capabilities = { ...SHARES, copies: false, ownNetwork: true, pauseMode: "disk" };
 
 const project = (id: string, name: string, computer: string): ProjectView => ({
   id,
@@ -37,21 +44,20 @@ const project = (id: string, name: string, computer: string): ProjectView => ({
   memoryDir: `/root/.claude-cfg/projects/-root-${name}/memory`,
   createdAt: "2026-09-12T09:31:00.000Z",
 });
-const places = [HERE, HETZNER, ASCII];
-const projects = params.get("projects") === "none" ? [] : [project("pr_1", "spoo-landing", "box"), project("pr_2", "wsp", "p_1")];
+const here = project("pr_1", "spoo-landing", "here");
+const box = project("pr_2", "wsp", "p_1");
+const projects = params.get("projects") === "none" ? [] : params.get("projects") === "one" ? [here] : [here, box];
+const landings: Record<string, WorkspaceLanding> = {
+  pr_1: { name: "here", capabilities: SHARES },
+  pr_2: { place: "p_1", name: "spoo", capabilities: OWN },
+};
+const places = [
+  { id: "here", kind: "computer", name: "studio.local", default: false, present: true, takesForks: false },
+  { id: "p_1", kind: "computer", name: "spoo", default: true, present: true, takesForks: true },
+] as unknown as PlaceView[];
 
 createRoot(document.getElementById("root")!).render(
   <TooltipProvider>
-    <NewWorkspaceDialog
-      initialName="workspace-3"
-      places={places}
-      projects={projects}
-      copies={[{ place: "box", version: 1, snapshotId: "snap_box", builtAt: "2026-09-12T09:31:00.000Z" }]}
-      goldenSize={{ cpu: 2, memMb: 4096 }}
-      refusal={params.get("refusal")}
-      onCreate={() => {}}
-      onCancel={() => {}}
-      onAddComputer={() => {}}
-    />
+    <NewWorkspaceDialog projects={projects} landings={landings} places={places} picked={null} onCreate={() => {}} onCancel={() => {}} />
   </TooltipProvider>,
 );

@@ -432,40 +432,21 @@ describe("store creations", () => {
     expect(useStore.getState().selectedId).toBe("ws_a");
   });
 
-  it("with no image sealed the fork is refused before a row exists: the toast says where the build stands and opens it, and nothing is asked of the runtime", async () => {
+  it("asks the runtime whatever the image says: a project on this computer forks nothing, and a refusal is the runtime's own on the creation view", async () => {
     const { api } = fakeApi([view("ws_a")], []);
     const asked: string[] = [];
     api.getGolden = async () => undefined;
-    api.createWorkspace = async name => {
+    api.createWorkspace = async (_project: string, name: string) => {
       asked.push(name);
       return view("ws_new");
     };
     useStore.getState().bind(api);
     await flush();
-    useStore.setState({
-      initJob: { id: "init_1", road: "manual", phase: "building", keys: { solari: true }, step: 0, stoppable: true, screens: [], rows: [{ id: "stage/creating", kind: "stage", label: "Creating the machine", state: "done" }, { id: "stage/ready", kind: "stage", label: "Waiting for the machine", state: "running" }], progress: { done: 1, total: 2 }, log: [] },
-    });
-    expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBeNull();
-    expect(asked).toEqual([]);
-    // No row: the sidebar never gains a workspace that only failed, so there is nothing to retry or dismiss.
-    expect(useStore.getState().creations).toEqual([]);
-    expect(useStore.getState().selectedId).toBe("ws_a");
-    expect(useStore.getState().toast).toBe("the image is still building · 1 of 2");
-    const action = useStore.getState().toastAction!;
-    expect(action.for).toBe(useStore.getState().toast);
-    expect(action.word).toBe(CLOUD_SETUP_WORDS.create.open);
-    action.run();
-    expect(useStore.getState().setupOpen).toBe(true);
-    // With no build to point at, the same road says the image instead and its word opens the screens that build it.
-    useStore.setState({ initJob: null, setupOpen: false });
-    expect(await useStore.getState().createWorkspace("pr_1", "gamma")).toBeNull();
-    expect(useStore.getState().toast).toBe(CLOUD_SETUP_WORDS.create.none);
-    expect(useStore.getState().toastAction!.word).toBe(CLOUD_SETUP_WORDS.create.build);
-    // A named snapshot carries its own image, so that fork is never held back by the golden's absence.
-    api.createWorkspace = async () => view("ws_new");
-    expect(await useStore.getState().createWorkspace("pr_1", "proj-fork", { golden: "snap_project" })).toBe("ws_new");
-    // The sentence the person reads is never the one that names a command to run.
-    expect(JSON.stringify([useStore.getState().toast, CLOUD_SETUP_WORDS.create])).not.toMatch(/wspx|golden build/);
+    expect(await useStore.getState().createWorkspace("pr_1", "beta")).toBe("ws_new");
+    expect(asked).toEqual(["beta"]);
+    // Nothing is said before the ask: no toast, and no row held back on where an image stands.
+    expect(useStore.getState().toast).toBeNull();
+    expect(useStore.getState().toastAction).toBeNull();
   });
 });
 

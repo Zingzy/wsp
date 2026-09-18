@@ -4,13 +4,17 @@
 // sidebarProjectGrouping.ts SidebarProjectSnapshot and Sidebar.logic.ts
 // resolveThreadStatusPill (commit 57a66608). Phase is the product word and
 // leads; machine state and reach only add when they diverge from it.
-import { foldThreads, IDLE_REASON, threadState, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
+import { foldThreads, IDLE_REASON, threadState, threadWordOf, waitingLine, workspaceStateOf, workspaceWord, type PauseMode, type SessionView, type ThreadView, type WorkspaceState, type WorkspaceStatus, type WorkspaceView } from "@wsp/protocol";
 import type { SidebarProjectSnapshot, SidebarThreadSnapshot, StatusIndicator } from "./view-model.js";
 
 export interface SidebarInput {
   readonly workspaces: ReadonlyArray<WorkspaceView>;
   readonly statuses?: Readonly<Record<string, WorkspaceStatus>>;
   readonly sessions?: Readonly<Record<string, ReadonlyArray<SessionView>>>;
+  /** How the computer each workspace's project lands on pauses a machine, by the project's id: the state word is
+   * Paused on a computer that keeps the machine's memory and Stopped on every other. A project the host has not
+   * answered a landing for reads the stopping words, as every caller holding no mode does. */
+  readonly pauseModes?: Readonly<Record<string, PauseMode | undefined>>;
 }
 
 export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapshot[] {
@@ -20,6 +24,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
       const phase = status?.phase ?? workspace.phase;
       const state = workspaceStateOf({ phase }, status);
       const threads = foldThreads(input.sessions?.[workspace.id] ?? []);
+      const pauseMode = input.pauseModes?.[workspace.project.id];
       return {
         id: workspace.id,
         projectKey: workspace.id,
@@ -34,7 +39,7 @@ export function deriveSidebarProjects(input: SidebarInput): SidebarProjectSnapsh
         machineState: status?.machineState ?? null,
         reach: status?.reach.state ?? null,
         state,
-        indicator: indicatorFor(state),
+        indicator: indicatorFor(state, pauseMode),
         threads: threads.map(thread => deriveThread(thread, workspace)),
       } satisfies SidebarProjectSnapshot;
     })
@@ -52,12 +57,19 @@ export function sidebarWorkspaceOrder(input: SidebarInput): string[] {
   return deriveSidebarProjects(input).map(project => project.id);
 }
 
-export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null): StatusIndicator {
-  return indicatorFor(workspaceStateOf(workspace, status));
+/** The workspace a surface holding no pick of its own is about: the selected one, or the sidebar's first row while
+ * what is selected is not a workspace, which is what a creation in flight leaves behind. One rule, so the chords
+ * that walk the list and the palette's rows cannot land on two different workspaces.  */
+export function currentWorkspaceId(orderedIds: ReadonlyArray<string>, selectedId: string | null): string | null {
+  return selectedId !== null && orderedIds.includes(selectedId) ? selectedId : orderedIds[0] ?? null;
 }
 
-function indicatorFor(state: WorkspaceState): StatusIndicator {
-  return { label: workspaceWord(state), tone: indicatorTone(state), pulse: state === "pausing" || state === "waking" };
+export function workspaceIndicator(workspace: Pick<WorkspaceView, "phase">, status: WorkspaceStatus | null, pauseMode?: PauseMode): StatusIndicator {
+  return indicatorFor(workspaceStateOf(workspace, status), pauseMode);
+}
+
+function indicatorFor(state: WorkspaceState, pauseMode?: PauseMode): StatusIndicator {
+  return { label: workspaceWord(state, pauseMode), tone: indicatorTone(state), pulse: state === "pausing" || state === "waking" };
 }
 
 function indicatorTone(state: WorkspaceState): StatusIndicator["tone"] {

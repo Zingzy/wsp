@@ -90,7 +90,8 @@ describe("app shell", () => {
   it("renders the sidebar, the center and the right panel", async () => {
     await mountShell();
     const sidebar = document.querySelector('[data-slot="sidebar"]');
-    expect(sidebar?.textContent).toContain("Workspaces");
+    // The project's own name heads its workspaces, and there is no row over them all.
+    expect(sidebar?.textContent).toContain("the-project");
     expect(sidebar?.textContent).toContain("api");
     expect(screen.getByText("center content")).toBeTruthy();
     expect(tabbar()).not.toBeNull();
@@ -157,8 +158,8 @@ describe("app shell", () => {
     expect(window.localStorage.getItem(RIGHT_PANEL_WIDTH_STORAGE_KEY)).toBe("640");
   });
 
-  it("a load paints the kept width and the Spaces body from this browser's first-paint cache before the host answers, and the record wins when it lands", async () => {
-    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "dark", sidebarWidth: 312, sidebarMode: "spaces", labs: true }));
+  it("a load paints the kept width from this browser's first-paint cache before the host answers, and the record wins when it lands", async () => {
+    window.localStorage.setItem("wsp:first-paint", JSON.stringify({ theme: "dark", sidebarWidth: 312, labs: true }));
     vi.resetModules();
     const { useStore: bootStore } = await import("../src/protocol/store.js");
     const { AppShell: BootShell } = await import("../src/shell/AppShell.js");
@@ -173,12 +174,9 @@ describe("app shell", () => {
     );
     const wrapper = document.querySelector<HTMLElement>("[data-slot='sidebar-wrapper']")!;
     expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("312px");
-    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    // Spaces: the one workspace row is the space's header.
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
-    await act(async () => answer!({ ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "list" }));
     await waitFor(() => expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(2));
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${SIDEBAR_DEFAULT_WIDTH}px`);
+    await act(async () => answer!({ ...DEFAULT_PREFERENCES, labs: true }));
+    await waitFor(() => expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(`${SIDEBAR_DEFAULT_WIDTH}px`));
     expect(JSON.parse(window.localStorage.getItem("wsp:first-paint")!)).toEqual({ theme: "system", sidebarMode: "list", labs: true });
   });
 

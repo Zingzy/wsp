@@ -27,7 +27,8 @@ vi.mock("../src/components/ui/popover.js", () => ({
 
 import { useContextMenuStore } from "../src/actions/contextMenu.js";
 import { ContextMenuHost } from "../src/actions/ContextMenuHost.js";
-import { FILE_WORDS, SIDEBAR_MODE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { FILE_WORDS, TERMINAL_WORDS, THREAD_WORDS, WORKSPACE_WORDS } from "../src/actions/format.js";
+import { NEW_WORKSPACE, PROJECT_WORDS } from "../src/sidebar/words.js";
 import { SidebarProvider } from "../src/components/ui/sidebar.js";
 import { WorkspaceTerminalDrawer } from "../src/components/WorkspaceTerminalDrawer.js";
 import { useDiffRevealStore } from "../src/diffs/reveal.js";
@@ -143,6 +144,9 @@ async function mountSidebar(api: FakeApi, firstName: string) {
   await waitFor(() => expect(screen.getByText(firstName)).toBeDefined());
 }
 
+/** The name the project's header row carries, which is the record every workspace in this file is made of. */
+const PROJECT_NAME = "the-project";
+
 const rowOf = (text: string): HTMLElement => screen.getByText(text).closest<HTMLElement>("[data-sidebar-row]")!;
 /** A row by the id it carries, for a row whose own text is being edited. */
 const rowOf2 = (rowId: string): HTMLElement => document.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`)!;
@@ -176,43 +180,6 @@ afterEach(() => {
   provideDaemonWire(WS, null);
 });
 
-describe("the space header's menu", () => {
-  // In Spaces mode no row of the workspace is on screen, so the header carries its menu. The chords are what a
-  // person learns the keys from, and the header is the only place they would see them for these actions.
-  it("carries the same chords the workspace row's menu shows for the same actions", async () => {
-    const chordsOfMenu = (): Array<[string | null | undefined, string | null]> =>
-      items().map(el => [el.querySelector("[data-menu-label]")?.textContent, el.querySelector("kbd")?.textContent ?? null]);
-
-    await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
-    rightClick(rowOf("api"));
-    await screen.findByRole("menu");
-    const fromRow = chordsOfMenu();
-    useContextMenuStore.getState().choose(null);
-    cleanup();
-
-    // The name reads twice in Spaces, on the header and on its own dot, so the shared mount's one-name wait
-    // cannot be used; the header arriving is what says the body is up.
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
-    useStore.getState().bind(fakeApi([API], [statusOf(API)]));
-    render(
-      <SidebarProvider defaultOpen>
-        <WorkspaceSidebar />
-        <ContextMenuHost />
-      </SidebarProvider>,
-    );
-    const header = await waitFor(() => document.querySelector("[data-space-header]")!);
-    rightClick(header);
-    await screen.findByRole("menu");
-    expect(chordsOfMenu()).toEqual(fromRow);
-    // Not a vacuous match: these three actions do carry a chord, so an empty column would fail here.
-    expect(chordsOfMenu().filter(([, chord]) => chord !== null).map(([label]) => label)).toEqual([
-      WORKSPACE_WORDS.newThread,
-      WORKSPACE_WORDS.openTerminal,
-      WORKSPACE_WORDS.openBrowser,
-    ]);
-  });
-});
-
 describe("a workspace row's menu", () => {
   it("opens at the pointer with every registry action in order; disabled rows are dimmed with their refusal; arrows walk it and Escape hands focus back", async () => {
     await mountSidebar(fakeApi([API], [statusOf(API)]), "api");
@@ -232,8 +199,6 @@ describe("a workspace row's menu", () => {
       WORKSPACE_WORDS.openMachine,
       WORKSPACE_WORDS.exportProject,
       WORKSPACE_WORDS.rename,
-      WORKSPACE_WORDS.icon,
-      WORKSPACE_WORDS.theme,
       WORKSPACE_WORDS.fork,
       WORKSPACE_WORDS.copyId,
       WORKSPACE_WORDS.forget,
@@ -331,8 +296,6 @@ describe("a workspace row's menu", () => {
       ["open-machine", WORKSPACE_WORDS.openMachine, true],
       ["export-project", WORKSPACE_WORDS.exportProject, false],
       ["rename", WORKSPACE_WORDS.rename, true],
-      ["icon", WORKSPACE_WORDS.icon, true],
-      ["theme", WORKSPACE_WORDS.theme, true],
       ["fork", WORKSPACE_WORDS.fork, false],
       ["copy-id", WORKSPACE_WORDS.copyId, true],
       ["forget", WORKSPACE_WORDS.forget, false],
@@ -344,42 +307,15 @@ describe("a workspace row's menu", () => {
   });
 });
 
-// The icon and theme pickers the menu opens are popovers, which this file's popover mock renders as nothing; they
-// have their own file, workspace-look.test.tsx, over the real popover.
-describe("a client that cannot hold a look", () => {
-  it("says so on both rows rather than opening a picker nothing would take", async () => {
-    const api = fakeApi([API], [statusOf(API)]);
-    delete (api as { setWorkspaceLook?: unknown }).setWorkspaceLook;
-    await mountSidebar(api, "api");
-    rightClick(rowOf("api"));
-    await screen.findByRole("menu");
-    for (const word of [WORKSPACE_WORDS.icon, WORKSPACE_WORDS.theme]) {
-      expect(item(word).getAttribute("aria-disabled")).toBe("true");
-      expect(refusalOf(word)).toBe("This client cannot set a workspace's theme or icon");
-      fireEvent.click(item(word));
-    }
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-});
-
-describe("the Workspaces section's menu", () => {
-  it("holds the sidebar's body toggle alone, and choosing it turns the body into one workspace under its header", async () => {
+describe("a project's header menu", () => {
+  it("holds the acts of a project: another piece of work on it, and forgetting it once nothing stands on it", async () => {
     await mountSidebar(fakeApi([API, OLD], [statusOf(API), statusOf(OLD)]), "api");
-    expect(document.querySelector("[data-space-header]")).toBeNull();
-    rightClick(screen.getByRole("button", { name: "Workspaces" }));
+    rightClick(screen.getByRole("button", { name: PROJECT_NAME }));
     await screen.findByRole("menu");
-    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.spaces.title]);
-    fireEvent.click(item(SIDEBAR_MODE_WORDS.spaces.title));
-    await waitFor(() => expect(menu()).toBeNull());
-    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-    // No workspace row: the one id under ws: is the header's, which wears it so the arrow walk stops there.
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
-    // Spaces has no Workspaces header: the body itself carries the section's menu, and it names the way back from
-    // the one registry entry, so nothing spells the two words twice.
-    expect(screen.queryByRole("button", { name: "Workspaces" })).toBeNull();
-    rightClick(document.querySelector("[data-slot=sidebar-group]")!);
-    await screen.findByRole("menu");
-    expect(labels()).toEqual([SIDEBAR_MODE_WORDS.list.title]);
+    expect(labels()).toEqual([NEW_WORKSPACE, PROJECT_WORDS.remove]);
+    // Two workspaces stand on it, so the runtime's own sentence holds the removal back before any click.
+    expect(item(PROJECT_WORDS.remove).getAttribute("aria-disabled")).toBe("true");
+    expect(refusalOf(PROJECT_WORDS.remove)).toContain("workspaces standing on it");
   });
 });
 
@@ -612,19 +548,6 @@ describe("a thread row's menu", () => {
 
 describe("a workspace row's name box", () => {
   const nameBox = () => screen.findByRole("textbox", { name: WORKSPACE_WORDS.rename }) as Promise<HTMLInputElement>;
-  /** The Spaces body draws no workspace row, and the current name reads twice (header and dot), so the shared
-   * mount's one-name wait cannot be used: the header arriving is what says the body is up. */
-  const mountSpaces = async (api: FakeApi): Promise<void> => {
-    useStore.setState({ preferences: { ...DEFAULT_PREFERENCES, labs: true, sidebarMode: "spaces" } });
-    useStore.getState().bind(api);
-    render(
-      <SidebarProvider defaultOpen>
-        <WorkspaceSidebar />
-        <ContextMenuHost />
-      </SidebarProvider>,
-    );
-    await waitFor(() => expect(document.querySelector("[data-space-header]")).not.toBeNull());
-  };
   const openFromMenu = async (): Promise<HTMLInputElement> => {
     rightClick(rowOf2("ws:ws_a"));
     await screen.findByRole("menu");
@@ -650,41 +573,7 @@ describe("a workspace row's name box", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("in Spaces the header grows the same box: the menu opens it in the name's own slot and Enter names the workspace", async () => {
-    const api = fakeApi([{ ...API }], [statusOf(API)]);
-    await mountSpaces(api);
-    // The header is the only thing wearing the workspace's row id, so it is the only editor there can be.
-    expect(document.querySelectorAll("[data-row-id^='ws:']")).toHaveLength(1);
-    const header = document.querySelector<HTMLElement>("[data-space-header]")!;
-    expect(header.dataset["rowId"]).toBe("ws:ws_a");
-    rightClick(header);
-    await screen.findByRole("menu");
-    expect(labels()).toContain(WORKSPACE_WORDS.rename);
-    fireEvent.click(item(WORKSPACE_WORDS.rename));
-    const input = await nameBox();
-    expect(input.value).toBe("api");
-    await waitFor(() => expect(document.activeElement).toBe(input));
-    // The block swaps a button for a plain box while it holds the field, since an input may not sit inside a button.
-    expect(input.closest("[data-space-header]")).toBe(document.querySelector("[data-space-header]"));
-    fireEvent.change(input, { target: { value: "the name he typed" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(api.renameWorkspace).toHaveBeenCalledWith("ws_a", "the name he typed"));
-    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-    expect(within(document.querySelector<HTMLElement>("[data-space-header]")!).getByText("the name he typed")).toBeDefined();
-  });
 
-  it("the menu key reaches the header's menu, which a browser sends as a menu with no pointer on what has focus", async () => {
-    await mountSpaces(fakeApi([{ ...API }], [statusOf(API)]));
-    const header = document.querySelector<HTMLElement>("[data-space-header]")!;
-    // A block a browser will never send that event to is a block whose actions are the mouse's alone.
-    expect(header.tabIndex).toBe(0);
-    header.focus();
-    expect(document.activeElement).toBe(header);
-    rightClick(header, { clientX: 0, clientY: 0 });
-    await screen.findByRole("menu");
-    expect(labels()).toContain(WORKSPACE_WORDS.rename);
-    expect(labels()).toContain(WORKSPACE_WORDS.newThread);
-  });
 
   it("a double-click on the name opens the same box", async () => {
     const api = fakeApi([{ ...API }], [statusOf(API)]);
@@ -725,10 +614,10 @@ describe("a workspace row's name box", () => {
     expect(screen.getByText("api")).toBeDefined();
   });
 
-  it("a box asked for while the Workspaces section is shut opens that section, so it lands on a row a person can see", async () => {
+  it("a box asked for while the project's section is shut opens that section, so it lands on a row a person can see", async () => {
     const api = fakeApi([{ ...API }], [statusOf(API)]);
     await mountSidebar(api, "api");
-    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+    fireEvent.click(screen.getByRole("button", { name: PROJECT_NAME }));
     await waitFor(() => expect(document.querySelector("[data-row-id='ws:ws_a']")).toBeNull());
 
     requestRenameWorkspace("ws_a");

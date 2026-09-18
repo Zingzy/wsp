@@ -99,7 +99,7 @@ function Header({ workspace, status }: { workspace: WorkspaceView; status: Works
   const machineId = status?.machineId ?? workspace.machineId;
   const verbs = useWorkspaceVerbs();
   const places = usePlaces();
-  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), verbs, false), "copy-id");
+  const copy = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), verbs), "copy-id");
   // A fork on a computer somebody joined carries no id a provider would look up: the corner holds nothing there,
   // and the Where row names the computer instead.
   const shown = workspacePlace(workspace) === undefined ? machineId : null;
@@ -168,7 +168,8 @@ function Facts({ workspace, status, kind }: FactsProps) {
   // Reach is not a row of its own: the protocol folds a machine that stopped answering into the state word, which
   // is the word every other surface shows for it.
   const state = workspaceStateOf(workspace, status);
-  const stateWord = workspaceWord(state);
+  // The pause mode rides, so a machine that keeps its memory reads paused and one that stops reads stopped.
+  const stateWord = workspaceWord(state, capabilities?.pauseMode);
   const rebuild = needsRebuild({ phase: workspace.phase, machineState: status?.machineState, reach: status?.reach.state, wakeRefused: workspace.wakeRefused });
   // The full reading of the ask the host is on; the sidebar row reads the same two numbers in the words its slot holds.
   const wakeAskLine = status?.wakeAsk === undefined ? null : wakeAskingAgainLine(status.wakeAsk.ask, status.wakeAsk.of);
@@ -391,7 +392,7 @@ function Rebuild({ workspace, status }: { workspace: WorkspaceView; status: Work
   const [note, setNote] = useState<string | null>(null);
   // The tab asks before it rebuilds, so its registry entry opens the dialog; the dialog's own button calls the api and
   // names a client without the verb.
-  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, rebuild: async () => setOpen(true) }, false), "rebuild");
+  const action = actionById(resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, rebuild: async () => setOpen(true) }), "rebuild");
 
   const rebuild = async (): Promise<void> => {
     setOpen(false);
@@ -912,7 +913,7 @@ function Actions({ workspace, status }: { workspace: WorkspaceView; status: Work
   const [forgetting, setForgetting] = useState(false);
   const gone = workspace.phase === "gone";
   // The tab's forget opens its own dialog, in place of the request the sidebar answers; the dialog names a client without the verb.
-  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, forget: () => setForgetting(true) }, false);
+  const actions = resolveActions(workspaceActions, workspaceTarget(workspace, status, places), { ...verbs, forget: () => setForgetting(true) });
   const phase = actionById(actions, "phase");
   const forget = actionById(actions, "forget");
   const driven = kindWords(workspaceKind(workspace)).driven;

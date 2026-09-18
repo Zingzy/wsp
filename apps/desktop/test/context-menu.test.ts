@@ -101,8 +101,7 @@ describe("the workspace menu the smoke expects", () => {
   it("is the workspace registry's own words in its own order, with a separator wherever the group changes", () => {
     const target = workspaceTarget(RUNNING, null, []);
     const shape = workspaceMenuShape(RUNNING);
-    // The smoke's host runs with labs off, so the registry's labs rows are not in the shape it expects.
-    const shown = workspaceActions.filter(entry => entry.labs !== true);
+    const shown = workspaceActions;
     expect(shape.filter(row => row !== SEPARATOR)).toEqual(shown.map(entry => entry.title(target)));
     const groups = shown.map(entry => entry.group);
     expect(shape.filter(row => row === SEPARATOR)).toHaveLength(groups.filter((group, i) => i > 0 && groups[i - 1] !== group).length);
@@ -131,7 +130,7 @@ describe("the workspace menu the smoke expects", () => {
 
   it("follows the registry: an action added to it lands in the shape without this file or the smoke changing", () => {
     const before = workspaceMenuShape(RUNNING);
-    const shown = workspaceActions.filter(entry => entry.labs !== true);
+    const shown = workspaceActions;
     const added = [...shown, { ...shown[0]!, id: "invented", group: "invented", title: () => "Invented" }];
     const target = workspaceTarget(RUNNING, null, []);
     const shape = contextMenuTemplate(

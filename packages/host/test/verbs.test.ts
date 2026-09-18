@@ -10,7 +10,7 @@ import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { CATALOG_AGENTS } from "@wsp/catalog";
 import { fakeCopier, NoProviderBackend, passphraseCipher, type MachineBackend } from "@wsp/engine";
-import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, sharesPortsLine, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
+import { type ProjectView, type DaemonErrorCode, DAEMON_TOKEN_PATH, noHostCliLine, copyPathFor, madeOfWord, portsWord, HERE_PLACE_ID, LIST_PRICE_WORD, goneRoadRefusal, notAnsweringYet, runForTheList, agentsKindRefusal, askingLine, needsYouLine, QUESTION_TOOL, permissionModeOptionLabel, PERMISSION_DENY, type PermissionAsk, DEFAULT_PREFERENCES, PERMISSION_ALLOW, effortsFor, HOST_TOKEN_ENV, HOST_URL_ENV, noWorkspaceRefusal, spawnReachRefusal, EMPTY_TASK_LINE, EXIT_CODES, IMAGE_NO_VAULT, IMAGE_PASSPHRASE_ENV, IMAGE_PASSPHRASE_MIN, HOST_STOPPING_LINE, IMAGE_ALREADY_NEWEST, IMAGE_MOVE_CONFIRM, imageKeptLine, markedDefault, NO_SUCH_TURN, noReplyLine, noThreadTargetLine, notifyLine, noWorkspaceForFolderLine, fmtSize, kindWords, RuntimeRequest, threadStateWord, whereWord, workspaceStateOf, workspaceWord, type WorkspaceListing, placeBuildsNoImageLine, registeredLine, REGISTERING_LINE, registerTakesNoConsentLine, signInRefusalLine, threadForgetRefusal, threadOpenedLine, threadWithoutIdRefusal, ThreadView, TURN_TOKEN_ENV, unknownAgentLine, workspaceAsleepAgainLine, workspaceKind, thisComputer, worksInPlaceTakesNone, type WorkspaceOut, WorkspaceView, forgetUndrivenRefusal, THIS_COMPUTER, noSuchPlaceRefusal, localRunsOneFix, localRunsOneLine, placeForksNothingPickLine, type HarnessCatalogAnswer } from "@wsp/protocol";
 import { copyKey, createRuntime, DAEMON_TOKEN_SET, harnessCatalog, memoryStore, type RuntimeDaemonChannel, type HarnessAdapterFactory, type PlaceBackends, type Runtime, type Store } from "@wsp/runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
@@ -299,15 +299,17 @@ describe("wsp verbs over the host", () => {
     expect(workspaceLine({ ...here, reach: { state: "unreachable" } })[7]).toBe("Unreachable");
   });
 
-  it("a row carries the road its copy was made by and, where this computer's copies share its ports, that they do", () => {
+  it("a row's copy and ports cells read the one word table the app's own row reads", () => {
     const shape = { id: "ws_1", name: "qr codes", machineId: "local", phase: "running" as const, kind: "local" as const, golden: "", createdAt: "2026-09-17T00:00:00.000Z", machineState: "running" as const, size: { cpu: 10, memMb: 16384 }, rateUsdPerHour: 0, reach: { state: "reachable" as const }, project: { id: "pr_1", name: "wsp", path: "/Users/dev/wsp", computer: "here" } };
     const shares = { copies: true, ownNetwork: false };
-    const cloned = { ...shape, copy: { road: "clonefile" as const, path: "/Users/dev/wsp-qr-codes", source: "/Users/dev/wsp", base: "abc", branch: "main", carried: "deps-and-config" as const } };
-    expect(workspaceLine(cloned, new Map(), shares).slice(4, 6)).toEqual(["clone", sharesPortsLine(hostPlatform())]);
-    expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "worktree" } }, new Map(), shares)[4]).toBe("worktree");
-    expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "in-place" } }, new Map(), shares)[4]).toBe("in place");
-    // A computer whose copies each get a network of their own says nothing about ports.
-    expect(workspaceLine(cloned, new Map(), { copies: true, ownNetwork: true }).slice(4, 6)).toEqual(["clone", ""]);
+    const cloned = { ...shape, portBase: 3100, copy: { road: "clonefile" as const, path: "/Users/dev/wsp-qr-codes", source: "/Users/dev/wsp", base: "abc", branch: "main", carried: "deps-and-config" as const } };
+    expect(workspaceLine(cloned, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("clonefile"), portsWord(shares, 3100, hostPlatform())]);
+    expect(workspaceLine({ ...cloned, copy: { ...cloned.copy, road: "worktree" } }, new Map(), shares)[4]).toBe(madeOfWord("worktree"));
+    // The folder worked in place holds no port base of its own, so the cell says the ports alone.
+    const { portBase: _none, ...inPlace } = { ...cloned, copy: { ...cloned.copy, road: "in-place" as const } };
+    expect(workspaceLine(inPlace, new Map(), shares).slice(4, 6)).toEqual([madeOfWord("in-place"), portsWord(shares, undefined, hostPlatform())]);
+    // A computer whose copies each get a network of their own says that instead.
+    expect(workspaceLine(cloned, new Map(), { copies: true, ownNetwork: true }).slice(4, 6)).toEqual([madeOfWord("clonefile"), "own network"]);
     // A fork has no copy of a folder on this computer, so both cells are empty.
     expect(workspaceLine(shape, new Map(), shares).slice(4, 6)).toEqual(["", ""]);
   });
@@ -334,8 +336,8 @@ describe("wsp verbs over the host", () => {
         expect.stringMatching(/^ws_/),
         here.name,
         expect.stringMatching(/^this (?:Mac|computer)$/),
-        "in place",
-        sharesPortsLine(hostPlatform()),
+        madeOfWord("in-place"),
+        portsWord({ copies: true, ownNetwork: false }, undefined, hostPlatform()),
         expect.stringMatching(/^\d+ cores · \d+ GB$/),
         expect.stringMatching(/^\S+$/),
       ],
@@ -451,6 +453,8 @@ describe("wsp verbs over the host", () => {
       ]);
       const [, ...rows] = listed.io.lines[0]!.split("\n");
       expect(rows.map(r => r.split(/ {2,}/).slice(0, 2).concat(r.split(/ {2,}/)[5]!))).toEqual([
+        // The provider this host forks on keeps a paused machine's memory, so its nap reads paused here as it
+        // does on the app's row, off the pause mode the landing carries for that project.
         ["napped", expect.stringMatching(/^ws_/), "Paused"],
         ["dark", expect.stringMatching(/^ws_/), "Unreachable"],
       ]);

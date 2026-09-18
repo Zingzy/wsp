@@ -76,16 +76,31 @@ export function removeSentence(place: PlaceView, holding: PlaceHolding, imageByt
 /** The dialog's own title. */
 export const removeTitle = (place: PlaceView): string => `Remove ${placeName(place)}?`;
 
-/** What this computer is called inside a sentence. One home for the word, so the day the app is told which
+/** Which platform every word the app writes about this computer is worded for, and the one home of that answer:
+ * the day the app is told which platform it runs on, this line reads it and every word follows. The row's copy
+ * words, the dialog's landing line and the sentences about this computer all take it from here rather than
+ * spelling it again.
+ *
+ * What this computer is called inside a sentence. One home for the word, so the day the app is told which
  * platform it runs on, the Mac's word becomes the platform's in one edit rather than in every sentence that says
  * it. The places table's first column says it capitalised, as a name in a column (hereWord); everything that says
  * it mid-sentence reads this. */
-export const THIS_COMPUTER_WORD = thisComputer("darwin");
+export const APP_PLATFORM = "darwin" as const;
+export const THIS_COMPUTER_WORD = thisComputer(APP_PLATFORM);
 
 /** What one row of the places list is, in the words the pane's Where row says after its name. One entry per kind
  * of row, so a third kind is a row here and nowhere else. A computer of the person's own is the protocol's own
  * phrase for a joined computer, the one both the row and every sentence about it read. */
 export const PLACE_KIND_WORDS: Record<PlaceKind, string> = { computer: JOINED_COMPUTER, provider: "a provider" };
+
+/** What the computer a landing names is called on a screen: the row this host holds for it, named the one way every
+ * surface names a computer, else the word the landing itself carried. The runtime answers the id of the computer
+ * the host runs on there, and an id is no word for a person to read. */
+export function landingName(places: readonly PlaceView[], landing: { readonly place?: string; readonly name: string }): string {
+  const word = landing.place ?? landing.name;
+  const row = places.find(place => place.id === word || namesPlace(place, word));
+  return row === undefined ? landing.name : placeName(row, row === places[0]);
+}
 
 /** Whether this row is the place a word names, read the one way every reader of a place word reads it: the id the
  * wire keys it by, or the name a person types. The image record's copies and the build's own frames both carry the
@@ -165,25 +180,6 @@ export function placeWorkspaceCounts(places: readonly PlaceView[], workspaces: r
  * runs on is never among them: it is already the one workspace it can be. */
 export const whereSegments = (places: readonly PlaceView[]): PlaceView[] => places.filter((place, at) => at !== 0 && placeTakesWorkspaces(place));
 
-/** The words the Where control says about the row a person has picked, and the two notes it says instead when
- * there is no row to pick. Each clause is a fact of the place; what joins them is the caption below. */
-export const WHERE_PICK_WORDS = {
-  label: "Where",
-  /** What a workspace on a computer of the person's own costs them: nothing, which is the point of having one. */
-  free: FREE_WORD,
-  whileAwake: "while awake",
-  napsToZero: "naps to $0",
-  room: (n: number): string => `room for ${plural(n, "workspace")}`,
-  /** The room clause when there is none left, and what to do about it. */
-  full: (n: number): string => `${n} of ${plural(n, "workspace")}`,
-  fullFix: "pause or delete one there",
-  /** How long the first workspace there takes, which is the image being built before it. */
-  firstBuild: "builds your image there first, about 4 min",
-  imageThere: (version: number): string => `your image is there, v${version}`,
-  /** Why Create is held with no name typed. */
-  nameFirst: "give the workspace a name",
-} as const;
-
 /** The project pick on the new-workspace dialog: a workspace is one project's copy, so the project is what the
  * dialog asks for and the computer comes with it. With no project there is nothing to make a workspace of, and the
  * two notes say so and what records one, in the command line's own words. */
@@ -193,27 +189,3 @@ export const PROJECT_PICK_WORDS = {
   addOne: "Record one with wsp add <folder> here, or wsp add <url> --on <computer> there.",
 } as const;
 
-/** The one caption line under the Where control, built from the facts the row itself carries: what a workspace
- * there costs, how much room is left on it, and whether the image is there already or is built first. A fact the
- * row has not reported is left out rather than guessed, so a caption says only what this host knows.
- *
- * The rate is the one the workspace being made will be charged at: the size the person picked where they picked
- * one, since a caption quoting the row's default while another size is ticked prices a machine nobody asked for.
- *
- * Every figure is the protocol's own formatter (fmtRate, plural), never a second spelling of one. */
-export function whereCaption(place: PlaceView, copy: SealedImageCopy | undefined, rateUsdPerHour = place.rateUsdPerHour): string {
-  // Nothing an hour is free, said in that word and read the protocol's one way: a caption reading $0.00/hr while
-  // awake · naps to $0 prices a workspace nobody is billed for in three clauses that all say nothing.
-  const cost = chargesNothing(rateUsdPerHour) ? [WHERE_PICK_WORDS.free] : [`${fmtRate(rateUsdPerHour)} ${WHERE_PICK_WORDS.whileAwake}`, WHERE_PICK_WORDS.napsToZero];
-  const forks = place.forks;
-  // A row with no room left ends on what to do about it: where the image stands is no longer the question, since
-  // nothing can be created there until a workspace goes.
-  if (forks !== undefined && forks.room === 0) return [...cost, WHERE_PICK_WORDS.full(forks.running), WHERE_PICK_WORDS.fullFix].join(" · ");
-  const room = forks === undefined ? [] : [WHERE_PICK_WORDS.room(forks.room)];
-  const image = copy === undefined ? WHERE_PICK_WORDS.firstBuild : WHERE_PICK_WORDS.imageThere(copy.version);
-  return [...cost, ...room, image].join(" · ");
-}
-
-/** Whether a row is out of room for another workspace, which holds Create with the caption as its reason. A row
- * that has not said what it forks with is not refused: nothing here knows it is full. */
-export const placeIsFull = (place: PlaceView): boolean => place.forks !== undefined && place.forks.room === 0;
