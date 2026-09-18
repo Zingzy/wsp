@@ -427,7 +427,8 @@ export const ProjectView = z.object({
   /** An id off places.list: this computer, a computer somebody joined, or a provider account. */
   computer: z.string(),
   source: ProjectSource,
-  /** Where the checkout sits inside a workspace of it: the folder itself on this computer, /root/<name> on a copy. */
+  /** Where the checkout sits inside a workspace of it: the folder itself on this computer, and under the folder
+   * the landing road for that computer names where the computer cloned it. Written once at the add. */
   path: z.string(),
   /** The remote the computer cloned, or the seed folder's own origin: written once at the add and never read again
    * to decide anything, so a remote renamed later changes nothing about a project that already stands. */
@@ -5072,7 +5073,7 @@ export { claudeMemoryDir, claudeProjectKey, copyPathFor, folderName, folderSlug,
 export * from "./bring-back.js";
 export * from "./daemon-contract.js";
 export * from "./projects.js";
-export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
+export { defaultSeedChoice, leftBehindLine, neverTravelsLine, noRemoteLine, notInTheMenuLine, SEED_DIR, SEED_MEMORY_DIR, SEED_PATCH, seedChoiceFrom, seedCommitsLostLine, seedConsentLines, seedMenuRows, seedRowWords, seedSummaryLines } from "./project-seed.js";
 export { agentsRequest, canTravel, consentRequest, defaultAgents, defaultConsent, importConsented, importRequest, secretOffer, type ImportAnswers, type ProjectImportRequest } from "./project-import.js";
 export { addressFromHash, appHash, workspaceHash, type AppAddress } from "./app-address.js";
 export * from "./app-ports.js";

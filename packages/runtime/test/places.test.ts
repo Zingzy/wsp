@@ -3133,3 +3133,55 @@ describe("the recipe this host holds, put on a computer you own", () => {
     expect(await provisionOf(placeId)).toBeUndefined();
   });
 });
+
+describe("a project on a computer you joined", () => {
+  /** What such a computer says about itself: it keeps the project checkouts it holds on a disk of its own, and no
+   * image, so the work of an add there runs in a copy of its own directories. */
+  const HOLDS_PROJECTS = { ...KEEPS_NO_IMAGE, projects: "/wsp/projects" };
+
+  /** Every command that computer was asked to run on itself rather than in a workspace on it. */
+  const onItself = (client: WsClient): string[] => {
+    const ran: string[] = [];
+    client.ws.on("message", raw => {
+      const frame = JSON.parse(String(raw)) as { op?: string; cmd?: string };
+      if (frame.op === "exec") ran.push(String(frame.cmd));
+    });
+    return ran;
+  };
+
+  it("is cloned by the add into the folder that computer keeps checkouts in, and that folder goes when the record does", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
+    sockets.push(client.ws);
+    const ran = onItself(client);
+    const project = await runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" });
+    // The checkout is wsp's own folder on that computer, and what a workspace of it reads is outside the
+    // computer's own home.
+    expect(project.checkout).toBe(`/wsp/projects/${project.id}/checkout`);
+    expect(project.path).toBe("/srv/landing-906");
+    // One workspace of that computer did the work and was stopped; the clone ran inside it.
+    expect(place.created).toHaveLength(1);
+    expect(place.killed).toHaveLength(1);
+    // The remove runs one command on the computer itself, over the same link, and says what went.
+    const { said } = await runtime!.projects.remove(project.id);
+    expect(ran.filter(cmd => cmd.startsWith("rm -rf"))).toEqual([`rm -rf '/wsp/projects/${project.id}'`]);
+    expect(said).toBe(`landing-906 is no longer a project on srv; the folder wsp kept for it there, /wsp/projects/${project.id}, is gone with its checkout and its memory`);
+    expect(await runtime!.projects.list()).toEqual([]);
+  });
+
+  it("is refused in that computer's own absent sentence while it is not connected, with nothing made anywhere", async () => {
+    const { hostKey } = await serving();
+    let place!: ForkingPlace;
+    const { client, placeId } = await join(hostKey, { code: await code(), name: "srv", answers: c => (place = forks(c, undefined, undefined, HOLDS_PROJECTS)) });
+    sockets.push(client.ws);
+    // The computer says what it forks with once, then goes.
+    await until(async () => runtime!.places!.offerOf(placeId) === HOLDS_PROJECTS.offer);
+    client.close();
+    await until(async () => (await runtime!.places!.list(0)).find(p => p.id === placeId)?.present === false);
+    await expect(runtime!.projects.add({ source: "https://github.com/spoo-me/spoo-ts", on: "srv", name: "landing-906" })).rejects.toThrow(absentComputer("srv", null).sentence);
+    // Nothing was forked there and nothing was recorded here: the refusal comes before either.
+    expect(place.created).toEqual([]);
+    expect(await runtime!.projects.list()).toEqual([]);
+  });
+});

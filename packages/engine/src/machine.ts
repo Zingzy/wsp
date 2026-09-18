@@ -180,6 +180,11 @@ export interface MachineBackend {
    * Only a computer whose daemon holds a disk of the person's answers one; on a provider a project lives in an
    * image instead, so there is nothing to clone into or to bind. */
   readonly projects?: string;
+  /** Optional, and exactly where `projects` is: one command on the computer holding this backend, outside every
+   * workspace on it, for the folders wsp itself keeps there. Only a computer the person owns answers one, since a
+   * provider has no computer of theirs to run anything on. Nothing of wsp is installed on the computer by it: the
+   * commands are its own folders' making and taking. */
+  onComputer?(cmd: string, opts?: { timeoutMs?: number }): Promise<ExecResult>;
   create(spec: MachineSpec): Promise<Machine>;
   /** Optional: only backends the person holds a key for. One cheap authenticated read that boots nothing and touches
    * no machine's idle clock, so a key the provider refuses is known before anything is saved or billed. Rejects with

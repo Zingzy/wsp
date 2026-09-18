@@ -209,7 +209,7 @@ import type {
 import { cloneLines, PROJECT_LANDINGS, projectLanding, type Landed, type LandingDeps, type ProjectLanding, type ProjectPlaces } from "./project-landing.js";
 import { DEFAULT_BRANCH, projectRemote, projectSource } from "./project-sources.js";
 import { branchUnreadRefusal, noParentWorkspaceLine, BringBackResult, GitPrReply, GitPushReply, agentsFrom, foldThreads, agentsKindRefusal, agentsMayDrive, askerOf, MCP_SERVER_NAME, threadForgetRefusal, threadRan, threadWord, threadsFollowed, SPAWN_ACTS_ALLOWED, HOST_TOKEN_ENV, HOST_URL_ENV, agentsOffRefusal, roadOf, scopeOf, spawnActRefusal, spawnCapRefusal, spawnDepthRefusal, spawnProjectRefusal, spawnReachRefusal, workspaceIdOf, type SpawnAct, type ThreadWaitingOn } from "@wsp/protocol";
-import { DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, projectPathOn, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
+import { DAEMON_TOKEN_PATH, FIRST_WORKSPACE_ROAD, recipePins, mcpServersBlocked, actionRefusal, buildsImages, copyBuildingLine, copyIsCurrent, copyStoppedLine, forksNoMachines, IDLE_REASON, kindWords, readingRoad, namesSize, NO_PROVIDER_LINE, providerCannotRefusal, ALREADY_APPLIED, ALREADY_RUNNING, applyPreferencesPatch, BLANK_NAME_REFUSAL, catalogRefused, CREATE_READY, DAEMON_INSTALL_FAILED, DAEMON_INSTALLING, DAEMON_RESTART_FAILED, DAEMON_RESTARTING, DAEMON_UPDATE_FAILED, DAEMON_UPDATING, DAEMON_VERSION, daemonVersionOf, EMPTY_TITLE_LINE, fmtBytes, fmtDuration, folderName, forgetUndrivenRefusal, goldenImage, goneRefusal, goneWords, HOSTNAME_KEPT, hostnameSetLine, imageMoveRefusal, imagePathIn, imageRecord, imagesBlocked, inFolder, labsFromEnv, leadAsk, listedPick, LOOPBACK, machineCapRefusal, machineLacksLine, machineNeverAnswered, machineWord, NO_IMAGE_YET, nameDeletingRefusal, nameTakenRefusal, NO_SUCH_TURN, noAdapterLine, noKindLine, noMachineHomeLine, noSshDaemonLine, noWorkspaceRefusal, ID_PREFIX_MIN, idPrefixRefusal, notFoundRefusal, NOT_GONE, NOTIFY_ME, notifyLine, offeredSize, PERMISSION_DENIED_LINE, askingLine, permissionModeOptionLabel, pickedOptions, preferencesFrom, RECORD_RESTORED, RESUME_UNANSWERED, refusalLine, registeredLine, REGISTERING_LINE, claudeMemoryDir, claudeProjectKey, folderOnCopyRefusal, gitOnThisMacRefusal, noComputerForSourceLine, noSuchProjectLine, NOT_A_REPO_LINE, leftBehindLine, projectInUseRefusal, projectNameOf, seedChoiceNeeded, sameSourceRefusal, sourceKind, projectSourceOf, sourceWord, worksInPlace, worksInPlaceTakesNone, kindForComputer, relayedRecordRefusal, relayedRefusal, rootsPathIn, RUN_GONE_LINE, sendRefusal, shellLine, shellQuote, signInRefusalLine, SIZE_PICK_FIX, sizeRefusal, sizeWord, sshDaemonPaths, startingLine, startPicks, storedTitleSource, titleLine, TURN_TOKEN_ENV, turnImagesDir, underProject, undrivenRefusal, WAKE_STOPPED, wakeAskingAgainLine, wakeAsksIn, wakeGaveUpLine, workspaceState, absentComputer, buildPlaceAskLine, HERE_PLACE_ID, NO_BUILD_PLACE_LINE, noSuchPlaceRefusal, placeBuildsNoImageLine, placeForksNothingPickLine, placeForksNowhereLine, placeHoldsNoImageLine, placeBehindLine, placeDaemonBehind, placeDaemonPaths, placeDialBackLine, placeServesDaemonLine, placeNotAWorkspaceLine, placeNotAWorkspaceFix, workspaceAccess, workspacePlace, workFolderIn, copyPathFor, folderSlug, type ProjectCopy } from "@wsp/protocol";
 import { openDaemonChannel } from "./daemon-channel.js";
 import { templateHost } from "./host-id.js";
 import { machineExecStream, type MachineExecOptions, type TurnWaiting } from "./machine-exec.js";
@@ -1014,9 +1014,6 @@ export const COPY_SIZE_LINE_BYTES = 20 * 1024 * 1024 * 1024;
 export const wipeTheState = (workspaceId: string, statePath: string | undefined): string =>
   `workspace ${workspaceId} was recorded before a workspace held a project, and nothing reads that shape: move ${statePath ?? "this host's state file"} aside and start again, and wsp add records your projects on the new one`;
 
-/** What a create says when this host has sealed no image yet, so there is nothing for a copy to fork. */
-export const NO_IMAGE_YET = "no image yet; run wsp init";
-
 /** The last line a command said, which is what git puts its reason on. */
 const lastLineOf = (said: string): string => said.trimEnd().split("\n").at(-1)?.trim() ?? "";
 /** How the import's done line reads each agent's outcome, after the agent's name. */
@@ -1325,8 +1322,9 @@ export interface Runtime {
     computers(): Promise<{ id: string; name: string }[]>;
     /** The project a word names, by id or by name; refused naming the ones there are. */
     resolve(ref: string, origin?: Caller): Promise<ProjectView>;
-    /** Drops a project's record; refused while a workspace of it stands, naming them. */
-    remove(id: string, origin?: Caller): Promise<void>;
+    /** Drops a project's record and whatever the add made for it on the computer holding it, with the one
+     * sentence the person reads for that computer; refused while a workspace of it stands, naming them. */
+    remove(id: string, origin?: Caller): Promise<{ said: string }>;
     /** Lands the host's bundle of a folder on the workspace's machine; progress rides project.import events. */
     import(opts: ProjectImportOptions, origin?: Caller): Promise<ProjectImportResult>;
     /** Brings a folder and the agent state keyed to it home from the workspace's machine; progress rides project.export events. */
@@ -1563,9 +1561,6 @@ export const NO_COPY_RECIPE = "this runtime cannot compose the recipe a copy bui
 /** The one refusal for a seed on a runtime the host wired no folder reader into: nothing of the person's folder is
  * read or sent by a runtime that cannot show them the menu first. */
 export const NO_SEED_WIRING = "this runtime cannot read a folder on this computer, so a folder cannot seed a project elsewhere; the host that serves the app wires the reader";
-/** Why a folder cannot seed a project on a computer this host has sealed no image for: the seed lands inside a
- * fork of that image, so there is nowhere for it to go. */
-export const NO_IMAGE_FOR_SEED = `${NO_IMAGE_YET}; the seed lands inside a copy of your image, so there is nowhere for it to go yet`;
 
 /** One blob per sealed version, `<name>@v<version>`: the vault as it was taken off that version's builder. */
 const IMAGE_VAULTS = "image-vaults";
@@ -4484,7 +4479,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // whatever could be worked out then, and the folder a workspace mounts has to be the one the computer holds.
     // The record is put right the first time a workspace of it is made, so the two can never disagree again.
     const road = projectLanding(landingKind(project.computer, at));
-    const said = road.places({ project, memoryKey: project.memoryKey, deps: (await landingDeps(project.computer)).deps });
+    const landingOn = (await landingDeps(project.computer)).deps;
+    // Why no workspace of this project can be made on that computer at all, before a machine is asked for or a
+    // record written: a create that read the refusal later left a workspace record behind for a fork that never
+    // happened.
+    const refused = road.refusal(project, landingOn);
+    if (refused !== undefined) throw Object.assign(new Error(refused), { kind: "invalid" });
+    const said = road.places({ project, memoryKey: project.memoryKey, deps: landingOn });
     if (said.memoryDir !== project.memoryDir) await rememberProject({ ...project, memoryDir: said.memoryDir });
     const binds = road.workspaceBinds(projectHeld(project.id));
     // A project whose checkout the add left on that computer: this workspace takes its own copy of it, mounted at
@@ -7780,7 +7781,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
   /** What a landing road may ask of this runtime, for one computer: a short-lived machine of that computer's image
    * to clone, seed and install in, the road that puts the seed archive on it, the snapshot a project image is, and
    * where that computer and this Mac keep what a project needs. */
-  const landingDeps = async (computer: string): Promise<{ deps: LandingDeps; at: MachineBackend | undefined }> => {
+  const landingDeps = async (computer: string): Promise<{ deps: LandingDeps; at: MachineBackend | undefined; placeId: string | undefined }> => {
     const { placeId } = await landingPlace(computer);
     // A computer this host cannot read a backend for holds nothing of a project: the record still stands, as it
     // did before this road existed, and the road that would have to fork there says so itself when it is asked.
@@ -7809,12 +7810,27 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       checkpoint: (machine, name) => machine.snapshot(name, { firstLife: true }),
       scratch: () => GUEST_TMP,
       ...(at?.projects !== undefined ? { projectsDir: at.projects } : {}),
+      // One command on the computer itself, where that computer runs any: how the folder wsp keeps for a project
+      // there is taken away again. A provider answers none, and this Mac's own road runs nothing outside a
+      // workspace, so both leave it absent and the roads there never ask.
+      ...(at?.onComputer === undefined ? {} : { onComputer: at.onComputer.bind(at) }),
+      imageHead: () => imageHeadOrNone(),
       // Where Claude Code keeps its projects on this computer, which is the memory folder of a project worked in
       // place here; read the way every other road on this computer reads that store.
       macStateHome: local?.home("claude") ?? "",
+      // The name this wsp holds for that computer, read the way a fork's own line reads it.
+      computerName: placeName(computer),
       now: () => clock.now(),
     };
-    return { deps, at };
+    return { deps, at, placeId };
+  };
+
+  /** A computer somebody joined that this host cannot reach right now holds nothing of a project: the sentence is
+   * that computer's own absent one, said before anything is made or removed. Read apart from the deps above
+   * because a computer with no backend at all is what this Mac looks like to a host with no provider key, and a
+   * folder here is still a project. */
+  const readableComputer = async (at: MachineBackend | undefined, placeId: string | undefined): Promise<void> => {
+    if (at === undefined && placeId !== undefined) await landingBackend(placeId);
   };
 
   /** Recording, reading and dropping a project, the four acts that keep the projects map and the store together.
@@ -7858,7 +7874,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // A folder here is a project only if it is the top of a git repo: a workspace of it starts on a branch, and
       // a folder with no git in it has none.
       if (source.kind === "folder" && !(await isRepoHere(source.path))) throw new Error(`${source.path} ${NOT_A_REPO_LINE}`);
-      const { deps, at } = await landingDeps(computer);
+      const { deps, at, placeId } = await landingDeps(computer);
+      await readableComputer(at, placeId);
       const road = projectLanding(landingKind(computer, at));
       // What the source resolves to on this computer: the remote whichever computer holds the project will clone,
       // and, for a folder here, the menu of what a seed of it would carry.
@@ -7876,7 +7893,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       if (seeding && o.seed === undefined) throw Object.assign(new Error(seedChoiceNeeded(source.kind === "folder" ? source.path : o.source)), { kind: "invalid" });
       const name = o.name ?? resolved.name;
       const id = `pr_${randomBytes(4).toString("hex")}`;
-      const path = projectPathOn(source, name);
+      const path = road.path({ name, source });
       // The key the agent's memory sits under, fixed here and never recomputed: the folder's own key where a folder
       // on this computer seeded the project, so the memory it already has is the memory it keeps, else the key of
       // the path on the computer holding it.
@@ -7908,30 +7925,37 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       // forks. A repo the computer can clone by itself is recorded here and cloned by the workspace's own create,
       // which is what it did before this road existed.
       const keep = async (landed: Landed): Promise<ProjectView & { notice?: string }> => {
-        const recorded: ProjectView = { ...project, ...landed };
+        // The notice is what the person is told about this add, not a field of the project: the record is written
+        // once here with the schema's own fields, so it is taken off before anything is stored or emitted.
+        const { notice: _said, ...fields } = landed;
+        const recorded: ProjectView = { ...project, ...fields };
         await rememberProject(recorded);
         // Kept under the folder as this host resolved it, which is the word the next menu is looked up by.
         if (o.seed?.remember === true && source.kind === "folder") await store.put(SEED_CHOICES, source.path, o.seed);
         bus.emit({ type: "project.added", project: recorded });
         return recorded;
       };
-      if (!seeding || resolved.seed === undefined || o.seed === undefined) return keep({});
-      // Where the seed lands: inside a copy of this host's image on a computer that keeps one, so a host that has
-      // sealed none has nowhere to put it; on a computer that keeps none the work runs in a copy of that
-      // computer's own directories and no image is read at all.
-      const image = at !== undefined && keepsImages(at) ? await imageHeadOrNone() : "";
-      if (image === undefined) throw Object.assign(new Error(NO_IMAGE_FOR_SEED), { kind: "invalid" });
-      const choice = o.seed;
-      const plan = resolved.seed;
-      report("planned", `${project.name} from ${sourceWord(source)}, ${plural(choice.files.length, "seeded file")}.`);
+      const seed = seeding && resolved.seed !== undefined && o.seed !== undefined ? { plan: resolved.seed, choice: o.seed } : undefined;
+      if (!road.landsAtAdd({ seeding: seed !== undefined })) return keep({});
+      report("planned", `${project.name} from ${sourceWord(source)}, ${seed === undefined ? "nothing seeded" : plural(seed.choice.files.length, "seeded file")}.`);
       try {
-        const packed = await seedWiring().pack({ plan, choice });
-        const landed = await road.land({ project, image, source: module, computerName: nameOfComputer(computer, rows), seed: { tar: packed.tar, choice, plan }, report }, deps);
+        const packed = seed === undefined ? undefined : await seedWiring().pack(seed);
+        const landed = await road.land(
+          {
+            project,
+            source: module,
+            ...(seed !== undefined && packed !== undefined ? { seed: { tar: packed.tar, choice: seed.choice, plan: seed.plan } } : {}),
+            report,
+          },
+          deps,
+        );
         const recorded = await keep(landed);
         report("done", `${recorded.name} is on ${nameOfComputer(computer, rows)}, at ${recorded.path} inside a workspace of it.`);
-        // A login found inside a folder they ticked stayed here: the pack leaves it behind, and the person is told
-        // which, since a path they asked to carry that did not travel is theirs to know about.
-        return packed.left.length === 0 ? recorded : { ...recorded, notice: leftBehindLine(packed.left) };
+        // What landed and is not what they asked for, each in its own sentence: the commits a computer's git
+        // refused, and a login found inside a folder they ticked, which the pack leaves here. Both are theirs to
+        // know about on an add that otherwise stands.
+        const notices = [...(landed.notice !== undefined ? [landed.notice] : []), ...(packed !== undefined && packed.left.length > 0 ? [leftBehindLine(packed.left)] : [])];
+        return notices.length === 0 ? recorded : { ...recorded, notice: notices.join("; ") };
       } catch (e) {
         report("failed", e instanceof Error ? e.message : String(e));
         throw e;
@@ -7956,15 +7980,22 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       return found;
     },
 
-    async remove(id: string, origin?: Caller): Promise<void> {
+    async remove(id: string, origin?: Caller): Promise<{ said: string }> {
       await ready();
       spawnGuard("delete", origin);
       const project = await projectsDoor.resolve(id);
       const standing = [...live.values()].filter(e => e.record.project === project.id).map(e => e.record.name);
       if (standing.length > 0) throw Object.assign(new Error(projectInUseRefusal(project.name, standing)), { kind: "conflict" });
+      const { deps, at, placeId } = await landingDeps(project.computer);
+      await readableComputer(at, placeId);
+      // What the add made on that computer goes before the record does, so a computer that cannot be reached
+      // keeps both and the person can say it again when it is back. The sentence is the road's: it is true
+      // differently on a computer of theirs, at a provider and here.
+      const said = await projectLanding(landingKind(project.computer, at)).remove(project, deps);
       projectsHeld.delete(project.id);
       await store.delete(PROJECTS, project.id);
       bus.emit({ type: "project.removed", projectId: project.id });
+      return { said };
     },
   };
 
