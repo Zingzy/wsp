@@ -2,6 +2,8 @@
 //! The bounds the zod schemas put on strings and numbers, applied at deserialization so a frame the protocol
 //! refuses is one these types refuse too.
 
+use std::collections::BTreeMap;
+
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
@@ -157,6 +159,46 @@ where
     }
 }
 
+/// The protocol's isUnderPath: a name under a folder the reader already holds, never a path of its own. The host
+/// joins one of these onto a folder of its own, so a leading slash, an empty part and a part that walks up out of
+/// it are all refused here rather than resolved at the other end.
+pub fn is_under_path(path: &str) -> bool {
+    !path.is_empty() && !path.starts_with('/') && !path.split('/').any(|part| part.is_empty() || part == "." || part == "..")
+}
+
+/// A list of names under a folder, each under a cap on its length and the list under a cap on how many.
+pub(crate) fn under_paths_opt<'de, D, const EACH: usize, const MAX: usize>(d: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(list) = Option::<Vec<String>>::deserialize(d)? else { return Ok(None) };
+    if list.len() > MAX {
+        return Err(de::Error::custom(format!("at most {MAX} entries, got {}", list.len())));
+    }
+    if let Some(long) = list.iter().find(|s| js_len(s) > EACH) {
+        return Err(de::Error::custom(format!("entry longer than {EACH} characters: {long}")));
+    }
+    if let Some(walks) = list.iter().find(|s| !is_under_path(s)) {
+        return Err(de::Error::custom(format!("not a name under a folder: {walks}")));
+    }
+    Ok(Some(list))
+}
+
+/// A map whose values are each under a cap, with a cap on how many pairs it carries.
+pub(crate) fn bounded_map<'de, D, const EACH: usize, const MAX: usize>(d: D) -> Result<BTreeMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let map = BTreeMap::<String, String>::deserialize(d)?;
+    if map.len() > MAX {
+        return Err(de::Error::custom(format!("at most {MAX} entries, got {}", map.len())));
+    }
+    if let Some((name, long)) = map.iter().find(|(_, v)| js_len(v) > EACH) {
+        return Err(de::Error::custom(format!("{name} is longer than {EACH} characters: {long}")));
+    }
+    Ok(map)
+}
+
 pub(crate) fn positive<'de, D>(d: D) -> Result<Option<u32>, D::Error>
 where
     D: Deserializer<'de>,
@@ -229,6 +271,13 @@ mod tests {
         assert!(!is_plain_path("/a/./b") && !is_plain_path("/.") && !is_plain_path("/a/.."));
         // A name is still a name where it begins with a dot, which half a home folder does.
         assert!(is_plain_path("/root/.claude/projects") && is_plain_path("/a/...") && is_plain_path("/a/.b"));
+    }
+
+    #[test]
+    fn a_name_under_a_folder_never_walks_out_of_it() {
+        assert!(is_under_path("codex/auth.json") && is_under_path("auth.json") && is_under_path(".codex/auth.json"));
+        assert!(!is_under_path("") && !is_under_path("/codex/auth.json") && !is_under_path("codex//auth.json"));
+        assert!(!is_under_path("../auth.json") && !is_under_path("codex/../../auth.json") && !is_under_path("./auth.json"));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use base64::{alphabet, Engine};
 use serde::de::{self, Deserializer};
 use serde::{Deserialize, Serialize};
 
-use crate::validate::{bounded, bounded_list, http_url, non_empty_list};
+use crate::validate::{bounded, bounded_list, bounded_map, http_url, non_empty_list, under_paths_opt};
 use crate::{CopyWord, RequestId};
 
 /// Decodes what the protocol's regex accepts: the standard alphabet, padded, with the trailing bits of the last
@@ -116,6 +116,15 @@ pub struct PlaceReport {
     pub dialed: String,
     #[serde(deserialize_with = "bounded_list::<_, 32, 32>")]
     pub agents: Vec<String>,
+    /// What each of those agents answered its own version flag with, by the same catalog id: the first line of
+    /// `<bin> --version`, as the computer said it. Empty on a computer whose agents have not been read yet.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty", deserialize_with = "bounded_map::<_, 64, 32>")]
+    pub agent_versions: BTreeMap<String, String>,
+    /// The files under this computer's logins directory, each named under it: what a sign-in there wrote and every
+    /// workspace on it shares. Absent from a report a daemon older than this field sent, which reads as unknown
+    /// rather than as none.
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "under_paths_opt::<_, 200, 64>")]
+    pub logins: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

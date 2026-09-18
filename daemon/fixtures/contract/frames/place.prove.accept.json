@@ -30,7 +30,14 @@
         "a1",
         "b2"
       ],
-      "copies": "reflink"
+      "copies": "reflink",
+      "agentVersions": {
+        "a1": "2.1.270 (Claude Code)",
+        "b2": "codex-cli 0.153.0"
+      },
+      "logins": [
+        "codex/auth.json"
+      ]
     }
   },
   {

@@ -4,17 +4,17 @@
 //! rather than once: a laptop gains a Docker, loses a disk and is renamed under wsp rather than by it. Signing and
 //! verifying are ed25519-dalek's; the bytes they cover are the protocol's.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime};
 
 use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest as _, Sha256};
 use wsp_frames::{
-    landed_files_script, numbers, own_marks, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile, PlacePublicKey,
-    PlaceReport, PlaceSignature, Platform, WorkspaceSize,
+    is_under_path, landed_files_script, numbers, own_marks, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile,
+    PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
-use wsp_runtime::doctor::on_path;
 
 /// The place file as it stands, or nothing when this computer is no place: a file that is there and is not one
 /// reads the same as none, since the one road that writes it is wsp join.
@@ -51,6 +51,148 @@ pub(crate) fn parse_agents(words: &[String]) -> Vec<AgentBin> {
             (!id.is_empty() && !bin.is_empty()).then(|| AgentBin { id: id.to_owned(), bin: bin.to_owned() })
         })
         .collect()
+}
+
+/// How long one `<bin> --version` gets to answer: a binary that hangs costs one dial that long and never the link.
+pub(crate) const VERSION_DEADLINE: Duration = Duration::from_secs(5);
+/// How often a running version read is looked in on while its deadline runs.
+const VERSION_POLL: Duration = Duration::from_millis(50);
+/// What the report carries of the line it printed, as the wire bounds it.
+const VERSION_LINE_MAX: usize = 64;
+/// What the report carries of the logins folder, as the wire bounds it: how many names and how long each.
+const LOGINS_MAX: usize = 64;
+const LOGIN_PATH_MAX: usize = 200;
+
+/// Where the first executable of that name on this PATH sits, or nothing: the one reading of what stands on this
+/// computer, since the agents list and the version read must never disagree about whether an agent is there.
+fn found_at(name: &str, path: &str) -> Option<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    path.split(':')
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| Path::new(dir).join(name))
+        .find(|at| std::fs::metadata(at).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false))
+}
+
+/// What the last version read of one agent found: the file it ran, as that file was then, and what it printed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AgentRead {
+    at: PathBuf,
+    size: u64,
+    modified: Option<SystemTime>,
+    line: String,
+}
+
+/// Every agent's version line, held between dials against the binary it came from. A daemon is not restarted by an
+/// update that installs a newer agent, so the line is read again at a dial where that binary's path, size or
+/// modification time moved, and handed back untouched where none of the three did: one stat per agent per dial.
+#[derive(Debug, Default)]
+pub(crate) struct AgentVersions {
+    held: BTreeMap<String, AgentRead>,
+}
+
+impl AgentVersions {
+    /// Stats each agent's binary and runs it again where it moved. An agent that is no longer on the PATH drops
+    /// off, so the report never carries a version for a binary that is not there.
+    pub(crate) fn refresh(&mut self, agents: &[AgentBin], path: &str, deadline: Duration) {
+        let mut fresh = BTreeMap::new();
+        for agent in agents {
+            let Some(at) = found_at(&agent.bin, path) else { continue };
+            let meta = std::fs::metadata(&at).ok();
+            let size = meta.as_ref().map(std::fs::Metadata::len).unwrap_or(0);
+            let modified = meta.as_ref().and_then(|m| m.modified().ok());
+            match self.held.remove(&agent.id) {
+                Some(read) if read.at == at && read.size == size && read.modified == modified => {
+                    fresh.insert(agent.id.clone(), read);
+                }
+                _ => {
+                    if let Some(line) = version_line(&at, deadline) {
+                        fresh.insert(agent.id.clone(), AgentRead { at, size, modified, line });
+                    }
+                }
+            }
+        }
+        self.held = fresh;
+    }
+
+    /// The lines as the report carries them, by catalog id.
+    pub(crate) fn lines(&self) -> BTreeMap<String, String> {
+        self.held.iter().map(|(id, read)| (id.clone(), read.line.clone())).collect()
+    }
+}
+
+/// What `<bin> --version` printed: the first line it said that is not blank, trimmed and cut to what the report
+/// carries. Both streams are read, stdout first: a tool that prints its version on stderr would otherwise read as
+/// nothing and be run again at every dial, a process per dial where the point of this is one stat. Nothing where
+/// the binary would not start or said nothing inside the deadline, which the next dial reads again. The exit code
+/// is not read: what a tool printed about itself is the fact, and some print it and exit non-zero.
+fn version_line(at: &Path, deadline: Duration) -> Option<String> {
+    let mut child = std::process::Command::new(at)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+    let until = Instant::now() + deadline;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < until => std::thread::sleep(VERSION_POLL),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Err(_) => return None,
+        }
+    }
+    let out = child.wait_with_output().ok()?;
+    let streams = [String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)];
+    let said = streams.iter().flat_map(|stream| stream.lines()).map(str::trim).find(|line| !line.is_empty())?;
+    Some(said.chars().take(VERSION_LINE_MAX).collect())
+}
+
+/// Where this computer keeps the logins every workspace on it shares, as the runtime spells it and nothing here
+/// does. Nothing on a computer whose runtime boots no workspace at all, which is every computer that is not Linux.
+#[cfg(target_os = "linux")]
+fn logins_dir(runtime_root: &Path) -> Option<PathBuf> {
+    Some(wsp_runtime::bundle::Layout::new(runtime_root).logins())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn logins_dir(_runtime_root: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// The files under that directory: what a sign-in here wrote and every workspace on this computer shares.
+pub(crate) fn logins_present(runtime_root: &Path) -> Vec<String> {
+    logins_dir(runtime_root).map(|dir| names_under(&dir)).unwrap_or_default()
+}
+
+/// Every file under a directory, one level of directories deep, each named under it. Which tool a name belongs to
+/// is the host's to say, since this daemon carries no catalog; what does not fit the wire's bounds is left out
+/// rather than sent and refused with the whole report.
+fn names_under(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_dir() {
+            let Ok(inner) = std::fs::read_dir(entry.path()) else { continue };
+            for file in inner.flatten() {
+                if file.file_type().map(|k| !k.is_dir()).unwrap_or(false) {
+                    out.push(format!("{name}/{}", file.file_name().to_string_lossy()));
+                }
+            }
+        } else {
+            out.push(name);
+        }
+    }
+    out.retain(|p| p.len() <= LOGIN_PATH_MAX && is_under_path(p));
+    out.sort();
+    out.truncate(LOGINS_MAX);
+    out
 }
 
 /// How much room is left on the volume the folder sits on, or nothing when this computer will not say.
@@ -108,6 +250,9 @@ pub(crate) struct ReportInput<'a> {
     pub(crate) home: &'a Path,
     pub(crate) wsp_argv: &'a [String],
     pub(crate) agents: &'a [AgentBin],
+    /// What each of those agents last answered its version flag with, read on the blocking pool before the report
+    /// is built rather than here: building a report runs nothing.
+    pub(crate) agent_versions: &'a BTreeMap<String, String>,
     pub(crate) daemon_port: u16,
     pub(crate) dialed: &'a str,
     /// Where this daemon keeps the workspaces it runs; the copy word is probed under it.
@@ -159,7 +304,10 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
         daemon_port: std::num::NonZeroU16::new(input.daemon_port),
         wsp,
         dialed: input.dialed.to_owned(),
-        agents: input.agents.iter().filter(|a| on_path(&a.bin, &path)).map(|a| a.id.clone()).collect(),
+        agents: input.agents.iter().filter(|a| found_at(&a.bin, &path).is_some()).map(|a| a.id.clone()).collect(),
+        agent_versions: input.agent_versions.clone(),
+        // Read at every dial, since a sign-in on this computer changes it between one link and the next.
+        logins: Some(logins_present(input.runtime_root)),
     }
 }
 
@@ -402,9 +550,9 @@ mod tests {
             parse_agents(&["a1=sh".to_owned(), "broken".to_owned(), "=x".to_owned(), "b2=no-such-agent-command".to_owned()]).len(),
             2
         );
-        assert!(on_path("sh", "/nonexistent:/bin:/usr/bin"));
-        assert!(!on_path("no-such-agent-command", "/bin:/usr/bin"));
-        assert!(!on_path("sh", ""));
+        assert_eq!(found_at("sh", "/nonexistent:/bin:/usr/bin"), Some(PathBuf::from("/bin/sh")));
+        assert_eq!(found_at("no-such-agent-command", "/bin:/usr/bin"), None);
+        assert_eq!(found_at("sh", ""), None);
     }
 
     /// A place's daemon runs unattended under a service unit: a word that is not a pair costs the report one agent
@@ -424,6 +572,114 @@ mod tests {
         );
     }
 
+    /// A binary that prints a line and records that it ran, so a second read can be told from a held one.
+    fn fake_bin(dir: &Path, name: &str, prints: &str, counter: &Path) -> PathBuf {
+        let at = dir.join(name);
+        std::fs::write(&at, format!("#!/bin/sh\necho ran >> {}\necho '{prints}'\n", counter.display())).unwrap();
+        std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        at
+    }
+
+    fn ran(counter: &Path) -> usize {
+        std::fs::read_to_string(counter).map(|t| t.lines().count()).unwrap_or(0)
+    }
+
+    #[test]
+    fn an_agents_version_is_read_once_and_again_only_when_its_binary_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("runs");
+        let bin = fake_bin(dir.path(), "claude", "2.1.270 (Claude Code)", &counter);
+        let path = dir.path().to_string_lossy().into_owned();
+        let agents = parse_agents(&["claude=claude".to_owned()]);
+        let mut held = AgentVersions::default();
+
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("claude").map(String::as_str), Some("2.1.270 (Claude Code)"));
+        assert_eq!(ran(&counter), 1);
+
+        // Nothing moved, so the dial costs one stat and the line already read stands.
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(ran(&counter), 1, "a dial where nothing moved ran the binary again");
+        assert_eq!(held.lines().get("claude").map(String::as_str), Some("2.1.270 (Claude Code)"));
+
+        // An update that replaces the binary is what the report has to follow, and the daemon is not restarted by
+        // one: the file's own size and modification time are what says it happened.
+        fake_bin(dir.path(), "claude", "2.1.280 (Claude Code) and then some", &counter);
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(ran(&counter), 2);
+        assert_eq!(held.lines().get("claude").map(String::as_str), Some("2.1.280 (Claude Code) and then some"));
+
+        // The same bytes at another modification time are read again too: a build dropped in by hand says nothing
+        // about its size.
+        let file = std::fs::File::options().write(true).open(&bin).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000))).unwrap();
+        drop(file);
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(ran(&counter), 3);
+
+        // An agent off the PATH drops off the report rather than keeping the version of a binary that is gone.
+        std::fs::remove_file(&bin).unwrap();
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert!(held.lines().is_empty());
+    }
+
+    #[test]
+    fn a_version_read_that_hangs_costs_its_deadline_and_says_nothing_for_that_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().join("codex");
+        std::fs::write(&at, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let mut held = AgentVersions::default();
+        let began = Instant::now();
+        held.refresh(&parse_agents(&["codex=codex".to_owned()]), &dir.path().to_string_lossy(), Duration::from_millis(300));
+        assert!(held.lines().is_empty());
+        assert!(began.elapsed() < Duration::from_secs(5), "the read waited past its deadline");
+        // A line cut at the wire's bound, so a binary that prints a paragraph cannot refuse the whole report.
+        let counter = dir.path().join("runs");
+        fake_bin(dir.path(), "long", &"v".repeat(200), &counter);
+        held.refresh(&parse_agents(&["long=long".to_owned()]), &dir.path().to_string_lossy(), VERSION_DEADLINE);
+        assert_eq!(held.lines()["long"].len(), VERSION_LINE_MAX);
+    }
+
+    /// A tool that says its version on stderr is read like any other. Reading stdout alone would leave it with no
+    /// line at all, so every dial would run it again: a process per dial where the whole point is one stat.
+    #[test]
+    fn a_version_printed_on_stderr_is_read_once_like_any_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter = dir.path().join("runs");
+        let at = dir.path().join("noisy");
+        std::fs::write(&at, format!("#!/bin/sh\necho ran >> {}\necho '' \necho 'noisy 4.5.6' 1>&2\n", counter.display())).unwrap();
+        std::fs::set_permissions(&at, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let agents = parse_agents(&["noisy=noisy".to_owned()]);
+        let path = dir.path().to_string_lossy().into_owned();
+        let mut held = AgentVersions::default();
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("noisy").map(String::as_str), Some("noisy 4.5.6"));
+        assert_eq!(ran(&counter), 1);
+        held.refresh(&agents, &path, VERSION_DEADLINE);
+        assert_eq!(ran(&counter), 1, "a version read off stderr was read again at the next dial");
+
+        // What a tool printed on stdout is still what the report carries, whatever it put on stderr beside it.
+        let both = dir.path().join("both");
+        std::fs::write(&both, "#!/bin/sh\necho 'warning: old config' 1>&2\necho 'both 1.2.3'\n").unwrap();
+        std::fs::set_permissions(&both, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        held.refresh(&parse_agents(&["both=both".to_owned()]), &path, VERSION_DEADLINE);
+        assert_eq!(held.lines().get("both").map(String::as_str), Some("both 1.2.3"));
+    }
+
+    #[test]
+    fn the_logins_folder_is_read_as_the_names_under_it_and_nothing_else() {
+        let logins = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(logins.path().join("codex")).unwrap();
+        // A tool whose sign-in made its folder and wrote nothing yet is not a login that stands.
+        std::fs::create_dir_all(logins.path().join("gemini")).unwrap();
+        std::fs::write(logins.path().join("codex/auth.json"), "{}").unwrap();
+        assert_eq!(names_under(logins.path()), vec!["codex/auth.json".to_owned()]);
+        // A computer with no logins folder at all says none, which is what a box before its first sign-in is.
+        assert!(names_under(&logins.path().join("nowhere")).is_empty());
+        assert!(logins_present(&logins.path().join("nowhere")).is_empty());
+    }
+
     #[test]
     fn the_report_is_read_off_the_home_and_the_words_given() {
         let home = tempfile::tempdir().unwrap();
@@ -432,11 +688,13 @@ mod tests {
                 .unwrap();
         let agents = parse_agents(&["a1=sh".to_owned(), "b2=no-such-agent-command".to_owned()]);
         let argv = ["/usr/local/bin/node".to_owned(), "/opt/wsp/bin.js".to_owned()];
+        let versions: BTreeMap<String, String> = [("a1".to_owned(), "1.2.3".to_owned())].into_iter().collect();
         let report = place_report(&ReportInput {
             file: &file,
             home: home.path(),
             wsp_argv: &argv,
             agents: &agents,
+            agent_versions: &versions,
             daemon_port: 4321,
             dialed: "http://h:1",
             runtime_root: &home.path().join("runtime"),
@@ -444,6 +702,10 @@ mod tests {
         assert_eq!(report.name, "old-macbook");
         assert_eq!(report.wsp, argv);
         assert_eq!(report.agents, vec!["a1"]);
+        // The versions read before the report was built, and the logins folder read as this dial found it: a
+        // report from this daemon always carries the list, empty or not, which is what tells it from an older one.
+        assert_eq!(report.agent_versions, versions);
+        assert_eq!(report.logins, Some(logins_present(&home.path().join("runtime"))));
         assert_eq!(report.login["HOME"], home.path().to_string_lossy());
         assert_eq!(report.daemon_port.map(|p| p.get()), Some(4321));
         assert_eq!(report.dialed, "http://h:1");
@@ -460,6 +722,7 @@ mod tests {
             home: home.path(),
             wsp_argv: &[],
             agents: &[],
+            agent_versions: &BTreeMap::new(),
             daemon_port: 1,
             dialed: "http://h:1",
             runtime_root: home.path(),
@@ -474,6 +737,7 @@ mod tests {
             home: home.path(),
             wsp_argv: &[],
             agents: &[],
+            agent_versions: &BTreeMap::new(),
             daemon_port: 1,
             dialed: "http://h:1",
             runtime_root: under,

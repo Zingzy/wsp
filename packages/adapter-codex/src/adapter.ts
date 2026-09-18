@@ -4,7 +4,7 @@
 // thread.started names the thread a resume takes, items start and complete
 // under one id each, turn.completed carries usage, turn.failed the error.
 import { randomUUID } from "node:crypto";
-import { RUN_EXIT_MS, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, endAfterResult, endRun, titlePrompt } from "@wsp/protocol";
+import { RUN_EXIT_MS, codexKeyRefusedLine, codexMissingEnvLine, codexNotSignedInLine, codexReconnectLine, endAfterResult, endRun, titlePrompt } from "@wsp/protocol";
 import type { AdapterAttachOptions, AdapterEvent, ExecStream, ExecStreamFactory, HarnessCatalogAnswer, SessionRenamer, SessionTitleMaker, SessionTitleReader, TurnImage, TurnRefusal, TurnResult } from "@wsp/protocol";
 import { catalogProbeCommand, parseCatalogProbe } from "./catalog.js";
 import { INTERRUPT_GRACE_MS, buildCommand, buildEnv } from "./command.js";
@@ -49,6 +49,9 @@ export interface CodexAdapterDeps {
   login: string;
   /** The API key the vault holds for this agent; set on every turn's environment. */
   apiKey?: string;
+  /** The variable that key travels under, for the sentence a turn fails with when the provider turns it down.
+   * Absent where no key was handed, which is what tells a refused key from no credential at all. */
+  keyEnv?: string;
   baseEnv?: Readonly<Record<string, string | undefined>>;
   interruptGraceMs?: number;
   /** How long the CLI gets to exit on its own after its turn's result, before its process and its tree are ended
@@ -95,10 +98,24 @@ const MISSING_ENV = /Missing environment variable: `([^`]+)`/;
 const RECONNECTING = /^Reconnecting\.\.\./;
 const RECONNECT_STALL_MS = 90_000;
 
+/** What the CLI said after the status it refused on, as a clause a sentence can carry: its own colon and spaces
+ * off the front, and the bracket it wraps a status in closed off the end. Empty where it said nothing. */
+function refusedBecause(message: string): string {
+  const at = UNAUTHORIZED.exec(message);
+  if (at === null) return "";
+  const tail = message.slice(at.index + at[0].length).split("\n")[0] ?? "";
+  return (tail.replace(/^[:\s]+/, "").split(")")[0] ?? "").trim();
+}
+
 /** The words for a failure the CLI reported in its own, with what wsp classes it as where it claims a cause;
- * undefined when the CLI's message stands as it is. */
-function failureWords(message: string, login: string): { line: string; cause?: TurnRefusal } | undefined {
-  if (UNAUTHORIZED.test(message)) return { line: codexNotSignedInLine(login), cause: "sign-in" };
+ * undefined when the CLI's message stands as it is. A 401 is two different things to the person: with a key
+ * handed, the provider turned that key down and signing in again fixes nothing; with none, nothing was signed in
+ * there at all. */
+function failureWords(message: string, login: string, keyEnv?: string): { line: string; cause?: TurnRefusal } | undefined {
+  if (UNAUTHORIZED.test(message)) {
+    const line = keyEnv === undefined ? codexNotSignedInLine(login) : codexKeyRefusedLine(keyEnv, refusedBecause(message), login);
+    return { line, cause: "sign-in" };
+  }
   const missing = MISSING_ENV.exec(message);
   return missing === null ? undefined : { line: codexMissingEnvLine(missing[1]!) };
 }
@@ -232,7 +249,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
           const event = parseLine(raw);
           if (event === undefined) {
             const text = raw.trim();
-            words = failureWords(text, deps.login) ?? words;
+            words = failureWords(text, deps.login, deps.keyEnv) ?? words;
             if (text.length > 0 && stderrTail.push(text) > STDERR_TAIL_LINES) stderrTail.shift();
             continue;
           }
@@ -263,7 +280,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
             case "turn.failed": {
               sawResult = true;
               const message = str(rec(event.error)?.message) ?? "codex reported a failed turn";
-              words = failureWords(message, deps.login) ?? words;
+              words = failureWords(message, deps.login, deps.keyEnv) ?? words;
               turnResult = { status: "failed", durationMs: Date.now() - startedAt, error: words?.line ?? message, ...(words?.cause !== undefined ? { refusal: words.cause } : {}) };
               emit({ type: "turn.done", sessionId: threadId, result: turnResult });
               endAfter();
@@ -272,7 +289,7 @@ export function createCodexAdapter(deps: CodexAdapterDeps): CodexAdapter {
             case "error": {
               const message = str(event.message) ?? "";
               lastError = message;
-              words = failureWords(message, deps.login) ?? words;
+              words = failureWords(message, deps.login, deps.keyEnv) ?? words;
               if (RECONNECTING.test(message)) reconnecting();
               break;
             }

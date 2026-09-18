@@ -224,6 +224,27 @@ describe("which rows the Computers table draws", () => {
     expect(recipeLines(hetzner)).toEqual([]);
   });
 
+  it("says each agent's version and whether a sign-in stands there, and keeps the recipe's word only where its row failed", () => {
+    const place: PlaceView = {
+      ...hetzner,
+      name: "spoo",
+      agents: ["claude", "codex"],
+      agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" },
+      signIns: { claude: "vault-key", codex: "none" },
+    };
+    expect(placeAgentLines(place)).toEqual([
+      { id: "claude", name: "Claude Code", state: "2.1.270 · your key", held: "Sign in from a terminal for now: wsp add spoo --sign-in claude", signedIn: true },
+      { id: "codex", name: "Codex", state: "0.153.0 · not signed in", held: "Sign in from a terminal for now: wsp add spoo --sign-in codex" },
+    ]);
+    // A sign-in on the computer itself reads as one, and a recipe row that installed the agent adds nothing the
+    // line does not already say.
+    const signedIn: PlaceView = { ...place, signIns: { claude: "vault-key", codex: "signed-in" }, provision: { state: "done", addId: "a_1", recipeAt: "t", startedAt: "t", rows: [{ id: "agents/codex", label: "Codex", outcome: "installed" }] } };
+    expect(placeAgentLines(signedIn)[1]).toMatchObject({ state: "0.153.0 · signed in", signedIn: true });
+    // A row that failed is the one recipe outcome worth the slot: the agent may be older than the run meant it to be.
+    const failed: PlaceView = { ...place, provision: { state: "done", addId: "a_1", recipeAt: "t", startedAt: "t", rows: [{ id: "agents/codex", label: "Codex", outcome: "failed", note: "npm exited 1" }] } };
+    expect(placeAgentLines(failed)[1]!.state).toBe("0.153.0 · not signed in · failed: npm exited 1");
+  });
+
   it("shows a present row's own note, which is where a tool answered from outside the directories its road links into", () => {
     const note = "node answers from /usr/bin/node, outside where its own installer puts it (/usr/local/bin)";
     expect(outcomeWord({ id: "tools/brew/node", label: "node", outcome: "present", note })).toBe(`already there: ${note}`);

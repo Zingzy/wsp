@@ -3,7 +3,7 @@
 // runtime's import and export events and the app; a turn's duration as the chat's footer,
 // the notify line and the cut line print it, and its cost. The files that keep their own
 // rule are the exception list in the protocol format test, each with its reason.
-import type { Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
+import type { AgentSignInState, Capabilities, ContextMenuItem, CopyRoad, GoldenMissingTool, GoldenStage, HarnessCatalog, HostsView, InitDraft, InitJob, InitPhase, InitRow, InitScreen, InitScreenId, InitSetup, LoginState, MachineSizeOffer, MachineState, PermissionEffect, PermissionOption, PermissionOutcome, PlaceCapacity, PlaceView, ProjectExportEvent, ProjectGolden, ProjectImportEvent, ProjectSecret, SealedImage, SealedImageCopy, SealedImageExport, SessionEvent, SessionPermissionEvent, TerminalConfig, TerminalRgb, TitleSource, ToolPin, TurnRefusal, TurnResult, WorkspaceGlyph, WorkspaceSize, WorkspaceView } from "./index.js";
 import { LOGIN_CHOICES, type LoginChoice } from "./init-job.js";
 import { dotColour, effectiveOpacity, themeInk, type Rgb, type WorkspaceTheme } from "./workspace-look.js";
 import { DEFAULT_PORT } from "./app-ports.js";
@@ -3455,6 +3455,47 @@ export function placeEngineLine(view: Pick<PlaceView, "name" | "engine">): strin
   if (view.engine === undefined) return undefined;
   if (view.engine === "none") return `${view.name} has no container engine; a project's docker compose runs there once you install Docker or podman on it`;
   return `${view.name} runs a project's own containers on ${view.engine}; a workspace made with --engine gets a socket to it and sees its own containers alone`;
+}
+
+/** What a person reads for whether an agent on a computer can take a turn there as things stand: its own login on
+ * that computer, the key of theirs wsp hands it, or nothing yet. One home for the three words, so the table, the
+ * doctor and the agents block under a computer's row cannot word them three ways. */
+export function agentSignInWord(state: AgentSignInState): string {
+  return state === "signed-in" ? "signed in" : state === "vault-key" ? "your key" : "not signed in";
+}
+
+/** The version number in what an agent's own version flag printed: agents word that line their own way (`2.1.270
+ * (Claude Code)`, `codex-cli 0.153.0`), so the number is lifted out where there is one and the line stands as the
+ * computer said it where there is not. */
+export function agentVersionWord(raw: string): string {
+  return /\d+\.\d+\.\d+/.exec(raw)?.[0] ?? raw.trim();
+}
+
+/** The agents cell of the computers table: each agent that computer reported, its version and the word for its
+ * sign-in, one clause apiece. Empty where the row reported no agent at all, which is a cloud account, this
+ * computer, and a computer that has not said yet. */
+export function agentsCell(place: Pick<PlaceView, "agents" | "agentVersions" | "signIns">): string {
+  return (place.agents ?? [])
+    .map(id => {
+      const version = place.agentVersions?.[id];
+      const state = place.signIns?.[id];
+      return [id, version === undefined ? undefined : agentVersionWord(version), state === undefined ? undefined : agentSignInWord(state)].filter(word => word !== undefined).join(" ");
+    })
+    .join(" · ");
+}
+
+/** How much of the provider's own reason for refusing a key a sentence carries: enough to tell a dead key from a
+ * narrowed one, short enough to stay one sentence. */
+const REFUSAL_REASON_MAX = 80;
+
+/** The one line a codex turn fails with when it ran on the person's own key and the provider turned that key down:
+ * whose key was refused, what the provider said about it, and the two ways out. Never the not-signed-in line,
+ * which would send a person to sign in when what they have is a key that no longer works. `reason` is what the CLI
+ * printed after the status, empty when it printed nothing, and a refusal with nothing after it drops the clause
+ * rather than reading as a colon with nothing behind it; `login` is the catalog's sign-in command for a machine. */
+export function codexKeyRefusedLine(keyEnv: string, reason: string, login: string): string {
+  const said = reason.trim().slice(0, REFUSAL_REASON_MAX).trim();
+  return `OpenAI refused your ${keyEnv}${said === "" ? "" : `: ${said}`}. Put a working key in ~/.wsp/.env, or sign Codex in where this workspace runs with ${login}.`;
 }
 
 /** The verb alone, for the host road that runs that leave on another computer over the line that computer said

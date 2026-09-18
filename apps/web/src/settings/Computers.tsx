@@ -378,7 +378,9 @@ function AgentsBlock({ place, here, agents, recipe }: { place: PlaceView; here: 
                   {AGENTS_WORDS.add}
                 </Button>
               ) : null
-            ) : (
+            ) : // An agent already signed in there has nothing to sign in: a held control for a finished thing is
+            // one more thing to read past, so the line carries the word alone.
+            agent.signedIn === true ? null : (
               <Button data-k="agent-sign-in" size="xs" variant="outline" held title={agent.held}>
                 {AGENTS_WORDS.signIn}
               </Button>

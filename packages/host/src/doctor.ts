@@ -12,7 +12,7 @@ import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import { agentName, CATALOG_AGENTS, CLAUDE_CONFIG_DIR, GOLDEN_SETUP, GOLDEN_SMOKE, keyEnvOf, mintsToken, VAULT_VARIABLES } from "@wsp/catalog";
 import { CREATED_AT_LABEL, DAEMON_ENV_FILE, DAEMON_LISTENING_CHECK, DAEMON_PORT, DOCTOR_LABEL, EXEC_ENV, GUEST_USER_ENV, OWNER_LABEL, RUN_DIR, TOOLS_PATH, WSP_LABEL, isMissing, isReserved, landBytes, presenceTests, presentElsewhere, presentSteps, whoseMachine, type DaemonSupervisor, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { absentComputer, awayMsOf, boxRoomLines, doctorComputerRowLine, hereDaemonBehindLine, HERE_PLACE_ID, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
+import { absentComputer, agentSignInWord, agentVersionWord, awayMsOf, boxRoomLines, doctorComputerRowLine, hereDaemonBehindLine, HERE_PLACE_ID, noSuchProjectLine, placeBehindLine, placeDaemonBehind, plural, projectNeedsReaddLine, DAEMON_MEMORY_MAX_PERCENT, DAEMON_ROOTS_PATH, DAEMON_TOKEN_PATH, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_INBOX_DIR, GUEST_MANIFEST_PATH, GUEST_WSP_PATH, LOOPBACK, machineLacking, machineUnanswered, NO_LINGER_LINE, NO_NODE_LINE, PLACE_NEEDS_ROOT_LINE, NO_SNAPSHOT_LISTING, NO_SYSTEMD_LINE, NO_TEMPLATES_LINE, OPEN_SOCKET_PATH, THIS_COMPUTER, isLocalWorkspace, otherHostsMachinesLine, placeDaemonPaths, rootsPathIn, shellQuote, sshDaemonPaths, templateRecordedLine, templateSkippedLine, wspBinIn, wspPackageIn, type PlaceProvision, type PlaceView, type ProjectView, type SnapshotStorage, type DaemonKind } from "@wsp/protocol";
 import { goldenHead, writeDaemonTokenScript, type AccountOrphans, type GoldenVersion, type HereDaemon, type Runtime } from "@wsp/runtime";
 import { keyIn } from "./env-keys.js";
 import WebSocket from "ws";
@@ -1538,11 +1538,19 @@ function vaultStep(io: Pick<CliIO, "log">, vault?: () => Readonly<Record<string,
   return `${lines.filter(line => !line.includes("not held")).length} of ${lines.length} held`;
 }
 
-/** The agents the computer says stand on it, one line each by their catalog names; never a failure, since an agent
- * a person has not installed there is theirs to install and not this run's to refuse. */
+/** The agents the computer says stand on it, one line each by their catalog names, with the version that computer
+ * answered and the one word for its sign-in where it reported them; never a failure, since an agent a person has
+ * not installed there is theirs to install and not this run's to refuse. Both words are the protocol's own, so
+ * this step, the computers table and the agents block under a row cannot say them three ways, and a computer whose
+ * daemon reports neither reads as the name alone. */
 function agentsStepNote(io: Pick<CliIO, "log">, computer: PlaceView): string {
   const agents = computer.agents ?? [];
-  for (const id of agents) io.log(`${agentName(id)} on ${computer.name}`);
+  for (const id of agents) {
+    const version = computer.agentVersions?.[id];
+    const state = computer.signIns?.[id];
+    const said = [version === undefined ? undefined : agentVersionWord(version), state === undefined ? undefined : agentSignInWord(state)].filter(word => word !== undefined);
+    io.log(`${agentName(id)} on ${computer.name}${said.length === 0 ? "" : `: ${said.join(", ")}`}`);
+  }
   return agents.length === 0 ? "the computer reported no agent" : `${plural(agents.length, "agent")}`;
 }
 

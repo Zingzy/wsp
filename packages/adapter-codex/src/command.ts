@@ -29,7 +29,11 @@ export function buildEnv(options: CodexEnvOptions): Record<string, string> {
   if (!home.startsWith("/")) throw new Error(`home must be an absolute path, got "${options.home}"`);
   const clean: Record<string, string> = {};
   for (const [key, value] of Object.entries(options.base ?? {})) if (value !== undefined) clean[key] = value;
-  return { ...clean, CODEX_HOME: home, ...(options.apiKey === undefined ? {} : { OPENAI_API_KEY: options.apiKey }) };
+  // The key travels under both names. CODEX_API_KEY is the one this CLI's own login reads and prefers over the
+  // store under CODEX_HOME (read_codex_api_key_from_env, codex-rs/login/src/auth/manager.rs at rust-v0.153.0);
+  // OPENAI_API_KEY is read by a provider a person configured with env_key and by nothing in exec's own login.
+  const key: Record<string, string> = options.apiKey === undefined ? {} : { CODEX_API_KEY: options.apiKey, OPENAI_API_KEY: options.apiKey };
+  return { ...clean, CODEX_HOME: home, ...key };
 }
 
 export interface BuildCommandOptions {

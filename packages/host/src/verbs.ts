@@ -214,6 +214,7 @@ import {
   HERE_PLACE_ID,
   isLocalWorkspace,
   turnSpendWord,
+  agentsCell,
   placeDaemonBehind,
   provisionWord,
   namesPlace,
@@ -514,8 +515,11 @@ export function computerLines(places: readonly PlaceView[], platform: "darwin" |
     // The recipe on that computer: what is being put on it, then what stands and what failed. Empty on a cloud
     // and on this computer, which wsp installs nothing on.
     provisionWord(p.provision),
+    // The agents on that computer, each at the version it answered with and the word for its sign-in. Empty on a
+    // cloud account and on this computer, neither of which reports an agent.
+    agentsCell(p),
   ]);
-  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS"], ...rows]);
+  return table([["COMPUTER", "KIND", "CORES", "MEMORY", "DISK FREE", "ENGINE", "COPIES", "PRESENT", "WORKSPACES", "LAST SEEN", "BEHIND", "IMAGE", "TOOLS", "AGENTS"], ...rows]);
 }
 
 /** Columns padded to their widest cell, two spaces apart; the last column is never padded. */

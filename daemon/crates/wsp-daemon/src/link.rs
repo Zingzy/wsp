@@ -4,8 +4,9 @@
 //! Nothing here opens a port. The bytes both sides sign come from the protocol's transcript, so this file holds
 //! the place's half of the handshake and no rule of its own about how it is spelled.
 
+use std::collections::BTreeMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -24,7 +25,7 @@ use wsp_frames::{
 
 use crate::door::{self, Ended};
 use crate::ops::{Conn, Road};
-use crate::place::{self, AgentBin, ReportInput};
+use crate::place::{self, AgentBin, AgentVersions, ReportInput};
 use crate::{Ctx, Outbound};
 
 /// How long each address gets to answer the connect and each frame of the handshake.
@@ -113,6 +114,8 @@ struct Link {
     file: std::path::PathBuf,
     home: std::path::PathBuf,
     agents: Vec<AgentBin>,
+    /// Each agent's version line, held across dials and read again only where its binary moved.
+    versions: Arc<Mutex<AgentVersions>>,
     connect: Duration,
     quiet: Duration,
     refused_retry: u64,
@@ -127,6 +130,7 @@ pub(crate) async fn run(ctx: Arc<Ctx>, daemon_port: u16) {
     let link = Link {
         home: place::place_home(o.home.as_deref()),
         agents: place::parse_agents(&o.agents),
+        versions: Arc::new(Mutex::new(AgentVersions::default())),
         connect: Duration::from_millis(o.link_connect_ms.unwrap_or(CONNECT_MS)),
         quiet: Duration::from_millis(o.link_quiet_ms.unwrap_or(QUIET_MS)),
         refused_retry: o.link_refused_retry_ms.unwrap_or(REFUSED_RETRY_MS),
@@ -265,7 +269,8 @@ impl Link {
                         self.log(&words::host_key_refusal(url));
                         return self.cut(ws, Outcome::Skipped).await;
                     }
-                    let prove = match self.prove(file, url, reply.nonce.as_str(), nonce.as_str()) {
+                    let versions = self.agent_versions().await;
+                    let prove = match self.prove(file, url, reply.nonce.as_str(), nonce.as_str(), &versions) {
                         Ok(prove) => prove,
                         Err(why) => {
                             self.log(&words::link_refused(url, &why));
@@ -283,14 +288,38 @@ impl Link {
         }
     }
 
+    /// Each agent's version line as of this dial: stats every agent's binary and runs the ones that moved. On the
+    /// blocking pool, since one read is a process and a wait and the task holding this link may not stand still
+    /// for them; a pool that will not take the work leaves the report the lines it had.
+    async fn agent_versions(&self) -> BTreeMap<String, String> {
+        let held = Arc::clone(&self.versions);
+        let agents = self.agents.clone();
+        let path = std::env::var("PATH").unwrap_or_default();
+        tokio::task::spawn_blocking(move || {
+            let mut versions = held.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            versions.refresh(&agents, &path, place::VERSION_DEADLINE);
+            versions.lines()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
     /// The second frame: this place's signature over the host's transcript and its report as it stands now.
-    fn prove(&self, file: &PlaceFile, url: &str, host_nonce: &str, my_nonce: &str) -> Result<PlaceProveRequest, String> {
+    fn prove(
+        &self,
+        file: &PlaceFile,
+        url: &str,
+        host_nonce: &str,
+        my_nonce: &str,
+        agent_versions: &BTreeMap<String, String>,
+    ) -> Result<PlaceProveRequest, String> {
         let pem = std::fs::read_to_string(Path::new(&file.key_path)).map_err(|e| format!("{}: {e}", file.key_path))?;
         let report = place::place_report(&ReportInput {
             file,
             home: &self.home,
             wsp_argv: &self.ctx.options.wsp_argv,
             agents: &self.agents,
+            agent_versions,
             daemon_port: self.daemon_port,
             dialed: url,
             runtime_root: self.ctx.options.runtime_root.as_deref().unwrap_or(Path::new(wsp_runtime::DEFAULT_ROOT)),

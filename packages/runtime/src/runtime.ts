@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { isAbsolute, join, posix, resolve as resolvePathOn } from "node:path";
-import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, catalogIdOfRow, guestEnv } from "@wsp/catalog";
+import { CATALOG_AGENTS, DEFAULT_AGENT, GUEST_HOME, PATH_BOUND_DIR_NAMES, catalogIdOfRow, guestEnv, sharedLoginOf } from "@wsp/catalog";
 import {
   BUILDER_IDLE_MS,
   DAEMON_PORT,
@@ -255,6 +255,11 @@ export interface HarnessAdapterContext {
    * adapter strips every inherited CLAUDE_CODE_* off the base environment as a nesting mark, so a token merged
    * into the environment would be stripped and never reach the CLI. Empty where the host wired no vault. */
   vault: Readonly<Record<string, string>>;
+  /** Whether a login of one agent's own already stands where this workspace runs, which is what decides whether
+   * the vault's key for it is handed to the turn: a harness reads a key in its environment ahead of the login on
+   * its disk, so handing one where a person signed in would bill the key and leave that sign-in unused. Where a
+   * login lives differs by machine kind, which the adapter cannot know, so it is told from here. */
+  loginStands: (agentId: string) => boolean;
 }
 
 /** What every machine wsp runs agents on tells them, cloud fork and ssh machine alike, and this computer never does:
@@ -1918,6 +1923,12 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     homeDir: (record: WorkspaceRecord) => string | undefined;
     /** The login environment a turn of one harness runs under there, read the same way. */
     env: (entry: LiveWorkspace, agentId: string) => Readonly<Record<string, string>>;
+    /** Whether a login of this agent's own stands where this workspace runs, which decides whether the vault's key
+     * is handed to a turn at all: a harness reads a key in its environment ahead of the login on its disk, so
+     * handing one where a person signed in would bill the key and leave that login unused. Where a login lives is
+     * the kind's own: a computer somebody joined listed what it holds, this computer is read on its own disk, and
+     * an image never carries one. */
+    loginStands: (entry: LiveWorkspace, agentId: string) => boolean;
     /** How a folder on this computer gets onto a machine of this kind: packed and landed on a fork, its path recorded
      * with nothing copied on this computer, refused where no road exists yet. Answers what landed, which carries the
      * project the record gains, and the done line; the caller keeps the record and the roots file, which every road
@@ -2200,6 +2211,13 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     daemonTokens.delete(entry.machine.id);
     await daemonTokenOf(entry.machine, DAEMON_TOKEN_PATH);
   };
+  /** Whether the file one agent's shared login lives in stands under the home that agent reads on this computer.
+   * The catalog names both the home and the file, and an agent with no shared login has no file to stand. Only a
+   * login kept as a file is seen: one a tool put in this computer's keyring reads here as none. */
+  const sharedLoginUnder = (home: string, agentId: string): boolean => {
+    const shared = sharedLoginOf(CATALOG_AGENTS.find(a => a.id === agentId)?.signIn ?? { kind: "shell" });
+    return shared !== undefined && existsSync(join(home, shared.file));
+  };
   /** The place door once the host wired one; the kind's refusal when it did not, which is what every road on a kind
    * this host does not serve answers. */
   let placeDoor: PlaceDoor | undefined;
@@ -2222,6 +2240,10 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       home: (_entry, id) => cloudHome(id),
       homeDir: () => GUEST_HOME,
       env: (_entry, id) => cloudEnv(id),
+      // A fork at a provider is a copy of an image, and no sign-in is ever sealed into one, so the vault's key is
+      // what a turn there runs on. A workspace on a computer somebody joined shares that computer's own logins,
+      // and the word for each is the one its row carries.
+      loginStands: (entry, id) => entry.record.place !== undefined && placeDoor?.signInsAt(entry.record.place)?.[id] === "signed-in",
       relayed: () => true,
       // The word, not a path: the deploy writes the shim onto the machine's PATH and the binary under it carries the
       // chip in its own path, so the one stable name for a fork's wsp is the word a turn's own shell runs. It dials
@@ -2266,6 +2288,8 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             folder: record => checkoutOf(record),
             home: (_entry, id) => local.home(id),
             homeDir: () => local.homeDir,
+            // The person's own login on the computer they are sitting at, read where that agent keeps it.
+            loginStands: (_entry, id) => sharedLoginUnder(local.home(id), id),
             // The person's own login, plus the port this workspace's apps bind: every copy here shares one
             // loopback, so a copy with no port of its own would race the person's own dev server for 3000.
             env: entry => (entry.record.portBase === undefined ? local.env() : { ...local.env(), PORT: String(entry.record.portBase) }),
@@ -2320,6 +2344,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
             // answered with. The catalog's rule for both is agentHomes, the same call the local kind makes.
             home: (entry, id) => sshHome(entry, id),
             homeDir: record => loginOf(record)["HOME"],
+            // The machine is the person's own and its disk is a round trip away, so what stands there is not read
+            // from here: the vault's key is handed as it has been, and the turn's own words say when it was wrong.
+            loginStands: () => false,
             // The machine's own login, plus the flag every machine wsp runs agents on carries, whoever owns it.
             env: entry => ({ ...loginOf(entry.record), ...MACHINE_SANDBOX_ENV }),
             // A machine wsp reaches is a machine, so a request relayed from one drives it as it drives a fork. The
@@ -2671,6 +2698,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
       now: () => clock.now(),
       onStage: event => bus.emit(event),
       copyBuild: placeId => copyRows.get(placeId),
+      // The same vault a turn is launched with: the word a computer's row says about an agent's sign-in and the
+      // secrets that turn actually gets are one reading, so a row cannot say a key stands that no turn would use.
+      ...(opts.vault !== undefined ? { vault: opts.vault } : {}),
       ...(opts.placeJoinWaitMs !== undefined ? { joinWaitMs: opts.placeJoinWaitMs } : {}),
       ...(opts.placeUpdateWaitMs !== undefined ? { updateWaitMs: opts.placeUpdateWaitMs } : {}),
       ...(opts.placeDialWaitMs !== undefined ? { dialWaitMs: opts.placeDialWaitMs } : {}),
@@ -5522,6 +5552,7 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
         })(),
         signInRefusal: signInRefusalLine({ kind: entry.record.kind }),
         vault: opts.vault?.() ?? {},
+        loginStands: id => kind.loginStands(entry, id),
       }),
     };
   };

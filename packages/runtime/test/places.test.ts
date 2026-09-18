@@ -3,7 +3,7 @@
 // records and links the door holds, the workspace a join records, and the two
 // ops a person's own socket reaches. The signatures here are real ed25519
 // ones, so what the door verifies is what a place would send.
-import { createHash, createPrivateKey, randomBytes, sign } from "node:crypto";
+import { createHash, createPrivateKey, randomBytes, randomUUID, sign } from "node:crypto";
 import { connect as netConnect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import type WebSocket from "ws";
@@ -18,6 +18,7 @@ import {
   PLACE_LINK_NONCE_BYTES,
   DAEMON_VERSION,
   placeBehindLine,
+  agentsCell,
   placeDaemonBehind,
   placeServesDaemonLine,
   noHostCliLine,
@@ -50,12 +51,13 @@ import {
   type PlaceStageEvent,
   type PlaceReport,
   type PlaceView,
+  type TurnResult,
 } from "@wsp/protocol";
 import { MCP_SERVERS_JSON } from "@wsp/catalog";
-import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type PlaceBackends, type Runtime } from "../src/runtime.js";
+import { copyKey, createRuntime, wiredPlace, type GoldenRecipe, type HarnessAdapterFactory, type PlaceBackends, type Runtime } from "../src/runtime.js";
 import { COPY_RECIPE, dfOk, recipeWith } from "./image-fixtures.js";
 import { NoProviderBackend, keyFingerprint, type Machine, type MachineBackend, type ProvisionPlan } from "@wsp/engine";
-import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
+import { NO_PLACE_UPDATER, PROVISION_HOST_STOPPED, PlaceLoginRefusedError, PlaceProvisioningError, type PlaceRecord, newPlaceKeyPair, signInsOf, placeLoginRoadLine, placeSweptOverLinkLine, placeSweptOverSshLine, type PlaceDialler, type PlaceInstallRequest, type PlaceKeyPair, type PlaceLeaveRequest, type PlaceLeaver, type PlaceLogin, type PlaceProvisioner, type PlaceUpdateRequest, type PlaceUpdater, type PlaceWiring } from "../src/places.js";
 import { serveRuntime, type RuntimeServer } from "../src/serve.js";
 import { memoryStore, type Store } from "../src/store.js";
 import { stubBackend, createOn, projectOn } from "./stub-backend.js";
@@ -101,13 +103,14 @@ const report = (name = "old-macbook", over: Partial<PlaceReport> = {}): PlaceRep
   ...over,
 });
 
-async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
+async function serving(opts: { provider?: { id: string; rateUsdPerHour: number }; store?: Store; relinkWaitMs?: number; update?: PlaceUpdater; updateWaitMs?: number; leave?: PlaceLeaver; vault?: Record<string, string> } = {}): Promise<{ hostKey: PlaceKeyPair; store: Store }> {
   const store = opts.store ?? memoryStore();
   const hostKey = newPlaceKeyPair();
   runtime = createRuntime({
     backend: stubBackend(),
     store,
     adapters: {},
+    ...(opts.vault === undefined ? {} : { vault: () => opts.vault! }),
     placeLinks: { ...wiring(hostKey, opts.provider, opts.update), ...(opts.leave === undefined ? {} : { leave: opts.leave }) },
     ...(opts.relinkWaitMs !== undefined ? { placeRelinkWaitMs: opts.relinkWaitMs } : {}),
     ...(opts.updateWaitMs !== undefined ? { placeUpdateWaitMs: opts.updateWaitMs } : {}),
@@ -627,6 +630,48 @@ describe("a channel to the daemon on a computer you own", () => {
     const refused = await ticketed.request("daemon.open", { placeId });
     expect(refused.ok).toBe(false);
     expect(refused["error"]).toBe(PLACES_TICKET_REFUSAL);
+  });
+});
+
+describe("what stands for each agent on a computer you own", () => {
+  const withAgents = (over: Partial<PlaceReport> = {}) => report("spoo", { agents: ["claude", "codex"], ...over });
+
+  it("reads a login off the files that computer listed, else the vault's variable, else nothing", () => {
+    const signedIn = signInsOf(withAgents({ logins: ["codex/auth.json"] }), {});
+    // Codex signed in on the box itself: that file is what every workspace there shares.
+    expect(signedIn).toEqual({ claude: "none", codex: "signed-in" });
+    // Claude Code keeps no login on a machine at all, so the vault's token or key is the whole of its sign-in there.
+    expect(signInsOf(withAgents({ logins: [] }), { ANTHROPIC_API_KEY: "sk-ant-x" })).toEqual({ claude: "vault-key", codex: "none" });
+    expect(signInsOf(withAgents({ logins: [] }), { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-x" })).toEqual({ claude: "vault-key", codex: "none" });
+    expect(signInsOf(withAgents({ logins: [] }), { OPENAI_API_KEY: "sk-x" })).toEqual({ claude: "none", codex: "vault-key" });
+    // A login on the computer wins over a key this host holds, which is the order a turn there is handed.
+    expect(signInsOf(withAgents({ logins: ["codex/auth.json"] }), { OPENAI_API_KEY: "sk-x" })?.codex).toBe("signed-in");
+    // A folder with no file under it is no login: the name the row shares is what has to be there.
+    expect(signInsOf(withAgents({ logins: ["gemini/oauth_creds.json"] }), {})?.codex).toBe("none");
+  });
+
+  it("says nothing at all about a computer whose daemon lists no logins, which is unknown and not none", () => {
+    expect(signInsOf(withAgents(), {})).toBeUndefined();
+  });
+
+  it("puts the versions that computer reported and the word for each agent on its row", async () => {
+    const { hostKey } = await serving({ vault: { ANTHROPIC_API_KEY: "sk-ant-x" } });
+    const sent = withAgents({ logins: [], agentVersions: { claude: "2.1.270 (Claude Code)", codex: "codex-cli 0.153.0" } });
+    const { client } = await join(hostKey, { code: await code(), report: sent });
+    const row = (await placesOf()).find(p => p.name === "spoo")!;
+    expect(row.agentVersions).toEqual(sent.agentVersions);
+    expect(row.signIns).toEqual({ claude: "vault-key", codex: "none" });
+    expect(agentsCell(row)).toBe("claude 2.1.270 your key · codex 0.153.0 not signed in");
+    client.close();
+  });
+
+  it("leaves both off the row of a computer running a daemon older than they are", async () => {
+    const { hostKey } = await serving();
+    const { client } = await join(hostKey, { code: await code(), report: withAgents() });
+    const row = (await placesOf()).find(p => p.name === "spoo")!;
+    expect(row.agentVersions).toBeUndefined();
+    expect(row.signIns).toBeUndefined();
+    client.close();
   });
 });
 
@@ -1954,6 +1999,35 @@ describe("a fork on a computer you joined", () => {
     expect(named.golden).toBe("");
     // Nothing was forked at this host's own provider for either, which is where a copy would have been built.
     expect(backend.machines).toHaveLength(0);
+  });
+
+  it("tells a turn there which agents already hold a login on that computer, so the vault's key goes only where none does", async () => {
+    const asked: Record<string, boolean>[] = [];
+    const factory: HarnessAdapterFactory = ctx => {
+      asked.push({ claude: ctx.loginStands("claude"), codex: ctx.loginStands("codex") });
+      return {
+        steers: false,
+        start: ({ onEvent }) => {
+          const sessionId = randomUUID();
+          const result: TurnResult = { status: "completed", text: "ok" };
+          onEvent({ type: "session.start", sessionId });
+          onEvent({ type: "turn.done", sessionId, result });
+          onEvent({ type: "session.end", sessionId, exitCode: 0, sawResult: true });
+          return { localId: sessionId, finished: Promise.resolve(result), interrupt: async () => {} };
+        },
+      };
+    };
+    const hostKey = newPlaceKeyPair();
+    runtime = createRuntime({ backend: stubBackend(), store: memoryStore(), adapters: { claude: factory }, placeLinks: wiring(hostKey) });
+    srv = await serveRuntime(runtime, { port: 0, authToken: "host-token", devices: runtime.devices });
+    const signedIn = report("srv", { agents: ["claude", "codex"], logins: ["codex/auth.json"] });
+    const { client } = await join(hostKey, { code: await code(), report: signedIn, answers: c => forks(c, undefined, undefined, KEEPS_NO_IMAGE) });
+    sockets.push(client.ws);
+    const ws = await createOn(runtime, { name: "x", on: "srv" });
+    await (await runtime.sessions.start(ws.id, { prompt: "one", harness: "claude" })).finished;
+    // Codex signed in there wins over any key this host holds; Claude Code keeps no login on a machine, so the
+    // vault is the whole of its sign-in and nothing stands against it.
+    expect(asked.at(-1)).toEqual({ claude: false, codex: true });
   });
 
   it("still names the image where the computer keeps them: a fork at this host's own provider carries the template its version was promoted to", async () => {
