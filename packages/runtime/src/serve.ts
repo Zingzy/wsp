@@ -19,8 +19,8 @@ import {
   DOCTOR_UNSERVED,
   doctorRowRefusal,
   doctorRunningLine,
-  HERE_PLACE_ID,
   HOST_STOPPING_CLOSE,
+  isJoinedComputer,
   LOOPBACK,
   PAIR_CODE_REFUSAL,
   PAIR_CODE_TTL_MS,
@@ -525,7 +525,7 @@ export async function serveRuntime(rt: Runtime, opts: ServeOptions): Promise<Run
               // The road makes a workspace on a computer somebody joined and reads the tools inside it: the row for
               // the computer this host runs on and a provider's row are proved where the line was typed, so they
               // are refused here rather than failing at the first step of a road they were never for.
-              if (row.kind !== "computer" || row.id === HERE_PLACE_ID) {
+              if (!isJoinedComputer(row)) {
                 send({ id: msg.id, ok: false, error: doctorRowRefusal(row.name), kind: "usage" });
                 return;
               }

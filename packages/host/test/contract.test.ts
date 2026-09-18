@@ -24,7 +24,7 @@ import { placeWiring } from "../src/places.js";
 import { hostTokenPath, lockPathFor } from "../src/host-lock.js";
 import { mcpServer } from "../src/mcp.js";
 import type { HostHandle } from "../src/server.js";
-import { CLI_VERBS, hasTool, noHostServingLine, type HostClient } from "../src/verbs.js";
+import { CLI_VERBS, hasTool, noHostServingLine, type DialOpts, type HostClient } from "../src/verbs.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend, type StubBackend } from "./stub-backend.js";
 import { ASKS, EXPORT_SOURCE, PAGE, SCRIPTED_ASK, bornDeadAgent, captured, execGuest, exportGuest, scriptedAgent, type Captured } from "./verbs-fixture.js";
@@ -64,13 +64,20 @@ function fakeDoctorHost(o: { code?: number; lines?: readonly (readonly [string, 
     close: () => void closed++,
     terminate: () => void closed++,
   };
+  const dialled: { statePath: string; aim: unknown }[] = [];
   return {
     asked,
     doctored,
+    dialled,
     get closed() {
       return closed;
     },
-    deps: { dial: async () => client as unknown as HostClient },
+    deps: {
+      dial: async (statePath: string, opts: DialOpts) => {
+        dialled.push({ statePath, aim: opts.aim });
+        return client as unknown as HostClient;
+      },
+    },
   };
 }
 
@@ -488,6 +495,16 @@ describe("the agent contract on the command line and the tool door", () => {
     // Nothing of the road ran here: no runtime of this line's own touched the state file.
     expect(existsSync(fresh)).toBe(false);
     expect(host.closed).toBe(1);
+  });
+
+  it("dials the host on this computer for that road, whatever the environment names and whatever alias is the default", async () => {
+    const host = fakeDoctorHost();
+    const fresh = join(dir, "aimed-here.json");
+    // A turn's launch environment names the host that started it, and a person may have set a default alias; this
+    // line proves a computer whose link only the host on this computer holds, so neither moves where it dials.
+    expect(await cli(["doctor", "spoo", "--state", fresh], captured(), undefined, { ...process.env, WSP_HOST: "somewhere-else" }, false, {}, host.deps)).toBe(0);
+    expect(host.dialled).toEqual([{ statePath: fresh, aim: { kind: "here" } }]);
+    expect(host.doctored).toEqual([{ placeId: "p_1" }]);
   });
 
   it("asks for a provider key on the doctor road that forks at one and on no other", () => {

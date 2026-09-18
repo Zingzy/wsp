@@ -27,7 +27,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { type AppPorts, authority, authRefusal, HERE_PLACE_ID, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { type AppPorts, authority, authRefusal, isJoinedComputer, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -89,7 +89,7 @@ import { publicHostname, readRelayRecord, relayCommand, relayOnLoopbackLine, sta
 import { aimAddress, aimName, DEFAULT_HOME, type HostPick, namedHost, stateIgnoredLine, wspHome } from "./hosts.js";
 import { currentHome, currentHomePointer, defaultHomeIn, homeNamed, realState, servingHome } from "./serving-home.js";
 import { advertiseWord, devicesCommand, hostReach, pairCommand } from "./pairing.js";
-import { addCommand, addFlags, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
+import { addCommand, addFlags, dialHere, joinCommand, leaveCommand, placeWiring, removeCommand } from "./places.js";
 import { startHost, workspaceRoads, type HostDoctorReaders, type HostHandle } from "./server.js";
 import { choosePorts, type PortProbes } from "./ports.js";
 import { serveMcp } from "./mcp.js";
@@ -555,16 +555,13 @@ export function localWiring(
     },
     close: async () => {
       shutting = true;
-      // The turns running here are let go of before the daemon: each leads a process group of its own and its log
-      // is on this computer, so what comes next re-opens them, and a poll nobody stopped would hold this process
-      // open until the turn ended.
+      // The turns running here are not ended: each leads a process group of its own and reads its own log off this
+      // computer, so the host that comes next re-opens them and their replies still land. What this host holds open
+      // is the reading of those runs and the daemon, and that is what closing it frees.
       for (const stop of [...reading]) stop();
       reading.clear();
       const started = daemon.held();
       daemon.forget();
-      // The turns running here are not ended: each leads a process group of its own and reads its own log off this
-      // computer, so the host that comes next re-opens them and their replies still land. What this host holds open
-      // is the daemon, and that is what closing it frees.
       await started?.then(d => d.close(), () => {});
     },
   };
@@ -2020,7 +2017,9 @@ const COMMANDS: Readonly<Record<string, Command>> = {
           handles(computer?.kind === "provider" ? "the cloud road" : "the local road");
         }
       };
-      const dialling = { home: opts.home, env: opts.env, say: (line: string): void => io.error(line), ...(opts.start !== undefined ? { start: opts.start } : {}) };
+      // This computer's own host and no other: the word in the environment and the default alias name hosts that
+      // hold no link to the computers this line proves, and --host is refused on this line for the same reason.
+      const dialling = dialHere(io, opts);
       // With no word: this computer first, on a runtime of this terminal's own and closed before anything else,
       // then every computer joined to this one, each on the host that holds its link.
       if (word === undefined) {
@@ -2039,14 +2038,16 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // map of links the process it dialled is holding and a fresh runtime here holds none. A host is started for
       // it where none serves, the way wsp add --update starts one.
       const client = await deps.dial(opts.statePath, dialling);
-      let computer: PlaceView;
+      let computer: PlaceView | undefined;
       try {
         computer = doctorRow((await client.request<{ places: PlaceView[] }>("places.list")).places, word);
         // A computer somebody joined is proved on the host holding its link, which prints what that host says.
-        if (computer.kind === "computer" && computer.id !== HERE_PLACE_ID) return await hostDoctor(client, io, computer, project);
+        if (isJoinedComputer(computer)) return await hostDoctor(client, io, computer, project);
       } finally {
         client.close();
-        handles("the computer road");
+        // Named for the road that was walked: a word that turned out to be this computer's own row or a cloud row
+        // read the list over this socket and then took a road of the terminal's own, which says its own line.
+        if (computer !== undefined && isJoinedComputer(computer)) handles("the computer road");
       }
       return terminalRoad(computer);
     },

@@ -3548,6 +3548,11 @@ export const noSuchPlaceRefusal = (word: string, held: readonly string[]): strin
  * road that takes a place word makes, so a list, a frame and a typed word cannot disagree about which place. */
 export const namesPlace = (place: { id: string; name: string }, word: string): boolean => word === place.id || word === place.name;
 
+/** Whether a row is a computer somebody joined to this wsp: a computer, and not the one the host runs on, whose
+ * files and threads are that host's own. The one reading, so the road that runs on the link, the road at the
+ * terminal and the list of places a fork could stand on cannot disagree about which rows are those computers. */
+export const isJoinedComputer = (place: { id: string; kind: string }): boolean => place.kind === "computer" && place.id !== HERE_PLACE_ID;
+
 /** What a build of the image at a place that cannot take one is refused with: a copy needs a builder forked there
  * and that builder's disk copied, and a computer somebody joined does neither. */
 export const placeBuildsNoImageLine = (place: string): string =>
