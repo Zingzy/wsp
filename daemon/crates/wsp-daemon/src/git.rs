@@ -287,9 +287,19 @@ pub(crate) mod recorded {
 
         /// What the next call answers with, in the order they are given.
         pub(crate) fn answering(self, answers: Vec<(i32, &str)>) -> Recorded {
+            self.answering_said(answers.into_iter().map(|(code, out)| (code, out, "")).collect())
+        }
+
+        /// The same, for the cases that read what a program said on stderr as well as what it exited with.
+        pub(crate) fn answering_said(self, answers: Vec<(i32, &str, &str)>) -> Recorded {
             *self.answers.lock().unwrap() = answers
                 .into_iter()
-                .map(|(code, out)| GitResult { code: Some(code), stdout: out.as_bytes().to_vec(), stderr: String::new(), truncated: false })
+                .map(|(code, out, err)| GitResult {
+                    code: Some(code),
+                    stdout: out.as_bytes().to_vec(),
+                    stderr: err.to_owned(),
+                    truncated: false,
+                })
                 .collect();
             self
         }

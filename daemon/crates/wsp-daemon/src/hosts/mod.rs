@@ -27,6 +27,12 @@ pub(crate) trait PullRequests: Sync {
     /// The pull request one of those lines answered with, off its JSON and never its prose; nothing where the JSON
     /// is not one this module reads.
     fn read(&self, stdout: &str) -> Option<PullRequest>;
+    /// The exit code that program answers with when it is there and nobody is signed in, where it has one of its
+    /// own. Read off the code and not the sentence: a sentence is the program's to reword between releases.
+    fn sign_in_exit(&self) -> Option<i32>;
+    /// What gives this computer a git credential for the host, in the words of the one command only the person can
+    /// run. Said beside a push refused for want of one; a host with no module here says none of it.
+    fn credential_fix(&self) -> &'static str;
 }
 
 /// Every git host wsp knows a command line for.
@@ -77,14 +83,21 @@ async fn cli_for<R: Runs>(runner: &R, ask: &Ask<'_>) -> Result<&'static dyn Pull
 
 /// One host command line, run the way the runner runs a program: in the checkout, at the work score every command
 /// of ours runs at, with nothing of the line interpolated into a shell.
+///
+/// A program that is there and answers its own not-signed-in code is the same refusal a program that is not there
+/// at all is: the push has landed either way and the pull request waits for a signed-in command line. Decided
+/// here, so looking one up and opening one answer it alike.
 async fn run_cli<R: Runs>(
     runner: &R,
     host: &'static dyn PullRequests,
     ask: &Ask<'_>,
     args: &[String],
 ) -> Result<(Option<i32>, String, String), OpError> {
-    let words: Vec<&str> = args.iter().map(String::as_str).collect();
-    let done = runner.run(ask.cwd, host.program(), &words, None, None).await?;
+    let line: Vec<&str> = args.iter().map(String::as_str).collect();
+    let done = runner.run(ask.cwd, host.program(), &line, None, None).await?;
+    if done.code.is_some() && done.code == host.sign_in_exit() {
+        return Err(OpError::coded(DaemonErrorCode::NoHostCli, words::no_host_cli(host.host())));
+    }
     Ok((done.code, String::from_utf8_lossy(&done.stdout).into_owned(), done.stderr))
 }
 
@@ -238,6 +251,42 @@ mod tests {
         let err = open(&bare, &ask, "main", None, None).await.unwrap_err();
         assert_eq!((err.code, err.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));
         assert!(bare.asked().is_empty(), "a computer with no gh ran something");
+    }
+
+    /// What gh prints on a box it is on and nobody has signed it in, measured on spoo on 2026-09-18: its own
+    /// authentication-required code, and a sentence it is free to reword, which is why the code is what is read.
+    const SIGN_IN_SAID: &str = "To get started with GitHub CLI, please run:  gh auth login";
+
+    #[tokio::test]
+    async fn a_gh_that_is_there_and_not_signed_in_reads_as_a_gh_that_is_not_there() {
+        let ask = Ask { cwd: Path::new("/private/tmp/proof/repo"), remote_url: "git@github.com:o/r.git", branch: "work" };
+        // Looking one up and opening one answer alike, and the open never reaches its create.
+        for runner in [
+            Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]),
+            Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID)]),
+        ] {
+            let found = find(&runner, &ask).await.unwrap_err();
+            assert_eq!((found.code, found.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));
+        }
+        let runner = Recorded::new(&["gh"]).answering_said(vec![(4, "", SIGN_IN_SAID), (4, "", SIGN_IN_SAID)]);
+        let opened = open(&runner, &ask, "main", None, None).await.unwrap_err();
+        assert_eq!((opened.code, opened.message.as_str()), (Some(DaemonErrorCode::NoHostCli), words::no_host_cli("github.com").as_str()));
+        let calls = runner.asked();
+        assert_eq!(calls.len(), 1, "a gh nobody is signed in on was asked to create a pull request");
+        assert_eq!(calls[0].args, ["pr", "view", "work", "--json", "number,url,state"]);
+    }
+
+    #[tokio::test]
+    async fn a_gh_that_refused_for_any_other_reason_still_says_what_it_said() {
+        let ask = Ask { cwd: Path::new("/private/tmp/proof/repo"), remote_url: "git@github.com:o/r.git", branch: "work" };
+        let runner = Recorded::new(&["gh"])
+            .answering_said(vec![(1, "", "no pull requests found for branch"), (1, "", "could not create pull request")]);
+        let refused = open(&runner, &ask, "main", None, None).await.unwrap_err();
+        assert_eq!(refused.code, None);
+        assert_eq!(refused.message, "gh said: could not create pull request");
+        // And a branch with no pull request is still a branch with no pull request rather than a refusal.
+        let quiet = Recorded::new(&["gh"]).answering_said(vec![(1, "", "no pull requests found for branch")]);
+        assert_eq!(find(&quiet, &ask).await.unwrap(), None);
     }
 
     #[tokio::test]

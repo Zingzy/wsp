@@ -10,8 +10,8 @@ use ed25519_dalek::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest as _, Sha256};
 use wsp_frames::{
-    numbers, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile, PlacePublicKey, PlaceReport, PlaceSignature, Platform,
-    WorkspaceSize,
+    landed_files_script, numbers, own_marks, place_daemon_paths, place_owned_paths, words, Base64Bytes, PlaceFile, PlacePublicKey,
+    PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
 use wsp_runtime::doctor::on_path;
 
@@ -162,10 +162,36 @@ pub(crate) fn place_report(input: &ReportInput<'_>) -> PlaceReport {
     }
 }
 
-/// Takes wsp off this computer, by the one list the protocol names, and answers what went. A path is there when it
-/// exists as a link or a file, since the browser name is a symlink whose target may already be gone.
-pub(crate) fn sweep_place_home(home: &Path) -> Vec<String> {
+/// The ownership read as this computer runs it: the one script text the engine renders, through a plain sh. Handed
+/// in rather than run from inside the sweep so a case can read the script that was run and when it was run.
+pub(crate) fn sh_stdout(script: &str) -> String {
+    std::process::Command::new(SH)
+        .arg("-c")
+        .arg(script)
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+        .unwrap_or_default()
+}
+
+/// By its own path: the script is POSIX sh, and a daemon under a service unit holds almost no PATH to find one on.
+const SH: &str = "/bin/sh";
+
+/// Takes wsp off this computer and answers what went: first every file wsp itself landed in the agents' homes here
+/// whose bytes are still the ones wsp left, read by the one ownership script, then the paths the protocol names, in
+/// its order. The read comes first because the list it reads sits in the provision folder that walk takes. A path
+/// is there when it exists as a link or a file, since the browser name is a symlink whose target may already be
+/// gone. A file the person has written since is on no line of that read and stays.
+pub(crate) fn sweep_place_home(home: &Path, read: &dyn Fn(&str) -> String) -> Vec<String> {
     let mut removed = Vec::new();
+    for rel in own_marks(&read(&landed_files_script(home))) {
+        let path = home.join(&rel);
+        if std::fs::remove_file(&path).is_ok() {
+            removed.push(path.to_string_lossy().into_owned());
+            if let Some(parent) = path.parent() {
+                prune_empty(home, parent);
+            }
+        }
+    }
     for path in place_owned_paths(home) {
         let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
         let gone = if meta.is_dir() { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
@@ -174,6 +200,21 @@ pub(crate) fn sweep_place_home(home: &Path) -> Vec<String> {
         }
     }
     removed
+}
+
+/// The folders wsp's own files left empty, taken from the file's own upwards. Never the first folder under the
+/// home: ~/.claude-cfg and ~/.codex are the agents' own to make and to keep, whatever wsp put inside them.
+fn prune_empty(home: &Path, from: &Path) {
+    let mut at = from;
+    while at != home && at.starts_with(home) && at.parent() != Some(home) {
+        if std::fs::remove_dir(at).is_err() {
+            return;
+        }
+        match at.parent() {
+            Some(parent) => at = parent,
+            None => return,
+        }
+    }
 }
 
 /// Where the parts of an update are appended while they arrive: under the place's own put folder, named after the
@@ -502,6 +543,117 @@ mod tests {
         assert!(running_daemon(Err(std::io::Error::other("no /proc"))).unwrap_err().contains("which file it runs from"));
     }
 
+    /// The bytes of the three files the committed ledger names, in its order: what the run that landed them put
+    /// there, so the read that hashes a file against the ledger's third column answers for the first two.
+    const LANDED_BYTES: [&str; 3] = ["the skill wsp landed\n", "{\"wsp\":true}\n", "wsp = true\n"];
+
+    /// The ledger both sides' cases build a fake home from, as rows of (home-relative path, the bytes wsp left).
+    fn ledger_rows() -> Vec<(String, String)> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/contract/landed.tsv");
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let rows: Vec<(String, String)> = text
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .zip(LANDED_BYTES)
+            .map(|(line, bytes)| {
+                let fields: Vec<&str> = line.split('\t').collect();
+                let standing = fields[2];
+                let held: String = Sha256::digest(bytes.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+                assert_eq!(standing, held, "landed.tsv names bytes for {} that this case does not write", fields[0]);
+                (fields[0].to_owned(), bytes.to_owned())
+            })
+            .collect();
+        assert_eq!(rows.len(), LANDED_BYTES.len(), "landed.tsv holds a line per set of bytes here");
+        rows
+    }
+
+    /// A home with the ledger and what it names: the first two files as wsp left them, the third rewritten by the
+    /// person since, and one file of theirs no line names.
+    fn home_with_landed_files() -> (tempfile::TempDir, Vec<(String, String)>) {
+        let home = tempfile::tempdir().unwrap();
+        let rows = ledger_rows();
+        let at = place_daemon_paths(home.path());
+        std::fs::create_dir_all(&at.wsp).unwrap();
+        let provision = wsp_frames::place_provision_paths(home.path());
+        std::fs::create_dir_all(&provision.dir).unwrap();
+        let tsv = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/contract/landed.tsv");
+        std::fs::copy(&tsv, &provision.landed).unwrap();
+        for (index, (rel, bytes)) in rows.iter().enumerate() {
+            let path = home.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, if index + 1 == rows.len() { "the person wrote this\n" } else { bytes }).unwrap();
+        }
+        std::fs::write(home.path().join(".claude/theirs.md"), "mine\n").unwrap();
+        (home, rows)
+    }
+
+    /// sh with a sha256sum to find: BSD carries none on every release, and the script the leave runs is the
+    /// engine's own, which hashes with it.
+    fn with_sha256sum() -> (tempfile::TempDir, impl Fn(&str) -> String) {
+        let bin = tempfile::tempdir().unwrap();
+        let shim = bin.path().join("sha256sum");
+        std::fs::write(&shim, "#!/bin/sh\nexec shasum -a 256 \"$@\"\n").unwrap();
+        std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        // Last on the PATH, so a computer with the real one runs that and the shim is there for one that has none.
+        let path = format!("{}:{}", std::env::var("PATH").unwrap_or_default(), bin.path().to_string_lossy());
+        let read = move |script: &str| {
+            let out = std::process::Command::new("/bin/sh").arg("-c").arg(script).env("PATH", &path).output().unwrap();
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        };
+        (bin, read)
+    }
+
+    #[test]
+    fn the_leave_takes_wsps_own_landed_files_and_keeps_the_one_the_person_changed() {
+        let (home, rows) = home_with_landed_files();
+        let (_bin, read) = with_sha256sum();
+        let swept = sweep_place_home(home.path(), &read);
+        let took = |rel: &str| swept.contains(&home.path().join(rel).to_string_lossy().into_owned());
+        // The two whose bytes are still wsp's go and are named; the one the person rewrote is on no line of the
+        // read, so it stays and the leave says nothing about it.
+        for (rel, _) in rows.iter().take(2) {
+            assert!(!home.path().join(rel).exists(), "{rel}");
+            assert!(took(rel), "{swept:?}");
+        }
+        let (kept, _) = rows.last().unwrap();
+        assert!(home.path().join(kept).exists(), "{kept}");
+        assert!(!took(kept), "{swept:?}");
+        // A folder wsp's own files left empty goes with them, up to but not into the folder the agent itself owns.
+        assert!(!home.path().join(".claude/skills").exists());
+        assert!(home.path().join(".claude").is_dir());
+        assert!(home.path().join(".codex").is_dir());
+        assert_eq!(std::fs::read_to_string(home.path().join(".claude/theirs.md")).unwrap(), "mine\n");
+        // And wsp's own folder is gone whole, the provision folder and the ledger inside it with it.
+        assert!(!place_daemon_paths(home.path()).wsp.exists());
+        assert!(swept.contains(&place_daemon_paths(home.path()).wsp.to_string_lossy().into_owned()));
+    }
+
+    #[test]
+    fn the_ledger_is_read_before_the_folder_that_holds_it_goes() {
+        let (home, rows) = home_with_landed_files();
+        let ledger = wsp_frames::place_provision_paths(home.path()).landed;
+        let (_bin, read) = with_sha256sum();
+        // The one thing the order buys: at the moment the read runs, the list it reads is still there.
+        let ledger_at_read = ledger.clone();
+        let watched = move |script: &str| {
+            assert!(ledger_at_read.exists(), "the ownership read ran after the folder holding the ledger had gone");
+            read(script)
+        };
+        sweep_place_home(home.path(), &watched);
+        assert!(!ledger.exists());
+        assert!(!home.path().join(&rows[0].0).exists());
+    }
+
+    #[test]
+    fn a_home_with_no_ledger_loses_nothing_of_the_persons() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".claude/skills/wsp")).unwrap();
+        std::fs::write(home.path().join(".claude/skills/wsp/SKILL.md"), "theirs\n").unwrap();
+        let (_bin, read) = with_sha256sum();
+        assert!(sweep_place_home(home.path(), &read).is_empty());
+        assert!(home.path().join(".claude/skills/wsp/SKILL.md").exists());
+    }
+
     #[test]
     fn the_sweep_takes_what_is_there_in_the_protocols_order_and_leaves_the_work_folder() {
         let home = tempfile::tempdir().unwrap();
@@ -515,17 +667,23 @@ mod tests {
         std::os::unix::fs::symlink("/nonexistent/wsp-open", at.bin_dir.join("xdg-open")).unwrap();
         let work = home.path().join("wsp-work");
         std::fs::create_dir_all(&work).unwrap();
-        let swept = sweep_place_home(home.path());
-        let names: Vec<_> = [&at.place_file, &at.place_key, &at.dir, &at.token_path, &at.bin_dir.join("xdg-open")]
+        // A stray file under wsp's own folder that no row above names, as two boxes were found holding: the
+        // folder goes whole, last, so a leave leaves no .wsp at all.
+        std::fs::write(at.wsp.join("place.json.bak-747"), "old").unwrap();
+        std::fs::create_dir_all(&at.put_dir).unwrap();
+        std::fs::write(at.put_dir.join("797"), "half an update").unwrap();
+        let swept = sweep_place_home(home.path(), &|_| String::new());
+        let names: Vec<_> = [&at.place_file, &at.place_key, &at.dir, &at.token_path, &at.bin_dir.join("xdg-open"), &at.wsp]
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
         assert_eq!(swept, names);
+        assert!(!at.wsp.exists());
         for path in [&at.place_file, &at.place_key, &at.dir, &at.token_path] {
             assert!(!path.exists(), "{}", path.display());
         }
         assert!(std::fs::symlink_metadata(at.bin_dir.join("xdg-open")).is_err());
         assert!(work.exists());
-        assert!(sweep_place_home(home.path()).is_empty());
+        assert!(sweep_place_home(home.path(), &|_| String::new()).is_empty());
     }
 }

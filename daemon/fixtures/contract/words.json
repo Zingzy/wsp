@@ -19,6 +19,8 @@
   "nothingAhead": "{branch} has no commits that {base} lacks, so there is nothing to bring back",
   "noRemote": "this project has no remote to push to",
   "noHostCli": "no signed-in command line for {host} is on this computer; the branch is pushed and the pull request waits for one",
+  "noGitCredential": "this computer has no git credential for {host}, so nothing was pushed; {fix}, then bring back again",
+  "noGitCredentialNoFix": "this computer has no git credential for {host}, so nothing was pushed",
   "hostKeyRefusal": "the host at {url} did not prove the key this computer learned at join; nothing was sent to it",
   "listening": "wsp-daemon listening on {host}:{port}",
   "sysSamplerStarted": "sys sampler started",

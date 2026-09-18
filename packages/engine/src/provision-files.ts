@@ -270,12 +270,20 @@ export async function landAgentFiles(machine: Machine, o: { home: string; tar: B
 export async function landedFiles(machine: Machine, home: string): Promise<Map<string, "present">> {
   const res = await machine.run(landedFilesScript(home), { deadlineMs: LAND_MS }).catch(() => undefined);
   if (res === undefined || res.exitCode !== 0) return new Map();
-  return new Map(
-    res.stdout.split("\n").flatMap(line => {
-      const words = line.split("\t");
-      return words[0] === OWN_MARK && words.length > 1 ? [[`${home}/${words.slice(1).join("\t")}`, "present"] as const] : [];
-    }),
-  );
+  return new Map(ownMarks(res.stdout).map(rel => [`${home}/${rel}`, "present"] as const));
+}
+
+/** The paths that read answered with, home-relative and in the order the list named them. A line that is not the
+ * mark's is not an answer: a path of the person's holding a newline prints lines this never reads as its own, and a
+ * path that is not plainly under the home is no path of wsp's, whatever a list says. Read by the MCP edit through
+ * landedFiles above and by the leave, which runs the same script on the computer itself. */
+export function ownMarks(stdout: string): string[] {
+  return stdout.split("\n").flatMap(line => {
+    const words = line.split("\t");
+    const rel = words.slice(1).join("\t");
+    if (words[0] !== OWN_MARK || rel === "" || rel.startsWith("/") || rel.split("/").includes("..")) return [];
+    return [rel];
+  });
 }
 
 /** The files round of the job: the archive read off this computer and landed on that one, with a row per planned

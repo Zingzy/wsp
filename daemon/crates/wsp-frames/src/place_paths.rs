@@ -57,8 +57,38 @@ pub fn place_daemon_paths(home: &Path) -> PlaceDaemonPaths {
     }
 }
 
-/// Every path a leave takes off a place, in the order the protocol's placeOwnedPaths names them. The work folder
-/// is not here: what the person's threads wrote there is theirs.
+/// What the job that puts the recipe on a computer the person owns keeps there, as the protocol's
+/// placeProvisionPaths lays it out: all of it under the one folder wsp already owns on that computer, so a
+/// workspace there never sees it and one sweep takes the lot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaceProvisionPaths {
+    pub dir: PathBuf,
+    pub run_dir: PathBuf,
+    pub log: PathBuf,
+    pub result: PathBuf,
+    pub staging: PathBuf,
+    /// What wsp put in the agents' homes there and what it left there, so a leave and a later run tell wsp's own
+    /// copy from a file the person has since written.
+    pub landed: PathBuf,
+    pub landing: PathBuf,
+}
+
+pub fn place_provision_paths(home: &Path) -> PlaceProvisionPaths {
+    let dir = place_daemon_paths(home).wsp.join("provision");
+    PlaceProvisionPaths {
+        run_dir: dir.join("run"),
+        log: dir.join("log"),
+        result: dir.join("result.json"),
+        staging: dir.join("files"),
+        landed: dir.join("landed"),
+        landing: dir.join("landing"),
+        dir,
+    }
+}
+
+/// Every path a leave takes off a place, in the order the protocol's placeOwnedPaths names them: the parts first,
+/// each for the line it puts in front of a person reading the leave, then wsp's own folder whole, which takes
+/// whatever no part above names. The work folder is not here: what the person's threads wrote there is theirs.
 pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
     let at = place_daemon_paths(home);
     vec![
@@ -66,6 +96,7 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.place_key,
         at.place_log,
         at.dir,
+        place_provision_paths(home).dir,
         at.bundle,
         at.inbox,
         at.token_path,
@@ -76,6 +107,7 @@ pub fn place_owned_paths(home: &Path) -> Vec<PathBuf> {
         at.port_file,
         at.bin_dir.join("wsp-open"),
         at.bin_dir.join("xdg-open"),
+        at.wsp,
     ]
 }
 
@@ -96,24 +128,30 @@ mod tests {
     }
 
     #[test]
-    fn the_owned_list_is_the_protocols_fourteen_in_order() {
-        let owned = place_owned_paths(Path::new("/h"));
-        let expected = [
-            "/h/.wsp/place.json",
-            "/h/.wsp/place-key.pem",
-            "/h/.wsp/place.log",
-            "/h/.wsp/daemon",
-            "/h/.wsp/daemon.tgz",
-            "/h/.wsp/inbox",
-            "/h/.wsp/daemon-token",
-            "/h/.wsp/roots",
-            "/h/.wsp/profile.sh",
-            "/h/.wsp/open.sock",
-            "/h/.wsp/run",
-            "/h/.wsp/daemon.port",
-            "/h/.local/bin/wsp-open",
-            "/h/.local/bin/xdg-open",
-        ];
-        assert_eq!(owned.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>(), expected);
+    fn the_provision_folder_follows_the_daemons_and_wsps_own_folder_is_last() {
+        let owned: Vec<String> = place_owned_paths(Path::new("/h")).iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let at = place_daemon_paths(Path::new("/h"));
+        // The exact list and its order are held against the protocol's own by the contract fixture; what is read
+        // here is the rule the two rows were added under.
+        let after =
+            |path: &Path| owned.iter().position(|row| row == &path.to_string_lossy()).unwrap_or_else(|| panic!("{}", path.display()));
+        assert_eq!(after(&place_provision_paths(Path::new("/h")).dir), after(&at.dir) + 1);
+        assert!(after(&at.bundle) > after(&place_provision_paths(Path::new("/h")).dir));
+        // Last, so every part above it is taken and named first and the folder then takes whatever no part names.
+        assert_eq!(owned.last().map(String::as_str), Some("/h/.wsp"));
+        assert!(owned.iter().all(|row| row.starts_with("/h/")), "{owned:?}");
+    }
+
+    #[test]
+    fn the_provision_paths_are_the_protocols_under_the_one_folder_wsp_owns_there() {
+        let at = place_provision_paths(Path::new("/h/"));
+        assert_eq!(at.dir, PathBuf::from("/h/.wsp/provision"));
+        assert_eq!(at.landed, PathBuf::from("/h/.wsp/provision/landed"));
+        assert_eq!(at.landing, PathBuf::from("/h/.wsp/provision/landing"));
+        assert_eq!(at.staging, PathBuf::from("/h/.wsp/provision/files"));
+        assert_eq!(at.result, PathBuf::from("/h/.wsp/provision/result.json"));
+        assert_eq!(at.log, PathBuf::from("/h/.wsp/provision/log"));
+        assert_eq!(at.run_dir, PathBuf::from("/h/.wsp/provision/run"));
+        assert_eq!(at, place_provision_paths(Path::new("/h")));
     }
 }

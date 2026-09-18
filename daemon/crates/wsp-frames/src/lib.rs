@@ -10,12 +10,14 @@ mod enums;
 mod event;
 mod guest;
 mod id;
+mod landed;
 mod machine;
 pub mod numbers;
 mod place;
 mod place_paths;
 mod reply;
 mod request;
+mod shell;
 mod validate;
 pub mod words;
 
@@ -25,6 +27,7 @@ pub use enums::{DaemonErrorCode, FsEntryType, FsReadEncoding, GitDiffScope, Proc
 pub use event::{DaemonEvent, ProcEntry, Usage};
 pub use guest::{GuestCliMessage, GuestKind, GuestOpen, GuestOpenReply, GuestStream};
 pub use id::RequestId;
+pub use landed::{landed_files_script, own_marks, OWN_MARK};
 pub use machine::{
     BackendFacts, BackendPricing, BaseTemplates, Bind, Capabilities, CopyWord, DaemonSupervisor, ExecResult, Lifecycle, LifecycleBudgets,
     MachineAnswersReply, MachineCounts, MachineErrorKind, MachineExecReply, MachineHandle, MachineHandleReply, MachineKind,
@@ -37,7 +40,7 @@ pub use place::{
     place_link_transcript, Base64Bytes, LinkRole, PlaceAuthReply, PlaceAuthRequest, PlaceFile, PlaceNonce, PlaceProveRequest,
     PlacePublicKey, PlaceReport, PlaceSignature, Platform, WorkspaceSize,
 };
-pub use place_paths::{place_daemon_paths, place_owned_paths, PlaceDaemonPaths};
+pub use place_paths::{place_daemon_paths, place_owned_paths, place_provision_paths, PlaceDaemonPaths, PlaceProvisionPaths};
 pub use reply::{
     DaemonErrorResponse, DaemonExecReply, Empty, False, FsEntry, FsListReply, FsReadReply, GitBranch, GitDiffFile, GitDiffReply,
     GitPrReply, GitPrStateReply, GitPushReply, GitStatusEntry, GitStatusReply, InboxRescanReply, ListeningPort, ManifestEntry,
@@ -45,4 +48,5 @@ pub use reply::{
     ProcInspectReply, PtyAttachReply, PtyCreateReply, PtyListEntry, PtyListReply, PullRequest, Reply, True,
 };
 pub use request::{DaemonOp, DaemonRequest, DAEMON_OPS, GUEST_OPS};
+pub use shell::shell_quote;
 pub use validate::{is_http_url, is_plain_path, RelayPort};
