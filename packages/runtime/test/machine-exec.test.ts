@@ -284,7 +284,7 @@ describe("machineExecStream", () => {
     now = 900;
     expect(await stream.write("late")).toBe("gone");
     expect(guest.writes).toHaveLength(1);
-    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\{ \[ -e '\/tmp\/wsp-run\/[a-f0-9]+'\.exit \] \|\| \[ ! -d '\/tmp\/wsp-run\/[a-f0-9]+\.d' \]; \} && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ -e '\/tmp\/wsp-run\/[a-f0-9]+\.in\.a[0-9a-f]{12}' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && : > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
+    expect(guest.writes[0]).toMatch(/^mkdir -p '\/tmp\/wsp-run'\n\{ \[ -e '\/tmp\/wsp-run\/[a-f0-9]+'\.exit \] \|\| \[ ! -d '\/tmp\/wsp-run\/[a-f0-9]+\.d' \]; \} && \{ echo WSP_GONE; exit 0; \}\nset -o pipefail\n\[ "\$\(cat '\/tmp\/wsp-run\/[a-f0-9]+\.in\.appended' 2>\/dev\/null\)" = '[0-9a-f]{12}\.0' \] \|\| \{ printf %s '[A-Za-z0-9+/=]+' \| base64 -d >> '\/tmp\/wsp-run\/[a-f0-9]+\.in' && printf %s '[0-9a-f]{12}\.0' > '[^']+'; \} \|\| exit 1\necho WSP_OK$/);
     expect(guest.getInput()).toBe("first\n");
     now = 1100;
     await expect(first).rejects.toThrow(/^stopped after 0m 01s with no output for 0m$/);

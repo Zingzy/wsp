@@ -148,14 +148,40 @@ describe("a download that fails", () => {
 
 describe("the versions read", () => {
   it("asks each floor command for its version on the tools PATH, unzip with zip, and nothing of the node that left it", () => {
+    const first = String.raw`grep -m1 -E '[0-9]+\.[0-9]+'`;
     expect(BASE_VERSIONS_CMD).toMatch(/^export PATH=\/root\/\.local\/bin:/);
     expect(BASE_VERSIONS_CMD).not.toContain("VERSION node:");
     expect(BASE_VERSIONS_CMD).not.toContain("VERSION npm:");
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION python3: $(python3 --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION rg: $(rg --version 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION unzip: $(unzip -v 2>/dev/null | head -n 1)"');
-    expect(BASE_VERSIONS_CMD).toContain('echo "VERSION git: $(git --version 2>/dev/null | head -n 1)"');
+    expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION python3: $(python3 --version 2>/dev/null | ${first})"`);
+    expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION rg: $(rg --version 2>/dev/null | ${first})"`);
+    expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION unzip: $(unzip -v 2>/dev/null | ${first})"`);
+    expect(BASE_VERSIONS_CMD).toContain(`echo "VERSION git: $(git --version 2>/dev/null | ${first})"`);
     expect(BASE_VERSIONS_CMD.split("\n").filter(l => l.startsWith("echo \"VERSION"))).toHaveLength(16);
+  });
+
+  it("keeps the first line of a read that carries a version, so zip reads carried and the floor has no apt index to run", () => {
+    // Every floor command answering under a real bash, zip with the two lines it really prints on Ubuntu: its
+    // version is on the second, behind a copyright line with no version number on it at all.
+    const dir = mkdtempSync(join(tmpdir(), "wsp-floor-read-"));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
+    for (const e of BASE_FLOOR) {
+      for (const c of [{ bin: e.bin, version: e.major === undefined ? "9.9.9" : `${e.major.version}.0` }, ...(e.brings ?? []).map(b => ({ bin: b.bin, version: "9.9.9" }))]) {
+        writeFileSync(join(dir, c.bin), `#!/bin/sh\necho "${c.bin} ${c.version}"\n`, { mode: 0o755 });
+      }
+    }
+    writeFileSync(join(dir, "zip"), ["#!/bin/sh", "echo \"Copyright (c) 1990-2008 Info-ZIP - Type 'zip \\\"-L\\\"' for software license.\"", "echo 'This is Zip 3.0 (July 5th 2008), by Info-ZIP.'", ""].join("\n"), { mode: 0o755 });
+    // The scratch folder goes ahead of the tools PATH the read exports, which itself carries /usr/bin: this Mac's
+    // own zip would answer otherwise, and what is under test is the read, not this machine.
+    const res = spawnSync("bash", ["-c", BASE_VERSIONS_CMD.replace(TOOLS_PATH, `${dir}:${TOOLS_PATH}`)], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } });
+    expect(res.status).toBe(0);
+    const versions = parseVersions(res.stdout);
+    expect(versions).toContainEqual({ name: "zip", version: "3.0" });
+
+    // With every row of the floor on the machine, nothing of it installs and no apt index is read for it: the
+    // index runs before the first row that waits on it and no row is left to wait.
+    const carried = carriedByImage(versions);
+    expect([...carried].sort()).toEqual(BASE_FLOOR.map(e => e.id).sort());
+    expect(baseInstalls(carried).map(t => t.id)).toEqual(["base/login-path"]);
   });
 
   it("keeps the version number out of each tool's own wording, and leaves out a command that printed nothing", () => {

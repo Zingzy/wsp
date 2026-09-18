@@ -71,14 +71,16 @@ export function provisionCountsOf(plan: ProvisionPlan): { tool: number; file: nu
 const PRESENT = "wsp-present";
 
 /** The tests one step must pass to count as already there: its own check where it carries one, its command on the
- * tools PATH where it names one, and the version its pin read prints against the version it asks for, where it
- * asks one and its road can read one back. A step with neither a check nor a command is never present. */
+ * tools PATH where it names one, and its road's version read where it has one, against the version it asks for or
+ * for any version at all where it asks for none. A package a person named by its own package name is the last case:
+ * it carries no command and no check, and the version read is the whole of what its computer can be asked. */
 function presenceTests(step: ToolInstall): string[] {
   const tests: string[] = [];
   if (step.check !== undefined) tests.push(`( ${step.check} ) >/dev/null 2>&1`);
   if (step.bin !== undefined) tests.push(`command -v ${shellQuote(step.bin)} >/dev/null 2>&1`);
-  if (step.asks !== undefined && step.pin?.read !== undefined) {
-    tests.push(`[ "$( ( ${step.pin.read} ) 2>/dev/null | head -n 1 | tr -d '[:space:]' )" = ${shellQuote(step.asks)} ]`);
+  if (step.pin?.read !== undefined) {
+    const read = `"$( ( ${step.pin.read} ) 2>/dev/null | head -n 1 | tr -d '[:space:]' )"`;
+    tests.push(step.asks === undefined ? `[ -n ${read} ]` : `[ ${read} = ${shellQuote(step.asks)} ]`);
   }
   return tests;
 }
@@ -89,7 +91,7 @@ function presenceTests(step: ToolInstall): string[] {
 export async function presentSteps(machine: Machine, steps: readonly ToolInstall[]): Promise<Set<string>> {
   const asked = steps.flatMap(step => {
     const tests = presenceTests(step);
-    return tests.length === 0 || (step.check === undefined && step.bin === undefined) ? [] : [{ step, tests }];
+    return tests.length === 0 ? [] : [{ step, tests }];
   });
   const present = new Set<string>();
   const pages = await pagedReads(machine, asked, (row, at) => `if ${row.tests.join(" && ")}; then printf '${PRESENT} %s\\n' ${at}; fi`, `export PATH=${TOOLS_PATH}`);
@@ -99,6 +101,19 @@ export async function presentSteps(machine: Machine, steps: readonly ToolInstall
     for (const [at, row] of rows.entries()) if (marked.has(String(at))) present.add(row.step.id);
   }
   return present;
+}
+
+/** The steps nothing can be asked about that every step waiting on them says are there: an index refresh answers
+ * no read of its own, and what it was for is the rows behind it, so a computer that has all of them has nothing for
+ * it to do. A step nothing waits on is not present by this rule, since nothing on that computer says it is. */
+export function presentByWhatWaits(steps: readonly ToolInstall[], present: ReadonlySet<string>): Set<string> {
+  const out = new Set<string>();
+  for (const step of steps) {
+    if (presenceTests(step).length > 0) continue;
+    const waiting = steps.filter(s => s.after === step.id);
+    if (waiting.length > 0 && waiting.every(s => present.has(s.id))) out.add(step.id);
+  }
+  return out;
 }
 
 /** One step's outcome as a row of the job: a step the computer already had reads present and says no more, since
@@ -155,7 +170,11 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
     if (detail !== undefined) stage(detail);
   }, { caches: "keep" });
   stage(base.line);
-  const present = await presentSteps(machine, plan.steps);
+  const read = await presentSteps(machine, plan.steps);
+  const present = new Set([...read, ...presentByWhatWaits(plan.steps, read)]);
+  /** What each row read as the loop reached it, by step id, so a row the checks corrected after the loop is said
+   * again rather than standing in the log on that computer as it first read. */
+  const said = new Map<string, string>();
   const tools = await installTools(
     machine,
     plan.steps,
@@ -168,12 +187,20 @@ export async function provisionBox(machine: Machine, plan: ProvisionPlan, stage:
       caches: "keep",
       onTool: result => {
         const row = rowOf(result, present);
-        rows.push(row);
+        said.set(result.id, rowLine(row));
         done++;
         stage(rowLine(row), at(), row);
       },
     },
   );
+  // The rows the job answers with are read once the loop's own checks have run: a row whose install exited 0 and
+  // whose check then failed is failed, and copying it at the moment the loop said it left the answer reading
+  // installed while the loop's tally read it failed. The record takes this array whole when the job is done.
+  for (const result of tools.tools) {
+    const row = rowOf(result, present);
+    rows.push(row);
+    if (said.get(result.id) !== rowLine(row)) stage(rowLine(row));
+  }
   let skippedFiles: SkippedPath[] = [];
   /** What this run itself landed in the agents' homes there; what stands there from before is read on the box. */
   let thisRun: OwnedPaths = new Map();

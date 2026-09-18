@@ -100,6 +100,17 @@ const everyMark = (cmd: string): string =>
     })
     .join("\n");
 
+/** A computer that answers the presence read for the commands named in it and for no others, so a test says which
+ * rows the box has rather than which place they fell in a page. */
+const marksFor = (cmd: string, wanted: readonly string[]): string =>
+  cmd
+    .split("\n")
+    .flatMap(line => {
+      const at = /wsp-present[^0-9]*([0-9]+)/.exec(line);
+      return at !== null && wanted.some(w => line.includes(w)) ? [`wsp-present ${at[1]!}`] : [];
+    })
+    .join("\n");
+
 describe("what a computer already satisfies", () => {
   it("is the step whose check passes, the step whose command answers with no version asked, and the step reading the version it asks for", async () => {
     const dir = scratch({ ace: "exit 0", bee: "exit 0", cee: "echo 1.2.3", dee: "echo 9.9.9" });
@@ -113,7 +124,7 @@ describe("what a computer already satisfies", () => {
     ];
     const present = await presentSteps(shellMachine(dir), steps);
     // Dee answers, but at another version than the recipe asks for, which is the drift the recipe is there to fix;
-    // Eff is not on the computer at all; the node step names neither a command nor a check and is never present.
+    // Eff is not on the computer at all; the node step names nothing that can be read and is never present.
     expect([...present].sort()).toEqual(["agents/cee", "tools/apt/bee", "tools/custom/ace"]);
   });
 
@@ -141,7 +152,64 @@ describe("what a computer already satisfies", () => {
     expect(provisionLines("spoo", { state: "done", addId: "a_1", recipeAt: plan.recipeAt, startedAt: "x", rows })[0]).toBe(`spoo: nothing installed, ${rows.length} already there`);
   });
 
-  it("is nothing at all when the computer answers nothing, and asks for nothing when no step carries a check or a command", async () => {
+  it("is a step whose only read is its version: the version it asks for, or any version at all where it asks for none", async () => {
+    const dir = scratch({ bun: "echo 1.4.0", wrangler: "echo 4.105.0", quiet: "exit 0", cloudflared: "echo 2026.9.1" });
+    // The three npm rows of spoo's recipe carry no command of their own and no check: what a person asked for is a
+    // package at a version, and the road's own version read is the whole of what the computer can be asked.
+    const steps = [
+      step({ id: "tools/npm/bun", label: "bun@1.4.0", manager: "npm", asks: "1.4.0", pin: { read: "bun", fixed: true, words: "as an npm global" } }),
+      step({ id: "tools/npm/wrangler", label: "wrangler@4.106.0", manager: "npm", asks: "4.106.0", pin: { read: "wrangler", fixed: true, words: "as an npm global" } }),
+      step({ id: "tools/npm/agent-browser", label: "agent-browser@0.31.1", manager: "npm", asks: "0.31.1", pin: { read: "agent-browser", fixed: true, words: "as an npm global" } }),
+      step({ id: "tools/npm/quiet", label: "quiet", manager: "npm", pin: { read: "quiet", fixed: false, words: "as an npm global" } }),
+      step({ id: "tools/brew/cloudflared", label: "cloudflared", manager: "brew", pin: { read: "cloudflared", fixed: false, words: "with Homebrew" } }),
+    ];
+    const present = await presentSteps(shellMachine(dir), steps);
+    // bun answers at the version the recipe pins; wrangler answers at another, which is the drift the recipe is
+    // there to fix; agent-browser is not on the computer; quiet prints nothing, so nothing says it is there;
+    // cloudflared's road installs whatever it serves that day, so any version it prints is that row on the box.
+    expect([...present].sort()).toEqual(["tools/brew/cloudflared", "tools/npm/bun"]);
+  });
+
+  it("is a step nothing can be asked about when every step waiting on it is already there, and not when one of them is missing", async () => {
+    const steps = [
+      step({ id: "tools/apt-index", label: "apt index", manager: "apt" }),
+      step({ id: "tools/apt/ffmpeg", label: "ffmpeg", manager: "apt", bin: "ffmpeg", after: "tools/apt-index" }),
+      step({ id: "tools/apt/ruby", label: "Ruby 3.1 with bundler", manager: "apt", bin: "ruby", after: "tools/apt-index" }),
+    ];
+    // An index refresh answers no read of its own: what it was for is the rows behind it, and a box that has all
+    // of them has nothing for it to do.
+    const { machine, calls } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: marksFor(cmd, ["ffmpeg", "ruby"]), stderr: "" } : undefined));
+    const rows = await provisionBox(machine, planOf(steps), () => {}, ON);
+    expect(outcomes(rows)).toEqual([
+      ["tools/apt-index", "present"],
+      ["tools/apt/ffmpeg", "present"],
+      ["tools/apt/ruby", "present"],
+    ]);
+    expect(calls.some(c => c.includes("install tools/apt-index"))).toBe(false);
+
+    // One of them is not on the box: the index runs, since the row behind it needs it.
+    const one = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: marksFor(cmd, ["ffmpeg"]), stderr: "" } : undefined));
+    const again = await provisionBox(one.machine, planOf(steps), () => {}, ON);
+    expect(outcomes(again)).toEqual([
+      ["tools/apt-index", "installed"],
+      ["tools/apt/ffmpeg", "present"],
+      ["tools/apt/ruby", "installed"],
+    ]);
+    expect(one.calls.some(c => c.includes("install tools/apt-index"))).toBe(true);
+  });
+
+  it("is the apt index of a real plan and no other step of it, since every other step says a command, a check or a version", async () => {
+    // Two apt rows of the catalog: the plan reads the index once, before the first row that waits on it.
+    const plan = provisionPlanOf({ recipeHash: "h1", agents: [], tools: toolInstallsFor([row("tools/catalog/ffmpeg", "tools"), row("tools/catalog/ruby", "tools")]).installs }, "2026-09-17T10:00:00.000Z");
+    const untested = plan.steps.filter(s => s.check === undefined && s.bin === undefined && s.pin?.read === undefined);
+    expect(untested.map(s => s.label)).toEqual(["apt index"]);
+    const { machine, calls } = boxMachine(cmd => (cmd.includes("wsp-present") ? { exitCode: 0, stdout: marksFor(cmd, ["ffmpeg", "ruby", "bundle", "gem"]), stderr: "" } : undefined));
+    const rows = await provisionBox(machine, plan, () => {}, ON);
+    expect(rows.every(r => r.outcome === "present")).toBe(true);
+    expect(calls.some(c => c.includes("apt-get update"))).toBe(false);
+  });
+
+  it("is nothing at all when the computer answers nothing, and asks for nothing when a step says nothing that can be read", async () => {
     const dir = scratch({});
     expect([...(await presentSteps(shellMachine(dir), [step({ id: "tools/apt/bee", label: "Bee", bin: "bee" })]))]).toEqual([]);
     const { machine, calls } = boxMachine();
@@ -212,6 +280,30 @@ describe("the run on the computer itself", () => {
     expect(answered[1]!.note).toContain("nodejs.org answered 404");
     expect(answered[2]!.note).toBeUndefined();
     expect(answered[3]!.note).toBe("Node 22.23.2 did not install");
+  });
+
+  it("answers one row per step as the checks left it, so a row whose check failed after its install is failed in the rows and said again", async () => {
+    const steps = [
+      step({ id: "tools/brew/bat", label: "bat", manager: "brew", check: "brew list --versions bat" }),
+      step({ id: "tools/brew/eza", label: "eza", manager: "brew", check: "brew list --versions eza" }),
+    ];
+    // Homebrew answers that bat is already installed and up to date, and its check then fails: the row is what
+    // the check left it, never an installed row in the answer beside a failed one in the tally.
+    const { machine } = boxMachine(cmd => {
+      if (cmd.includes("wsp-check")) return { exitCode: 0, stdout: "wsp-check 0 Error: The current working directory must be readable to linuxbrew to run brew.\n", stderr: "" };
+      return undefined;
+    });
+    const seen: string[] = [];
+    const rows = await provisionBox(machine, planOf(steps), detail => void seen.push(detail), ON);
+    expect(rows.map(r => [r.id, r.outcome])).toEqual([
+      ["tools/brew/bat", "failed"],
+      ["tools/brew/eza", "installed"],
+    ]);
+    expect(rows[0]!.note).toContain("The current working directory must be readable");
+    // What the log on that computer reads says the row twice: as the loop said it, then as the check left it, so
+    // the log and the rows the record keeps cannot disagree.
+    expect(seen.filter(l => l.startsWith("bat: "))).toEqual(["bat: installed", expect.stringContaining("bat: failed (the check did not pass")]);
+    expect(seen.filter(l => l.startsWith("eza: "))).toEqual(["eza: installed"]);
   });
 
   it("says which row it was on while it runs, and how many of how many", async () => {
