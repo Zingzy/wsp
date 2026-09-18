@@ -2077,9 +2077,9 @@ export function createRuntime(opts: RuntimeOptions): Runtime {
     // Before the binary is run at all: one that predates this wsp answers a verb it never heard of with its own
     // usage text, forty flags long, which a person read as the refusal for a second workspace.
     const here = local?.hereDaemon;
-    const version = here === undefined ? undefined : await here.version();
-    if (version !== undefined && version < DAEMON_VERSION) {
-      throw Object.assign(new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here!.fix)), { kind: "invalid" });
+    if (here !== undefined) {
+      const version = await here.version();
+      if (version < DAEMON_VERSION) throw Object.assign(new Error(hereDaemonBehindLine(version, DAEMON_VERSION, here.fix)), { kind: "invalid" });
     }
     const to = copyPathFor(project.path, work.slug);
     const report = await copier.make({

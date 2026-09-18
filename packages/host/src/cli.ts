@@ -26,7 +26,7 @@ import {
   type SshWiring,
 } from "@wsp/runtime";
 import { GOLDEN_SETUP, GOLDEN_SMOKE, MCP_AGENT_IDS, THREAD_AGENTS } from "@wsp/catalog";
-import { type AppPorts, authority, authRefusal, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
+import { type AppPorts, authority, authRefusal, PLACE_LEAVE_LINE, PLACE_LEAVE_VERB, DEFAULT_PORT, DEFAULT_WS_PORT, EXIT_CODES, EXIT_WORDS, ExitClass, FIRST_WORKSPACE, fmtDuration, forksNoMachines, initJobOver, InitSetup, NO_BUILD_PLACE_LINE, isLocalWorkspace, isLoopback, type ListenAsked, listenBeyondLoopbackLine, LOOPBACK, PERSON_HOME_ENV, portInsteadLine, PORT_TAKEN_REFUSAL, portsAsked, portsPickedLine, portTakenLine, runForTheList, type SealedImage, shellQuote, THIS_COMPUTER, thisComputerLine, TURN_END_WORDS, namesPlace, noSuchPlaceRefusal, type PlaceView, unknownWordLine, usageRefusal, foreignFlagLine, WS_PORT_OFFSET } from "@wsp/protocol";
 import { agentHome, agentHomes, checkProviderKey, type Copier, keyCheckLine, type KeyCheck, LocalBackend, type MachineBackend, providerSlot, type ProviderSlot, SshBackend, SshForwards, sshReachOf, type SshReach, verbCopier } from "@wsp/engine";
 import { providerBackendFor, providerEnvWith, providerEnvWithKey, providerKeyRow, providerKeyRows, providerKeySet, providerModule, providerPlaces, wiredProviderId, type ProviderEnv } from "./providers.js";
 import { daemonBinaryHere, webDirFor } from "./assets.js";
@@ -1677,12 +1677,31 @@ export async function pickUpPorts(io: CliIO, opts: ServeAsked, probes: PortProbe
   return undefined;
 }
 
+/** The doctor's own usage line, read by its row and by every refusal that prints it. */
+const DOCTOR_USAGE = "wsp doctor [<computer>] [--project <name>] [--local] [--yes]";
+
+/** What the doctor's roads that touch no provider load: no key, and no question about one. The local road and the
+ * computer road fork nothing and bill nothing, so a person with a computer of their own and no cloud account is
+ * never asked for a cloud key; the agents' key rides along from the files either way. */
+const NO_CLOUD_KEY = { anthropic: false, noSolari: "local" } as const;
+
+/** Which keys one doctor road needs: a cloud row's road forks a machine at that provider and bills while it runs,
+ * so its key is asked for the way every cloud road asks for one; every other road forks nothing and is handed no
+ * key at all. Read after the row, since the row is what says which road this is. */
+export const doctorKeyAsk = (computer?: Pick<PlaceView, "kind">): { anthropic: boolean; noSolari?: "local" } =>
+  computer?.kind === "provider" ? { anthropic: true } : NO_CLOUD_KEY;
+
+/** The row a word names, or the refusal naming the rows this host holds and the line that lists them. The one
+ * reading every road that takes a place word makes, and it says nothing about which road the doctor then takes. */
+export function doctorRow(places: readonly PlaceView[], word: string): PlaceView {
+  const found = places.find(place => namesPlace(place, word));
+  if (found === undefined) throw usageRefusal(noSuchPlaceRefusal(word, places.map(place => place.name)), "Run wsp computers to read the ones this host holds.");
+  return found;
+}
+
 /** The commands the shared parse serves, keyed by the words that select one. A line is matched against the longest
  * key whose words open it, as a verb's words select a verb, so the plumbing folded under `host` needs no second
  * dispatch of its own. */
-/** The doctor's own usage line, read by its row and by the refusal that prints it. */
-const DOCTOR_USAGE = "wsp doctor [<computer>] [--project <name>] [--local] [--yes]";
-
 const COMMANDS: Readonly<Record<string, Command>> = {
   up: {
     page: "agent",
@@ -1899,11 +1918,13 @@ const COMMANDS: Readonly<Record<string, Command>> = {
       // version off are the same process.
       const local = localWiring(homedir(), process.env, undefined, hostRunDir(opts.statePath));
       const hereDaemon = local.hereDaemon;
+      const word = args[0];
+      if (args.length > 1) throw usageRefusal(`wsp doctor proves one computer, and it was given ${args.length} words: ${args.map(w => JSON.stringify(w)).join(" ")}.`, DOCTOR_USAGE);
       // The local road touches no provider, so a missing key is not asked for: it is the whole of the doctor for a
       // person whose wsp init took the local road.
       if (values.local === true) {
-        if (args.length > 0) throw usageRefusal(`wsp doctor --local proves this computer alone, so there is no computer to name beside it, and it was given ${JSON.stringify(args[0])}.`, DOCTOR_USAGE);
-        const { keys, env } = await loadKeys(io, keySources(opts.providerEnv), { anthropic: false, noSolari: "local" });
+        if (word !== undefined) throw usageRefusal(`wsp doctor --local proves this computer alone, so there is no computer to name beside it, and it was given ${JSON.stringify(word)}.`, DOCTOR_USAGE);
+        const { keys, env } = await loadKeys(io, keySources(opts.providerEnv), NO_CLOUD_KEY);
         const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local);
         try {
           return await localDoctor(rt, io, { ...(hereDaemon !== undefined ? { hereDaemon } : {}) });
@@ -1911,14 +1932,23 @@ const COMMANDS: Readonly<Record<string, Command>> = {
           await rt.close();
         }
       }
-      const { keys, env } = await loadKeys(io, keySources(opts.providerEnv));
+      // A project is the one a workspace on the computer named is made of, so it means nothing spread over every
+      // computer this host holds: a run with no word would hand it to each of them and fail on any without it.
+      if (values.project !== undefined && word === undefined) throw usageRefusal("wsp doctor --project names the project the workspace on the computer you named is made of, and no computer was named.", DOCTOR_USAGE);
+      // Which row the word names decides what this run needs, so the row is read first, off a runtime built with
+      // no key at all: a places list is records and the links this host is holding, and neither needs one. Only a
+      // cloud row's road forks and bills, and that is the one road that asks for a key.
+      const reading = await loadKeys(io, keySources(opts.providerEnv), NO_CLOUD_KEY);
+      let computer: PlaceView | undefined;
+      const readRt = makeRuntime(reading.keys, opts.statePath, goldenRecipe(), reading.env);
+      try {
+        computer = word === undefined ? undefined : doctorRow((await readRt.places?.list(Date.now())) ?? [], word);
+      } finally {
+        await readRt.close();
+      }
+      const { keys, env } = computer?.kind === "provider" ? await loadKeys(io, keySources(opts.providerEnv), doctorKeyAsk(computer)) : reading;
       const rt = makeRuntime(keys, opts.statePath, goldenRecipe(), env, undefined, local);
       try {
-        // The word is a row of the places list, read the one way every road that takes a place word reads it.
-        const word = args[0];
-        const places = (await rt.places?.list(Date.now())) ?? [];
-        const computer = word === undefined ? undefined : places.find(place => namesPlace(place, word));
-        if (word !== undefined && computer === undefined) throw usageRefusal(noSuchPlaceRefusal(word, places.map(place => place.name)), "Run wsp computers to read the ones this host holds.");
         return await doctor(rt, io, {
           envs: claudeEnvs(),
           ...(values.yes === true ? { yes: true } : {}),
@@ -1946,8 +1976,6 @@ const COMMANDS: Readonly<Record<string, Command>> = {
     },
   },
 };
-
-
 
 /** What each line of the shared parse does with --host, the one fact the parse, its refusal and the usage table read. */
 export const HOST_FLAG: Readonly<Record<string, HostFlag>> = Object.fromEntries(Object.entries(COMMANDS).map(([words, command]) => [words, command.host]));

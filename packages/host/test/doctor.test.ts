@@ -12,7 +12,7 @@ import { daemonUnderTest, type DaemonUnderTest } from "../../daemon/test/harness
 import { assetDir, assetProof, daemonBinaryHere } from "../src/assets.js";
 import { hostPlatform } from "../src/verbs.js";
 import { DAEMON_TARGETS, daemonBinaryIn, daemonTargetHere, GUEST_DAEMON_TARGETS } from "../src/daemon-binary.js";
-import { noSuchProjectLine, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
+import { noSuchPlaceRefusal, noSuchProjectLine, projectNeedsReaddLine, THIS_COMPUTER, type PlaceProvision, type ProjectView, HERE_PLACE_ID, HOMEBREW_PREFIX, DAEMON_MEMORY_MAX_PERCENT, DAEMON_VERSION, GUEST_DAEMON_DIR, GUEST_WSP_BIN, GUEST_WSP_PATH, machineLacksShort, NO_SYSTEMD_LINE, placeUpdateLine, signInRefusalLine, wspBinIn, type HarnessCatalogAnswer, type PlaceCapacity, type PlaceView } from "@wsp/protocol";
 import { copyKey, createRuntime, localExecStream, memoryStore, rotateDaemonTokenScript, writeDaemonTokenScript, type HarnessAdapterFactory, type Runtime } from "@wsp/runtime";
 import { afterEach, describe, expect, it } from "vitest";
 import { isReserved, LocalBackend, NoProviderBackend } from "@wsp/engine";
@@ -68,7 +68,7 @@ import { agentName, catalogEntry, VAULT_VARIABLES } from "@wsp/catalog";
 import { daemonFixLine } from "../src/daemon-fix.js";
 import { redact } from "../src/init-log.js";
 import { captured, createOn, projectOn } from "./verbs-fixture.js";
-import { commandPage, COMMANDS_FOR_HELP, SHARED_FLAGS, type CliIO } from "../src/cli.js";
+import { commandPage, COMMANDS_FOR_HELP, doctorRow, SHARED_FLAGS, type CliIO } from "../src/cli.js";
 import { SEALED_GOLDEN } from "./sealed-golden.js";
 import { stubBackend } from "./stub-backend.js";
 import { runsFromItsOwnFolder } from "./own-folder.js";
@@ -857,6 +857,26 @@ describe("the words wsp doctor says about itself", () => {
     expect(says("project")).toBe("the project the doctor's workspace is made of, by name, on the computer named; the first project there whose checkout stands when absent");
     // And the flag rows are in the page a person reads for this line.
     for (const flag of ["--local", "--project", "--yes"]) expect(commandPage("doctor", row)).toContain(flag);
+  });
+});
+
+describe("the word wsp doctor takes", () => {
+  const row = (over: Partial<PlaceView>): PlaceView => ({ id: "p_1", kind: "computer", name: "spoo", default: false, ...over });
+  const places = [row({ id: HERE_PLACE_ID, name: "zingzys-macbook-pro.local", default: true }), row({}), row({ id: "solari", kind: "provider", name: "solari" })];
+
+  it("picks the row the word names, by the name a person types or the id the wire keys it by", () => {
+    expect(doctorRow(places, "spoo").id).toBe("p_1");
+    expect(doctorRow(places, "p_1").name).toBe("spoo");
+    expect(doctorRow(places, "solari").kind).toBe("provider");
+    expect(doctorRow(places, HERE_PLACE_ID).id).toBe(HERE_PLACE_ID);
+  });
+
+  it("refuses a word that names no row of this host, with the rows it holds and the line that lists them", () => {
+    // The same refusal every road that takes a place word gives, and the line a person runs to read the names.
+    expect(() => doctorRow(places, "nosuchbox")).toThrow(noSuchPlaceRefusal("nosuchbox", ["zingzys-macbook-pro.local", "spoo", "solari"]));
+    expect(() => doctorRow(places, "nosuchbox")).toThrow("Run wsp computers to read the ones this host holds.");
+    // A host that has joined no computer holds its own row all the same, so the names are never an empty list.
+    expect(() => doctorRow([places[0]!], "spoo")).toThrow(noSuchPlaceRefusal("spoo", ["zingzys-macbook-pro.local"]));
   });
 });
 
